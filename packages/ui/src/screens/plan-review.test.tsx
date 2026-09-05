@@ -26,6 +26,7 @@ const document: PlanDocument = {
 const openPlannotator = vi.fn<PlannotatorPlanHost["openPlannotator"]>(async () => {})
 const hidePlannotator = vi.fn()
 let decisionListener: Parameters<PlannotatorPlanHost["onPlannotatorDecision"]>[0] | undefined
+let rectX = 0
 const host: PlannotatorPlanHost = {
   openPlannotator,
   hidePlannotator,
@@ -36,15 +37,24 @@ const host: PlannotatorPlanHost = {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("ResizeObserver", class {
-    observe() {}
-    disconnect() {}
-  })
+  rectX = 0
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({
+    x: rectX,
+    y: 20,
+    top: 20,
+    right: rectX + 800,
+    bottom: 620,
+    left: rectX,
+    width: 800,
+    height: 600,
+    toJSON: () => ({})
+  }))
 })
 
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.restoreAllMocks()
   decisionListener = undefined
   vi.unstubAllGlobals()
 })
@@ -66,6 +76,21 @@ describe("PlanReview", () => {
       canDecide: true,
       themeCss: expect.stringContaining("--background: var(--sb-editor)")
     }))
+  })
+
+  it("republishes native bounds when layout movement changes only position", async () => {
+    render(
+      <ThemeProvider tokens={toTokens(jinglerDark)}>
+        <PlanReview document={document} host={host} />
+      </ThemeProvider>
+    )
+    await waitFor(() => expect(openPlannotator).toHaveBeenCalled())
+
+    rectX = 320
+
+    await waitFor(() =>
+      expect(openPlannotator.mock.calls.at(-1)?.[0].bounds.x).toBe(320)
+    )
   })
 
   it("resends the embedded stylesheet when Jingler's theme changes", async () => {

@@ -23,6 +23,8 @@ import type { PaneContribution } from "../app/pane-contributions.js"
 export type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
 
 export interface SessionConversationProps {
+  /** Global command search shown at the top of the sidebar. */
+  search?: ReactNode
   sessions: ReadonlyArray<Session>
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
@@ -241,6 +243,7 @@ export function SessionConversation(props: SessionConversationProps) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
       <SessionSidebar
+        search={props.search}
         sessions={props.sessions}
         environments={props.environments}
         activeSessionId={props.activeSessionId}

@@ -18,6 +18,20 @@ const rowOrder = () =>
   )
 
 describe("SessionSidebar session identity", () => {
+  it("renders global search above the session list", () => {
+    render(
+      <SessionSidebar
+        activeSessionId="local"
+        onSelect={() => {}}
+        sessions={[session({ id: "local" })]}
+        search={<button type="button">Search sessions and actions</button>}
+      />
+    )
+
+    const search = screen.getByRole("button", { name: "Search sessions and actions" })
+    const row = screen.getByTestId("session-row-local")
+    expect(search.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
   it("keeps an in-flight remote session navigable before it is persisted", () => {
     const selectPending = vi.fn()
     render(

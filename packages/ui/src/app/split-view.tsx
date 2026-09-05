@@ -181,7 +181,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
       if (!row || rowWidth === 0 || !left || !right) return
       const leftElement = row.querySelector<HTMLElement>(`[data-${testIdPrefix}-pane-index="${index}"]`)
       const rightElement = row.querySelector<HTMLElement>(`[data-${testIdPrefix}-pane-index="${index + 1}"]`)
-      if (!leftElement || !rightElement) return
+      if (!(leftElement && rightElement)) return
 
       const handle = e.currentTarget
       const pointerId = e.pointerId
@@ -254,7 +254,10 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
       ref={rowRef}
       data-testid={`${testIdPrefix}-view`}
       data-panes={group.panes.length}
-      className="flex min-h-0 min-w-0 flex-1 bg-hairline"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1",
+        testIdPrefix === "surface" ? "gap-1.5 bg-panel p-1.5" : "bg-hairline"
+      )}
     >
       {/*
         Keyed by the switch token, so a switch REMOUNTS the presence tree: the
@@ -311,7 +314,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
               onMouseDownCapture={() => onFocusPane?.(index)}
               onFocusCapture={() => onFocusPane?.(index)}
               onDragOver={(e) => {
-                if (!onSplitWith && !onReplacePane) return
+                if (!(onSplitWith || onReplacePane)) return
                 if (!carriesPayload(e, dragMime)) return
                 // Calling preventDefault is what MARKS this element as a valid
                 // drop target — without it the browser refuses the drop entirely.
@@ -331,6 +334,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
               onDrop={handleDrop(index)}
               className={cn(
                 "relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-editor",
+                testIdPrefix === "surface" && "rounded-xl border border-hairline",
                 // The focus ring is noise when there's only one pane — with
                 // nothing to disambiguate it would just be a permanent border.
                 !single && isFocused && "ring-1 ring-inset ring-blue/40",

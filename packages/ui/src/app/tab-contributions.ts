@@ -112,8 +112,7 @@ export interface TabContext {
 
 /** What a contribution is handed when it is the tab actually on screen. */
 export interface TabRenderContext {
-  /** The tab currently selected — a contribution in a shared mount group
-   *  uses this to pick which face to show. */
+  /** The tab currently selected. */
   readonly activeTabId: TabKey
   /** Whether the plan is currently split beside the conversation. */
   readonly splitOpen: boolean
@@ -145,17 +144,6 @@ export interface TabContribution {
   readonly issueProviderId?: string
   /** Optional decoration drawn beside the label. */
   readonly badge?: (ctx: TabContext) => TabBadge | undefined
-  /**
-   * Tabs sharing a mount group share ONE mounted subtree and swap faces
-   * internally instead of unmounting. Defaults to the tab's own id, i.e. "I
-   * unmount when you switch away from me" — which is what almost every tab
-   * wants, and what the virtualized transcript REQUIRES of its neighbours (its
-   * measurement cache corrupts if it is kept mounted-but-hidden).
-   *
-   * Conversation and Plan Review share one, because switching to Plan must not
-   * unmount — and so abort — a parked plan run.
-   */
-  readonly mountGroup?: string
   readonly render: (session: Session, ctx: TabRenderContext) => ReactNode
 }
 
@@ -340,15 +328,11 @@ export const builtinTabContributions = (
   renderers: BuiltinTabRenderers
 ): ReadonlyArray<TabContribution> => {
   const meta = BUILTIN_TAB_META
-  /** Conversation and Plan are one mounted subtree — see `mountGroup`. */
-  const CONVERSATION_GROUP = "conversation"
-
   return [
     {
       id: BUILTIN_TAB.conversation,
       ...meta.conversation,
       when: () => true,
-      mountGroup: CONVERSATION_GROUP,
       render: renderers.conversation
     },
     {
@@ -383,7 +367,6 @@ export const builtinTabContributions = (
       id: BUILTIN_TAB.plan,
       ...meta.plan,
       when: ({ hasPlan }) => hasPlan,
-      mountGroup: CONVERSATION_GROUP,
       render: renderers.conversation
     },
     {

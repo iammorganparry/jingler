@@ -49,6 +49,8 @@ import {
 } from "./session-filters.js"
 
 export interface SessionSidebarProps {
+  /** Global command search shown below the sidebar header. */
+  search?: React.ReactNode
   sessions: ReadonlyArray<Session>
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
@@ -143,6 +145,7 @@ export interface SessionSidebarProps {
 function SidebarBody({
   width,
   onResize,
+  search,
   sessions,
   environments = [],
   activeSessionId,
@@ -377,7 +380,8 @@ function SidebarBody({
         />
       )}
       {/*
-        The header — collapse, search, filter and new-session, on ONE row.
+        The header — mark, collapse, filter and new-session, on one row; global
+        search sits directly beneath it.
 
         This used to be two rows: a title row reading "⌘ Sessions (4)" above a
         search row. Both went, and neither is missed.
@@ -385,8 +389,7 @@ function SidebarBody({
         The title was labelling the only thing this panel has ever contained.
         The count duplicated a list the operator is looking at. And the ⌘ tile
         was a command-palette affordance parked next to a word it had nothing to
-        do with — the palette has ⌘K and the title bar, which is where people
-        already reach for it.
+        do with — the search control below has ⌘K and opens that same palette.
 
         What replaced them is the row that was doing the work anyway. The
         reclaimed ~34px is roughly one session row, and it comes back at every
@@ -394,8 +397,8 @@ function SidebarBody({
       */}
       <div className="flex items-center gap-1.5 px-3 pb-2 pt-3">
         {/*
-          The mark's home. It was centred in the title bar until global search
-          took that slot, and this is the better corner for it anyway: macOS
+          The mark's home. The title bar now belongs to the focused session's
+          tabs, and this is the better corner for the app mark anyway: macOS
           reserves the window's top-left for traffic lights, but the SIDEBAR's
           top-left is below that chrome and collides with nothing on any
           platform. `text-brand` for the same reason it was branded up there —
@@ -418,8 +421,8 @@ function SidebarBody({
         {/*
           Where the "Filter sessions…" field used to be.
 
-          Search is global now: it lives in the title bar and is served by the
-          command palette, which already indexes every session, every archived
+          Search is global now: it lives directly below this row and is served
+          by the command palette, which already indexes every session, every archived
           session and every action. A second field here would be a second search
           implementation over the same index, and the two would drift.
 
@@ -470,6 +473,8 @@ function SidebarBody({
           <Plus size={15} />
         </button>
       </div>
+
+      {search ? <div className="px-3 pb-2">{search}</div> : null}
 
       {onOpenPullRequests && (
         <div className="px-2 pb-2">
@@ -604,7 +609,7 @@ function SidebarBody({
             <Search size={20} className="text-line-strong" />
             {/*
               Names the FILTERS, not a search term. This panel no longer has a
-              text field — search is global and lives in the title bar — so the
+              text field — search is global and lives above this list — so the
               only way to empty a non-empty store is the facet menu beside this
               message. Quoting a search term here would name a control that is
               not on screen, which is worse than saying nothing: the operator

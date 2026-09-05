@@ -59,6 +59,10 @@ import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut } from "./split-shortcuts.js"
 import {
+  SESSION_SURFACE_COMMAND_EVENT,
+  type SessionSurfaceCommand
+} from "./session-surface-layout.js"
+import {
   Archive,
   ArchiveRestore,
   LogOut,
@@ -869,9 +873,10 @@ export function JinglerApp({
         // Out-of-range is a no-op rather than a clamp: ⌃⇧4 in a two-pane split
         // means "the fourth pane", and there isn't one.
         case "focus-pane": {
-          if (!group || shortcut.index >= group.panes.length) return
+          if (!group) return
           e.preventDefault()
-          split.focusPane(group.id, shortcut.index)
+          const detail = `focus-${shortcut.index}` as SessionSurfaceCommand
+          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
           return
         }
         // Stops at the ends (the reducer refuses to wrap): wrapping from the
@@ -880,20 +885,27 @@ export function JinglerApp({
         case "focus-neighbour": {
           if (!group) return
           e.preventDefault()
-          split.focusNeighbour(shortcut.direction)
+          const detail: SessionSurfaceCommand =
+            shortcut.direction === -1 ? "focus-left" : "focus-right"
+          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
           return
         }
         case "move-pane": {
           if (!group) return
           e.preventDefault()
-          split.moveFocused(shortcut.direction)
+          const detail: SessionSurfaceCommand =
+            shortcut.direction === -1 ? "move-left" : "move-right"
+          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
           return
         }
-        // The session keeps running; this closes the VIEW of it.
         case "close-pane": {
-          if (!group || group.panes.length <= 1) return
+          if (!group) return
           e.preventDefault()
-          split.closeFocused()
+          window.dispatchEvent(
+            new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, {
+              detail: "close"
+            })
+          )
         }
       }
     }
@@ -1160,11 +1172,14 @@ export function JinglerApp({
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
-    <AppShell
-      title="Jingler"
-      search={<TitleSearch onOpen={() => setPaletteOpen(true)} />}
-    >
+    <AppShell title="Jingler">
       <SessionConversation
+        search={
+          <TitleSearch
+            onOpen={() => setPaletteOpen(true)}
+            className="w-full"
+          />
+        }
         sessions={sessions}
         environments={environments}
         activeSessionId={selected}

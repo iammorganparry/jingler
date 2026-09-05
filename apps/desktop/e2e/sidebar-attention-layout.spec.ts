@@ -51,6 +51,7 @@ test("groups chats by attention and opens session views in a responsive two-thir
 }) => {
   const { window } = await launchApp({
     configured: true,
+    isolateSystemHome: true,
     withRepo: true,
     sessions
   })
@@ -75,11 +76,14 @@ test("groups chats by attention and opens session views in a responsive two-thir
   await window.getByRole("button", { name: "Files", exact: true }).click()
 
   const surfaces = window.getByTestId("surface-view")
-  await expect(surfaces).toHaveAttribute("data-panes", "1")
-  await expect(window.getByRole("region", { name: "Repository files" })).toBeVisible()
+  await expect(surfaces).toHaveAttribute("data-panes", "2")
+  const tree = window.getByRole("region", { name: "Repository files" })
+  if (!(await tree.isVisible())) {
+    await window.getByRole("button", { name: "Repository files", exact: true }).click()
+  }
+  await expect(tree).toBeVisible()
 
   await window.setViewportSize({ width: 900, height: 700 })
   await window.waitForTimeout(120)
-  await expect(surfaces).toHaveAttribute("data-panes", "1")
-  await expect(window.getByRole("region", { name: "Repository files" })).toBeVisible()
+  await expect(surfaces).toHaveAttribute("data-panes", "2")
 })

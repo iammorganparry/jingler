@@ -13,7 +13,7 @@ const dragTo = async (
     ({ sourceSelector, targetSelector, fraction }) => {
       const source = document.querySelector(sourceSelector)
       const target = document.querySelector(targetSelector)
-      if (!source || !target) throw new Error(`missing drag node: ${sourceSelector} → ${targetSelector}`)
+      if (!(source && target)) throw new Error(`missing drag node: ${sourceSelector} → ${targetSelector}`)
       const box = target.getBoundingClientRect()
       const dataTransfer = new DataTransfer()
       const init = {
@@ -71,10 +71,13 @@ test("large chat and file sets collapse into independent tab groups", async ({ l
   await expect(window.getByTitle("4 open chats")).toBeVisible()
 
   await window.getByRole("button", { name: "Files", exact: true }).click()
-  const tree = window.locator('[aria-label="Repository files"]')
+  const tree = window.locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
+  const treeToggle = window.getByRole("button", { name: "Repository files", exact: true })
+  if (!(await tree.isVisible())) await treeToggle.click()
   await expect(tree).toBeVisible()
   for (let index = 1; index <= 6; index += 1) {
     const path = `file-${index}.ts`
+    if (!(await tree.isVisible())) await treeToggle.click()
     await tree.locator(`[role="treeitem"][data-item-path="${path}"]`).click()
     await expect(window.getByTestId(`file-tab-${path}`)).toBeVisible()
   }
@@ -94,6 +97,10 @@ test("large chat and file sets collapse into independent tab groups", async ({ l
 test("the + dropdown and cmd+t command menu share tab types and quick keys", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions: session })
   await expect(appShell(window)).toBeVisible()
+  await expect(
+    window.getByTestId("session-sidebar").getByRole("button", { name: "Search sessions and actions" })
+  ).toBeVisible()
+  await expect(window.getByTestId("title-bar").getByTestId("session-tab-bar")).toBeVisible()
 
   await window.getByRole("button", { name: "New tab" }).click()
   await expect(window.getByTestId("new-tab-option-browser")).toBeVisible()
@@ -128,17 +135,49 @@ test("tabs split inside one pane of an outer session split", async ({ launchApp 
   await expect(window.getByTestId("split-view")).toHaveAttribute("data-panes", "2")
 
   const first = window.getByTestId("split-pane-0")
-  await first.getByRole("button", { name: "New tab" }).click()
+  await first.click({ position: { x: 20, y: 80 } })
+  await window.getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
-  await expect(first.getByTestId("open-view-tab-terminal")).toBeVisible()
+  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
 
-  await dragTo(
-    window,
-    '[data-testid="split-pane-0"] [data-testid^="chat-tab-"]',
-    '[data-testid="split-pane-0"] [data-testid="surface-pane-0"]',
-    0.04
-  )
   await expect(first.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await window.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "!",
+      code: "Digit1",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true
+    }))
+  )
+  await expect(first.getByTestId("surface-pane-0")).toHaveAttribute("data-focused", "true")
+  await window.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "}",
+      code: "BracketRight",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true
+    }))
+  )
+  await expect(first.getByTestId("surface-pane-1")).toHaveAttribute("data-focused", "true")
+  await window.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+      ctrlKey: true,
+      shiftKey: true,
+      altKey: true,
+      bubbles: true
+    }))
+  )
+  await expect(first.getByTestId("surface-pane-0")).toHaveAttribute("data-surface", /terminal/)
+  await window.getByRole("button", { name: "Move pane right" }).click()
+  await expect(first.getByTestId("surface-pane-1")).toHaveAttribute("data-surface", /terminal/)
+  await window.getByRole("button", { name: "Move pane left" }).click()
+  await window.getByRole("button", { name: "Close pane" }).click()
+  await expect(first.getByTestId("surface-view")).toHaveAttribute("data-panes", "1")
+  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
   await expect(window.getByTestId("split-pane-1").getByTestId("surface-view")).toHaveAttribute(
     "data-panes",
     "1"

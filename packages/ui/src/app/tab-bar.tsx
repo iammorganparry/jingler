@@ -193,7 +193,8 @@ export function TabBar({
   splitActive = false,
   onClosePane,
   onMovePaneLeft,
-  onMovePaneRight
+  onMovePaneRight,
+  inTitleBar = false
 }: {
   /**
    * Every tab this pane can switch to, in display order, built-ins and plugin
@@ -269,11 +270,14 @@ export function TabBar({
   onMovePaneLeft?: () => void
   /** Swap this pane with the one on its right (Move Right, ⌃⇧⌥→). */
   onMovePaneRight?: () => void
+  /** Render inside the window title row instead of above the session body. */
+  inTitleBar?: boolean
 }) {
   // The PANE's width, not the window's. A four-way split on a 4K display gives
   // every pane a `narrow` tier; a maximised single pane on a laptop gives
   // `wide`. Keying off the window would get both backwards.
-  const tier = useWidthTier()
+  const measuredTier = useWidthTier()
+  const tier = inTitleBar ? "wide" : measuredTier
   // A selected view tab keeps its label from `mid` up. Below that the row is
   // fighting the chat titles for the same pixels, and the chat titles win: the
   // view you're on is also announced by what's rendered beneath the bar, while
@@ -306,7 +310,10 @@ export function TabBar({
     <div
       data-testid="session-tab-bar"
       data-tier={tier}
-      className="flex h-10 flex-none items-center gap-1.5 border-b border-hairline bg-sunken px-2"
+      className={cn(
+        "flex h-10 flex-none items-center gap-1.5 px-2",
+        inTitleBar ? "w-full bg-transparent" : "border-b border-hairline bg-sunken"
+      )}
     >
       {/*
         `min-w-0 flex-1 overflow-x-auto` is the whole fix for this row.

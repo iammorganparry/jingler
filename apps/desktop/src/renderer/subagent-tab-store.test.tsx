@@ -9,6 +9,7 @@ import {
   publishActorSubagentTabs,
   publishSubagentTabs,
   releaseSubagentTabController,
+  retainSubagentTabController,
   useSessionSubagentTabs
 } from "./subagent-tab-store.js"
 
@@ -76,6 +77,26 @@ describe("subagent tab store", () => {
 
     act(() => releaseSubagentTabController("session-1", "chat-1"))
     expect(result.current[0]?.active).toEqual([worker])
+  })
+
+  it("keeps controller state until every mounted chat surface releases it", () => {
+    const { result } = renderHook(() => useSessionSubagentTabs("session-1"))
+    act(() => {
+      retainSubagentTabController("session-1", "chat-1")
+      retainSubagentTabController("session-1", "chat-1")
+      publishSubagentTabs("session-1", {
+        chatId: "chat-1",
+        active: [node()],
+        completed: [],
+        selectedId: "parent/worker-1"
+      })
+    })
+
+    act(() => releaseSubagentTabController("session-1", "chat-1"))
+    expect(result.current[0]?.selectedId).toBe("parent/worker-1")
+
+    act(() => releaseSubagentTabController("session-1", "chat-1"))
+    expect(result.current).toEqual([])
   })
 
   it("keeps identical child ids isolated by parent chat", () => {

@@ -89,15 +89,10 @@ export const showSessions = async (
  * restyled away — and if it ever is, this is one line rather than fifty-six.
  *
  * That prediction was half right. The sidebar's "Filter sessions…" field WAS
- * removed — search went global and moved to the title bar — and this being one
- * line is the only reason the whole suite did not fail with it. The sentinel is
- * now the title bar's search control, found by its accessible name rather than
- * by a placeholder: it is a button dressed as a field (it opens the command
- * palette rather than accepting text), so `getByPlaceholder` has nothing to
- * match and the label is the stabler handle regardless.
+ * removed — the title bar itself is the stable shell sentinel. Search now lives
+ * in the collapsible sidebar, so it cannot prove that a narrow app has mounted.
  */
-export const appShell = (window: Page) =>
-  window.getByRole("button", { name: "Search sessions and actions" });
+export const appShell = (window: Page) => window.getByTestId("title-bar");
 
 /** Create a normal workspace through the current project-scoped composer. */
 export const createWorkspace = async (

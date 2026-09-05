@@ -15,6 +15,7 @@ const touchedFiles = new Map<string, ReadonlyArray<string>>()
  * session alone — Fleet selection is a session-level choice, not per chat.
  */
 const fleetActivities = new Map<string, PublishedAgentFileActivity>()
+const fleetPublishers = new Map<string, number>()
 const listeners = new Set<() => void>()
 let sequence = 0
 
@@ -108,6 +109,20 @@ export const publishFleetAgentFileActivity = (
   notify()
 }
 
+export const retainFleetAgentFileActivityPublisher = (sessionId: string): void => {
+  fleetPublishers.set(sessionId, (fleetPublishers.get(sessionId) ?? 0) + 1)
+}
+
+export const releaseFleetAgentFileActivityPublisher = (sessionId: string): void => {
+  const remaining = (fleetPublishers.get(sessionId) ?? 1) - 1
+  if (remaining > 0) {
+    fleetPublishers.set(sessionId, remaining)
+    return
+  }
+  fleetPublishers.delete(sessionId)
+  publishFleetAgentFileActivity(sessionId, null)
+}
+
 export const getFleetAgentFileActivity = (
   sessionId: string
 ): PublishedAgentFileActivity | null => fleetActivities.get(sessionId) ?? null
@@ -125,6 +140,7 @@ export const clearAgentFileActivitySession = (sessionId: string): void => {
     touchedFiles.delete(key)
     changed = true
   }
+  fleetPublishers.delete(sessionId)
   if (fleetActivities.delete(sessionId)) changed = true
   if (changed) notify()
 }

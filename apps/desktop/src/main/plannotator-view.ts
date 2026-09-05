@@ -280,6 +280,26 @@ const sendDecision = async (
   return json({ ok: true })
 }
 
+const archivedPlanOf = (entry: ViewEntry) => {
+  const markdown = reviewMarkdownOf(entry.document)
+  return {
+    markdown,
+    descriptor: {
+      filename: "current-plan.md",
+      title: entry.document.plan.title,
+      date: entry.document.updatedAt.slice(0, 10),
+      timestamp: entry.document.updatedAt,
+      status:
+        entry.document.status === "approved"
+          ? "approved"
+          : entry.document.status === "rejected"
+            ? "denied"
+            : "unknown",
+      size: Buffer.byteLength(markdown)
+    }
+  } as const
+}
+
 const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Response> => {
   if (path === "/") {
     host.reviewHtml ??= readFile(reviewAssetPath(), "utf8")
@@ -292,11 +312,12 @@ const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Re
   }
   if (path === "/api/plan") {
     const readOnly = !entry.canDecide || entry.document.reviewId === undefined
+    const archived = readOnly ? archivedPlanOf(entry) : null
     return json({
-      plan: reviewMarkdownOf(entry.document),
+      plan: archived?.markdown ?? reviewMarkdownOf(entry.document),
       origin: "pi",
       mode: readOnly ? "archive" : undefined,
-      archivePlans: readOnly ? [] : undefined,
+      archivePlans: archived ? [archived.descriptor] : undefined,
       sharingEnabled: false,
       approvalNotesSupported: true,
       serverConfig: { displayName: "Jingler" }
@@ -304,7 +325,13 @@ const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Re
   }
   if (path === "/api/ai/capabilities") return json({ available: false, providers: [] })
   if (path === "/api/skills") return json({ skills: [] })
-  if (path === "/api/archive/plans") return json({ plans: [] })
+  if (path === "/api/archive/plans") {
+    return json({ plans: entry.canDecide ? [] : [archivedPlanOf(entry).descriptor] })
+  }
+  if (path === "/api/archive/plan") {
+    const archived = archivedPlanOf(entry)
+    return json({ markdown: archived.markdown, filepath: archived.descriptor.filename })
+  }
   if (path === "/api/external-annotations") return json({ annotations: [], version: 0 })
   if (path === "/api/draft") return json(null)
   if (path === "/api/hooks/status") {
@@ -331,6 +358,7 @@ const handlePost = async (
   request: Request
 ): Promise<Response> => {
   if (path === "/api/approve") return sendDecision(host, entry, true, request)
+  if (path === "/api/doc/exists") return json({ results: {} })
   if (path === "/api/layout-preferences") {
     const decoded = Schema.decodeUnknownOption(LayoutPreferencesPayload)(
       await request.json().catch(() => null)

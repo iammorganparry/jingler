@@ -1,5 +1,4 @@
 import { createServer, type Server } from "node:http"
-import type { Page } from "@playwright/test"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
@@ -12,8 +11,7 @@ import type { SeedSession } from "./fixtures.js"
  *  - `$…$` / `$$…$$` render as KaTeX (a `.katex` node), not raw dollar-math;
  *  - an html block defaults to the plain-text Code view and, on opt-in, renders a
  *    sandboxed Preview iframe;
- *  - the session-owned Browser opens as a tab and accepts a chat-tab edge drop
- *    to create an explicit nested split.
+ *  - the session-owned Browser opens as a tab beside the current chat.
  *
  * The browser preview is a native `WebContentsView` (out of the DOM, like the
  * xterm canvas in terminal.spec.ts), so we assert on the pane's React chrome
@@ -76,30 +74,6 @@ const agentBrowserSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<
   activeChatId: "chat-alpha"
 }]
 
-const dragToLeftEdge = async (page: Page, sourceSelector: string, targetSelector: string) => {
-  await page.evaluate(
-    ({ sourceSelector, targetSelector }) => {
-      const source = document.querySelector(sourceSelector)
-      const target = document.querySelector(targetSelector)
-      if (!source || !target) throw new Error(`missing drag node: ${sourceSelector} → ${targetSelector}`)
-      const box = target.getBoundingClientRect()
-      const dataTransfer = new DataTransfer()
-      const init = {
-        dataTransfer,
-        bubbles: true,
-        cancelable: true,
-        clientX: box.left + box.width * 0.04,
-        clientY: box.top + box.height / 2
-      }
-      source.dispatchEvent(new DragEvent("dragstart", init))
-      target.dispatchEvent(new DragEvent("dragover", init))
-      target.dispatchEvent(new DragEvent("drop", init))
-      source.dispatchEvent(new DragEvent("dragend", init))
-    },
-    { sourceSelector, targetSelector }
-  )
-}
-
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve) => {
     server.close(() => resolve())
@@ -140,20 +114,11 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await preview.click()
   await expect(window.locator('iframe[title="HTML preview"]')).toBeVisible()
 
-  // Browser opens as a normal view tab. Dragging the chat tab to its edge creates
-  // the nested split explicitly; opening the view alone no longer spends half the pane.
+  // A newly opened Browser stacks beside the current chat while both remain readable.
   await window.getByTestId("view-tab-browser").click()
   const url = window.getByLabel("Preview URL")
   await expect(url).toBeVisible()
   await expect(window.getByTestId("open-view-tab-browser")).toBeVisible()
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "1")
-  await expect(window.locator(".katex")).toHaveCount(0)
-
-  await dragToLeftEdge(
-    window,
-    '[data-testid^="chat-tab-"]',
-    '[data-testid="surface-pane-0"]'
-  )
   await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
   await expect(window.locator(".katex").first()).toBeVisible()
   await url.fill("http://localhost:4321")

@@ -18,6 +18,17 @@ export interface SessionSurfaceLayout {
 }
 
 export const SESSION_SURFACE_DND_MIME = "application/x-jingler-session-surface"
+export const SESSION_SURFACE_COMMAND_EVENT = "jingler:session-surface-command"
+export type SessionSurfaceCommand =
+  | "close"
+  | "move-left"
+  | "move-right"
+  | "focus-left"
+  | "focus-right"
+  | "focus-0"
+  | "focus-1"
+  | "focus-2"
+  | "focus-3"
 export const SESSION_SURFACE_MIN_PX = 220
 export const maxSessionSurfacesForWidth = (width: number): number =>
   width <= 0 ? 4 : Math.max(1, Math.min(4, Math.floor(width / SESSION_SURFACE_MIN_PX)))
@@ -48,17 +59,6 @@ export const sessionSurfaceLabel = (surface: SessionSurface): string =>
 
 const sameSurface = (left: SessionSurface, right: SessionSurface): boolean =>
   sessionSurfaceKey(left) === sessionSurfaceKey(right)
-
-const samePaneMount = (left: SessionSurface, right: SessionSurface): boolean =>
-  sameSurface(left, right) ||
-  (left.kind === "chat" &&
-    right.kind === "view" &&
-    right.id === "plan" &&
-    right.chatId === left.id) ||
-  (right.kind === "chat" &&
-    left.kind === "view" &&
-    left.id === "plan" &&
-    left.chatId === right.id)
 
 const evenly = (surfaces: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurfacePane> =>
   surfaces.map((surface) => ({ surface, ratio: 1 / surfaces.length }))
@@ -94,16 +94,6 @@ export const selectSessionSurface = (
 ): SessionSurfaceLayout => {
   const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (visible !== -1) return focusSessionSurface(layout, visible)
-  const paired = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
-  if (paired !== -1) {
-    return {
-      ...layout,
-      panes: layout.panes.map((pane, index) =>
-        index === paired ? { ...pane, surface } : pane
-      ),
-      focused: paired
-    }
-  }
   if (layout.panes.length === 0) return { ...layout, panes: [{ surface, ratio: 1 }], focused: 0 }
   return {
     ...layout,
@@ -113,14 +103,27 @@ export const selectSessionSurface = (
   }
 }
 
+export const openSessionSurface = (
+  layout: SessionSurfaceLayout,
+  surface: SessionSurface,
+  maxPanes: number
+): SessionSurfaceLayout => {
+  const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
+  if (visible !== -1) return focusSessionSurface(layout, visible)
+  return layout.panes.length < maxPanes
+    ? splitSessionSurface(layout, surface, layout.panes.length, maxPanes)
+    : selectSessionSurface(layout, surface)
+}
+
 export const openSessionView = (
   layout: SessionSurfaceLayout,
-  surface: Extract<SessionSurface, { kind: "view" }>
+  surface: Extract<SessionSurface, { kind: "view" }>,
+  maxPanes = 1
 ): SessionSurfaceLayout => {
   const openViews = layout.openViews.some((view) => sameSurface(view, surface))
     ? layout.openViews
     : [...layout.openViews, surface]
-  return selectSessionSurface({ ...layout, openViews }, surface)
+  return openSessionSurface({ ...layout, openViews }, surface, maxPanes)
 }
 
 export const splitSessionSurface = (
@@ -129,7 +132,7 @@ export const splitSessionSurface = (
   at: number,
   maxPanes: number
 ): SessionSurfaceLayout => {
-  const existing = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
+  const existing = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (existing === -1 && layout.panes.length >= maxPanes) return layout
   const surfaces = layout.panes.map((pane) => pane.surface)
   if (existing !== -1) surfaces.splice(existing, 1)
@@ -146,13 +149,41 @@ export const replaceSessionSurface = (
 ): SessionSurfaceLayout => {
   if (index < 0 || index >= layout.panes.length) return layout
   if (sameSurface(layout.panes[index]!.surface, surface)) return focusSessionSurface(layout, index)
-  const duplicate = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
+  const duplicate = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   const kept = layout.panes.filter((_, paneIndex) => paneIndex === index || paneIndex !== duplicate)
   const target = duplicate !== -1 && duplicate < index ? index - 1 : index
   const panes = normalise(
     kept.map((pane, paneIndex) => (paneIndex === target ? { ...pane, surface } : pane))
   )
   return { ...layout, panes, focused: target }
+}
+
+export const closeSessionPane = (
+  layout: SessionSurfaceLayout,
+  index: number,
+  fallback: SessionSurface
+): SessionSurfaceLayout => {
+  if (index < 0 || index >= layout.panes.length) return layout
+  const panes = normalise(layout.panes.filter((_, paneIndex) => paneIndex !== index))
+  return {
+    ...layout,
+    panes: panes.length > 0 ? panes : [{ surface: fallback, ratio: 1 }],
+    focused: Math.min(index, Math.max(0, panes.length - 1))
+  }
+}
+
+export const moveSessionPane = (
+  layout: SessionSurfaceLayout,
+  from: number,
+  to: number
+): SessionSurfaceLayout => {
+  if (from < 0 || from >= layout.panes.length || to < 0 || to >= layout.panes.length || from === to) {
+    return layout
+  }
+  const panes = [...layout.panes]
+  const [pane] = panes.splice(from, 1)
+  panes.splice(to, 0, pane!)
+  return { ...layout, panes, focused: to }
 }
 
 export const closeSessionSurface = (
@@ -200,7 +231,7 @@ export const resizeSessionSurface = (
 ): SessionSurfaceLayout => {
   const left = layout.panes[index]
   const right = layout.panes[index + 1]
-  if (!left || !right || !Number.isFinite(delta)) return layout
+  if (!((left && right ) && Number.isFinite(delta))) return layout
   const pair = left.ratio + right.ratio
   if (pair < MIN_RATIO * 2) return layout
   const nextLeft = Math.min(Math.max(left.ratio + delta, MIN_RATIO), pair - MIN_RATIO)
@@ -237,7 +268,7 @@ export const pruneSessionSurfaceLayout = (
   const panes = normalise(
     layout.panes.filter((pane) => {
       const key = sessionSurfaceKey(pane.surface)
-      if (!allowed.has(key) || seen.some((surface) => samePaneMount(surface, pane.surface))) {
+      if (!allowed.has(key) || seen.some((surface) => sameSurface(surface, pane.surface))) {
         return false
       }
       seen.push(pane.surface)
@@ -263,7 +294,7 @@ export const loadSessionSurfaceLayout = (
     const raw = localStorage.getItem(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`)
     if (raw === null) return createSessionSurfaceLayout(fallback)
     const parsed = JSON.parse(raw) as Partial<SessionSurfaceLayout>
-    if (!Array.isArray(parsed.panes) || !Array.isArray(parsed.openViews)) {
+    if (!(Array.isArray(parsed.panes) && Array.isArray(parsed.openViews))) {
       return createSessionSurfaceLayout(fallback)
     }
     const panes = parsed.panes
