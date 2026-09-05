@@ -38,11 +38,6 @@ await chmod(resolve(dist, "jingler-device.mjs"), 0o755)
 
 await mkdir(resolve(payload, "runtime-assets"), { recursive: true })
 await cp(
-  resolve(root, "packages/cli-adapters/runtime-assets/pi-subagent-wrapper.mjs"),
-  resolve(payload, "runtime-assets/pi-subagent-wrapper.mjs")
-)
-await chmod(resolve(payload, "runtime-assets/pi-subagent-wrapper.mjs"), 0o755)
-await cp(
   resolve(root, "packages/cli-adapters/runtime-assets/jingler-child-tools.mjs"),
   resolve(payload, "runtime-assets/jingler-child-tools.mjs")
 )

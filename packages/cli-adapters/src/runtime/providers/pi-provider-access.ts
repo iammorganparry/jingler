@@ -68,6 +68,34 @@ const isolatedCredentialStore = (
 
 const CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL = "claude-haiku-4-5"
 
+const ASTRA_MODEL = {
+  id: "gpt-6-astra",
+  name: "GPT-6 Astra",
+  api: "openai-codex-responses" as const,
+  reasoning: true,
+  thinkingLevelMap: { minimal: "low", xhigh: "xhigh", max: "max" } as const,
+  input: ["text", "image"] as Array<"text" | "image">,
+  cost: {
+    input: 10,
+    output: 50,
+    cacheRead: 1,
+    cacheWrite: 12.5,
+    tiers: [{ inputTokensAbove: 272_000, input: 20, output: 75, cacheRead: 2, cacheWrite: 25 }]
+  },
+  contextWindow: 1_050_000,
+  maxTokens: 128_000,
+  compat: { supportsOpenAIGrammarTools: true, supportsToolSearch: true }
+}
+
+export const registerJinglerModels = (runtime: ModelRuntime): void => {
+  const provider = runtime.getProvider("openai-codex")
+  if (provider === undefined || provider.getModels().some(({ id }) => id === ASTRA_MODEL.id)) return
+  runtime.registerProvider("openai-codex", {
+    ...runtime.getRegisteredProviderConfig("openai-codex"),
+    models: [...provider.getModels(), ASTRA_MODEL]
+  })
+}
+
 export const selectEntitlementModel = <Model extends { readonly id: string }>(
   models: ReadonlyArray<Model>,
   authKind: AuthKind
@@ -152,6 +180,7 @@ export const probePiEntitlement = async (input: {
     refreshOnCreate: true,
     signal: input.signal
   })
+  registerJinglerModels(runtime)
   const model = await entitlementModel(
     runtime,
     input.providerId,
@@ -232,6 +261,7 @@ export const discoverPiModels = (
         refreshOnCreate: true,
         signal
       })
+      registerJinglerModels(runtime)
       return (await runtime.getAvailable(connection.providerId, { signal })).map(
         (model) => ({
           providerId: Schema.decodeUnknownSync(ProviderId)(model.provider),

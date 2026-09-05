@@ -8,9 +8,9 @@ patchedDependencies:
   '@pierre/diffs@1.3.6':
     hash: e359e20dd06be19c9ae66eef227647587513cb1ae3b22777e3bcbb9be33826d1
     path: patches/@pierre__diffs@1.3.6.patch
-  pi-subagents@0.57.0:
-    hash: 991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d
-    path: patches/pi-subagents@0.57.0.patch
+  pi-subagents@0.65.0:
+    hash: 909f48b6f589a1380e0a524faee6520c1441daecb1f38a435c40929df18fcce4
+    path: patches/pi-subagents@0.65.0.patch
 
 importers:
 
@@ -129,8 +129,8 @@ importers:
         specifier: ^2.7.0
         version: 2.7.0
       pi-subagents:
-        specifier: 0.57.0
-        version: 0.57.0(patch_hash=991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+        specifier: 0.65.0
+        version: 0.65.0(patch_hash=909f48b6f589a1380e0a524faee6520c1441daecb1f38a435c40929df18fcce4)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
       ws:
         specifier: ^8.18.0
         version: 8.21.0
@@ -247,8 +247,8 @@ importers:
         specifier: ^3.21.4
         version: 3.21.4
       pi-subagents:
-        specifier: 0.57.0
-        version: 0.57.0(patch_hash=991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+        specifier: 0.65.0
+        version: 0.65.0(patch_hash=909f48b6f589a1380e0a524faee6520c1441daecb1f38a435c40929df18fcce4)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
       ws:
         specifier: ^8.18.0
         version: 8.21.0
@@ -492,8 +492,8 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
       pi-subagents:
-        specifier: 0.57.0
-        version: 0.57.0(patch_hash=991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
+        specifier: 0.65.0
+        version: 0.65.0(patch_hash=909f48b6f589a1380e0a524faee6520c1441daecb1f38a435c40929df18fcce4)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1)
       proper-lockfile:
         specifier: 4.1.2
         version: 4.1.2
@@ -8381,8 +8381,8 @@ packages:
   peberminta@0.9.0:
     resolution: {integrity: sha512-XIxfHpEuSJbITd1H3EeQwpcZbTLHc+VVr8ANI9t5sit565tsI4/xK3KWTUFE2e6QiangUkh3B0jihzmGnNrRsQ==}
 
-  pi-subagents@0.57.0:
-    resolution: {integrity: sha512-CvsOBp61dZU+HV3kHdfFc+iBuO9DOI5nvTiGrSaFVpH7XK5/22QbBAdjcrhOjcSzA5Ev3l0Qr/JC1I8VLES9Bw==}
+  pi-subagents@0.65.0:
+    resolution: {integrity: sha512-OJ2dn3OsDMKj9mxSFWIzcDyg2PS0VupXw9uMmcU0qWcjtXxo3ZW1RDzp75bwmKWrde8qHZkGfeM8YxGlta0Dcg==}
     hasBin: true
     peerDependencies:
       '@earendil-works/pi-agent-core': '*'
@@ -17413,7 +17413,7 @@ snapshots:
 
   peberminta@0.9.0: {}
 
-  pi-subagents@0.57.0(patch_hash=991670116d58bf940ba5936858cce86bcfe6c61afe294c9ae2ab7f2b857a5b4d)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1):
+  pi-subagents@0.65.0(patch_hash=909f48b6f589a1380e0a524faee6520c1441daecb1f38a435c40929df18fcce4)(@earendil-works/pi-agent-core@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-ai@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-coding-agent@0.84.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.0)(zod@4.4.3))(@earendil-works/pi-tui@0.84.1):
     dependencies:
       acorn: 8.18.0
       jiti: 2.7.0

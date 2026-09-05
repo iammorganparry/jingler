@@ -1,0 +1,593 @@
+diff --git a/src/extension/index.ts b/src/extension/index.ts
+index 63d2f7bff0ad178ef5b6434b5d9c68425d65164d..6e8a846cfc7400b5d3a6d92c199bdf94c139d81a 100644
+--- a/src/extension/index.ts
++++ b/src/extension/index.ts
+@@ -64,7 +64,15 @@ import { drainOutstandingWork } from "../runs/background/auto-drain.ts";
+ import registerSubagentNotify, { parseSubagentNotifyContent, type SubagentNotifyDetails } from "../runs/background/notify.ts";
+ import { formatSteeringNotice, handleSubagentSteeringNotice, SUBAGENT_STEERING_MESSAGE_TYPE, type SubagentSteeringMessageDetails } from "./steering-notices.ts";
+ import { SUBAGENT_CHILD_ENV, SUBAGENT_PARENT_SESSION_ENV } from "../runs/shared/child-runtime-config.ts";
+-import { disposeChildSessions } from "../runs/shared/child-session.ts";
++import {
++	disposeChildSessions,
++	setChildSessionFactory,
++	setChildSessionFactoryModule,
++} from "../runs/shared/child-session.ts";
++import {
++	createProcessChildSessionFactory,
++	processChildSessionFactoryModule,
++} from "../runs/shared/process-child-session.ts";
+ import { resolveCurrentSubagentCapabilityCeiling } from "../runs/shared/capability-ceiling.ts";
+ import { formatDuration, shortenPath } from "../shared/formatters.ts";
+ import { applyModelExclusionsConfig, loadConfig, resolveAsyncByDefault, resolveScheduledStoreRoot } from "./config.ts";
+@@ -416,6 +424,10 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 	if (process.env[SUBAGENT_CHILD_ENV] === "1") {
+ 		return;
+ 	}
++	if (process.env.JINGLER_SUBAGENT_PROCESS_ISOLATION === "1") {
++		setChildSessionFactory(createProcessChildSessionFactory());
++		setChildSessionFactoryModule(processChildSessionFactoryModule);
++	}
+ 	const runtimeRegistry = getRuntimeRegistry();
+ 
+ 	DIRS.results = ensureAccessibleDir(DIRS.results);
+@@ -688,6 +700,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 	});
+ 
+ 	const executeSubagentCollapsed = (id: string, params: SubagentParamsLike, signal: AbortSignal, onUpdate: ((result: AgentToolResult<Details>) => void) | undefined, ctx: ExtensionContext) => {
++		state.lastUiContext = ctx;
++		supervisorChannel.start();
+ 		if (ctx.hasUI) ctx.ui.setToolsExpanded(false);
+ 		return executor.executePublic(id, params, signal, onUpdate, ctx);
+ 	};
+@@ -715,6 +729,7 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
+ 		getContext: () => state.lastUiContext,
+ 		execute: (id, params, signal, onUpdate, ctx) => executor.executePublic(id, params, signal, onUpdate, ctx),
+ 		state,
++		replySupervisor: (requestId, message) => supervisorChannel.reply(requestId, message),
+ 	});
+ 
+ 
+diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
+index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..6c88bb35d8da2ac34f9df4c8f6f89008ef06d6b9 100644
+--- a/src/extension/rpc.ts
++++ b/src/extension/rpc.ts
+@@ -31,7 +31,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
+ export const SUBAGENT_RPC_READY_EVENT = "subagents:rpc:v1:ready";
+ export const SUBAGENT_RPC_REPLY_EVENT_PREFIX = "subagents:rpc:v1:reply:";
+ 
+-export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume"] as const;
++export const SUBAGENT_RPC_METHODS = ["ping", "status", "manage", "spawn", "steer", "interrupt", "stop", "resume", "reply"] as const;
+ export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
+ 
+ export interface SubagentRpcRequestEnvelope {
+@@ -317,6 +317,7 @@ interface RegisterSubagentRpcBridgeOptions {
+ 	now?: () => number;
+ 	/** Native live state, projected into the optional public fleet-status capability. */
+ 	state?: SubagentState;
++	replySupervisor?: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
+ }
+ 
+ class SubagentRpcError extends Error {
+@@ -720,6 +721,17 @@ async function handleRequest(
+ ): Promise<unknown> {
+ 	const ctx = options.getContext();
+ 	if (request.method === "ping") return pingData(ctx);
++	if (request.method === "reply") {
++		const input = assertRecordParams(request.params, "reply");
++		if (typeof input.requestId !== "string" || !input.requestId.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty requestId.");
++		}
++		if (typeof input.message !== "string" || !input.message.trim()) {
++			throw new SubagentRpcError("invalid_params", "RPC reply requires a non-empty message.");
++		}
++		if (!options.replySupervisor) throw new SubagentRpcError("invalid_state", "Supervisor reply is unavailable.");
++		return options.replySupervisor(input.requestId.trim(), input.message.trim());
++	}
+ 	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
+ 
+ 	if (request.method === "manage") {
+diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
+index 868d66d3f5501e0bc45d709d81f02808ba1aa2a0..c8505e11c673cfd5b0763038e57aa7b14c134c4d 100644
+--- a/src/intercom/native-supervisor-channel.ts
++++ b/src/intercom/native-supervisor-channel.ts
+@@ -409,18 +409,32 @@ function cleanupStaleEmptySupervisorChannels(nowMs = Date.now()): number {
+ 	return removed;
+ }
+ 
+-function currentContextSessionId(state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): string | undefined {
+-	try {
+-		const sessionId = ctx.sessionManager.getSessionId();
+-		if (sessionId) return sessionId;
+-	} catch {
+-		// Fall through to the last known identity.
++function currentContextSessionId(
++	state: Pick<SubagentState, "currentSessionId">,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): string | undefined {
++	if (ctx) {
++		try {
++			const sessionId = ctx.sessionManager.getSessionId();
++			if (sessionId) return sessionId;
++		} catch {
++			// Fall through to the last verified identity.
++		}
+ 	}
+-	return state.currentSessionId ?? undefined;
++	return state.currentSessionId ?? rememberedSessionId ?? undefined;
+ }
+ 
+-function requestMatchesContext(request: SupervisorRequest, state: Pick<SubagentState, "currentSessionId">, ctx: ExtensionContext): boolean {
+-	const currentSessionId = currentContextSessionId(state, ctx);
++function requestMatchesContext(
++	request: SupervisorRequest,
++	state: SubagentState,
++	ctx?: ExtensionContext,
++	rememberedSessionId?: string,
++): boolean {
++	if (state.foregroundRuns.has(request.runId) || state.foregroundControls.has(request.runId) || state.asyncJobs.has(request.runId)) {
++		return true;
++	}
++	const currentSessionId = currentContextSessionId(state, ctx, rememberedSessionId);
+ 	return Boolean(currentSessionId && request.orchestratorSessionId === currentSessionId);
+ }
+ 
+@@ -633,6 +647,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	activateTransport: () => void;
+ 	dispose: () => void;
+ 	pending: Map<string, PendingSupervisorRequest>;
++	reply: (requestId: string, message: string) => { requestId: string; runId: string; agent: string };
+ 	getSupervisorRequestState: (event: ControlEvent) => SupervisorRequestState;
+ } {
+ 	const watch = deps.watch ?? fs.watch;
+@@ -696,6 +711,7 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	let deferredWatcherRefresh: ReturnType<typeof setImmediate> | undefined;
+ 	let started = false;
+ 	let lastStaleCleanupAt = 0;
++	let rememberedSessionId: string | undefined;
+ 	const platform = deps.platform ?? process.platform;
+ 	const useNativeWatcher = () => shouldUseNativeFsWatch("supervisor-channel", platform) && platform !== "win32";
+ 	const hasTransportDemand = () => {
+@@ -721,14 +737,14 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 
+ 	const poll = (): void => {
+ 		cleanupStaleChannelsIfDue();
+-		const ctx = state.lastUiContext;
+-		if (!ctx) return;
++		const ctx = state.lastUiContext ?? undefined;
++		if (ctx) rememberedSessionId = currentContextSessionId(state, ctx) ?? rememberedSessionId;
+ 		refreshPendingRequests(pending, state, ctx, observeRequestLifecycle);
+ 		const now = Date.now();
+ 		for (const { channelDir, file } of listRequestFiles()) {
+ 			if (seenFiles.has(file)) continue;
+ 			const request = parseRequestFile(file, channelDir);
+-			if (!request || !requestMatchesContext(request, state, ctx)) continue;
++			if (!request || !requestMatchesContext(request, state, ctx, rememberedSessionId)) continue;
+ 			const lifecycle = requestLifecycle(request, state, undefined, now);
+ 			if (lifecycle !== "pending") {
+ 				seenFiles.add(file);
+@@ -757,6 +773,8 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 					runId: request.runId,
+ 					agent: request.agent,
+ 					childIndex: request.childIndex,
++					requestedAt: request.createdAt,
++					deadlineAt: request.expiresAt ?? null,
+ 					...(request.childTarget ? { childTarget: request.childTarget } : {}),
+ 					...(request.interview !== undefined ? { interview: request.interview } : {}),
+ 					...(request.expectsReply ? { replyHint: supervisorReplyHint(request.id) } : {}),
+@@ -768,6 +786,10 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 					runId: request.runId,
+ 					agent: request.agent,
+ 					childIndex: request.childIndex,
++					reason: request.reason,
++					message: request.message,
++					requestedAt: request.createdAt,
++					deadlineAt: request.expiresAt ?? null,
+ 				});
+ 				if (pending.has(request.id)) markForegroundSupervisorAttention(request, state);
+ 			}
+@@ -833,6 +855,15 @@ export function createNativeSupervisorChannel(pi: ExtensionAPI, state: SubagentS
+ 	};
+ 
+ 	return {
++		reply: (requestId, message) => {
++			refreshPendingRequests(pending, state, state.lastUiContext ?? undefined);
++			const request = pending.get(requestId);
++			if (!request) throw new Error(`No pending supervisor request found for replyTo '${requestId}'.`);
++			writeReply(request, message);
++			pending.delete(request.id);
++			clearForegroundSupervisorAttention(request, pending, state);
++			return { requestId: request.id, runId: request.runId, agent: request.agent };
++		},
+ 		activateTransport: () => {
+ 			if (!started) return;
+ 			poll();
+diff --git a/src/runs/background/async-execution.ts b/src/runs/background/async-execution.ts
+index d243ce0e80a490cf4c6479a8aa58348f2acd75b7..17d120226742a1a44da7e4ac8b5985fa733bcf51 100644
+--- a/src/runs/background/async-execution.ts
++++ b/src/runs/background/async-execution.ts
+@@ -560,7 +560,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
+ 	const launchConfig = { ...cfg, runnerProcessInstanceId, ...(launchBarrierToken ? { launchBarrierToken } : {}) };
+ 	writePrivateAtomicJson(cfgPath, launchConfig);
+ 	const runner = path.join(path.dirname(fileURLToPath(import.meta.url)), "subagent-runner.ts");
+-	const nodeCommand = resolveNodeExecutable();
++	const nodeCommand = process.env.JINGLER_SUBAGENT_NODE?.trim() || resolveNodeExecutable();
+ 	const launchForStartup = launchConfig as typeof launchConfig & { asyncDir?: unknown; id?: unknown; sessionId?: unknown; completionOwnerId?: unknown; revivalLease?: unknown };
+ 	const launchAsyncDir = typeof launchForStartup.asyncDir === "string" ? launchForStartup.asyncDir : undefined;
+ 	const launchRunId = typeof launchForStartup.id === "string" ? launchForStartup.id : suffix;
+@@ -592,6 +592,9 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
+ 			stdio: ["ignore", stdoutFd ?? "ignore", stderrFd ?? "ignore"],
+ 			env: {
+ 				...omitExtensionBindingsEnv(process.env),
++				...(process.env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE === "1"
++					? { ELECTRON_RUN_AS_NODE: "1" }
++					: {}),
+ 				[PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piPackageRoot,
+ 				[JITI_ALIAS_ENV]: JSON.stringify(hostPeerAliases.aliases),
+ 			},
+diff --git a/src/runs/foreground/execution.ts b/src/runs/foreground/execution.ts
+index 3d0f305a85e9c51bbb018cf0d95d5dfed78909f4..ca0b719f41f77030f7fcc85e01960377d5de8ac5 100644
+--- a/src/runs/foreground/execution.ts
++++ b/src/runs/foreground/execution.ts
+@@ -131,6 +131,11 @@ function redactResultPrompt<T extends SingleResult>(result: T): T {
+ 	return result;
+ }
+ 
++function isBlockingSupervisorToolCall(toolName: string | undefined, args: Record<string, unknown>): boolean {
++	return (toolName === "intercom" && args.action === "ask")
++		|| (toolName === "contact_supervisor" && (args.reason === "need_decision" || args.reason === "interview_request"));
++}
++
+ function sumUsage(target: Usage, source: Usage): void {
+ 	target.input += source.input;
+ 	target.output += source.output;
+@@ -629,6 +634,9 @@ async function runSingleAttempt(
+ 			receiptProgress.status = "detached";
+ 			receiptProgress.durationMs = Date.now() - startTime;
+ 			const receipt = snapshotResult(result, receiptProgress);
++			if (!receipt.sessionFile && options.sessionFile && existsSync(options.sessionFile)) {
++				receipt.sessionFile = options.sessionFile;
++			}
+ 			receipt.exitCode = -2;
+ 			receipt.detached = true;
+ 			receipt.detachedReason = reason;
+@@ -1021,6 +1029,8 @@ async function runSingleAttempt(
+ 				const toolArgs = evt.args && typeof evt.args === "object" && !Array.isArray(evt.args)
+ 					? evt.args as Record<string, unknown>
+ 					: {};
++				const shouldDetachForBlockingSupervisor = options.allowIntercomDetach
++					&& isBlockingSupervisorToolCall(evt.toolName, toolArgs);
+ 				const activeTool = evt.toolName !== undefined ? recordActiveToolCall(evt as { toolCallId?: unknown; toolName: string }, toolArgs, now) : undefined;
+ 				if (evt.toolName !== undefined) armToolTimeout(evt as { toolCallId?: unknown; toolName: string });
+ 				if (options.structuredOutput && evt.toolName === "structured_output") {
+@@ -1038,6 +1048,7 @@ async function runSingleAttempt(
+ 				observedMutationAttempt = observedMutationAttempt || mutates;
+ 				pendingToolResult = { tool: evt.toolName ?? "tool", path: activeTool?.path, mutates, startedAt: now };
+ 				fireUpdate();
++				if (shouldDetachForBlockingSupervisor) detachForeground("intercom coordination");
+ 			}
+ 
+ 			if (evt.type === "tool_execution_end") {
+diff --git a/src/runs/shared/process-child-session-worker.ts b/src/runs/shared/process-child-session-worker.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..b74f34a6b96f13721a755c8fdfc054c03cd6e954
+--- /dev/null
++++ b/src/runs/shared/process-child-session-worker.ts
+@@ -0,0 +1,92 @@
++import { createInterface } from "node:readline"
++import { createChildHooks } from "./child-hooks.ts"
++import {
++  createDefaultChildSessionFactory,
++  type ChildSession,
++  type ChildSessionLaunch
++} from "./child-session.ts"
++
++const send = (value: unknown): void => {
++  process.stdout.write(`${JSON.stringify(value)}\n`)
++}
++
++let session: ChildSession | undefined
++let factory: ReturnType<typeof createDefaultChildSessionFactory> | undefined
++
++const respond = async (message: Record<string, unknown>): Promise<void> => {
++  const id = typeof message.id === "string" ? message.id : undefined
++  try {
++    if (message.type === "init") {
++      const launch = message.launch as ChildSessionLaunch
++      const runtime = launch.runtime
++      if (runtime.structuredOutput) {
++        runtime.structuredOutput.capture = (value, acceptanceReport) =>
++          send({ type: "callback", callback: "structuredOutput", value, acceptanceReport })
++      }
++      runtime.watchdogStatus = (event) =>
++        send({ type: "callback", callback: "watchdogStatus", event })
++      runtime.toolDiagnostic = (diagnostic) =>
++        send({ type: "callback", callback: "toolDiagnostic", diagnostic })
++      runtime.runtimeAcknowledgements = (ids) =>
++        send({ type: "callback", callback: "runtimeAcknowledgements", ids })
++      launch.hooks = createChildHooks(runtime)
++      launch.onExtensionError = (error) => send({
++        type: "callback",
++        callback: "extensionError",
++        error: {
++          extensionPath: error.extensionPath,
++          event: error.event,
++          message: error.error instanceof Error ? error.error.message : String(error.error)
++        }
++      })
++      factory = createDefaultChildSessionFactory()
++      session = await factory.create(launch)
++      session.subscribe((event) => send({ type: "event", event }))
++      send({
++        type: "ready",
++        sessionFile: session.sessionFile,
++        sessionId: session.sessionId,
++        modelId: session.modelId
++      })
++      return
++    }
++    if (!session) throw new Error("Child session is not initialized")
++    if (message.type === "prompt") await session.prompt(String(message.text ?? ""))
++    else if (message.type === "steer") await session.steer(String(message.text ?? ""))
++    else if (message.type === "followUp") await session.followUp(String(message.text ?? ""))
++    else if (message.type === "abort") await session.abort()
++    else if (message.type === "dispose") {
++      await session.dispose()
++      await factory?.dispose()
++    } else throw new Error(`Unknown child session command: ${String(message.type)}`)
++    if (id && message.type === "dispose") {
++      process.stdout.write(
++        `${JSON.stringify({ type: "response", id, success: true })}\n`,
++        () => process.exit(0)
++      )
++      return
++    }
++    if (id) send({ type: "response", id, success: true })
++  } catch (error) {
++    if (id) send({
++      type: "response",
++      id,
++      success: false,
++      error: error instanceof Error ? error.message : String(error)
++    })
++    else send({ type: "fatal", error: error instanceof Error ? error.message : String(error) })
++  }
++}
++
++const lines = createInterface({ input: process.stdin })
++lines.on("line", (line) => {
++  let message: unknown
++  try {
++    message = JSON.parse(line)
++  } catch {
++    send({ type: "fatal", error: "Malformed child session command" })
++    return
++  }
++  if (!message || typeof message !== "object" || Array.isArray(message)) return
++  void respond(message as Record<string, unknown>)
++})
+diff --git a/src/runs/shared/process-child-session.ts b/src/runs/shared/process-child-session.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..84c1137923b9c6a73e11424fc9457fa4d39fffec
+--- /dev/null
++++ b/src/runs/shared/process-child-session.ts
+@@ -0,0 +1,219 @@
++import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
++import { createHash } from "node:crypto"
++import * as fs from "node:fs"
++import * as path from "node:path"
++import { createRequire } from "node:module"
++import { createInterface } from "node:readline"
++import { fileURLToPath } from "node:url"
++import type {
++  ChildSession,
++  ChildSessionEvent,
++  ChildSessionFactory,
++  ChildSessionLaunch
++} from "./child-session.ts"
++
++const require = createRequire(import.meta.url)
++const SAFE_AGENT = /^[a-z][a-z0-9-]*$/u
++
++const jitiCli = (): string => {
++  const packageJson = require.resolve("jiti/package.json")
++  const root = path.dirname(packageJson)
++  const manifest = JSON.parse(fs.readFileSync(packageJson, "utf8")) as {
++    bin?: string | Record<string, string>
++  }
++  const bin = typeof manifest.bin === "string"
++    ? manifest.bin
++    : manifest.bin?.jiti ?? Object.values(manifest.bin ?? {})[0]
++  if (!bin) throw new Error("Could not resolve jiti CLI")
++  return path.resolve(root, bin)
++}
++
++export const isolatedChildEnvironment = (launch: ChildSessionLaunch): NodeJS.ProcessEnv => {
++  const env = { ...process.env, ...launch.processEnv }
++  const root = env.JINGLER_SUBAGENT_CREDENTIAL_ROOT
++  const parent = launch.runtime.parentSessionId ?? launch.runtime.orchestratorSessionId
++  const agent = launch.runtime.agent
++  if (!root || !parent || !agent || !SAFE_AGENT.test(agent)) {
++    throw new Error("Jingler child credentials require a valid parent session and agent")
++  }
++  const agentDir = path.join(root, createHash("sha256").update(parent).digest("hex"))
++  const authPath = path.join(agentDir, "auth.json")
++  const capabilityPath = path.join(agentDir, `capability-${agent}.json`)
++  for (const file of [authPath, capabilityPath]) {
++    const stat = fs.statSync(file)
++    if (process.platform !== "win32" && (stat.mode & 0o777) !== 0o600) {
++      throw new Error(`Jingler child credential permissions are not restricted: ${file}`)
++    }
++  }
++  env.PI_CODING_AGENT_DIR = agentDir
++  env.JINGLER_SUBAGENT_CAPABILITY = capabilityPath
++  env.PI_SUBAGENT_CHILD = "1"
++  env.PI_SUBAGENT_PARENT_SESSION = parent
++  if (env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE === "1") env.ELECTRON_RUN_AS_NODE = "1"
++  delete env.JINGLER_SUBAGENT_CREDENTIAL_ROOT
++  return env
++}
++
++interface PendingCommand {
++  resolve: () => void
++  reject: (error: Error) => void
++}
++
++const serializableLaunch = (launch: ChildSessionLaunch): ChildSessionLaunch => ({
++  ...launch,
++  hooks: [],
++  onExtensionError: undefined,
++  runtime: {
++    ...launch.runtime,
++    watchdogStatus: undefined,
++    toolDiagnostic: undefined,
++    runtimeAcknowledgements: undefined,
++    ...(launch.runtime.structuredOutput
++      ? { structuredOutput: { ...launch.runtime.structuredOutput, capture: undefined as never } }
++      : {})
++  }
++})
++
++const startChild = (launch: ChildSessionLaunch): Promise<ChildSession> =>
++  new Promise((resolve, reject) => {
++    const node = process.env.JINGLER_SUBAGENT_NODE ?? process.execPath
++    const fixtureWorker = process.env.JINGLER_SUBAGENT_PROCESS_WORKER?.trim()
++    const worker = fileURLToPath(new URL("./process-child-session-worker.ts", import.meta.url))
++    const child: ChildProcessWithoutNullStreams = spawn(
++      node,
++      fixtureWorker ? [fixtureWorker] : [jitiCli(), worker],
++      {
++      cwd: launch.cwd,
++      env: isolatedChildEnvironment(launch),
++      stdio: ["pipe", "pipe", "pipe"],
++      windowsHide: true
++    })
++    const listeners = new Set<(event: ChildSessionEvent) => void>()
++    const pending = new Map<string, PendingCommand>()
++    const messages: unknown[] = []
++    let sequence = 0
++    let ready = false
++    let disposed = false
++    let stderr = ""
++    const command = (type: string, text?: string): Promise<void> => {
++      if (disposed) return Promise.reject(new Error("Child session is disposed"))
++      const id = `command-${++sequence}`
++      child.stdin.write(`${JSON.stringify({ id, type, ...(text === undefined ? {} : { text }) })}\n`)
++      return new Promise((resolveCommand, rejectCommand) => {
++        pending.set(id, { resolve: resolveCommand, reject: rejectCommand })
++      })
++    }
++    const fail = (error: Error, terminate = false): void => {
++      if (!ready) reject(error)
++      for (const waiter of pending.values()) waiter.reject(error)
++      pending.clear()
++      if (terminate && child.exitCode === null) child.kill("SIGTERM")
++    }
++    const startupTimer = setTimeout(() => {
++      fail(new Error(stderr.trim() || "Child session did not start within 10 seconds"), true)
++    }, 10_000)
++    startupTimer.unref?.()
++    child.stderr.on("data", (chunk: Buffer) => {
++      stderr = `${stderr}${chunk.toString("utf8")}`.slice(-64 * 1024)
++    })
++    child.on("error", (error) => fail(error, true))
++    child.on("close", (code) => {
++      clearTimeout(startupTimer)
++      const unfinished = !ready || pending.size > 0
++      disposed = true
++      if (code !== 0 || unfinished) {
++        fail(new Error(stderr.trim() || `Child session exited with code ${code}`))
++      }
++    })
++    createInterface({ input: child.stdout }).on("line", (line) => {
++      let message: Record<string, unknown>
++      try {
++        message = JSON.parse(line) as Record<string, unknown>
++      } catch {
++        fail(new Error("Child session emitted malformed JSON"), true)
++        return
++      }
++      if (message.type === "event") {
++        const event = message.event as ChildSessionEvent
++        if ((event.type === "message_end" || event.type === "tool_result_end") && event.message) {
++          messages.push(event.message)
++        }
++        for (const listener of listeners) listener(event)
++        return
++      }
++      if (message.type === "callback") {
++        if (message.callback === "watchdogStatus") launch.runtime.watchdogStatus?.(message.event as never)
++        else if (message.callback === "toolDiagnostic") launch.runtime.toolDiagnostic?.(message.diagnostic as never)
++        else if (message.callback === "runtimeAcknowledgements") launch.runtime.runtimeAcknowledgements?.(message.ids as string[])
++        else if (message.callback === "structuredOutput") launch.runtime.structuredOutput?.capture(message.value, message.acceptanceReport)
++        else if (message.callback === "extensionError") {
++          const error = message.error as { extensionPath: string; event: string; message: string }
++          launch.onExtensionError?.({ ...error, error: new Error(error.message) })
++        }
++        return
++      }
++      if (message.type === "response" && typeof message.id === "string") {
++        const waiter = pending.get(message.id)
++        if (!waiter) return
++        pending.delete(message.id)
++        if (message.success === true) waiter.resolve()
++        else waiter.reject(new Error(String(message.error ?? "Child session command failed")))
++        return
++      }
++      if (message.type === "fatal") {
++        fail(new Error(String(message.error ?? "Child session failed")), true)
++        return
++      }
++      if (message.type !== "ready") return
++      clearTimeout(startupTimer)
++      ready = true
++      const session: ChildSession = {
++        subscribe: (listener) => {
++          listeners.add(listener)
++          return () => listeners.delete(listener)
++        },
++        prompt: (text) => command("prompt", text),
++        steer: (text) => command("steer", text),
++        followUp: (text) => command("followUp", text),
++        abort: () => command("abort"),
++        dispose: async () => {
++          if (disposed) return
++          await command("dispose").catch(() => {})
++          disposed = true
++          if (child.exitCode === null) child.kill("SIGTERM")
++        },
++        get messages() { return messages as ChildSession["messages"] },
++        sessionFile: typeof message.sessionFile === "string" ? message.sessionFile : undefined,
++        sessionId: String(message.sessionId ?? ""),
++        modelId: typeof message.modelId === "string" ? message.modelId : undefined
++      }
++      resolve(session)
++    })
++    child.stdin.write(`${JSON.stringify({ type: "init", launch: serializableLaunch(launch) })}\n`)
++  })
++
++export const processChildSessionFactoryModule = fileURLToPath(import.meta.url)
++
++export const createProcessChildSessionFactory = (): ChildSessionFactory => {
++  const live = new Set<ChildSession>()
++  return {
++    create: async (launch) => {
++      const child = await startChild(launch)
++      live.add(child)
++      const dispose = child.dispose
++      child.dispose = async () => {
++        live.delete(child)
++        await dispose()
++      }
++      return child
++    },
++    dispose: async () => {
++      const attached = [...live].filter((child) => !child.detached)
++      for (const child of attached) child.shutDown = true
++      await Promise.allSettled(attached.map((child) => child.abort()))
++      await Promise.allSettled(attached.map((child) => child.dispose()))
++    }
++  }
++}
++
++export default createProcessChildSessionFactory

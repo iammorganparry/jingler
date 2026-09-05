@@ -1,6 +1,7 @@
 ---
 "@jingler/desktop": patch
 "@jingler/cli-adapters": patch
+"@jingler/core": patch
 ---
 
-Upgrade pi-subagents to 0.57.0 and reduce Jingler's vendor patch to the two host hooks still missing upstream: direct supervisor replies and packaged child-launch argument prefixes. Keep Ponytail and pi-subagents loadable as normal Pi packages outside Jingler.
+Upgrade pi-subagents to 0.65.0 for stale-context-safe session replacement while retaining Jingler's supervisor replies, foreground intercom handoff, and credential-scoped child process isolation. Add GPT-6 Astra to the Codex runtime with its published reasoning, pricing, and context limits.

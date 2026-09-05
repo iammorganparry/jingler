@@ -438,7 +438,7 @@ const INSTALL_AGENT = [
   'next="$(mktemp -d "$managed_root/releases/staging-XXXXXX")"',
   'tar -xzf .jingler-device-runtime-upload.tgz -C "$next"',
   'test -f "$next/jingler-device.mjs" && test -f "$next/node_modules/pi-subagents/index.ts"',
-  'chmod 700 "$next/jingler-device.mjs" "$next/runtime-assets/pi-subagent-wrapper.mjs"',
+  'chmod 700 "$next/jingler-device.mjs"',
   'release="$(mktemp -d "$managed_root/releases/runtime-XXXXXX")"',
   'rmdir "$release" && mv "$next" "$release"',
   'rm -f "$managed_root/current.next"',

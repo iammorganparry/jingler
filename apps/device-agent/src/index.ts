@@ -22,22 +22,8 @@ import {
 // static loaders before ModelRuntime can resolve a subscription credential.
 registerBunOAuthFlows()
 
-// The managed device archive keeps the exact child Pi runtime beside this
-// bundle. Pin explicit paths before any remote session can create an embedded
-// parent, so pi-subagents never consults an ambient Pi installation.
-process.env.JINGLER_SUBAGENT_WRAPPER_PATH ??= join(
-  import.meta.dirname,
-  "runtime-assets",
-  "pi-subagent-wrapper.mjs"
-)
-process.env.JINGLER_SUBAGENT_PI_CLI_PATH ??= join(
-  import.meta.dirname,
-  "node_modules",
-  "@earendil-works",
-  "pi-coding-agent",
-  "dist",
-  "cli.js"
-)
+// Pin the brokered child-tool extension before any remote session creates an
+// embedded parent; process-isolated children inherit this exact packaged path.
 process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
   import.meta.dirname,
   "runtime-assets",

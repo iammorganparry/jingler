@@ -1,10 +1,30 @@
+import { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import type { Api, Model } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "vitest"
 import {
   classifyObservedBillingRoute,
   modelReasoningCapabilities,
+  registerJinglerModels,
   selectEntitlementModel,
 } from "./pi-provider-access.js"
+
+describe("Jingler model additions", () => {
+  it("adds GPT-6 Astra to the configured Codex route", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
+    runtime.registerProvider("openai-codex", { baseUrl: "https://codex-proxy.example.com" })
+
+    registerJinglerModels(runtime)
+
+    expect(runtime.getModel("openai-codex", "gpt-6-astra")).toMatchObject({
+      baseUrl: "https://codex-proxy.example.com",
+      contextWindow: 1_050_000,
+      maxTokens: 128_000,
+      reasoning: true,
+      input: ["text", "image"],
+      cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }
+    })
+  })
+})
 
 describe("observed provider billing routes", () => {
   it("confirms Codex subscription only on the ChatGPT backend", () => {
