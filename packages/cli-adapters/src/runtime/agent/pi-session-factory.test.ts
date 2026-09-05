@@ -287,13 +287,19 @@ describe("pi session creation", () => {
       "Never launch coding CLIs through command_execute"
     )
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Implementation belongs to YOU: do it in the visible Main transcript"
+      "Self-implementation stays in Main"
     )
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Never launch a workflow or child named `main` as a proxy"
+      "never use a child named main as its proxy"
     )
     expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "two or more named children with distinct tasks"
+      "Select a catalog agent and name every child"
+    )
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
+      "reserve workflowScript for two or more children"
+    )
+    expect(received?.resourceLoader?.getSystemPrompt()).not.toContain(
+      "scout (fast codebase recon)"
     )
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({

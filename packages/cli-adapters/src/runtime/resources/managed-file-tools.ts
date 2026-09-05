@@ -5,8 +5,8 @@ import type { AgentResourceServiceShape } from "./agent-resource-service.js"
 import { ToolError, type ToolRegistry } from "../tools/tool-registry.js"
 
 const TOOL_OUTPUT_BYTES = 48 * 1024
-const DESCRIPTION_BYTES = 500
-const DEFAULT_LIST_LIMIT = 20
+const DESCRIPTION_BYTES = 160
+const DEFAULT_LIST_LIMIT = 10
 const roles = [
   "conversation",
   "plan",
@@ -19,7 +19,7 @@ const modes = ["ask", "accept-edits", "auto", "plan", "read-only"] as const
 
 const ListResourcesInput = Schema.Struct({
   query: Schema.optional(Schema.String.pipe(Schema.maxLength(200))),
-  limit: Schema.optional(Schema.Int.pipe(Schema.between(1, DEFAULT_LIST_LIMIT)))
+  limit: Schema.optional(Schema.Int.pipe(Schema.between(1, 20)))
 })
 const LoadResourceInput = Schema.Struct({ id: ManagedResourceId })
 
@@ -98,7 +98,7 @@ export const registerManagedFileTools = (
   registry.register({
     id: "jingler_list_resources",
     version: "2",
-    description: "Search enabled Jingler skills and prompt templates before loading one.",
+    description: "Search the enabled skill map before loading one skill or prompt.",
     input: ListResourcesInput,
     risk: "read",
     roles,

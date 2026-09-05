@@ -184,31 +184,8 @@ export const enterPlannotatorPlanMode = (
 const NATIVE_SUBAGENT_TOOLS = [
   {
     id: "subagent",
-    version: "1",
-    // ALWAYS name the agent. The pi runtime keys an unnamed child to the
-    // default workflow key "main" and Fleet then shows it as an agent called
-    // "main" doing "run main" — no identity, no purpose. Passing a catalogue
-    // agent makes the child resolve to that name end-to-end (trace, durable
-    // status, and Fleet), so every child reads as what it actually is.
-    description:
-      "Delegate bounded SUPPORT work to a named child agent, shown in Fleet by its type and task. " +
-      "Implementation belongs to YOU: do it in the visible Main transcript. Never launch a " +
-      "workflow or child named `main` as a proxy for your own work. Delegate only work that feeds " +
-      "yours (recon, research, review) or parallel implementation the operator explicitly asked for. " +
-      "ALWAYS set `agent` to the catalogue type that fits the work: " +
-      "scout (fast codebase recon), reviewer (review diffs/plans/PRs), researcher (web research), " +
-      "oracle (high-context decisions that must not drift), delegate (lightweight, inherits your " +
-      "model), worker (operator-requested parallel implementation), fanout (parallel spread of one " +
-      "task). Never leave `agent` unset. " +
-      "One unit of work is ALWAYS `{ agent, task }` — NEVER wrap a single child in a " +
-      "`workflowScript`; a workflow run has no transcript of its own, so its output is invisible " +
-      "to the operator. Reserve `workflowScript` for coordinating two or more named children with " +
-      "distinct tasks, and inside one, every runs.run child must name a catalogue agent and a task. " +
-      "Runs are foreground by default: the tool call returns the child's report into this " +
-      "transcript. For a long multi-child workflow pass `async: true`, do NOT block the script " +
-      "awaiting children inline (it hits the orchestrator timeout), and collect results with " +
-      "subagent_wait before finishing any turn that needs them. " +
-      "Never call resume at the top level — resume belongs on a runs.run/runs.all item."
+    version: "2",
+    description: "Delegate support work to a named child agent, or coordinate multiple named children."
   },
   {
     id: "subagent_wait",

@@ -22,7 +22,8 @@ describe("managed file tools", () => {
     const managedRoot = await temporary()
     const sourceDir = join(home, ".agents", "skills", "release")
     await mkdir(sourceDir, { recursive: true })
-    await writeFile(join(sourceDir, "SKILL.md"), "name: release\ndescription: Release safely\nOriginal")
+    const description = "Release safely ".repeat(20)
+    await writeFile(join(sourceDir, "SKILL.md"), `name: release\ndescription: ${description}\nOriginal`)
     const candidate = (await Effect.runPromise(detectAgentResources({ homeDir: home, worktreePath: null }))).candidates[0]!
     const service = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
     await Effect.runPromise(service.importResources([candidate], { kind: "portable", allowedTargets: [] }))
@@ -46,7 +47,7 @@ describe("managed file tools", () => {
       value: {
         total: 1,
         truncated: false,
-        resources: [{ id: "release", kind: "skill", description: "Release safely" }]
+        resources: [{ id: "release", kind: "skill", description: description.slice(0, 160) }]
       }
     })
     const loaded = await Effect.runPromise(registry.execute({
