@@ -38,7 +38,6 @@ import type {
 import { UNTITLED_SESSION } from "@jingler/core"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { useMachine } from "@xstate/react"
-import type { DockSide } from "./terminal-panel.js"
 import { AppShell } from "./app-shell.js"
 import { AddProjectDialog } from "../composites/add-project-dialog.js"
 import { NewWorkspaceView } from "../composites/new-workspace-view.js"
@@ -53,6 +52,7 @@ import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
 import {
   type ConversationPaneCtx,
+  type SessionChatTabsRenderContext,
   SessionConversation
 } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
@@ -62,10 +62,8 @@ import {
   Archive,
   ArchiveRestore,
   LogOut,
-  MonitorPlay,
   Settings as SettingsIcon,
-  SquareTerminal,
-  TerminalSquare
+  SquareTerminal
 } from "lucide-react"
 import { CommandPalette } from "./command-palette.js"
 import { TitleSearch } from "./title-search.js"
@@ -102,6 +100,8 @@ import {
  */
 const TAB_SHAPES = builtinTabContributions({
   conversation: () => null,
+  browser: () => null,
+  terminal: () => null,
   stub: () => null
 })
 
@@ -269,23 +269,12 @@ export interface JinglerAppProps {
     ctx: { onConnectGithub: () => void }
   ) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
-  /** Render the per-session terminal dock (desktop app's live TerminalDock). */
+  /** Render the per-session Terminal view. */
   renderTerminalDock?: (session: Session) => ReactNode
-  /** Which edge the terminal dock attaches to (drives the content column's flow). */
-  terminalDockSide?: DockSide
-  /**
-   * Show/hide the terminal dock — the same toggle ⌃` drives.
-   *
-   * The dock's visibility is the renderer's (`use-terminal-dock.ts`), not this
-   * shell's, so until the palette existed only `renderTerminalDock` needed to
-   * cross the boundary: the shell laid the dock out but never asked for it. A
-   * palette entry has to be able to ask.
-   */
-  onToggleTerminal?: () => void
-  /** Whether the terminal dock is currently open (drives the palette's label). */
-  terminalActive?: boolean
   /** Render the embedded browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
+  /** Make a nested chat-owned surface the session's canonical active chat. */
+  onFocusChat?: (sessionId: string, chatId: string) => void
   /** Toggle the Browser tab belonging to the named session. */
   onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's Browser tab is currently open. */
@@ -332,10 +321,15 @@ export interface JinglerAppProps {
   /** Render the session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly onSelectConversation: () => void
+      readonly path?: string
+      readonly onClosed?: () => void
+    }
   ) => ReactNode
   /** Select a repository path in a session's persistent Files state. */
   onOpenFile?: (sessionId: string, path: string) => void
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
   /** Render the focused session's repository quick picker. */
   renderFileQuickOpen?: (
     session: Session,
@@ -352,14 +346,7 @@ export interface JinglerAppProps {
    * the desktop renderer, so building the bar here would drag the RPC client
    * into the component library. Absent in stories.
    */
-  renderChatTabs?: (
-    session: Session,
-    ctx: {
-      readonly activeTabId: TabKey
-      readonly onSelectConversation: () => void
-      readonly onSelectFiles: () => void
-    }
-  ) => ReactNode
+  renderChatTabs?: (session: Session, ctx: SessionChatTabsRenderContext) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -508,12 +495,10 @@ export function JinglerApp({
   renderReview,
   renderCode,
   renderTerminalDock,
-  terminalDockSide,
-  onToggleTerminal,
-  terminalActive,
   pluginCommands,
   onRunPluginCommand,
   renderBrowser,
+  onFocusChat,
   onToggleBrowser,
   isBrowserActive,
   activeSessionId,
@@ -525,6 +510,7 @@ export function JinglerApp({
   renderExplanation,
   renderFiles,
   onOpenFile,
+  onRequestCloseFile,
   renderFileQuickOpen,
   renderChatTabs,
   renderSubagentTabs,
@@ -811,6 +797,22 @@ export function JinglerApp({
         return
       }
 
+      if (
+        e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.code === "Backquote" || e.key === "`") &&
+        active &&
+        renderTerminalDock
+      ) {
+        e.preventDefault()
+        setTabRequest((previous) => ({
+          tabId: BUILTIN_TAB.terminal,
+          nonce: (previous?.nonce ?? 0) + 1
+        }))
+        return
+      }
+
       // ⌘F lands here too, now that search is global.
       //
       // It used to live in the sidebar and focus its "Filter sessions…" field.
@@ -837,10 +839,13 @@ export function JinglerApp({
         !e.altKey &&
         (e.key === "B" || e.code === "KeyB") &&
         active &&
-        onToggleBrowser
+        renderBrowser
       ) {
         e.preventDefault()
-        onToggleBrowser(active.id, active.activeChatId)
+        setTabRequest((previous) => ({
+          tabId: BUILTIN_TAB.browser,
+          nonce: (previous?.nonce ?? 0) + 1
+        }))
         return
       }
 
@@ -896,12 +901,13 @@ export function JinglerApp({
     return () => window.removeEventListener("keydown", onKey)
   }, [
     onCreateSession,
-    onToggleBrowser,
+    renderBrowser,
     group,
     split,
     addNextSessionAsPane,
     active,
     renderFileQuickOpen,
+    renderTerminalDock,
     openNewSession
   ])
 
@@ -947,38 +953,6 @@ export function JinglerApp({
         hint: "⌘N",
         icon: SquareTerminal,
         run: openNewSession
-      })
-    }
-
-    // Gated on a session as well as the prop. The terminal dock is per-SESSION —
-    // `SessionSplit` renders it only when there is one to attach to — so in an
-    // empty workspace this row would flip a localStorage preference and change
-    // nothing on screen, with no error to read. That is the failure this whole
-    // block's gating exists to prevent, arrived at from the other direction.
-    //
-    if (onToggleTerminal && active) {
-      items.push({
-        id: "action:toggle-terminal",
-        kind: "action",
-        label: terminalActive ? "Hide Terminal" : "Show Terminal",
-        group: PALETTE_GROUP.actions,
-        hint: "⌃`",
-        icon: TerminalSquare,
-        run: onToggleTerminal
-      })
-    }
-
-    if (onToggleBrowser && active) {
-      items.push({
-        id: "action:toggle-browser",
-        kind: "action",
-        // The label names what the chord will DO, not what is currently true —
-        // "Browser: on" would leave you working out which way to read it.
-        label: isBrowserActive?.(active.id, active.activeChatId) ? "Hide Browser" : "Show Browser",
-        group: PALETTE_GROUP.actions,
-        hint: "⌃⇧B",
-        icon: MonitorPlay,
-        run: () => onToggleBrowser(active.id, active.activeChatId)
       })
     }
 
@@ -1053,12 +1027,20 @@ export function JinglerApp({
         ...TAB_SHAPES,
         ...(tabContributions ?? [])
       ])) {
+        if (tab.id === BUILTIN_TAB.browser && !renderBrowser) continue
+        if (tab.id === BUILTIN_TAB.terminal && !renderTerminalDock) continue
         items.push({
           id: `tab:${tab.id}`,
           kind: "tab",
           label: `Go to ${tab.label}`,
           group: PALETTE_GROUP.tabs,
           icon: tab.icon,
+          hint:
+            tab.id === BUILTIN_TAB.browser
+              ? "⌃⇧B"
+              : tab.id === BUILTIN_TAB.terminal
+                ? "⌃`"
+                : undefined,
           run: () =>
             setTabRequest((prev) => ({
               tabId: tab.id,
@@ -1093,10 +1075,8 @@ export function JinglerApp({
     active,
     selectSession,
     onCreateSession,
-    onToggleTerminal,
-    terminalActive,
-    onToggleBrowser,
-    isBrowserActive,
+    renderTerminalDock,
+    renderBrowser,
     onArchiveSession,
     onRestoreSession,
     providerConnections,
@@ -1221,6 +1201,7 @@ export function JinglerApp({
           group && split.resizePane(group.id, index, delta)
         }
         onRenameSession={onRenameSession}
+        onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}
         isBrowserActive={isBrowserActive}
         onSetSessionPersistent={onSetSessionPersistent}
@@ -1232,6 +1213,7 @@ export function JinglerApp({
         renderFiles={renderFiles}
         renderBrowser={renderBrowser}
         onOpenFile={onOpenFile}
+        onRequestCloseFile={onRequestCloseFile}
         renderChatTabs={renderChatTabs}
         renderSubagentTabs={renderSubagentTabs}
         planSessions={planSessions}
@@ -1383,9 +1365,6 @@ export function JinglerApp({
         renderReview={renderReview}
         renderCode={renderCode}
         renderTerminalDock={renderTerminalDock}
-        terminalDockSide={terminalDockSide}
-        terminalActive={terminalActive}
-        onToggleTerminal={onToggleTerminal}
         selectTabRequest={tabRequest}
         onTabRequestHandled={clearTabRequest}
         version={version}

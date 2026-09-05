@@ -8,20 +8,19 @@ import type {
   SessionActivity,
   User
 } from "@jingler/core"
-import type { DockSide } from "../app/terminal-panel.js"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
-import type { ConversationPaneCtx } from "./session-pane.js"
+import type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
 import type { TabContribution, TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (JinglerApp types its
 // `renderConversation` callback with it), so keep it importable from here even
 // though it's now defined alongside the pane that consumes it.
-export type { ConversationPaneCtx } from "./session-pane.js"
+export type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
 
 export interface SessionConversationProps {
   sessions: ReadonlyArray<Session>
@@ -56,10 +55,12 @@ export interface SessionConversationProps {
   onMovePane?: (index: number, direction: -1 | 1) => void
   /** Arc's "Separate all tabs" — every pane of a group flies out to its own row. */
   onSeparateAll?: (groupId: string) => void
-  /** Continuous divider drag, as a fraction of the split's width. */
+  /** Committed divider delta, as a fraction of the split's width. */
   onResizePane?: (index: number, delta: number) => void
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
+  /** Make a nested chat-owned surface the session's canonical active chat. */
+  onFocusChat?: (sessionId: string, chatId: string) => void
   /** Toggle the browser belonging to the named session. */
   onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's browser is currently visible. */
@@ -94,27 +95,25 @@ export interface SessionConversationProps {
   /** Render the session-native repository browser and editor. */
   renderFiles?: (
     session: Session,
-    ctx: { readonly onSelectConversation: () => void }
+    ctx: {
+      readonly onSelectConversation: () => void
+      readonly path?: string
+      readonly onClosed?: () => void
+    }
   ) => ReactNode
   /** Render the latest focused visual explanation. */
   renderExplanation?: (session: Session) => ReactNode
   /** Render the browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
    * for the same reason `renderConversation` is: the chat state it drives (RPCs
    * + live per-chat activity) lives in the desktop renderer, so building the bar
    * here would drag the RPC client into the component library. Absent in stories.
    */
-  renderChatTabs?: (
-    session: Session,
-    ctx: {
-      readonly activeTabId: TabKey
-      readonly onSelectConversation: () => void
-      readonly onSelectFiles: () => void
-    }
-  ) => ReactNode
+  renderChatTabs?: (session: Session, ctx: SessionChatTabsRenderContext) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -203,18 +202,8 @@ export interface SessionConversationProps {
   /** Render the Changes tab — the Code Review view over the local worktree diff. */
   renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
-  /**
-   * Render the per-session terminal dock (the desktop app's live TerminalDock).
-   * Docked to the main content column beside/below the tab body — never shown in
-   * the Settings or empty states. Absent in stories.
-   */
+  /** Render the per-session Terminal view. */
   renderTerminalDock?: (session: Session) => ReactNode
-  /** Whether the per-session terminal dock is open (the view rail's toggle). */
-  terminalActive?: boolean
-  /** Toggle the per-session terminal dock from the view rail. */
-  onToggleTerminal?: () => void
-  /** Which edge the terminal dock attaches to — drives the content column's flow. */
-  terminalDockSide?: DockSide
   /** App version, shown in the sidebar footer. */
   version?: string
   /**
@@ -326,10 +315,12 @@ export function SessionConversation(props: SessionConversationProps) {
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
             onOpenFile={props.onOpenFile}
+            onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
             renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
+            onFocusChat={props.onFocusChat}
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}
             planSessions={props.planSessions}
@@ -346,9 +337,6 @@ export function SessionConversation(props: SessionConversationProps) {
             renderReview={props.renderReview}
             renderCode={props.renderCode}
             renderTerminalDock={props.renderTerminalDock}
-            terminalDockSide={props.terminalDockSide}
-            terminalActive={props.terminalActive}
-            onToggleTerminal={props.onToggleTerminal}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
           />

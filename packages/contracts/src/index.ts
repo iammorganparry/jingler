@@ -2192,6 +2192,11 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String, visible: Schema.Boolean }
   }),
 
+  /** Destroy one chat's native browser view and discard its page state. */
+  Rpc.make("BrowserPreview.close", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   /**
    * Deliver the operator's verdict on a pending Plannotator review to the
    * live session. The forked extension resolves its awaited review when the

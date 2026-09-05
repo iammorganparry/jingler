@@ -96,7 +96,6 @@ function Shell({
             sessions={SESSIONS}
             planSessions={new Set(["s1"])}
             liveActivity={ACTIVITY}
-            terminalDockSide={dock ?? "bottom"}
             renderTerminalDock={
               dock
                 ? () => (

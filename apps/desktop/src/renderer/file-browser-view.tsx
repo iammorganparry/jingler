@@ -41,6 +41,9 @@ export interface FileBrowserViewProps {
   readonly debugSnapshot?: DebugViewSnapshot
   readonly onSendReference?: (reference: CodeReference) => void
   readonly onSendComment?: (body: string, reference: CodeReference) => void
+  /** Path-owned mode used by nested file splits. */
+  readonly path?: string
+  readonly onClosed?: () => void
 }
 
 export interface FileBrowserQuickOpenProps {
@@ -78,9 +81,15 @@ export function FileBrowserView({
   session,
   debugSnapshot,
   onSendReference,
-  onSendComment
+  onSendComment,
+  path,
+  onClosed
 }: FileBrowserViewProps) {
-  const browser = useFileBrowser(session.id, session.worktreePath)
+  const browser = useFileBrowser(
+    session.id,
+    session.worktreePath,
+    path === undefined ? undefined : `file:${path}`
+  )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
   const debugFrame = debug.snapshot.session?.status === "stopped"
     ? (debug.snapshot.session.frame ?? null)
@@ -95,7 +104,25 @@ export function FileBrowserView({
   const rootRef = useRef<HTMLDivElement>(null)
   const followedDebugStop = useRef<string | null>(null)
   const selectionPathRef = useRef(browser.selectedPath)
+  const pathWasOpened = useRef(false)
   const [selection, setSelection] = useState<JinglerLineSelection | null>(null)
+
+  useEffect(() => {
+    if (path !== undefined && browser.selectedPath !== path && !pathWasOpened.current) {
+      browser.open(path)
+    }
+  }, [browser.open, browser.selectedPath, path])
+
+  useEffect(() => {
+    if (path === undefined) return
+    if (browser.selectedPath === path) {
+      pathWasOpened.current = true
+      return
+    }
+    if (pathWasOpened.current && browser.selectedPath === null && browser.pendingDiscard === null) {
+      onClosed?.()
+    }
+  }, [browser.pendingDiscard, browser.selectedPath, onClosed, path])
 
   useEffect(() => {
     if (selectionPathRef.current === browser.selectedPath) return
@@ -184,8 +211,8 @@ export function FileBrowserView({
       event.preventDefault()
       browser.save()
     }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [browser.save, browser.status, canSendSelection, sendSelectionToChat])
 
   return (

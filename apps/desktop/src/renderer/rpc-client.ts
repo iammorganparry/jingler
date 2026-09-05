@@ -1212,6 +1212,9 @@ export const rpc = {
     visible: boolean
   ): Promise<void> =>
     run((c) => c.BrowserPreview.setVisible({ sessionId, chatId, visible })),
+  /** Destroy one chat's native browser view after its tab is explicitly closed. */
+  browserPreviewClose: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.close({ sessionId, chatId })),
   /**
    * Deliver the operator's verdict on a pending Plannotator review. The live
    * session's forked extension resolves the awaited review when the reviewId

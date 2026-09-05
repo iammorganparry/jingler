@@ -145,7 +145,7 @@ const controller = (
   ...over
 })
 
-const renderTabs = (filesActive = true) => {
+const renderTabs = (filesActive = true, onRequestCloseFile?: (path: string) => boolean) => {
   const onSelectConversation = vi.fn()
   const onSelectFiles = vi.fn()
   render(<>
@@ -154,6 +154,7 @@ const renderTabs = (filesActive = true) => {
       filesActive={filesActive}
       onSelectConversation={onSelectConversation}
       onSelectFiles={onSelectFiles}
+      onRequestCloseFile={onRequestCloseFile}
     />
     <SessionSubagentTabs
       session={session}
@@ -439,6 +440,17 @@ describe("SessionChatTabs file tabs", () => {
     expect(mocks.files.close).toHaveBeenCalledWith("src/app.ts")
     expect(onSelectFiles).toHaveBeenCalledTimes(1)
     expect(onSelectConversation).not.toHaveBeenCalled()
+  })
+
+  it("keeps the first blocked file focused when closing all files", () => {
+    const { onSelectConversation, onSelectFiles } = renderTabs(true, () => false)
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Collapse files group" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close all files" }))
+
+    expect(onSelectFiles).toHaveBeenCalledOnce()
+    expect(onSelectConversation).not.toHaveBeenCalled()
+    expect(mocks.files?.close).not.toHaveBeenCalled()
   })
 
   it("disambiguates duplicate filenames with their parent paths", () => {

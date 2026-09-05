@@ -40,7 +40,8 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
 
   await sessionRow(first.window, "Multi-chat lifecycle").click()
   await expect(first.window.getByTitle("1. Chat 1")).toBeVisible()
-  await first.window.getByRole("button", { name: "New chat" }).click()
+  await first.window.getByRole("button", { name: "New tab" }).click()
+  await first.window.getByTestId("new-tab-option-chat").click()
   const secondChat = first.window.getByTitle("2. Chat 2")
   await expect(secondChat).toHaveAttribute("aria-current", "page")
   await secondChat.dblclick()
@@ -91,7 +92,8 @@ test("a new chat stays empty while its own transcript loads", async ({ launchApp
   await sessionRow(launched.window, "Multi-chat lifecycle").click()
   const priorContent = launched.window.getByText("The release checklist is ready.")
   await expect(priorContent).toBeVisible()
-  await launched.window.getByRole("button", { name: "New chat" }).click()
+  await launched.window.getByRole("button", { name: "New tab" }).click()
+  await launched.window.getByTestId("new-tab-option-chat").click()
   await expect(launched.window.getByTitle("2. Chat 2")).toHaveAttribute(
     "aria-current",
     "page"
@@ -119,7 +121,8 @@ test("a closed chat can be reopened with its transcript after a real app restart
   const title = first.window.getByRole("textbox", { name: "Chat title" })
   await title.fill("Main workspace")
   await title.press("Enter")
-  await first.window.getByRole("button", { name: "New chat" }).click()
+  await first.window.getByRole("button", { name: "New tab" }).click()
+  await first.window.getByTestId("new-tab-option-chat").click()
   await first.window.getByRole("button", { name: "Close Main workspace" }).click()
   await expect(first.window.getByRole("button", { name: "Previous chats" })).toBeVisible()
   await expect(first.window.getByText("The release checklist is ready.")).toHaveCount(0)

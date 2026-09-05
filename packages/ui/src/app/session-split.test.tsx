@@ -221,52 +221,48 @@ describe("dropping a session onto a pane", () => {
   })
 })
 
-describe("dock mounting", () => {
-  const docks = {
-    renderTerminalDock: (s: { id: string }) => <div data-testid="terminal-dock">{s.id}</div>,
+describe("session view mounting", () => {
+  const views = {
+    renderTerminalDock: (s: { id: string }) => <div data-testid="terminal-view">{s.id}</div>,
     renderBrowser: (s: { id: string }) => <div data-testid="browser-view">{s.id}</div>,
     onToggleBrowser: vi.fn(),
-    isBrowserActive: () => true
+    isBrowserActive: () => false
   }
 
-  it("mounts one browser per owning session and one shared terminal dock", () => {
-    renderSplit({ group: groupOf(["a", "b", "c"]), ...docks })
-    expect(screen.getAllByTestId("browser-view")).toHaveLength(3)
-    expect(screen.getAllByTestId("terminal-dock")).toHaveLength(1)
+  it("does not eagerly mount Browser or Terminal in every outer pane", () => {
+    renderSplit({ group: groupOf(["a", "b", "c"]), ...views })
+    expect(screen.queryByTestId("browser-view")).toBeNull()
+    expect(screen.queryByTestId("terminal-view")).toBeNull()
   })
 
-  it("mounts each browser inside its session pane and the terminal outside", () => {
-    renderSplit(docks)
-    for (const index of [0, 1]) {
-      const pane = screen.getByTestId(`split-pane-${index}`)
-      expect(within(pane).getByTestId("browser-view")).toBeTruthy()
-      expect(within(pane).queryByTestId("terminal-dock")).toBeNull()
-    }
+  it("opens Browser and Terminal inside only their owning session panes", () => {
+    renderSplit(views)
+    const first = screen.getByTestId("split-pane-0")
+    const second = screen.getByTestId("split-pane-1")
+
+    fireEvent.click(within(first).getByRole("button", { name: "Browser" }))
+    expect(within(first).getByTestId("browser-view").textContent).toBe("a")
+    expect(within(second).queryByTestId("browser-view")).toBeNull()
+
+    fireEvent.click(within(second).getByRole("button", { name: "Terminal" }))
+    expect(within(second).getByTestId("terminal-view").textContent).toBe("b")
+    expect(within(first).queryByTestId("terminal-view")).toBeNull()
   })
 
-  it("keeps each browser element across a focus change", () => {
-    const { rerender } = renderSplit(docks)
-    const before = within(screen.getByTestId("split-pane-0")).getByTestId("browser-view")
+  it("keeps an opened Browser element across outer focus changes", () => {
+    const { rerender } = renderSplit(views)
+    const first = screen.getByTestId("split-pane-0")
+    fireEvent.click(within(first).getByRole("button", { name: "Browser" }))
+    const before = within(first).getByTestId("browser-view")
+
     rerender(
       <SessionSplit
         group={groupOf(["a", "b"], 1)}
         sessions={sessions}
         renderConversation={(s) => <div>transcript {s.id}</div>}
-        {...docks}
+        {...views}
       />
     )
     expect(within(screen.getByTestId("split-pane-0")).getByTestId("browser-view")).toBe(before)
-  })
-
-  it("points the terminal dock at the FOCUSED pane's session", () => {
-    renderSplit({ group: groupOf(["a", "b"], 1), ...docks })
-    expect(screen.getByTestId("terminal-dock").textContent).toBe("b")
-  })
-
-  it("falls back to the first pane when the focused index has no pane", () => {
-    // Closing the focused pane can leave `focused` momentarily out of range;
-    // the docks must not be stranded on nothing for that frame.
-    renderSplit({ group: groupOf(["a"], 3), ...docks })
-    expect(screen.getByTestId("terminal-dock").textContent).toBe("a")
   })
 })

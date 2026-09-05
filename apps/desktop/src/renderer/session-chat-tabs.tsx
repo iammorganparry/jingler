@@ -9,8 +9,19 @@
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
 import type { Session } from "@jingler/core"
-import { AgentRoster, ChatTabBar, FileIcon, SubagentTabBar } from "@jingler/ui"
-import { X } from "lucide-react"
+import {
+  AgentRoster,
+  ChatTabBar,
+  FileIcon,
+  FileQuickOpen,
+  SESSION_SURFACE_DND_MIME,
+  sessionSurfaceKey,
+  SubagentTabBar,
+  type SessionSurface,
+  type TabLauncherItem
+} from "@jingler/ui"
+import { File, MessageSquarePlus, X } from "lucide-react"
+import { useState, type ReactNode } from "react"
 import { rpc } from "./rpc-client.js"
 import { publishSessionUpdate } from "./session-updates.js"
 import { queueSessionChatMutation } from "./session-chat-mutations.js"
@@ -66,12 +77,32 @@ export function SessionChatTabs({
   session,
   filesActive,
   onSelectConversation,
-  onSelectFiles
+  onSelectFiles,
+  activeSurface,
+  onSelectSurface,
+  onCloseSurface,
+  onRequestCloseFile,
+  viewSlot,
+  viewCount = 0,
+  viewsActive = false,
+  onCloseAllViews,
+  viewLauncherItems = [],
+  paneFocused = true
 }: {
   session: Session
   filesActive: boolean
   onSelectConversation: () => void
   onSelectFiles: () => void
+  activeSurface?: SessionSurface
+  onSelectSurface?: (surface: SessionSurface) => void
+  onCloseSurface?: (surface: SessionSurface) => void
+  onRequestCloseFile?: (path: string) => boolean
+  viewSlot?: ReactNode
+  viewCount?: number
+  viewsActive?: boolean
+  onCloseAllViews?: () => void
+  viewLauncherItems?: ReadonlyArray<TabLauncherItem>
+  paneFocused?: boolean
 }) {
   const activeChat =
     session.chats.find((chat) => chat.id === session.activeChatId) ??
@@ -83,12 +114,21 @@ export function SessionChatTabs({
     completed.map((node) => ({ id: `${chatId}\0${node.id}`, chatId, node }))
   )
   const files = useFileBrowser(session.id, session.worktreePath)
+  const [filePickerOpen, setFilePickerOpen] = useState(false)
 
   const createChat = () => {
-    queueSessionChatMutation(session.id, () => rpc.sessionsCreateChat(session.id))
+    queueSessionChatMutation(
+      session.id,
+      () => rpc.sessionsCreateChat(session.id),
+      (updated) => {
+        publishSessionUpdate(updated)
+        onSelectSurface?.({ kind: "chat", id: updated.activeChatId })
+      }
+    )
   }
   const selectChat = (chatId: string) => {
     selectSubagentTab(session.id, chatId, "main")
+    onSelectSurface?.({ kind: "chat", id: chatId })
     if (chatId === activeChat.id) onSelectConversation()
     queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
@@ -115,6 +155,7 @@ export function SessionChatTabs({
         window.jingler.closePlannotator({ sessionId: session.id, chatId })
         disposeChatActor(session.id, chatId)
         publishSessionUpdate(updated)
+        onCloseSurface?.({ kind: "chat", id: chatId })
       }
     )
   }
@@ -136,6 +177,7 @@ export function SessionChatTabs({
             clearDraft(chat.id)
             window.jingler.closePlannotator({ sessionId: session.id, chatId: chat.id })
             disposeChatActor(session.id, chat.id)
+            onCloseSurface?.({ kind: "chat", id: chat.id })
           } catch {}
         }
         return updated
@@ -149,12 +191,18 @@ export function SessionChatTabs({
 
   const selectFile = (path: string) => {
     files.open(path)
-    onSelectFiles()
+    if (onSelectSurface) onSelectSurface({ kind: "file", id: path })
+    else onSelectFiles()
   }
   const closeFile = (path: string) => {
     const active = path === files.selectedPath
     const closingLast = files.openPaths.length === 1
+    if (onRequestCloseFile && !onRequestCloseFile(path)) {
+      onSelectSurface?.({ kind: "file", id: path })
+      return
+    }
     files.close(path)
+    if (!active || !files.dirty) onCloseSurface?.({ kind: "file", id: path })
     if (!active) return
     if (files.dirty) {
       onSelectFiles()
@@ -164,8 +212,21 @@ export function SessionChatTabs({
     else onSelectFiles()
   }
   const closeAllFiles = () => {
-    for (const path of [...files.openPaths]) files.close(path)
-    onSelectConversation()
+    let blocked: string | null = null
+    for (const path of [...files.openPaths]) {
+      if (onRequestCloseFile && !onRequestCloseFile(path)) {
+        blocked ??= path
+        continue
+      }
+      files.close(path)
+      if (path !== files.selectedPath || !files.dirty) {
+        onCloseSurface?.({ kind: "file", id: path })
+      }
+    }
+    if (blocked) {
+      if (onSelectSurface) onSelectSurface({ kind: "file", id: blocked })
+      else onSelectFiles()
+    } else onSelectConversation()
   }
   const duplicateNames = new Set(
     files.openPaths
@@ -174,12 +235,25 @@ export function SessionChatTabs({
   )
   const fileSlot = files.openPaths.map((path) => {
     const name = path.split("/").at(-1) ?? path
-    const active = filesActive && path === files.selectedPath
+    const active = activeSurface
+      ? (activeSurface.kind === "file" && activeSurface.id === path) ||
+        (activeSurface.kind === "view" &&
+          activeSurface.id === "files" &&
+          path === files.selectedPath)
+      : filesActive && path === files.selectedPath
     const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
     return (
       <div
         key={path}
         data-testid={`file-tab-${path}`}
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.setData(
+            SESSION_SURFACE_DND_MIME,
+            sessionSurfaceKey({ kind: "file", id: path })
+          )
+          event.dataTransfer.effectAllowed = "move"
+        }}
         className={
           active
             ? "group flex flex-none items-center rounded-md bg-panel text-text-bright"
@@ -213,21 +287,47 @@ export function SessionChatTabs({
     )
   })
 
+  const launcherItems: ReadonlyArray<TabLauncherItem> = [
+    {
+      id: "chat",
+      label: "Chat",
+      detail: "Start a new conversation",
+      icon: MessageSquarePlus,
+      onSelect: createChat
+    },
+    ...(session.worktreePath
+      ? [{
+          id: "file",
+          label: "File",
+          detail: "Open a repository file",
+          icon: File,
+          onSelect: () => setFilePickerOpen(true)
+        } satisfies TabLauncherItem]
+      : []),
+    ...viewLauncherItems
+  ]
+
   return (
+    <>
     <ChatTabBar
       chats={session.chats.map((chat, index) => ({
         id: chat.id,
         title: chat.title ?? `Chat ${index + 1}`,
-        running: chatActivities[chat.id] !== undefined
+        running: chatActivities[chat.id] !== undefined,
+        surfaceKey: sessionSurfaceKey({ kind: "chat", id: chat.id })
       }))}
       closedChats={(session.closedChats ?? []).map((chat, index) => ({
         id: chat.id,
         title: chat.title ?? `Closed chat ${index + 1}`
       }))}
       activeChatId={
-        filesActive || (activeSubagents !== undefined && activeSubagents.selectedId !== "main")
-          ? ""
-          : activeChat.id
+        activeSurface
+          ? activeSurface.kind === "chat"
+            ? activeSurface.id
+            : ""
+          : filesActive || (activeSubagents !== undefined && activeSubagents.selectedId !== "main")
+            ? ""
+            : activeChat.id
       }
       onSelectChat={selectChat}
       previousSubagents={previousSubagents.map(({ id, node }) => ({
@@ -243,6 +343,25 @@ export function SessionChatTabs({
       filesActive={filesActive}
       onCloseAllChats={closeAllChats}
       onCloseAllFiles={closeAllFiles}
+      viewSlot={viewSlot}
+      viewCount={viewCount}
+      viewsActive={viewsActive}
+      onCloseAllViews={onCloseAllViews}
+      launcherItems={launcherItems}
+      paneFocused={paneFocused}
     />
+    <FileQuickOpen
+      open={filePickerOpen}
+      onOpenChange={setFilePickerOpen}
+      entries={files.entries}
+      sessionTitle={session.title}
+      loading={files.treeLoading}
+      error={files.treeError}
+      onOpenPath={(path) => {
+        selectFile(path)
+        setFilePickerOpen(false)
+      }}
+    />
+    </>
   )
 }

@@ -57,7 +57,7 @@ describe("agent runtime ownership matrix", () => {
     )
     const view = render(pane(baseSession))
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(screen.getByTestId("view").textContent).toBe("split")
+    expect(screen.getByTestId("view").textContent).toBe("plan")
 
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
     expect(screen.getByTestId("view").textContent).toBe("conversation")
@@ -71,15 +71,16 @@ describe("agent runtime ownership matrix", () => {
     browser.set("b", true)
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
     await waitFor(() =>
-      expect(screen.getByTestId("session-browser-panel")).toBeTruthy()
+      expect(screen.getByTestId("surface-pane-0").dataset.surface).toContain(
+        '["view","browser","b"]'
+      )
     )
 
-    // Rapid switching restores only the selected owner's browser state.
+    // Chat switching selects that chat surface; opened Browser tabs remain
+    // available without taking focus back from the operator.
     for (const chatId of ["a", "b", "a", "b"] as const) {
       view.rerender(pane({ ...baseSession, activeChatId: chatId }))
-      await waitFor(() =>
-        expect(screen.getByTestId("session-browser-panel")).toBeTruthy()
-      )
+      await waitFor(() => expect(screen.getByTestId("view").textContent).toBe("conversation"))
     }
   })
 

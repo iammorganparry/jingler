@@ -1,6 +1,5 @@
 import { type ReactNode, useId } from "react"
 import { LayoutGroup } from "motion/react"
-import { SquareTerminal } from "lucide-react"
 import { ChipMenu } from "../components/chip-menu.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Tooltip } from "../components/tooltip.js"
@@ -78,19 +77,13 @@ export function ViewRail({
   tabs,
   active,
   onChange,
-  menus = {},
-  terminalActive = false,
-  onToggleTerminal
+  menus = {}
 }: {
   tabs: ReadonlyArray<TabDescriptor>
   active: TabKey
   onChange: (key: TabKey) => void
   /** Optional pickers keyed by tab id. Omit single-option menus to open directly. */
   menus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
-  /** Whether this session's terminal dock is open (drives the glyph tint). */
-  terminalActive?: boolean
-  /** Toggle this session's terminal dock; omitted → no terminal button. */
-  onToggleTerminal?: () => void
 }) {
   const layoutId = useId()
   return (
@@ -147,31 +140,6 @@ export function ViewRail({
           )
         })}
       </div>
-      {onToggleTerminal && (
-        <>
-          <div aria-hidden className="h-px w-5 flex-none bg-hairline" />
-          <Tooltip
-            label={`${terminalActive ? "Hide" : "Show"} Terminal (⌃\`)`}
-            side="left"
-          >
-            <button
-              type="button"
-              onClick={onToggleTerminal}
-              aria-label={terminalActive ? "Hide Terminal" : "Show Terminal"}
-              aria-pressed={terminalActive}
-              data-testid="view-rail-terminal"
-              className={cn(
-                "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors",
-                terminalActive
-                  ? "bg-surface text-blue"
-                  : "text-dim hover:bg-panel hover:text-muted-foreground"
-              )}
-            >
-              <SquareTerminal className="size-4" />
-            </button>
-          </Tooltip>
-        </>
-      )}
     </div>
     </LayoutGroup>
   )
