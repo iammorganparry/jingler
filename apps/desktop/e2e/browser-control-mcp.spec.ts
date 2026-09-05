@@ -26,7 +26,11 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
   launchApp
 }) => {
   const requests: string[] = []
-  const targetServer = createServer((request, response) => {
+  let releasePage: () => void = () => {}
+  const pageReleased = new Promise<void>((resolve) => {
+    releasePage = resolve
+  })
+  const targetServer = createServer(async (request, response) => {
     const path = request.url ?? ""
     requests.push(path)
     if (path === "/browser-pi") {
@@ -34,6 +38,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
       response.end()
       return
     }
+    await pageReleased
     response.writeHead(200, { "Content-Type": "text/html" })
     response.end(
       "<!doctype html><title>Browser pi parity</title><h1>Native Preview reached through pi</h1>"
@@ -51,7 +56,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
   const targetUrl = `http://127.0.0.1:${address.port}/browser-pi`
 
   try {
-    const { window } = await launchApp({
+    const { app, window } = await launchApp({
       configured: true,
       withRepo: true,
       piFixture: { scenarioId: "browser-control", authRoute: "api-key" },
@@ -59,9 +64,28 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     })
 
     await expect(appShell(window)).toBeVisible()
+    await window.getByRole("button", { name: "Browser", exact: true }).click()
+    const anyNativeViewVisible = () => app.evaluate(({ BrowserWindow }) =>
+      (BrowserWindow.getAllWindows()[0]?.contentView.children ?? []).some((view) => view.getVisible()))
+    await expect.poll(anyNativeViewVisible).toBe(true)
+    if (process.env.JINGLER_E2E_HEADED === "1") {
+      await expect.poll(() => app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(true)
+    }
+
     const composer = window.getByPlaceholder(/message/i)
     await composer.fill(`Navigate the operator's Preview. [[browser-url=${targetUrl}]]`)
     await composer.press("Enter")
+    await expect.poll(() => requests.includes("/browser-pi-final")).toBe(true)
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (process.env.JINGLER_E2E_HEADLESS === "1") win?.emit("blur")
+      else win?.blur()
+    })
+    await expect.poll(anyNativeViewVisible).toBe(false)
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(false)
+    releasePage()
 
     await expect(window.getByText("Browser workflow completed through pi.")).toBeVisible({
       timeout: 20_000
@@ -73,9 +97,22 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     await expect(window.getByLabel("Preview URL")).toHaveValue(
       `http://127.0.0.1:${address.port}/browser-pi-final`
     )
+
+    const nativeBrowserVisible = () => app.evaluate(({ BrowserWindow }, url) =>
+      (BrowserWindow.getAllWindows()[0]?.contentView.children ?? []).some((view) => {
+        const candidate = view as typeof view & { webContents?: { getURL(): string } }
+        return candidate.webContents?.getURL() === url && view.getVisible()
+      }), `http://127.0.0.1:${address.port}/browser-pi-final`)
+    await expect.poll(nativeBrowserVisible).toBe(false)
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(false)
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.emit("focus"))
+    await expect.poll(nativeBrowserVisible).toBe(true)
+
     expect(requests.filter((path) => path === "/browser-pi")).toHaveLength(1)
     expect(requests.filter((path) => path === "/browser-pi-final")).toHaveLength(1)
   } finally {
+    releasePage()
     await closeServer(targetServer)
   }
 })
