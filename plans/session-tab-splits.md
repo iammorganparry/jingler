@@ -25,13 +25,13 @@ Add a collapsible **Views** group for opened Browser, Plan, PR, Changes, Explana
 
 - [x] 1. Add and test a small inner surface-layout model plus versioned persistence/pruning.
 - [x] 2. Reuse the existing split geometry by making pane identity and drag payload configurable without changing outer-session behavior; animate inserts, moves, replacements, and exits with the existing Motion spring/fast tokens.
-- [ ] 3. Add draggable chat/file/view tabs and a collapsible Views group with close-one and close-all actions; use a lightweight drag preview and animate only transform/opacity/layout properties.
-- [ ] 4. Add the shared tab-launcher item model, `+` dropdown, and `⌘T` command menu with visible `1`–`9` quick keys; route New Chat and File through their existing create/quick-open flows.
-- [ ] 5. Convert Terminal from a window dock to a contribution-backed session view, reusing the persistent terminal actors and xterm cells while removing dock-side/visibility chrome and state.
-- [ ] 6. Replace the fixed conversation/auxiliary split in `SessionPane` with the inner surface split, including chat-addressed rendering and independent file documents; preserve mounted subtrees by stable surface key.
-- [ ] 7. Update focused commands, browser/plan ownership, native browser bounds, and lifecycle cleanup for nested panes without remounting unchanged surfaces.
-- [ ] 8. Add component and desktop e2e coverage for Views grouping, both tab launchers/quick keys, nested splits inside an outer split, terminal lifecycle, close behavior, persistence, ignored OS file drops, and reduced-motion behavior.
-- [ ] 9. Add a render-count/drag regression check proving divider pointer moves do not rerender conversation/editor/xterm surfaces, then run targeted unit tests, typecheck/lint, relevant desktop e2e specs, and review the final diff.
+- [x] 3. Add draggable chat/file/view tabs and a collapsible Views group with close-one and close-all actions; use a lightweight drag preview and animate only transform/opacity/layout properties.
+- [x] 4. Add the shared tab-launcher item model, `+` dropdown, and `⌘T` command menu with visible `1`–`9` quick keys; route New Chat and File through their existing create/quick-open flows.
+- [x] 5. Convert Terminal from a window dock to a contribution-backed session view, reusing the persistent terminal actors and xterm cells while removing dock-side/visibility chrome and state.
+- [x] 6. Replace the fixed conversation/auxiliary split in `SessionPane` with the inner surface split, including chat-addressed rendering and independent file documents; preserve mounted subtrees by stable surface key.
+- [x] 7. Update focused commands, browser/plan ownership, native browser bounds, and lifecycle cleanup for nested panes without remounting unchanged surfaces.
+- [x] 8. Add component and desktop e2e coverage for Views grouping, both tab launchers/quick keys, nested splits inside an outer split, terminal lifecycle, close behavior, persistence, ignored OS file drops, and reduced-motion behavior.
+- [x] 9. Add a render-count/drag regression check proving divider pointer moves do not rerender conversation/editor/xterm surfaces, then run targeted unit tests, typecheck/lint, relevant desktop e2e specs, and review the final diff.
 
 ## Constraints to preserve
 

@@ -408,6 +408,31 @@ describe("session browser tab", () => {
     expect(toggled).toEqual(["browser-owner"])
   })
 
+  it("destroys a chat-owned browser when that chat closes", () => {
+    const owner = session({ id: "browser-owner" })
+    const onToggleBrowser = vi.fn()
+    render(
+      <SessionPane
+        session={owner}
+        renderConversation={() => <div>owner transcript</div>}
+        renderChatTabs={(_session, ctx) => (
+          <button
+            type="button"
+            onClick={() => ctx.onCloseSurface?.({ kind: "chat", id: owner.activeChatId })}
+          >
+            close owner chat
+          </button>
+        )}
+        isBrowserActive={() => true}
+        onToggleBrowser={onToggleBrowser}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "close owner chat" }))
+
+    expect(onToggleBrowser).toHaveBeenCalledWith("browser-owner", owner.activeChatId)
+  })
+
   it("opens the owning browser tab when an agent reveals it", () => {
     const props = {
       session: session({ id: "agent-owner" }),
@@ -655,6 +680,28 @@ describe("SessionPane", () => {
     fireEvent.click(screen.getByRole("button", { name: "forward reference for a" }))
 
     expect(screen.getByText("transcript for a")).toBeTruthy()
+  })
+
+  it("hydrates restored file panes into the host's file tab actor", async () => {
+    localStorage.setItem(
+      "sb.session-surfaces.v1:a",
+      JSON.stringify({
+        panes: [{ surface: { kind: "file", id: "src/restored.ts" }, ratio: 1 }],
+        focused: 0,
+        openViews: []
+      })
+    )
+    const onOpenFile = vi.fn()
+
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderFiles={() => <div>restored file</div>}
+        onOpenFile={onOpenFile}
+      />
+    )
+
+    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith("a", "src/restored.ts"))
   })
 
   it("routes a transcript file gesture into this session's Files tab", () => {

@@ -5869,6 +5869,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
     Effect.flatMap(PreviewViewService, (b) => b.reload(sessionId, chatId)),
   "BrowserPreview.setVisible": ({ sessionId, chatId, visible }) =>
     Effect.flatMap(PreviewViewService, (b) => b.setVisible(sessionId, chatId, visible)),
+  "BrowserPreview.close": ({ sessionId, chatId }) =>
+    Effect.flatMap(PreviewViewService, (b) => b.closeBrowser(sessionId, chatId)),
   // Native plan review: the renderer's PlanReview surface delivers the
   // operator's verdict straight onto the live session's event bus, where the
   // forked Plannotator extension resolves its awaited review by reviewId.

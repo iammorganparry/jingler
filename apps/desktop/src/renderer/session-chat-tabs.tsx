@@ -191,8 +191,8 @@ export function SessionChatTabs({
 
   const selectFile = (path: string) => {
     files.open(path)
-    onSelectSurface?.({ kind: "file", id: path })
-    onSelectFiles()
+    if (onSelectSurface) onSelectSurface({ kind: "file", id: path })
+    else onSelectFiles()
   }
   const closeFile = (path: string) => {
     const active = path === files.selectedPath
@@ -212,9 +212,10 @@ export function SessionChatTabs({
     else onSelectFiles()
   }
   const closeAllFiles = () => {
+    let blocked: string | null = null
     for (const path of [...files.openPaths]) {
       if (onRequestCloseFile && !onRequestCloseFile(path)) {
-        onSelectSurface?.({ kind: "file", id: path })
+        blocked ??= path
         continue
       }
       files.close(path)
@@ -222,7 +223,10 @@ export function SessionChatTabs({
         onCloseSurface?.({ kind: "file", id: path })
       }
     }
-    onSelectConversation()
+    if (blocked) {
+      if (onSelectSurface) onSelectSurface({ kind: "file", id: blocked })
+      else onSelectFiles()
+    } else onSelectConversation()
   }
   const duplicateNames = new Set(
     files.openPaths
@@ -232,7 +236,10 @@ export function SessionChatTabs({
   const fileSlot = files.openPaths.map((path) => {
     const name = path.split("/").at(-1) ?? path
     const active = activeSurface
-      ? activeSurface.kind === "file" && activeSurface.id === path
+      ? (activeSurface.kind === "file" && activeSurface.id === path) ||
+        (activeSurface.kind === "view" &&
+          activeSurface.id === "files" &&
+          path === files.selectedPath)
       : filesActive && path === files.selectedPath
     const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
     return (

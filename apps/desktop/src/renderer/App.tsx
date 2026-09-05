@@ -2075,9 +2075,11 @@ function AuthedApp({
         isBrowserActive={(sessionId, chatId) =>
           browserDock.forAgent(sessionId, chatId).visible
         }
-        onToggleBrowser={(sessionId, chatId) =>
-          browserDock.forAgent(sessionId, chatId).toggle()
-        }
+        onToggleBrowser={(sessionId, chatId) => {
+          const browser = browserDock.forAgent(sessionId, chatId);
+          if (browser.visible) void rpc.browserPreviewClose(sessionId, chatId);
+          browser.toggle();
+        }}
         renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />
         )}

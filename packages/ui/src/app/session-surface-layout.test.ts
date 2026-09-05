@@ -53,6 +53,16 @@ describe("session surface layout", () => {
     expect(replaced.panes.map(({ surface }) => surface.id)).toEqual(["a"])
   })
 
+  it("treats a chat and its Plan view as one mounted pane", () => {
+    const split = splitSessionSurface(createSessionSurfaceLayout(chat("a")), file("a.ts"), 1, 4)
+    const plan = view("plan", "a")
+    const selected = selectSessionSurface(split, plan)
+    expect(selected.panes.map(({ surface }) => surface)).toEqual([plan, file("a.ts")])
+
+    const replaced = replaceSessionSurface(split, 1, plan)
+    expect(replaced.panes.map(({ surface }) => surface)).toEqual([plan])
+  })
+
   it("closes view metadata and always leaves a fallback pane", () => {
     const opened = openSessionView(createSessionSurfaceLayout(chat("a")), view("terminal"))
     const closed = closeSessionSurface(opened, view("terminal"), chat("a"))
@@ -76,6 +86,40 @@ describe("session surface layout", () => {
     expect(resized.panes[0]!.ratio).toBeCloseTo(2 / 3 - 0.15)
     expect(resized.panes[1]!.ratio).toBeCloseTo(0.15)
     expect(resized.panes[2]!.ratio).toBeCloseTo(1 / 3)
+  })
+
+  it("prunes restored chat and Plan panes that share one mount", () => {
+    const restored = {
+      panes: [
+        { surface: chat("a"), ratio: 0.5 },
+        { surface: view("plan", "a"), ratio: 0.5 }
+      ],
+      focused: 1,
+      openViews: [view("plan", "a")]
+    }
+    const allowed = new Set(restored.panes.map(({ surface }) => sessionSurfaceKey(surface)))
+
+    const pruned = pruneSessionSurfaceLayout(restored, allowed, chat("a"))
+
+    expect(pruned.panes).toEqual([{ surface: chat("a"), ratio: 1 }])
+  })
+
+  it("rejects non-positive persisted pane ratios", () => {
+    localStorage.setItem(
+      "sb.session-surfaces.v1:s1",
+      JSON.stringify({
+        panes: [
+          { surface: chat("hidden"), ratio: 0 },
+          { surface: file("negative.ts"), ratio: -1 }
+        ],
+        focused: 0,
+        openViews: []
+      })
+    )
+
+    expect(loadSessionSurfaceLayout("s1", chat("fallback"))).toEqual(
+      createSessionSurfaceLayout(chat("fallback"))
+    )
   })
 
   it("restores valid state then prunes stale and duplicate surfaces", () => {

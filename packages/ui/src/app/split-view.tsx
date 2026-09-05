@@ -108,7 +108,10 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   // Doubles as the divider drag's reference box and as the source of the
   // width-derived pane cap below — one measurement, two uses.
   const [rowRef, rowWidth] = useContainerWidth<HTMLDivElement>()
+  const dividerAbort = useRef<AbortController | null>(null)
   const layoutScope = useId()
+
+  useEffect(() => () => dividerAbort.current?.abort(), [])
 
   const paneIds = group?.panes.map(paneId) ?? []
   const presence = useRef<{ ids: ReadonlyArray<string>; token: number }>({ ids: paneIds, token: 0 })
@@ -180,9 +183,15 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
       const rightElement = row.querySelector<HTMLElement>(`[data-${testIdPrefix}-pane-index="${index + 1}"]`)
       if (!leftElement || !rightElement) return
 
+      const handle = e.currentTarget
+      const pointerId = e.pointerId
       const startX = e.clientX
       const pair = left.ratio + right.ratio
       let committedDelta = 0
+      dividerAbort.current?.abort()
+      const controller = new AbortController()
+      dividerAbort.current = controller
+      handle.setPointerCapture?.(pointerId)
       setDraggingDivider(index)
       const move = (event: PointerEvent) => {
         const wanted = left.ratio + (event.clientX - startX) / rowWidth
@@ -195,15 +204,18 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
         rightElement.style.flexGrow = String(pair - nextLeft)
       }
       const end = () => {
+        controller.abort()
+        dividerAbort.current = null
+        if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId)
         if (committedDelta !== 0) onResize(index, committedDelta)
         setDraggingDivider(null)
-        window.removeEventListener("pointermove", move)
-        window.removeEventListener("pointerup", end)
-        window.removeEventListener("pointercancel", end)
       }
-      window.addEventListener("pointermove", move)
-      window.addEventListener("pointerup", end)
-      window.addEventListener("pointercancel", end)
+      const options = { signal: controller.signal }
+      window.addEventListener("pointermove", move, options)
+      window.addEventListener("pointerup", end, options)
+      window.addEventListener("pointercancel", end, options)
+      window.addEventListener("blur", end, options)
+      handle.addEventListener("lostpointercapture", end, options)
     },
     [group, onResize, rowRef, testIdPrefix]
   )

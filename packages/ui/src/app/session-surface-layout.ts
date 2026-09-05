@@ -49,6 +49,17 @@ export const sessionSurfaceLabel = (surface: SessionSurface): string =>
 const sameSurface = (left: SessionSurface, right: SessionSurface): boolean =>
   sessionSurfaceKey(left) === sessionSurfaceKey(right)
 
+const samePaneMount = (left: SessionSurface, right: SessionSurface): boolean =>
+  sameSurface(left, right) ||
+  (left.kind === "chat" &&
+    right.kind === "view" &&
+    right.id === "plan" &&
+    right.chatId === left.id) ||
+  (right.kind === "chat" &&
+    left.kind === "view" &&
+    left.id === "plan" &&
+    left.chatId === right.id)
+
 const evenly = (surfaces: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurfacePane> =>
   surfaces.map((surface) => ({ surface, ratio: 1 / surfaces.length }))
 
@@ -83,6 +94,16 @@ export const selectSessionSurface = (
 ): SessionSurfaceLayout => {
   const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (visible !== -1) return focusSessionSurface(layout, visible)
+  const paired = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
+  if (paired !== -1) {
+    return {
+      ...layout,
+      panes: layout.panes.map((pane, index) =>
+        index === paired ? { ...pane, surface } : pane
+      ),
+      focused: paired
+    }
+  }
   if (layout.panes.length === 0) return { ...layout, panes: [{ surface, ratio: 1 }], focused: 0 }
   return {
     ...layout,
@@ -108,7 +129,7 @@ export const splitSessionSurface = (
   at: number,
   maxPanes: number
 ): SessionSurfaceLayout => {
-  const existing = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
+  const existing = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
   if (existing === -1 && layout.panes.length >= maxPanes) return layout
   const surfaces = layout.panes.map((pane) => pane.surface)
   if (existing !== -1) surfaces.splice(existing, 1)
@@ -125,7 +146,7 @@ export const replaceSessionSurface = (
 ): SessionSurfaceLayout => {
   if (index < 0 || index >= layout.panes.length) return layout
   if (sameSurface(layout.panes[index]!.surface, surface)) return focusSessionSurface(layout, index)
-  const duplicate = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
+  const duplicate = layout.panes.findIndex((pane) => samePaneMount(pane.surface, surface))
   const kept = layout.panes.filter((_, paneIndex) => paneIndex === index || paneIndex !== duplicate)
   const target = duplicate !== -1 && duplicate < index ? index - 1 : index
   const panes = normalise(
@@ -212,12 +233,14 @@ export const pruneSessionSurfaceLayout = (
   allowed: ReadonlySet<string>,
   fallback: SessionSurface
 ): SessionSurfaceLayout => {
-  const seen = new Set<string>()
+  const seen: SessionSurface[] = []
   const panes = normalise(
     layout.panes.filter((pane) => {
       const key = sessionSurfaceKey(pane.surface)
-      if (!allowed.has(key) || seen.has(key)) return false
-      seen.add(key)
+      if (!allowed.has(key) || seen.some((surface) => samePaneMount(surface, pane.surface))) {
+        return false
+      }
+      seen.push(pane.surface)
       return true
     })
   )
@@ -250,7 +273,8 @@ export const loadSessionSurfaceLayout = (
           pane !== null &&
           isSurface((pane as SessionSurfacePane).surface) &&
           typeof (pane as SessionSurfacePane).ratio === "number" &&
-          Number.isFinite((pane as SessionSurfacePane).ratio)
+          Number.isFinite((pane as SessionSurfacePane).ratio) &&
+          (pane as SessionSurfacePane).ratio > 0
       )
       .slice(0, 4)
     const openViews = parsed.openViews.filter(

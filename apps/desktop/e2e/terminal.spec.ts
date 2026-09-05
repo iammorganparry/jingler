@@ -50,6 +50,31 @@ test("opens Terminal as a view tab and its `+` button adds another shell", async
   await expect(window.locator(".xterm")).toHaveCount(2, { timeout: 20_000 })
 })
 
+test("does not respawn a shell after the last terminal and its view tab are closed", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("view-tab-terminal").click()
+  await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+  await window
+    .getByRole("button", { name: "New terminal" })
+    .locator("..")
+    .getByRole("button", { name: /^Close / })
+    .click()
+  await expect(window.locator(".xterm")).toHaveCount(0)
+  await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
+  await window.getByTestId("view-tab-terminal").click()
+  await expect(window.locator(".xterm")).toHaveCount(0)
+  await expect(window.getByLabel("New terminal")).toBeVisible()
+})
+
 test("keystrokes reach the PTY and its exit surfaces in the dock footer", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,

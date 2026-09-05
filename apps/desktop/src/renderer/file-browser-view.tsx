@@ -211,8 +211,8 @@ export function FileBrowserView({
       event.preventDefault()
       browser.save()
     }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [browser.save, browser.status, canSendSelection, sendSelectionToChat])
 
   return (

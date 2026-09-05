@@ -546,6 +546,7 @@ export function ConversationPane({
   }
 
   useEffect(() => {
+    if (!paneFocused) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
       if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
@@ -570,7 +571,7 @@ export function ConversationPane({
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [session.id, session.chats, activeChat.id])
+  }, [session.id, session.chats, activeChat.id, paneFocused])
 
   // Which sub-agent tab is selected ("main" = the parent conversation). Declared
   // before the Plan Review early-return so hook order stays stable. We derive the

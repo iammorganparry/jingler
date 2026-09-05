@@ -243,6 +243,15 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     await expect(url).toHaveValue(`${origin}/alpha-history`)
     await sessionRow(window, "Preview Beta").click()
     await expect(url).toBeHidden()
+
+    await sessionRow(window, "Preview Alpha").click()
+    await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByRole("button", { name: "Close Browser", exact: true }).click()
+    await expect.poll(() => app.evaluate(
+      ({ webContents }, expectedOrigin) =>
+        webContents.getAllWebContents().filter((contents) => contents.getURL().startsWith(expectedOrigin)).length,
+      origin
+    )).toBe(1)
   } finally {
     await closeServer(server)
   }

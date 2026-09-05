@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   DiffStat,
   IssueIdentity,
@@ -303,6 +303,15 @@ function SessionPaneBody(props: SessionPaneProps) {
     }
     return restored
   })
+  const filePanePaths = useMemo(
+    () => surfaceLayout.panes.flatMap(({ surface }) =>
+      surface.kind === "file" ? [surface.id] : []
+    ),
+    [surfaceLayout.panes]
+  )
+  useEffect(() => {
+    for (const path of filePanePaths) props.onOpenFile?.(props.session.id, path)
+  }, [filePanePaths, props.onOpenFile, props.session.id])
   const focusedSurface = surfaceLayout.panes[surfaceLayout.focused]?.surface ?? fallbackSurface
   const [tab, setTab] = useState<TabKey>(() =>
     focusedSurface.kind === "view"
@@ -923,7 +932,29 @@ function SessionPaneBody(props: SessionPaneProps) {
             setSurfaceLayout((current) => selectSessionSurface(current, surface))
           },
           onCloseSurface: (surface) => {
-            setSurfaceLayout((current) => closeSessionSurface(current, surface, fallbackChatSurface))
+            if (
+              surface.kind === "chat" &&
+              props.isBrowserActive?.(active.id, surface.id)
+            ) {
+              props.onToggleBrowser?.(active.id, surface.id)
+            }
+            setSurfaceLayout((current) => {
+              const withoutOwnedViews =
+                surface.kind === "chat"
+                  ? current.openViews
+                      .filter((view) => view.chatId === surface.id)
+                      .reduce(
+                        (layout, view) =>
+                          closeSessionSurface(layout, view, fallbackChatSurface),
+                        current
+                      )
+                  : current
+              return closeSessionSurface(
+                withoutOwnedViews,
+                surface,
+                fallbackChatSurface
+              )
+            })
           },
           onRequestCloseFile: props.onRequestCloseFile
             ? (path) => props.onRequestCloseFile?.(active.id, path) ?? true
@@ -970,25 +1001,14 @@ function SessionPaneBody(props: SessionPaneProps) {
           onSplitWith={(payload, at) => {
             const surface = parseSessionSurfaceKey(payload)
             if (!surface) return
-            setSurfaceLayout((current) => {
-              const pairedIndex = current.panes.findIndex((pane) =>
-                surface.kind === "view" && surface.id === BUILTIN_TAB.plan
-                  ? pane.surface.kind === "chat" && pane.surface.id === surface.chatId
-                  : surface.kind === "chat"
-                    ? pane.surface.kind === "view" &&
-                      pane.surface.id === BUILTIN_TAB.plan &&
-                      pane.surface.chatId === surface.id
-                    : false
+            setSurfaceLayout((current) =>
+              splitSessionSurface(
+                current,
+                surface,
+                at,
+                maxSessionSurfacesForWidth(paneWidth)
               )
-              return pairedIndex === -1
-                ? splitSessionSurface(
-                    current,
-                    surface,
-                    at,
-                    maxSessionSurfacesForWidth(paneWidth)
-                  )
-                : replaceSessionSurface(current, pairedIndex, surface)
-            })
+            )
           }}
           onReplacePane={(index, payload) => {
             const surface = parseSessionSurfaceKey(payload)
