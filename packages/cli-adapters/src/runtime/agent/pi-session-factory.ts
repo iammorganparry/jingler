@@ -28,6 +28,7 @@ import { Data, Effect, Option, Schema } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
+import { registerJinglerModels } from "../providers/pi-provider-access.js"
 import {
   PromptCompiler,
   type PromptToolCapability
@@ -442,6 +443,7 @@ const createEmbeddedSession = (
         refreshOnCreate: false
       })
       await options.configureModelRuntime?.(modelRuntime)
+      registerJinglerModels(modelRuntime)
       const rawModelId = modelIdForProvider(spec, connection)
       const model = modelRuntime.getModel(connection.providerId, rawModelId)
       if (!model) {

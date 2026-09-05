@@ -41,7 +41,8 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor(openaiCodex, "gpt-5.6-sol-20260709")).toBe(1_000_000)
   })
 
-  it("uses the 1M context window for every GPT-5.6 variant", () => {
+  it("uses the published context windows for current OpenAI models", () => {
+    expect(contextWindowFor(openaiCodex, "gpt-6-astra")).toBe(1_050_000)
     expect(contextWindowFor(openaiCodex, "gpt-5.6-sol")).toBe(1_000_000)
     expect(contextWindowFor(openaiCodex, "gpt-5.6-terra")).toBe(1_000_000)
     expect(contextWindowFor(openaiCodex, "gpt-5.6-luna")).toBe(1_000_000)

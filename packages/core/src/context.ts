@@ -111,6 +111,7 @@ const ANTHROPIC_WINDOW_PREFIXES: ReadonlyArray<readonly [string, number]> = [
 // this known model value as a floor so stale telemetry cannot force an early
 // compaction.
 const OPENAI_WINDOW_PREFIXES: ReadonlyArray<readonly [string, number]> = [
+  ["gpt-6-astra", 1_050_000],
   ["gpt-5.6-sol", 1_000_000],
   ["gpt-5.6-terra", 1_000_000],
   ["gpt-5.6-luna", 1_000_000],
