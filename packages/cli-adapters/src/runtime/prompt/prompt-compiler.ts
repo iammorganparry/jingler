@@ -99,7 +99,7 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
       : []),
     ...(ids.has("subagent")
       ? [
-          "For delegated agent work, use the native subagent tool so runs remain contained and visible in Fleet. Never launch coding CLIs through command_execute as a substitute. Self-implementation stays in the visible Main transcript; never launch a workflow or child named main as its proxy. A single delegated unit is always { agent, task }; workflowScript is reserved for two or more named children with distinct tasks."
+          "For delegated agent work, use the native subagent tool so runs remain contained and visible in Fleet. Never launch coding CLIs through command_execute as a substitute. Self-implementation stays in Main; never use a child named main as its proxy. Select a catalog agent and name every child. Run one child directly; reserve workflowScript for two or more children. Runs are foreground by default; use async plus subagent_wait for long multi-child work. Resume only inside runs.run or runs.all."
         ]
       : [])
   ]

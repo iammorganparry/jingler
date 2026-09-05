@@ -97,6 +97,8 @@ const serviceError = (
   message: string
 ): AgentResourceError => new AgentResourceError({ operation, message })
 
+class DuplicateResourceError extends Error {}
+
 /**
  * Jingler-owned resource catalog. All mutations are serialized by AtomicJsonFile;
  * source and destination confinement is rechecked at the moment of mutation.
@@ -143,6 +145,12 @@ export const makeAgentResourceService = (
 
           try {
             await catalog.update(async (current) => {
+              if (current.some((resource) =>
+                resource.kind === kind &&
+                resource.provenance.sourcePath === source
+              )) {
+                throw new DuplicateResourceError("Resource source is already imported")
+              }
               const id = await nextId(candidate.id, current, root, kind)
               const target = targetFor(root, kind, id)
               if (!inside(root, target)) throw new Error("Managed destination escapes its root")
@@ -171,6 +179,7 @@ export const makeAgentResourceService = (
                   byteLength: Buffer.byteLength(content),
                   provenance: {
                     ...candidate.provenance,
+                    sourcePath: source,
                     importedAt: new Date().toISOString()
                   }
                 }
@@ -189,7 +198,11 @@ export const makeAgentResourceService = (
         },
         catch: (cause) => diagnostic(
           candidate,
-          cause instanceof Error && cause.message.includes("256 KiB") ? "oversized" : "malformed",
+          cause instanceof DuplicateResourceError
+            ? "duplicate"
+            : cause instanceof Error && cause.message.includes("256 KiB")
+              ? "oversized"
+              : "malformed",
           cause instanceof Error ? cause.message : "Resource could not be imported"
         )
       })

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { ManagedResourceId } from "@jingler/core"
@@ -43,6 +43,22 @@ describe("AgentResourceService", () => {
     expect(catalog).toHaveLength(2)
     expect(await readFile(await Effect.runPromise(service.reveal(id("deploy"))), "utf8")).toContain("Ship safely")
     expect(await readFile(await Effect.runPromise(service.reveal(id("deploy-2"))), "utf8")).toBe("Review deployment")
+
+    const repeated = await Effect.runPromise(service.importResources(candidates, {
+      kind: "portable",
+      allowedTargets: []
+    }))
+    expect(repeated.imported).toEqual([])
+    expect(repeated.skipped.map(({ code }) => code)).toEqual(["duplicate", "duplicate"])
+
+    const alias = join(home, ".claude", "skills", "deploy-alias.md")
+    await symlink(join(skill, "SKILL.md"), alias)
+    const aliased = await Effect.runPromise(service.importResources([{
+      ...candidates[0]!,
+      provenance: { ...candidates[0]!.provenance, sourcePath: alias }
+    }], { kind: "portable", allowedTargets: [] }))
+    expect(aliased.skipped.map(({ code }) => code)).toEqual(["duplicate"])
+    expect(await Effect.runPromise(service.list)).toHaveLength(2)
   })
 
   it("enables, filters, watches, and removes resources without restart", async () => {

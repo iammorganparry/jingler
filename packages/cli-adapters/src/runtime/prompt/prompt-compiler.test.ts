@@ -79,10 +79,12 @@ describe("PromptCompiler", () => {
     expect(result.manifest.activeTools).toContain("subagent")
     expect(result.text).toContain("use the native subagent tool")
     expect(result.text).toContain("Never launch coding CLIs through command_execute")
-    expect(result.text).toContain("Self-implementation stays in the visible Main transcript")
-    expect(result.text).toContain("never launch a workflow or child named main as its proxy")
-    expect(result.text).toContain("A single delegated unit is always { agent, task }")
-    expect(result.text).toContain("two or more named children with distinct tasks")
+    expect(result.text).toContain("Self-implementation stays in Main")
+    expect(result.text).toContain("never use a child named main as its proxy")
+    expect(result.text).toContain("Select a catalog agent and name every child")
+    expect(result.text).toContain("reserve workflowScript for two or more children")
+    expect(result.text).toContain("use async plus subagent_wait")
+    expect(result.text).toContain("Resume only inside runs.run or runs.all")
   })
 
   it("requires a Plannotator checklist item to be tested and committed before completion", () => {
