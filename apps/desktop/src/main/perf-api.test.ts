@@ -26,6 +26,7 @@ const makeDeps = (overrides: Partial<PerfApiDeps> = {}): PerfApiDeps => ({
   rendersStop: () => Promise.resolve({ ok: true }),
   rendersReport: () => Promise.resolve({ components: [] }),
   leakCheck: () => Promise.resolve({ workdir: "/leak" }),
+  memoryDump: (options) => Promise.resolve({ path: `/dump/${options.dumps ?? "default"}`, dumps: options.dumps ?? 1 }),
   ...overrides
 })
 
@@ -126,5 +127,17 @@ describe("perf API", () => {
     ctx.stop()
     expect(existsSync(join(ctx.root, "endpoint.json"))).toBe(false)
     await expect(call(ctx, "GET", "/status")).rejects.toThrow()
+  })
+})
+
+describe("perf API memory dumps", () => {
+  it("forwards memory-dump options and defaults them when absent", async () => {
+    const ctx = await start()
+    const explicit = (await (
+      await call(ctx, "POST", "/memory-dump", { body: { dumps: 3, intervalMs: 1000 } })
+    ).json()) as { path: string; dumps: number }
+    expect(explicit).toEqual({ path: "/dump/3", dumps: 3 })
+    const defaulted = (await (await call(ctx, "POST", "/memory-dump")).json()) as { path: string }
+    expect(defaulted.path).toBe("/dump/default")
   })
 })

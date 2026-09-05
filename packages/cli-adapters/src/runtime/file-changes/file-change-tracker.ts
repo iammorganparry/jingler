@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { promisify } from "node:util"
 import {
+  boundFileChangePreviews,
   fileChangeTotals,
   type FileChange,
   type FileChangeArtifact,
@@ -281,7 +282,7 @@ export class FileChangeTracker {
     return {
       id: randomUUID(),
       callId,
-      changes,
+      changes: boundFileChangePreviews(changes),
       totals: fileChangeTotals(changes),
       authoritative: true,
       reconciledAt: new Date().toISOString()

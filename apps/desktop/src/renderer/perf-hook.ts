@@ -60,6 +60,27 @@ try {
   // longtask observation unsupported — counter stays 0.
 }
 
+/**
+ * Sweep React's dev-only User Timing entries.
+ *
+ * React 19.2's development build logs every component render and every lane
+ * onto the "Components ⚛" / "Scheduler ⚛" DevTools tracks with
+ * `performance.measure` (react-dom-client.development.js, `logComponentRender`
+ * and friends). User Timing has no buffer limit, and nothing ever consumes the
+ * entries, so they accumulate for the life of the page: measured at 452,703
+ * retained `PerformanceMeasure` objects (52MB of Oilpan) 28 minutes into a dev
+ * session. The Performance panel captures a measure at the moment it is made,
+ * so clearing the buffer afterwards costs a recording nothing. Nothing in the
+ * app reads marks or measures (grep before adding something that does).
+ */
+const USER_TIMING_SWEEP_MS = 5_000
+if (typeof performance.clearMeasures === "function") {
+  window.setInterval(() => {
+    performance.clearMeasures()
+    performance.clearMarks()
+  }, USER_TIMING_SWEEP_MS)
+}
+
 /** react-scan render aggregation, active only between start() and stop(). */
 const renderStats = new Map<string, RenderStat>()
 let tracking = false

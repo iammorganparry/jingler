@@ -37,6 +37,29 @@ guess at leaks when you can measure.
 6. For render churn: `pnpm perf renders start`, exercise the surface,
    `pnpm perf renders report` — per-component render counts with unnecessary
    renders highlighted (react-scan under the hood).
+7. **Renderer huge but JS heap / nodes / listeners flat?** The CDP counters
+   only see V8, Oilpan and DOM counts. `pnpm perf memory-dump --dumps 3`
+   captures Chromium's memory-infra trace via contentTracing and prints, per
+   process, every allocator (`partition_alloc/partitions/*`, `blink_gc`,
+   `v8/isolate_*` — one per worker — `skia`, `web_cache`, `font_caches`,
+   `malloc`, `discardable`) with a Δ across dumps, plus `blink_objects/*`
+   instance counts (Resource, Document, Frame, LayoutObject, …). This is the
+   only view that names PartitionAlloc growth. It does not use the debugger
+   slot, so it works with DevTools open or a wedged CDP op.
+   `pnpm perf memory-report <trace>` re-summarizes a saved trace. Reading it:
+   - `blink_gc/main/heap` far above `allocated_objects` = Oilpan garbage
+     between GCs, i.e. churn, not retention. `blink_objects/.../GeometryMapper*`,
+     `PendingLayer`, `PaintChunk`, `LayoutResult` in the hundreds of thousands
+     = something forces layout/paint every frame (a rAF that reads
+     `getBoundingClientRect`, a JS-driven transform animation). Confirm with
+     `cpu-profile`: `(program)` + `getBoundingClientRect` self time.
+   - `PerformanceMeasure` in the hundreds of thousands = React 19.2's dev
+     performance tracks; the renderer perf hook sweeps them every 5s.
+   - `malloc/partitions brp_quarantined_bytes_per_minute` in the GB = native
+     allocation churn (compositor/paint), same root cause as the above.
+   - `v8 isolates:N` > 1 = workers; each has its own heap the CDP counters
+     never see.
+   - Use `--dumps 6 --interval 30` for a 3-minute Δ when hunting a ratchet.
 
 ## Reading the numbers
 
@@ -48,6 +71,18 @@ guess at leaks when you can measure.
   (monotonicity + r² gates) before it calls anything a leak. Trust `stable`.
 - One heap snapshot pauses the renderer for seconds on a big heap; don't
   snapshot in a tight loop.
+- `workingSetKb` / `ps rss` UNDER-report a leaking renderer on macOS: a 13GB
+  renderer showed 437MB RSS because 12.5GB was compressed/swapped. Check
+  `footprint -p <pid>` (phys_footprint) and `vmmap --summary <pid>`. VM tag
+  253 = PartitionAlloc (Blink strings/vectors/buffers/Skia), 255 = V8 +
+  Oilpan, 252 = legacy Blink GC. Tens of thousands of 64K regions under tag
+  253 = small-object slot spans, not one big buffer.
+- `history`/`watch` show the app window's renderer by pid
+  (`sample.rendererPid`); native preview views are separate Tab processes.
+- Exclusive ops time out after 180s (`JINGLER_PERF_OP_TIMEOUT_MS`). A
+  timeout means the renderer never answered the CDP command — typically
+  because it is swapped out — and the lock is released; the command itself
+  cannot be cancelled.
 
 ## No pnpm? Use the HTTP API directly
 

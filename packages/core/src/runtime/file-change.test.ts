@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
-import { FileChange, FileChangeSet, fileChangeTotals } from "./file-change.js"
+import { FileChange, FileChangeSet, boundFileChangePreviews, fileChangeTotals } from "./file-change.js"
 
 const change = (status: "A" | "M" | "D" | "R", path: string) => ({
   status,
@@ -36,5 +36,36 @@ describe("canonical file changes", () => {
       reconciledAt: "2026-08-10T00:00:00.000Z"
     })
     expect(JSON.stringify(set)).not.toContain("diff --git")
+  })
+})
+
+describe("boundFileChangePreviews", () => {
+  const withPreview = (path: string, preview: string | null) => ({ ...change("M", path), preview })
+
+  it("returns the same array when every preview fits the budget", () => {
+    const changes = [withPreview("a.ts", "+a"), withPreview("b.ts", "+bb")]
+    expect(boundFileChangePreviews(changes, 5)).toBe(changes)
+  })
+
+  it("keeps the first previews that fit and nulls the rest without reordering", () => {
+    const changes = [
+      withPreview("a.ts", "+aaaa"),
+      withPreview("b.ts", null),
+      withPreview("c.ts", "+ccc"),
+      withPreview("d.ts", "+dd")
+    ]
+    const bounded = boundFileChangePreviews(changes, 6)
+    expect(bounded.map((item) => item.path)).toEqual(["a.ts", "b.ts", "c.ts", "d.ts"])
+    expect(bounded.map((item) => item.preview)).toEqual(["+aaaa", null, null, null])
+    // Untouched entries are the same objects; only the trimmed ones are copies.
+    expect(bounded[0]).toBe(changes[0])
+    expect(bounded[3]).not.toBe(changes[3])
+    expect(bounded[3]!.patchArtifactId).toBe("patch-1")
+  })
+
+  it("does not let a later small preview squeeze past a large one that overflowed", () => {
+    const bounded = boundFileChangePreviews([withPreview("big.ts", "x".repeat(10)), withPreview("small.ts", "+s")], 5)
+    // The big one overflows and is dropped; the small one still fits.
+    expect(bounded.map((item) => item.preview)).toEqual([null, "+s"])
   })
 })

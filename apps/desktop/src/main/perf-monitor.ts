@@ -32,6 +32,7 @@ import { join } from "node:path"
 import { app, webContents, type WebContents } from "electron"
 import { jinglerRoot } from "./app-paths.js"
 import { startPerfApi, type PerfApiDeps, type PerfSample } from "./perf-api.js"
+import { captureMemoryDump } from "./perf-memory-dump.js"
 import {
   cpuProfileStart,
   cpuProfileStop,
@@ -44,6 +45,16 @@ import {
 const SAMPLE_INTERVAL_MS = Number(process.env.JINGLER_PERF_INTERVAL_MS ?? 20_000)
 /** ~4 hours of history at the default interval. */
 const RING_CAPACITY = 720
+/**
+ * Ceiling on any exclusive operation. A CDP command against a renderer that
+ * has been swapped out to disk (`HeapProfiler.stopSampling` on a 13GB
+ * process, in the case that motivated this) can simply never answer; without
+ * a bound the op held the monitor's exclusive lock for the rest of the dev
+ * session and every later heavy request 500'd with "another operation is in
+ * flight". The command itself is not cancelled — CDP has no cancel — but the
+ * lock is released and the caller learns why.
+ */
+const EXCLUSIVE_OP_TIMEOUT_MS = Number(process.env.JINGLER_PERF_OP_TIMEOUT_MS ?? 180_000)
 
 export const perfDiagnosticsRoot = (): string => join(jinglerRoot, "diagnostics", "perf")
 
@@ -151,8 +162,10 @@ const takeSample = async (cdp: RendererCdp): Promise<PerfSample> => {
   const heap = await cdp.send<HeapUsage>("Runtime.getHeapUsage")
   const dom = await cdp.send<DomCounters>("Memory.getDOMCounters")
   const appMetrics = await readAppMetrics(cdp)
+  const target = cdp.target()
   return {
     t: Date.now(),
+    ...(target ? { rendererPid: target.getOSProcessId() } : {}),
     main: {
       rss: mem.rss,
       heapUsed: mem.heapUsed,
@@ -220,15 +233,30 @@ interface MonitorState {
 const exclusively = async <T>(
   state: MonitorState,
   op: string,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  timeoutMs: number = EXCLUSIVE_OP_TIMEOUT_MS
 ): Promise<T> => {
   if (state.activeOps.size > 0) {
     throw new Error(`another operation is in flight: ${[...state.activeOps].join(", ")}`)
   }
   state.activeOps.add(op)
+  let timer: NodeJS.Timeout | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `${op} timed out after ${Math.round(timeoutMs / 1000)}s — the renderer did not answer (swapped out, or a CDP command that never completes); the lock is released`
+          )
+        ),
+      timeoutMs
+    )
+    timer.unref()
+  })
   try {
-    return await run()
+    return await Promise.race([run(), deadline])
   } finally {
+    clearTimeout(timer)
     state.activeOps.delete(op)
   }
 }
@@ -276,7 +304,17 @@ const buildApiDeps = (state: MonitorState): PerfApiDeps => ({
   rendersStop: () => rendersOp(state.cdp, "globalThis.__jinglerPerf.renders.stop()"),
   rendersReport: () => rendersOp(state.cdp, "globalThis.__jinglerPerf.renders.report()"),
   leakCheck: (options) =>
-    exclusively(state, "leak-check", () => runLeakCheck(state.cdp, state.root, options))
+    exclusively(
+      state,
+      "leak-check",
+      () => runLeakCheck(state.cdp, state.root, options),
+      // Three snapshots plus the caller's warmup: the default op ceiling would
+      // cut a long repro window short.
+      Math.max(EXCLUSIVE_OP_TIMEOUT_MS, (options.warmupMs ?? 0) + (options.settleMs ?? 0) + EXCLUSIVE_OP_TIMEOUT_MS)
+    ),
+  // Tracing does not touch the debugger slot, so it deliberately bypasses
+  // `exclusively`: it must still work while a wedged CDP op holds the lock.
+  memoryDump: (options) => captureMemoryDump(join(state.root, `${stamp()}.memory-infra.json`), options)
 })
 
 export const startPerfMonitor = async (preferredWebContentsId: number): Promise<PerfMonitorHandle> => {

@@ -17,6 +17,12 @@
  *   renders start|stop|report    React render tracking (react-scan)
  *   leak-check [--warmup s]      3-snapshot memlab protocol; repro during warmup
  *   analyze <workdir|snapshot>   run memlab analyses (needs npx memlab)
+ *   memory-dump [--dumps N] [--interval s] [--json] [--top N]
+ *                                memory-infra trace: per-process allocator
+ *                                breakdown (PartitionAlloc, Oilpan, V8 per
+ *                                isolate, Skia, caches) + blink object counts.
+ *                                Works with DevTools open / CDP wedged.
+ *   memory-report <trace.json>   summarize an existing memory-infra trace
  *
  * memlab is invoked via npx on demand — it is deliberately NOT a repo
  * dependency (heavy, CLI-only, never runs inside the app).
@@ -26,6 +32,7 @@ import { readFileSync, existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, dirname } from "node:path"
 import { detectTrends } from "./trend.mjs"
+import { printMemoryReport, summarizeMemoryInfra } from "./memory-infra.mjs"
 
 // biome-ignore lint/suspicious/noUndeclaredEnvVars: JINGLER_HOME is the app-wide root override (see main/app-paths.ts), read here outside any turbo task — declaring it in turbo.json would invalidate every task's cache for a CLI-only variable.
 const jinglerRoot = join(process.env.JINGLER_HOME ?? homedir(), "jingler")
@@ -75,7 +82,11 @@ const mb = (bytes) => `${(bytes / 1048576).toFixed(1)}MB`
 const kbToMb = (kb) => `${(kb / 1024).toFixed(0)}MB`
 
 const sampleLine = (s) => {
-  const renderer = s.processes?.find((p) => p.type === "Tab")
+  // The app window's renderer by pid; older samples (no rendererPid) fall back
+  // to the first Tab, which may be a native preview view.
+  const renderer =
+    s.processes?.find((p) => s.rendererPid !== undefined && p.pid === s.rendererPid) ??
+    s.processes?.find((p) => p.type === "Tab")
   const parts = [
     new Date(s.t).toTimeString().slice(0, 8),
     `rss:${mb(s.main.rss)}`,
@@ -215,6 +226,26 @@ switch (command) {
     runMemlab(["find-leaks", "--work-dir", result.workdir])
     break
   }
+  case "memory-dump": {
+    const dumps = Number(flag(args, "dumps", "1"))
+    const intervalMs = Number(flag(args, "interval", "2")) * 1000
+    console.log(`capturing ${dumps} detailed memory-infra dump${dumps === 1 ? "" : "s"} (≈${Math.round((intervalMs * dumps) / 1000) + 2}s)…`)
+    const { path } = await api("POST", "/memory-dump", { dumps, intervalMs })
+    console.log(path)
+    const report = summarizeMemoryInfra(JSON.parse(readFileSync(path, "utf8")))
+    if (args.includes("--json")) console.log(JSON.stringify(report, null, 2))
+    else printMemoryReport(report, { top: Number(flag(args, "top", "25")) })
+    break
+  }
+  case "memory-report": {
+    const target = args[0]
+    if (!target) die("usage: pnpm perf memory-report <trace.memory-infra.json>")
+    if (!existsSync(target)) die(`no such path: ${target}`)
+    const report = summarizeMemoryInfra(JSON.parse(readFileSync(target, "utf8")))
+    if (args.includes("--json")) console.log(JSON.stringify(report, null, 2))
+    else printMemoryReport(report, { top: Number(flag(args, "top", "25")) })
+    break
+  }
   case "analyze": {
     const target = args[0]
     if (!target) die("usage: pnpm perf analyze <workdir|snapshot.heapsnapshot>")
@@ -228,5 +259,5 @@ switch (command) {
     break
   }
   default:
-    die(`unknown command: ${command}\ncommands: status metrics watch history snapshot cpu-profile alloc renders leak-check analyze`)
+    die(`unknown command: ${command}\ncommands: status metrics watch history snapshot cpu-profile alloc renders leak-check analyze memory-dump memory-report`)
 }

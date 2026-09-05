@@ -88,6 +88,14 @@ import {
 } from "./run-coordinator.js"
 
 /**
+ * Coalescing window for streaming-turn transcript writes — see the
+ * "Coalesced transcript persistence" note inside `promptSetup`. Long enough to
+ * collapse a burst of deltas into one rewrite, short enough that a crash loses
+ * well under a second of a turn that the harness will re-stream anyway.
+ */
+const TRANSCRIPT_FLUSH_MS = 250
+
+/**
  * How long `stop` waits for an interrupted run to finish unwinding before it
  * gives up the session lock.
  *
@@ -670,6 +678,50 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             Effect.orElseSucceed(() => 0)
           )
           /**
+           * ── Coalesced transcript persistence ────────────────────────────────
+           *
+           * `TranscriptStore.patchLast` reads the whole transcript, decodes and
+           * re-encodes the last message and rewrites the file. Doing that on
+           * EVERY stream event — each text delta, each tool status tick — meant
+           * a 20MB transcript was rewritten dozens of times a second during a
+           * tool-heavy turn (measured: main's external buffers sawtoothing to
+           * 600MB+, a 2.4GB peak footprint). The accumulator is the source of
+           * truth; disk only needs to converge. So writes coalesce: at most one
+           * flush per `TRANSCRIPT_FLUSH_MS`, and always an immediate one on a
+           * terminal event so `Done`/`Failed` land before anything reads them.
+           *
+           * The delayed flush takes the same `turnMutation` permit as `emit`
+           * and the steer path, so it can never interleave with a placeholder
+           * append; and it re-reads `acc` when it runs, so it always writes the
+           * newest state, never a stale capture.
+           */
+          const transcriptDirty = yield* Ref.make(false)
+          const flushScheduled = yield* Ref.make(false)
+          const flushTranscript: Effect.Effect<void> = Effect.gen(function* () {
+            yield* Ref.set(transcriptDirty, false)
+            const current = yield* Ref.get(acc)
+            yield* TranscriptStore.patchLast(chatId, () => current).pipe(Effect.ignore)
+          }).pipe(Effect.provide(env))
+          const persistAccumulated = (event: StreamEvent): Effect.Effect<void> =>
+            Effect.gen(function* () {
+              if (isTerminal(event)) return yield* flushTranscript
+              yield* Ref.set(transcriptDirty, true)
+              if (yield* Ref.get(flushScheduled)) return
+              yield* Ref.set(flushScheduled, true)
+              yield* Effect.forkDaemon(
+                Effect.sleep(TRANSCRIPT_FLUSH_MS).pipe(
+                  Effect.andThen(
+                    turnMutation.withPermits(1)(
+                      Effect.gen(function* () {
+                        yield* Ref.set(flushScheduled, false)
+                        if (yield* Ref.get(transcriptDirty)) yield* flushTranscript
+                      })
+                    )
+                  )
+                )
+              )
+            })
+          /**
            * Resolved when the turn reaches its terminal event.
            *
            * A Deferred beside the Ref rather than polling it: the drain supervisor
@@ -720,7 +772,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   yield* accountTurnUsage(sessionId, event)
                   const next = applyStreamEvent(yield* Ref.get(acc), event)
               yield* Ref.set(acc, next)
-              yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
+              yield* persistAccumulated(event)
                   // Persist the pi session id (carried on Started) so the NEXT
                   // prompt resumes this conversation — even after an app restart wiped
                   // the runtime's in-memory resume map. `event.sessionId` is the
@@ -827,6 +879,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     turnSteer,
                     steeredReply,
                     acc,
+                    transcriptDirty,
                     nextId,
                     chatId,
                     providerId: chat.providerId
@@ -1583,6 +1636,8 @@ interface ActiveTurnSteering {
   readonly turnSteer: Ref.Ref<SteerTurn | null>
   readonly steeredReply: Ref.Ref<RunReplyWaiter | null>
   readonly acc: Ref.Ref<Message>
+  /** Cleared here so a pending coalesced flush cannot overwrite the new placeholder. */
+  readonly transcriptDirty: Ref.Ref<boolean>
   readonly nextId: Effect.Effect<number>
   readonly chatId: string
   readonly providerId: Session["chats"][number]["providerId"]
@@ -1594,7 +1649,7 @@ const steerActiveTurn = (
   images: ReadonlyArray<Attachment>,
   captureReply: boolean
 ) => {
-  const { turnSteer, steeredReply, acc, nextId, chatId, providerId } = state
+  const { turnSteer, steeredReply, acc, transcriptDirty, nextId, chatId, providerId } = state
   return Effect.gen(function* () {
     const handler = yield* Ref.get(turnSteer)
     if (handler === null) {
@@ -1626,6 +1681,10 @@ const steerActiveTurn = (
     const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images)
     const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, providerId)
     yield* Ref.set(acc, assistant)
+    // This write supersedes any coalesced flush still pending for the
+    // old turn; clearing the flag stops that flush from rewriting the
+    // new placeholder with a byte-identical copy of itself.
+    yield* Ref.set(transcriptDirty, false)
     yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
     yield* TranscriptStore.append(chatId, user)
     yield* TranscriptStore.append(chatId, assistant)

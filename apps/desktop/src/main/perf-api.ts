@@ -29,6 +29,13 @@ const MAX_REQUEST_BYTES = 1024 * 1024
 
 export interface PerfSample {
   readonly t: number
+  /**
+   * OS pid of the app window's renderer. `processes` lists every Tab process
+   * — native preview views included — in whatever order Chromium hands them
+   * back, so "the first Tab" is a different process from sample to sample.
+   * Absent when no window is alive.
+   */
+  readonly rendererPid?: number
   readonly main: {
     readonly rss: number
     readonly heapUsed: number
@@ -72,6 +79,8 @@ export interface PerfApiDeps {
   rendersStop(): Promise<unknown>
   rendersReport(): Promise<unknown>
   leakCheck(options: { warmupMs?: number; settleMs?: number }): Promise<unknown>
+  /** memory-infra trace (per-process allocator breakdown) — see perf-memory-dump.ts. */
+  memoryDump(options: { dumps?: number; intervalMs?: number }): Promise<{ path: string; dumps: number }>
 }
 
 const sameSecret = (actual: string | undefined, expected: string): boolean => {
@@ -157,6 +166,13 @@ const ROUTES: Readonly<Record<string, Route>> = {
     return deps.leakCheck({
       warmupMs: typeof body.warmupMs === "number" ? body.warmupMs : undefined,
       settleMs: typeof body.settleMs === "number" ? body.settleMs : undefined
+    })
+  },
+  "POST /memory-dump": async (deps, ctx) => {
+    const body = await ctx.body()
+    return deps.memoryDump({
+      dumps: typeof body.dumps === "number" ? body.dumps : undefined,
+      intervalMs: typeof body.intervalMs === "number" ? body.intervalMs : undefined
     })
   }
 }
