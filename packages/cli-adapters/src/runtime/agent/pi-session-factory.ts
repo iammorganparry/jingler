@@ -443,101 +443,8 @@ const createEmbeddedSession = (
       // review (the agent chooses when a change warrants it), update refreshes
       // the live plan silently. Plan mode additionally narrows the rest of the
       // toolset to read-only capabilities.
-      var {
-        result,
-        plannotatorListeners,
-        latestPlannotatorState,
-        plannotatorNoticeListeners,
-        pendingPlannotatorNotices,
-        stopPlannotatorState,
-        stopPlannotatorNotice
-      } : {
-        result: CreateAgentSessionResult
-        plannotatorListeners: Set<
-        (state: PlannotatorProjection) => void
-      >
-        latestPlannotatorState: {
-          readonly review: {
-            readonly reviewId: string
-            readonly url?: string | undefined
-          } | null
-          readonly title?: string | null | undefined
-          readonly phase: "idle" | "planning" | "executing"
-          readonly planFilePath: string | null
-          readonly checklist: readonly {
-            readonly text: string
-            readonly completed: boolean
-            readonly step: number
-          }[]
-          readonly planContent?: string | undefined
-          readonly revision?: number | undefined
-          readonly stages?:
-            | readonly {
-                readonly id: string
-                readonly title: string
-                readonly intent: string
-                readonly approach: readonly string[]
-                readonly files: readonly {
-                  readonly path: string
-                  readonly change: "A" | "M" | "D"
-                }[]
-                readonly tasks: readonly {
-                  readonly status: "in-progress" | "completed" | "blocked" | "pending"
-                  readonly text: string
-                  readonly step: number
-                  readonly subtasks: readonly {
-                    readonly status: "in-progress" | "completed" | "blocked" | "pending"
-                    readonly text: string
-                    readonly step: number
-                  }[]
-                }[]
-                readonly acceptance: readonly {
-                  readonly status: "pending" | "passed"
-                  readonly text: string
-                  readonly step: number
-                  readonly testReferences?:
-                    | readonly {
-                        readonly path: string
-                        readonly cases: readonly string[]
-                      }[]
-                    | undefined
-                }[]
-                readonly diagrams: readonly string[]
-                readonly notes: readonly string[]
-                readonly complexity?: "low" | "medium" | "high" | undefined
-                readonly dependencies?: readonly string[] | undefined
-              }[]
-            | undefined
-          readonly sections?:
-            | readonly {
-                readonly title: string | null
-                readonly blocks: readonly (
-                  | { readonly text: string; readonly kind: "prose" }
-                  | {
-                      readonly text: string
-                      readonly kind: "heading"
-                      readonly level: 2 | 3 | 4
-                    }
-                  | {
-                      readonly kind: "list"
-                      readonly ordered: boolean
-                      readonly items: readonly string[]
-                    }
-                  | {
-                      readonly kind: "code"
-                      readonly code: string
-                      readonly language?: string | undefined
-                    }
-                  | { readonly kind: "diagram"; readonly source: string }
-                )[]
-              }[]
-            | undefined
-        } | null
-        plannotatorNoticeListeners: Set<(message: string) => void>
-        pendingPlannotatorNotices: string[]
-        stopPlannotatorState: () => void
-        stopPlannotatorNotice: () => void
-      } = await createConfiguredPiSession(spec,
+      const configured = await createConfiguredPiSession(
+        spec,
         registry,
         nativeSubagentsEnabled,
         customTools,
@@ -547,27 +454,17 @@ const createEmbeddedSession = (
         thinkingLevel,
         resources,
         sessionManager,
-        events)
+        events
+      )
       return {
-        result,
+        result: configured.result,
         connection,
         contextWindow: model.contextWindow,
         plannotatorPhase: () => plannotatorPhase(sessionManager),
-        subscribePlannotator: (listener) => {
-          plannotatorListeners.add(listener)
-          if (latestPlannotatorState !== null) listener(latestPlannotatorState)
-          return () => plannotatorListeners.delete(listener)
-        },
-        subscribePlannotatorNotice: (listener) => {
-          plannotatorNoticeListeners.add(listener)
-          for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
-          return () => plannotatorNoticeListeners.delete(listener)
-        },
+        subscribePlannotator: configured.subscribePlannotator,
+        subscribePlannotatorNotice: configured.subscribePlannotatorNotice,
         decidePlanReview: (decision) => deliverPlanReviewDecision(events, decision),
-        stopPlannotatorProjection: () => {
-          stopPlannotatorState()
-          stopPlannotatorNotice()
-        },
+        stopPlannotatorProjection: configured.stopPlannotatorProjection,
         setMemoryReflectionActive: (active) => {
           memoryReflectionActive = active
         }
@@ -1061,12 +958,20 @@ async function createConfiguredPiSession(
   }
   return {
     result,
-    plannotatorListeners,
-    latestPlannotatorState,
-    plannotatorNoticeListeners,
-    pendingPlannotatorNotices,
-    stopPlannotatorState,
-    stopPlannotatorNotice
+    subscribePlannotator: (listener: (state: PlannotatorProjection) => void) => {
+      plannotatorListeners.add(listener)
+      if (latestPlannotatorState !== null) listener(latestPlannotatorState)
+      return () => plannotatorListeners.delete(listener)
+    },
+    subscribePlannotatorNotice: (listener: (message: string) => void) => {
+      plannotatorNoticeListeners.add(listener)
+      for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
+      return () => plannotatorNoticeListeners.delete(listener)
+    },
+    stopPlannotatorProjection: () => {
+      stopPlannotatorState()
+      stopPlannotatorNotice()
+    }
   }
 }
 

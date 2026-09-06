@@ -176,7 +176,9 @@ describe("pi session creation", () => {
       },
       checklist: [{ step: 1, text: "Implement", completed: false }]
     }
+    const planEvents: EventBus[] = []
     const enterPlanMode = vi.fn(async (events: EventBus) => {
+      planEvents.push(events)
       events.emit("plannotator:host-state", projection)
       events.emit("plannotator:host-notice", { message: "Plan review failed closed." })
       return { phase: "executing" as const }
@@ -213,6 +215,15 @@ describe("pi session creation", () => {
     const projected = vi.fn()
     handle.subscribePlannotator?.(projected)
     expect(projected).toHaveBeenCalledWith(projection)
+    const updatedProjection = {
+      ...projection,
+      checklist: [{ step: 1, text: "Implement", completed: true }]
+    }
+    planEvents[0]?.emit("plannotator:host-state", updatedProjection)
+    expect(projected).toHaveBeenLastCalledWith(updatedProjection)
+    const replayed = vi.fn()
+    handle.subscribePlannotator?.(replayed)
+    expect(replayed).toHaveBeenCalledWith(updatedProjection)
     const notified = vi.fn()
     handle.subscribePlannotatorNotice?.(notified)
     expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
