@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { parseJsonc } from "./jsonc.mjs"
 /**
  * Vendors VS Code's built-in colour themes into `src/presets/*.ts`.
  *
@@ -60,49 +61,6 @@ const PRESETS = [
   { id: "high-contrast-dark", path: "theme-defaults/themes/hc_black.json", name: "High Contrast Dark", type: "hcDark" },
   { id: "tomorrow-night-blue", path: "theme-tomorrow-night-blue/themes/tomorrow-night-blue-color-theme.json", name: "Tomorrow Night Blue", type: "dark" }
 ]
-
-/**
- * Strip `//` and block comments and trailing commas so `JSON.parse` accepts a
- * JSONC file.
- *
- * Character-by-character with a string-literal guard rather than a regex,
- * because `"url": "https://example.com"` contains `//` inside a string and a
- * regex that does not track quoting truncates the value to `"https:`.
- */
-const parseJsonc = (text) => {
-  let out = ""
-  let inString = false
-  let escaped = false
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (inString) {
-      out += ch
-      if (escaped) escaped = false
-      else if (ch === "\\") escaped = true
-      else if (ch === '"') inString = false
-      continue
-    }
-    if (ch === '"') {
-      inString = true
-      out += ch
-      continue
-    }
-    if (ch === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++
-      out += "\n"
-      continue
-    }
-    if (ch === "/" && text[i + 1] === "*") {
-      i += 2
-      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++
-      i++
-      continue
-    }
-    out += ch
-  }
-  // Trailing commas before a closing brace/bracket.
-  return JSON.parse(out.replace(/,(\s*[}\]])/g, "$1"))
-}
 
 const fetchTheme = async (extPath) => {
   const url = `${RAW}/${extPath}`

@@ -63,15 +63,7 @@ class PaginatingTurbopufferBackend {
     for (const row of rows) this.rows.set(row.id, row)
   }
 
-  readonly fetch: typeof fetch = async (input, init) => {
-    const url =
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-    const body = init?.body === undefined ? {} : (JSON.parse(init.body as string) as Record<string, unknown>)
-    if (init?.method === "DELETE") {
-      this.rows.clear()
-      return new Response(null, { status: 200 })
-    }
-    if (url.endsWith("/query")) {
+  private query(body: Record<string, unknown>): Response {
       this.queryCount += 1
       const filters = body.filters
       const after = Array.isArray(filters) ? (filters[2] as string) : undefined
@@ -82,6 +74,18 @@ class PaginatingTurbopufferBackend {
         .slice(0, topK)
         .map((row) => ({ id: row.id, contentHash: row.contentHash }))
       return Response.json({ rows })
+  }
+
+  readonly fetch: typeof fetch = async (input, init) => {
+    const url =
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+    const body = init?.body === undefined ? {} : (JSON.parse(init.body as string) as Record<string, unknown>)
+    if (init?.method === "DELETE") {
+      this.rows.clear()
+      return new Response(null, { status: 200 })
+    }
+    if (url.endsWith("/query")) {
+      return this.query(body)
     }
     // Namespace-root POST: an upsert (upsert_rows) or a delete (deletes).
     if (Array.isArray(body.deletes)) {

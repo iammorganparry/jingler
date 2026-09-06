@@ -172,3 +172,15 @@ describe("normalizeAgentFileTarget", () => {
     expect(normalizeAgentFileTarget("/other/repo/src/a.ts", "/work/repo")).toBeNull()
   })
 })
+
+it.each([
+  ["/work/repository/a.ts", "/work/repo", null],
+  ["/work/repo/src/../../secret", "/work/repo", null],
+  ["/work/repo/src/../A.ts:2", "/work/repo/", "A.ts"],
+  ["c:\\WORK\\REPO\\Src\\A.ts", "C:\\work\\repo", "Src/A.ts"],
+  ["src/../.", "/work/repo", null],
+  ["/work/repo/a.ts", undefined, null],
+  ["src/./nested/../a.ts", undefined, "src/a.ts"]
+])("normalizes target %s within %s", (target, root, expected) => {
+  expect(normalizeAgentFileTarget(target!, root)).toBe(expected)
+})

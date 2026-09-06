@@ -144,68 +144,130 @@ export class DebugController {
     }
     if (input.action === "sessions") return state.session ? [state.session.snapshot()] : []
     const session = required(state.session ?? undefined, "active session")
-    switch (input.action) {
-      case "set_breakpoint":
-      case "remove_breakpoint": {
-        const remove = input.action === "remove_breakpoint"
-        if (input.function) return session.setFunctionBreakpoint(input.function, input.condition, remove, signal)
-        return session.setSourceBreakpoint(await contained(root, required(input.file, "file")), required(input.line, "line"), input.condition, remove, signal)
-      }
-      case "set_instruction_breakpoint":
-      case "remove_instruction_breakpoint":
-        return session.setInstructionBreakpoint({
-          instructionReference: required(input.instruction_reference, "instruction_reference"),
-          ...(input.offset === undefined ? {} : { offset: input.offset }),
-          ...(input.condition ? { condition: input.condition } : {}),
-          ...(input.hit_condition ? { hitCondition: input.hit_condition } : {})
-        }, input.action === "remove_instruction_breakpoint", signal)
-      case "data_breakpoint_info":
-        return session.dataBreakpointInfo(required(input.name, "name"), input.frame_id, input.variable_ref ?? input.scope_id, signal)
-      case "set_data_breakpoint":
-      case "remove_data_breakpoint":
-        return session.setDataBreakpoint({
-          dataId: required(input.data_id, "data_id"),
-          ...(input.access_type ? { accessType: input.access_type } : {}),
-          ...(input.condition ? { condition: input.condition } : {}),
-          ...(input.hit_condition ? { hitCondition: input.hit_condition } : {})
-        }, input.action === "remove_data_breakpoint", signal)
-      case "continue": return session.continue("continue", signal, (input.timeout ?? 30) * 1_000)
-      case "step_over": return session.continue("next", signal, (input.timeout ?? 30) * 1_000)
-      case "step_in": return session.continue("stepIn", signal, (input.timeout ?? 30) * 1_000)
-      case "step_out": return session.continue("stepOut", signal, (input.timeout ?? 30) * 1_000)
-      case "pause": return session.pause(signal)
-      case "evaluate": return session.evaluate(required(input.expression, "expression"), input.frame_id, input.context, signal)
-      case "threads": return session.threads(signal)
-      case "stack_trace": return session.stackTrace(undefined, input.levels, signal)
-      case "scopes": return session.scopes(input.frame_id, signal)
-      case "variables": return session.variables(required(input.variable_ref ?? input.scope_id, "variable_ref or scope_id"), signal)
-      case "disassemble": return session.raw("disassemble", {
+    const runSetBreakpoint = async () => {
+      const remove = input.action === "remove_breakpoint"
+      if (input.function) return session.setFunctionBreakpoint(input.function, input.condition, remove, signal)
+      return session.setSourceBreakpoint(await contained(root, required(input.file, "file")), required(input.line, "line"), input.condition, remove, signal)
+    }
+    const runSetInstructionBreakpoint = async () => {
+      return session.setInstructionBreakpoint({
+        instructionReference: required(input.instruction_reference, "instruction_reference"),
+        ...(input.offset === undefined ? {} : { offset: input.offset }),
+        ...(input.condition ? { condition: input.condition } : {}),
+        ...(input.hit_condition ? { hitCondition: input.hit_condition } : {})
+      }, input.action === "remove_instruction_breakpoint", signal)
+    }
+    const runDataBreakpointInfo = async () => {
+      return session.dataBreakpointInfo(required(input.name, "name"), input.frame_id, input.variable_ref ?? input.scope_id, signal)
+    }
+    const runSetDataBreakpoint = async () => {
+      return session.setDataBreakpoint({
+        dataId: required(input.data_id, "data_id"),
+        ...(input.access_type ? { accessType: input.access_type } : {}),
+        ...(input.condition ? { condition: input.condition } : {}),
+        ...(input.hit_condition ? { hitCondition: input.hit_condition } : {})
+      }, input.action === "remove_data_breakpoint", signal)
+    }
+    const runContinue = async () => {
+      return session.continue("continue", signal, (input.timeout ?? 30) * 1_000)
+    }
+    const runStepOver = async () => {
+      return session.continue("next", signal, (input.timeout ?? 30) * 1_000)
+    }
+    const runStepIn = async () => {
+      return session.continue("stepIn", signal, (input.timeout ?? 30) * 1_000)
+    }
+    const runStepOut = async () => {
+      return session.continue("stepOut", signal, (input.timeout ?? 30) * 1_000)
+    }
+    const runPause = async () => {
+      return session.pause(signal)
+    }
+    const runEvaluate = async () => {
+      return session.evaluate(required(input.expression, "expression"), input.frame_id, input.context, signal)
+    }
+    const runThreads = async () => {
+      return session.threads(signal)
+    }
+    const runStackTrace = async () => {
+      return session.stackTrace(undefined, input.levels, signal)
+    }
+    const runScopes = async () => {
+      return session.scopes(input.frame_id, signal)
+    }
+    const runVariables = async () => {
+      return session.variables(required(input.variable_ref ?? input.scope_id, "variable_ref or scope_id"), signal)
+    }
+    const runDisassemble = async () => {
+      return session.raw("disassemble", {
         memoryReference: required(input.memory_reference ?? session.snapshot().frame?.instructionPointerReference, "memory_reference"),
         instructionCount: required(input.instruction_count, "instruction_count"),
         ...(input.instruction_offset === undefined ? {} : { instructionOffset: input.instruction_offset }),
         ...(input.resolve_symbols === undefined ? {} : { resolveSymbols: input.resolve_symbols })
       }, "supportsDisassembleRequest", signal)
-      case "read_memory": return session.raw("readMemory", {
+    }
+    const runReadMemory = async () => {
+      return session.raw("readMemory", {
         memoryReference: required(input.memory_reference, "memory_reference"),
         count: required(input.count, "count"),
         ...(input.offset === undefined ? {} : { offset: input.offset })
       }, "supportsReadMemoryRequest", signal)
-      case "write_memory": return session.raw("writeMemory", {
+    }
+    const runWriteMemory = async () => {
+      return session.raw("writeMemory", {
         memoryReference: required(input.memory_reference, "memory_reference"),
         data: required(input.data, "data"),
         ...(input.offset === undefined ? {} : { offset: input.offset }),
         ...(input.allow_partial === undefined ? {} : { allowPartial: input.allow_partial })
       }, "supportsWriteMemoryRequest", signal)
-      case "modules": return session.raw("modules", {
+    }
+    const runModules = async () => {
+      return session.raw("modules", {
         ...(input.start_module === undefined ? {} : { startModule: input.start_module }),
         ...(input.module_count === undefined ? {} : { moduleCount: input.module_count })
       }, "supportsModulesRequest", signal)
-      case "loaded_sources": return session.raw("loadedSources", {}, "supportsLoadedSourcesRequest", signal)
-      case "custom_request": return session.raw(required(input.command, "command"), input.arguments ?? {}, undefined, signal)
-      case "output": return { output: session.snapshot().output }
-      case "terminate": await session.terminate(signal); return session.snapshot()
-      default: input.action satisfies never
     }
+    const runLoadedSources = async () => {
+      return session.raw("loadedSources", {}, "supportsLoadedSourcesRequest", signal)
+    }
+    const runCustomRequest = async () => {
+      return session.raw(required(input.command, "command"), input.arguments ?? {}, undefined, signal)
+    }
+    const runOutput = async () => {
+      return { output: session.snapshot().output }
+    }
+    const runTerminate = async () => {
+      await session.terminate(signal)
+      return session.snapshot()
+    }
+    const actions = {
+      set_breakpoint: runSetBreakpoint,
+      remove_breakpoint: runSetBreakpoint,
+      set_instruction_breakpoint: runSetInstructionBreakpoint,
+      remove_instruction_breakpoint: runSetInstructionBreakpoint,
+      data_breakpoint_info: runDataBreakpointInfo,
+      set_data_breakpoint: runSetDataBreakpoint,
+      remove_data_breakpoint: runSetDataBreakpoint,
+      continue: runContinue,
+      step_over: runStepOver,
+      step_in: runStepIn,
+      step_out: runStepOut,
+      pause: runPause,
+      evaluate: runEvaluate,
+      threads: runThreads,
+      stack_trace: runStackTrace,
+      scopes: runScopes,
+      variables: runVariables,
+      disassemble: runDisassemble,
+      read_memory: runReadMemory,
+      write_memory: runWriteMemory,
+      modules: runModules,
+      loaded_sources: runLoadedSources,
+      custom_request: runCustomRequest,
+      output: runOutput,
+      terminate: runTerminate,
+    }
+    return actions[input.action]()
   }
 
   async #runControl(session: DapSession, action: DebugControl["action"]): Promise<void> {

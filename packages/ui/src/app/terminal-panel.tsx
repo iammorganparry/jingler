@@ -51,6 +51,17 @@ const WIDTH = { key: "jingler.terminal.width", initial: 480, min: 300, max: 920 
 /** The dockable terminal shell. Renders every tab's cell (only the active one is
  * shown) so switching tabs — or hiding the dock — never tears down xterm. */
 export function TerminalDock(props: TerminalDockProps) {
+         function getDockDimensions() {
+           return (visible && !embedded
+          ? isBottom
+            ? { height: height.width }
+            : // Capped at a fraction of the row: the stored width is clamped to
+              // [300, 920] in absolute pixels, which says nothing about whether
+              // it leaves a readable pane beside it.
+              { width: clampDockWidth(width.width, shellWidth) }
+          : undefined)
+         }
+
   const { dock: preferredDock, tabs, activeId, visible, embedded = false } = props
   // The shell's width (from `app-shell.tsx`), not this dock's own — the question
   // is how much room the ROW has to give away, which a dock measuring itself
@@ -109,14 +120,7 @@ export function TerminalDock(props: TerminalDockProps) {
         !visible && "hidden"
       )}
       style={
-        visible && !embedded
-          ? isBottom
-            ? { height: height.width }
-            : // Capped at a fraction of the row: the stored width is clamped to
-              // [300, 920] in absolute pixels, which says nothing about whether
-              // it leaves a readable pane beside it.
-              { width: clampDockWidth(width.width, shellWidth) }
-          : undefined
+        getDockDimensions()
       }
     >
       {!embedded && (

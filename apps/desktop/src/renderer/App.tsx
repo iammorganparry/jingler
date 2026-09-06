@@ -161,13 +161,9 @@ const MEMORY_TABS: ReadonlyArray<{
   { id: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+function MemoryWorkspaceHeader({ memory }: { memory: ReturnType<typeof useMemory> }) {
   const { context } = memory;
   return (
-    <div
-      className="relative flex min-h-0 flex-1 flex-col bg-editor"
-      data-testid="memory-workspace"
-    >
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
         <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
         <Select
@@ -235,6 +231,51 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               : "Export"}
         </button>
       </header>
+  );
+}
+
+function MemoryRecoveryNotice({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory;
+  return <>
+{(context.error !== null || context.recovery !== null) && (
+            <div
+              role="alert"
+              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
+            >
+              <p className="min-w-0 text-[10.5px] text-text">
+                {context.error !== null
+                  ? context.error
+                  : context.recovery?.retained
+                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
+                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
+              </p>
+              {context.error !== null && (
+                <button
+                  type="button"
+                  disabled={memory.recovering}
+                  onClick={memory.recover}
+                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                >
+                  <RotateCcw
+                    size={12}
+                    className={memory.recovering ? "animate-spin" : undefined}
+                  />
+                  {memory.recovering ? "Recovering…" : "Recover memory"}
+                </button>
+              )}
+            </div>
+          )}
+  </>;
+}
+
+function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory;
+  return (
+    <div
+      className="relative flex min-h-0 flex-1 flex-col bg-editor"
+      data-testid="memory-workspace"
+    >
+      <MemoryWorkspaceHeader memory={memory} />
       {context.organizationId === null ? (
         <main className="grid min-h-0 flex-1 place-items-center p-6">
           <div className="max-w-md rounded-xl border border-line bg-panel p-5 text-center">
@@ -265,34 +306,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               </button>
             ))}
           </nav>
-          {(context.error !== null || context.recovery !== null) && (
-            <div
-              role="alert"
-              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
-            >
-              <p className="min-w-0 text-[10.5px] text-text">
-                {context.error !== null
-                  ? context.error
-                  : context.recovery?.retained
-                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
-                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
-              </p>
-              {context.error !== null && (
-                <button
-                  type="button"
-                  disabled={memory.recovering}
-                  onClick={memory.recover}
-                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  <RotateCcw
-                    size={12}
-                    className={memory.recovering ? "animate-spin" : undefined}
-                  />
-                  {memory.recovering ? "Recovering…" : "Recover memory"}
-                </button>
-              )}
-            </div>
-          )}
+          <MemoryRecoveryNotice memory={memory} />
           {context.view === "dashboard" && (
             <MemoryDashboard
               summary={context.summary}

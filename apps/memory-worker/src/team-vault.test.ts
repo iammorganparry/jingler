@@ -157,6 +157,30 @@ describe("TeamVault", () => {
     expect((await run(vault.readPage("runbook"))).page.revision).toBe(2)
     expect((await run(vault.getProposal("proposal-b"))).status).toBe("superseded")
     expect((await run(vault.snapshot())).revisions).toHaveLength(2)
+    const beforeReplay = await run(vault.snapshot())
+    expect(await run(vault.approveProposal("proposal-a", "another-reviewer", "2026-07-04T00:00:00.000Z"))).toEqual(outcomes[0])
+    expect(await run(vault.snapshot())).toEqual(beforeReplay)
+  })
+
+  it("bounds compiler lookups and preserves preferred-page priority", async () => {
+    const state = new InMemoryVaultState()
+    const vault = await run(TeamVault.create("org-context", state, new InMemoryR2Bucket()))
+    const search = vi.spyOn(state, "searchPageIds").mockImplementation((claim) =>
+      Effect.succeed(Array.from({ length: 12 }, (_, index) => `${claim}:${index}`))
+    )
+    const projected = vi.spyOn(state, "loadProjectedPages")
+    await run(vault.compilerContext(Array.from({ length: 40 }, (_, index) => `claim-${index}`), "preferred"))
+    expect(search).toHaveBeenCalledTimes(4)
+    expect(search).toHaveBeenLastCalledWith("claim-3", 12)
+    const candidateIds = projected.mock.calls[0]![0]!
+    expect(candidateIds).toHaveLength(48)
+    expect(candidateIds[0]).toBe("preferred")
+    expect(candidateIds.at(-1)).toBe("claim-3:10")
+    search.mockReturnValue(Effect.succeed([]))
+    search.mockClear()
+    await run(vault.compilerContext(Array.from({ length: 40 }, (_, index) => `claim-${index}`)))
+    expect(search).toHaveBeenCalledTimes(32)
+    expect(search).toHaveBeenLastCalledWith("claim-31", 12)
   })
 
   it("is idempotent and rebuilds accepted heads and lexical search entirely from R2", async () => {
@@ -545,6 +569,23 @@ describe("TeamVault", () => {
     expect(
       reflected.basedOn.pages.length + reflected.basedOn.mentalModels.length
     ).toBe(1)
+  })
+
+  it("truncates reflection text at the character budget and cites only represented pages", async () => {
+    const vault = await run(TeamVault.create("org-budget", new InMemoryVaultState(), new InMemoryR2Bucket()))
+    const searchResult = await run(vault.search("query"))
+    vi.spyOn(vault, "search").mockReturnValue(Effect.succeed({
+      ...searchResult,
+      results: ["a", "b", "c"].map((id) => ({
+        pageId: id, path: `${id}.md`, title: id, revision: 1, revisionId: `revision:${id}`,
+        score: 1, snippet: "x".repeat(7_000), citationIds: [id], matchKinds: ["index" as const]
+      }))
+    }))
+    const reflected = await run(vault.reflect("query", { kind: "organization", id: "org-budget" }, 3))
+    expect(reflected.text).toHaveLength(12_000)
+    expect(reflected.text).toBe(`a: ${"x".repeat(7_000)}\n\nb: ${"x".repeat(4_992)}`)
+    expect(reflected.basedOn.pages.map(({ pageId }) => pageId)).toEqual(["a", "b"])
+    expect(reflected.basedOn.mentalModels).toEqual([])
   })
 
   it("reflects from cited accepted evidence without creating source evidence", async () => {

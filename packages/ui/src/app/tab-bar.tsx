@@ -273,6 +273,116 @@ export function TabBar({
   /** Render inside the window title row instead of above the session body. */
   inTitleBar?: boolean
 }) {
+function renderEditableTitle() {
+             return (titleWidth ? (
+            titleDraft !== null ? (
+              <input
+                autoFocus
+                aria-label="Session title"
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onBlur={commitTitle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    event.currentTarget.blur()
+                  } else if (event.key === "Escape") {
+                    event.preventDefault()
+                    setTitleDraft(null)
+                  }
+                }}
+                className={cn(
+                  "min-w-0 bg-transparent text-[12.5px] font-medium text-text-bright outline-none",
+                  titleWidth
+                )}
+              />
+            ) : (
+              <span className={cn("truncate", titleWidth)}>{title}</span>
+            )
+          ) : (
+            status && <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
+          ))
+           }
+
+         function renderPaneMoveActions() {
+           return (!collapseActions && (onMovePaneLeft || onMovePaneRight) && (
+          // Grouped with the close × rather than beside the tabs: these are all
+          // operations on the PANE, not on what's inside it.
+          <div className="flex flex-none items-center">
+            {onMovePaneLeft && (
+              <button
+                type="button"
+                onClick={onMovePaneLeft}
+                aria-label="Move pane left"
+                data-testid="move-pane-left"
+                title="Move pane left (⌃⇧⌥←)"
+                className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+            )}
+            {onMovePaneRight && (
+              <button
+                type="button"
+                onClick={onMovePaneRight}
+                aria-label="Move pane right"
+                data-testid="move-pane-right"
+                title="Move pane right (⌃⇧⌥→)"
+                className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            )}
+          </div>
+        ))
+         }
+
+         function renderSessionIdentity() {
+
+
+           return (<div
+          aria-label={`Session title: ${identity}`}
+          data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
+          title={
+            pane
+              ? `Pane ${pane.index + 1} — ${identity} (double-click to rename)`
+              : `${identity} (double-click to rename)`
+          }
+          tabIndex={canRenameTitle ? 0 : undefined}
+          onDoubleClick={beginTitleEdit}
+          onKeyDown={(event) => {
+            if (event.key === "F2") {
+              event.preventDefault()
+              beginTitleEdit()
+            }
+          }}
+          className={cn(
+            "flex flex-none select-none items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-text-bright outline-none",
+            canRenameTitle &&
+              "cursor-text focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-sunken",
+            pane && !pane.focused && "text-dim"
+          )}
+        >
+          {pane ? (
+            <Badge tone={pane.focused ? "blue" : "count"} size="xs">
+              {pane.index + 1}
+            </Badge>
+          ) : (
+            <MessagesSquare className="size-3.5 flex-none text-dim" />
+          )}
+          {repoName && titleWidth && (
+            <>
+              <span className="max-w-[92px] truncate text-muted-foreground">{repoName}</span>
+              <span aria-hidden className="text-dim">
+                /
+              </span>
+            </>
+          )}
+          {renderEditableTitle()}
+        </div>)
+         }
+
   // The PANE's width, not the window's. A four-way split on a 4K display gives
   // every pane a `narrow` tier; a maximised single pane on a laptop gives
   // `wide`. Keying off the window would get both backwards.
@@ -331,74 +441,7 @@ export function TabBar({
           single click. `data-testid` stays stable for split and command-palette
           coverage that reads the active session name.
         */}
-        <div
-          aria-label={`Session title: ${identity}`}
-          data-testid={pane ? `pane-chip-${pane.index}` : "conversation-tab"}
-          title={
-            pane
-              ? `Pane ${pane.index + 1} — ${identity} (double-click to rename)`
-              : `${identity} (double-click to rename)`
-          }
-          tabIndex={canRenameTitle ? 0 : undefined}
-          onDoubleClick={beginTitleEdit}
-          onKeyDown={(event) => {
-            if (event.key === "F2") {
-              event.preventDefault()
-              beginTitleEdit()
-            }
-          }}
-          className={cn(
-            "flex flex-none select-none items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-text-bright outline-none",
-            canRenameTitle &&
-              "cursor-text focus-visible:ring-2 focus-visible:ring-blue focus-visible:ring-offset-1 focus-visible:ring-offset-sunken",
-            pane && !pane.focused && "text-dim"
-          )}
-        >
-          {pane ? (
-            <Badge tone={pane.focused ? "blue" : "count"} size="xs">
-              {pane.index + 1}
-            </Badge>
-          ) : (
-            <MessagesSquare className="size-3.5 flex-none text-dim" />
-          )}
-          {repoName && titleWidth && (
-            <>
-              <span className="max-w-[92px] truncate text-muted-foreground">{repoName}</span>
-              <span aria-hidden className="text-dim">
-                /
-              </span>
-            </>
-          )}
-          {titleWidth ? (
-            titleDraft !== null ? (
-              <input
-                autoFocus
-                aria-label="Session title"
-                value={titleDraft}
-                onChange={(event) => setTitleDraft(event.target.value)}
-                onDoubleClick={(event) => event.stopPropagation()}
-                onBlur={commitTitle}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault()
-                    event.currentTarget.blur()
-                  } else if (event.key === "Escape") {
-                    event.preventDefault()
-                    setTitleDraft(null)
-                  }
-                }}
-                className={cn(
-                  "min-w-0 bg-transparent text-[12.5px] font-medium text-text-bright outline-none",
-                  titleWidth
-                )}
-              />
-            ) : (
-              <span className={cn("truncate", titleWidth)}>{title}</span>
-            )
-          ) : (
-            status && <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
-          )}
-        </div>
+        {renderSessionIdentity()}
 
         {/*
           The divider keeps pane identity separate from its chat choices. View
@@ -512,36 +555,7 @@ export function TabBar({
             <PanelRight className="size-4" />
           </button>
         )}
-        {!collapseActions && (onMovePaneLeft || onMovePaneRight) && (
-          // Grouped with the close × rather than beside the tabs: these are all
-          // operations on the PANE, not on what's inside it.
-          <div className="flex flex-none items-center">
-            {onMovePaneLeft && (
-              <button
-                type="button"
-                onClick={onMovePaneLeft}
-                aria-label="Move pane left"
-                data-testid="move-pane-left"
-                title="Move pane left (⌃⇧⌥←)"
-                className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
-              >
-                <ChevronLeft className="size-4" />
-              </button>
-            )}
-            {onMovePaneRight && (
-              <button
-                type="button"
-                onClick={onMovePaneRight}
-                aria-label="Move pane right"
-                data-testid="move-pane-right"
-                title="Move pane right (⌃⇧⌥→)"
-                className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
-              >
-                <ChevronRight className="size-4" />
-              </button>
-            )}
-          </div>
-        )}
+        {renderPaneMoveActions()}
         {/* Never collapsed, at any tier. Every other control here has an
             alternative route (a chord, the sidebar, the menu above); closing an
             unreadable pane is the one thing you'd reach for BECAUSE the pane is

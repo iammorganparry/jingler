@@ -131,6 +131,30 @@ export const MemoryGraphEdge = Schema.Struct({
 )
 export type MemoryGraphEdge = Schema.Schema.Type<typeof MemoryGraphEdge>
 
+const validateGraphEdge = (
+  edge: MemoryGraphEdge, nodes: ReadonlyMap<string, MemoryGraphNode["kind"]>
+): true | string => {
+  const sourceKind = nodes.get(edge.sourceId)
+  const targetKind = nodes.get(edge.targetId)
+  if (sourceKind === undefined || targetKind === undefined) {
+    return "graph edges must resolve to declared nodes"
+  }
+  if (sourceKind !== "page") return "graph edges must originate at page nodes"
+  if (edge.kind === "citation" && targetKind !== "source") {
+    return "citation edges must target source nodes"
+  }
+  if (edge.kind === "schema" && targetKind !== "schema") {
+    return "schema edges must target schema nodes"
+  }
+  if (
+    (edge.kind === "wikilink" || edge.kind === "dependency" || edge.kind === "backlink") &&
+    targetKind !== "page"
+  ) {
+    return `${edge.kind} edges must target page nodes`
+  }
+  return true
+}
+
 export const MemoryGraph = Schema.Struct({
   version: Schema.Literal(1),
   nodes: Schema.Array(MemoryGraphNode),
@@ -140,24 +164,8 @@ export const MemoryGraph = Schema.Struct({
     const nodes = new Map(graph.nodes.map((node) => [node.id, node.kind]))
     if (nodes.size !== graph.nodes.length) return "graph node ids must be unique"
     for (const edge of graph.edges) {
-      const sourceKind = nodes.get(edge.sourceId)
-      const targetKind = nodes.get(edge.targetId)
-      if (sourceKind === undefined || targetKind === undefined) {
-        return "graph edges must resolve to declared nodes"
-      }
-      if (sourceKind !== "page") return "graph edges must originate at page nodes"
-      if (edge.kind === "citation" && targetKind !== "source") {
-        return "citation edges must target source nodes"
-      }
-      if (edge.kind === "schema" && targetKind !== "schema") {
-        return "schema edges must target schema nodes"
-      }
-      if (
-        (edge.kind === "wikilink" || edge.kind === "dependency" || edge.kind === "backlink") &&
-        targetKind !== "page"
-      ) {
-        return `${edge.kind} edges must target page nodes`
-      }
+      const result = validateGraphEdge(edge, nodes)
+      if (result !== true) return result
     }
     return true
   })

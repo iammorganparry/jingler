@@ -74,29 +74,7 @@ const readCredentialStdin = async (): Promise<unknown> => {
 const main = async (): Promise<void> => {
   switch (command) {
     case "managed-command": {
-      const inputFile = option("--input")
-      const root = option("--root")
-      const targetId = option("--target-id")
-      if (!inputFile || !root || !targetId) {
-        throw new Error(
-          "managed-command requires --input, --root and --target-id"
-        )
-      }
-      const command = Schema.decodeUnknownSync(RemoteSessionCommandSchema)(
-        JSON.parse(await readFile(inputFile, "utf8")),
-        { onExcessProperty: "error" }
-      )
-      await runManagedCommand(
-        command,
-        makeLiveDeviceSessionCommandExecutor(root, targetId),
-        print
-      )
-      // This entrypoint is deliberately one-shot. The shared cli-adapters
-      // runtime retains background handles used by the long-lived device
-      // daemon; after the terminal protocol frame is flushed those handles
-      // must not keep a Cloudflare exec process alive indefinitely.
-      process.exit(0)
-      return
+      return await executeManagedCommand()
     }
     case "direct-session": {
       const socketPath = (await readFile(
@@ -153,19 +131,7 @@ const main = async (): Promise<void> => {
       return
     }
     case "install-service": {
-      const subject = option("--subject")
-      const deviceId = option("--device-id")
-      const serverUrl = option("--server")
-      if (!subject || !deviceId || !serverUrl) {
-        throw new Error("install-service requires --subject, --device-id and --server")
-      }
-      await persistEnrollment(deviceAgentPaths(), { subject, deviceId, serverUrl })
-      await print(
-        await installDeviceService({
-          ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
-        })
-      )
-      return
+      return await installEnrolledService()
     }
     case "status":
       await print(await deviceStatus())
@@ -180,6 +146,48 @@ const main = async (): Promise<void> => {
       return
     default:
       usage()
+  }
+
+  async function installEnrolledService() {
+    const subject = option("--subject")
+    const deviceId = option("--device-id")
+    const serverUrl = option("--server")
+    if (!subject || !deviceId || !serverUrl) {
+      throw new Error("install-service requires --subject, --device-id and --server")
+    }
+    await persistEnrollment(deviceAgentPaths(), { subject, deviceId, serverUrl })
+    await print(
+      await installDeviceService({
+        ...(process.env.JINGLER_HOME ? { jinglerHome: process.env.JINGLER_HOME } : {})
+      })
+    )
+    return
+  }
+
+  async function executeManagedCommand() {
+    const inputFile = option("--input")
+    const root = option("--root")
+    const targetId = option("--target-id")
+    if (!inputFile || !root || !targetId) {
+      throw new Error(
+        "managed-command requires --input, --root and --target-id"
+      )
+    }
+    const command = Schema.decodeUnknownSync(RemoteSessionCommandSchema)(
+      JSON.parse(await readFile(inputFile, "utf8")),
+      { onExcessProperty: "error" }
+    )
+    await runManagedCommand(
+      command,
+      makeLiveDeviceSessionCommandExecutor(root, targetId),
+      print
+    )
+    // This entrypoint is deliberately one-shot. The shared cli-adapters
+    // runtime retains background handles used by the long-lived device
+    // daemon; after the terminal protocol frame is flushed those handles
+    // must not keep a Cloudflare exec process alive indefinitely.
+    process.exit(0)
+    return
   }
 }
 

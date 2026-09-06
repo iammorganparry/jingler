@@ -124,6 +124,30 @@ export function ProviderConnectionsSettings({
   onStartCodex,
   onSetApiKey
 }: ProviderConnectionsSettingsProps) {
+         type SelectedConnection = NonNullable<typeof selected>
+  function renderConnectionHeading(selected: SelectedConnection) {
+           return (<div className="flex items-start gap-3">
+                <span className="flex size-9 items-center justify-center rounded-lg bg-canvas">
+                  <ShieldCheck size={18} className={selected.connection.status === "authenticated" ? "text-green" : "text-dim"} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[15px] font-semibold text-text-bright">{providerAuthRouteLabel(selected.connection.authKind)}</div>
+                  <div className="mt-1 font-mono text-[10.5px] text-muted-foreground">
+                    {selected.connection.account?.displayLabel ?? selected.connection.account?.fingerprint ?? "Account identity unavailable"}
+                  </div>
+                  <div className="mt-1 text-[11px] text-dim">
+                    {selected.connection.subscription.planLabel ?? "Plan not reported"} · {selected.connection.targetId} · billing: {selected.connection.subscription.confirmedBillingRoute ?? "unconfirmed"}
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" disabled={busy || selected.connection.status !== "authenticated"} onClick={() => onRefresh(selected.connection.id)}>
+                  {busy ? <Spinner size={12} /> : <RefreshCw size={12} />} Refresh
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onLogout(selected.connection.id)}>
+                  <LogOut size={12} /> Log out
+                </Button>
+              </div>)
+         }
+
   const connections = catalog?.connections ?? EMPTY_CONNECTIONS
   const connectionIds = useMemo(
     () => connections.map(({ connection }) => connection.id),
@@ -219,26 +243,7 @@ export function ProviderConnectionsSettings({
           {error && <Callout tone="red">{error}</Callout>}
           {selected ? (
             <>
-              <div className="flex items-start gap-3">
-                <span className="flex size-9 items-center justify-center rounded-lg bg-canvas">
-                  <ShieldCheck size={18} className={selected.connection.status === "authenticated" ? "text-green" : "text-dim"} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[15px] font-semibold text-text-bright">{providerAuthRouteLabel(selected.connection.authKind)}</div>
-                  <div className="mt-1 font-mono text-[10.5px] text-muted-foreground">
-                    {selected.connection.account?.displayLabel ?? selected.connection.account?.fingerprint ?? "Account identity unavailable"}
-                  </div>
-                  <div className="mt-1 text-[11px] text-dim">
-                    {selected.connection.subscription.planLabel ?? "Plan not reported"} · {selected.connection.targetId} · billing: {selected.connection.subscription.confirmedBillingRoute ?? "unconfirmed"}
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" disabled={busy || selected.connection.status !== "authenticated"} onClick={() => onRefresh(selected.connection.id)}>
-                  {busy ? <Spinner size={12} /> : <RefreshCw size={12} />} Refresh
-                </Button>
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onLogout(selected.connection.id)}>
-                  <LogOut size={12} /> Log out
-                </Button>
-              </div>
+              {renderConnectionHeading(selected)}
 
               {selected.connection.status !== "authenticated" && (
                 <div className="flex flex-col gap-3 rounded-lg border border-yellow/30 bg-yellow/[0.04] p-3">

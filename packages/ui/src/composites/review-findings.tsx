@@ -327,14 +327,8 @@ export function ReviewFindings({
   onSendFindingToAgent,
   sentFindingIds
 }: ReviewFindingsProps) {
-  const findings = review === null ? [] : rankFindings(review.findings)
-  const elapsed = useTicker(running && startedAt !== null, startedAt)
-  const split = review === null ? null : partitionFindings(review.findings)
-  const resolved = review === null ? 0 : resolvedCount(review.findings)
-
-  return (
-    <div className="flex flex-col gap-3">
-      <Button
+         function renderReviewButton() {
+           return (<Button
         variant="secondary"
         className="w-full justify-center gap-2"
         disabled={!canRun || running || !onRun}
@@ -352,36 +346,11 @@ export function ReviewFindings({
         ) : (
           "Review again"
         )}
-      </Button>
+      </Button>)
+         }
 
-      {error && (
-        <Callout tone="red" className="items-start">
-          {error}
-        </Callout>
-      )}
-
-      {/* The reviewer ran but said something we couldn't parse — a refusal, or
-          prose. Showing its words beats an empty list that reads as "no bugs". */}
-      {review?.note != null && (
-        <Callout tone="yellow" className="items-start">
-          {review.note}
-        </Callout>
-      )}
-
-      {review !== null && findings.length === 0 && review.note == null && (
-        <Callout tone="green">
-          The reviewer argued against this diff and found nothing to report.
-        </Callout>
-      )}
-
-      {/*
-        What the review DID, in one line, above the evidence.
-        Routing and posting now happen without anyone asking, so the first thing
-        a reader needs is not the findings — it's to know the agent already has
-        the serious ones. Without this the automation is invisible and the list
-        reads like a to-do list you're expected to work through by hand.
-      */}
-      {split !== null && findings.length > 0 && (
+         function renderFindingSummary() {
+           return (split !== null && findings.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-[7px] gap-y-1 text-[11px] text-muted-foreground">
           {split.toAgent.length > 0 && (
             <span className="flex items-center gap-[5px]">
@@ -415,7 +384,46 @@ export function ReviewFindings({
             </>
           )}
         </div>
+      ))
+         }
+
+  const findings = review === null ? [] : rankFindings(review.findings)
+  const elapsed = useTicker(running && startedAt !== null, startedAt)
+  const split = review === null ? null : partitionFindings(review.findings)
+  const resolved = review === null ? 0 : resolvedCount(review.findings)
+
+  return (
+    <div className="flex flex-col gap-3">
+      {renderReviewButton()}
+
+      {error && (
+        <Callout tone="red" className="items-start">
+          {error}
+        </Callout>
       )}
+
+      {/* The reviewer ran but said something we couldn't parse — a refusal, or
+          prose. Showing its words beats an empty list that reads as "no bugs". */}
+      {review?.note != null && (
+        <Callout tone="yellow" className="items-start">
+          {review.note}
+        </Callout>
+      )}
+
+      {review !== null && findings.length === 0 && review.note == null && (
+        <Callout tone="green">
+          The reviewer argued against this diff and found nothing to report.
+        </Callout>
+      )}
+
+      {/*
+        What the review DID, in one line, above the evidence.
+        Routing and posting now happen without anyone asking, so the first thing
+        a reader needs is not the findings — it's to know the agent already has
+        the serious ones. Without this the automation is invisible and the list
+        reads like a to-do list you're expected to work through by hand.
+      */}
+      {renderFindingSummary()}
 
       {/* The post failed — say so once, here, rather than only on each nit's
           card. The cause is the review's, not any one finding's. */}

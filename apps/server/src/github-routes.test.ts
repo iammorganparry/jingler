@@ -273,12 +273,7 @@ const harness = (): Harness => {
       const existing = [...sessionRoutes.values()].find(
         (route) => route.userId === input.userId && route.sessionId === input.sessionId
       )
-      const identityChanged =
-        existing !== undefined &&
-        (existing.installationId !== input.installationId ||
-          existing.repositoryId !== input.repositoryId ||
-          existing.pullRequestNumber !== input.pullRequestNumber)
-      const generationIncrement = identityChanged && existing.state !== "removed" ? 2 : 1
+      const { identityChanged, generationIncrement } = sessionRouteIdentity()
       const route: GitHubSessionRouteRecord = {
         id: existing?.id ?? `route-${sessionRoutes.size + 1}`,
         userId: input.userId,
@@ -296,11 +291,11 @@ const harness = (): Harness => {
         createdAt: existing?.createdAt ?? input.at,
         updatedAt: input.at
       }
-      if (identityChanged && existing.relaySessionId !== route.relaySessionId) {
+      if (identityChanged && existing && existing.relaySessionId !== route.relaySessionId) {
         sessionRoutes.delete(existing.relaySessionId)
       }
       sessionRoutes.set(route.relaySessionId, route)
-      if (identityChanged && existing.state !== "removed") {
+      if (identityChanged && existing && existing.state !== "removed") {
         const removedId = `session-mutation-${route.relaySessionId}-${route.generation - 1}`
         sessionMutations.set(removedId, {
           id: removedId,
@@ -327,6 +322,15 @@ const harness = (): Harness => {
         attemptCount: 0
       })
       return route
+
+      function sessionRouteIdentity() {
+        const identityChanged = existing !== undefined &&
+          (existing.installationId !== input.installationId ||
+            existing.repositoryId !== input.repositoryId ||
+            existing.pullRequestNumber !== input.pullRequestNumber)
+        const generationIncrement = identityChanged && existing.state !== "removed" ? 2 : 1
+        return { identityChanged, generationIncrement }
+      }
     },
     setState: async (input) => {
       const route = sessionRoutes.get(input.relaySessionId)

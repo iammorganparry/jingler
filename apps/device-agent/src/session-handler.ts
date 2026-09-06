@@ -213,33 +213,22 @@ export class SessionCommandHandler {
   adoptControllerScope(scope: ControllerExecutionScope): Promise<void> {
     return this.#initialize().then(() => this.#withLedger(async (ledger) => {
       const current = ledger.controllerScope
-      if (current) {
-        if (scope.controllerLeaseGeneration < current.controllerLeaseGeneration) {
-          throw new Error("Stale controller lease generation.")
-        }
-        if (
-          scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
-          scope.clientInstanceId !== current.clientInstanceId
-        ) {
-          throw new Error("Controller identity changed without a new lease generation.")
-        }
-        if (
-          scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
-          scope.attachmentGeneration < current.attachmentGeneration
-        ) {
-          throw new Error("Stale client attachment generation.")
-        }
-      }
+      validateControllerScope(current, scope)
       if (sameControllerScope(current, scope)) return
-      if (!current) {
-        for (const [commandId, command] of Object.entries(ledger.commands)) {
-          if (!command.controllerScope) {
-            ledger.commands[commandId] = { ...command, controllerScope: scope }
+      adoptUnscopedCommands()
+      ledger.controllerScope = scope
+      await this.#write(ledger)
+
+      function adoptUnscopedCommands() {
+        if (!current) {
+          for (const [commandId, command] of Object.entries(ledger.commands)) {
+            if (!command.controllerScope) {
+              ledger.commands[commandId] = { ...command, controllerScope: scope }
+            }
           }
         }
       }
-      ledger.controllerScope = scope
-      await this.#write(ledger)
+
     }))
   }
 
@@ -337,28 +326,14 @@ export class SessionCommandHandler {
         }
         const sequence = receivedSequence ?? ledger.transport.highestReceivedDesktopSequence + 1
         const previous = ledger.commands[command.commandId]
-        if (previous && (
-          JSON.stringify(previous.command) !== JSON.stringify(command) ||
-          (previous.receivedSequence !== undefined && previous.receivedSequence !== sequence) ||
-          !sameControllerScope(previous.controllerScope, controllerScope)
-        )) {
-          throw new Error(`Command ${command.commandId} conflicts with its persisted admission.`)
-        }
+        validatePersistedAdmission()
         if (previous?.status === "complete" || previous?.status === "failed") {
           return { previous, sequence } as const
         }
         if (previous?.status === "admitted") {
           throw new Error(`Command ${command.commandId} has an active admission without an executor.`)
         }
-        if (sequence <= ledger.transport.highestReceivedDesktopSequence) {
-          throw new Error(`Unknown replayed command ${command.commandId} at sequence ${sequence}.`)
-        }
-        if (sequence !== ledger.transport.highestReceivedDesktopSequence + 1) {
-          throw new Error(`Desktop command sequence gap: expected ${ledger.transport.highestReceivedDesktopSequence + 1}, received ${sequence}.`)
-        }
-        if (Object.keys(ledger.commands).length >= this.#policy.maxRetainedCommands) {
-          throw new Error("Remote command retention is full while responses remain unacknowledged.")
-        }
+        validateNewAdmission(this.#policy.maxRetainedCommands)
         ledger.commands[command.commandId] = {
           command,
           receivedSequence: sequence,
@@ -369,6 +344,28 @@ export class SessionCommandHandler {
         ledger.transport = { ...ledger.transport, highestReceivedDesktopSequence: sequence }
         await this.#write(ledger)
         return { previous: null, sequence } as const
+
+        function validateNewAdmission(maxRetainedCommands: number) {
+          if (sequence <= ledger.transport.highestReceivedDesktopSequence) {
+            throw new Error(`Unknown replayed command ${command.commandId} at sequence ${sequence}.`)
+          }
+          if (sequence !== ledger.transport.highestReceivedDesktopSequence + 1) {
+            throw new Error(`Desktop command sequence gap: expected ${ledger.transport.highestReceivedDesktopSequence + 1}, received ${sequence}.`)
+          }
+          if (Object.keys(ledger.commands).length >= maxRetainedCommands) {
+            throw new Error("Remote command retention is full while responses remain unacknowledged.")
+          }
+        }
+
+        function validatePersistedAdmission() {
+          if (previous && (
+            JSON.stringify(previous.command) !== JSON.stringify(command) ||
+            (previous.receivedSequence !== undefined && previous.receivedSequence !== sequence) ||
+            !sameControllerScope(previous.controllerScope, controllerScope)
+          )) {
+            throw new Error(`Command ${command.commandId} conflicts with its persisted admission.`)
+          }
+        }
       })
 
       if (admission.previous) return admission.previous.events
@@ -500,19 +497,36 @@ export class SessionCommandHandler {
       }
       if (acknowledgedSequence <= ledger.transport.acknowledgedOutgoingSequence) return
       ledger.transport = { ...ledger.transport, acknowledgedOutgoingSequence: acknowledgedSequence }
-      for (const [commandId, command] of Object.entries(ledger.commands)) {
-        const lastSequence = commandLastOutgoingSequence(command)
-        if (
-          command.status !== "admitted" &&
-          (command.receivedSequence ?? Number.POSITIVE_INFINITY) <=
+      pruneAcknowledgedCommands()
+      await this.#write(ledger)
+
+      function pruneAcknowledgedCommands() {
+        for (const [commandId, command] of Object.entries(ledger.commands)) {
+          const lastSequence = commandLastOutgoingSequence(command)
+          if (command.status !== "admitted" &&
+            (command.receivedSequence ?? Number.POSITIVE_INFINITY) <=
             ledger.transport.acknowledgedDesktopSequence &&
-          lastSequence !== null &&
-          lastSequence <= acknowledgedSequence
-        ) {
-          delete ledger.commands[commandId]
+            lastSequence !== null &&
+            lastSequence <= acknowledgedSequence) {
+            delete ledger.commands[commandId]
+          }
         }
       }
-      await this.#write(ledger)
     }))
+  }
+}
+
+function validateControllerScope(current: ControllerExecutionScope | undefined, scope: ControllerExecutionScope) {
+  if (!current) return
+  if (scope.controllerLeaseGeneration < current.controllerLeaseGeneration) {
+    throw new Error("Stale controller lease generation.")
+  }
+  if (scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
+    scope.clientInstanceId !== current.clientInstanceId) {
+    throw new Error("Controller identity changed without a new lease generation.")
+  }
+  if (scope.controllerLeaseGeneration === current.controllerLeaseGeneration &&
+    scope.attachmentGeneration < current.attachmentGeneration) {
+    throw new Error("Stale client attachment generation.")
   }
 }

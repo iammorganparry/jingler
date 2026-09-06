@@ -20,6 +20,16 @@ export function AgentDisclosure({
   transition,
   ...props
 }: AgentDisclosureProps) {
+         function getDisclosureAnimation() {
+           return (reduce
+          ? { opacity: open ? 1 : 0 }
+          : {
+              opacity: open ? 1 : 0,
+              clipPath: open ? "inset(0 0 0% 0)" : "inset(0 0 100% 0)",
+              y: open ? 0 : -4,
+            })
+         }
+
   const reduce = useReducedMotion() ?? false;
 
   return (
@@ -29,13 +39,7 @@ export function AgentDisclosure({
       inert={!open}
       initial={false}
       animate={
-        reduce
-          ? { opacity: open ? 1 : 0 }
-          : {
-              opacity: open ? 1 : 0,
-              clipPath: open ? "inset(0 0 0% 0)" : "inset(0 0 100% 0)",
-              y: open ? 0 : -4,
-            }
+        getDisclosureAnimation()
       }
       transition={
         transition ?? {

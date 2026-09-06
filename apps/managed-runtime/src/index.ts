@@ -440,490 +440,545 @@ const createOffloadWorkflowOnce = async (
   }
 };
 
-export default {
-  async fetch(
-    request: Request,
-    env: ManagedRuntimeEnv,
-    ctx: ExecutionContext
-  ): Promise<Response> {
-    const url = new URL(request.url);
-    if (url.pathname === "/health") {
-      return json({
-        status: "ok",
-        service: "@jingler/managed-runtime",
-        serviceAuthorizationConfigured:
-          typeof env.MANAGED_RUNTIME_SERVICE_SECRET === "string" &&
-          env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32,
-      });
-    }
-    if (url.pathname === "/v1/offload/prime" && request.method === "POST") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const body = decodeOrNull(OffloadRuntimePrimeRequest, await request.json());
-      if (body === null) return json({ error: "Invalid offload prime request" }, 400);
-      ctx.waitUntil(
-        primeOffloadSession(env, body).catch((cause) =>
-          console.error("Offload primer failed", cause)
-        )
-      );
-      return json({ accepted: true }, 202);
-    }
-    if (
-      url.pathname === "/v1/offload/sandboxes/destroy" &&
-      request.method === "POST"
-    ) {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const body = decodeOrNull(OffloadRuntimeSandboxDestroyRequest, await request.json());
-      if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400);
-      const response = await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(
-        body.sessionId
-      ).fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body)
-      });
-      return response.ok
-        ? json({ destroyed: true })
-        : json({ error: "Sandbox cleanup failed" }, 503);
-    }
-    if (url.pathname === "/v1/offload/grants" && request.method === "POST") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const body = decodeOrNull(OffloadRuntimeGrantRequest, await request.json());
-      if (body === null) return json({ error: "Invalid offload grant request" }, 400);
-      const jobId = await offloadJobId(body.subject, body.idempotencyKey);
-      let registration: Schema.Schema.Type<typeof OffloadAccountRegistration>;
-      try {
-        registration = await registerOffloadJob(
-          env,
-          body.subject,
+const handleHealth = async (env: ManagedRuntimeEnv, url: URL): Promise<Response | null> => {
+  if (!(url.pathname === "/health")) return null;
+
+  return json({
+    status: "ok",
+    service: "@jingler/managed-runtime",
+    serviceAuthorizationConfigured:
+      typeof env.MANAGED_RUNTIME_SERVICE_SECRET === "string" &&
+      env.MANAGED_RUNTIME_SERVICE_SECRET.length >= 32,
+  });
+};
+
+const handleOffloadPrime = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  ctx: ExecutionContext,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/offload/prime" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(OffloadRuntimePrimeRequest, await request.json());
+  if (body === null) return json({ error: "Invalid offload prime request" }, 400);
+  ctx.waitUntil(
+    primeOffloadSession(env, body).catch((cause) => console.error("Offload primer failed", cause)),
+  );
+  return json({ accepted: true }, 202);
+};
+
+const handleOffloadSandboxesDestroy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/offload/sandboxes/destroy" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(OffloadRuntimeSandboxDestroyRequest, await request.json());
+  if (body === null) return json({ error: "Invalid sandbox cleanup request" }, 400);
+  const response = await env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(body.sessionId).fetch(
+    INTERNAL_ROUTES.offloadLifecycle.destroy,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  return response.ok ? json({ destroyed: true }) : json({ error: "Sandbox cleanup failed" }, 503);
+};
+
+const handleOffloadGrants = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/offload/grants" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(OffloadRuntimeGrantRequest, await request.json());
+  if (body === null) return json({ error: "Invalid offload grant request" }, 400);
+  const jobId = await offloadJobId(body.subject, body.idempotencyKey);
+  let registration: Schema.Schema.Type<typeof OffloadAccountRegistration>;
+  try {
+    registration = await registerOffloadJob(env, body.subject, jobId, body.idempotencyKey);
+  } catch (cause) {
+    return cause instanceof RuntimeRegistrationError
+      ? json({ error: cause.message }, cause.status)
+      : json({ error: "Offload registration failed" }, 503);
+  }
+  const requestFields: OffloadAdmissionRequestValue = {
+    version: body.version,
+    sessionId: body.sessionId,
+    idempotencyKey: body.idempotencyKey,
+    repositorySlug: body.repositorySlug,
+    snapshot: body.snapshot,
+    command: body.command,
+    limits: body.limits,
+  };
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const store = yield* OffloadJobStore;
+        yield* store.create({
           jobId,
-          body.idempotencyKey
-        );
-      } catch (cause) {
-        return cause instanceof RuntimeRegistrationError
-          ? json({ error: cause.message }, cause.status)
-          : json({ error: "Offload registration failed" }, 503);
-      }
-      const requestFields: OffloadAdmissionRequestValue = {
-        version: body.version,
-        sessionId: body.sessionId,
-        idempotencyKey: body.idempotencyKey,
-        repositorySlug: body.repositorySlug,
-        snapshot: body.snapshot,
-        command: body.command,
-        limits: body.limits
-      };
-      try {
-        await Effect.runPromise(
-          Effect.gen(function* () {
-            const store = yield* OffloadJobStore;
-            yield* store.create({
-              jobId,
-              subject: body.subject,
-              request: requestFields,
-              githubCapabilityHandle: registration.githubCapabilityHandle,
-              nowSeconds: Math.floor(Date.now() / 1_000)
-            });
-          }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
-        );
-        await createOffloadWorkflowOnce(env.OFFLOAD_WORKFLOW, jobId);
-        const issued = await Effect.runPromise(issueOffloadGrant(
-          {
-            subject: body.subject,
-            sessionId: body.sessionId,
-            jobId,
-            idempotencyKey: body.idempotencyKey,
-            repositorySlug: body.repositorySlug,
-            snapshotDigest: body.snapshot.digest,
-            actions: ["snapshot.upload", "job.read", "job.cancel"]
-          },
-          env.MANAGED_RUNTIME_GRANT_SECRET
-        ));
-        return json({
-          version: 1,
-          jobId,
-          runtimeUrl: env.MANAGED_RUNTIME_ORIGIN,
-          uploadUrl: `${env.MANAGED_RUNTIME_ORIGIN}/v1/offload/jobs/${encodeURIComponent(jobId)}/snapshot`,
-          grant: issued.grant,
-          expiresAt: issued.claims.expiresAt
+          subject: body.subject,
+          request: requestFields,
+          githubCapabilityHandle: registration.githubCapabilityHandle,
+          nowSeconds: Math.floor(Date.now() / 1_000),
         });
-      } catch (cause) {
-        if (registration.claimed) {
-          if (!(cause instanceof OffloadStoreError && cause.reason === "conflict")) {
-            await env.OFFLOAD_WORKFLOW.get(jobId).then(
-              (instance) => instance.terminate(),
-              () => undefined
-            ).catch(() => undefined);
-            await Effect.runPromise(
-              Effect.flatMap(OffloadJobStore, (store) => store.remove(jobId)).pipe(
-                Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)),
-                Effect.catchAll(() => Effect.void)
-              )
-            );
-          }
-          await unregisterOffloadJob(env, body.subject, jobId).catch(() => undefined);
-        }
-        return cause instanceof OffloadStoreError && cause.reason === "conflict"
-          ? json({ error: cause.message }, 409)
-          : json({ error: "Offload grant could not be issued" }, 503);
-      }
-    }
-    if (url.pathname === "/v1/grants" && request.method === "POST") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const input = decodeManagedGrantRequest(await request.json());
-      if (input === null) return json({ error: "Invalid grant request" }, 400);
-      let registration: RuntimeRegistration;
-      try {
-        registration = await runtimeRegistration(
-          env,
-          input,
-          claimsManagedSessionSlot(input.actions),
-        );
-      } catch (cause) {
-        return cause instanceof RuntimeRegistrationError
-          ? json({ error: cause.message }, cause.status)
-          : json({ error: "Managed execution registration failed" }, 503);
-      }
-      const issued = await issueManagedRuntimeGrant(
+      }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS))),
+    );
+    await createOffloadWorkflowOnce(env.OFFLOAD_WORKFLOW, jobId);
+    const issued = await Effect.runPromise(
+      issueOffloadGrant(
         {
-          ...input,
-          authStateVersion: registration.authStateVersion,
-          sessionGeneration: registration.sessionGeneration,
+          subject: body.subject,
+          sessionId: body.sessionId,
+          jobId,
+          idempotencyKey: body.idempotencyKey,
+          repositorySlug: body.repositorySlug,
+          snapshotDigest: body.snapshot.digest,
+          actions: ["snapshot.upload", "job.read", "job.cancel"],
         },
         env.MANAGED_RUNTIME_GRANT_SECRET,
-      );
-      return json({
-        version: 1,
-        runtimeUrl: env.MANAGED_RUNTIME_ORIGIN,
-        grant: issued.grant,
-        expiresAt: issued.claims.expiresAt,
-      });
-    }
-    if (url.pathname === "/v1/offload-benchmark" && request.method === "POST") {
-      if (!hasServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const suffix = crypto.randomUUID().replaceAll("-", "");
-      const sandbox = getSandbox(env.Sandbox, `offload-benchmark-${suffix}`, {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: "2m"
-      });
-      try {
-        const coldStarted = Date.now();
-        const cold = await sandbox.exec("printf cold-ready", {
-          cwd: "/workspace",
-          timeout: 30_000,
-          origin: "internal"
-        });
-        const coldMs = Date.now() - coldStarted;
-        const warmStarted = Date.now();
-        const warm = await sandbox.exec("printf warm-ready", {
-          cwd: "/workspace",
-          timeout: 30_000,
-          origin: "internal"
-        });
-        const warmMs = Date.now() - warmStarted;
-        return json({
-          success: cold.success && warm.success,
-          coldMs,
-          warmMs
-        }, cold.success && warm.success ? 200 : 500);
-      } finally {
-        await sandbox.destroy().catch(() => undefined);
-      }
-    }
-    if (url.pathname === "/v1/offload-probe" && request.method === "POST") {
-      if (!hasServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const suffix = crypto.randomUUID().replaceAll("-", "");
-      const sessionId = `offload_probe_${suffix}`;
-      const subject = "offload-probe";
-      const key = `offload/probes/${suffix}.txt`;
-      const lifecycle = env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(sessionId);
-      const sandbox = getSandbox(
-        env.Sandbox,
-        await sandboxIdForSession(`offload_${sessionId}`),
-        {
-          transport: "rpc",
-          normalizeId: true,
-          enableDefaultSession: false,
-          sleepAfter: "2m"
-        }
-      );
-      try {
-        await env.OFFLOAD_JOBS.put(key, "offload-r2-ready");
-        const stored = await env.OFFLOAD_JOBS.get(key);
-        const image = await sandbox.exec(
-          "test -x /opt/jingler/offload-exec.mjs -a -x /opt/jingler/offload-launch && node --version",
-          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
-        );
-        const isolation = await sandbox.exec(
-          "printf locked > /workspace/offload-probe-source && chmod 0444 /workspace/offload-probe-source && /opt/jingler/offload-launch node -e \"const fs=require('node:fs'),net=require('node:net');let denied=0;try{fs.writeFileSync('/workspace/offload-probe-source','changed')}catch(e){if(e.code==='EACCES')denied++}const s=net.connect(443,'1.1.1.1');s.on('error',e=>{if(e.code==='EPERM')denied++;process.exit(denied===2?0:1)});setTimeout(()=>process.exit(2),2000)\"",
-          { cwd: "/workspace", timeout: 30_000, origin: "internal" }
-        );
-        const touched = await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.touch, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject, sessionId })
-        });
-        const success = stored !== null && await stored.text() === "offload-r2-ready" &&
-          image.success && isolation.success && touched.ok;
-        return json({
-          success,
-          checks: {
-            r2: stored !== null,
-            sandboxImage: image.success,
-            commandIsolation: isolation.success,
-            lifecycle: touched.ok
-          }
-        }, success ? 200 : 500);
-      } finally {
-        await env.OFFLOAD_JOBS.delete(key).catch(() => undefined);
-        await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject, sessionId })
-        }).catch(() => undefined);
-      }
-    }
-    if (url.pathname === "/v1/sandbox-probe" && request.method === "POST") {
-      if (!hasServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const sandbox = getSandbox(env.Sandbox, "probe", {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: "2m",
-      });
-      const result = await sandbox.exec("printf ready", { cwd: "/workspace" });
-      await sandbox.destroy();
-      return json({ success: result.success, output: result.stdout });
-    }
-    if (url.pathname === "/v1/checkpoint-probe" && request.method === "POST") {
-      if (!hasServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const suffix = crypto.randomUUID().replaceAll("-", "");
-      const sessionId = `checkpoint_probe_${suffix}`;
-      const checkpointId = `checkpoint_${suffix}`;
-      const store = r2CheckpointStore(env.WORKSPACE_CHECKPOINTS);
-      const sandboxId = await sandboxIdForSession(sessionId);
-      let sandbox = getSandbox(env.Sandbox, sandboxId, {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: "2m",
-      });
-      let archiveKey: string | null = null;
-      const manifestKey = `manifests/checkpoint-probe/${encodeURIComponent(sessionId)}/${encodeURIComponent(checkpointId)}.json`;
-      try {
-        const initialized = await sandbox.exec(
-          "git init --initial-branch=main . && git config user.email probe@jingler.dev && git config user.name Jingler && printf checkpoint-ready > checkpoint.txt && git add checkpoint.txt && git commit -m base && printf dirty-state > dirty.txt",
-          { cwd: "/workspace", timeout: 30_000 },
-        );
-        if (!initialized.success)
-          throw new Error("Checkpoint probe setup failed");
-        const created = await createWorkspaceCheckpoint(sandbox, store, {
-          checkpointId,
-          subject: "checkpoint-probe",
-          environmentId: "managed-probe",
-          sessionId,
-          previousCheckpoint: null,
-          eventCursor: 1,
-          nowSeconds: Math.floor(Date.now() / 1_000),
-          retentionSeconds: 300,
-          maxBytes: 1_048_576,
-        });
-        archiveKey = created.manifest.backup.key;
-        await sandbox.destroy();
-        sandbox = getSandbox(env.Sandbox, sandboxId, {
-          transport: "rpc",
-          normalizeId: true,
-          enableDefaultSession: false,
-          sleepAfter: "2m",
-        });
-        await restoreWorkspaceCheckpoint(sandbox, store, created.manifest);
-        const verified = await sandbox.exec(
-          'test "$(cat checkpoint.txt)" = checkpoint-ready && test "$(cat dirty.txt)" = dirty-state && printf restored',
-          { cwd: "/workspace", timeout: 30_000 },
-        );
-        return json(
-          {
-            success: verified.success,
-            output: verified.stdout,
-            checkpointId,
-          },
-          verified.success ? 200 : 500,
-        );
-      } catch (cause) {
-        return json(
-          {
-            success: false,
-            error:
-              cause instanceof Error
-                ? cause.message
-                : "Checkpoint probe failed",
-          },
-          500,
-        );
-      } finally {
-        await sandbox.destroy().catch(() => undefined);
-        await env.WORKSPACE_CHECKPOINTS.delete(manifestKey).catch(
-          () => undefined,
-        );
-        if (archiveKey !== null) {
-          await env.WORKSPACE_CHECKPOINTS.delete(archiveKey).catch(
-            () => undefined,
+      ),
+    );
+    return json({
+      version: 1,
+      jobId,
+      runtimeUrl: env.MANAGED_RUNTIME_ORIGIN,
+      uploadUrl: `${env.MANAGED_RUNTIME_ORIGIN}/v1/offload/jobs/${encodeURIComponent(jobId)}/snapshot`,
+      grant: issued.grant,
+      expiresAt: issued.claims.expiresAt,
+    });
+  } catch (cause) {
+    const handleGrantFailure = async (): Promise<Response> => {
+      if (registration.claimed) {
+        if (!(cause instanceof OffloadStoreError && cause.reason === "conflict")) {
+          await env.OFFLOAD_WORKFLOW.get(jobId)
+            .then(
+              (instance) => instance.terminate(),
+              () => undefined,
+            )
+            .catch(() => undefined);
+          await Effect.runPromise(
+            Effect.flatMap(OffloadJobStore, (store) => store.remove(jobId)).pipe(
+              Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)),
+              Effect.catchAll(() => Effect.void),
+            ),
           );
         }
+        await unregisterOffloadJob(env, body.subject, jobId).catch(() => undefined);
       }
-    }
-    if (
-      url.pathname === "/v1/environments/destroy" &&
-      request.method === "POST"
-    ) {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
+      return cause instanceof OffloadStoreError && cause.reason === "conflict"
+        ? json({ error: cause.message }, 409)
+        : json({ error: "Offload grant could not be issued" }, 503);
+    };
+    return await handleGrantFailure();
+  }
+};
+
+const handleGrants = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/grants" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const input = decodeManagedGrantRequest(await request.json());
+  if (input === null) return json({ error: "Invalid grant request" }, 400);
+  let registration: RuntimeRegistration;
+  try {
+    registration = await runtimeRegistration(env, input, claimsManagedSessionSlot(input.actions));
+  } catch (cause) {
+    return cause instanceof RuntimeRegistrationError
+      ? json({ error: cause.message }, cause.status)
+      : json({ error: "Managed execution registration failed" }, 503);
+  }
+  const issued = await issueManagedRuntimeGrant(
+    {
+      ...input,
+      authStateVersion: registration.authStateVersion,
+      sessionGeneration: registration.sessionGeneration,
+    },
+    env.MANAGED_RUNTIME_GRANT_SECRET,
+  );
+  return json({
+    version: 1,
+    runtimeUrl: env.MANAGED_RUNTIME_ORIGIN,
+    grant: issued.grant,
+    expiresAt: issued.claims.expiresAt,
+  });
+};
+
+const handleOffloadBenchmark = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/offload-benchmark" && request.method === "POST")) return null;
+
+  if (!hasServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const sandbox = getSandbox(env.Sandbox, `offload-benchmark-${suffix}`, {
+    transport: "rpc",
+    normalizeId: true,
+    enableDefaultSession: false,
+    sleepAfter: "2m",
+  });
+  try {
+    const coldStarted = Date.now();
+    const cold = await sandbox.exec("printf cold-ready", {
+      cwd: "/workspace",
+      timeout: 30_000,
+      origin: "internal",
+    });
+    const coldMs = Date.now() - coldStarted;
+    const warmStarted = Date.now();
+    const warm = await sandbox.exec("printf warm-ready", {
+      cwd: "/workspace",
+      timeout: 30_000,
+      origin: "internal",
+    });
+    const warmMs = Date.now() - warmStarted;
+    return json(
+      {
+        success: cold.success && warm.success,
+        coldMs,
+        warmMs,
+      },
+      cold.success && warm.success ? 200 : 500,
+    );
+  } finally {
+    await sandbox.destroy().catch(() => undefined);
+  }
+};
+
+const handleOffloadProbe = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/offload-probe" && request.method === "POST")) return null;
+
+  if (!hasServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const sessionId = `offload_probe_${suffix}`;
+  const subject = "offload-probe";
+  const key = `offload/probes/${suffix}.txt`;
+  const lifecycle = env.OFFLOAD_SANDBOX_LIFECYCLE.getByName(sessionId);
+  const sandbox = getSandbox(env.Sandbox, await sandboxIdForSession(`offload_${sessionId}`), {
+    transport: "rpc",
+    normalizeId: true,
+    enableDefaultSession: false,
+    sleepAfter: "2m",
+  });
+  try {
+    await env.OFFLOAD_JOBS.put(key, "offload-r2-ready");
+    const stored = await env.OFFLOAD_JOBS.get(key);
+    const image = await sandbox.exec(
+      "test -x /opt/jingler/offload-exec.mjs -a -x /opt/jingler/offload-launch && node --version",
+      { cwd: "/workspace", timeout: 30_000, origin: "internal" },
+    );
+    const isolation = await sandbox.exec(
+      "printf locked > /workspace/offload-probe-source && chmod 0444 /workspace/offload-probe-source && /opt/jingler/offload-launch node -e \"const fs=require('node:fs'),net=require('node:net');let denied=0;try{fs.writeFileSync('/workspace/offload-probe-source','changed')}catch(e){if(e.code==='EACCES')denied++}const s=net.connect(443,'1.1.1.1');s.on('error',e=>{if(e.code==='EPERM')denied++;process.exit(denied===2?0:1)});setTimeout(()=>process.exit(2),2000)\"",
+      { cwd: "/workspace", timeout: 30_000, origin: "internal" },
+    );
+    const touched = await lifecycle.fetch(INTERNAL_ROUTES.offloadLifecycle.touch, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subject, sessionId }),
+    });
+    const success =
+      stored !== null &&
+      (await stored.text()) === "offload-r2-ready" &&
+      image.success &&
+      isolation.success &&
+      touched.ok;
+    return json(
+      {
+        success,
+        checks: {
+          r2: stored !== null,
+          sandboxImage: image.success,
+          commandIsolation: isolation.success,
+          lifecycle: touched.ok,
+        },
+      },
+      success ? 200 : 500,
+    );
+  } finally {
+    await env.OFFLOAD_JOBS.delete(key).catch(() => undefined);
+    await lifecycle
+      .fetch(INTERNAL_ROUTES.offloadLifecycle.destroy, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subject, sessionId }),
+      })
+      .catch(() => undefined);
+  }
+};
+
+const handleSandboxProbe = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/sandbox-probe" && request.method === "POST")) return null;
+
+  if (!hasServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const sandbox = getSandbox(env.Sandbox, "probe", {
+    transport: "rpc",
+    normalizeId: true,
+    enableDefaultSession: false,
+    sleepAfter: "2m",
+  });
+  const result = await sandbox.exec("printf ready", { cwd: "/workspace" });
+  await sandbox.destroy();
+  return json({ success: result.success, output: result.stdout });
+};
+
+const handleCheckpointProbe = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/checkpoint-probe" && request.method === "POST")) return null;
+
+  if (!hasServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const sessionId = `checkpoint_probe_${suffix}`;
+  const checkpointId = `checkpoint_${suffix}`;
+  const store = r2CheckpointStore(env.WORKSPACE_CHECKPOINTS);
+  const sandboxId = await sandboxIdForSession(sessionId);
+  let sandbox = getSandbox(env.Sandbox, sandboxId, {
+    transport: "rpc",
+    normalizeId: true,
+    enableDefaultSession: false,
+    sleepAfter: "2m",
+  });
+  let archiveKey: string | null = null;
+  const manifestKey = `manifests/checkpoint-probe/${encodeURIComponent(sessionId)}/${encodeURIComponent(checkpointId)}.json`;
+  try {
+    const initialized = await sandbox.exec(
+      "git init --initial-branch=main . && git config user.email probe@jingler.dev && git config user.name Jingler && printf checkpoint-ready > checkpoint.txt && git add checkpoint.txt && git commit -m base && printf dirty-state > dirty.txt",
+      { cwd: "/workspace", timeout: 30_000 },
+    );
+    if (!initialized.success) throw new Error("Checkpoint probe setup failed");
+    const created = await createWorkspaceCheckpoint(sandbox, store, {
+      checkpointId,
+      subject: "checkpoint-probe",
+      environmentId: "managed-probe",
+      sessionId,
+      previousCheckpoint: null,
+      eventCursor: 1,
+      nowSeconds: Math.floor(Date.now() / 1_000),
+      retentionSeconds: 300,
+      maxBytes: 1_048_576,
+    });
+    archiveKey = created.manifest.backup.key;
+    await sandbox.destroy();
+    sandbox = getSandbox(env.Sandbox, sandboxId, {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: "2m",
+    });
+    await restoreWorkspaceCheckpoint(sandbox, store, created.manifest);
+    const verified = await sandbox.exec(
+      'test "$(cat checkpoint.txt)" = checkpoint-ready && test "$(cat dirty.txt)" = dirty-state && printf restored',
+      { cwd: "/workspace", timeout: 30_000 },
+    );
+    return json(
+      {
+        success: verified.success,
+        output: verified.stdout,
+        checkpointId,
+      },
+      verified.success ? 200 : 500,
+    );
+  } catch (cause) {
+    return json(
+      {
+        success: false,
+        error: cause instanceof Error ? cause.message : "Checkpoint probe failed",
+      },
+      500,
+    );
+  } finally {
+    const cleanupCheckpointProbe = async (): Promise<void> => {
+      await sandbox.destroy().catch(() => undefined);
+      await env.WORKSPACE_CHECKPOINTS.delete(manifestKey).catch(() => undefined);
+      if (archiveKey !== null) {
+        await env.WORKSPACE_CHECKPOINTS.delete(archiveKey).catch(() => undefined);
       }
-      const body = decodeOrNull(ManagedIdentity, await request.json());
-      if (body === null)
-        return json({ error: "Invalid environment cleanup request" }, 400);
-      const account = env.MANAGED_ACCOUNT.getByName(body.subject);
-      const listed = await account.fetch(
-        INTERNAL_ROUTES.managedAccount.sessionList,
+    };
+    await cleanupCheckpointProbe();
+  }
+};
+
+const handleEnvironmentsDestroy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/environments/destroy" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(ManagedIdentity, await request.json());
+  if (body === null) return json({ error: "Invalid environment cleanup request" }, 400);
+  const account = env.MANAGED_ACCOUNT.getByName(body.subject);
+  const listed = await account.fetch(INTERNAL_ROUTES.managedAccount.sessionList, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ subject: body.subject }),
+  });
+  if (!listed.ok) return json({ error: "Managed session inventory unavailable" }, 503);
+  const listedBody = (await listed.json()) as { sessionIds?: unknown };
+  const sessionIds = Array.isArray(listedBody.sessionIds)
+    ? listedBody.sessionIds.filter((value): value is string => typeof value === "string")
+    : [];
+  const results = await Promise.all(
+    sessionIds.map((sessionId) =>
+      env.MANAGED_SESSION.getByName(sessionId).fetch(
+        "https://managed-session.internal/v1/destroy",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject: body.subject }),
+          body: JSON.stringify(body),
         },
+      ),
+    ),
+  );
+  if (results.some((response) => !response.ok && response.status !== 403)) {
+    return json({ error: "Managed environment cleanup incomplete" }, 503);
+  }
+  return json({
+    destroyed: results.filter((response) => response.ok).length,
+  });
+};
+
+const handleSessionsDestroy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/sessions/destroy" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(ManagedSessionIdentity, await request.json());
+  if (body === null) return json({ error: "Invalid session cleanup request" }, 400);
+  await destroyRuntimeSession(env, body);
+  return json({ destroyed: true });
+};
+
+const handleWorkspacesHydrate = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  if (!(url.pathname === "/v1/workspaces/hydrate" && request.method === "POST")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const body = decodeOrNull(ManagedWorkspaceHydrationRequest, await request.json());
+  if (body === null) {
+    return json({ error: "Invalid workspace hydration request" }, 400);
+  }
+  const sandbox = getSandbox(env.Sandbox, await sandboxIdForSession(body.sessionId), {
+    transport: "rpc",
+    normalizeId: true,
+    enableDefaultSession: false,
+    // Hydration can legitimately outlive the settled-session idle window:
+    // a cold VM plus an exact-SHA Git fetch must remain active until the
+    // workspace is ready. Subsequent session commands reapply the short
+    // idle policy, and every failure path below destroys the sandbox.
+    sleepAfter: `${env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS}s`,
+  });
+  let registration: RuntimeRegistration;
+  try {
+    registration = await runtimeRegistration(
+      env,
+      {
+        subject: body.subject,
+        environmentId: body.environmentId,
+        environmentGeneration: body.environmentGeneration,
+        sessionId: body.sessionId,
+        connectionId: body.connectionId,
+        providerId: body.providerId,
+        modelId: body.modelId,
+        reservationId: null,
+        repositorySlug: body.plan.repository.slug,
+      },
+      true,
+    );
+  } catch (cause) {
+    return cause instanceof RuntimeRegistrationError
+      ? json({ error: cause.message }, cause.status)
+      : json({ error: "Managed workspace registration failed" }, 503);
+  }
+  const cleanup = () =>
+    destroyRuntimeSession(env, {
+      subject: body.subject,
+      environmentId: body.environmentId,
+      sessionId: body.sessionId,
+    });
+  const sessionStub = env.MANAGED_SESSION.getByName(body.sessionId);
+  let gitAuthorization: string | undefined;
+  const authorizeHydrationGit = async (): Promise<Response | null> => {
+    if (registration.githubCapabilityHandle !== null) {
+      const tokenResponse = await sessionStub.fetch(
+        "https://managed-session.internal/v1/git-token",
+        { method: "POST" },
       );
-      if (!listed.ok)
-        return json({ error: "Managed session inventory unavailable" }, 503);
-      const listedBody = (await listed.json()) as { sessionIds?: unknown };
-      const sessionIds = Array.isArray(listedBody.sessionIds)
-        ? listedBody.sessionIds.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [];
-      const results = await Promise.all(
-        sessionIds.map((sessionId) =>
-          env.MANAGED_SESSION.getByName(sessionId).fetch(
-            "https://managed-session.internal/v1/destroy",
-            {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(body),
-            },
-          ),
-        ),
-      );
-      if (results.some((response) => !response.ok && response.status !== 403)) {
-        return json({ error: "Managed environment cleanup incomplete" }, 503);
+      if (!tokenResponse.ok) {
+        await cleanup().catch(() => undefined);
+        return json({ error: "GitHub authorization unavailable" }, 403);
       }
-      return json({
-        destroyed: results.filter((response) => response.ok).length,
-      });
+      const tokenFields = decodeOrNull(
+        GitTokenResponse,
+        await tokenResponse.json().catch(() => null),
+      );
+      if (tokenFields === null) {
+        await cleanup().catch(() => undefined);
+        return json({ error: "GitHub authorization unavailable" }, 403);
+      }
+      gitAuthorization = `Bearer ${tokenFields.token}`;
     }
-    if (url.pathname === "/v1/sessions/destroy" && request.method === "POST") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const body = decodeOrNull(ManagedSessionIdentity, await request.json());
-      if (body === null)
-        return json({ error: "Invalid session cleanup request" }, 400);
-      await destroyRuntimeSession(env, body);
-      return json({ destroyed: true });
-    }
-    if (
-      url.pathname === "/v1/workspaces/hydrate" &&
-      request.method === "POST"
-    ) {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const body = decodeOrNull(
-        ManagedWorkspaceHydrationRequest,
-        await request.json(),
-      );
-      if (body === null) {
-        return json({ error: "Invalid workspace hydration request" }, 400);
-      }
-      const sandbox = getSandbox(
-        env.Sandbox,
-        await sandboxIdForSession(body.sessionId),
-        {
-          transport: "rpc",
-          normalizeId: true,
-          enableDefaultSession: false,
-          // Hydration can legitimately outlive the settled-session idle window:
-          // a cold VM plus an exact-SHA Git fetch must remain active until the
-          // workspace is ready. Subsequent session commands reapply the short
-          // idle policy, and every failure path below destroys the sandbox.
-          sleepAfter: `${env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS}s`,
-        },
-      );
-      let registration: RuntimeRegistration;
-      try {
-        registration = await runtimeRegistration(
-          env,
-          {
-            subject: body.subject,
-            environmentId: body.environmentId,
-            environmentGeneration: body.environmentGeneration,
-            sessionId: body.sessionId,
-            connectionId: body.connectionId,
-            providerId: body.providerId,
-            modelId: body.modelId,
-            reservationId: null,
-            repositorySlug: body.plan.repository.slug,
-          },
-          true,
-        );
-      } catch (cause) {
-        return cause instanceof RuntimeRegistrationError
-          ? json({ error: cause.message }, cause.status)
-          : json({ error: "Managed workspace registration failed" }, 503);
-      }
-      const cleanup = () =>
-        destroyRuntimeSession(env, {
-          subject: body.subject,
-          environmentId: body.environmentId,
-          sessionId: body.sessionId,
-        });
-      const sessionStub = env.MANAGED_SESSION.getByName(body.sessionId);
-      let gitAuthorization: string | undefined;
-      if (registration.githubCapabilityHandle !== null) {
-        const tokenResponse = await sessionStub.fetch(
-          "https://managed-session.internal/v1/git-token",
-          { method: "POST" },
-        );
-        if (!tokenResponse.ok) {
-          await cleanup().catch(() => undefined);
-          return json({ error: "GitHub authorization unavailable" }, 403);
-        }
-        const tokenFields = decodeOrNull(
-          GitTokenResponse,
-          await tokenResponse.json().catch(() => null),
-        );
-        if (tokenFields === null) {
-          await cleanup().catch(() => undefined);
-          return json({ error: "GitHub authorization unavailable" }, 403);
-        }
-        gitAuthorization = `Bearer ${tokenFields.token}`;
-      }
-      try {
-        const repositorySlug = body.plan.repository.slug;
+
+    return null;
+  };
+  const gitDenied = await authorizeHydrationGit();
+  if (gitDenied !== null) return gitDenied;
+  const hydrateRegisteredWorkspace = async (): Promise<Response> => {
+    try {
+      const repositorySlug = body.plan.repository.slug;
+      const hydrateWithAuthorization = async () => {
         const identity = await hydrateWorkspace(
           sandbox,
           body.plan,
@@ -931,474 +986,566 @@ export default {
             ? body.repositoryUrl
             : `${managedRuntimeSandboxOrigin(env)}/v1/git/${encodeURIComponent(body.sessionId)}/${repositorySlug}.git`,
           {
-            ...(gitAuthorization === undefined
-              ? {}
-              : { authorizationHeader: gitAuthorization }),
+            ...(gitAuthorization === undefined ? {} : { authorizationHeader: gitAuthorization }),
             canonicalRepositoryUrl: body.repositoryUrl,
           },
         );
-        return json({ version: 1, identity });
-      } catch (cause) {
-        await cleanup().catch(async () => {
-          await sandbox.destroy().catch(() => undefined);
-          await unregisterRuntimeSession(
-            env,
-            body.subject,
-            body.sessionId,
-          ).catch(() => undefined);
-        });
-        return json(
-          {
-            error:
-              cause instanceof Error
-                ? cause.message
-                : "Workspace hydration failed",
-          },
-          409,
-        );
-      } finally {
-        if (gitAuthorization !== undefined) {
-          await sessionStub.fetch(
-            "https://managed-session.internal/v1/git-token/revoke",
-            { method: "POST" },
-          );
-        }
-      }
-    }
-    const offloadSnapshotMatch = url.pathname.match(
-      /^\/v1\/offload\/jobs\/([^/]+)\/snapshot$/u
-    );
-    if (offloadSnapshotMatch !== null && request.method === "PUT") {
-      const jobId = decodeURIComponent(offloadSnapshotMatch[1] ?? "");
-      const authorized = await Effect.runPromise(
-        authorizeOffloadRequest(request, env, "snapshot.upload", jobId, false).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-      );
-      if (authorized === null) return json({ error: "Offload upload denied" }, 403);
-      const declared = Number(request.headers.get("x-jingler-snapshot-bytes") ?? 0);
-      if (!request.body || !Number.isSafeInteger(declared) || declared < 1 || declared > OFFLOAD_SNAPSHOT_MAX_BYTES) {
-        return json({ error: "Invalid offload snapshot length" }, 413);
-      }
-      const bytes = new Uint8Array(await request.arrayBuffer());
-      if (bytes.byteLength !== declared || bytes.byteLength > OFFLOAD_SNAPSHOT_MAX_BYTES) {
-        return json({ error: "Offload snapshot length changed" }, 413);
-      }
-      const digest = await bytesDigest(bytes);
-      if (digest !== authorized.record.request.snapshot.digest) {
-        return json({ error: "Offload snapshot digest mismatch" }, 409);
-      }
-      if (authorized.record.state !== "uploading") {
-        if (authorized.record.state === "queued") {
-          const published = await env.OFFLOAD_WORKFLOW.get(jobId).then(
-            (instance) => instance.sendEvent({
-              type: "snapshot-ready",
-              payload: { jobId }
-            }).then(() => true),
-            () => false
-          ).catch(() => false);
-          if (!published) return json({ error: "Offload workflow event unavailable" }, 503);
-        }
-        const consumed = await consumeOffloadGrantUse(
-          env,
-          authorized.record.subject,
-          `${authorized.claims.grantId}:snapshot.upload`
-        ).catch(() => false);
-        return consumed
-          ? json({ accepted: true, jobId }, 202)
-          : json({ error: "Offload upload could not be confirmed" }, 503);
-      }
-      try {
-        await Effect.runPromise(
-          Effect.gen(function* () {
-            const store = yield* OffloadJobStore;
-            yield* store.putSnapshot(jobId, bytes, digest);
-            yield* store.append(jobId, { kind: "state", state: "queued" });
-          }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
-        );
-        await (await env.OFFLOAD_WORKFLOW.get(jobId)).sendEvent({
-          type: "snapshot-ready",
-          payload: { jobId }
-        });
-        const consumed = await consumeOffloadGrantUse(
-          env,
-          authorized.record.subject,
-          `${authorized.claims.grantId}:snapshot.upload`
-        );
-        if (!consumed) throw new Error("Offload upload grant could not be committed");
-        return json({ accepted: true, jobId }, 202);
-      } catch {
-        return json({ error: "Offload workflow could not be started" }, 503);
-      }
-    }
-    const offloadEventsMatch = url.pathname.match(
-      /^\/v1\/offload\/jobs\/([^/]+)\/events$/u
-    );
-    if (offloadEventsMatch !== null && request.method === "GET") {
-      const jobId = decodeURIComponent(offloadEventsMatch[1] ?? "");
-      const authorized = await Effect.runPromise(
-        authorizeOffloadRequest(request, env, "job.read", jobId, false).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-      );
-      if (authorized === null) return json({ error: "Offload read denied" }, 403);
-      const cursor = Number(url.searchParams.get("cursor") ?? 0);
-      if (!Number.isSafeInteger(cursor) || cursor < 0) {
-        return json({ error: "Invalid event cursor" }, 400);
-      }
-      return json({
-        version: 1,
-        jobId,
-        state: authorized.record.state,
-        cursor: authorized.record.sequence,
-        events: authorized.record.events.filter((event) => event.sequence > cursor),
-        result: authorized.record.result
-      });
-    }
-    const offloadCancelMatch = url.pathname.match(
-      /^\/v1\/offload\/jobs\/([^/]+)\/cancel$/u
-    );
-    if (offloadCancelMatch !== null && request.method === "POST") {
-      const jobId = decodeURIComponent(offloadCancelMatch[1] ?? "");
-      const authorized = await Effect.runPromise(
-        authorizeOffloadRequest(request, env, "job.cancel", jobId, true).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-      );
-      if (authorized === null) return json({ error: "Offload cancellation denied" }, 403);
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const store = yield* OffloadJobStore;
-          yield* store.requestCancel(jobId);
-        }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
-      );
-      const sandbox = getSandbox(
-        env.Sandbox,
-        await sandboxIdForSession(`offload_${authorized.record.request.sessionId}`),
-        {
-          transport: "rpc",
-          normalizeId: true,
-          enableDefaultSession: false,
-          sleepAfter: "10m"
-        }
-      );
-      await sandbox.killAllProcesses().catch(() => undefined);
-      await env.OFFLOAD_WORKFLOW.get(jobId).then(
-        (instance) => instance.terminate(),
-        () => undefined
-      ).catch(() => undefined);
-      const result = {
-        version: 1 as const,
-        jobId,
-        state: "cancelled" as const,
-        exitCode: null,
-        failureReason: null,
-        stdout: "",
-        stderr: "",
-        outputTruncated: false,
-        timings: {
-          queuedMs: 0,
-          snapshotMs: 0,
-          hydrationMs: 0,
-          dependencyMs: 0,
-          commandMs: 0
-        }
+        return identity;
       };
+      const identity = await hydrateWithAuthorization();
+      return json({ version: 1, identity });
+    } catch (cause) {
+      await cleanup().catch(async () => {
+        await sandbox.destroy().catch(() => undefined);
+        await unregisterRuntimeSession(env, body.subject, body.sessionId).catch(() => undefined);
+      });
+      return json(
+        {
+          error: cause instanceof Error ? cause.message : "Workspace hydration failed",
+        },
+        409,
+      );
+    } finally {
+      if (gitAuthorization !== undefined) {
+        await sessionStub.fetch("https://managed-session.internal/v1/git-token/revoke", {
+          method: "POST",
+        });
+      }
+    }
+  };
+  return await hydrateRegisteredWorkspace();
+};
+
+const handleOffloadSnapshot = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const offloadSnapshotMatch = url.pathname.match(/^\/v1\/offload\/jobs\/([^/]+)\/snapshot$/u);
+  if (!(offloadSnapshotMatch !== null && request.method === "PUT")) return null;
+
+  const jobId = decodeURIComponent(offloadSnapshotMatch[1] ?? "");
+  const authorized = await Effect.runPromise(
+    authorizeOffloadRequest(request, env, "snapshot.upload", jobId, false).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    ),
+  );
+  if (authorized === null) return json({ error: "Offload upload denied" }, 403);
+  const readSnapshot = async (): Promise<Response | { bytes: Uint8Array; digest: string }> => {
+    const declared = Number(request.headers.get("x-jingler-snapshot-bytes") ?? 0);
+    if (!request.body || !validSnapshotLength(declared)) {
+      return json({ error: "Invalid offload snapshot length" }, 413);
+    }
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (snapshotLengthChanged(bytes, declared)) {
+      return json({ error: "Offload snapshot length changed" }, 413);
+    }
+    const digest = await bytesDigest(bytes);
+    if (digest !== authorized.record.request.snapshot.digest) {
+      return json({ error: "Offload snapshot digest mismatch" }, 409);
+    }
+    return { bytes, digest };
+  };
+  const snapshot = await readSnapshot();
+  if (snapshot instanceof Response) return snapshot;
+  const { bytes, digest } = snapshot;
+  const confirmExistingSnapshot = async (): Promise<Response | null> => {
+    if (authorized.record.state === "uploading") return null;
+    if (authorized.record.state === "queued") {
+      const published = await env.OFFLOAD_WORKFLOW.get(jobId)
+        .then(
+          (instance) =>
+            instance
+              .sendEvent({
+                type: "snapshot-ready",
+                payload: { jobId },
+              })
+              .then(() => true),
+          () => false,
+        )
+        .catch(() => false);
+      if (!published) return json({ error: "Offload workflow event unavailable" }, 503);
+    }
+    const consumed = await consumeOffloadGrantUse(
+      env,
+      authorized.record.subject,
+      `${authorized.claims.grantId}:snapshot.upload`,
+    ).catch(() => false);
+    return consumed
+      ? json({ accepted: true, jobId }, 202)
+      : json({ error: "Offload upload could not be confirmed" }, 503);
+  };
+  const existingResponse = await confirmExistingSnapshot();
+  if (existingResponse !== null) return existingResponse;
+  const startUploadedJob = async (): Promise<Response> => {
+    try {
       await Effect.runPromise(
         Effect.gen(function* () {
           const store = yield* OffloadJobStore;
-          yield* store.finish(jobId, result);
-        }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS)))
+          yield* store.putSnapshot(jobId, bytes, digest);
+          yield* store.append(jobId, { kind: "state", state: "queued" });
+        }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS))),
       );
-      await cleanupOffloadJob(env, jobId);
-      return json({ cancelled: true, jobId });
+      await (
+        await env.OFFLOAD_WORKFLOW.get(jobId)
+      ).sendEvent({
+        type: "snapshot-ready",
+        payload: { jobId },
+      });
+      const consumed = await consumeOffloadGrantUse(
+        env,
+        authorized.record.subject,
+        `${authorized.claims.grantId}:snapshot.upload`,
+      );
+      if (!consumed) throw new Error("Offload upload grant could not be committed");
+      return json({ accepted: true, jobId }, 202);
+    } catch {
+      return json({ error: "Offload workflow could not be started" }, 503);
     }
-    const offloadGitMatch = url.pathname.match(
-      /^\/v1\/offload\/git\/([^/]+)\/([^/]+)\/([^/]+\.git)(\/.*)?$/u
+  };
+  return startUploadedJob();
+};
+
+const handleOffloadEvents = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const offloadEventsMatch = url.pathname.match(/^\/v1\/offload\/jobs\/([^/]+)\/events$/u);
+  if (!(offloadEventsMatch !== null && request.method === "GET")) return null;
+
+  const jobId = decodeURIComponent(offloadEventsMatch[1] ?? "");
+  const authorized = await Effect.runPromise(
+    authorizeOffloadRequest(request, env, "job.read", jobId, false).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    ),
+  );
+  if (authorized === null) return json({ error: "Offload read denied" }, 403);
+  const cursor = Number(url.searchParams.get("cursor") ?? 0);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) {
+    return json({ error: "Invalid event cursor" }, 400);
+  }
+  return json({
+    version: 1,
+    jobId,
+    state: authorized.record.state,
+    cursor: authorized.record.sequence,
+    events: authorized.record.events.filter((event) => event.sequence > cursor),
+    result: authorized.record.result,
+  });
+};
+
+const handleOffloadCancel = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const offloadCancelMatch = url.pathname.match(/^\/v1\/offload\/jobs\/([^/]+)\/cancel$/u);
+  if (!(offloadCancelMatch !== null && request.method === "POST")) return null;
+
+  const jobId = decodeURIComponent(offloadCancelMatch[1] ?? "");
+  const authorized = await Effect.runPromise(
+    authorizeOffloadRequest(request, env, "job.cancel", jobId, true).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    ),
+  );
+  if (authorized === null) return json({ error: "Offload cancellation denied" }, 403);
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* OffloadJobStore;
+      yield* store.requestCancel(jobId);
+    }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS))),
+  );
+  const sandbox = getSandbox(
+    env.Sandbox,
+    await sandboxIdForSession(`offload_${authorized.record.request.sessionId}`),
+    {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: "10m",
+    },
+  );
+  await sandbox.killAllProcesses().catch(() => undefined);
+  await env.OFFLOAD_WORKFLOW.get(jobId)
+    .then(
+      (instance) => instance.terminate(),
+      () => undefined,
+    )
+    .catch(() => undefined);
+  const result = {
+    version: 1 as const,
+    jobId,
+    state: "cancelled" as const,
+    exitCode: null,
+    failureReason: null,
+    stdout: "",
+    stderr: "",
+    outputTruncated: false,
+    timings: {
+      queuedMs: 0,
+      snapshotMs: 0,
+      hydrationMs: 0,
+      dependencyMs: 0,
+      commandMs: 0,
+    },
+  };
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const store = yield* OffloadJobStore;
+      yield* store.finish(jobId, result);
+    }).pipe(Effect.provide(makeOffloadJobStoreLayer(env.OFFLOAD_JOBS))),
+  );
+  await cleanupOffloadJob(env, jobId);
+  return json({ cancelled: true, jobId });
+};
+
+const handleOffloadGit = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const offloadGitMatch = url.pathname.match(
+    /^\/v1\/offload\/git\/([^/]+)\/([^/]+)\/([^/]+\.git)(\/.*)?$/u,
+  );
+  if (!(offloadGitMatch !== null && (request.method === "GET" || request.method === "POST")))
+    return null;
+
+  const jobId = decodeURIComponent(offloadGitMatch[1] ?? "");
+  const authorized = await Effect.runPromise(
+    authorizeOffloadRequest(request, env, "git.read", jobId, false).pipe(
+      Effect.catchAll(() => Effect.succeed(null)),
+    ),
+  );
+  if (authorized === null) return json({ error: "Offload Git denied" }, 403);
+  const owner = offloadGitMatch[2] ?? "";
+  const repository = offloadGitMatch[3] ?? "";
+  const suffix = offloadGitMatch[4] ?? "";
+  if (!matchesGitRepositoryScope(owner, repository, authorized.record.request.repositorySlug)) {
+    return json({ error: "Git repository scope denied" }, 403);
+  }
+  return proxyProviderRequest(
+    {
+      provider: "github",
+      gitSmartHttp: true,
+      subject: authorized.record.subject,
+      capabilityHandle: authorized.record.githubCapabilityHandle,
+      upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
+      method: request.method,
+      body: request.body,
+      contentType: request.headers.get("content-type"),
+      accept: request.headers.get("accept"),
+      contentLength: Number(request.headers.get("content-length") ?? 0),
+    },
+    {
+      resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, "github"),
+      fetch,
+      maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
+    },
+  );
+};
+
+const handleWebSearchProxy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const webSearchProxyMatch = url.pathname.match(/^\/v1\/web-search\/(exa|firecrawl)\/([^/]+)$/u);
+  if (!(webSearchProxyMatch !== null && request.method === "POST")) return null;
+
+  const provider = webSearchProxyMatch[1] as "exa" | "firecrawl";
+  const sessionId = decodeManagedPathComponent(webSearchProxyMatch[2] ?? "");
+  if (sessionId === null) {
+    return json({ error: "Malformed session identifier" }, 400);
+  }
+  const authorization = await env.MANAGED_SESSION.getByName(sessionId).fetch(
+    `https://managed-session.internal/v1/web-search-authorization/${provider}`,
+    {
+      method: "POST",
+      headers: {
+        authorization: request.headers.get("authorization") ?? "",
+      },
+    },
+  );
+  if (!authorization.ok) {
+    return json({ error: "WebSearch authorization unavailable" }, 403);
+  }
+  const scope = providerAuthorizationScope(await authorization.json());
+  if (scope === null) {
+    return json({ error: "WebSearch authorization unavailable" }, 403);
+  }
+  return proxyProviderRequest(
+    {
+      provider,
+      subject: scope.subject,
+      capabilityHandle: scope.capabilityHandle,
+      upstreamUrl:
+        provider === "exa" ? "https://api.exa.ai/search" : "https://api.firecrawl.dev/v1/search",
+      method: "POST",
+      body: request.body,
+      contentType: request.headers.get("content-type"),
+      accept: request.headers.get("accept"),
+      contentLength: Number(request.headers.get("content-length") ?? 0),
+    },
+    {
+      resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, provider),
+      fetch,
+      maxEgressBytes: Math.min(Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES), 512 * 1_024),
+    },
+  );
+};
+
+const handleProviderProxy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const providerProxyMatch = url.pathname.match(/^\/v1\/provider\/(codex|claude)\/([^/]+)(\/.*)$/u);
+  if (!(providerProxyMatch !== null)) return null;
+
+  const provider = providerProxyMatch[1] as "codex" | "claude";
+  const sessionId = decodeManagedPathComponent(providerProxyMatch[2] ?? "");
+  if (sessionId === null) {
+    return json({ error: "Malformed session identifier" }, 400);
+  }
+  const authorization = await env.MANAGED_SESSION.getByName(sessionId).fetch(
+    `https://managed-session.internal/v1/provider-authorization/${provider}`,
+    {
+      method: "POST",
+      headers: {
+        authorization: request.headers.get("authorization") ?? "",
+      },
+    },
+  );
+  if (!authorization.ok) {
+    console.warn(
+      JSON.stringify({
+        component: "managed-provider-proxy",
+        event: "session_scope_denied",
+        provider,
+        status: authorization.status,
+      }),
     );
-    if (
-      offloadGitMatch !== null &&
-      (request.method === "GET" || request.method === "POST")
-    ) {
-      const jobId = decodeURIComponent(offloadGitMatch[1] ?? "");
-      const authorized = await Effect.runPromise(
-        authorizeOffloadRequest(request, env, "git.read", jobId, false).pipe(
-          Effect.catchAll(() => Effect.succeed(null))
-        )
-      );
-      if (authorized === null) return json({ error: "Offload Git denied" }, 403);
-      const owner = offloadGitMatch[2] ?? "";
-      const repository = offloadGitMatch[3] ?? "";
-      const suffix = offloadGitMatch[4] ?? "";
-      if (!matchesGitRepositoryScope(owner, repository, authorized.record.request.repositorySlug)) {
-        return json({ error: "Git repository scope denied" }, 403);
-      }
-      return proxyProviderRequest(
-        {
-          provider: "github",
-          gitSmartHttp: true,
-          subject: authorized.record.subject,
-          capabilityHandle: authorized.record.githubCapabilityHandle,
-          upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
-          method: request.method,
-          body: request.body,
-          contentType: request.headers.get("content-type"),
-          accept: request.headers.get("accept"),
-          contentLength: Number(request.headers.get("content-length") ?? 0)
-        },
-        {
-          resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, "github"),
+    return json({ error: "Provider authorization unavailable" }, 403);
+  }
+  const scope = providerAuthorizationScope(await authorization.json());
+  if (scope === null) {
+    return json({ error: "Provider authorization unavailable" }, 403);
+  }
+  const forwardProvider = async (): Promise<Response> => {
+    return proxyProviderRequest(
+      {
+        provider,
+        subject: scope.subject,
+        capabilityHandle: scope.capabilityHandle,
+        upstreamUrl:
+          provider === "codex"
+            ? `https://api.openai.com${providerProxyMatch[3] ?? "/"}`
+            : `https://api.anthropic.com${providerProxyMatch[3] ?? "/"}`,
+        method: request.method === "GET" ? "GET" : "POST",
+        body: request.body,
+        contentType: request.headers.get("content-type"),
+        contentEncoding: request.headers.get("content-encoding"),
+        accept: request.headers.get("accept"),
+        userAgent: request.headers.get("user-agent"),
+        originator: request.headers.get("originator"),
+        openAiBeta: request.headers.get("openai-beta"),
+        anthropicBeta: request.headers.get("anthropic-beta"),
+        sessionId: request.headers.get("session-id"),
+        clientRequestId: request.headers.get("x-client-request-id"),
+        contentLength: Number(request.headers.get("content-length") ?? 0),
+      },
+      {
+        resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, provider),
+        fetch: createControlPlaneProviderFetch({
+          controlPlaneUrl: env.MANAGED_CONTROL_PLANE_URL,
+          serviceSecret: env.MANAGED_RUNTIME_SERVICE_SECRET,
           fetch,
-          maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES)
-        }
-      );
-    }
-    const webSearchProxyMatch = url.pathname.match(
-      /^\/v1\/web-search\/(exa|firecrawl)\/([^/]+)$/u,
+        }),
+        maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
+      },
     );
-    if (webSearchProxyMatch !== null && request.method === "POST") {
-      const provider = webSearchProxyMatch[1] as "exa" | "firecrawl";
-      const sessionId = decodeManagedPathComponent(webSearchProxyMatch[2] ?? "");
-      if (sessionId === null) {
-        return json({ error: "Malformed session identifier" }, 400);
-      }
-      const authorization = await env.MANAGED_SESSION.getByName(
-        sessionId,
-      ).fetch(
-        `https://managed-session.internal/v1/web-search-authorization/${provider}`,
-        {
-          method: "POST",
-          headers: {
-            authorization: request.headers.get("authorization") ?? "",
-          },
-        },
-      );
-      if (!authorization.ok) {
-        return json({ error: "WebSearch authorization unavailable" }, 403);
-      }
-      const scope = providerAuthorizationScope(await authorization.json());
-      if (scope === null) {
-        return json({ error: "WebSearch authorization unavailable" }, 403);
-      }
-      return proxyProviderRequest(
-        {
-          provider,
-          subject: scope.subject,
-          capabilityHandle: scope.capabilityHandle,
-          upstreamUrl:
-            provider === "exa"
-              ? "https://api.exa.ai/search"
-              : "https://api.firecrawl.dev/v1/search",
-          method: "POST",
-          body: request.body,
-          contentType: request.headers.get("content-type"),
-          accept: request.headers.get("accept"),
-          contentLength: Number(request.headers.get("content-length") ?? 0),
-        },
-        {
-          resolve: (subject, handle) =>
-            resolveProviderCredential(env, subject, handle, provider),
-          fetch,
-          maxEgressBytes: Math.min(
-            Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
-            512 * 1_024,
-          ),
-        },
-      );
+  };
+  return forwardProvider();
+};
+
+const handleGitProxy = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const gitProxyMatch = url.pathname.match(/^\/v1\/git\/([^/]+)\/([^/]+)\/([^/]+\.git)(\/.*)?$/u);
+  if (!(gitProxyMatch !== null && (request.method === "GET" || request.method === "POST")))
+    return null;
+
+  const sessionId = decodeManagedPathComponent(gitProxyMatch[1] ?? "");
+  if (sessionId === null) {
+    return json({ error: "Malformed session identifier" }, 400);
+  }
+  const authorization = await env.MANAGED_SESSION.getByName(sessionId).fetch(
+    "https://managed-session.internal/v1/git-authorization",
+    {
+      method: "POST",
+      headers: { authorization: request.headers.get("authorization") ?? "" },
+    },
+  );
+  if (!authorization.ok) return json({ error: "Git authorization unavailable" }, 403);
+  const readGitScope = async () => {
+    const scope: unknown = await authorization.json();
+    const scopeFields =
+      typeof scope === "object" && scope !== null
+        ? Object.fromEntries(Object.entries(scope))
+        : null;
+    return scopeFields;
+  };
+  const scopeFields = await readGitScope();
+  if (
+    typeof scopeFields?.subject !== "string" ||
+    typeof scopeFields.capabilityHandle !== "string"
+  ) {
+    return json({ error: "Git authorization unavailable" }, 403);
+  }
+  const [owner, repository, suffix] = gitProxyParts(gitProxyMatch);
+  if (!matchesGitRepositoryScope(owner, repository, scopeFields.repositorySlug)) {
+    return json({ error: "Git repository scope denied" }, 403);
+  }
+  const method = request.method;
+  const forwardGit = async (): Promise<Response> => {
+    return proxyProviderRequest(
+      {
+        provider: "github",
+        gitSmartHttp: true,
+        subject: scopeFields.subject,
+        capabilityHandle: scopeFields.capabilityHandle,
+        upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
+        method,
+        body: request.body,
+        contentType: request.headers.get("content-type"),
+        accept: request.headers.get("accept"),
+        contentLength: Number(request.headers.get("content-length") ?? 0),
+      },
+      {
+        resolve: (subject, handle) => resolveProviderCredential(env, subject, handle, "github"),
+        fetch,
+        maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
+      },
+    );
+  };
+  return forwardGit();
+};
+
+const handleAuth = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const authMatch = url.pathname.match(/^\/v1\/internal\/auth\/([^/]+)$/u);
+  if (!(authMatch !== null && request.method === "POST")) return null;
+
+  if (!hasServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const subject = decodeManagedPathComponent(authMatch[1] ?? "");
+  if (subject === null) {
+    return json({ error: "Malformed subject identifier" }, 400);
+  }
+  const body: unknown = await request.json();
+  return env.MANAGED_ACCOUNT.getByName(subject).fetch(INTERNAL_ROUTES.managedAccount.authState, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ...(typeof body === "object" && body !== null ? body : {}),
+      subject,
+    }),
+  });
+};
+
+const handleCapability = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const capabilityMatch = url.pathname.match(/^\/v1\/account-capabilities\/([^/]+)$/u);
+  if (!(capabilityMatch !== null && request.method === "GET")) return null;
+
+  if (!hasBearerServiceAuthorization(request, env)) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const subject = decodeManagedPathComponent(capabilityMatch[1] ?? "");
+  if (subject === null) {
+    return json({ error: "Malformed subject identifier" }, 400);
+  }
+  return env.MANAGED_ACCOUNT.getByName(subject).fetch(INTERNAL_ROUTES.managedAccount.capabilities, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ subject }),
+  });
+};
+
+const handleSession = async (
+  request: Request,
+  env: ManagedRuntimeEnv,
+  url: URL,
+): Promise<Response | null> => {
+  const sessionMatch = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/(commands|events|cancel)$/u);
+  if (!(sessionMatch !== null)) return null;
+
+  const sessionId = decodeManagedPathComponent(sessionMatch[1] ?? "");
+  if (sessionId === null) {
+    return json({ error: "Malformed session identifier" }, 400);
+  }
+  const operation = sessionMatch[2] ?? "";
+  const target = new URL(`https://managed-session.internal/v1/${operation}`);
+  target.search = url.search;
+  const forwardedRequest = new Request(target, request);
+  const response = await env.MANAGED_SESSION.getByName(sessionId).fetch(forwardedRequest);
+  return response;
+};
+
+export default {
+  async fetch(request: Request, env: ManagedRuntimeEnv, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    for (const handle of [
+      () => handleHealth(env, url),
+      () => handleOffloadPrime(request, env, ctx, url),
+      () => handleOffloadSandboxesDestroy(request, env, url),
+      () => handleOffloadGrants(request, env, url),
+      () => handleGrants(request, env, url),
+      () => handleOffloadBenchmark(request, env, url),
+      () => handleOffloadProbe(request, env, url),
+      () => handleSandboxProbe(request, env, url),
+      () => handleCheckpointProbe(request, env, url),
+      () => handleEnvironmentsDestroy(request, env, url),
+      () => handleSessionsDestroy(request, env, url),
+      () => handleWorkspacesHydrate(request, env, url),
+      () => handleOffloadSnapshot(request, env, url),
+      () => handleOffloadEvents(request, env, url),
+      () => handleOffloadCancel(request, env, url),
+      () => handleOffloadGit(request, env, url),
+      () => handleWebSearchProxy(request, env, url),
+      () => handleProviderProxy(request, env, url),
+      () => handleGitProxy(request, env, url),
+      () => handleAuth(request, env, url),
+      () => handleCapability(request, env, url),
+      () => handleSession(request, env, url),
+    ]) {
+      const response = await handle();
+      if (response !== null) return response;
     }
 
-    const providerProxyMatch = url.pathname.match(
-      /^\/v1\/provider\/(codex|claude)\/([^/]+)(\/.*)$/u,
-    );
-    if (providerProxyMatch !== null) {
-      const provider = providerProxyMatch[1] as "codex" | "claude";
-      const sessionId = decodeManagedPathComponent(providerProxyMatch[2] ?? "");
-      if (sessionId === null) {
-        return json({ error: "Malformed session identifier" }, 400);
-      }
-      const authorization = await env.MANAGED_SESSION.getByName(
-        sessionId,
-      ).fetch(
-        `https://managed-session.internal/v1/provider-authorization/${provider}`,
-        {
-          method: "POST",
-          headers: {
-            authorization: request.headers.get("authorization") ?? "",
-          },
-        },
-      );
-      if (!authorization.ok) {
-        console.warn(
-          JSON.stringify({
-            component: "managed-provider-proxy",
-            event: "session_scope_denied",
-            provider,
-            status: authorization.status,
-          }),
-        );
-        return json({ error: "Provider authorization unavailable" }, 403);
-      }
-      const scope = providerAuthorizationScope(await authorization.json());
-      if (scope === null) {
-        return json({ error: "Provider authorization unavailable" }, 403);
-      }
-      return proxyProviderRequest(
-        {
-          provider,
-          subject: scope.subject,
-          capabilityHandle: scope.capabilityHandle,
-          upstreamUrl:
-            provider === "codex"
-              ? `https://api.openai.com${providerProxyMatch[3] ?? "/"}`
-              : `https://api.anthropic.com${providerProxyMatch[3] ?? "/"}`,
-          method: request.method === "GET" ? "GET" : "POST",
-          body: request.body,
-          contentType: request.headers.get("content-type"),
-          contentEncoding: request.headers.get("content-encoding"),
-          accept: request.headers.get("accept"),
-          userAgent: request.headers.get("user-agent"),
-          originator: request.headers.get("originator"),
-          openAiBeta: request.headers.get("openai-beta"),
-          anthropicBeta: request.headers.get("anthropic-beta"),
-          sessionId: request.headers.get("session-id"),
-          clientRequestId: request.headers.get("x-client-request-id"),
-          contentLength: Number(request.headers.get("content-length") ?? 0),
-        },
-        {
-          resolve: (subject, handle) =>
-            resolveProviderCredential(env, subject, handle, provider),
-          fetch: createControlPlaneProviderFetch({
-            controlPlaneUrl: env.MANAGED_CONTROL_PLANE_URL,
-            serviceSecret: env.MANAGED_RUNTIME_SERVICE_SECRET,
-            fetch,
-          }),
-          maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
-        },
-      );
-    }
-    const gitProxyMatch = url.pathname.match(
-      /^\/v1\/git\/([^/]+)\/([^/]+)\/([^/]+\.git)(\/.*)?$/u,
-    );
-    if (
-      gitProxyMatch !== null &&
-      (request.method === "GET" || request.method === "POST")
-    ) {
-      const sessionId = decodeManagedPathComponent(gitProxyMatch[1] ?? "");
-      if (sessionId === null) {
-        return json({ error: "Malformed session identifier" }, 400);
-      }
-      const authorization = await env.MANAGED_SESSION.getByName(
-        sessionId,
-      ).fetch("https://managed-session.internal/v1/git-authorization", {
-        method: "POST",
-        headers: { authorization: request.headers.get("authorization") ?? "" },
-      });
-      if (!authorization.ok)
-        return json({ error: "Git authorization unavailable" }, 403);
-      const scope: unknown = await authorization.json();
-      const scopeFields =
-        typeof scope === "object" && scope !== null
-          ? Object.fromEntries(Object.entries(scope))
-          : null;
-      if (
-        typeof scopeFields?.subject !== "string" ||
-        typeof scopeFields.capabilityHandle !== "string"
-      ) {
-        return json({ error: "Git authorization unavailable" }, 403);
-      }
-      const owner = gitProxyMatch[2] ?? "";
-      const repository = gitProxyMatch[3] ?? "";
-      const suffix = gitProxyMatch[4] ?? "";
-      if (
-        !matchesGitRepositoryScope(
-          owner,
-          repository,
-          scopeFields.repositorySlug,
-        )
-      ) {
-        return json({ error: "Git repository scope denied" }, 403);
-      }
-      return proxyProviderRequest(
-        {
-          provider: "github",
-          gitSmartHttp: true,
-          subject: scopeFields.subject,
-          capabilityHandle: scopeFields.capabilityHandle,
-          upstreamUrl: `https://github.com/${owner}/${repository}${suffix}${url.search}`,
-          method: request.method,
-          body: request.body,
-          contentType: request.headers.get("content-type"),
-          accept: request.headers.get("accept"),
-          contentLength: Number(request.headers.get("content-length") ?? 0),
-        },
-        {
-          resolve: (subject, handle) =>
-            resolveProviderCredential(env, subject, handle, "github"),
-          fetch,
-          maxEgressBytes: Number(env.MANAGED_RUNTIME_MAX_EGRESS_BYTES),
-        },
-      );
-    }
-    const authMatch = url.pathname.match(/^\/v1\/internal\/auth\/([^/]+)$/u);
-    if (authMatch !== null && request.method === "POST") {
-      if (!hasServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const subject = decodeManagedPathComponent(authMatch[1] ?? "");
-      if (subject === null) {
-        return json({ error: "Malformed subject identifier" }, 400);
-      }
-      const body: unknown = await request.json();
-      return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        INTERNAL_ROUTES.managedAccount.authState,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            ...(typeof body === "object" && body !== null ? body : {}),
-            subject,
-          }),
-        },
-      );
-    }
-    const capabilityMatch = url.pathname.match(
-      /^\/v1\/account-capabilities\/([^/]+)$/u,
-    );
-    if (capabilityMatch !== null && request.method === "GET") {
-      if (!hasBearerServiceAuthorization(request, env)) {
-        return json({ error: "Unauthorized" }, 401);
-      }
-      const subject = decodeManagedPathComponent(capabilityMatch[1] ?? "");
-      if (subject === null) {
-        return json({ error: "Malformed subject identifier" }, 400);
-      }
-      return env.MANAGED_ACCOUNT.getByName(subject).fetch(
-        INTERNAL_ROUTES.managedAccount.capabilities,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject }),
-        },
-      );
-    }
-    const sessionMatch = url.pathname.match(
-      /^\/v1\/sessions\/([^/]+)\/(commands|events|cancel)$/u,
-    );
-    if (sessionMatch !== null) {
-      const sessionId = decodeManagedPathComponent(sessionMatch[1] ?? "");
-      if (sessionId === null) {
-        return json({ error: "Malformed session identifier" }, 400);
-      }
-      const operation = sessionMatch[2] ?? "";
-      const target = new URL(
-        `https://managed-session.internal/v1/${operation}`,
-      );
-      target.search = url.search;
-      const forwardedRequest = new Request(target, request);
-      const response =
-        await env.MANAGED_SESSION.getByName(sessionId).fetch(forwardedRequest);
-      return response;
-    }
     return json({ error: "Not found" }, 404);
   },
 } satisfies ExportedHandler<ManagedRuntimeEnv>;
+
+const validSnapshotLength = (length: number): boolean =>
+  Number.isSafeInteger(length) && length >= 1 && length <= OFFLOAD_SNAPSHOT_MAX_BYTES;
+
+const gitProxyParts = (match: RegExpMatchArray): [string, string, string] => [
+  match[2] ?? "",
+  match[3] ?? "",
+  match[4] ?? "",
+];
+
+const snapshotLengthChanged = (bytes: Uint8Array, declared: number): boolean =>
+  bytes.byteLength !== declared || bytes.byteLength > OFFLOAD_SNAPSHOT_MAX_BYTES;

@@ -222,15 +222,7 @@ export const executeOffloadCommand = (
       jobId,
       state,
       exitCode: result.exitCode,
-      failureReason: result.timedOut
-        ? "timed-out"
-        : result.sourceMutated
-          ? "source-mutated"
-          : result.outputTruncated
-            ? "output-limit"
-            : result.exitCode !== 0
-              ? "command-failed"
-              : null,
+      failureReason: executorFailureReason(result),
       stdout: result.stdout,
       stderr: result.stderr,
       outputTruncated: result.outputTruncated,
@@ -240,3 +232,10 @@ export const executeOffloadCommand = (
       }
     }
   })
+
+const executorFailureReason = (result: ExecutorResult): OffloadJobResult["failureReason"] => {
+  if (result.timedOut) return "timed-out"
+  if (result.sourceMutated) return "source-mutated"
+  if (result.outputTruncated) return "output-limit"
+  return result.exitCode !== 0 ? "command-failed" : null
+}

@@ -92,21 +92,8 @@ export function SetupScreen({
   onCancelResourceImport,
   onRetryResources
 }: SetupScreenProps) {
-  const chosen = reposDir !== null
-  const shownRepos = repos.slice(0, 6)
-  const overflow = repos.length - shownRepos.length
-  const githubBusy = busy || github.mode === "connecting"
-  const hasConnection = github.connected && github.user !== null
-
-  return (
-    <div className="flex h-full flex-1 justify-center overflow-auto bg-editor px-6 py-10">
-      <div className="my-auto flex w-full max-w-[520px] flex-col gap-6">
-        <div className="flex size-12 items-center justify-center rounded-xl bg-brand">
-          <JinglerMark className="h-6 w-auto text-white" />
-        </div>
-
-        {step === "workspace" ? (
-          <>
+function renderWorkspaceSetup() {
+             return (<>
             <div className="flex flex-col gap-2.5">
               <Eyebrow>Welcome · 1 of 2</Eyebrow>
               <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-bright">
@@ -141,9 +128,11 @@ export function SetupScreen({
                 </div>
               </>
             )}
-          </>
-        ) : step === "github" ? (
-          <>
+          </>)
+           }
+
+function renderGithubSetup() {
+             return (<>
             <div className="flex flex-col gap-2.5">
               <Eyebrow>Welcome · 2 of 2</Eyebrow>
               <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-bright">
@@ -198,9 +187,25 @@ export function SetupScreen({
               GitHub is optional during setup. You can connect later in Settings, but PR features
               remain off until an active installation can access the repository.
             </p>
-          </>
-        ) : step === "provider" ? (
-          <ProviderSetupStep
+          </>)
+           }
+
+         function getStep() {
+
+
+
+
+           switch (step) {
+case "workspace": {
+return (renderWorkspaceSetup())
+break
+}
+case "github": {
+return (renderGithubSetup())
+break
+}
+case "provider": {
+return (<ProviderSetupStep
             catalog={providerCatalog}
             loginEvent={providerLoginEvent}
             busy={busy}
@@ -213,9 +218,11 @@ export function SetupScreen({
             onSkip={onSkipProvider}
             onCancel={onCancelAuth}
             onRetry={onRetryProvider}
-          />
-        ) : (
-          <ResourceSetupStep
+          />)
+break
+}
+}
+           return (<ResourceSetupStep
             detection={resourceDetection}
             busy={busy}
             error={error}
@@ -223,8 +230,23 @@ export function SetupScreen({
             onSkip={onSkipResources}
             onCancel={onCancelResourceImport}
             onRetry={onRetryResources}
-          />
-        )}
+          />)
+         }
+
+  const chosen = reposDir !== null
+  const shownRepos = repos.slice(0, 6)
+  const overflow = repos.length - shownRepos.length
+  const githubBusy = busy || github.mode === "connecting"
+  const hasConnection = github.connected && github.user !== null
+
+  return (
+    <div className="flex h-full flex-1 justify-center overflow-auto bg-editor px-6 py-10">
+      <div className="my-auto flex w-full max-w-[520px] flex-col gap-6">
+        <div className="flex size-12 items-center justify-center rounded-xl bg-brand">
+          <JinglerMark className="h-6 w-auto text-white" />
+        </div>
+
+        {getStep()}
       </div>
     </div>
   )

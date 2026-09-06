@@ -136,6 +136,23 @@ export const installDeviceService = async (
       definitionPath,
       launchdDefinition(nodePath, agentPath, join(stateDir, "device-agent.log"), input.jinglerHome)
     )
+    return await installLaunchAgent(uid,definitionPath)
+  }
+
+  if (platform === "linux") {
+    const definitionPath = join(home, ".config", "systemd", "user", "jingler-device-agent.service")
+    await atomicWrite(definitionPath, systemdDefinition(nodePath, agentPath, input.jinglerHome))
+    requireSuccess(await runner.run("systemctl", ["--user", "daemon-reload"]), "Reloading the systemd user manager")
+    requireSuccess(
+      await runner.run("systemctl", ["--user", "enable", "--now", "jingler-device-agent.service"]),
+      "Starting the Jingler device service"
+    )
+    return { manager: "systemd", definitionPath }
+  }
+
+  throw new Error(`Persistent device service installation is not supported on ${platform}`)
+
+  async function installLaunchAgent(uid: number, definitionPath: string): Promise<InstalledDeviceService> {
     const domains = [`gui/${uid}`, `user/${uid}`]
     let installed = false
     let lastError = ""
@@ -160,19 +177,6 @@ export const installDeviceService = async (
     }
     return { manager: "launchd", definitionPath }
   }
-
-  if (platform === "linux") {
-    const definitionPath = join(home, ".config", "systemd", "user", "jingler-device-agent.service")
-    await atomicWrite(definitionPath, systemdDefinition(nodePath, agentPath, input.jinglerHome))
-    requireSuccess(await runner.run("systemctl", ["--user", "daemon-reload"]), "Reloading the systemd user manager")
-    requireSuccess(
-      await runner.run("systemctl", ["--user", "enable", "--now", "jingler-device-agent.service"]),
-      "Starting the Jingler device service"
-    )
-    return { manager: "systemd", definitionPath }
-  }
-
-  throw new Error(`Persistent device service installation is not supported on ${platform}`)
 }
 
 /** Remove persistence without trying to stop the process currently performing cleanup. */
@@ -189,6 +193,21 @@ export const removeDeviceService = async (
     // daemon may be revoking itself, in which case bootout terminates this
     // process before it can perform any later filesystem cleanup.
     await rm(definitionPath, { force: true })
+    return await stopLaunchAgent()
+  }
+  if (platform === "linux") {
+    await runner
+      .run("systemctl", ["--user", "disable", ...(stop ? ["--now"] : []), "jingler-device-agent.service"])
+      .catch(() => ({
+        exitCode: 1,
+        stderr: ""
+      }))
+    await rm(join(home, ".config", "systemd", "user", "jingler-device-agent.service"), {
+      force: true
+    })
+  }
+
+  async function stopLaunchAgent() {
     if (stop) {
       const uid = input.uid ?? process.getuid?.()
       if (uid !== undefined) {
@@ -201,16 +220,5 @@ export const removeDeviceService = async (
       }
     }
     return
-  }
-  if (platform === "linux") {
-    await runner
-      .run("systemctl", ["--user", "disable", ...(stop ? ["--now"] : []), "jingler-device-agent.service"])
-      .catch(() => ({
-        exitCode: 1,
-        stderr: ""
-      }))
-    await rm(join(home, ".config", "systemd", "user", "jingler-device-agent.service"), {
-      force: true
-    })
   }
 }

@@ -105,7 +105,7 @@ const decodeRecord = (value: unknown): OffloadJobRecord => {
     typeof fields.state !== "string" ||
     typeof fields.sequence !== "number" ||
     typeof fields.cancelRequested !== "boolean" ||
-    (fields.execution !== "available" && fields.execution !== "running" && fields.execution !== "completed") ||
+    !isExecutionState(fields.execution) ||
     typeof fields.createdAt !== "number" ||
     typeof fields.updatedAt !== "number" ||
     typeof fields.expiresAt !== "number"
@@ -347,3 +347,6 @@ export const makeOffloadJobStoreLayer = (bucket: R2Bucket): Layer.Layer<OffloadJ
   }
   return Layer.succeed(OffloadJobStore, service)
 }
+
+const isExecutionState = (value: unknown): value is "available" | "running" | "completed" =>
+  value === "available" || value === "running" || value === "completed"

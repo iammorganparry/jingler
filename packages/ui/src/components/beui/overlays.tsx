@@ -28,13 +28,17 @@ export interface PreviewRailProps {
   previewClassName?: string
 }
 export function PreviewRail({ items, label = "Section navigation", activeId, defaultActiveId, onActiveChange, onItemSelect, onSelect, showPreview = true, previewSide = "after", highlightActive = false, itemSize = 24, children, className, railClassName, previewContainerClassName, previewClassName }: PreviewRailProps) {
+         function getActiveItemId() {
+           return (items.some(item => item.id === requestedActiveId) ? requestedActiveId : (items[0]?.id ?? ""))
+         }
+
   const uid = useId()
   const reduce = useReducedMotion() ?? false
   const [internalActiveId, setInternalActiveId] = useState(defaultActiveId ?? items[0]?.id ?? "")
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const requestedActiveId = activeId ?? internalActiveId
-  const selectedId = items.some(item => item.id === requestedActiveId) ? requestedActiveId : (items[0]?.id ?? "")
+  const selectedId = getActiveItemId()
   const displayedId = hoveredId ?? focusedId ?? ""
   const highlightedId = displayedId || (highlightActive ? selectedId : "")
   const displayedIndex = items.findIndex(item => item.id === highlightedId)

@@ -65,6 +65,9 @@ const baseExecutorResult = {
 describe("offload workspace result policy", () => {
   it.each([
     ["timed-out", { timedOut: true }],
+    ["timed-out", { timedOut: true, sourceMutated: true, outputTruncated: true, exitCode: 2 }],
+    ["source-mutated", { sourceMutated: true, outputTruncated: true, exitCode: 2 }],
+    ["output-limit", { outputTruncated: true, exitCode: 2 }],
     ["source-mutated", { sourceMutated: true }],
     ["output-limit", { outputTruncated: true }],
     ["command-failed", { exitCode: 2 }]

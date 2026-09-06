@@ -441,57 +441,61 @@ const providerCredentialFrom = (
       now + 24 * 60 * 60 * 1_000,
     );
     if (expiresAt <= now + 60_000) return null;
-    if (
-      credential.providerId === "openai-codex" &&
-      credential.authKind === "openai-codex-oauth" &&
-      credential.accountId !== null
-    ) {
-      return {
-        provider: "codex",
-        proxy: "codex",
-        connectionId: credential.connectionId,
-        providerId: credential.providerId,
-        authKind: credential.authKind,
-        billingRoute: credential.billingRoute,
-        authorizationHeader: `Bearer ${credential.access}`,
-        upstream: "chatgpt-codex",
-        accountId: credential.accountId,
-        expiresAt: new Date(expiresAt),
-      };
+    const billingRoute = credential.billingRoute;
+    const syncedCredential = (): SyncedProviderCredential | null => {
+      if (
+        credential.providerId === "openai-codex" &&
+        credential.authKind === "openai-codex-oauth" &&
+        credential.accountId !== null
+      ) {
+        return {
+          provider: "codex",
+          proxy: "codex",
+          connectionId: credential.connectionId,
+          providerId: credential.providerId,
+          authKind: credential.authKind,
+          billingRoute,
+          authorizationHeader: `Bearer ${credential.access}`,
+          upstream: "chatgpt-codex",
+          accountId: credential.accountId,
+          expiresAt: new Date(expiresAt),
+        };
+      }
+      if (
+        credential.providerId === "openai" &&
+        credential.authKind === "api-key"
+      ) {
+        return {
+          provider: "codex",
+          proxy: "codex",
+          connectionId: credential.connectionId,
+          providerId: credential.providerId,
+          authKind: credential.authKind,
+          billingRoute,
+          authorizationHeader: `Bearer ${credential.access}`,
+          upstream: "openai-api",
+          expiresAt: new Date(expiresAt),
+        };
+      }
+      if (credential.providerId === "anthropic") {
+        return {
+          provider: "claude",
+          proxy: "claude",
+          connectionId: credential.connectionId,
+          providerId: credential.providerId,
+          authKind: credential.authKind,
+          billingRoute,
+          authorizationHeader:
+            credential.authKind === "claude-setup-token"
+              ? `Bearer ${credential.access}`
+              : `X-Api-Key ${credential.access}`,
+          upstream: "anthropic-api",
+          expiresAt: new Date(expiresAt),
+        };
+      }
+      return null;
     }
-    if (
-      credential.providerId === "openai" &&
-      credential.authKind === "api-key"
-    ) {
-      return {
-        provider: "codex",
-        proxy: "codex",
-        connectionId: credential.connectionId,
-        providerId: credential.providerId,
-        authKind: credential.authKind,
-        billingRoute: credential.billingRoute,
-        authorizationHeader: `Bearer ${credential.access}`,
-        upstream: "openai-api",
-        expiresAt: new Date(expiresAt),
-      };
-    }
-    if (credential.providerId === "anthropic") {
-      return {
-        provider: "claude",
-        proxy: "claude",
-        connectionId: credential.connectionId,
-        providerId: credential.providerId,
-        authKind: credential.authKind,
-        billingRoute: credential.billingRoute,
-        authorizationHeader:
-          credential.authKind === "claude-setup-token"
-            ? `Bearer ${credential.access}`
-            : `X-Api-Key ${credential.access}`,
-        upstream: "anthropic-api",
-        expiresAt: new Date(expiresAt),
-      };
-    }
-    return null;
+    return syncedCredential()
   } catch {
     return null;
   }
@@ -728,6 +732,7 @@ export const createEnvironmentRoutes = (
     } catch {
       return json({ error: "Managed environment creation unavailable" }, 503);
     }
+
   });
 
   routes.post("/managed/:environmentId/rename", async (context) => {
@@ -770,30 +775,8 @@ export const createEnvironmentRoutes = (
       ManagedEnvironmentLifecycleRequest,
     );
     if (!input) return json({ error: "Invalid lifecycle request" }, 400);
-    if (input.action === "pause" && dependencies.destroyEnvironment) {
-      try {
-        await dependencies.destroyEnvironment({
-          userId,
-          environmentId: context.req.param("environmentId"),
-        });
-      } catch (cause) {
-        return cause instanceof ManagedRuntimeRequestError
-          ? json({ error: cause.message }, cause.status)
-          : json({ error: "Managed environment cleanup failed" }, 503);
-      }
-    }
-    const environment = await dependencies.store
-      .setStateForUser({
-        userId,
-        environmentId: context.req.param("environmentId"),
-        state: lifecycleState(input.action),
-        expectedGeneration: input.expectedGeneration,
-        at: dependencies.now(),
-      })
-      .catch(() => null);
-    return environment
-      ? json({ version: 1, environment })
-      : json({ error: "Managed environment generation changed" }, 409);
+
+    return transitionManagedEnvironment(dependencies, userId, input, context.req.param("environmentId"))
   });
 
   routes.post("/managed/:environmentId/workspaces", async (context) => {
@@ -819,44 +802,47 @@ export const createEnvironmentRoutes = (
     if (environment.generation !== input.expectedGeneration) {
       return json({ error: "Managed environment generation changed" }, 409);
     }
-    const providerCredential = providerCredentialFrom(context.req.raw);
-    if (!matchesProviderSelection(providerCredential, input)) {
-      return json(
-        { error: "Managed provider connection does not match the workspace" },
-        409,
-      );
+    const hydrateSelectedWorkspace = async (): Promise<Response> => {
+      const providerCredential = providerCredentialFrom(context.req.raw);
+      if (!matchesProviderSelection(providerCredential, input)) {
+        return json(
+          { error: "Managed provider connection does not match the workspace" },
+          409,
+        );
+      }
+      if (!dependencies.hydrateWorkspace) {
+        return json({ error: "Managed workspace hydration unavailable" }, 503);
+      }
+      try {
+        await dependencies.syncCapabilities?.({
+          userId,
+          providerCredential,
+          includeGitHub: true,
+        });
+        await dependencies.hydrateWorkspace({
+          userId,
+          environment,
+          sessionId: input.sessionId,
+          connectionId: input.connectionId,
+          providerId: input.providerId,
+          modelId: input.modelId,
+          plan: input.plan,
+        });
+        await dependencies.store.setStateForUser({
+          userId,
+          environmentId: environment.id,
+          state: "online",
+          expectedGeneration: environment.generation,
+          at: dependencies.now(),
+        });
+        return json({ version: 1, hydrated: true });
+      } catch (cause) {
+        return cause instanceof ManagedRuntimeRequestError
+          ? json({ error: cause.message }, cause.status)
+          : json({ error: "Managed workspace hydration failed" }, 503);
+      }
     }
-    if (!dependencies.hydrateWorkspace) {
-      return json({ error: "Managed workspace hydration unavailable" }, 503);
-    }
-    try {
-      await dependencies.syncCapabilities?.({
-        userId,
-        providerCredential,
-        includeGitHub: true,
-      });
-      await dependencies.hydrateWorkspace({
-        userId,
-        environment,
-        sessionId: input.sessionId,
-        connectionId: input.connectionId,
-        providerId: input.providerId,
-        modelId: input.modelId,
-        plan: input.plan,
-      });
-      await dependencies.store.setStateForUser({
-        userId,
-        environmentId: environment.id,
-        state: "online",
-        expectedGeneration: environment.generation,
-        at: dependencies.now(),
-      });
-      return json({ version: 1, hydrated: true });
-    } catch (cause) {
-      return cause instanceof ManagedRuntimeRequestError
-        ? json({ error: cause.message }, cause.status)
-        : json({ error: "Managed workspace hydration failed" }, 503);
-    }
+    return hydrateSelectedWorkspace()
   });
 
   routes.post(
@@ -910,29 +896,32 @@ export const createEnvironmentRoutes = (
     if (current.generation !== input.expectedGeneration) {
       return json({ error: "Managed environment generation changed" }, 409);
     }
-    if (dependencies.destroyEnvironment) {
-      try {
-        await dependencies.destroyEnvironment({
-          userId,
-          environmentId: current.id,
-        });
-      } catch (cause) {
-        return cause instanceof ManagedRuntimeRequestError
-          ? json({ error: cause.message }, cause.status)
-          : json({ error: "Managed environment cleanup failed" }, 503);
+    const destroyManagedEnvironment = async (): Promise<Response> => {
+      if (dependencies.destroyEnvironment) {
+        try {
+          await dependencies.destroyEnvironment({
+            userId,
+            environmentId: current.id,
+          });
+        } catch (cause) {
+          return cause instanceof ManagedRuntimeRequestError
+            ? json({ error: cause.message }, cause.status)
+            : json({ error: "Managed environment cleanup failed" }, 503);
+        }
       }
+      const environment = await dependencies.store
+        .deleteForUser({
+          userId,
+          environmentId: context.req.param("environmentId"),
+          expectedGeneration: input.expectedGeneration,
+          at: dependencies.now(),
+        })
+        .catch(() => null);
+      return environment
+        ? json({ version: 1 })
+        : json({ error: "Managed environment not found" }, 404);
     }
-    const environment = await dependencies.store
-      .deleteForUser({
-        userId,
-        environmentId: context.req.param("environmentId"),
-        expectedGeneration: input.expectedGeneration,
-        at: dependencies.now(),
-      })
-      .catch(() => null);
-    return environment
-      ? json({ version: 1 })
-      : json({ error: "Managed environment not found" }, 404);
+    return destroyManagedEnvironment()
   });
 
   routes.post("/managed/:environmentId/grants", async (context) => {
@@ -965,71 +954,125 @@ export const createEnvironmentRoutes = (
         409,
       );
     }
-    const metered = request.actions.some(
-      (action) => action === "session.start" || action === "session.input",
-    );
-    if (metered) {
-      try {
-        await dependencies.syncCapabilities?.({
-          userId,
-          providerCredential,
-          includeGitHub: false,
-        });
-      } catch {
-        return json({ error: "Managed authorization sync unavailable" }, 503);
-      }
-    }
-    const reservation =
-      metered && dependencies.reserveStart
-        ? await dependencies
-            .reserveStart({
-              userId,
-              environmentId: environment.id,
-              sessionId: request.sessionId,
-              usageIntervalId: request.usageIntervalId,
-            })
-            .catch(() => null)
-        : null;
-    if (metered && dependencies.reserveStart && reservation === null) {
-      return json(
-        { error: "Managed usage budget is temporarily unavailable" },
-        503,
-      );
-    }
-    if (reservation?.status === "denied") {
-      return json(
-        {
-          error:
-            reservation.reason === "concurrency"
-              ? "Only one managed session can run at a time"
-              : "The daily managed-compute budget has been reached",
-        },
-        429,
-      );
-    }
-    try {
-      return json(
-        await dependencies.issueGrant({
-          userId,
-          environment,
-          request,
-          reservationId: reservation?.reservationId ?? null,
-        }),
-      );
-    } catch (cause) {
-      if (reservation?.status === "reserved" && dependencies.releaseStart) {
-        await dependencies
-          .releaseStart({
-            userId,
-            reservationId: reservation.reservationId,
-          })
-          .catch(() => undefined);
-      }
-      return cause instanceof ManagedRuntimeRequestError
-        ? json({ error: cause.message }, cause.status)
-        : json({ error: "Managed runtime unavailable" }, 503);
-    }
+
+    return issueMeteredGrant(dependencies, userId, environment, request, providerCredential)
   });
 
   return routes;
 };
+
+const issueReservedGrant = async (
+  dependencies: EnvironmentRoutesDependencies,
+  userId: string,
+  environment: ManagedEnvironment,
+  request: Schema.Schema.Type<typeof ManagedEnvironmentGrantRequest>,
+  reservation: Exclude<ManagedUsageReservationResult, { status: "denied" }> | null
+): Promise<Response> => {
+  try {
+    return json(
+      await dependencies.issueGrant({
+        userId,
+        environment,
+        request,
+        reservationId: reservation?.reservationId ?? null,
+      }),
+    );
+  } catch (cause) {
+    if (reservation?.status === "reserved" && dependencies.releaseStart) {
+      await dependencies
+        .releaseStart({
+          userId,
+          reservationId: reservation.reservationId,
+        })
+        .catch(() => undefined);
+    }
+    return cause instanceof ManagedRuntimeRequestError
+      ? json({ error: cause.message }, cause.status)
+      : json({ error: "Managed runtime unavailable" }, 503);
+  }
+}
+
+const issueMeteredGrant = async (
+  dependencies: EnvironmentRoutesDependencies,
+  userId: string,
+  environment: ManagedEnvironment,
+  request: Schema.Schema.Type<typeof ManagedEnvironmentGrantRequest>,
+  providerCredential: SyncedProviderCredential | null
+): Promise<Response> => {
+  const metered = request.actions.some(
+    (action) => action === "session.start" || action === "session.input",
+  );
+  if (metered) {
+    try {
+      await dependencies.syncCapabilities?.({
+        userId,
+        providerCredential,
+        includeGitHub: false,
+      });
+    } catch {
+      return json({ error: "Managed authorization sync unavailable" }, 503);
+    }
+  }
+  const reservation =
+    metered && dependencies.reserveStart
+      ? await dependencies
+        .reserveStart({
+          userId,
+          environmentId: environment.id,
+          sessionId: request.sessionId,
+          usageIntervalId: request.usageIntervalId,
+        })
+        .catch(() => null)
+      : null;
+  if (metered && dependencies.reserveStart && reservation === null) {
+    return json(
+      { error: "Managed usage budget is temporarily unavailable" },
+      503,
+    );
+  }
+  if (reservation?.status === "denied") {
+    return json(
+      {
+        error:
+          reservation.reason === "concurrency"
+            ? "Only one managed session can run at a time"
+            : "The daily managed-compute budget has been reached",
+      },
+      429,
+    );
+  }
+
+  return issueReservedGrant(dependencies, userId, environment, request, reservation)
+}
+
+const transitionManagedEnvironment = async (
+  dependencies: EnvironmentRoutesDependencies,
+  userId: string,
+  input: Schema.Schema.Type<typeof ManagedEnvironmentLifecycleRequest>,
+  environmentId: string
+): Promise<Response> => {
+  if (input.action === "pause" && dependencies.destroyEnvironment) {
+    try {
+      await dependencies.destroyEnvironment({
+        userId,
+        environmentId,
+      });
+    } catch (cause) {
+      return cause instanceof ManagedRuntimeRequestError
+        ? json({ error: cause.message }, cause.status)
+        : json({ error: "Managed environment cleanup failed" }, 503);
+    }
+  }
+  const environment = await dependencies.store
+    .setStateForUser({
+      userId,
+      environmentId,
+      state: lifecycleState(input.action),
+      expectedGeneration: input.expectedGeneration,
+      at: dependencies.now(),
+    })
+    .catch(() => null);
+  return environment
+    ? json({ version: 1, environment })
+    : json({ error: "Managed environment generation changed" }, 409);
+}

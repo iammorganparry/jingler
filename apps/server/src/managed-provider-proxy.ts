@@ -45,39 +45,42 @@ export const proxyManagedCodexRequest = async (
     return Response.json({ error: "Provider request exceeds its egress limit" }, { status: 413 })
   }
 
-  const headers = new Headers({ authorization })
-  for (const name of [
-    "accept",
-    "chatgpt-account-id",
-    "content-encoding",
-    "content-type",
-    "openai-beta",
-    "originator",
-    "session-id",
-    "x-client-request-id",
-    "user-agent"
-  ]) {
-    const value = allowedHeader(request, name)
-    if (value !== null) headers.set(name, value)
+  const forwardProviderRequest = async (): Promise<Response> => {
+    const headers = new Headers({ authorization })
+    for (const name of [
+      "accept",
+      "chatgpt-account-id",
+      "content-encoding",
+      "content-type",
+      "openai-beta",
+      "originator",
+      "session-id",
+      "x-client-request-id",
+      "user-agent"
+    ]) {
+      const value = allowedHeader(request, name)
+      if (value !== null) headers.set(name, value)
+    }
+    const target = new URL(`${CHATGPT_CODEX_PREFIX}${path}`, CHATGPT_CODEX_ORIGIN)
+    const init: RequestInit & { duplex?: "half" } = {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: "manual"
+    }
+    if (request.body !== null) init.duplex = "half"
+    const upstream = await (dependencies.fetch ?? fetch)(target, init)
+    const responseLength = Number(upstream.headers.get("content-length") ?? 0)
+    if (Number.isFinite(responseLength) && responseLength > dependencies.maxEgressBytes) {
+      return Response.json({ error: "Provider response exceeds its egress limit" }, { status: 502 })
+    }
+    const responseHeaders = new Headers(upstream.headers)
+    responseHeaders.delete("location")
+    responseHeaders.delete("set-cookie")
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders
+    })
   }
-  const target = new URL(`${CHATGPT_CODEX_PREFIX}${path}`, CHATGPT_CODEX_ORIGIN)
-  const init: RequestInit & { duplex?: "half" } = {
-    method: request.method,
-    headers,
-    body: request.body,
-    redirect: "manual"
-  }
-  if (request.body !== null) init.duplex = "half"
-  const upstream = await (dependencies.fetch ?? fetch)(target, init)
-  const responseLength = Number(upstream.headers.get("content-length") ?? 0)
-  if (Number.isFinite(responseLength) && responseLength > dependencies.maxEgressBytes) {
-    return Response.json({ error: "Provider response exceeds its egress limit" }, { status: 502 })
-  }
-  const responseHeaders = new Headers(upstream.headers)
-  responseHeaders.delete("location")
-  responseHeaders.delete("set-cookie")
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: responseHeaders
-  })
+  return forwardProviderRequest()
 }

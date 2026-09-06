@@ -238,6 +238,28 @@ function mergeConfig(base: PlannotatorConfig, override: PlannotatorConfig): Plan
   };
 }
 
+function warnObsoletePrompts(fields: Record<string, unknown>, phaseFields: Record<string, unknown> | null, path: string, warnings: string[]): void {
+  // Plannotator no longer modifies Pi's system prompt (#922). The old
+  // systemPrompt key is ignored; say so once instead of silently dropping it.
+  const obsoleteScopes: string[] = [];
+  if (fields.defaults !== null && typeof fields.defaults === "object" && !Array.isArray(fields.defaults) && "systemPrompt" in fields.defaults) {
+    obsoleteScopes.push("defaults");
+  }
+  if (phaseFields !== null) {
+    for (const phase of PHASES) {
+      const phaseRaw = phaseFields[phase];
+      if (phaseRaw !== null && typeof phaseRaw === "object" && !Array.isArray(phaseRaw) && "systemPrompt" in phaseRaw) {
+        obsoleteScopes.push(`phases.${phase}`);
+      }
+    }
+  }
+  if (obsoleteScopes.length > 0) {
+    warnings.push(
+      `Ignoring obsolete "systemPrompt" under ${obsoleteScopes.join(", ")} in ${path}: Plannotator no longer modifies the system prompt. Rename the key to "instructions" to deliver the text as a phase-entry message instead.`,
+    );
+  }
+}
+
 function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: string[] } {
   const parsed = readJsonFile(path);
   if (parsed.error) {
@@ -275,25 +297,7 @@ function loadConfigSource(path: string): { config: PlannotatorConfig; warnings: 
     if (Object.keys(phases).length > 0) config.phases = phases;
   }
 
-  // Plannotator no longer modifies Pi's system prompt (#922). The old
-  // systemPrompt key is ignored; say so once instead of silently dropping it.
-  const obsoleteScopes: string[] = [];
-  if (fields.defaults !== null && typeof fields.defaults === "object" && !Array.isArray(fields.defaults) && "systemPrompt" in fields.defaults) {
-    obsoleteScopes.push("defaults");
-  }
-  if (phaseFields !== null) {
-    for (const phase of PHASES) {
-      const phaseRaw = phaseFields[phase];
-      if (phaseRaw !== null && typeof phaseRaw === "object" && !Array.isArray(phaseRaw) && "systemPrompt" in phaseRaw) {
-        obsoleteScopes.push(`phases.${phase}`);
-      }
-    }
-  }
-  if (obsoleteScopes.length > 0) {
-    warnings.push(
-      `Ignoring obsolete "systemPrompt" under ${obsoleteScopes.join(", ")} in ${path}: Plannotator no longer modifies the system prompt. Rename the key to "instructions" to deliver the text as a phase-entry message instead.`,
-    );
-  }
+  warnObsoletePrompts(fields, phaseFields, path, warnings);
 
   return { config, warnings };
 }

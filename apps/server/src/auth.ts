@@ -28,32 +28,24 @@ import {
   sendWelcomeEmail
 } from "./email.js"
 
+const firstUserAgentMatch = (
+  ua: string,
+  candidates: ReadonlyArray<readonly [RegExp, string]>,
+  fallback: string
+): string => candidates.find(([pattern]) => pattern.test(ua))?.[1] ?? fallback
+
 /** Short "macOS · Chrome" device label from a request's User-Agent (best-effort). */
 function deviceFrom(request?: Request): string {
   const ua = request?.headers.get("user-agent") ?? ""
   if (!ua) return "Unknown device"
-  const os = /Mac OS X/.test(ua)
-    ? "macOS"
-    : /Windows/.test(ua)
-      ? "Windows"
-      : /Android/.test(ua)
-        ? "Android"
-        : /(iPhone|iPad|iOS)/.test(ua)
-          ? "iOS"
-          : /Linux/.test(ua)
-            ? "Linux"
-            : "Unknown OS"
-  const browser = /Edg\//.test(ua)
-    ? "Edge"
-    : /OPR\/|Opera/.test(ua)
-      ? "Opera"
-      : /Chrome\//.test(ua)
-        ? "Chrome"
-        : /Firefox\//.test(ua)
-          ? "Firefox"
-          : /Safari\//.test(ua)
-            ? "Safari"
-            : "browser"
+  const os = firstUserAgentMatch(ua, [
+    [/Mac OS X/, "macOS"], [/Windows/, "Windows"], [/Android/, "Android"],
+    [/(iPhone|iPad|iOS)/, "iOS"], [/Linux/, "Linux"]
+  ], "Unknown OS")
+  const browser = firstUserAgentMatch(ua, [
+    [/Edg\//, "Edge"], [/OPR\/|Opera/, "Opera"], [/Chrome\//, "Chrome"],
+    [/Firefox\//, "Firefox"], [/Safari\//, "Safari"]
+  ], "browser")
   return `${os} · ${browser}`
 }
 

@@ -139,17 +139,23 @@ export class InstallationRoutesObject extends DurableObject<Env> {
       } catch (error) {
         if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error
       }
-      for (const statement of [
-        "ALTER TABLE owners ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE session_routes ADD COLUMN generation INTEGER NOT NULL DEFAULT 0"
-      ]) {
-        try {
-          this.ctx.storage.sql.exec(statement)
-        } catch (error) {
-          if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error
-        }
-      }
+      this.migrateRouteGenerations()
+
+
     })
+  }
+
+  private migrateRouteGenerations() {
+    for (const statement of [
+      "ALTER TABLE owners ADD COLUMN generation INTEGER NOT NULL DEFAULT 0",
+      "ALTER TABLE session_routes ADD COLUMN generation INTEGER NOT NULL DEFAULT 0"
+    ]) {
+      try {
+        this.ctx.storage.sql.exec(statement)
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes("duplicate column name")) throw error
+      }
+    }
   }
 
   async setOwner(

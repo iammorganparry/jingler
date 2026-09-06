@@ -199,6 +199,236 @@ function SidebarBody({
   /** Collapse to the icon rail (the header's `PanelLeft` button). */
   onCollapse?: () => void
 }) {
+  function renderMemoryLink() {
+    return (memoryEligible && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="memory-sidebar-item"
+            aria-current={memoryActive ? "page" : undefined}
+            onClick={onOpenMemory}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              memoryActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <BrainCircuit size={15} className={memoryActive ? "text-blue" : undefined} />
+            <span className="flex-1">Memory</span>
+            {memoryActive && <span className="text-[10px] text-blue">Open</span>}
+          </button>
+        </div>
+      ))
+  }
+
+  function renderSessionList() {
+    return (<div className="flex flex-1 flex-col overflow-auto px-2 pb-2 pt-0.5">
+        {sessions.length === 0 ? (
+          <div className="flex flex-1 flex-col px-1">
+            <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
+              <Layers size={22} className="text-line-strong" />
+              <span className="text-[12px] leading-[1.5] text-muted-foreground">
+                No workspaces yet.
+                <br />
+                They&apos;ll appear here as you start them.
+              </span>
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
+            <Search size={20} className="text-line-strong" />
+            {/*
+              Names the FILTERS, not a search term. This panel no longer has a
+              text field — search is global and lives above this list — so the
+              only way to empty a non-empty store is the facet menu beside this
+              message. Quoting a search term here would name a control that is
+              not on screen, which is worse than saying nothing: the operator
+              would go looking for a box to clear.
+            */}
+            <span className="text-[12px] leading-[1.5] text-muted-foreground">
+              No sessions match these filters.
+            </span>
+          </div>
+        ) : (
+          <>
+          {/* Splits, above every group and directly under the filters.
+              A split can span repos, so nesting it under one repo's heading
+              named an owner it doesn't have. Its own section says the true
+              thing: these are on screen together, wherever they came from. */}
+          {visibleSplits.length > 0 && (
+            <div>
+              <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
+                <span className="w-2 text-center text-[9px] text-muted-foreground">▾</span>
+                <Columns2 size={12} className="text-blue" />
+                <span className="flex-1 truncate text-[11.5px] font-semibold text-text">
+                  {visibleSplits.length === 1 ? "Split" : "Splits"}
+                </span>
+                <Badge tone="count" size="xs">
+                  {visibleSplits.length}
+                </Badge>
+              </div>
+              <div className="mb-1 flex flex-col gap-[3px]">{visibleSplits.map(renderSplit)}</div>
+            </div>
+          )}
+          {groups.map(renderSessionGroup)}
+          </>
+        )}
+      </div>)
+  }
+
+  function renderPendingEnvironment() {
+    return (pendingEnvironmentSession && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="pending-environment-session"
+            aria-current={pendingEnvironmentSessionActive ? "page" : undefined}
+            onClick={onSelectPendingEnvironmentSession}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              pendingEnvironmentSessionActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <span className="relative flex size-7 flex-none items-center justify-center rounded-md bg-selection text-blue">
+              {pendingEnvironmentSession.environmentKind === "managed"
+                ? <Cloud size={15} aria-hidden />
+                : <Server size={15} aria-hidden />}
+              {pendingEnvironmentSession.error === null ? (
+                <LoaderCircle className="absolute -bottom-1 -right-1 animate-spin text-blue" size={10} aria-hidden />
+              ) : (
+                <CircleAlert className="absolute -bottom-1 -right-1 text-red" size={10} aria-hidden />
+              )}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12px] font-semibold">
+                {pendingEnvironmentSession.title}
+              </span>
+              <span className="block truncate text-[10px] text-dim">
+                {pendingEnvironmentSession.error ?? `Starting on ${pendingEnvironmentSession.environmentName} · ${pendingEnvironmentSession.repo}`}
+              </span>
+            </span>
+          </button>
+        </div>
+      ))
+  }
+
+  const renderSessionGroup = ((group) => {
+function renderExpandedGroupHeading() {
+                                    return (<>
+                    <span className="w-2 text-center text-[9px] text-muted-foreground">▾</span>
+                    {isStatus ? (
+                      <StatusDot status={displayStatusTone[key as SessionDisplayStatus]} size={8} />
+                    ) : (
+                      <GitBranch size={12} className="text-cyan" />
+                    )}
+                    <span
+                      className={cn(
+                        "flex-1 truncate text-[11.5px] font-semibold text-text",
+                        isStatus ? "" : "font-mono"
+                      )}
+                    >
+                      {isStatus ? displayStatusLabel[key as SessionDisplayStatus] : key}
+                    </span>
+                  </>)
+                                  }
+
+                                function renderGroupHeading() {
+
+
+                                  if (collapsible) return (<button
+                    type="button"
+                    onClick={() => onToggleCollapsed?.(key)}
+                    aria-expanded={!collapsed}
+                    aria-label={collapsed ? "Expand repository" : "Collapse repository"}
+                    className="flex min-w-0 flex-1 items-center gap-[7px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <ChevronRight
+                      size={11}
+                      className={cn(
+                        "flex-none text-muted-foreground transition-transform",
+                        !collapsed && "rotate-90"
+                      )}
+                    />
+                    <GitBranch size={12} className="flex-none text-cyan" />
+                    <span className="flex-1 truncate font-mono text-[11.5px] font-semibold text-text">
+                      {key}
+                    </span>
+                  </button>)
+return (renderExpandedGroupHeading())
+                                }
+
+            // A `null` key is the flat list (Group by: None) — rows with no
+            // heading over them at all, rather than one heading called
+            // "Everything", which would be a header that says nothing.
+            if (group.key === null) {
+              return (
+                <div key="__flat__" className="mb-1 flex flex-col gap-[3px] pt-1">
+                  {group.sessions.map(renderEntry)}
+                </div>
+              )
+            }
+            const key = group.key
+            // Collapse applies to repo grouping only (Status groups stay open).
+            const collapsible = filters.groupBy === "repo" && Boolean(onToggleCollapsed)
+            const collapsed = collapsible && (collapsedRepoNames?.has(key) ?? false)
+            const isStatus = filters.groupBy === "status"
+            return (
+            <div key={key}>
+              <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
+                {renderGroupHeading()}
+                {filters.groupBy === "repo" && onToggleStar && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    type="button"
+                    aria-label={starredRepoNames?.has(key) ? "Unstar repository" : "Star repository"}
+                    aria-pressed={starredRepoNames?.has(key) ?? false}
+                    onClick={() => onToggleStar(key)}
+                    className={cn(
+                      "size-5 rounded hover:bg-surface",
+                      starredRepoNames?.has(key) && "text-yellow hover:text-yellow"
+                    )}
+                  >
+                    <Star size={12} className={starredRepoNames?.has(key) ? "fill-current" : undefined} />
+                  </Button>
+                )}
+                <Badge tone="count" size="xs">
+                  {group.sessions.length}
+                </Badge>
+              </div>
+              {!collapsed && (
+                <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
+              )}
+            </div>
+            )
+          }) satisfies  Parameters<typeof groups.map>[0]
+
+  function renderPullRequestsLink() {
+    return (onOpenPullRequests && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="pull-requests-sidebar-item"
+            aria-current={pullRequestsActive ? "page" : undefined}
+            onClick={onOpenPullRequests}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              pullRequestsActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <GitPullRequest size={15} className={pullRequestsActive ? "text-green" : undefined} />
+            <span className="flex-1">Pull requests</span>
+            {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
+          </button>
+        </div>
+      ))
+  }
+
   const [filters, setFiltersState] = React.useState<SessionFilters>(
     () => defaultFilters ?? loadFilters()
   )
@@ -476,83 +706,11 @@ function SidebarBody({
 
       {search ? <div className="px-3 pb-2">{search}</div> : null}
 
-      {onOpenPullRequests && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="pull-requests-sidebar-item"
-            aria-current={pullRequestsActive ? "page" : undefined}
-            onClick={onOpenPullRequests}
-            className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              pullRequestsActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <GitPullRequest size={15} className={pullRequestsActive ? "text-green" : undefined} />
-            <span className="flex-1">Pull requests</span>
-            {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
-          </button>
-        </div>
-      )}
+      {renderPullRequestsLink()}
 
-      {memoryEligible && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="memory-sidebar-item"
-            aria-current={memoryActive ? "page" : undefined}
-            onClick={onOpenMemory}
-            className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              memoryActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <BrainCircuit size={15} className={memoryActive ? "text-blue" : undefined} />
-            <span className="flex-1">Memory</span>
-            {memoryActive && <span className="text-[10px] text-blue">Open</span>}
-          </button>
-        </div>
-      )}
+      {renderMemoryLink()}
 
-      {pendingEnvironmentSession && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="pending-environment-session"
-            aria-current={pendingEnvironmentSessionActive ? "page" : undefined}
-            onClick={onSelectPendingEnvironmentSession}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              pendingEnvironmentSessionActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <span className="relative flex size-7 flex-none items-center justify-center rounded-md bg-selection text-blue">
-              {pendingEnvironmentSession.environmentKind === "managed"
-                ? <Cloud size={15} aria-hidden />
-                : <Server size={15} aria-hidden />}
-              {pendingEnvironmentSession.error === null ? (
-                <LoaderCircle className="absolute -bottom-1 -right-1 animate-spin text-blue" size={10} aria-hidden />
-              ) : (
-                <CircleAlert className="absolute -bottom-1 -right-1 text-red" size={10} aria-hidden />
-              )}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-semibold">
-                {pendingEnvironmentSession.title}
-              </span>
-              <span className="block truncate text-[10px] text-dim">
-                {pendingEnvironmentSession.error ?? `Starting on ${pendingEnvironmentSession.environmentName} · ${pendingEnvironmentSession.repo}`}
-              </span>
-            </span>
-          </button>
-        </div>
-      )}
+      {renderPendingEnvironment()}
 
       {/* Fixed persistent navigation: never narrowed by the ordinary list's
           status/repo filters, and never duplicated in those groups. */}
@@ -592,140 +750,7 @@ function SidebarBody({
       </div>
 
       {/* Groups (or the empty hint when there are no sessions yet) */}
-      <div className="flex flex-1 flex-col overflow-auto px-2 pb-2 pt-0.5">
-        {sessions.length === 0 ? (
-          <div className="flex flex-1 flex-col px-1">
-            <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
-              <Layers size={22} className="text-line-strong" />
-              <span className="text-[12px] leading-[1.5] text-muted-foreground">
-                No workspaces yet.
-                <br />
-                They&apos;ll appear here as you start them.
-              </span>
-            </div>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="m-auto flex flex-col items-center gap-2.5 px-4 text-center">
-            <Search size={20} className="text-line-strong" />
-            {/*
-              Names the FILTERS, not a search term. This panel no longer has a
-              text field — search is global and lives above this list — so the
-              only way to empty a non-empty store is the facet menu beside this
-              message. Quoting a search term here would name a control that is
-              not on screen, which is worse than saying nothing: the operator
-              would go looking for a box to clear.
-            */}
-            <span className="text-[12px] leading-[1.5] text-muted-foreground">
-              No sessions match these filters.
-            </span>
-          </div>
-        ) : (
-          <>
-          {/* Splits, above every group and directly under the filters.
-              A split can span repos, so nesting it under one repo's heading
-              named an owner it doesn't have. Its own section says the true
-              thing: these are on screen together, wherever they came from. */}
-          {visibleSplits.length > 0 && (
-            <div>
-              <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
-                <span className="w-2 text-center text-[9px] text-muted-foreground">▾</span>
-                <Columns2 size={12} className="text-blue" />
-                <span className="flex-1 truncate text-[11.5px] font-semibold text-text">
-                  {visibleSplits.length === 1 ? "Split" : "Splits"}
-                </span>
-                <Badge tone="count" size="xs">
-                  {visibleSplits.length}
-                </Badge>
-              </div>
-              <div className="mb-1 flex flex-col gap-[3px]">{visibleSplits.map(renderSplit)}</div>
-            </div>
-          )}
-          {groups.map((group) => {
-            // A `null` key is the flat list (Group by: None) — rows with no
-            // heading over them at all, rather than one heading called
-            // "Everything", which would be a header that says nothing.
-            if (group.key === null) {
-              return (
-                <div key="__flat__" className="mb-1 flex flex-col gap-[3px] pt-1">
-                  {group.sessions.map(renderEntry)}
-                </div>
-              )
-            }
-            const key = group.key
-            // Collapse applies to repo grouping only (Status groups stay open).
-            const collapsible = filters.groupBy === "repo" && Boolean(onToggleCollapsed)
-            const collapsed = collapsible && (collapsedRepoNames?.has(key) ?? false)
-            const isStatus = filters.groupBy === "status"
-            return (
-            <div key={key}>
-              <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
-                {collapsible ? (
-                  <button
-                    type="button"
-                    onClick={() => onToggleCollapsed?.(key)}
-                    aria-expanded={!collapsed}
-                    aria-label={collapsed ? "Expand repository" : "Collapse repository"}
-                    className="flex min-w-0 flex-1 items-center gap-[7px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <ChevronRight
-                      size={11}
-                      className={cn(
-                        "flex-none text-muted-foreground transition-transform",
-                        !collapsed && "rotate-90"
-                      )}
-                    />
-                    <GitBranch size={12} className="flex-none text-cyan" />
-                    <span className="flex-1 truncate font-mono text-[11.5px] font-semibold text-text">
-                      {key}
-                    </span>
-                  </button>
-                ) : (
-                  <>
-                    <span className="w-2 text-center text-[9px] text-muted-foreground">▾</span>
-                    {isStatus ? (
-                      <StatusDot status={displayStatusTone[key as SessionDisplayStatus]} size={8} />
-                    ) : (
-                      <GitBranch size={12} className="text-cyan" />
-                    )}
-                    <span
-                      className={cn(
-                        "flex-1 truncate text-[11.5px] font-semibold text-text",
-                        isStatus ? "" : "font-mono"
-                      )}
-                    >
-                      {isStatus ? displayStatusLabel[key as SessionDisplayStatus] : key}
-                    </span>
-                  </>
-                )}
-                {filters.groupBy === "repo" && onToggleStar && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    type="button"
-                    aria-label={starredRepoNames?.has(key) ? "Unstar repository" : "Star repository"}
-                    aria-pressed={starredRepoNames?.has(key) ?? false}
-                    onClick={() => onToggleStar(key)}
-                    className={cn(
-                      "size-5 rounded hover:bg-surface",
-                      starredRepoNames?.has(key) && "text-yellow hover:text-yellow"
-                    )}
-                  >
-                    <Star size={12} className={starredRepoNames?.has(key) ? "fill-current" : undefined} />
-                  </Button>
-                )}
-                <Badge tone="count" size="xs">
-                  {group.sessions.length}
-                </Badge>
-              </div>
-              {!collapsed && (
-                <div className="mb-1 flex flex-col gap-[3px]">{group.sessions.map(renderEntry)}</div>
-              )}
-            </div>
-            )
-          })}
-          </>
-        )}
-      </div>
+      {renderSessionList()}
 
       {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out). */}
       <div className="flex-none border-t border-hairline p-1.5">

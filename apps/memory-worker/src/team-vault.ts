@@ -111,6 +111,47 @@ export interface VaultPageHead {
   readonly acceptedAt: string
 }
 
+const findLatestScopedRevisions = (
+  snapshot: VaultSnapshot,
+  scopedModels: ReadonlyArray<MemoryMentalModel>,
+  scope: MemoryKnowledgeScope
+): ReadonlyMap<string, MemoryMentalModelRevision> => {
+  const latestModelRevisions = new Map<string, MemoryMentalModelRevision>()
+  for (const revision of snapshot.mentalModelRevisions) {
+    const model = scopedModels.find((candidate) => candidate.id === revision.modelId)
+    if (model === undefined || revision.definitionVersion !== model.definitionVersion) continue
+    const evidenceIsScoped = revision.evidenceObservationIds.every((observationId) => {
+      const observation = snapshot.observations.find((candidate) => candidate.id === observationId)
+      return observation !== undefined &&
+        observation.scope.kind === scope.kind && observation.scope.id === scope.id
+    })
+    if (!evidenceIsScoped) continue
+    const previous = latestModelRevisions.get(revision.modelId)
+    if (previous === undefined || revision.version > previous.version) {
+      latestModelRevisions.set(revision.modelId, revision)
+    }
+  }
+  return latestModelRevisions
+}
+
+const boundReflectionText = <T extends { readonly text: string }>(candidates: ReadonlyArray<T>) => {
+  const selected: Array<T> = []
+  const lines: string[] = []
+  let remainingCharacters = MAX_REFLECTION_CHARACTERS
+  for (const candidate of candidates) {
+    const separatorCharacters = lines.length === 0 ? 0 : 2
+    const availableCharacters = remainingCharacters - separatorCharacters
+    if (availableCharacters <= 0) break
+    const represented = candidate.text.slice(0, availableCharacters)
+    if (represented.trim().length === 0) break
+    selected.push(candidate)
+    lines.push(represented)
+    remainingCharacters -= represented.length + separatorCharacters
+    if (represented.length < candidate.text.length) break
+  }
+  return { selected, lines }
+}
+
 export interface VaultSnapshot {
   readonly version: number
   readonly heads: ReadonlyArray<VaultPageHead>
@@ -1309,29 +1350,33 @@ export class TeamVault {
         this.sources(current)
       )
       const candidateById = new Map(prepared.candidatePages.map((page) => [page.id, page]))
-      const storedRevisions: Array<StoredRevisionRecord> = []
-      for (const proposal of setProposals) {
-        const head = heads.get(proposal.pageId)
-        const candidate = candidateById.get(proposal.pageId)
-        if (candidate === undefined) {
-          return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} disappeared` })
+      const storeSetRevisions = () => Effect.gen(this, function* () {
+        const storedRevisions: Array<StoredRevisionRecord> = []
+        for (const proposal of setProposals) {
+          const head = heads.get(proposal.pageId)
+          const candidate = candidateById.get(proposal.pageId)
+          if (candidate === undefined) {
+            return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} disappeared` })
+          }
+          if (head === undefined && proposal.baseRevisionId !== NEW_PAGE_BASE_REVISION_ID) {
+            return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} lost its accepted head` })
+          }
+          storedRevisions.push(
+            yield* Effect.promise(() => this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
+              id: `revision:${proposal.id}`,
+              pageId: proposal.pageId,
+              revision: candidate.revision,
+              ...(head === undefined ? {} : { parentRevisionId: head.revisionId }),
+              authorId: proposal.proposedBy,
+              createdAt: proposal.createdAt,
+              acceptedAt,
+              publicationId: proposalSet.id
+            }))
+          )
         }
-        if (head === undefined && proposal.baseRevisionId !== NEW_PAGE_BASE_REVISION_ID) {
-          return yield* new MemoryVaultError({ code: "invalid", message: `proposal page ${proposal.pageId} lost its accepted head` })
-        }
-        storedRevisions.push(
-          yield* Effect.promise(() => this.objects.putAcceptedRevision(serializeMemoryMarkdown(candidate), {
-            id: `revision:${proposal.id}`,
-            pageId: proposal.pageId,
-            revision: candidate.revision,
-            ...(head === undefined ? {} : { parentRevisionId: head.revisionId }),
-            authorId: proposal.proposedBy,
-            createdAt: proposal.createdAt,
-            acceptedAt,
-            publicationId: proposalSet.id
-          }))
-        )
-      }
+        return storedRevisions
+      })
+      const storedRevisions = yield* storeSetRevisions()
       yield* Effect.promise(() => this.objects.putPublicationCommit({
         id: proposalSet.id,
         revisionIds: storedRevisions.map((revision) => revision.id),
@@ -1484,6 +1529,20 @@ export class TeamVault {
     }))
   }
 
+  private acceptedProposalResult(current: VaultSnapshot, proposal: MemoryProposal): Effect.Effect<ApprovalResult, MemoryVaultError> {
+    return Effect.gen(function* () {
+      const revision = current.revisions.find((candidate) => candidate.id === `revision:${proposal.id}`)
+      if (revision === undefined) return yield* new MemoryVaultError({ code: "invalid", message: "accepted proposal revision is missing" })
+      return {
+        status: "accepted",
+        proposalId: proposal.id,
+        pageId: proposal.pageId,
+        revisionId: revision.id,
+        revision: revision.revision
+      }
+    })
+  }
+
   approveProposal(proposalId: string, reviewerId: string, acceptedAt: string): Effect.Effect<ApprovalResult, MemoryVaultError> {
     return this.serialized(Effect.gen(this, function* () {
       const current = yield* this.state.load()
@@ -1492,15 +1551,7 @@ export class TeamVault {
       const head = current.heads.find((candidate) => candidate.pageId === proposal.pageId)
       if (head === undefined) return yield* new MemoryVaultError({ code: "not_found", message: `page ${proposal.pageId} was not found`, status: 404 })
       if (proposal.status === "accepted") {
-        const revision = current.revisions.find((candidate) => candidate.id === `revision:${proposal.id}`)
-        if (revision === undefined) return yield* new MemoryVaultError({ code: "invalid", message: "accepted proposal revision is missing" })
-        return {
-          status: "accepted",
-          proposalId,
-          pageId: proposal.pageId,
-          revisionId: revision.id,
-          revision: revision.revision
-        }
+        return yield* this.acceptedProposalResult(current, proposal)
       }
       if (proposal.status !== "open" || head.revisionId !== proposal.baseRevisionId) {
         const proposals = current.proposals.map((candidate): MemoryProposal =>
@@ -1927,12 +1978,8 @@ export class TeamVault {
     })
   }
 
-  compilerContext(
-    claims: ReadonlyArray<string>,
-    preferredPageId?: string
-  ): Effect.Effect<CompilerVaultContext, MemoryVaultError> {
+  private findCompilerCandidateIds(claims: ReadonlyArray<string>, preferredPageId?: string) {
     return Effect.gen(this, function* () {
-      const snapshot = yield* this.state.load()
       const candidateIds = new Set<string>()
       if (preferredPageId !== undefined) candidateIds.add(preferredPageId)
       for (const claim of claims.slice(0, 32)) {
@@ -1942,6 +1989,17 @@ export class TeamVault {
         }
         if (candidateIds.size >= 48) break
       }
+      return candidateIds
+    })
+  }
+
+  compilerContext(
+    claims: ReadonlyArray<string>,
+    preferredPageId?: string
+  ): Effect.Effect<CompilerVaultContext, MemoryVaultError> {
+    return Effect.gen(this, function* () {
+      const snapshot = yield* this.state.load()
+      const candidateIds = yield* this.findCompilerCandidateIds(claims, preferredPageId)
       const candidatePages = yield* this.loadPages(snapshot, [...candidateIds])
       const projectedPages = (yield* this.state.loadProjectedPages()) ?? []
       const schemaPages = projectedPages
@@ -2129,21 +2187,7 @@ export class TeamVault {
       const scopedModels = snapshot.mentalModels.filter((model) =>
         model.scope.kind === scope.kind && model.scope.id === scope.id
       )
-      const latestModelRevisions = new Map<string, MemoryMentalModelRevision>()
-      for (const revision of snapshot.mentalModelRevisions) {
-        const model = scopedModels.find((candidate) => candidate.id === revision.modelId)
-        if (model === undefined || revision.definitionVersion !== model.definitionVersion) continue
-        const evidenceIsScoped = revision.evidenceObservationIds.every((observationId) => {
-          const observation = snapshot.observations.find((candidate) => candidate.id === observationId)
-          return observation !== undefined &&
-            observation.scope.kind === scope.kind && observation.scope.id === scope.id
-        })
-        if (!evidenceIsScoped) continue
-        const previous = latestModelRevisions.get(revision.modelId)
-        if (previous === undefined || revision.version > previous.version) {
-          latestModelRevisions.set(revision.modelId, revision)
-        }
-      }
+      const latestModelRevisions = findLatestScopedRevisions(snapshot, scopedModels, scope)
       const terms = [...new Set(
         query.toLocaleLowerCase("en-US").split(/\s+/u).filter(Boolean)
       )]
@@ -2175,20 +2219,7 @@ export class TeamVault {
           right.score - left.score || compareText(left.id, right.id)
         )
         .slice(0, boundedLimit)
-      const selected: typeof candidates = []
-      const lines: string[] = []
-      let remainingCharacters = MAX_REFLECTION_CHARACTERS
-      for (const candidate of candidates) {
-        const separatorCharacters = lines.length === 0 ? 0 : 2
-        const availableCharacters = remainingCharacters - separatorCharacters
-        if (availableCharacters <= 0) break
-        const represented = candidate.text.slice(0, availableCharacters)
-        if (represented.trim().length === 0) break
-        selected.push(candidate)
-        lines.push(represented)
-        remainingCharacters -= represented.length + separatorCharacters
-        if (represented.length < candidate.text.length) break
-      }
+      const { selected, lines } = boundReflectionText(candidates)
       return {
         text: lines.length === 0
           ? "No accepted memory evidence matched this reflection."

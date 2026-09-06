@@ -262,6 +262,22 @@ const titleFor = (directory: boolean, github: boolean, cloneReady: boolean, form
 }
 
 export function AddProjectDialog(props: AddProjectDialogProps) {
+         function renderDialogHeader() {
+           return (<DialogHeader>
+          {(directory || github) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => send({ type: "BACK" })}><ArrowLeft size={15} /></Button>}
+          <DialogTitle>{titleFor(directory, github, cloneReady, form, method)}</DialogTitle>
+          {directoryListing && directory && <span className="max-w-[55%] truncate text-[11px] font-normal text-muted-foreground">{directoryListing.path}</span>}
+        </DialogHeader>)
+         }
+
+         function getDirectory() {
+           if (directory) return (<DirectoryBrowser key={directoryListing?.path ?? "loading"} listing={directoryListing} loading={directoryLoading} error={directoryError} onOpen={(nextPath) => send({ type: "OPEN_DIRECTORY", ...(nextPath === undefined ? {} : { path: nextPath }) })} />)
+           if (github) return (<GitHubRepositoryPicker repositories={githubRepositories} loading={githubLoading} error={githubError} onSelect={(repository) => send({ type: "SELECT_GITHUB_REPOSITORY", repository })} />)
+           if (cloneReady && selectedGitHubRepository) return (<CloneConfirmation repository={selectedGitHubRepository} destination={path} name={name} error={error} onName={(value) => send({ type: "SET_NAME", name: value })} />)
+           if (form) return (<ProjectForm path={path} name={name} error={error} onPath={(value) => send({ type: "SET_PATH", path: value })} onName={(value) => send({ type: "SET_NAME", name: value })} />)
+           return (<MethodPicker onSelect={(value) => send({ type: "SELECT", method: value })} />)
+         }
+
   const depsRef = useRef<AddProjectDeps>(props)
   depsRef.current = props
   const getDeps = useCallback(() => depsRef.current, [])
@@ -282,23 +298,9 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
   return (
     <Dialog open={props.open} onOpenChange={(open) => send({ type: open ? "OPEN" : "CLOSE" })}>
       <DialogContent className="max-w-[720px]">
-        <DialogHeader>
-          {(directory || github) && <Button variant="ghost" size="icon" aria-label="Back" onClick={() => send({ type: "BACK" })}><ArrowLeft size={15} /></Button>}
-          <DialogTitle>{titleFor(directory, github, cloneReady, form, method)}</DialogTitle>
-          {directoryListing && directory && <span className="max-w-[55%] truncate text-[11px] font-normal text-muted-foreground">{directoryListing.path}</span>}
-        </DialogHeader>
+        {renderDialogHeader()}
         <DialogBody className="p-0">
-          {directory ? (
-            <DirectoryBrowser key={directoryListing?.path ?? "loading"} listing={directoryListing} loading={directoryLoading} error={directoryError} onOpen={(nextPath) => send({ type: "OPEN_DIRECTORY", ...(nextPath === undefined ? {} : { path: nextPath }) })} />
-          ) : github ? (
-            <GitHubRepositoryPicker repositories={githubRepositories} loading={githubLoading} error={githubError} onSelect={(repository) => send({ type: "SELECT_GITHUB_REPOSITORY", repository })} />
-          ) : cloneReady && selectedGitHubRepository ? (
-            <CloneConfirmation repository={selectedGitHubRepository} destination={path} name={name} error={error} onName={(value) => send({ type: "SET_NAME", name: value })} />
-          ) : form ? (
-            <ProjectForm path={path} name={name} error={error} onPath={(value) => send({ type: "SET_PATH", path: value })} onName={(value) => send({ type: "SET_NAME", name: value })} />
-          ) : (
-            <MethodPicker onSelect={(value) => send({ type: "SELECT", method: value })} />
-          )}
+          {getDirectory()}
         </DialogBody>
         {directory && directoryListing && !directoryLoading && (
           <DialogFooter className="justify-between">

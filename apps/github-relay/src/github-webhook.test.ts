@@ -257,3 +257,33 @@ describe("GitHub webhook normalization", () => {
     ).resolves.toBeNull()
   })
 })
+
+describe("webhook identity projection", () => {
+  it.each([
+    { installation: null },
+    { installation: { id: null } },
+    { repository: null },
+    { repository: { id: 10, name: "jingler", owner: {} } },
+    { sender: null },
+    { sender: { id: 7, type: "User" } },
+    { sender: { id: 7, login: "reviewer" } }
+  ])("rejects incomplete routing identity: %j", async (override) => {
+    await expect(normalizeGitHubWebhook({
+      deliveryId: "missing-identity", eventName: "issue_comment",
+      payload: githubPayload(override)
+    })).resolves.toBeNull()
+  })
+
+  it("preserves status action and timestamp fallbacks without a PR route", async () => {
+    await expect(normalizeGitHubWebhook({
+      deliveryId: "status-fallback", eventName: "status",
+      payload: githubPayload({
+        action: undefined, state: "success",
+        updated_at: "2026-08-04T12:00:00Z", created_at: "2026-08-04T11:00:00Z"
+      })
+    })).resolves.toMatchObject({
+      action: "success", occurredAt: "2026-08-04T12:00:00Z",
+      pullRequest: null, actionable: false
+    })
+  })
+})

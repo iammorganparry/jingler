@@ -300,6 +300,20 @@ const archivedPlanOf = (entry: ViewEntry) => {
   } as const
 }
 
+const planResponse = (entry: ViewEntry): Response => {
+  const readOnly = !entry.canDecide || entry.document.reviewId === undefined
+  const archived = readOnly ? archivedPlanOf(entry) : null
+  return json({
+    plan: archived?.markdown ?? reviewMarkdownOf(entry.document),
+    origin: "pi",
+    mode: readOnly ? "archive" : undefined,
+    archivePlans: archived ? [archived.descriptor] : undefined,
+    sharingEnabled: false,
+    approvalNotesSupported: true,
+    serverConfig: { displayName: "Jingler" }
+  })
+}
+
 const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Response> => {
   if (path === "/") {
     host.reviewHtml ??= readFile(reviewAssetPath(), "utf8")
@@ -311,17 +325,7 @@ const handleGet = async (host: Host, entry: ViewEntry, path: string): Promise<Re
     })
   }
   if (path === "/api/plan") {
-    const readOnly = !entry.canDecide || entry.document.reviewId === undefined
-    const archived = readOnly ? archivedPlanOf(entry) : null
-    return json({
-      plan: archived?.markdown ?? reviewMarkdownOf(entry.document),
-      origin: "pi",
-      mode: readOnly ? "archive" : undefined,
-      archivePlans: archived ? [archived.descriptor] : undefined,
-      sharingEnabled: false,
-      approvalNotesSupported: true,
-      serverConfig: { displayName: "Jingler" }
-    })
+    return planResponse(entry)
   }
   if (path === "/api/ai/capabilities") return json({ available: false, providers: [] })
   if (path === "/api/skills") return json({ skills: [] })

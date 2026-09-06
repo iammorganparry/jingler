@@ -26,6 +26,26 @@ import { PlanPrd } from "@jingler/core"
 import { AppPaths } from "./app-paths.js"
 import { migrateLegacyConfigIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
+/** Preserve the historical omission rules while copying unrelated settings. */
+const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceConfig> => {
+  if (existing === null) return {}
+  // Every unrelated section must survive this whole-object read-modify-write.
+  const truthyKeys = [
+    "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
+    "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
+    "planTemplate", "notifications", "theme", "webSearch", "memory", "offloadCompute",
+    "disabledPlugins"
+  ] as const
+  // A saved false (or zero) is a real value, not an absent section.
+  const definedKeys = [
+    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "fontScale"
+  ] as const
+  return Object.fromEntries([
+    ...truthyKeys.filter((key) => Boolean(existing[key])).map((key) => [key, existing[key]]),
+    ...definedKeys.filter((key) => existing[key] !== undefined).map((key) => [key, existing[key]])
+  ])
+}
+
 const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
@@ -124,40 +144,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
           const config: WorkspaceConfig = {
             reposDir: existing?.reposDir ?? null,
             createdAt,
-            ...(existing?.context ? { context: existing.context } : {}),
-            ...(existing?.github ? { github: existing.github } : {}),
-            ...(existing?.git ? { git: existing.git } : {}),
-            ...(existing?.starredRepos ? { starredRepos: existing.starredRepos } : {}),
-            ...(existing?.collapsedRepos ? { collapsedRepos: existing.collapsedRepos } : {}),
-            ...(existing?.lastRepoPath ? { lastRepoPath: existing.lastRepoPath } : {}),
-            ...(existing?.defaultConnectionId
-              ? { defaultConnectionId: existing.defaultConnectionId }
-              : {}),
-            ...(existing?.defaultProviderId
-              ? { defaultProviderId: existing.defaultProviderId }
-              : {}),
-            ...(existing?.defaultModelId ? { defaultModelId: existing.defaultModelId } : {}),
-            ...(existing?.defaultMode ? { defaultMode: existing.defaultMode } : {}),
-            ...(existing?.connectionSelectionRequired !== undefined
-              ? { connectionSelectionRequired: existing.connectionSelectionRequired }
-              : {}),
-            ...(existing?.providerSetupCompleted !== undefined
-              ? { providerSetupCompleted: existing.providerSetupCompleted }
-              : {}),
-            ...(existing?.planTemplate ? { planTemplate: existing.planTemplate } : {}),
-            ...(existing?.notifications ? { notifications: existing.notifications } : {}),
-            // Booleans are checked against `undefined`, not truthiness — a saved
-            // `false` is a real setting and must survive an unrelated write.
-            ...(existing?.planAutoRun !== undefined ? { planAutoRun: existing.planAutoRun } : {}),
-            ...(existing?.adhdMode !== undefined ? { adhdMode: existing.adhdMode } : {}),
-            ...(existing?.fontScale !== undefined ? { fontScale: existing.fontScale } : {}),
-            ...(existing?.theme ? { theme: existing.theme } : {}),
-            ...(existing?.webSearch ? { webSearch: existing.webSearch } : {}),
-            ...(existing?.memory ? { memory: existing.memory } : {}),
-            ...(existing?.offloadCompute ? { offloadCompute: existing.offloadCompute } : {}),
-            ...(existing?.disabledPlugins ? { disabledPlugins: existing.disabledPlugins } : {}),
-            // MANDATORY: omit a section here and every unrelated save silently
-            // drops it, because `patch` is a whole-object read-modify-write.
+            ...preservedSettings(existing),
             ...patch
           }
           return yield* persist(config)

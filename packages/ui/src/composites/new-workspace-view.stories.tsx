@@ -456,6 +456,79 @@ function PreviewField({
 }
 
 function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: PreviewSource }) {
+function renderSourceSearch() {
+      return (<div className="mb-3 flex items-center gap-2">
+                <SearchInput
+                  value={search}
+                  onChange={setSearch}
+                  placeholder={source === "branch"
+                    ? "Search branches…"
+                    : source === "pr"
+                      ? "Search pull requests…"
+                      : `Search ${source === "linear" ? "Linear" : "GitHub"} issues…`}
+                  className="flex-1"
+                />
+                {source !== "branch" && (
+                  <Button variant="secondary" className="h-[34px]">Just mine</Button>
+                )}
+              </div>)
+    }
+
+  function getBaseBranch() {
+    return (source === "branch"
+    ? selectedBranch || "Choose a branch"
+    : source === "pr"
+      ? selectedPr?.headRefName ?? "Choose a pull request"
+      : "main")
+  }
+
+  function renderSourcePicker() {
+
+
+    return (<section className="rounded-xl border border-line bg-panel p-3" aria-label="Source picker">
+              {renderSourceSearch()}
+
+              {source === "branch" ? (
+                <div className="grid grid-cols-2 gap-2">
+                  {["feat/session-sources", "fix/linear-plugin-loading", "release/2.0", "main"]
+                    .filter((candidate) => candidate.includes(search))
+                    .map((candidate) => (
+                      <button
+                        key={candidate}
+                        type="button"
+                        aria-pressed={candidate === selectedBranch}
+                        onClick={() => setSelectedBranch(candidate)}
+                        className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-left font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                          candidate === selectedBranch
+                            ? "border-blue/55 bg-blue/10 text-text-bright"
+                            : "border-line bg-sunken text-text hover:border-line-strong"
+                        }`}
+                      >
+                        <GitBranch size={14} className="text-muted-foreground" />
+                        {candidate}
+                      </button>
+                    ))}
+                </div>
+              ) : source === "pr" ? (
+                <PrPickerList
+                  prs={PREVIEW_PRS.filter((pr) => pr.title.toLowerCase().includes(search.toLowerCase()))}
+                  selected={selectedPr?.number ?? null}
+                  onSelect={setSelectedPr}
+                />
+              ) : (
+                <IssuePickerList
+                  issues={issues.filter((candidate) =>
+                    `${candidate.identifier} ${candidate.title}`.toLowerCase().includes(search.toLowerCase()))}
+                  selected={selectedIssue?.id ?? null}
+                  onSelect={(next) => {
+                    setSelectedIssue(next)
+                    setDraft(`${next.title}\n\n${next.body}`)
+                  }}
+                />
+              )}
+            </section>)
+  }
+
   const [source, setSource] = useState<PreviewSource>(initialSource)
   const [search, setSearch] = useState("")
   const [selectedBranch, setSelectedBranch] = useState(
@@ -482,11 +555,7 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
   }
 
   const issues = source === "linear" ? LINEAR_ISSUES : GITHUB_ISSUES
-  const branch = source === "branch"
-    ? selectedBranch || "Choose a branch"
-    : source === "pr"
-      ? selectedPr?.headRefName ?? "Choose a pull request"
-      : "main"
+  const branch = getBaseBranch()
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="session-source-prototype">
@@ -557,62 +626,7 @@ function SessionSourcePrototype({ initialSource = "blank" }: { initialSource?: P
           </div>
 
           {source !== "blank" && (
-            <section className="rounded-xl border border-line bg-panel p-3" aria-label="Source picker">
-              <div className="mb-3 flex items-center gap-2">
-                <SearchInput
-                  value={search}
-                  onChange={setSearch}
-                  placeholder={source === "branch"
-                    ? "Search branches…"
-                    : source === "pr"
-                      ? "Search pull requests…"
-                      : `Search ${source === "linear" ? "Linear" : "GitHub"} issues…`}
-                  className="flex-1"
-                />
-                {source !== "branch" && (
-                  <Button variant="secondary" className="h-[34px]">Just mine</Button>
-                )}
-              </div>
-
-              {source === "branch" ? (
-                <div className="grid grid-cols-2 gap-2">
-                  {["feat/session-sources", "fix/linear-plugin-loading", "release/2.0", "main"]
-                    .filter((candidate) => candidate.includes(search))
-                    .map((candidate) => (
-                      <button
-                        key={candidate}
-                        type="button"
-                        aria-pressed={candidate === selectedBranch}
-                        onClick={() => setSelectedBranch(candidate)}
-                        className={`flex min-h-11 items-center gap-2 rounded-lg border px-3 text-left font-mono text-[11.5px] outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                          candidate === selectedBranch
-                            ? "border-blue/55 bg-blue/10 text-text-bright"
-                            : "border-line bg-sunken text-text hover:border-line-strong"
-                        }`}
-                      >
-                        <GitBranch size={14} className="text-muted-foreground" />
-                        {candidate}
-                      </button>
-                    ))}
-                </div>
-              ) : source === "pr" ? (
-                <PrPickerList
-                  prs={PREVIEW_PRS.filter((pr) => pr.title.toLowerCase().includes(search.toLowerCase()))}
-                  selected={selectedPr?.number ?? null}
-                  onSelect={setSelectedPr}
-                />
-              ) : (
-                <IssuePickerList
-                  issues={issues.filter((candidate) =>
-                    `${candidate.identifier} ${candidate.title}`.toLowerCase().includes(search.toLowerCase()))}
-                  selected={selectedIssue?.id ?? null}
-                  onSelect={(next) => {
-                    setSelectedIssue(next)
-                    setDraft(`${next.title}\n\n${next.body}`)
-                  }}
-                />
-              )}
-            </section>
+            renderSourcePicker()
           )}
 
           <Composer

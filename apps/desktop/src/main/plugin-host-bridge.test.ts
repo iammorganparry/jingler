@@ -123,3 +123,17 @@ describe("plugin host settings bridge", () => {
     expect(reply).toEqual({ ok: false, message: "setting is not declared" })
   })
 })
+
+it.each([new Error("unavailable"), "unavailable"])(
+  "converts synchronous secret failures to refusal values: %s",
+  async (cause) => {
+    const handle = setup(() => { throw cause })
+    await expect(handle("linear", "settings.getSecret", { settingId: "key" }))
+      .resolves.toEqual({ ok: false, message: "unavailable" })
+  }
+)
+
+it("preserves null secret results as successful values", async () => {
+  await expect(setup()("linear", "settings.getSecret", { settingId: "key" }))
+    .resolves.toEqual({ ok: true, value: null })
+})

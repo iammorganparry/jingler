@@ -86,36 +86,37 @@ export const verifyGitHubRelayGrant = (
   const signed = `${headerPart}.${payloadPart}`
   if (!safeEqual(signature, sign(signed, secret))) throw new GitHubRelayGrantError()
   try {
-    const header = object(JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8")))
-    const claims = object(JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")))
-    if (
-      header?.alg !== "HS256" ||
-      header.typ !== "JinglerGitHubGrant" ||
-      header.version !== 1 ||
-      claims?.version !== 1 ||
-      claims.issuer !== "jingler" ||
-      claims.audience !== "jingler-github-relay" ||
-      !string(claims.subject) ||
-      !string(claims.installationId) ||
-      !/^\d+$/.test(claims.installationId) ||
-      !integer(claims.issuedAt) ||
-      !integer(claims.expiresAt) ||
-      !string(claims.grantId) ||
-      claims.issuedAt > nowSeconds + 60 ||
-      claims.expiresAt <= nowSeconds
-    ) {
-      throw new GitHubRelayGrantError()
+    const decodeRelayClaims = (): GitHubDesktopGrantClaims => {
+      const header = object(JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8")))
+      const claims = object(JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")))
+      if (
+        !validRelayHeader(header) ||
+        claims?.version !== 1 ||
+        claims.issuer !== "jingler" ||
+        claims.audience !== "jingler-github-relay" ||
+        !string(claims.subject) ||
+        !string(claims.installationId) ||
+        !/^\d+$/.test(claims.installationId) ||
+        !integer(claims.issuedAt) ||
+        !integer(claims.expiresAt) ||
+        !string(claims.grantId) ||
+        claims.issuedAt > nowSeconds + 60 ||
+        claims.expiresAt <= nowSeconds
+      ) {
+        throw new GitHubRelayGrantError()
+      }
+      return {
+        version: 1,
+        issuer: "jingler",
+        audience: "jingler-github-relay",
+        subject: claims.subject,
+        installationId: claims.installationId,
+        issuedAt: claims.issuedAt,
+        expiresAt: claims.expiresAt,
+        grantId: claims.grantId
+      }
     }
-    return {
-      version: 1,
-      issuer: "jingler",
-      audience: "jingler-github-relay",
-      subject: claims.subject,
-      installationId: claims.installationId,
-      issuedAt: claims.issuedAt,
-      expiresAt: claims.expiresAt,
-      grantId: claims.grantId
-    }
+    return decodeRelayClaims()
   } catch (error) {
     if (error instanceof GitHubRelayGrantError) throw error
     throw new GitHubRelayGrantError()
@@ -189,3 +190,6 @@ export const issueGitHubDesktopGrant = (
 ): GitHubDesktopGrantResponse =>
   issueGitHubRelayGrant(input, { ...config, ttlSeconds }, nowSeconds, grantId)
 export const verifyGitHubDesktopGrant = verifyGitHubRelayGrant
+
+const validRelayHeader = (header: Record<string, unknown> | null): boolean =>
+  header?.alg === "HS256" && header.typ === "JinglerGitHubGrant" && header.version === 1

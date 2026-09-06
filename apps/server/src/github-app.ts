@@ -297,26 +297,7 @@ export const createGitHubAppClient = (
         })
         const rows = Array.isArray(body.installations) ? body.installations : null
         if (!rows) throw new GitHubAppError("invalid-response")
-        for (const value of rows) {
-          const row = object(value)
-          const account = object(row?.account)
-          const id = number(row?.id)
-          const accountId = number(account?.id)
-          const login = string(account?.login)
-          if (id === null || !account || accountId === null || !login) continue
-          installations.push({
-            id: String(id),
-            account: {
-              id: String(accountId),
-              login,
-              type: string(account.type) ?? "Unknown",
-              avatarUrl: string(account.avatar_url)
-            },
-            repositorySelection: row?.repository_selection === "selected" ? "selected" : "all",
-            permissions: permissionsFrom(row?.permissions),
-            suspendedAt: string(row?.suspended_at) ? new Date(String(row?.suspended_at)) : null
-          })
-        }
+        appendInstallations(rows, installations)
         if (rows.length < 100) break
       }
       return installations
@@ -331,6 +312,12 @@ export const createGitHubAppClient = (
         )
         const rows = Array.isArray(body.repositories) ? body.repositories : null
         if (!rows) throw new GitHubAppError("invalid-response")
+        appendRepositories(rows)
+        if (rows.length < 100) break
+      }
+      return repositories
+
+      function appendRepositories(rows: unknown[]) {
         for (const value of rows) {
           const row = object(value)
           const id = number(row?.id)
@@ -338,9 +325,7 @@ export const createGitHubAppClient = (
           if (id === null || !fullName) throw new GitHubAppError("invalid-response")
           repositories.push({ id: String(id), fullName })
         }
-        if (rows.length < 100) break
       }
-      return repositories
     },
 
     createInstallationAccessToken: async (installationId, scope) => {
@@ -495,13 +480,7 @@ export const createGitHubTokenCipher = (
         readonly key: Buffer
         readonly offset: number
       }> =
-        parts[0] === "v2" && parts.length === 5 && parts[1]
-          ? keys
-              .filter((key) => key.id === parts[1])
-              .map((key) => ({ key: key.current, offset: 2 }))
-          : parts[0] === "v1" && parts.length === 4
-            ? keys.map((key) => ({ key: key.legacy, offset: 1 }))
-            : []
+        decryptionCandidates()
       for (const candidate of candidates) {
         const encodedIv = parts[candidate.offset]
         const encodedTag = parts[candidate.offset + 1]
@@ -514,6 +493,16 @@ export const createGitHubTokenCipher = (
         }
       }
       throw new GitHubAppError("invalid-response")
+
+      function decryptionCandidates(): readonly { readonly key: Buffer; readonly offset: number }[] {
+        return parts[0] === "v2" && parts.length === 5 && parts[1]
+          ? keys
+            .filter((key) => key.id === parts[1])
+            .map((key) => ({ key: key.current, offset: 2 }))
+          : parts[0] === "v1" && parts.length === 4
+            ? keys.map((key) => ({ key: key.legacy, offset: 1 }))
+            : []
+      }
     }
   }
 }
@@ -533,3 +522,26 @@ export const createGitHubPkce = (): {
 }
 
 export { issueGitHubDesktopGrant, verifyGitHubDesktopGrant } from "./github-relay-grant.js"
+
+function appendInstallations(rows: unknown[], installations: Array<GitHubApiInstallation>) {
+  for (const value of rows) {
+    const row = object(value)
+    const account = object(row?.account)
+    const id = number(row?.id)
+    const accountId = number(account?.id)
+    const login = string(account?.login)
+    if (id === null || !account || accountId === null || !login) continue
+    installations.push({
+      id: String(id),
+      account: {
+        id: String(accountId),
+        login,
+        type: string(account.type) ?? "Unknown",
+        avatarUrl: string(account.avatar_url)
+      },
+      repositorySelection: row?.repository_selection === "selected" ? "selected" : "all",
+      permissions: permissionsFrom(row?.permissions),
+      suspendedAt: string(row?.suspended_at) ? new Date(String(row?.suspended_at)) : null
+    })
+  }
+}

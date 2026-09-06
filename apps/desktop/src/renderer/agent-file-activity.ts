@@ -160,6 +160,16 @@ const LINE_SUFFIX = /:\d+(?::\d+)?$/
 const withoutMacPrivateAlias = (path: string): string =>
   path.startsWith("/private/") ? path.slice("/private".length) : path
 
+const relativeToWorktree = (raw: string, root: string): string | null => {
+  const windows = WINDOWS_ABSOLUTE.test(root)
+  const canonicalRaw = windows ? raw : withoutMacPrivateAlias(raw)
+  const canonicalRoot = windows ? root : withoutMacPrivateAlias(root)
+  const candidateForCompare = windows ? canonicalRaw.toLowerCase() : canonicalRaw
+  const rootForCompare = windows ? canonicalRoot.toLowerCase() : canonicalRoot
+  if (!candidateForCompare.startsWith(`${rootForCompare}/`)) return null
+  return canonicalRaw.slice(canonicalRoot.length + 1)
+}
+
 /** Convert a tool target to a contained, repository-relative path. */
 export const normalizeAgentFileTarget = (
   rawTarget: string,
@@ -172,15 +182,15 @@ export const normalizeAgentFileTarget = (
   const absolute = raw.startsWith("/") || WINDOWS_ABSOLUTE.test(raw)
   if (absolute) {
     if (!root) return null
-    const windows = WINDOWS_ABSOLUTE.test(root)
-    const canonicalRaw = windows ? raw : withoutMacPrivateAlias(raw)
-    const canonicalRoot = windows ? root : withoutMacPrivateAlias(root)
-    const candidateForCompare = windows ? canonicalRaw.toLowerCase() : canonicalRaw
-    const rootForCompare = windows ? canonicalRoot.toLowerCase() : canonicalRoot
-    if (!candidateForCompare.startsWith(`${rootForCompare}/`)) return null
-    relative = canonicalRaw.slice(canonicalRoot.length + 1)
+    const contained = relativeToWorktree(raw, root)
+    if (contained === null) return null
+    relative = contained
   }
 
+  return normalizeRelativeTarget(relative)
+}
+
+const normalizeRelativeTarget = (relative: string): string | null => {
   const parts: string[] = []
   for (const part of relative.replace(/^\.\//, "").split("/")) {
     if (part === "" || part === ".") continue

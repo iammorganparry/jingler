@@ -64,51 +64,59 @@ export const parseCsv = (text: string, delimiter?: string): string[][] => {
   let fieldStart = true
   const n = text.length
 
-  for (let i = 0; i < n; i++) {
-    const c = text[i]!
-
-    if (inQuotes) {
-      if (c === '"') {
-        // A doubled quote inside a quoted field is one literal quote; anything
-        // else closes the quoted section.
-        if (text[i + 1] === '"') {
-          field += '"'
-          i++
-        } else {
-          inQuotes = false
-        }
-      } else {
-        field += c
-      }
-      continue
+  // Quoted characters have their own escape rule and never end a row.
+  const consumeQuotedCharacter = (c: string, index: number): number => {
+    if (c !== '"') {
+      field += c
+      return index
     }
+    if (text[index + 1] === '"') {
+      field += '"'
+      return index + 1
+    }
+    inQuotes = false
+    return index
+  }
 
+  const consumeUnquotedCharacter = (c: string, index: number): number => {
     if (c === '"' && fieldStart) {
       inQuotes = true
       fieldStart = false
-      continue
+      return index
     }
 
     if (c === delim) {
       row.push(field)
       field = ""
       fieldStart = true
-      continue
+      return index
     }
 
     if (c === "\r" || c === "\n") {
       // Collapse CRLF into one break; a lone \r (old-Mac) or lone \n both count.
-      if (c === "\r" && text[i + 1] === "\n") i++
+      if (c === "\r" && text[index + 1] === "\n") index++
       row.push(field)
       rows.push(row)
       row = []
       field = ""
       fieldStart = true
-      continue
+      return index
     }
 
     field += c
     fieldStart = false
+    return index
+  }
+
+  for (let i = 0; i < n; i++) {
+    const c = text[i]!
+
+    if (inQuotes) {
+      i = consumeQuotedCharacter(c, i)
+      continue
+    }
+
+    i = consumeUnquotedCharacter(c, i)
   }
 
   // Flush a final row unless the input ended exactly on a row break. `fieldStart`

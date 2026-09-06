@@ -237,156 +237,32 @@ export function PullRequestView({
   readOnly = false,
   review
 }: PullRequestViewProps) {
-  // Declared ABOVE the early returns below — this component returns early for
-  // the loading and no-PR states, and a hook after those runs on some renders
-  // and not others, which is the one thing React's hook order cannot survive.
-  //
-  // Below `mid` the 352px rail floats instead of docking: the centre column is a
-  // 760px reading measure with 60px of gutter, so a docked rail in a 500px pane
-  // left roughly 88px of it — narrower than the PR title.
-  const roomy = atLeast(useWidthTier(), "mid")
-  const [railOpen, setRailOpen] = useState(false)
-  const [evidence, setEvidence] = useState<PrEvidence>("overview")
-  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
-  useEffect(() => {
-    if (roomy) setRailOpen(false)
-  }, [roomy])
-  useEffect(() => {
-    if (!railOpen) return
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setRailOpen(false)
-    }
-    window.addEventListener("keydown", close)
-    return () => window.removeEventListener("keydown", close)
-  }, [railOpen])
+         function renderDetailsToggle() {
+           return (!roomy && (
+        <button
+          type="button"
+          aria-label={railOpen ? "Close pull request details" : "Pull request details"}
+          aria-pressed={railOpen}
+          title={
+            railOpen
+              ? "Close details"
+              : readOnly && !onMerge
+                ? "Reviewers and checks"
+                : "Reviewers, checks and merge"
+          }
+          onClick={() => setRailOpen((v) => !v)}
+          className={cn(
+            "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
+            railOpen ? "text-blue" : "text-dim hover:text-text-bright"
+          )}
+        >
+          <PanelRight size={15} />
+        </button>
+      ))
+         }
 
-  // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
-  if (pr === null && busy) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Spinner size={20} />
-        <span className="text-[13px]">Loading pull request…</span>
-      </div>
-    )
-  }
-  if (pr === null) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
-        <span className="flex size-14 items-center justify-center rounded-2xl bg-surface text-dim">
-          <GitPullRequest size={26} />
-        </span>
-        <div className="flex flex-col gap-1.5">
-          <h2 className="text-balance text-[15px] font-semibold text-text-bright">
-            No pull request yet for this branch
-          </h2>
-          <p className="max-w-xs text-[13px] text-muted-foreground">
-            Open a pull request to run CI, collect reviews, and route feedback back to the agent.
-          </p>
-        </div>
-        {connected ? (
-          onCreatePr ? (
-            <div className="flex w-full max-w-sm flex-col items-center gap-3">
-              <Button
-                size="md"
-                disabled={busy || publishing}
-                onClick={() => onCreatePr()}
-              >
-                <GitPullRequest size={14} />
-                {publishing
-                  ? "Publishing…"
-                  : publish?.step === "failed"
-                    ? "Try publishing again"
-                    : publish && !["idle", "complete", "no-changes"].includes(publish.step)
-                      ? "Resume publishing"
-                    : "Publish pull request"}
-              </Button>
-              {branch && <p className="text-[11px] text-muted-foreground">Branch: <code>{branch}</code></p>}
-              {publish && publish.step !== "idle" && (
-                <div
-                  aria-live="polite"
-                  className="w-full rounded-lg border border-line bg-surface p-3 text-left text-[11px] text-muted-foreground"
-                >
-                  <p className="font-medium text-text-bright">
-                    {publish.step === "failed"
-                      ? "Publishing stopped"
-                      : publish.step === "no-changes"
-                        ? "Nothing to publish"
-                        : publish.step === "complete" && publish.prNumber !== undefined
-                          ? `Pull request #${publish.prNumber} linked`
-                          : `Current step: ${publishStepLabel(publish.step)}`}
-                  </p>
-                  <ol className="mt-2 flex flex-col gap-1.5">
-                    {PUBLISH_PROGRESS.map(({ step, label }) => {
-                      const done = publish.completed.includes(step)
-                      const active = publish.step === step || publish.resumeFrom === step
-                      return (
-                        <li
-                          key={step}
-                          className={cn("flex items-center gap-2", active && "font-medium text-text-bright")}
-                        >
-                          <span className="flex size-3.5 shrink-0 items-center justify-center">
-                            {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
-                          </span>
-                          <span>{label}</span>
-                        </li>
-                      )
-                    })}
-                  </ol>
-                  {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
-                  {publish.step === "failed" && onRetryPublish && (
-                    <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
-                      Retry from {publish.resumeFrom ?? "inspection"}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <Callout tone="blue">
-              Direct sessions work on their selected branch, so Jingler cannot
-              open a pull request from that branch to itself.
-            </Callout>
-          )
-        ) : (
-          <div className="flex w-full max-w-sm flex-col gap-3">
-            <Callout tone="blue">
-              {connectionMessage ?? "Connect GitHub to create and review pull requests."}
-            </Callout>
-            <Button variant="secondary" className="self-center" onClick={onConnectGithub}>
-              {connectionActionLabel}
-            </Button>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Not memoized: the early returns above rule out a hook here, and this is a
-  // map + sort over a handful of entries.
-  const feed = buildFeed(pr)
-
-  return (
-    <div className="relative flex min-h-0 min-w-0 flex-1">
-      {onClosePr && (
-        <ConfirmDialog
-          open={closeConfirmOpen}
-          onOpenChange={setCloseConfirmOpen}
-          title={`Close pull request #${pr.number}?`}
-          description="The pull request can be reopened later on GitHub."
-          confirmLabel="Close pull request"
-          tone="danger"
-          onConfirm={async () => {
-            try {
-              await onClosePr()
-            } catch (cause) {
-              setCloseConfirmOpen(false)
-              throw cause
-            }
-          }}
-        />
-      )}
-      {/* Centre column: header + timeline + sticky composer */}
-      <div className="flex min-w-0 flex-1 flex-col">
+  function renderPullRequestBody(pr: NonNullable<PullRequestViewProps["pr"]>) {
+    return (<div className="flex min-w-0 flex-1 flex-col">
         {/*
           Same reading column as the Conversation view — 760px, centred, on a
           30px gutter, with the scrollbar gutter reserved on BOTH edges so the
@@ -480,9 +356,15 @@ export function PullRequestView({
             />
           </div>
 
-          {evidence === "commits" ? (
-            <CommitEvidence pr={pr} />
-          ) : evidence === "checks" ? (
+          {renderReviewEvidence(pr)}
+          </div>
+        </div>
+      </div>)
+  }
+
+         function renderReviewEvidence(pr: NonNullable<PullRequestViewProps["pr"]>) {
+           if (evidence === "commits") return (<CommitEvidence pr={pr} />)
+return (evidence === "checks" ? (
             <CheckEvidence pr={pr} />
           ) : (
           <>
@@ -562,33 +444,168 @@ export function PullRequestView({
             </div>
           )}
           </>
-          )}
-          </div>
+          ))
+         }
+
+         function renderCreatePullRequest() {
+           return (<div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+        <span className="flex size-14 items-center justify-center rounded-2xl bg-surface text-dim">
+          <GitPullRequest size={26} />
+        </span>
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-balance text-[15px] font-semibold text-text-bright">
+            No pull request yet for this branch
+          </h2>
+          <p className="max-w-xs text-[13px] text-muted-foreground">
+            Open a pull request to run CI, collect reviews, and route feedback back to the agent.
+          </p>
         </div>
+        {connected ? (
+          onCreatePr ? (
+            <div className="flex w-full max-w-sm flex-col items-center gap-3">
+              <Button
+                size="md"
+                disabled={busy || publishing}
+                onClick={() => onCreatePr()}
+              >
+                <GitPullRequest size={14} />
+                {getPublishing()}
+              </Button>
+              {branch && <p className="text-[11px] text-muted-foreground">Branch: <code>{branch}</code></p>}
+              {publish && publish.step !== "idle" && (
+                <div
+                  aria-live="polite"
+                  className="w-full rounded-lg border border-line bg-surface p-3 text-left text-[11px] text-muted-foreground"
+                >
+                  <p className="font-medium text-text-bright">
+                    {getStep(publish)}
+                  </p>
+                  <ol className="mt-2 flex flex-col gap-1.5">
+                    {PUBLISH_PROGRESS.map(({ step, label }) => {
+                      const done = publish.completed.includes(step)
+                      const active = publish.step === step || publish.resumeFrom === step
+                      return (
+                        <li
+                          key={step}
+                          className={cn("flex items-center gap-2", active && "font-medium text-text-bright")}
+                        >
+                          <span className="flex size-3.5 shrink-0 items-center justify-center">
+                            {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
+                          </span>
+                          <span>{label}</span>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                  {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
+                  {publish.step === "failed" && onRetryPublish && (
+                    <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
+                      Retry from {publish.resumeFrom ?? "inspection"}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <Callout tone="blue">
+              Direct sessions work on their selected branch, so Jingler cannot
+              open a pull request from that branch to itself.
+            </Callout>
+          )
+        ) : (
+          <div className="flex w-full max-w-sm flex-col gap-3">
+            <Callout tone="blue">
+              {connectionMessage ?? "Connect GitHub to create and review pull requests."}
+            </Callout>
+            <Button variant="secondary" className="self-center" onClick={onConnectGithub}>
+              {connectionActionLabel}
+            </Button>
+          </div>
+        )}
+      </div>)
+         }
+
+         function getStep(publish: PublishCheckpoint) {
+           if (publish.step === "failed") return ("Publishing stopped")
+           if (publish.step === "no-changes") return ("Nothing to publish")
+           if (publish.step === "complete" && publish.prNumber !== undefined) return (`Pull request #${publish.prNumber} linked`)
+           return (`Current step: ${publishStepLabel(publish.step)}`)
+         }
+
+         function getPublishing() {
+           if (publishing) return ("Publishing…")
+           if (publish?.step === "failed") return ("Try publishing again")
+           if (publish && !["idle", "complete", "no-changes"].includes(publish.step)) return ("Resume publishing")
+           return ("Publish pull request")
+         }
+
+  // Declared ABOVE the early returns below — this component returns early for
+  // the loading and no-PR states, and a hook after those runs on some renders
+  // and not others, which is the one thing React's hook order cannot survive.
+  //
+  // Below `mid` the 352px rail floats instead of docking: the centre column is a
+  // 760px reading measure with 60px of gutter, so a docked rail in a 500px pane
+  // left roughly 88px of it — narrower than the PR title.
+  const roomy = atLeast(useWidthTier(), "mid")
+  const [railOpen, setRailOpen] = useState(false)
+  const [evidence, setEvidence] = useState<PrEvidence>("overview")
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  useEffect(() => {
+    if (roomy) setRailOpen(false)
+  }, [roomy])
+  useEffect(() => {
+    if (!railOpen) return
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRailOpen(false)
+    }
+    window.addEventListener("keydown", close)
+    return () => window.removeEventListener("keydown", close)
+  }, [railOpen])
+
+  // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
+  if (pr === null && busy) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Spinner size={20} />
+        <span className="text-[13px]">Loading pull request…</span>
       </div>
+    )
+  }
+  if (pr === null) {
+    return (
+      renderCreatePullRequest()
+    )
+  }
+
+  // Not memoized: the early returns above rule out a hook here, and this is a
+  // map + sort over a handful of entries.
+  const feed = buildFeed(pr)
+
+  return (
+    <div className="relative flex min-h-0 min-w-0 flex-1">
+      {onClosePr && (
+        <ConfirmDialog
+          open={closeConfirmOpen}
+          onOpenChange={setCloseConfirmOpen}
+          title={`Close pull request #${pr.number}?`}
+          description="The pull request can be reopened later on GitHub."
+          confirmLabel="Close pull request"
+          tone="danger"
+          onConfirm={async () => {
+            try {
+              await onClosePr()
+            } catch (cause) {
+              setCloseConfirmOpen(false)
+              throw cause
+            }
+          }}
+        />
+      )}
+      {/* Centre column: header + timeline + sticky composer */}
+      {renderPullRequestBody(pr)}
 
       {/* Right rail — docked when there's room, a floating sheet when not. */}
-      {!roomy && (
-        <button
-          type="button"
-          aria-label={railOpen ? "Close pull request details" : "Pull request details"}
-          aria-pressed={railOpen}
-          title={
-            railOpen
-              ? "Close details"
-              : readOnly && !onMerge
-                ? "Reviewers and checks"
-                : "Reviewers, checks and merge"
-          }
-          onClick={() => setRailOpen((v) => !v)}
-          className={cn(
-            "absolute right-2 top-2 z-40 flex size-7 items-center justify-center rounded-md border border-line bg-sunken shadow-lg transition-colors",
-            railOpen ? "text-blue" : "text-dim hover:text-text-bright"
-          )}
-        >
-          <PanelRight size={15} />
-        </button>
-      )}
+      {renderDetailsToggle()}
       <PrSidePanel
         // The rail holds the merge button, so it can't just be dropped at narrow
         // widths — it has to remain reachable, which is what the toggle above is

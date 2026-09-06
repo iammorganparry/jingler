@@ -140,97 +140,103 @@ const handleWebhook = async (request: Request, env: Env): Promise<Response> => {
   if (eventName === "ping") return json({ accepted: true, pong: true })
 
   if (eventName === "installation") {
-    const action = record(payload)?.action
-    const installationId = installationIdFromPayload(payload)
-    const generation = installationGenerationFromPayload(payload)
-    if (
-      installationId &&
-      generation !== null &&
-      (action === "deleted" || action === "suspend" || action === "unsuspend")
-    ) {
-      const state: InstallationState =
-        action === "deleted" ? "removed" : action === "suspend" ? "suspended" : "active"
-      const id = await workflowId("lifecycle", deliveryId)
-      const created = await createOnce(env.RELAY_REGISTRATION_WORKFLOW, id, {
-        kind: "installation-lifecycle",
-        mutationId: deliveryId,
-        generation,
-        installationId,
-        state
-      })
-      return json({ accepted: true, lifecycle: action, workflowId: id, duplicate: created.duplicate }, 202)
+    const handleInstallationLifecycle = async (): Promise<Response> => {
+      const action = record(payload)?.action
+      const installationId = installationIdFromPayload(payload)
+      const generation = installationGenerationFromPayload(payload)
+      if (
+        installationId &&
+        generation !== null &&
+        (action === "deleted" || action === "suspend" || action === "unsuspend")
+      ) {
+        const state: InstallationState =
+          action === "deleted" ? "removed" : action === "suspend" ? "suspended" : "active"
+        const id = await workflowId("lifecycle", deliveryId)
+        const created = await createOnce(env.RELAY_REGISTRATION_WORKFLOW, id, {
+          kind: "installation-lifecycle",
+          mutationId: deliveryId,
+          generation,
+          installationId,
+          state
+        })
+        return json({ accepted: true, lifecycle: action, workflowId: id, duplicate: created.duplicate }, 202)
+      }
+      return json({ accepted: true, ignored: true }, 202)
     }
-    return json({ accepted: true, ignored: true }, 202)
+    return handleInstallationLifecycle()
   }
 
-  const event = await normalizeGitHubWebhook({
-    deliveryId,
-    eventName,
-    payload,
-    ourAppId: env.GITHUB_APP_ID
-  })
-  if (!event) return json({ accepted: true, ignored: true }, 202)
-  if (!event.pullRequest) {
-    relayTelemetry("ignored_event", {
-      installationId: event.installationId,
-      githubEvent: event.event,
-      reason: "no_pull_request_route"
+  const deliverWebhook = async (): Promise<Response> => {
+    const event = await normalizeGitHubWebhook({
+      deliveryId,
+      eventName,
+      payload,
+      ourAppId: env.GITHUB_APP_ID
     })
-    return json({ accepted: true, ignored: true, reason: "no_pull_request_route" }, 202)
-  }
-  const pullRequestPayload = record(record(payload)?.pull_request)
-  const pullRequestMerged =
-    event.event === "pull_request" &&
-    event.action === "closed" &&
-    (pullRequestPayload?.merged === true || typeof pullRequestPayload?.merged_at === "string")
-  if (pullRequestMerged) {
+    if (!event) return json({ accepted: true, ignored: true }, 202)
+    if (!event.pullRequest) {
+      relayTelemetry("ignored_event", {
+        installationId: event.installationId,
+        githubEvent: event.event,
+        reason: "no_pull_request_route"
+      })
+      return json({ accepted: true, ignored: true, reason: "no_pull_request_route" }, 202)
+    }
+    const pullRequestPayload = record(record(payload)?.pull_request)
+    const pullRequestMerged =
+      event.event === "pull_request" &&
+      event.action === "closed" &&
+      (pullRequestPayload?.merged === true || typeof pullRequestPayload?.merged_at === "string")
+    if (pullRequestMerged) {
+      const routes = env.INSTALLATION_ROUTES.getByName(event.installationId)
+      const flushedEvents = await routes.flushPullRequestEvents(
+        event.repository.id,
+        event.pullRequest.number
+      )
+      relayTelemetry("pull_request_stream_flushed", {
+        installationId: event.installationId,
+        repositoryId: event.repository.id,
+        pullRequestNumber: event.pullRequest.number,
+        flushedEvents
+      })
+      return json(
+        { accepted: true, ignored: true, reason: "pull_request_merged", flushedEvents },
+        202
+      )
+    }
+    // CI/check and pull-request state webhooks are useful for refreshing a PR
+    // screen, but they are not feedback for an agent. Persisting them once per
+    // linked session made busy repositories dominate the Durable Object budget.
+    // PR screens already refresh from GitHub, so keep the relay for actionable
+    // review/comment feedback only.
+    if (!event.actionable) {
+      relayTelemetry("ignored_event", {
+        installationId: event.installationId,
+        githubEvent: event.event,
+        reason: "not_actionable"
+      })
+      return json({ accepted: true, ignored: true, reason: "not_actionable" }, 202)
+    }
+    const id = await workflowId("delivery", deliveryId)
     const routes = env.INSTALLATION_ROUTES.getByName(event.installationId)
-    const flushedEvents = await routes.flushPullRequestEvents(
-      event.repository.id,
-      event.pullRequest.number
-    )
-    relayTelemetry("pull_request_stream_flushed", {
+    const admission = await routes.prepareDeliveryWorkflow(deliveryId, id)
+    let workflowDuplicate = false
+    if (admission.shouldCreate) {
+      const created = await createOnce(env.GITHUB_DELIVERY_WORKFLOW, admission.workflowId, event)
+      workflowDuplicate = created.duplicate
+      await routes.confirmDeliveryWorkflow(deliveryId)
+    }
+    const duplicate = admission.duplicate || workflowDuplicate
+    relayTelemetry(duplicate ? "delivery_deduplicated" : "workflow_created", {
       installationId: event.installationId,
-      repositoryId: event.repository.id,
-      pullRequestNumber: event.pullRequest.number,
-      flushedEvents
+      workflowId: admission.workflowId
     })
     return json(
-      { accepted: true, ignored: true, reason: "pull_request_merged", flushedEvents },
+      { accepted: true, workflowId: admission.workflowId, duplicate },
       202
     )
   }
-  // CI/check and pull-request state webhooks are useful for refreshing a PR
-  // screen, but they are not feedback for an agent. Persisting them once per
-  // linked session made busy repositories dominate the Durable Object budget.
-  // PR screens already refresh from GitHub, so keep the relay for actionable
-  // review/comment feedback only.
-  if (!event.actionable) {
-    relayTelemetry("ignored_event", {
-      installationId: event.installationId,
-      githubEvent: event.event,
-      reason: "not_actionable"
-    })
-    return json({ accepted: true, ignored: true, reason: "not_actionable" }, 202)
-  }
-  const id = await workflowId("delivery", deliveryId)
-  const routes = env.INSTALLATION_ROUTES.getByName(event.installationId)
-  const admission = await routes.prepareDeliveryWorkflow(deliveryId, id)
-  let workflowDuplicate = false
-  if (admission.shouldCreate) {
-    const created = await createOnce(env.GITHUB_DELIVERY_WORKFLOW, admission.workflowId, event)
-    workflowDuplicate = created.duplicate
-    await routes.confirmDeliveryWorkflow(deliveryId)
-  }
-  const duplicate = admission.duplicate || workflowDuplicate
-  relayTelemetry(duplicate ? "delivery_deduplicated" : "workflow_created", {
-    installationId: event.installationId,
-    workflowId: admission.workflowId
-  })
-  return json(
-    { accepted: true, workflowId: admission.workflowId, duplicate },
-    202
-  )
+  return deliverWebhook()
 }
 
 const handleEvents = async (request: Request, env: Env): Promise<Response> => {
@@ -393,23 +399,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     try {
-      if (request.method === "GET" && url.pathname === "/health") return health(env)
-      if (request.method === "POST" && url.pathname === "/webhooks/github") {
-        return await handleWebhook(request, env)
-      }
-      if (request.method === "GET" && url.pathname === "/events") {
-        return await handleEvents(request, env)
-      }
-      if (request.method === "POST" && url.pathname === "/internal/session-routes") {
-        return await handleInternalSessionRoute(request, env)
-      }
-      if (request.method === "POST" && url.pathname === "/internal/installations") {
-        return await handleInternalInstallation(request, env)
-      }
-      if (request.method === "POST" && url.pathname === "/internal/revoke") {
-        return await handleInternalInstallation(request, env, true)
-      }
-      return json({ error: "Not found" }, 404)
+      return await routeRequest(request, env, url)
     } catch (error) {
       console.error({
         level: "error",
@@ -426,3 +416,23 @@ export default {
     }
   }
 } satisfies ExportedHandler<Env>
+
+const routeRequest = async (request: Request, env: Env, url: URL): Promise<Response> => {
+  if (request.method === "GET" && url.pathname === "/health") return health(env)
+  if (request.method === "POST" && url.pathname === "/webhooks/github") {
+    return await handleWebhook(request, env)
+  }
+  if (request.method === "GET" && url.pathname === "/events") {
+    return await handleEvents(request, env)
+  }
+  if (request.method === "POST" && url.pathname === "/internal/session-routes") {
+    return await handleInternalSessionRoute(request, env)
+  }
+  if (request.method === "POST" && url.pathname === "/internal/installations") {
+    return await handleInternalInstallation(request, env)
+  }
+  if (request.method === "POST" && url.pathname === "/internal/revoke") {
+    return await handleInternalInstallation(request, env, true)
+  }
+  return json({ error: "Not found" }, 404)
+}

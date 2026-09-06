@@ -404,64 +404,70 @@ export const createDeviceRoutes = (
         retryable: false
       }, 401)
     }
-    const identityFingerprint = createHash("sha256")
-      .update(input.registration.publicKey.value, "utf8")
-      .digest("base64url")
-    let result: DeviceEnrollmentResult
-    try {
-      result = await deviceStore(dependencies).consumeAndUpsert({
-        credential,
-        identityFingerprint,
-        registration: input.registration,
-        at: new Date(dependencies.nowSeconds() * 1_000)
-      })
-    } catch {
-      return json({ error: "Device enrollment unavailable" }, 503)
-    }
-    if (result.status !== "registered") {
-      return json({
-        _tag: "DeviceControlPlaneError",
-        reason: result.status,
-        message: `Device enrollment rejected: ${result.status}`,
-        retryable: false
-      }, result.status === "expired" ? 401 : 409)
-    }
-    const relayCredential = result.device.deviceId === credential.deviceId
-      ? { claim: credential, token }
-      : dependencies.issueClaim({
-          subject: credential.subject,
-          deviceId: result.device.deviceId,
-          clientInstanceId: credential.clientInstanceId
+    const registerEnrollment = async (): Promise<Response> => {
+      const identityFingerprint = createHash("sha256")
+        .update(input.registration.publicKey.value, "utf8")
+        .digest("base64url")
+      let result: DeviceEnrollmentResult
+      try {
+        result = await deviceStore(dependencies).consumeAndUpsert({
+          credential,
+          identityFingerprint,
+          registration: input.registration,
+          at: new Date(dependencies.nowSeconds() * 1_000)
         })
-    const relayRegistration = await relayRequest(
-      dependencies,
-      "/v1/device-registrations",
-      relayCredential.token,
-      "POST",
-      { version: 1, claim: relayCredential.claim, registration: input.registration }
-    ).catch(() => null)
-    // A lost relay response can make an exact enrollment retry observe the
-    // relay's one-use claim as replayed. The database identity fence above
-    // proves this is the same registration, so only that typed 409 is safe.
-    const relayReplay = relayRegistration?.status === 409
-      ? await relayRegistration.clone().json().then(
-          (body: unknown) =>
-            typeof body === "object" &&
-            body !== null &&
-            "reason" in body &&
-            body.reason === "replayed",
-          () => false
-        )
-      : false
-    if (!relayRegistration?.ok && !relayReplay) {
-      return json({
-        _tag: "DeviceControlPlaneError",
-        reason: "offline",
-        message: "Device was enrolled but relay synchronization failed",
-        retryable: true
-      }, 503)
+      } catch {
+        return json({ error: "Device enrollment unavailable" }, 503)
+      }
+      if (result.status !== "registered") {
+        return json({
+          _tag: "DeviceControlPlaneError",
+          reason: result.status,
+          message: `Device enrollment rejected: ${result.status}`,
+          retryable: false
+        }, result.status === "expired" ? 401 : 409)
+      }
+      const synchronizeEnrolledDevice = async (): Promise<Response> => {
+        const relayCredential = result.device.deviceId === credential.deviceId
+          ? { claim: credential, token }
+          : dependencies.issueClaim({
+            subject: credential.subject,
+            deviceId: result.device.deviceId,
+            clientInstanceId: credential.clientInstanceId
+          })
+        const relayRegistration = await relayRequest(
+          dependencies,
+          "/v1/device-registrations",
+          relayCredential.token,
+          "POST",
+          { version: 1, claim: relayCredential.claim, registration: input.registration }
+        ).catch(() => null)
+        // A lost relay response can make an exact enrollment retry observe the
+        // relay's one-use claim as replayed. The database identity fence above
+        // proves this is the same registration, so only that typed 409 is safe.
+        const relayReplay = relayRegistration?.status === 409
+          ? await relayRegistration.clone().json().then(
+            (body: unknown) =>
+              typeof body === "object" &&
+              body !== null &&
+              "reason" in body &&
+              body.reason === "replayed",
+            () => false
+          )
+          : false
+        if (!relayRegistration?.ok && !relayReplay) {
+          return json({
+            _tag: "DeviceControlPlaneError",
+            reason: "offline",
+            message: "Device was enrolled but relay synchronization failed",
+            retryable: true
+          }, 503)
+        }
+        return json({ version: 1, device: result.device }, 201)
+      }
+      return synchronizeEnrolledDevice()
     }
-    return json({ version: 1, device: result.device }, 201)
+    return registerEnrollment()
   })
 
   routes.post("/grants", async (context) => {
@@ -491,59 +497,8 @@ export const createDeviceRoutes = (
       })
       return json(issued)
     }
-    if (!input.deviceId || !input.sessionId) {
-      return json(
-        { error: "Session grants require deviceId and sessionId" },
-        400
-      )
-    }
-    const device = await deviceStore(dependencies)
-      .findForUser(subject, input.deviceId)
-      .catch(() => null)
-    if (!device) return json({ error: "Device not found" }, 404)
-    if (device.state !== "active") return json({ error: "Device revoked" }, 409)
-    const clientInstanceId = input.clientInstanceId ??
-      requestClientInstanceId(context.req.raw, subject)
-    const inventoryResponse = await relayRequest(
-      dependencies,
-      `/v1/devices/${encodeURIComponent(device.deviceId)}/sessions/${encodeURIComponent(input.sessionId)}`,
-      controlGrant(dependencies, subject, clientInstanceId, device.deviceId).grant,
-      "GET"
-    ).catch(() => null)
-    if (!inventoryResponse?.ok) {
-      return inventoryResponse
-        ? forward(inventoryResponse)
-        : json({ error: "Device relay unavailable" }, 502)
-    }
-    let controllerLeaseGeneration = 1
-    try {
-      const inventory = Schema.decodeUnknownSync(RemoteSessionInventory)(
-        await inventoryResponse.json(),
-        { onExcessProperty: "error" }
-      )
-      controllerLeaseGeneration = inventory.sessions.find(
-        (session) => session.sessionId === input.sessionId
-      )?.controllerLeaseGeneration ?? 1
-    } catch {
-      return json({ error: "Invalid device session inventory response" }, 502)
-    }
-    const issued = dependencies.issueGrant({
-        audience: "session-tunnel",
-        subject,
-        deviceId: device.deviceId,
-        sessionId: input.sessionId,
-        clientInstanceId,
-        attachmentGeneration: 1,
-        controllerLeaseGeneration,
-        deviceGeneration: device.generation
-      })
-    deviceServerTelemetry("grant_issued", {
-      audience: issued.claims.audience,
-      clientInstanceId: issued.claims.clientInstanceId,
-      deviceId: issued.claims.deviceId,
-      sessionId: issued.claims.sessionId
-    })
-    return json(issued)
+
+    return issueSessionTunnelGrant(input, dependencies, subject, context)
   })
 
   routes.post("/pairing/claim", async (context) => {
@@ -813,4 +768,68 @@ export const createDeviceRoutes = (
   })
 
   return routes
+}
+
+const issueSessionTunnelGrant = async (
+  input: Schema.Schema.Type<typeof DeviceRelayGrantRequest>,
+  dependencies: DeviceRoutesDependencies,
+  subject: string,
+  context: Context
+): Promise<Response> => {
+  if (!input.deviceId || !input.sessionId) {
+    return json(
+      { error: "Session grants require deviceId and sessionId" },
+      400
+    )
+  }
+  const device = await deviceStore(dependencies)
+    .findForUser(subject, input.deviceId)
+    .catch(() => null)
+  if (!device) return json({ error: "Device not found" }, 404)
+  if (device.state !== "active") return json({ error: "Device revoked" }, 409)
+  const clientInstanceId = input.clientInstanceId ??
+    requestClientInstanceId(context.req.raw, subject)
+  const inventoryResponse = await relayRequest(
+    dependencies,
+    `/v1/devices/${encodeURIComponent(device.deviceId)}/sessions/${encodeURIComponent(input.sessionId)}`,
+    controlGrant(dependencies, subject, clientInstanceId, device.deviceId).grant,
+    "GET"
+  ).catch(() => null)
+  if (!inventoryResponse?.ok) {
+    return inventoryResponse
+      ? forward(inventoryResponse)
+      : json({ error: "Device relay unavailable" }, 502)
+  }
+  const grantFromSessionInventory = async (): Promise<Response> => {
+    let controllerLeaseGeneration = 1
+    try {
+      const inventory = Schema.decodeUnknownSync(RemoteSessionInventory)(
+        await inventoryResponse.json(),
+        { onExcessProperty: "error" }
+      )
+      controllerLeaseGeneration = inventory.sessions.find(
+        (session) => session.sessionId === input.sessionId
+      )?.controllerLeaseGeneration ?? 1
+    } catch {
+      return json({ error: "Invalid device session inventory response" }, 502)
+    }
+    const issued = dependencies.issueGrant({
+      audience: "session-tunnel",
+      subject,
+      deviceId: device.deviceId,
+      sessionId: input.sessionId,
+      clientInstanceId,
+      attachmentGeneration: 1,
+      controllerLeaseGeneration,
+      deviceGeneration: device.generation
+    })
+    deviceServerTelemetry("grant_issued", {
+      audience: issued.claims.audience,
+      clientInstanceId: issued.claims.clientInstanceId,
+      deviceId: issued.claims.deviceId,
+      sessionId: issued.claims.sessionId
+    })
+    return json(issued)
+  }
+  return grantFromSessionInventory()
 }

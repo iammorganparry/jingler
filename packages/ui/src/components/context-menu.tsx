@@ -71,18 +71,34 @@ function Submenu({
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation()
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    switch (event.key) {
+case "ArrowDown":
+case "ArrowUp": {
+
       event.preventDefault()
       move(event.key === "ArrowDown" ? 1 : -1)
-    } else if (event.key === "Home" || event.key === "End") {
+
+break
+}
+case "Home":
+case "End": {
+
       event.preventDefault()
       const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])]
       buttons[event.key === "Home" ? 0 : buttons.length - 1]?.focus()
-    } else if (event.key === "ArrowLeft" || event.key === "Escape") {
+
+break
+}
+case "ArrowLeft":
+case "Escape": {
+
       event.preventDefault()
       onClose()
       state.anchor.focus()
-    }
+
+break
+}
+}
   }
 
   return createPortal(

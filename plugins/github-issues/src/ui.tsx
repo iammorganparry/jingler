@@ -178,7 +178,6 @@ function IssueTab({ session }: TabProps) {
     )
   }
 
-  const open = issue.state.toLowerCase() === "open"
 
   return (
     <div
@@ -238,25 +237,7 @@ function IssueTab({ session }: TabProps) {
           </button>
         </div>
 
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium",
-              open ? "bg-green/15 text-green" : "bg-purple/15 text-purple"
-            )}
-          >
-            {open ? <CircleDot size={12} /> : <CheckCircle2 size={12} />}
-            {open ? "Open" : "Closed"}
-          </span>
-          <span className="text-[12px] text-dim">
-            {issue.author?.login ?? "unknown"} opened this {relativeTime(issue.createdAt)}
-          </span>
-          {(issue.comments?.length ?? 0) > 0 && (
-            <span className="flex items-center gap-1 text-[12px] text-dim">
-              <MessageSquare size={12} /> {issue.comments?.length}
-            </span>
-          )}
-        </div>
+        <IssueMetadata issue={issue} />
 
         {(issue.labels?.length ?? 0) > 0 && (
           <div className="mb-5 flex flex-wrap gap-1.5">
@@ -290,3 +271,29 @@ function IssueTab({ session }: TabProps) {
 export default definePlugin(manifest, {
   views: { "github-issues.issue": IssueTab }
 })
+
+function IssueMetadata({ issue }: { readonly issue: Issue }) {
+  const open = issue.state.toLowerCase() === "open"
+  return (
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium",
+              open ? "bg-green/15 text-green" : "bg-purple/15 text-purple"
+            )}
+          >
+            {open ? <CircleDot size={12} /> : <CheckCircle2 size={12} />}
+            {open ? "Open" : "Closed"}
+          </span>
+          <span className="text-[12px] text-dim">
+            {issue.author?.login ?? "unknown"} opened this {relativeTime(issue.createdAt)}
+          </span>
+          {(issue.comments?.length ?? 0) > 0 && (
+            <span className="flex items-center gap-1 text-[12px] text-dim">
+              <MessageSquare size={12} /> {issue.comments?.length}
+            </span>
+          )}
+        </div>
+
+  )
+}

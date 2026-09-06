@@ -137,26 +137,7 @@ describe("createLinearClient", () => {
       const body = JSON.parse(String(init?.body))
       if (body.query.includes("query LinearIssue(")) return json({ issue: rawIssue() })
       const firstPage = body.variables.after === null
-      return json({
-        issue: {
-          comments: {
-            nodes: [
-              {
-                id: firstPage ? "comment-1" : "comment-2",
-                body: firstPage ? "Investigating" : "Fixed",
-                createdAt: firstPage
-                  ? "2026-08-08T11:00:00.000Z"
-                  : "2026-08-08T12:00:00.000Z",
-                url: null,
-                user: firstPage ? { id: "user-1", name: "Alex", avatarUrl: null } : null
-              }
-            ],
-            pageInfo: firstPage
-              ? { hasNextPage: true, endCursor: "comment-page-2" }
-              : { hasNextPage: false, endCursor: null }
-          }
-        }
-      })
+      return commentPage(firstPage)
     })
     const client = createLinearClient({ getSecret: async () => "lin_api_test", request })
 
@@ -603,3 +584,26 @@ describe("activateWithClient", () => {
     }
   })
 })
+
+function commentPage(firstPage: boolean) {
+  return json({
+        issue: {
+          comments: {
+            nodes: [
+              {
+                id: firstPage ? "comment-1" : "comment-2",
+                body: firstPage ? "Investigating" : "Fixed",
+                createdAt: firstPage
+                  ? "2026-08-08T11:00:00.000Z"
+                  : "2026-08-08T12:00:00.000Z",
+                url: null,
+                user: firstPage ? { id: "user-1", name: "Alex", avatarUrl: null } : null
+              }
+            ],
+            pageInfo: firstPage
+              ? { hasNextPage: true, endCursor: "comment-page-2" }
+              : { hasNextPage: false, endCursor: null }
+          }
+        }
+      })
+}

@@ -57,6 +57,16 @@ export const spawnHostProcess = (): HostProcess => {
 /** A plugin's request, refused with a reason it can act on. */
 const refuse = (message: string) => ({ ok: false as const, message })
 
+const attemptHostOperation = async (
+  operation: () => Promise<unknown>
+): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> => {
+  try {
+    return { ok: true, value: await operation() }
+  } catch (cause) {
+    return refuse(cause instanceof Error ? cause.message : String(cause))
+  }
+}
+
 /**
  * Serve one `host-request` from a plugin.
  *
@@ -120,50 +130,31 @@ export const makeHostRequestHandler = (deps: {
 
       case "settings.getSecret": {
         const { settingId } = payload as { settingId: string }
-        try {
-          return { ok: true, value: await deps.getSecret(pluginId, settingId) }
-        } catch (cause) {
-          return refuse(cause instanceof Error ? cause.message : String(cause))
-        }
+        return attemptHostOperation(() => deps.getSecret(pluginId, settingId))
       }
 
       case "settings.getProfileSecret": {
         const { collectionId, profileId } = payload as { collectionId: string; profileId: string }
-        try {
-          return { ok: true, value: await deps.getProfileSecret(pluginId, collectionId, profileId) }
-        } catch (cause) {
-          return refuse(cause instanceof Error ? cause.message : String(cause))
-        }
+        return attemptHostOperation(() => deps.getProfileSecret(pluginId, collectionId, profileId))
       }
       case "settings.setProfileSecret": {
         const { collectionId, profileId, value } = payload as {
           collectionId: string; profileId: string; value: string
         }
-        try {
+        return attemptHostOperation(async () => {
           await deps.setProfileSecret(pluginId, collectionId, profileId, value)
-          return { ok: true, value: undefined }
-        } catch (cause) {
-          return refuse(cause instanceof Error ? cause.message : String(cause))
-        }
+        })
       }
       case "settings.deleteProfileSecret": {
         const { collectionId, profileId } = payload as { collectionId: string; profileId: string }
-        try {
+        return attemptHostOperation(async () => {
           await deps.deleteProfileSecret(pluginId, collectionId, profileId)
-          return { ok: true, value: undefined }
-        } catch (cause) {
-          return refuse(cause instanceof Error ? cause.message : String(cause))
-        }
+        })
       }
 
       case "exec": {
         const request = payload as ExecRequest
-        try {
-          const result = await runShell(request, deps.defaultCwd())
-          return { ok: true, value: result }
-        } catch (cause) {
-          return refuse(cause instanceof Error ? cause.message : String(cause))
-        }
+        return attemptHostOperation(() => runShell(request, deps.defaultCwd()))
       }
 
       case "auth.getSession": {

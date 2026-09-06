@@ -169,6 +169,23 @@ export interface SessionGroup {
  * down to nothing, simply isn't a heading. A heading over nothing reads as a
  * loading state.
  */
+const groupByStatus = (
+  sorted: ReadonlyArray<Session>,
+  statusOf: (session: Session) => SessionDisplayStatus
+): ReadonlyArray<SessionGroup> => {
+    const byStatus = new Map<SessionDisplayStatus, Array<Session>>()
+    for (const s of sorted) {
+      const status = statusOf(s)
+      const list = byStatus.get(status)
+      if (list) list.push(s)
+      else byStatus.set(status, [s])
+    }
+    return STATUS_ORDER.filter((s) => byStatus.has(s)).map((s) => ({
+      key: s,
+      sessions: byStatus.get(s)!
+    }))
+}
+
 export const groupSessions = (
   sessions: ReadonlyArray<Session>,
   filters: SessionFilters,
@@ -184,17 +201,7 @@ export const groupSessions = (
   }
 
   if (filters.groupBy === "status") {
-    const byStatus = new Map<SessionDisplayStatus, Array<Session>>()
-    for (const s of sorted) {
-      const status = statusOf(s)
-      const list = byStatus.get(status)
-      if (list) list.push(s)
-      else byStatus.set(status, [s])
-    }
-    return STATUS_ORDER.filter((s) => byStatus.has(s)).map((s) => ({
-      key: s,
-      sessions: byStatus.get(s)!
-    }))
+    return groupByStatus(sorted, statusOf)
   }
 
   const byRepo = new Map<string, Array<Session>>()

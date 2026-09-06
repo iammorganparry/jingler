@@ -25,6 +25,38 @@ describe("ConfigService", () => {
   const provided = <A, E>(effect: Effect.Effect<A, E, ConfigService | AppPaths | FileSystem.FileSystem>) =>
     runExit(effect.pipe(Effect.provide(ConfigService.Default)), temp.layer)
 
+  it("preserves false flags and empty lists while omitting empty optional strings", async () => {
+    mkdirSync(temp.root, { recursive: true })
+    writeFileSync(`${temp.root}/config.json`, JSON.stringify({
+      reposDir: "/repos/original",
+      createdAt: "2026-01-01",
+      defaultConnectionId: "connection:test",
+      lastRepoPath: "",
+      starredRepos: [],
+      collapsedRepos: [],
+      disabledPlugins: [],
+      planAutoRun: false,
+      adhdMode: false,
+      connectionSelectionRequired: false,
+      providerSetupCompleted: false
+    }))
+    const exit = await provided(ConfigService.setReposDir("/repos/updated"))
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value).toMatchObject({
+      reposDir: "/repos/updated",
+      createdAt: "2026-01-01",
+      starredRepos: [],
+      collapsedRepos: [],
+      disabledPlugins: [],
+      planAutoRun: false,
+      adhdMode: false,
+      connectionSelectionRequired: false,
+      providerSetupCompleted: false
+    })
+    expect(exit.value).not.toHaveProperty("lastRepoPath")
+  })
+
   it("returns null before first-run setup (no config file)", async () => {
     const exit = await provided(ConfigService.get())
     expect(exit._tag).toBe("Success")

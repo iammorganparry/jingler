@@ -585,46 +585,54 @@ type DeviceRelayGrantScope = Pick<
   | "deviceGeneration"
 >
 
+const validDeviceControlScope = (claims: DeviceRelayGrantScope): boolean => (
+  claims.sessionId === null &&
+  claims.clientInstanceId !== null &&
+  claims.attachmentGeneration === null &&
+  claims.controllerLeaseGeneration === null &&
+  claims.deviceGeneration === null
+)
+
+const validDeviceChallengeScope = (claims: DeviceRelayGrantScope): boolean => (
+  claims.deviceId !== null &&
+  claims.sessionId === null &&
+  claims.clientInstanceId === null &&
+  claims.attachmentGeneration === null &&
+  claims.controllerLeaseGeneration === null &&
+  claims.deviceGeneration === null
+)
+
+const validDeviceConnectScope = (claims: DeviceRelayGrantScope): boolean => (
+  claims.deviceId !== null &&
+  claims.sessionId === null &&
+  claims.clientInstanceId === null &&
+  claims.attachmentGeneration === null &&
+  claims.controllerLeaseGeneration === null &&
+  claims.deviceGeneration !== null
+)
+
+const validSessionTunnelScope = (claims: DeviceRelayGrantScope): boolean => (
+  claims.deviceId !== null &&
+  claims.sessionId !== null &&
+  claims.clientInstanceId !== null &&
+  claims.attachmentGeneration !== null &&
+  claims.controllerLeaseGeneration !== null &&
+  claims.deviceGeneration !== null
+)
+
 /** Shared authorization matrix used by both the Node issuer and Worker verifier. */
 export const isValidDeviceRelayGrantScope = (
   claims: DeviceRelayGrantScope
 ): boolean => {
   switch (claims.audience) {
     case "device-control":
-      return (
-        claims.sessionId === null &&
-        claims.clientInstanceId !== null &&
-        claims.attachmentGeneration === null &&
-        claims.controllerLeaseGeneration === null &&
-        claims.deviceGeneration === null
-      )
+      return validDeviceControlScope(claims)
     case "device-challenge":
-      return (
-        claims.deviceId !== null &&
-        claims.sessionId === null &&
-        claims.clientInstanceId === null &&
-        claims.attachmentGeneration === null &&
-        claims.controllerLeaseGeneration === null &&
-        claims.deviceGeneration === null
-      )
+      return validDeviceChallengeScope(claims)
     case "device-connect":
-      return (
-        claims.deviceId !== null &&
-        claims.sessionId === null &&
-        claims.clientInstanceId === null &&
-        claims.attachmentGeneration === null &&
-        claims.controllerLeaseGeneration === null &&
-        claims.deviceGeneration !== null
-      )
+      return validDeviceConnectScope(claims)
     case "session-tunnel":
-      return (
-        claims.deviceId !== null &&
-        claims.sessionId !== null &&
-        claims.clientInstanceId !== null &&
-        claims.attachmentGeneration !== null &&
-        claims.controllerLeaseGeneration !== null &&
-        claims.deviceGeneration !== null
-      )
+      return validSessionTunnelScope(claims)
   }
 }
 

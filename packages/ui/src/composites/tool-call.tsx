@@ -121,8 +121,8 @@ export function ToolCall({
   onStop,
   className
 }: ToolCallProps) {
-  const header = (
-    <>
+         function renderToolHeading() {
+           return (<>
       {status === "success" && <span className="text-green">✓</span>}
       {status === "error" && <span className="text-red">✗</span>}
       {status === "running" && <StatusDot tone="bg-yellow" size={8} pulse />}
@@ -143,7 +143,11 @@ export function ToolCall({
         ) : (
           <ChevronRight className="size-3 shrink-0 text-line-strong" />
         ))}
-    </>
+    </>)
+         }
+
+  const header = (
+    renderToolHeading()
   )
   const headerClass = cn(
     "flex w-full items-center gap-[9px] px-2.5 py-1.5 font-mono text-[11.5px]",

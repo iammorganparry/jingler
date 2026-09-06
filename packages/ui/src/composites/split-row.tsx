@@ -60,6 +60,99 @@ export function SplitRow({
   splitCandidates?: ReadonlyArray<Session>
   className?: string
 }) {
+  const renderSplitPane = ((pane, index) => {
+                             function renderPaneFocusButton(session: NonNullable<ReturnType<typeof byId>>) {
+                               return (<button
+                    type="button"
+                    onClick={() => onFocusPane?.(group.id, index)}
+                    // A segment is a drag SOURCE as well as a target, writing the
+                    // same payload a standalone `SessionRow` does. Without this
+                    // there is no gesture for taking a session back out of a
+                    // split, or moving one from one split to another — the only
+                    // sessions you could drag were the ones not on screen, which
+                    // is exactly backwards from Arc, where the sidebar pill is
+                    // the handle for the thing you are looking at.
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.setData(SESSION_DND_MIME, pane.sessionId)
+                      e.dataTransfer.effectAllowed = "copyMove"
+                    }}
+                    data-testid={`split-segment-${pane.sessionId}`}
+                    title={`${session.title} — ${displayStatusLabel[display]}`}
+                    className={cn(
+                      "flex min-w-0 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      compact ? "flex-none justify-center" : "flex-1"
+                    )}
+                  >
+                    <StatusDot status={displayStatusTone[display]} size={7} />
+                    {!compact && (
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate text-[12px]",
+                          focused ? "font-medium text-text" : "text-muted-foreground"
+                        )}
+                      >
+                        {session.title}
+                      </span>
+                    )}
+                  </button>)
+                             }
+
+              const session = byId(pane.sessionId)
+              if (!session) return null
+              const display = displayStatusOf(liveActivity?.[session.id], session.status)
+              const focused = active && index === group.focused
+              return (
+                <motion.div
+                  key={pane.sessionId}
+                  // Matched against this session's standalone `SessionRow` — this
+                  // is what makes merge/separate a morph rather than a cut.
+                  layoutId={`session-${pane.sessionId}`}
+                  layout
+                  transition={SPRING}
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.94 }}
+                  // Segments share the row evenly rather than by pane ratio: the
+                  // sidebar is ~250px wide, and a 15%-wide segment there is a
+                  // sliver with no readable title. The pill says WHICH sessions
+                  // are split, not how the panes are proportioned.
+                  className={cn(
+                    "group/seg flex min-h-[34px] min-w-0 flex-1 items-center gap-1.5 rounded-[7px] transition-colors",
+                    compact ? "justify-center px-1" : "px-2",
+                    focused ? "bg-editor" : "hover:bg-surface/60"
+                  )}
+                >
+                  {renderPaneFocusButton(session)}
+                  {onClosePane && (
+                    <button
+                      type="button"
+                      // Arc: "hit the X next to either Split View Tab in the
+                      // Sidebar to close it". Always visible on the focused
+                      // segment, on hover otherwise — an always-on × per segment
+                      // is a lot of noise in a four-way split.
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onClosePane(group.id, index)
+                      }}
+                      aria-label={`Close ${session.title} pane`}
+                      data-testid={`split-close-${pane.sessionId}`}
+                      title="Close this pane (the session keeps running)"
+                      className={cn(
+                        "flex size-4 flex-none items-center justify-center rounded text-dim outline-none transition-colors hover:bg-hairline hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring",
+                        // Compact segments have no room for a permanent ×; the
+                        // dot alone is the whole segment, so the × arrives on
+                        // hover and the peek card offers the alternative.
+                        focused && !compact ? "opacity-100" : "opacity-0 group-hover/seg:opacity-100"
+                      )}
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
+                </motion.div>
+              )
+            }) satisfies  Parameters<typeof group.panes.map>[0]
+
   const [dropping, setDropping] = useState(false)
   const [peeking, setPeeking] = useState(false)
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -199,94 +292,7 @@ export function SplitRow({
           )}
         >
           <AnimatePresence initial={false} mode="popLayout">
-            {group.panes.map((pane, index) => {
-              const session = byId(pane.sessionId)
-              if (!session) return null
-              const display = displayStatusOf(liveActivity?.[session.id], session.status)
-              const focused = active && index === group.focused
-              return (
-                <motion.div
-                  key={pane.sessionId}
-                  // Matched against this session's standalone `SessionRow` — this
-                  // is what makes merge/separate a morph rather than a cut.
-                  layoutId={`session-${pane.sessionId}`}
-                  layout
-                  transition={SPRING}
-                  initial={{ opacity: 0, scale: 0.94 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.94 }}
-                  // Segments share the row evenly rather than by pane ratio: the
-                  // sidebar is ~250px wide, and a 15%-wide segment there is a
-                  // sliver with no readable title. The pill says WHICH sessions
-                  // are split, not how the panes are proportioned.
-                  className={cn(
-                    "group/seg flex min-h-[34px] min-w-0 flex-1 items-center gap-1.5 rounded-[7px] transition-colors",
-                    compact ? "justify-center px-1" : "px-2",
-                    focused ? "bg-editor" : "hover:bg-surface/60"
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => onFocusPane?.(group.id, index)}
-                    // A segment is a drag SOURCE as well as a target, writing the
-                    // same payload a standalone `SessionRow` does. Without this
-                    // there is no gesture for taking a session back out of a
-                    // split, or moving one from one split to another — the only
-                    // sessions you could drag were the ones not on screen, which
-                    // is exactly backwards from Arc, where the sidebar pill is
-                    // the handle for the thing you are looking at.
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(SESSION_DND_MIME, pane.sessionId)
-                      e.dataTransfer.effectAllowed = "copyMove"
-                    }}
-                    data-testid={`split-segment-${pane.sessionId}`}
-                    title={`${session.title} — ${displayStatusLabel[display]}`}
-                    className={cn(
-                      "flex min-w-0 items-center gap-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      compact ? "flex-none justify-center" : "flex-1"
-                    )}
-                  >
-                    <StatusDot status={displayStatusTone[display]} size={7} />
-                    {!compact && (
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1 truncate text-[12px]",
-                          focused ? "font-medium text-text" : "text-muted-foreground"
-                        )}
-                      >
-                        {session.title}
-                      </span>
-                    )}
-                  </button>
-                  {onClosePane && (
-                    <button
-                      type="button"
-                      // Arc: "hit the X next to either Split View Tab in the
-                      // Sidebar to close it". Always visible on the focused
-                      // segment, on hover otherwise — an always-on × per segment
-                      // is a lot of noise in a four-way split.
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onClosePane(group.id, index)
-                      }}
-                      aria-label={`Close ${session.title} pane`}
-                      data-testid={`split-close-${pane.sessionId}`}
-                      title="Close this pane (the session keeps running)"
-                      className={cn(
-                        "flex size-4 flex-none items-center justify-center rounded text-dim outline-none transition-colors hover:bg-hairline hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring",
-                        // Compact segments have no room for a permanent ×; the
-                        // dot alone is the whole segment, so the × arrives on
-                        // hover and the peek card offers the alternative.
-                        focused && !compact ? "opacity-100" : "opacity-0 group-hover/seg:opacity-100"
-                      )}
-                    >
-                      <X size={11} />
-                    </button>
-                  )}
-                </motion.div>
-              )
-            })}
+            {group.panes.map(renderSplitPane)}
           </AnimatePresence>
         </motion.div>
 

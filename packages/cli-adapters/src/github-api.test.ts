@@ -50,6 +50,11 @@ const requestOf = async (input: string | URL | Request, init?: RequestInit): Pro
   }
 }
 
+const isDiffRequest = (request: SeenRequest, path: string): boolean =>
+  pathIs(request, path) && request.headers.get("accept")?.includes("diff") === true
+
+const pageLength = (page: number): number => page === 1 ? 100 : 1
+
 const repository = {
   id: 101,
   node_id: "R_widget",
@@ -249,13 +254,13 @@ describe("GitHubApi pagination and large pull requests", () => {
   it("falls back from an oversized aggregate diff to every paginated file patch", async () => {
     const { client } = makeClient((request) => {
       if (pathIs(request, "/repos/acme/widget")) return json(repository)
-      if (pathIs(request, "/repos/acme/widget/pulls/9") && request.headers.get("accept")?.includes("diff")) {
+      if (isDiffRequest(request, "/repos/acme/widget/pulls/9")) {
         return json({ message: "diff too large" }, 406)
       }
       if (pathIs(request, "/repos/acme/widget/pulls/9/files")) {
         const page = Number(request.url.searchParams.get("page"))
         const start = page === 1 ? 0 : 100
-        const length = page === 1 ? 100 : 1
+        const length = pageLength(page)
         return json(
           Array.from({ length }, (_, index) => ({
             filename: `src/large-${start + index}.ts`,
@@ -276,7 +281,7 @@ describe("GitHubApi pagination and large pull requests", () => {
     // it (repository-access) even when the files endpoint is fully readable.
     const { client } = makeClient((request) => {
       if (pathIs(request, "/repos/acme/widget")) return json(repository)
-      if (pathIs(request, "/repos/acme/widget/pulls/9") && request.headers.get("accept")?.includes("diff")) {
+      if (isDiffRequest(request, "/repos/acme/widget/pulls/9")) {
         return json({ message: "Resource not accessible by integration" }, 403)
       }
       if (pathIs(request, "/repos/acme/widget/pulls/9/files")) {
@@ -502,7 +507,7 @@ describe("GitHubApi installation permission scopes", () => {
       if (pathIs(request, "/repos/acme/widget/commits/abc123/status")) {
         const page = Number(request.url.searchParams.get("page"))
         return json({
-          statuses: Array.from({ length: page === 1 ? 100 : 1 }, (_, index) => ({
+          statuses: Array.from({ length: pageLength(page) }, (_, index) => ({
             context: `status-${page}-${index}`,
             state: "success"
           }))
@@ -567,6 +572,18 @@ describe("GitHubApi installation permission scopes", () => {
 })
 
 describe("GitHubApi typed failures", () => {
+  it.each([
+    [401, "token-expired"],
+    [403, "rate-limited"]
+  ] as const)("preserves error precedence for HTTP %s with exhausted quota", async (status, reason) => {
+    const { client } = makeClient(() => json(
+      { message: "installation suspended" },
+      status,
+      { "x-ratelimit-remaining": "0" }
+    ))
+    await expect(client.repository("/repo")).rejects.toMatchObject({ reason, status })
+  })
+
   it.each([
     [401, { message: "Bad credentials" }, "token-expired"],
     [403, { message: "installation suspended" }, "installation-suspended"],

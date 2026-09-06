@@ -274,21 +274,24 @@ const handlePairingClaim = async (
     input.pairingCode
   )
   if (result.status !== "claimed") {
-    const status =
-      result.status === "expired"
-        ? 410
-        : result.status === "already-claimed"
-          ? 409
-          : result.status === "rate-limited"
-            ? 429
-            : result.status === "not-found"
-              ? 404
-              : 401
-    return json({ error: `Pairing ${result.status}` }, status)
+    return pairingFailureResponse()
   }
   const registry = env.DEVICE_REGISTRY.getByName(claims.subject)
   const device = await registry.adoptClaim(claims.subject, result.device)
   return json({ version: 1, subject: claims.subject, device })
+
+  function pairingFailureResponse() {
+    const status = result.status === "expired"
+      ? 410
+      : result.status === "already-claimed"
+        ? 409
+        : result.status === "rate-limited"
+          ? 429
+          : result.status === "not-found"
+            ? 404
+            : 401
+    return json({ error: `Pairing ${result.status}` }, status)
+  }
 }
 
 const handleDeviceList = async (
@@ -498,18 +501,8 @@ const handleTunnelSocket = async (
   env: Env,
   sessionId: string
 ): Promise<Response> => {
-  const claims = await grant(request, env, "session-tunnel")
-  if (
-    !claims?.deviceId ||
-    claims.deviceGeneration === null ||
-    !claims.sessionId ||
-    claims.sessionId !== sessionId ||
-    !claims.clientInstanceId ||
-    claims.attachmentGeneration === null ||
-    claims.controllerLeaseGeneration === null
-  ) {
-    return json({ error: "Invalid session-tunnel grant" }, 401)
-  }
+  const claims = await readTunnelClaims(request, env, sessionId)
+  if (!claims) return json({ error: "Invalid session-tunnel grant" }, 401)
   // A cheap edge-local guard absorbs an abusive account before it wakes the
   // strongly consistent usage/registry/tunnel objects. The usage DO remains
   // the authoritative exact limiter and quota ledger.
@@ -561,96 +554,8 @@ const handleTunnelSocket = async (
   // Fail on the account/device budget before waking the session object or
   // notifying the daemon. Rejected attachments should not fan out into more
   // billed Durable Object requests.
-  const usage = env.RELAY_USAGE.getByName(claims.subject)
-  const usageAttachmentId = `relay_${crypto.randomUUID()}`
-  const sourceIp = request.headers.get("cf-connecting-ip") ?? "unknown"
-  const usageAdmission = await usage.admit({
-    attachmentId: usageAttachmentId,
-    deviceId: claims.deviceId,
-    clientInstanceId: claims.clientInstanceId,
-    sourceIp,
-    expiresAt: claims.expiresAt
-  })
-  if (usageAdmission !== "admitted") {
-    return json({
-      _tag: "DeviceControlPlaneError",
-      reason: usageAdmission,
-      message: `Relay attachment rejected: ${usageAdmission}`,
-      retryable: usageAdmission === "rate-limited"
-    }, usageAdmission === "rate-limited" ? 429 : 403)
-  }
-  const tunnel = env.SESSION_TUNNEL.getByName(claims.sessionId)
-  const admission = {
-    subject: claims.subject,
-    deviceId: claims.deviceId,
-    sessionId: claims.sessionId,
-    clientInstanceId: claims.clientInstanceId,
-    attachmentGeneration: claims.attachmentGeneration,
-    controllerLeaseGeneration: claims.controllerLeaseGeneration,
-    expiresAt: claims.expiresAt
-  }
-  const preparation = await tunnel.prepareConnection({
-    endpoint,
-    initialization: {
-      sessionId: claims.sessionId,
-      subject: claims.subject,
-      deviceId: claims.deviceId,
-      deviceGeneration: claims.deviceGeneration,
-      expiresAt: claims.expiresAt
-    },
-    admission
-  })
-  if (preparation.status !== "prepared") {
-    await usage.release(usageAttachmentId)
-    const reason = preparation.status
-    const retryable = reason === "offline" ||
-      reason === "controller-occupied" ||
-      reason === "stale-controller"
-    const publicReason = reason === "stale-controller"
-      ? "stale-controller"
-      : retryable
-        ? "offline"
-        : "invalid-grant"
-    return json({
-      _tag: "DeviceControlPlaneError",
-      reason: publicReason,
-      message: `Client attachment rejected: ${reason}`,
-      retryable
-    }, retryable ? 409 : 403)
-  }
-  if (endpoint === "desktop" && !(await registry.notifySession(
-    claims.deviceId,
-    claims.sessionId,
-    bearerGrant(request)!,
-    keyOffer,
-    {
-      clientInstanceId: claims.clientInstanceId,
-      attachmentGeneration: claims.attachmentGeneration,
-      controllerLeaseGeneration: preparation.controllerLeaseGeneration
-    }
-  ))) {
-    await usage.release(usageAttachmentId)
-    return json({
-      _tag: "DeviceControlPlaneError",
-      reason: "offline",
-      message: "Device is offline",
-      retryable: true
-    }, 409)
-  }
-  const response = await tunnel.fetch(
-    new Request(request.url, {
-      headers: websocketHeaders(
-        claims,
-        endpoint,
-        acknowledgedSequence,
-        usageAttachmentId,
-        sourceIp,
-        preparation.controllerLeaseGeneration
-      )
-    })
-  )
-  if (response.status !== 101) await usage.release(usageAttachmentId)
-  return response
+
+  return admitTunnelConnection(request, env, claims, registry, endpoint, keyOffer, acknowledgedSequence)
 }
 
 const scopedSessionClaims = async (
@@ -868,92 +773,235 @@ const worker = {
     if (request.method === "GET" && url.pathname === "/v1/devices") {
       return handleDeviceList(request, env)
     }
-    const targetedInventory = url.pathname.match(
-      /^\/v1\/devices\/([A-Za-z0-9_-]{1,128})\/sessions\/([A-Za-z0-9_-]{1,128})$/u
-    )
-    if (request.method === "GET" && targetedInventory) {
-      return handleSessionInventory(
-        request,
-        env,
-        targetedInventory[1]!,
-        targetedInventory[2]!
-      )
-    }
-    const discoveryDeviceId = routeDeviceId(url.pathname, "/discovery")
-    if (request.method === "GET" && discoveryDeviceId) {
-      return handleDiscovery(request, env, discoveryDeviceId)
-    }
-    if (request.method === "POST" && url.pathname === "/v1/device-challenges") {
-      return handleChallengeCreation(request, env)
-    }
-    if (
-      request.method === "POST" &&
-      url.pathname === "/v1/device-challenges/exchange"
-    ) {
-      return handleChallengeExchange(request, env)
-    }
-    if (request.method === "GET" && url.pathname === "/v1/device-connect") {
-      return handleDeviceSocket(request, env)
-    }
-    const attachmentSessionId = sessionOperationId(
-      url.pathname,
-      "/attachments"
-    )
-    if (request.method === "POST" && attachmentSessionId) {
-      return handleClientAttachment(request, env, attachmentSessionId)
-    }
-    const acquireSessionId = sessionOperationId(
-      url.pathname,
-      "/controller/acquire"
-    )
-    if (request.method === "POST" && acquireSessionId) {
-      return handleControllerLease(request, env, acquireSessionId, "acquire")
-    }
-    const takeoverSessionId = sessionOperationId(
-      url.pathname,
-      "/controller/takeover"
-    )
-    if (request.method === "POST" && takeoverSessionId) {
-      return handleControllerLease(request, env, takeoverSessionId, "takeover")
-    }
-    const releaseSessionId = sessionOperationId(
-      url.pathname,
-      "/controller/release"
-    )
-    if (request.method === "POST" && releaseSessionId) {
-      return handleControllerLease(request, env, releaseSessionId, "release")
-    }
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/v1/session-tunnels/")
-    ) {
-      const sessionId = url.pathname.slice("/v1/session-tunnels/".length)
-      if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
-        return json({ error: "Invalid session id" }, 400)
-      }
-      return handleTunnelSocket(request, env, sessionId)
-    }
-    const revokeDeviceId = routeDeviceId(url.pathname, "/revoke")
-    if (request.method === "POST" && revokeDeviceId) {
-      return handleRevocation(request, env, revokeDeviceId)
-    }
-    const renameDeviceId = routeDeviceId(url.pathname, "/rename")
-    if (request.method === "POST" && renameDeviceId) {
-      return handleRename(request, env, renameDeviceId)
-    }
-    const challengeDeviceId = routeDeviceId(
-      url.pathname,
-      "/rotation-challenges"
-    )
-    if (request.method === "POST" && challengeDeviceId) {
-      return handleRotationChallenge(request, env, challengeDeviceId)
-    }
-    const rotateDeviceId = routeDeviceId(url.pathname, "/rotate-key")
-    if (request.method === "POST" && rotateDeviceId) {
-      return handleKeyRotation(request, env, rotateDeviceId)
-    }
-    return json({ error: "Not found" }, 404)
+
+    return routeDeviceConnection(request, env, url)
   }
 } satisfies ExportedHandler<Env>
 
 export default worker
+
+const routeDeviceMutation = async (request: Request, env: Env, url: URL): Promise<Response> => {
+  const revokeDeviceId = routeDeviceId(url.pathname, "/revoke")
+  if (request.method === "POST" && revokeDeviceId) {
+    return handleRevocation(request, env, revokeDeviceId)
+  }
+  const renameDeviceId = routeDeviceId(url.pathname, "/rename")
+  if (request.method === "POST" && renameDeviceId) {
+    return handleRename(request, env, renameDeviceId)
+  }
+  const challengeDeviceId = routeDeviceId(
+    url.pathname,
+    "/rotation-challenges"
+  )
+  if (request.method === "POST" && challengeDeviceId) {
+    return handleRotationChallenge(request, env, challengeDeviceId)
+  }
+  const rotateDeviceId = routeDeviceId(url.pathname, "/rotate-key")
+  if (request.method === "POST" && rotateDeviceId) {
+    return handleKeyRotation(request, env, rotateDeviceId)
+  }
+  return json({ error: "Not found" }, 404)
+}
+
+const routeSessionRequest = async (request: Request, env: Env, url: URL): Promise<Response> => {
+  const attachmentSessionId = sessionOperationId(
+    url.pathname,
+    "/attachments"
+  )
+  if (request.method === "POST" && attachmentSessionId) {
+    return handleClientAttachment(request, env, attachmentSessionId)
+  }
+  const acquireSessionId = sessionOperationId(
+    url.pathname,
+    "/controller/acquire"
+  )
+  if (request.method === "POST" && acquireSessionId) {
+    return handleControllerLease(request, env, acquireSessionId, "acquire")
+  }
+  const takeoverSessionId = sessionOperationId(
+    url.pathname,
+    "/controller/takeover"
+  )
+  if (request.method === "POST" && takeoverSessionId) {
+    return handleControllerLease(request, env, takeoverSessionId, "takeover")
+  }
+  const releaseSessionId = sessionOperationId(
+    url.pathname,
+    "/controller/release"
+  )
+  if (request.method === "POST" && releaseSessionId) {
+    return handleControllerLease(request, env, releaseSessionId, "release")
+  }
+  if (
+    request.method === "GET" &&
+    url.pathname.startsWith("/v1/session-tunnels/")
+  ) {
+    const sessionId = url.pathname.slice("/v1/session-tunnels/".length)
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
+      return json({ error: "Invalid session id" }, 400)
+    }
+    return handleTunnelSocket(request, env, sessionId)
+  }
+
+  return routeDeviceMutation(request, env, url)
+}
+
+const routeDeviceConnection = async (request: Request, env: Env, url: URL): Promise<Response> => {
+  const targetedInventory = url.pathname.match(
+    /^\/v1\/devices\/([A-Za-z0-9_-]{1,128})\/sessions\/([A-Za-z0-9_-]{1,128})$/u
+  )
+  if (request.method === "GET" && targetedInventory) {
+    return handleSessionInventory(
+      request,
+      env,
+      targetedInventory[1]!,
+      targetedInventory[2]!
+    )
+  }
+  const discoveryDeviceId = routeDeviceId(url.pathname, "/discovery")
+  if (request.method === "GET" && discoveryDeviceId) {
+    return handleDiscovery(request, env, discoveryDeviceId)
+  }
+  if (request.method === "POST" && url.pathname === "/v1/device-challenges") {
+    return handleChallengeCreation(request, env)
+  }
+  if (
+    request.method === "POST" &&
+    url.pathname === "/v1/device-challenges/exchange"
+  ) {
+    return handleChallengeExchange(request, env)
+  }
+  if (request.method === "GET" && url.pathname === "/v1/device-connect") {
+    return handleDeviceSocket(request, env)
+  }
+
+  return routeSessionRequest(request, env, url)
+}
+
+const readTunnelClaims = async (request: Request, env: Env, sessionId: string) => {
+  const claims = await grant(request, env, "session-tunnel")
+  if (
+    !claims?.deviceId ||
+    claims.deviceGeneration === null ||
+    !claims.sessionId ||
+    claims.sessionId !== sessionId ||
+    !claims.clientInstanceId ||
+    claims.attachmentGeneration === null ||
+    claims.controllerLeaseGeneration === null
+  ) {
+    return null
+  }
+  return {
+    ...claims,
+    deviceId: claims.deviceId,
+    deviceGeneration: claims.deviceGeneration,
+    sessionId: claims.sessionId,
+    clientInstanceId: claims.clientInstanceId,
+    attachmentGeneration: claims.attachmentGeneration,
+    controllerLeaseGeneration: claims.controllerLeaseGeneration
+  }
+}
+
+const admitTunnelConnection = async (
+  request: Request,
+  env: Env,
+  claims: NonNullable<Awaited<ReturnType<typeof readTunnelClaims>>>,
+  registry: ReturnType<Env["DEVICE_REGISTRY"]["getByName"]>,
+  endpoint: "desktop" | "device",
+  keyOffer: Schema.Schema.Type<typeof RemoteSessionKeyOffer> | null,
+  acknowledgedSequence: string
+): Promise<Response> => {
+  const usage = env.RELAY_USAGE.getByName(claims.subject)
+  const usageAttachmentId = `relay_${crypto.randomUUID()}`
+  const sourceIp = request.headers.get("cf-connecting-ip") ?? "unknown"
+  const usageAdmission = await usage.admit({
+    attachmentId: usageAttachmentId,
+    deviceId: claims.deviceId,
+    clientInstanceId: claims.clientInstanceId,
+    sourceIp,
+    expiresAt: claims.expiresAt
+  })
+  if (usageAdmission !== "admitted") {
+    return json({
+      _tag: "DeviceControlPlaneError",
+      reason: usageAdmission,
+      message: `Relay attachment rejected: ${usageAdmission}`,
+      retryable: usageAdmission === "rate-limited"
+    }, usageAdmission === "rate-limited" ? 429 : 403)
+  }
+  const tunnel = env.SESSION_TUNNEL.getByName(claims.sessionId)
+  const admission = {
+    subject: claims.subject,
+    deviceId: claims.deviceId,
+    sessionId: claims.sessionId,
+    clientInstanceId: claims.clientInstanceId,
+    attachmentGeneration: claims.attachmentGeneration,
+    controllerLeaseGeneration: claims.controllerLeaseGeneration,
+    expiresAt: claims.expiresAt
+  }
+  const preparation = await tunnel.prepareConnection({
+    endpoint,
+    initialization: {
+      sessionId: claims.sessionId,
+      subject: claims.subject,
+      deviceId: claims.deviceId,
+      deviceGeneration: claims.deviceGeneration,
+      expiresAt: claims.expiresAt
+    },
+    admission
+  })
+  if (preparation.status !== "prepared") {
+    await usage.release(usageAttachmentId)
+    return preparationFailureResponse(preparation.status)
+  }
+  if (endpoint === "desktop" && !(await registry.notifySession(
+    claims.deviceId,
+    claims.sessionId,
+    bearerGrant(request)!,
+    keyOffer,
+    {
+      clientInstanceId: claims.clientInstanceId,
+      attachmentGeneration: claims.attachmentGeneration,
+      controllerLeaseGeneration: preparation.controllerLeaseGeneration
+    }
+  ))) {
+    await usage.release(usageAttachmentId)
+    return json({
+      _tag: "DeviceControlPlaneError",
+      reason: "offline",
+      message: "Device is offline",
+      retryable: true
+    }, 409)
+  }
+  const response = await tunnel.fetch(
+    new Request(request.url, {
+      headers: websocketHeaders(
+        claims,
+        endpoint,
+        acknowledgedSequence,
+        usageAttachmentId,
+        sourceIp,
+        preparation.controllerLeaseGeneration
+      )
+    })
+  )
+  if (response.status !== 101) await usage.release(usageAttachmentId)
+  return response
+}
+
+const preparationFailureResponse = (reason: string): Response => {
+  const retryable = reason === "offline" ||
+    reason === "controller-occupied" ||
+    reason === "stale-controller"
+  const publicReason = reason === "stale-controller"
+    ? "stale-controller"
+    : retryable
+      ? "offline"
+      : "invalid-grant"
+  return json({
+    _tag: "DeviceControlPlaneError",
+    reason: publicReason,
+    message: `Client attachment rejected: ${reason}`,
+    retryable
+  }, retryable ? 409 : 403)
+}

@@ -23,24 +23,32 @@ const FrontmatterAttributes = Schema.Record({ key: Schema.String, value: Schema.
 
 const splitLines = (value: string): Array<string> => value.split(/\r?\n/)
 
+interface QuoteState {
+  quote: '"' | "'" | null
+  escaped: boolean
+}
+
+const consumeQuotedCharacter = (state: QuoteState, character: string): boolean => {
+  if (state.escaped) {
+    state.escaped = false
+    return true
+  }
+  if (character === "\\" && state.quote === '"') {
+    state.escaped = true
+    return true
+  }
+  if (character !== '"' && character !== "'") return false
+  if (state.quote === character) state.quote = null
+  else if (state.quote === null) state.quote = character
+  return true
+}
+
 const stripComment = (value: string): string => {
-  let quote: '"' | "'" | null = null
-  let escaped = false
+  const state: QuoteState = { quote: null, escaped: false }
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (character === "\\" && quote === '"') {
-      escaped = true
-      continue
-    }
-    if (character === '"' || character === "'") {
-      quote = quote === character ? null : quote === null ? character : quote
-      continue
-    }
-    if (character === "#" && quote === null && (index === 0 || /\s/.test(value[index - 1]!))) {
+    if (consumeQuotedCharacter(state, character)) continue
+    if (character === "#" && state.quote === null && (index === 0 || /\s/.test(value[index - 1]!))) {
       return value.slice(0, index).trimEnd()
     }
   }
@@ -67,23 +75,11 @@ const splitInline = (value: string): Array<string> => {
   const parts: Array<string> = []
   let start = 0
   let depth = 0
-  let quote: '"' | "'" | null = null
-  let escaped = false
+  const state: QuoteState = { quote: null, escaped: false }
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index]!
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (character === "\\" && quote === '"') {
-      escaped = true
-      continue
-    }
-    if (character === '"' || character === "'") {
-      quote = quote === character ? null : quote === null ? character : quote
-      continue
-    }
-    if (quote !== null) continue
+    if (consumeQuotedCharacter(state, character)) continue
+    if (state.quote !== null) continue
     if (character === "[" || character === "{") depth += 1
     if (character === "]" || character === "}") depth -= 1
     if (character === "," && depth === 0) {
@@ -129,6 +125,20 @@ const assertUniqueKey = (
   }
 }
 
+const parseInlineMapping = (value: string, line: number): Record<string, unknown> => {
+  const inner = value.slice(1, -1).trim()
+  if (inner === "") return {}
+  const record: Record<string, unknown> = {}
+  for (const entry of splitInline(inner)) {
+    const colon = findMappingColon(entry)
+    if (colon < 1) throw new FrontmatterParseError("invalid inline mapping", line)
+    const key = parseKey(entry.slice(0, colon), line)
+    assertUniqueKey(record, key, line)
+    record[key] = parseScalar(entry.slice(colon + 1), line)
+  }
+  return record
+}
+
 const parseScalar = (rawValue: string, line: number): unknown => {
   const value = stripComment(rawValue).trim()
   if (value === "") return ""
@@ -142,19 +152,9 @@ const parseScalar = (rawValue: string, line: number): unknown => {
     return inner === "" ? [] : splitInline(inner).map((entry) => parseScalar(entry, line))
   }
   if (value.startsWith("{") && value.endsWith("}")) {
-    const inner = value.slice(1, -1).trim()
-    if (inner === "") return {}
-    const record: Record<string, unknown> = {}
-    for (const entry of splitInline(inner)) {
-      const colon = findMappingColon(entry)
-      if (colon < 1) throw new FrontmatterParseError("invalid inline mapping", line)
-      const key = parseKey(entry.slice(0, colon), line)
-      assertUniqueKey(record, key, line)
-      record[key] = parseScalar(entry.slice(colon + 1), line)
-    }
-    return record
+    return parseInlineMapping(value, line)
   }
-  if (value.startsWith("!") || value.startsWith("&") || value.startsWith("*")) {
+  if (/^[!&*]/.test(value)) {
     throw new FrontmatterParseError("YAML tags and aliases are not supported", line)
   }
   return value
@@ -165,6 +165,56 @@ const indentationOf = (line: string): number => line.length - line.trimStart().l
 interface ParsedBlock {
   readonly value: unknown
   readonly next: number
+}
+
+const parseNestedValue = (
+  lines: ReadonlyArray<string>, index: number, indent: number, fallback: unknown
+): ParsedBlock => {
+  const next = index + 1
+  if (next < lines.length && indentationOf(lines[next]!) > indent) {
+    return parseBlock(lines, next, indentationOf(lines[next]!))
+  }
+  return { value: fallback, next }
+}
+
+const parseSequenceRecord = (
+  lines: ReadonlyArray<string>, index: number, indent: number, item: string, colon: number
+): ParsedBlock => {
+  const record: Record<string, unknown> = {}
+  const key = parseKey(item.slice(0, colon), index + 1)
+  assertUniqueKey(record, key, index + 1)
+  const rest = item.slice(colon + 1).trim()
+  record[key] = rest === "" ? "" : parseScalar(rest, index + 1)
+  index += 1
+  while (index < lines.length) {
+    const continuation = lines[index]!
+    if (continuation.trim() === "") {
+      index += 1
+      continue
+    }
+    const continuationIndent = indentationOf(continuation)
+    if (continuationIndent <= indent) break
+    const continuationLine = continuation.trim()
+    const continuationColon = findMappingColon(continuationLine)
+    if (continuationColon < 1) {
+      throw new FrontmatterParseError("invalid sequence mapping", index + 1)
+    }
+    const continuationKey = parseKey(
+      continuationLine.slice(0, continuationColon),
+      index + 1
+    )
+    assertUniqueKey(record, continuationKey, index + 1)
+    const continuationRest = continuationLine.slice(continuationColon + 1).trim()
+    if (continuationRest !== "") {
+      record[continuationKey] = parseScalar(continuationRest, index + 1)
+      index += 1
+      continue
+    }
+    const nested = parseNestedValue(lines, index, continuationIndent, "")
+    record[continuationKey] = nested.value
+    index = nested.next
+  }
+  return { value: record, next: index }
 }
 
 const parseArrayBlock = (
@@ -189,15 +239,9 @@ const parseArrayBlock = (
     if (!(line === "-" || line.startsWith("- "))) break
     const item = line.slice(1).trim()
     if (item === "") {
-      const nestedStart = index + 1
-      if (nestedStart >= lines.length || indentationOf(lines[nestedStart]!) <= indent) {
-        value.push(null)
-        index += 1
-      } else {
-        const nested = parseBlock(lines, nestedStart, indentationOf(lines[nestedStart]!))
-        value.push(nested.value)
-        index = nested.next
-      }
+      const nested = parseNestedValue(lines, index, indent, null)
+      value.push(nested.value)
+      index = nested.next
       continue
     }
     const colon = findMappingColon(item)
@@ -207,47 +251,9 @@ const parseArrayBlock = (
       continue
     }
 
-    const record: Record<string, unknown> = {}
-    const key = parseKey(item.slice(0, colon), index + 1)
-    assertUniqueKey(record, key, index + 1)
-    const rest = item.slice(colon + 1).trim()
-    record[key] = rest === "" ? "" : parseScalar(rest, index + 1)
-    index += 1
-    while (index < lines.length) {
-      const continuation = lines[index]!
-      if (continuation.trim() === "") {
-        index += 1
-        continue
-      }
-      const continuationIndent = indentationOf(continuation)
-      if (continuationIndent <= indent) break
-      const continuationLine = continuation.trim()
-      const continuationColon = findMappingColon(continuationLine)
-      if (continuationColon < 1) {
-        throw new FrontmatterParseError("invalid sequence mapping", index + 1)
-      }
-      const continuationKey = parseKey(
-        continuationLine.slice(0, continuationColon),
-        index + 1
-      )
-      assertUniqueKey(record, continuationKey, index + 1)
-      const continuationRest = continuationLine.slice(continuationColon + 1).trim()
-      if (continuationRest !== "") {
-        record[continuationKey] = parseScalar(continuationRest, index + 1)
-        index += 1
-        continue
-      }
-      const nestedStart = index + 1
-      if (nestedStart < lines.length && indentationOf(lines[nestedStart]!) > continuationIndent) {
-        const nested = parseBlock(lines, nestedStart, indentationOf(lines[nestedStart]!))
-        record[continuationKey] = nested.value
-        index = nested.next
-      } else {
-        record[continuationKey] = ""
-        index += 1
-      }
-    }
-    value.push(record)
+    const record = parseSequenceRecord(lines, index, indent, item, colon)
+    value.push(record.value)
+    index = record.next
   }
   return { value, next: index }
 }
@@ -282,15 +288,9 @@ const parseRecordBlock = (
       index += 1
       continue
     }
-    const nestedStart = index + 1
-    if (nestedStart < lines.length && indentationOf(lines[nestedStart]!) > indent) {
-      const nested = parseBlock(lines, nestedStart, indentationOf(lines[nestedStart]!))
-      value[key] = nested.value
-      index = nested.next
-    } else {
-      value[key] = ""
-      index += 1
-    }
+    const nested = parseNestedValue(lines, index, indent, "")
+    value[key] = nested.value
+    index = nested.next
   }
   return { value, next: index }
 }
@@ -314,16 +314,7 @@ const parseBlock = (
     : parseRecordBlock(lines, start, indent)
 }
 
-/** Parse an optional `---` frontmatter block, preserving the body verbatim. */
-export const parseFrontmatter = (markdown: string): ParsedFrontmatter => {
-  const source = markdown.startsWith("\uFEFF") ? markdown.slice(1) : markdown
-  const openingEnd = source.indexOf("\n")
-  const openingLine = source
-    .slice(0, openingEnd < 0 ? source.length : openingEnd)
-    .replace(/\r$/, "")
-  if (!FRONTMATTER_BOUNDARY.test(openingLine)) {
-    return { attributes: {}, body: source }
-  }
+const findClosingBoundary = (source: string, openingEnd: number) => {
   let lineStart = openingEnd + 1
   let frontmatterEnd = -1
   let bodyStart = -1
@@ -340,6 +331,20 @@ export const parseFrontmatter = (markdown: string): ParsedFrontmatter => {
     lineStart = newline + 1
   }
   if (frontmatterEnd < 0) throw new FrontmatterParseError("frontmatter has no closing delimiter")
+  return { frontmatterEnd, bodyStart }
+}
+
+/** Parse an optional `---` frontmatter block, preserving the body verbatim. */
+export const parseFrontmatter = (markdown: string): ParsedFrontmatter => {
+  const source = markdown.startsWith("\uFEFF") ? markdown.slice(1) : markdown
+  const openingEnd = source.indexOf("\n")
+  const openingLine = source
+    .slice(0, openingEnd < 0 ? source.length : openingEnd)
+    .replace(/\r$/, "")
+  if (!FRONTMATTER_BOUNDARY.test(openingLine)) {
+    return { attributes: {}, body: source }
+  }
+  const { frontmatterEnd, bodyStart } = findClosingBoundary(source, openingEnd)
   const frontmatterLines = splitLines(source.slice(openingEnd + 1, frontmatterEnd))
   const parsed = parseBlock(frontmatterLines, 0, 0).value
   const attributes = Schema.decodeUnknownOption(FrontmatterAttributes)(parsed)

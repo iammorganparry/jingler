@@ -171,25 +171,28 @@ const parseStored = (raw: string): StoredDeviceIdentity | LegacyStoredDeviceIden
     privateKeyPkcs8: record.privateKeyPkcs8,
     publicKey: { algorithm: "Ed25519", encoding: "base64url", value: publicKey.value }
   }
-  if (record.encryptionPrivateKeyPkcs8 === undefined && encryptionPublicKey === null) return legacy
-  if (
-    typeof record.encryptionPrivateKeyPkcs8 !== "string" ||
-    encryptionPublicKey?.algorithm !== "X25519" ||
-    encryptionPublicKey.encoding !== "base64url" ||
-    typeof encryptionPublicKey.value !== "string" ||
-    !/^[A-Za-z0-9_-]{43}$/u.test(encryptionPublicKey.value)
-  ) {
-    throw new Error("Malformed device encryption key")
-  }
-  return {
-    ...legacy,
-    encryptionPrivateKeyPkcs8: record.encryptionPrivateKeyPkcs8,
-    encryptionPublicKey: {
-      algorithm: "X25519",
-      encoding: "base64url",
-      value: encryptionPublicKey.value
+  const restoreEncryptionIdentity = (): StoredDeviceIdentity | LegacyStoredDeviceIdentity => {
+    if (record.encryptionPrivateKeyPkcs8 === undefined && encryptionPublicKey === null) return legacy
+    if (
+      typeof record.encryptionPrivateKeyPkcs8 !== "string" ||
+      encryptionPublicKey?.algorithm !== "X25519" ||
+      encryptionPublicKey.encoding !== "base64url" ||
+      typeof encryptionPublicKey.value !== "string" ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(encryptionPublicKey.value)
+    ) {
+      throw new Error("Malformed device encryption key")
+    }
+    return {
+      ...legacy,
+      encryptionPrivateKeyPkcs8: record.encryptionPrivateKeyPkcs8,
+      encryptionPublicKey: {
+        algorithm: "X25519",
+        encoding: "base64url",
+        value: encryptionPublicKey.value
+      }
     }
   }
+  return restoreEncryptionIdentity()
 }
 
 const hasEncryptionKey = (

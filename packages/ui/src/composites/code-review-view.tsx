@@ -108,6 +108,206 @@ export function CodeReviewView({
   sentFindingIds,
   onDeslopFile
 }: CodeReviewViewProps) {
+         function renderConnectionNotice() {
+           return (!isLocal && !connected && (
+        <div className="flex items-center gap-3 border-b border-hairline px-4 py-2.5">
+          <Callout tone="blue" className="flex-1">
+            {connectionMessage ?? "Connect GitHub to post this review."}
+          </Callout>
+          <Button variant="secondary" size="sm" onClick={onConnectGithub}>
+            {connectionActionLabel}
+          </Button>
+        </div>
+      ))
+         }
+
+  function renderDiffCenter() {
+    return (<div
+            data-testid="review-diff-center"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-editor"
+          >
+            {general.length > 0 && (
+              <div className="flex flex-none flex-col gap-2 border-b border-hairline bg-panel/40 p-4">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.4px] text-dim">
+                  Review · general
+                </span>
+                {general.map((finding) => (
+                  <ReviewFindingRow
+                    key={finding.id}
+                    finding={finding}
+                    sent={sentFindingIds?.has(finding.id) ?? false}
+                    canRoute={routeTargetSession !== null}
+                    review={activeReview}
+                    onSendToAgent={onSendFindingToAgent}
+                  />
+                ))}
+              </div>
+            )}
+            {files.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center text-[13px] text-dim">
+                <span>
+                  {filtersActive
+                    ? "No files match these filters."
+                    : "No changes to review."}
+                </span>
+                {filtersActive && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={controls.clearFilters}
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <ReviewCodeView
+                entries={entries}
+                selection={selection}
+                scrollRequest={scrollRequest}
+                drafts={drafts}
+                reviewThreads={reviewThreads}
+                findingsByPath={byFile}
+                review={activeReview}
+                sentFindingIds={sentFindingIds}
+                connected={connected}
+                routeTargetSession={routeTargetSession}
+                local={isLocal}
+                compactActions={compactActions}
+                collapseViewed={controls.collapseViewed}
+                onSelectionChange={setSelection}
+                onActivePathChange={handleActivePathChange}
+                onAddDraft={onAddDraft}
+                onRemoveDraft={onRemoveDraft}
+                onToggleViewed={onToggleViewed}
+                onRevertLines={onRevertLines}
+                onRevertFile={onRevertFile}
+                onDeslopFile={onDeslopFile}
+                onSendFindingToAgent={onSendFindingToAgent}
+              />
+            )}
+          </div>)
+  }
+
+function renderFocusButton() {
+             return (<Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          aria-pressed={controls.focused}
+          aria-label={controls.focused ? "Exit review focus" : "Focus diff"}
+          title={controls.focused ? "Restore review panels" : "Show only the diff"}
+          onClick={controls.toggleFocus}
+          className={cn("min-h-10", compactActions && "size-10 p-0")}
+        >
+          {controls.focused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          <span className={cn(compactActions && "sr-only")}>
+            {controls.focused ? "Exit focus" : "Focus"}
+          </span>
+        </Button>)
+           }
+
+         function renderFileRail() {
+           return (!controls.focused && (
+            <>
+              <div
+                data-testid="review-file-rail"
+                style={{ width: roomy ? fileList.width : sheetWidth }}
+                className={cn(
+                  "flex max-w-full flex-col border-r border-hairline bg-panel",
+                  roomy
+                    ? "flex-none"
+                    : "absolute inset-y-0 left-0 z-30 shadow-2xl",
+                  !roomy && controls.sheet !== "files" && "hidden"
+                )}
+              >
+                <ReviewFileRail
+                  files={files}
+                  totalFiles={allFiles.length}
+                  activePath={activePath}
+                  feedback={feedback.byPath}
+                  feedbackAny={feedback.any}
+                  statusByPath={statusByPath}
+                  added={added}
+                  removed={removed}
+                  viewed={viewed}
+                  controls={controls}
+                  onSelectFile={scrollToFile}
+                />
+              </div>
+              {roomy && (
+                <ResizeHandle
+                  onResize={(dx) => fileList.adjust(dx, maxFileListWidth)}
+                  aria-label="Resize file list"
+                />
+              )}
+            </>
+          ))
+         }
+
+         function renderReviewToolbar() {
+
+
+           return (<div className="flex min-h-10 flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-hairline px-[14px] py-1">
+        <SegmentedControl
+          value={source}
+          onChange={onSetSource}
+          items={[
+            { value: "pr", label: "Pull Request", disabled: !prAvailable },
+            { value: "local", label: "Uncommitted", disabled: !localAvailable }
+          ]}
+        />
+        <div className="min-w-[8px] flex-1" />
+        {renderFocusButton()}
+        {!roomy && !controls.focused && (
+          <>
+            <button
+              type="button"
+              aria-label="Changed files"
+              aria-pressed={controls.sheet === "files"}
+              title="Changed files"
+              onClick={() => controls.toggleSheet("files")}
+              className={cn(
+                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
+                controls.sheet === "files"
+                  ? "text-blue"
+                  : "text-dim hover:text-text-bright"
+              )}
+            >
+              <PanelLeft size={15} />
+            </button>
+            <button
+              type="button"
+              aria-label="Review drafts"
+              aria-pressed={controls.sheet === "tray"}
+              title="Review drafts"
+              onClick={() => controls.toggleSheet("tray")}
+              className={cn(
+                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
+                controls.sheet === "tray"
+                  ? "text-blue"
+                  : "text-dim hover:text-text-bright"
+              )}
+            >
+              <PanelRight size={15} />
+            </button>
+          </>
+        )}
+        {!isLocal && (
+          <Button
+            size="sm"
+            disabled={drafts.length === 0}
+            onClick={() => onFinishReview("send_to_agent")}
+          >
+            Finish review
+            <span className="rounded-sm bg-editor/25 px-1.5 py-px font-mono text-[10px]">
+              {drafts.length}
+            </span>
+          </Button>
+        )}
+      </div>)
+         }
+
   const isLocal = source === "local"
   const controls = useCodeReviewView()
   const theme = useThemeSyntax()
@@ -261,89 +461,9 @@ export function CodeReviewView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex min-h-10 flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-hairline px-[14px] py-1">
-        <SegmentedControl
-          value={source}
-          onChange={onSetSource}
-          items={[
-            { value: "pr", label: "Pull Request", disabled: !prAvailable },
-            { value: "local", label: "Uncommitted", disabled: !localAvailable }
-          ]}
-        />
-        <div className="min-w-[8px] flex-1" />
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          aria-pressed={controls.focused}
-          aria-label={controls.focused ? "Exit review focus" : "Focus diff"}
-          title={controls.focused ? "Restore review panels" : "Show only the diff"}
-          onClick={controls.toggleFocus}
-          className={cn("min-h-10", compactActions && "size-10 p-0")}
-        >
-          {controls.focused ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          <span className={cn(compactActions && "sr-only")}>
-            {controls.focused ? "Exit focus" : "Focus"}
-          </span>
-        </Button>
-        {!roomy && !controls.focused && (
-          <>
-            <button
-              type="button"
-              aria-label="Changed files"
-              aria-pressed={controls.sheet === "files"}
-              title="Changed files"
-              onClick={() => controls.toggleSheet("files")}
-              className={cn(
-                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
-                controls.sheet === "files"
-                  ? "text-blue"
-                  : "text-dim hover:text-text-bright"
-              )}
-            >
-              <PanelLeft size={15} />
-            </button>
-            <button
-              type="button"
-              aria-label="Review drafts"
-              aria-pressed={controls.sheet === "tray"}
-              title="Review drafts"
-              onClick={() => controls.toggleSheet("tray")}
-              className={cn(
-                "flex size-10 flex-none items-center justify-center rounded-lg transition-[background-color,color,scale] duration-150 ease-out hover:bg-hairline active:scale-[0.96]",
-                controls.sheet === "tray"
-                  ? "text-blue"
-                  : "text-dim hover:text-text-bright"
-              )}
-            >
-              <PanelRight size={15} />
-            </button>
-          </>
-        )}
-        {!isLocal && (
-          <Button
-            size="sm"
-            disabled={drafts.length === 0}
-            onClick={() => onFinishReview("send_to_agent")}
-          >
-            Finish review
-            <span className="rounded-sm bg-editor/25 px-1.5 py-px font-mono text-[10px]">
-              {drafts.length}
-            </span>
-          </Button>
-        )}
-      </div>
+      {renderReviewToolbar()}
 
-      {!isLocal && !connected && (
-        <div className="flex items-center gap-3 border-b border-hairline px-4 py-2.5">
-          <Callout tone="blue" className="flex-1">
-            {connectionMessage ?? "Connect GitHub to post this review."}
-          </Callout>
-          <Button variant="secondary" size="sm" onClick={onConnectGithub}>
-            {connectionActionLabel}
-          </Button>
-        </div>
-      )}
+      {renderConnectionNotice()}
 
       <PierreProvider
         theme={theme}
@@ -351,107 +471,9 @@ export function CodeReviewView({
         workers
       >
         <div className="relative flex min-h-0 min-w-0 flex-1">
-          {!controls.focused && (
-            <>
-              <div
-                data-testid="review-file-rail"
-                style={{ width: roomy ? fileList.width : sheetWidth }}
-                className={cn(
-                  "flex max-w-full flex-col border-r border-hairline bg-panel",
-                  roomy
-                    ? "flex-none"
-                    : "absolute inset-y-0 left-0 z-30 shadow-2xl",
-                  !roomy && controls.sheet !== "files" && "hidden"
-                )}
-              >
-                <ReviewFileRail
-                  files={files}
-                  totalFiles={allFiles.length}
-                  activePath={activePath}
-                  feedback={feedback.byPath}
-                  feedbackAny={feedback.any}
-                  statusByPath={statusByPath}
-                  added={added}
-                  removed={removed}
-                  viewed={viewed}
-                  controls={controls}
-                  onSelectFile={scrollToFile}
-                />
-              </div>
-              {roomy && (
-                <ResizeHandle
-                  onResize={(dx) => fileList.adjust(dx, maxFileListWidth)}
-                  aria-label="Resize file list"
-                />
-              )}
-            </>
-          )}
+          {renderFileRail()}
 
-          <div
-            data-testid="review-diff-center"
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-editor"
-          >
-            {general.length > 0 && (
-              <div className="flex flex-none flex-col gap-2 border-b border-hairline bg-panel/40 p-4">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.4px] text-dim">
-                  Review · general
-                </span>
-                {general.map((finding) => (
-                  <ReviewFindingRow
-                    key={finding.id}
-                    finding={finding}
-                    sent={sentFindingIds?.has(finding.id) ?? false}
-                    canRoute={routeTargetSession !== null}
-                    review={activeReview}
-                    onSendToAgent={onSendFindingToAgent}
-                  />
-                ))}
-              </div>
-            )}
-            {files.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center text-[13px] text-dim">
-                <span>
-                  {filtersActive
-                    ? "No files match these filters."
-                    : "No changes to review."}
-                </span>
-                {filtersActive && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={controls.clearFilters}
-                  >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <ReviewCodeView
-                entries={entries}
-                selection={selection}
-                scrollRequest={scrollRequest}
-                drafts={drafts}
-                reviewThreads={reviewThreads}
-                findingsByPath={byFile}
-                review={activeReview}
-                sentFindingIds={sentFindingIds}
-                connected={connected}
-                routeTargetSession={routeTargetSession}
-                local={isLocal}
-                compactActions={compactActions}
-                collapseViewed={controls.collapseViewed}
-                onSelectionChange={setSelection}
-                onActivePathChange={handleActivePathChange}
-                onAddDraft={onAddDraft}
-                onRemoveDraft={onRemoveDraft}
-                onToggleViewed={onToggleViewed}
-                onRevertLines={onRevertLines}
-                onRevertFile={onRevertFile}
-                onDeslopFile={onDeslopFile}
-                onSendFindingToAgent={onSendFindingToAgent}
-              />
-            )}
-          </div>
+          {renderDiffCenter()}
 
           {!controls.focused && (
             <>

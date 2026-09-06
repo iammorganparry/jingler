@@ -75,6 +75,33 @@ export function ContextMeter({
   onCompactNow,
   className
 }: ContextMeterProps) {
+         function getTitle() {
+           if (preparing) return (" · summarising in the background")
+           if (held) return (` · a summary is ready but held: ${heldReason ?? "the session is mid-task"}`)
+           if (digestReady) return (" · the next turn starts from a summary")
+           if (stalled) return (" · automatic compaction gave up after repeated failures; click to try again")
+           if (phase === "unknown") return (" · automatic compaction is off for this session")
+           if (onCompactNow) return (" · click to compact now")
+           return ("")
+         }
+
+         function getLabel() {
+           if (preparing) return ("compacting…")
+           if (held) return ("compaction held")
+           if (digestReady) return ("compacts next turn")
+           if (stalled) return ("compaction failed")
+           if (willCompact) return ("compacting soon")
+           return ("context")
+         }
+
+         function getTone() {
+           if (preparing || digestReady) return ("bg-blue/60")
+           if (stalled) return ("bg-fg/25")
+           if (willCompact) return ("bg-amber-400/70")
+           if (ratio >= 0.8 && phase !== "unknown") return ("bg-amber-400/45")
+           return ("bg-fg/25")
+         }
+
   if (triggerAt === null || triggerAt <= 0) return null
   if (tokens <= 0) return null
 
@@ -89,15 +116,7 @@ export function ContextMeter({
   // "something is about to happen", and nothing is.
   const willCompact = phase === "prepare" || phase === "swap"
   const tone =
-    preparing || digestReady
-      ? "bg-blue/60"
-      : stalled
-        ? "bg-fg/25"
-        : willCompact
-          ? "bg-amber-400/70"
-          : ratio >= 0.8 && phase !== "unknown"
-            ? "bg-amber-400/45"
-            : "bg-fg/25"
+    getTone()
 
   /**
    * Four states, in the order they actually occur.
@@ -108,32 +127,10 @@ export function ContextMeter({
    * working. It is also the only state the user cannot cause themselves, so it
    * is the one they most need told about.
    */
-  const label = preparing
-    ? "compacting…"
-    : held
-      ? "compaction held"
-      : digestReady
-        ? "compacts next turn"
-        : stalled
-          ? "compaction failed"
-          : willCompact
-            ? "compacting soon"
-            : "context"
+  const label = getLabel()
 
   const title = `${tokens.toLocaleString()} of ~${triggerAt.toLocaleString()} tokens before Jingler compacts this session${
-    preparing
-      ? " · summarising in the background"
-      : held
-        ? ` · a summary is ready but held: ${heldReason ?? "the session is mid-task"}`
-        : digestReady
-          ? " · the next turn starts from a summary"
-        : stalled
-          ? " · automatic compaction gave up after repeated failures; click to try again"
-          : phase === "unknown"
-            ? " · automatic compaction is off for this session"
-            : onCompactNow
-              ? " · click to compact now"
-              : ""
+    getTitle()
   }`
 
   // A plain span when there is nothing to click, so the meter never presents a

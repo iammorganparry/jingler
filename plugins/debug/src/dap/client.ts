@@ -254,19 +254,23 @@ export class DapClient {
       const body = this.#buffer.subarray(bodyStart, bodyStart + length).toString()
       this.#buffer = this.#buffer.subarray(bodyStart + length)
       const message = JSON.parse(body) as DapMessage
-      if (message.type === "response") {
-        const response = message as DapResponse
-        const pending = this.#pending.get(response.request_seq)
-        if (!pending) continue
-        clearTimeout(pending.timer)
-        this.#pending.delete(response.request_seq)
-        pending.resolve(response)
-      } else if (message.type === "event") {
-        this.#emit(message as DapEvent)
-      } else if (message.type === "request") {
-        const request = message as DapRequest
-        this.respond(request, false, {}, `Unsupported reverse request: ${request.command}`).catch(() => {})
-      }
+      this.#handleMessage(message)
+    }
+  }
+
+  #handleMessage(message: DapMessage): void {
+    if (message.type === "response") {
+      const response = message as DapResponse
+      const pending = this.#pending.get(response.request_seq)
+      if (!pending) return
+      clearTimeout(pending.timer)
+      this.#pending.delete(response.request_seq)
+      pending.resolve(response)
+    } else if (message.type === "event") {
+      this.#emit(message as DapEvent)
+    } else if (message.type === "request") {
+      const request = message as DapRequest
+      this.respond(request, false, {}, `Unsupported reverse request: ${request.command}`).catch(() => {})
     }
   }
 }

@@ -71,3 +71,8 @@ describe("diffCounts", () => {
     expect(diffCounts(patch)).toEqual(first)
   })
 })
+
+it("does not confuse two-character content lines with three-character headers", () => {
+  expect(diffCounts("++\n--\n+++\n---\n diff --git\ndiff --git a/x b/x"))
+    .toEqual({ added: 1, removed: 1, files: 1 })
+})

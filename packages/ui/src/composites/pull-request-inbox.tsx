@@ -88,39 +88,34 @@ export function PullRequestInbox({
   detailError = null,
   error = null
 }: PullRequestInboxProps) {
-  const [filter, setFilter] = useState<PullRequestInboxFilter>("all")
-  const [query, setQuery] = useState("")
-  const [mobileDetail, setMobileDetail] = useState(false)
-  const compact = !atLeast(useWidthTier(), "mid")
-  const visible = useMemo(
-    () => filterPullRequests(prs, filter, query, viewerLogin),
-    [filter, prs, query, viewerLogin]
-  )
-  const selectedKey = selected ? `${selected.repository}#${selected.number}` : null
-  const showList = !(compact && mobileDetail)
+         function renderSelectedPullRequest() {
+           return (<PullRequestView
+              key={selectedKey ?? "none"}
+              pr={detail}
+              connected
+              busy={detailLoading}
+              viewerLogin={viewerLogin}
+              readOnly
+              onOpenSession={sessionAction?.onSelect}
+              sessionActionLabel={sessionAction?.label}
+              sessionActionDisabledReason={sessionAction?.disabledReason}
+              onOpenOnGithub={detail?.url && onOpenOnGithub ? () => onOpenOnGithub(detail.url) : undefined}
+              onOpenFiles={onOpenFiles}
+              onComment={onComment}
+              onClosePr={onClosePr}
+              onMerge={onMerge}
+              closing={closing}
+              closeError={closeError}
+              merging={merging}
+              mergeError={mergeError}
+            />)
+         }
 
-  return (
-    <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
-      {showList && (
-        <section className={cn("flex min-h-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}> 
-          <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
-            <div className="flex items-center gap-2">
-              <GitPullRequest className="size-4 text-green" />
-              <h1 className="text-[14px] font-semibold text-text-bright">Pull requests</h1>
-              <Badge tone="count" size="xs">{visible.length}</Badge>
-            </div>
-            <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
-            <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {loading ? (
-              <InboxMessage><Spinner size={18} />Loading pull requests…</InboxMessage>
-            ) : error ? (
-              <InboxMessage>{error}</InboxMessage>
-            ) : visible.length === 0 ? (
-              <InboxMessage><GitPullRequest className="size-5 text-dim" />No pull requests match this view.</InboxMessage>
-            ) : visible.map((pr) => {
+         function getLoading() {
+           if (loading) return (<InboxMessage><Spinner size={18} />Loading pull requests…</InboxMessage>)
+           if (error) return (<InboxMessage>{error}</InboxMessage>)
+           if (visible.length === 0) return (<InboxMessage><GitPullRequest className="size-5 text-dim" />No pull requests match this view.</InboxMessage>)
+           return (visible.map((pr) => {
               const active = keyOf(pr) === selectedKey
               return (
                 <button
@@ -157,7 +152,36 @@ export function PullRequestInbox({
                   </div>
                 </button>
               )
-            })}
+            }))
+         }
+
+  const [filter, setFilter] = useState<PullRequestInboxFilter>("all")
+  const [query, setQuery] = useState("")
+  const [mobileDetail, setMobileDetail] = useState(false)
+  const compact = !atLeast(useWidthTier(), "mid")
+  const visible = useMemo(
+    () => filterPullRequests(prs, filter, query, viewerLogin),
+    [filter, prs, query, viewerLogin]
+  )
+  const selectedKey = selected ? `${selected.repository}#${selected.number}` : null
+  const showList = !(compact && mobileDetail)
+
+  return (
+    <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
+      {showList && (
+        <section className={cn("flex min-h-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
+          <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
+            <div className="flex items-center gap-2">
+              <GitPullRequest className="size-4 text-green" />
+              <h1 className="text-[14px] font-semibold text-text-bright">Pull requests</h1>
+              <Badge tone="count" size="xs">{visible.length}</Badge>
+            </div>
+            <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
+            <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />
+          </header>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {getLoading()}
           </div>
         </section>
       )}
@@ -174,26 +198,7 @@ export function PullRequestInbox({
           ) : detailError ? (
             <InboxMessage>{detailError}</InboxMessage>
           ) : (
-            <PullRequestView
-              key={selectedKey ?? "none"}
-              pr={detail}
-              connected
-              busy={detailLoading}
-              viewerLogin={viewerLogin}
-              readOnly
-              onOpenSession={sessionAction?.onSelect}
-              sessionActionLabel={sessionAction?.label}
-              sessionActionDisabledReason={sessionAction?.disabledReason}
-              onOpenOnGithub={detail?.url && onOpenOnGithub ? () => onOpenOnGithub(detail.url) : undefined}
-              onOpenFiles={onOpenFiles}
-              onComment={onComment}
-              onClosePr={onClosePr}
-              onMerge={onMerge}
-              closing={closing}
-              closeError={closeError}
-              merging={merging}
-              mergeError={mergeError}
-            />
+            renderSelectedPullRequest()
           )}
         </WidthTierProvider>
       )}

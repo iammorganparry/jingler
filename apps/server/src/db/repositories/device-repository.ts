@@ -5,7 +5,7 @@ import type {
 } from "@jingler/core"
 import { and, asc, eq, gt, isNull, sql } from "drizzle-orm"
 import { Effect } from "effect"
-import { Database, type DatabaseError } from "../database.js"
+import { Database, type DatabaseError, type DrizzleClient } from "../database.js"
 import { deviceEnrollment, ownedDevice } from "../schema.js"
 
 export type DeviceEnrollmentResult =
@@ -88,61 +88,10 @@ const repositoryFor = (database: Database) => ({
           )
           .returning()
         if (!consumed[0]) {
-          const rows = await tx
-            .select()
-            .from(deviceEnrollment)
-            .where(eq(deviceEnrollment.id, input.credential.claimId))
-            .limit(1)
-          const row = rows[0]
-          if (!row) return { status: "claim-mismatch" } as const
-          if (
-            row.userId !== input.credential.subject ||
-            row.deviceId !== input.credential.deviceId ||
-            row.clientInstanceId !== input.credential.clientInstanceId
-          ) {
-            return { status: "claim-mismatch" } as const
-          }
-          if (row.expiresAt <= input.at) return { status: "expired" } as const
-          if (row.identityFingerprint === input.identityFingerprint) {
-            const devices = await tx
-              .select()
-              .from(ownedDevice)
-              .where(
-                and(
-                  eq(ownedDevice.userId, input.credential.subject),
-                  eq(ownedDevice.identityFingerprint, input.identityFingerprint)
-                )
-              )
-              .limit(1)
-            const device = devices[0]
-            if (device) {
-              return device.state === "revoked"
-                ? ({ status: "revoked" } as const)
-                : ({ status: "registered", device: toRecord(device) } as const)
-            }
-          }
-          return { status: "replayed" } as const
+          return resolveEnrollmentReplay(tx, input)
         }
 
-        const values = {
-          id: input.credential.deviceId,
-          userId: input.credential.subject,
-          identityFingerprint: input.identityFingerprint,
-          displayName: input.registration.displayName,
-          platform: JSON.stringify(input.registration.platform),
-          publicKey: JSON.stringify(input.registration.publicKey),
-          encryptionPublicKey: input.registration.encryptionPublicKey
-            ? JSON.stringify(input.registration.encryptionPublicKey)
-            : null,
-          capabilities: JSON.stringify(input.registration.capabilities),
-          agentVersion: input.registration.agentVersion ?? null,
-          state: "active",
-          generation: 1,
-          enrolledAt: input.at,
-          revokedAt: null,
-          createdAt: input.at,
-          updatedAt: input.at
-        } as const
+        const values = enrolledDeviceValues()
         const rows = await tx
           .insert(ownedDevice)
           .values(values)
@@ -164,6 +113,28 @@ const repositoryFor = (database: Database) => ({
         return device.state === "revoked"
           ? ({ status: "revoked" } as const)
           : ({ status: "registered", device: toRecord(device) } as const)
+
+        function enrolledDeviceValues() {
+          return {
+            id: input.credential.deviceId,
+            userId: input.credential.subject,
+            identityFingerprint: input.identityFingerprint,
+            displayName: input.registration.displayName,
+            platform: JSON.stringify(input.registration.platform),
+            publicKey: JSON.stringify(input.registration.publicKey),
+            encryptionPublicKey: input.registration.encryptionPublicKey
+              ? JSON.stringify(input.registration.encryptionPublicKey)
+              : null,
+            capabilities: JSON.stringify(input.registration.capabilities),
+            agentVersion: input.registration.agentVersion ?? null,
+            state: "active",
+            generation: 1,
+            enrolledAt: input.at,
+            revokedAt: null,
+            createdAt: input.at,
+            updatedAt: input.at
+          } as const
+        }
       })
     ),
 
@@ -252,3 +223,43 @@ export class DeviceRepository extends Effect.Service<DeviceRepository>()(
     })
   }
 ) {}
+
+type EnrollmentInput = Parameters<ReturnType<typeof repositoryFor>["consumeAndUpsert"]>[0]
+type EnrollmentTransaction = Parameters<Parameters<DrizzleClient["transaction"]>[0]>[0]
+
+const resolveEnrollmentReplay = async (tx: EnrollmentTransaction, input: EnrollmentInput): Promise<DeviceEnrollmentResult> => {
+  const rows = await tx
+    .select()
+    .from(deviceEnrollment)
+    .where(eq(deviceEnrollment.id, input.credential.claimId))
+    .limit(1)
+  const row = rows[0]
+  if (!row) return { status: "claim-mismatch" } as const
+  if (
+    row.userId !== input.credential.subject ||
+    row.deviceId !== input.credential.deviceId ||
+    row.clientInstanceId !== input.credential.clientInstanceId
+  ) {
+    return { status: "claim-mismatch" } as const
+  }
+  if (row.expiresAt <= input.at) return { status: "expired" } as const
+  if (row.identityFingerprint === input.identityFingerprint) {
+    const devices = await tx
+      .select()
+      .from(ownedDevice)
+      .where(
+        and(
+          eq(ownedDevice.userId, input.credential.subject),
+          eq(ownedDevice.identityFingerprint, input.identityFingerprint)
+        )
+      )
+      .limit(1)
+    const device = devices[0]
+    if (device) {
+      return device.state === "revoked"
+        ? ({ status: "revoked" } as const)
+        : ({ status: "registered", device: toRecord(device) } as const)
+    }
+  }
+  return { status: "replayed" } as const
+}

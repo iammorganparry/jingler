@@ -34,30 +34,8 @@ export function ProviderAuthForms({
   onStartCodex,
   onConnectApi
 }: ProviderAuthFormsProps) {
-  const claudeToken = useRef<HTMLInputElement>(null)
-  const apiKey = useRef<HTMLInputElement>(null)
-  const [apiProvider, setApiProvider] = useState("anthropic")
-  const allows = (kind: AuthKind) => authKinds.includes(kind)
-  const isPending = (kind: AuthKind) => pendingAuthKind === kind
-
-  const submitClaude = () => {
-    const token = claudeToken.current?.value.trim() ?? ""
-    if (!token) return
-    if (claudeToken.current) claudeToken.current.value = ""
-    onConnectClaude(token)
-  }
-
-  const submitApiKey = () => {
-    const key = apiKey.current?.value.trim() ?? ""
-    const providerId = apiProviderId ?? apiProvider
-    if (!key) return
-    if (apiKey.current) apiKey.current.value = ""
-    onConnectApi(providerId, key)
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {allows("claude-setup-token") && (
+         function renderClaudeSetup() {
+           return (allows("claude-setup-token") && (
         <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">
           <div className="flex items-center gap-2.5 text-[12.5px] font-medium text-text-bright">
             <span className="flex size-7 items-center justify-center rounded-md border border-line bg-canvas">
@@ -90,7 +68,33 @@ export function ProviderAuthForms({
             </Button>
           </div>
         </div>
-      )}
+      ))
+         }
+
+  const claudeToken = useRef<HTMLInputElement>(null)
+  const apiKey = useRef<HTMLInputElement>(null)
+  const [apiProvider, setApiProvider] = useState("anthropic")
+  const allows = (kind: AuthKind) => authKinds.includes(kind)
+  const isPending = (kind: AuthKind) => pendingAuthKind === kind
+
+  const submitClaude = () => {
+    const token = claudeToken.current?.value.trim() ?? ""
+    if (!token) return
+    if (claudeToken.current) claudeToken.current.value = ""
+    onConnectClaude(token)
+  }
+
+  const submitApiKey = () => {
+    const key = apiKey.current?.value.trim() ?? ""
+    const providerId = apiProviderId ?? apiProvider
+    if (!key) return
+    if (apiKey.current) apiKey.current.value = ""
+    onConnectApi(providerId, key)
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {renderClaudeSetup()}
 
       {allows("openai-codex-oauth") && (
         <div className="flex flex-col gap-3 rounded-lg border border-line bg-sunken p-3">

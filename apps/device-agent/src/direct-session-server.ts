@@ -56,6 +56,49 @@ const serveConnection = async (
   const accept = async (line: string): Promise<void> => {
     const raw: unknown = JSON.parse(line)
     if (!opened) {
+      return await openSession()
+    }
+    const message = Schema.decodeUnknownSync(TunnelClientMessageSchema)(raw, { onExcessProperty: "error" })
+    const handler = handlerFor(opened.sessionId)
+    if (message.type === "ping") return writeFrame(socket, { type: "pong" })
+    if (message.type === "resume") {
+      opened = { ...opened, acknowledgedSequence: message.acknowledgedSequence }
+      return scheduleFlush(handler)
+    }
+    if (message.type === "ack") {
+      if (message.acknowledgement.sessionId !== opened.sessionId || message.acknowledgement.sender !== "desktop") {
+        throw new Error("Invalid direct session acknowledgement.")
+      }
+      opened = { ...opened, acknowledgedSequence: message.acknowledgement.acknowledgedSequence }
+      await handler.acknowledgeOutgoing(message.acknowledgement.acknowledgedSequence)
+      return
+    }
+    if (message.type !== "envelope") throw new Error("Unsupported direct session frame.")
+    await handleEnvelope(message.envelope, opened)
+
+    async function handleEnvelope(envelope: EncryptedTunnelEnvelope, opened: DirectSessionOpen) {
+      if (envelope.sessionId !== opened.sessionId || envelope.sender !== "desktop") {
+        throw new Error("Direct envelope resource mismatch.")
+      }
+      const command = decryptRemotePayload(key!, envelope, RemoteSessionCommandSchema)
+      const scope = {
+        clientInstanceId: opened.clientInstanceId,
+        attachmentGeneration: opened.attachmentGeneration,
+        controllerLeaseGeneration: opened.controllerLeaseGeneration
+      }
+      const before = await handler.transportState()
+      const duplicate = envelope.sequence <= before.highestReceivedDesktopSequence
+      await handler.handle(
+        command,
+        envelope.sequence,
+        (commandId) => scheduleFlush(handler, commandId),
+        scope
+      )
+      scheduleFlush(handler, command.commandId)
+      writeFrame(socket, { type: "envelope-result", status: duplicate ? "duplicate" : "inserted", sequence: envelope.sequence })
+    }
+
+    async function openSession() {
       opened = Schema.decodeUnknownSync(DirectSessionOpenSchema)(raw, { onExcessProperty: "error" })
       if (opened.keyOffer.subject !== enrollment.subject || opened.keyOffer.deviceId !== enrollment.deviceId) {
         throw new Error("Direct session does not belong to this enrolled device.")
@@ -80,42 +123,6 @@ const serveConnection = async (
       await scheduleFlush(handler)
       return
     }
-    const message = Schema.decodeUnknownSync(TunnelClientMessageSchema)(raw, { onExcessProperty: "error" })
-    const handler = handlerFor(opened.sessionId)
-    if (message.type === "ping") return writeFrame(socket, { type: "pong" })
-    if (message.type === "resume") {
-      opened = { ...opened, acknowledgedSequence: message.acknowledgedSequence }
-      return scheduleFlush(handler)
-    }
-    if (message.type === "ack") {
-      if (message.acknowledgement.sessionId !== opened.sessionId || message.acknowledgement.sender !== "desktop") {
-        throw new Error("Invalid direct session acknowledgement.")
-      }
-      opened = { ...opened, acknowledgedSequence: message.acknowledgement.acknowledgedSequence }
-      await handler.acknowledgeOutgoing(message.acknowledgement.acknowledgedSequence)
-      return
-    }
-    if (message.type !== "envelope") throw new Error("Unsupported direct session frame.")
-    const envelope: EncryptedTunnelEnvelope = message.envelope
-    if (envelope.sessionId !== opened.sessionId || envelope.sender !== "desktop") {
-      throw new Error("Direct envelope resource mismatch.")
-    }
-    const command = decryptRemotePayload(key!, envelope, RemoteSessionCommandSchema)
-    const scope = {
-      clientInstanceId: opened.clientInstanceId,
-      attachmentGeneration: opened.attachmentGeneration,
-      controllerLeaseGeneration: opened.controllerLeaseGeneration
-    }
-    const before = await handler.transportState()
-    const duplicate = envelope.sequence <= before.highestReceivedDesktopSequence
-    await handler.handle(
-      command,
-      envelope.sequence,
-      (commandId) => scheduleFlush(handler, commandId),
-      scope
-    )
-    scheduleFlush(handler, command.commandId)
-    writeFrame(socket, { type: "envelope-result", status: duplicate ? "duplicate" : "inserted", sequence: envelope.sequence })
   }
   socket.on("data", (chunk: string) => {
     buffer += chunk

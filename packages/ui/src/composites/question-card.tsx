@@ -30,6 +30,58 @@ export function QuestionCard({
   /** Show a spinner on the submit button while the answers are in flight. */
   submitting?: boolean
 }) {
+  function selectNumberedOption(e: KeyboardEvent) {
+if (/^[1-9]$/.test(e.key)) {
+        const opt = q.options[Number(e.key) - 1]
+        if (opt) {
+          e.preventDefault()
+          pickOption(opt.label)
+        }
+      }
+  }
+
+  const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement
+      const inOther = active === otherRef.current
+      const onButton = active instanceof HTMLButtonElement
+
+      // Let a focused button fire its own click instead of double-advancing.
+      if (e.key === "Enter" && onButton) return
+      if (e.key === "Enter") {
+        e.preventDefault()
+        goNext()
+        return
+      }
+      // While typing a custom answer, only Enter is a shortcut.
+      if (inOther) return
+
+      switch (e.key) {
+case "ArrowLeft": {
+
+        e.preventDefault()
+        goBack()
+
+break
+}
+case "ArrowRight": {
+
+        e.preventDefault()
+        goNext()
+
+break
+}
+case "o":
+case "O": {
+
+        e.preventDefault()
+        otherRef.current?.focus()
+
+break
+}
+default: selectNumberedOption(e)
+}
+    }
+
   const questions = request.questions
   const n = questions.length
   const [qi, setQi] = React.useState(0)
@@ -86,38 +138,7 @@ export function QuestionCard({
   }
 
   React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement
-      const inOther = active === otherRef.current
-      const onButton = active instanceof HTMLButtonElement
 
-      if (e.key === "Enter") {
-        // Let a focused button fire its own click instead of double-advancing.
-        if (onButton) return
-        e.preventDefault()
-        goNext()
-        return
-      }
-      // While typing a custom answer, only Enter is a shortcut.
-      if (inOther) return
-
-      if (e.key === "ArrowLeft") {
-        e.preventDefault()
-        goBack()
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault()
-        goNext()
-      } else if (e.key === "o" || e.key === "O") {
-        e.preventDefault()
-        otherRef.current?.focus()
-      } else if (/^[1-9]$/.test(e.key)) {
-        const opt = q.options[Number(e.key) - 1]
-        if (opt) {
-          e.preventDefault()
-          pickOption(opt.label)
-        }
-      }
-    }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
     // Re-subscribe when the question or its selections change so the closure is fresh.

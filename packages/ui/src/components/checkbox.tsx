@@ -17,6 +17,42 @@ export interface CheckboxProps
 
 export const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
   ({ className, checked = false, onCheckedChange, indeterminate = false, label, tone = "accent", onClick, disabled, id, ...props }, ref) => {
+function renderMarkPath() {
+        return (<m.path
+                d={path}
+                initial={reduce ? { pathLength: 1 } : { pathLength: 0 }}
+                animate={{ pathLength: 1 }}
+                transition={reduce ? { duration: 0 } : { duration: indeterminate ? 0.2 : 0.3, ease: EASE_OUT, delay: 0.04 }}
+              />)
+      }
+
+    function renderCheckMark() {
+
+
+      return (<AnimatePresence initial={false}>
+          {showMark && (
+            <m.svg
+              key={indeterminate ? "indeterminate" : "checked"}
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.5 }}
+              animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.5, filter: "blur(4px)" }}
+              transition={reduce ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
+              aria-hidden
+            >
+              {renderMarkPath()}
+            </m.svg>
+          )}
+        </AnimatePresence>)
+    }
+
     const reduce = useReducedMotion()
     const showMark = checked || indeterminate
     const path = indeterminate ? INDETERMINATE_PATH : CHECK_PATH
@@ -46,33 +82,7 @@ export const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
         )}
         {...props}
       >
-        <AnimatePresence initial={false}>
-          {showMark && (
-            <m.svg
-              key={indeterminate ? "indeterminate" : "checked"}
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={3}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              initial={reduce ? { opacity: 1 } : { opacity: 0, scale: 0.5 }}
-              animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
-              exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.5, filter: "blur(4px)" }}
-              transition={reduce ? { duration: 0 } : { duration: 0.16, ease: EASE_OUT }}
-              aria-hidden
-            >
-              <m.path
-                d={path}
-                initial={reduce ? { pathLength: 1 } : { pathLength: 0 }}
-                animate={{ pathLength: 1 }}
-                transition={reduce ? { duration: 0 } : { duration: indeterminate ? 0.2 : 0.3, ease: EASE_OUT, delay: 0.04 }}
-              />
-            </m.svg>
-          )}
-        </AnimatePresence>
+        {renderCheckMark()}
       </m.button>
     )
 

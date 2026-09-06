@@ -177,6 +177,71 @@ const mergeableOf = (pr: Json): string | null => {
   return null
 }
 
+const collectReviewers = (reviews: ReadonlyArray<Json>, requested: ReadonlyArray<Json>) => {
+  const reviewerStates = new Map<string, PrReviewKind>()
+  for (const review of reviews) {
+    const login = nestedLogin(review.author ?? review.user)
+    const reviewState = text(review.state)?.toUpperCase()
+    if (!login || reviewState === "PENDING" || reviewState === "DISMISSED") continue
+    const kind = reviewKindOf(reviewState ?? null)
+    if (kind !== "commented" || !reviewerStates.has(login)) reviewerStates.set(login, kind)
+  }
+  for (const requestedReviewer of requested) {
+    const login = text(requestedReviewer.login) ?? text(requestedReviewer.name)
+    if (login && !reviewerStates.has(login)) reviewerStates.set(login, "pending")
+  }
+  const reviewers: ReadonlyArray<PrReviewer> = [...reviewerStates].map(([login, reviewerState]) => ({
+    login,
+    state: reviewerState
+  }))
+  return reviewers
+}
+
+const collectMergeBlockers = (
+  mergeable: string | null,
+  mergeStateStatus: string | null,
+  checks: ReadonlyArray<PrCheck>,
+  reviewers: ReadonlyArray<PrReviewer>
+): ReadonlyArray<string> => {
+  const mergeBlockers: Array<string> = []
+  if (mergeable === "CONFLICTING" || mergeStateStatus === "DIRTY") {
+    mergeBlockers.push("Merge conflicts")
+  }
+  if (mergeStateStatus === "BLOCKED") mergeBlockers.push("Blocked by branch protection")
+  if (mergeStateStatus === "BEHIND") {
+    mergeBlockers.push("Branch is out of date with the base")
+  }
+  const failing = checks.filter((check) => check.status === "fail").length
+  if (failing > 0) mergeBlockers.push(`${failing} failing check${failing === 1 ? "" : "s"}`)
+  const changeRequests = reviewers.filter((reviewer) => reviewer.state === "changes_requested").length
+  if (changeRequests > 0) {
+    mergeBlockers.push(`${changeRequests} change request${changeRequests === 1 ? "" : "s"}`)
+  }
+  return mergeBlockers
+}
+
+const pullRequestDetails = (pr: Json) => {
+  const author = jsonRecord(pr.author ?? pr.user)
+  const head = jsonRecord(pr.head)
+  const base = jsonRecord(pr.base)
+  return {
+    number: integer(pr.number) ?? 0,
+    title: text(pr.title) ?? "",
+    body: text(pr.body),
+    url: text(field(pr, "htmlUrl", "html_url")) ?? text(pr.url) ?? "",
+    headRefName: text(field(pr, "headRefName", "head_ref")) ?? text(head.ref) ?? "",
+    baseRefName: text(field(pr, "baseRefName", "base_ref")) ?? text(base.ref) ?? "",
+    author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
+    createdAt: text(field(pr, "createdAt", "created_at")) ?? "",
+    commits: integer(pr.commits) ?? rows(pr.commit_items ?? pr.commits).length,
+    commitItems: rows(pr.commit_items ?? pr.commits).map(mapPrCommit),
+    changedFiles: integer(field(pr, "changedFiles", "changed_files")) ?? rows(pr.files).length,
+    additions: integer(pr.additions) ?? 0,
+    deletions: integer(pr.deletions) ?? 0,
+    labels: labelsOf(pr.labels)
+  }
+}
+
 /** Map a REST pull plus its separately paginated related resources. */
 export const mapPrView = (raw: unknown): PullRequest => {
   const pr = jsonRecord(raw)
@@ -194,24 +259,8 @@ export const mapPrView = (raw: unknown): PullRequest => {
   const requested = rows(field(pr, "reviewRequests", "requested_reviewers"))
   const issueComments = rows(pr.comments)
   const checks = rows(field(pr, "statusCheckRollup", "checks")).map(mapCheck)
-  const files = rows(pr.files)
 
-  const reviewerStates = new Map<string, PrReviewKind>()
-  for (const review of reviews) {
-    const login = nestedLogin(review.author ?? review.user)
-    const reviewState = text(review.state)?.toUpperCase()
-    if (!login || reviewState === "PENDING" || reviewState === "DISMISSED") continue
-    const kind = reviewKindOf(reviewState ?? null)
-    if (kind !== "commented" || !reviewerStates.has(login)) reviewerStates.set(login, kind)
-  }
-  for (const requestedReviewer of requested) {
-    const login = text(requestedReviewer.login) ?? text(requestedReviewer.name)
-    if (login && !reviewerStates.has(login)) reviewerStates.set(login, "pending")
-  }
-  const reviewers: ReadonlyArray<PrReviewer> = [...reviewerStates].map(([login, reviewerState]) => ({
-    login,
-    state: reviewerState
-  }))
+  const reviewers = collectReviewers(reviews, requested)
 
   const reviewItems: ReadonlyArray<PrTimelineItem> = reviews
     .filter((review) => {
@@ -249,41 +298,12 @@ export const mapPrView = (raw: unknown): PullRequest => {
 
   const mergeable = mergeableOf(pr)
   const mergeStateStatus = mergeStateOf(pr)
-  const mergeBlockers: Array<string> = []
-  if (mergeable === "CONFLICTING" || mergeStateStatus === "DIRTY") {
-    mergeBlockers.push("Merge conflicts")
-  }
-  if (mergeStateStatus === "BLOCKED") mergeBlockers.push("Blocked by branch protection")
-  if (mergeStateStatus === "BEHIND") {
-    mergeBlockers.push("Branch is out of date with the base")
-  }
-  const failing = checks.filter((check) => check.status === "fail").length
-  if (failing > 0) mergeBlockers.push(`${failing} failing check${failing === 1 ? "" : "s"}`)
-  const changeRequests = reviewers.filter((reviewer) => reviewer.state === "changes_requested").length
-  if (changeRequests > 0) {
-    mergeBlockers.push(`${changeRequests} change request${changeRequests === 1 ? "" : "s"}`)
-  }
+  const mergeBlockers = collectMergeBlockers(mergeable, mergeStateStatus, checks, reviewers)
 
-  const author = jsonRecord(pr.author ?? pr.user)
-  const head = jsonRecord(pr.head)
-  const base = jsonRecord(pr.base)
   return {
-    number: integer(pr.number) ?? 0,
+    ...pullRequestDetails(pr),
     state,
-    title: text(pr.title) ?? "",
-    body: text(pr.body),
-    url: text(field(pr, "htmlUrl", "html_url")) ?? text(pr.url) ?? "",
-    headRefName: text(field(pr, "headRefName", "head_ref")) ?? text(head.ref) ?? "",
-    baseRefName: text(field(pr, "baseRefName", "base_ref")) ?? text(base.ref) ?? "",
     isDraft,
-    author: { login: text(author.login) ?? "unknown", avatarUrl: avatarOf(author) },
-    createdAt: text(field(pr, "createdAt", "created_at")) ?? "",
-    commits: integer(pr.commits) ?? rows(pr.commit_items ?? pr.commits).length,
-    commitItems: rows(pr.commit_items ?? pr.commits).map(mapPrCommit),
-    changedFiles: integer(field(pr, "changedFiles", "changed_files")) ?? files.length,
-    additions: integer(pr.additions) ?? 0,
-    deletions: integer(pr.deletions) ?? 0,
-    labels: labelsOf(pr.labels),
     reviewers,
     timeline,
     reviewThreads: rows(pr.reviewThreads).length > 0 ? mapReviewThreads(pr.reviewThreads) : [],
@@ -532,47 +552,60 @@ export const mapRateLimit = (
 
 const HUNK_RE = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@/
 
+interface DiffAnchorCursor {
+  path: string | null
+  newLine: number
+  remaining: number
+  inHunk: boolean
+}
+
+const consumeDiffHeader = (raw: string, cursor: DiffAnchorCursor): boolean => {
+  if (raw.startsWith("diff --git ")) {
+    cursor.path = null
+    cursor.inHunk = false
+    return true
+  }
+  if (!cursor.inHunk && raw.startsWith("+++ ")) {
+    const target = raw.slice(4).trim()
+    cursor.path = target === "/dev/null" ? null : target.replace(/^b\//, "")
+    return true
+  }
+  if (!cursor.inHunk && raw.startsWith("--- ")) return true
+  const hunk = HUNK_RE.exec(raw)
+  if (!hunk) return false
+  cursor.inHunk = true
+  cursor.newLine = Number(hunk[1])
+  cursor.remaining = hunk[2] === undefined ? 1 : Number(hunk[2])
+  return true
+}
+
+const recordHunkLine = (
+  raw: string,
+  cursor: DiffAnchorCursor,
+  output: Map<string, Set<number>>
+): void => {
+  if (!cursor.inHunk || cursor.path === null || raw.startsWith("-")) return
+  if (raw.startsWith("+") || raw.startsWith(" ") || raw.length === 0) {
+    if (cursor.remaining <= 0) {
+      cursor.inHunk = false
+      return
+    }
+    const lines = output.get(cursor.path) ?? new Set<number>()
+    lines.add(cursor.newLine)
+    output.set(cursor.path, lines)
+    cursor.newLine += 1
+    cursor.remaining -= 1
+  } else if (!raw.startsWith("\\")) {
+    cursor.inHunk = false
+  }
+}
+
 /** Every NEW-side line GitHub accepts as an inline-review anchor. */
 export const postableLines = (diff: string): ReadonlyMap<string, ReadonlySet<number>> => {
   const output = new Map<string, Set<number>>()
-  let path: string | null = null
-  let newLine = 0
-  let remaining = 0
-  let inHunk = false
+  const cursor: DiffAnchorCursor = { path: null, newLine: 0, remaining: 0, inHunk: false }
   for (const raw of diff.split("\n")) {
-    if (raw.startsWith("diff --git ")) {
-      path = null
-      inHunk = false
-      continue
-    }
-    if (!inHunk && raw.startsWith("+++ ")) {
-      const target = raw.slice(4).trim()
-      path = target === "/dev/null" ? null : target.replace(/^b\//, "")
-      continue
-    }
-    if (!inHunk && raw.startsWith("--- ")) continue
-    const hunk = HUNK_RE.exec(raw)
-    if (hunk) {
-      inHunk = true
-      newLine = Number(hunk[1])
-      remaining = hunk[2] === undefined ? 1 : Number(hunk[2])
-      continue
-    }
-    if (!inHunk || path === null) continue
-    if (raw.startsWith("-")) continue
-    if (raw.startsWith("+") || raw.startsWith(" ") || raw.length === 0) {
-      if (remaining <= 0) {
-        inHunk = false
-        continue
-      }
-      const lines = output.get(path) ?? new Set<number>()
-      lines.add(newLine)
-      output.set(path, lines)
-      newLine += 1
-      remaining -= 1
-    } else if (!raw.startsWith("\\")) {
-      inHunk = false
-    }
+    if (!consumeDiffHeader(raw, cursor)) recordHunkLine(raw, cursor, output)
   }
   return output
 }

@@ -674,24 +674,21 @@ function PierreCodeViewContent({
     if (item === undefined) return
     const view = viewRef.current
     if (view === null) return
+    const behavior = scrollRequest.behavior === undefined ? {} : { behavior: scrollRequest.behavior }
     view.scrollTo(
       scrollRequest.range === undefined
         ? {
             type: "item",
             id: item.id,
             align: "start",
-            ...(scrollRequest.behavior === undefined
-              ? {}
-              : { behavior: scrollRequest.behavior })
+            ...behavior
           }
         : {
             type: "range",
             id: item.id,
             range: toPierreSelectedLineRange(scrollRequest.range),
             align: "center",
-            ...(scrollRequest.behavior === undefined
-              ? {}
-              : { behavior: scrollRequest.behavior })
+            ...behavior
           }
     )
     lastScrollRevision.current = scrollRequest.revision

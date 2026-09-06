@@ -172,16 +172,7 @@ export const createWorkspaceCheckpoint = async (
   ) {
     throw new Error("Workspace checkpoint exceeds its configured size limit")
   }
-  const [headSha, branch, stagedFlag, dirtyFlag] = identityResult.stdout
-    .trim()
-    .split("\n")
-  if (
-    !(((identityResult.success &&headSha ) &&/^[a-f0-9]{40,64}$/iu.test(headSha) ) &&branch ) ||
-    (stagedFlag !== "0" && stagedFlag !== "1") ||
-    (dirtyFlag !== "0" && dirtyFlag !== "1")
-  ) {
-    throw new Error("Unable to capture checkpoint Git identity")
-  }
+  const { headSha, branch, stagedFlag, dirtyFlag } = checkpointGitIdentity(identityResult)
   const path = archivePath(input.checkpointId)
   const packed = await sandbox.exec(
     `tar --create --gzip --file=${JSON.stringify(path)} --exclude-vcs-ignores ${TAR_EXCLUDES} --directory=/workspace .`,
@@ -272,4 +263,18 @@ export const restoreWorkspaceCheckpoint = async (
   ) {
     throw new Error("Restored workspace identity does not match its checkpoint")
   }
+}
+
+const checkpointGitIdentity = (identityResult: { success: boolean; stdout: string }) => {
+  const [headSha, branch, stagedFlag, dirtyFlag] = identityResult.stdout
+    .trim()
+    .split("\n")
+  if (
+    !identityResult.success || !headSha || !/^[a-f0-9]{40,64}$/iu.test(headSha) || !branch ||
+    (stagedFlag !== "0" && stagedFlag !== "1") ||
+    (dirtyFlag !== "0" && dirtyFlag !== "1")
+  ) {
+    throw new Error("Unable to capture checkpoint Git identity")
+  }
+  return { headSha, branch, stagedFlag, dirtyFlag }
 }

@@ -146,31 +146,7 @@ export const verifyManagedRuntimeGrant = async (
     )
     if (Either.isLeft(decoded)) return { ok: false, reason: "invalid-claims" }
     const claims = decoded.right
-    if (claims.expiresAt <= nowSeconds) return { ok: false, reason: "expired" }
-    if (claims.issuedAt > nowSeconds + 60) return { ok: false, reason: "future-issued" }
-    if (claims.expiresAt - claims.issuedAt > MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS) {
-      return { ok: false, reason: "overlong" }
-    }
-    if (claims.authStateVersion !== expected.authStateVersion) {
-      return { ok: false, reason: "wrong-auth-version" }
-    }
-    if (claims.environmentGeneration !== expected.environmentGeneration) {
-      return { ok: false, reason: "stale-environment" }
-    }
-    if (claims.sessionGeneration !== expected.sessionGeneration) {
-      return { ok: false, reason: "stale-session" }
-    }
-    if (!claims.actions.includes(expected.action)) {
-      return { ok: false, reason: "action-denied" }
-    }
-    if (
-      (expected.subject !== undefined && claims.subject !== expected.subject) ||
-      (expected.environmentId !== undefined && claims.environmentId !== expected.environmentId) ||
-      (expected.sessionId !== undefined && claims.sessionId !== expected.sessionId)
-    ) {
-      return { ok: false, reason: "wrong-scope" }
-    }
-    return { ok: true, claims }
+    return verifyClaimScope(claims, expected, nowSeconds)
   } catch {
     return { ok: false, reason: "malformed" }
   }
@@ -181,4 +157,36 @@ export const bearerManagedGrant = (request: Request): string | null => {
   if (!authorization?.startsWith("Bearer ")) return null
   const grant = authorization.slice("Bearer ".length).trim()
   return grant.length === 0 ? null : grant
+}
+
+const verifyClaimScope = (
+  claims: ManagedRuntimeGrantClaims,
+  expected: Parameters<typeof verifyManagedRuntimeGrant>[2],
+  nowSeconds: number
+): ManagedGrantVerification => {
+  if (claims.expiresAt <= nowSeconds) return { ok: false, reason: "expired" }
+  if (claims.issuedAt > nowSeconds + 60) return { ok: false, reason: "future-issued" }
+  if (claims.expiresAt - claims.issuedAt > MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS) {
+    return { ok: false, reason: "overlong" }
+  }
+  if (claims.authStateVersion !== expected.authStateVersion) {
+    return { ok: false, reason: "wrong-auth-version" }
+  }
+  if (claims.environmentGeneration !== expected.environmentGeneration) {
+    return { ok: false, reason: "stale-environment" }
+  }
+  if (claims.sessionGeneration !== expected.sessionGeneration) {
+    return { ok: false, reason: "stale-session" }
+  }
+  if (!claims.actions.includes(expected.action)) {
+    return { ok: false, reason: "action-denied" }
+  }
+  if (
+    (expected.subject !== undefined && claims.subject !== expected.subject) ||
+    (expected.environmentId !== undefined && claims.environmentId !== expected.environmentId) ||
+    (expected.sessionId !== undefined && claims.sessionId !== expected.sessionId)
+  ) {
+    return { ok: false, reason: "wrong-scope" }
+  }
+  return { ok: true, claims }
 }

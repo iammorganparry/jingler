@@ -47,6 +47,86 @@ export function AssetBrowser({
   toolbar,
   className
 }: AssetBrowserProps) {
+         function renderRepositoryTree() {
+           return (<div className="relative h-full min-h-0 overflow-hidden bg-panel">
+      <AssetFileTree
+        entries={entries}
+        selectedPath={selectedPath}
+        onSelectPath={selectPath}
+        className="h-full"
+      />
+      {treeLoading && entries.length === 0 ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
+          <Spinner size={12} />
+          Loading files…
+        </div>
+      ) : null}
+      {treeError !== null ? (
+        <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded border border-line bg-surface px-2.5 py-2 text-[11px] text-red">
+          <span className="min-w-0 flex-1">{treeError}</span>
+          {onRetryTree !== undefined ? (
+            <button
+              type="button"
+              onClick={onRetryTree}
+              className="flex-none rounded border border-line px-2 py-1 text-text-body hover:bg-hover"
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>)
+         }
+
+         function renderAssetContent() {
+           return (<div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          {toolbar !== undefined ? (
+            <div className="flex h-8 flex-none items-center gap-1.5 border-b border-line bg-panel px-2">
+              {/* The collapsed-tree toggle lives IN the toolbar, not floating
+                  over the code — the overlay square read as a (useless) copy
+                  button and covered the first lines of every file. */}
+              {!roomy ? (
+                <button
+                  type="button"
+                  aria-label="Repository files"
+                  aria-expanded={sheetOpen}
+                  title="Repository files"
+                  onClick={() => send({ type: "TOGGLE_TREE" })}
+                  className={cn(
+                    "flex size-6 flex-none items-center justify-center rounded-md text-dim hover:bg-surface hover:text-text-bright",
+                    sheetOpen && "bg-selection text-text-bright"
+                  )}
+                >
+                  <Files className="size-3.5" aria-hidden />
+                </button>
+              ) : null}
+              {toolbar}
+            </div>
+          ) : null}
+          {!roomy && toolbar === undefined ? (
+            <button
+              type="button"
+              aria-label="Repository files"
+              aria-expanded={sheetOpen}
+              onClick={() => send({ type: "TOGGLE_TREE" })}
+              className={cn(
+                "absolute left-2 top-2 z-10 flex size-7 items-center justify-center rounded-md bg-panel/80 text-dim shadow-[0_0_0_1px_var(--sb-line)] backdrop-blur-xl hover:bg-surface hover:text-text-bright",
+                sheetOpen && "bg-selection text-text-bright"
+              )}
+            >
+              <Files className="size-3.5" aria-hidden />
+            </button>
+          ) : null}
+          <main
+            aria-label={selectedPath === null ? "Asset content" : `${selectedPath} content`}
+            data-testid="asset-content-canvas"
+            className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas"
+          >
+            {renderCanvas(nativeAvailable)}
+          </main>
+        </div>)
+         }
+
   const [containerRef, width] = useContainerWidth()
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
@@ -79,34 +159,7 @@ export function AssetBrowser({
     onSelectPath(path)
   }
   const tree = (
-    <div className="relative h-full min-h-0 overflow-hidden bg-panel">
-      <AssetFileTree
-        entries={entries}
-        selectedPath={selectedPath}
-        onSelectPath={selectPath}
-        className="h-full"
-      />
-      {treeLoading && entries.length === 0 ? (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
-          <Spinner size={12} />
-          Loading files…
-        </div>
-      ) : null}
-      {treeError !== null ? (
-        <div className="absolute inset-x-3 top-3 flex items-center gap-2 rounded border border-line bg-surface px-2.5 py-2 text-[11px] text-red">
-          <span className="min-w-0 flex-1">{treeError}</span>
-          {onRetryTree !== undefined ? (
-            <button
-              type="button"
-              onClick={onRetryTree}
-              className="flex-none rounded border border-line px-2 py-1 text-text-body hover:bg-hover"
-            >
-              Retry
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
+    renderRepositoryTree()
   )
 
   return (
@@ -173,52 +226,7 @@ export function AssetBrowser({
           />
         ) : null}
 
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-          {toolbar !== undefined ? (
-            <div className="flex h-8 flex-none items-center gap-1.5 border-b border-line bg-panel px-2">
-              {/* The collapsed-tree toggle lives IN the toolbar, not floating
-                  over the code — the overlay square read as a (useless) copy
-                  button and covered the first lines of every file. */}
-              {!roomy ? (
-                <button
-                  type="button"
-                  aria-label="Repository files"
-                  aria-expanded={sheetOpen}
-                  title="Repository files"
-                  onClick={() => send({ type: "TOGGLE_TREE" })}
-                  className={cn(
-                    "flex size-6 flex-none items-center justify-center rounded-md text-dim hover:bg-surface hover:text-text-bright",
-                    sheetOpen && "bg-selection text-text-bright"
-                  )}
-                >
-                  <Files className="size-3.5" aria-hidden />
-                </button>
-              ) : null}
-              {toolbar}
-            </div>
-          ) : null}
-          {!roomy && toolbar === undefined ? (
-            <button
-              type="button"
-              aria-label="Repository files"
-              aria-expanded={sheetOpen}
-              onClick={() => send({ type: "TOGGLE_TREE" })}
-              className={cn(
-                "absolute left-2 top-2 z-10 flex size-7 items-center justify-center rounded-md bg-panel/80 text-dim shadow-[0_0_0_1px_var(--sb-line)] backdrop-blur-xl hover:bg-surface hover:text-text-bright",
-                sheetOpen && "bg-selection text-text-bright"
-              )}
-            >
-              <Files className="size-3.5" aria-hidden />
-            </button>
-          ) : null}
-          <main
-            aria-label={selectedPath === null ? "Asset content" : `${selectedPath} content`}
-            data-testid="asset-content-canvas"
-            className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-canvas"
-          >
-            {renderCanvas(nativeAvailable)}
-          </main>
-        </div>
+        {renderAssetContent()}
       </section>
     </PierreProvider>
   )
