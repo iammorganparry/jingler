@@ -92,6 +92,33 @@ const nextId = async (
 const targetFor = (root: string, kind: "skill" | "prompt", id: ManagedResourceId): string =>
   kind === "skill" ? join(root, "skills", id, "SKILL.md") : join(root, "prompts", `${id}.md`)
 
+const managedContent = async (
+  root: string,
+  resource: ManagedResource
+): Promise<string | null> => {
+  const expected = targetFor(root, resource.kind, resource.id)
+  if (resource.managedPath !== expected || !inside(root, expected)) return null
+  return readFile(expected, "utf8").catch(() => null)
+}
+
+const uniqueByContent = async (
+  root: string,
+  resources: ReadonlyArray<ManagedResource>
+): Promise<ReadonlyArray<ManagedResource>> => {
+  const resolved = await Promise.all(resources.map(async (resource) => ({
+    resource,
+    content: await managedContent(root, resource)
+  })))
+  const seen = new Set<string>()
+  return resolved.flatMap(({ resource, content }) => {
+    if (content === null) return [resource]
+    const key = `${resource.kind}\0${content}`
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [resource]
+  })
+}
+
 const serviceError = (
   operation: AgentResourceError["operation"],
   message: string
@@ -225,9 +252,12 @@ export const makeAgentResourceService = (
       reveal,
       setEnabled,
       enabledForTarget: (targetId) => list.pipe(
-        Effect.map((resources) => resources.filter((resource) =>
-          resource.enabled && supportsTarget(resource.scope, targetId)
-        ))
+        Effect.flatMap((resources) => Effect.promise(() => uniqueByContent(
+          root,
+          resources.filter((resource) =>
+            resource.enabled && supportsTarget(resource.scope, targetId)
+          )
+        )))
       ),
       watch: () => Stream.concat(Stream.fromEffect(list.pipe(Effect.orElseSucceed(() => []))), Stream.fromPubSub(changes))
     }
@@ -281,6 +311,7 @@ async function importResourceSource(
   if (sourceInfo.size > MAX_RESOURCE_BYTES)
     throw new Error("Resource exceeds the 256 KiB import limit")
   const content = await readFile(source, "utf8")
+  const byteLength = Buffer.byteLength(content)
   let importedId: ManagedResourceId | null = null
   let createdPath: string | null = null
 
@@ -292,6 +323,15 @@ async function importResourceSource(
         )
       ) {
         throw new DuplicateResourceError("Resource source is already imported")
+      }
+      const comparable = current.filter(
+        (resource) => resource.kind === kind && resource.byteLength === byteLength
+      )
+      const existingContents = await Promise.all(
+        comparable.map((resource) => managedContent(root, resource))
+      )
+      if (existingContents.includes(content)) {
+        throw new DuplicateResourceError("Resource content is already imported")
       }
       const id = await nextId(candidate.id, current, root, kind)
       const target = targetFor(root, kind, id)
@@ -318,7 +358,7 @@ async function importResourceSource(
           trust: "operator-approved",
           scope,
           managedPath: target,
-          byteLength: Buffer.byteLength(content),
+          byteLength,
           provenance: {
             ...candidate.provenance,
             sourcePath: source,

@@ -61,6 +61,64 @@ describe("AgentResourceService", () => {
     expect(await Effect.runPromise(service.list)).toHaveLength(2)
   })
 
+  it("deduplicates identical skill content while preserving different same-name skills", async () => {
+    const home = await temporary()
+    const managedRoot = await temporary()
+    const copies = [
+      [".claude", "Follow the pull request to green"],
+      [".codex", "Follow the pull request to green"],
+      [".agents", "Handle a different pull request workflow"]
+    ] as const
+    await Promise.all(copies.map(async ([directory, content]) => {
+      const skill = join(home, directory, "skills", "babysit-pr")
+      await mkdir(skill, { recursive: true })
+      await writeFile(join(skill, "SKILL.md"), `name: babysit-pr\ndescription: Babysit a PR\n${content}`)
+    }))
+    const service = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
+
+    const result = await Effect.runPromise(service.importResources(
+      (await detected(home)).candidates,
+      { kind: "portable", allowedTargets: [] }
+    ))
+
+    expect(result.imported).toEqual([id("babysit-pr"), id("babysit-pr-2")])
+    expect(result.skipped.map(({ code }) => code)).toEqual(["duplicate"])
+    expect(await Effect.runPromise(service.list)).toHaveLength(2)
+  })
+
+  it("collapses identical copies already present in the managed catalog", async () => {
+    const managedRoot = await temporary()
+    const content = "name: babysit-pr\ndescription: Babysit a PR"
+    const ids = ["babysit-pr", "babysit-pr-2"] as const
+    await Promise.all(ids.map(async (resourceId) => {
+      const directory = join(managedRoot, "skills", resourceId)
+      await mkdir(directory, { recursive: true })
+      await writeFile(join(directory, "SKILL.md"), content)
+    }))
+    await writeFile(join(managedRoot, "catalog.json"), JSON.stringify(ids.map((resourceId) => ({
+      id: resourceId,
+      kind: "skill",
+      name: "babysit-pr",
+      description: "Babysit a PR",
+      enabled: true,
+      trust: "operator-approved",
+      scope: { kind: "portable", allowedTargets: [] },
+      managedPath: join(managedRoot, "skills", resourceId, "SKILL.md"),
+      byteLength: Buffer.byteLength(content),
+      provenance: {
+        origin: resourceId === "babysit-pr" ? "claude" : "codex",
+        sourceRoot: managedRoot,
+        sourcePath: join(managedRoot, `${resourceId}.source.md`),
+        importedAt: new Date(0).toISOString()
+      }
+    }))))
+    const service = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
+
+    expect((await Effect.runPromise(service.enabledForTarget("desktop"))).map(({ id }) => id))
+      .toEqual([id("babysit-pr")])
+    expect(await Effect.runPromise(service.list)).toHaveLength(2)
+  })
+
   it("enables, filters, watches, and removes resources without restart", async () => {
     const home = await temporary()
     const managedRoot = await temporary()
