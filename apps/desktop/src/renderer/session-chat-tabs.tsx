@@ -198,6 +198,10 @@ export function SessionChatTabs({
     if (closingLast) onSelectConversation()
     else onSelectFiles()
   }
+  const focusBlockedFile = (path: string) => {
+    if (onSelectSurface) onSelectSurface({ kind: "file", id: path })
+    else onSelectFiles()
+  }
   const closeAllFiles = () => {
     let blocked: string | null = null
     for (const path of [...files.openPaths]) {
@@ -210,10 +214,8 @@ export function SessionChatTabs({
         onCloseSurface?.({ kind: "file", id: path })
       }
     }
-    if (blocked) {
-      if (onSelectSurface) onSelectSurface({ kind: "file", id: blocked })
-      else onSelectFiles()
-    } else onSelectConversation()
+    if (blocked) focusBlockedFile(blocked)
+    else onSelectConversation()
   }
   const duplicateNames = new Set(
     files.openPaths
@@ -222,12 +224,7 @@ export function SessionChatTabs({
   )
   const fileSlot = files.openPaths.map((path) => {
     const name = path.split("/").at(-1) ?? path
-    const active = activeSurface
-      ? (activeSurface.kind === "file" && activeSurface.id === path) ||
-        (activeSurface.kind === "view" &&
-          activeSurface.id === "files" &&
-          path === files.selectedPath)
-      : filesActive && path === files.selectedPath
+    const active = isActiveFileTab(activeSurface, path, files.selectedPath, filesActive)
     const parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""
     return (
       <div
@@ -351,4 +348,15 @@ export function SessionChatTabs({
     />
     </>
   )
+}
+
+function isActiveFileTab(
+  surface: SessionSurface | null | undefined,
+  path: string,
+  selectedPath: string | null,
+  filesActive: boolean
+): boolean {
+  if (surface == null) return filesActive && path === selectedPath
+  if (surface.kind === "file") return surface.id === path
+  return surface.kind === "view" && surface.id === "files" && path === selectedPath
 }

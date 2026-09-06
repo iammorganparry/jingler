@@ -179,20 +179,7 @@ const subscribeToSession = (
     reflectionTimeout = null
   }
   const unsubscribeSession = handle.subscribe((event) => {
-    if (!reflectionActive) {
-      const providerFailure = piProviderFailure(event)
-      if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
-      if (
-        (event.type === "auto_retry_end" && event.success) ||
-        (event.type === "message_end" &&
-          event.message.role === "assistant" &&
-          event.message.stopReason !== "error")
-      ) {
-        sink.noteProviderRecovery()
-      }
-      const normalized = normalize(event, handle.contextWindow ?? undefined)
-      if (normalized) sink.emit(normalized)
-    }
+    emitVisibleAgentEvent(reflectionActive, event, sink, normalize, handle)
     if (event.type !== "agent_settled") return
 
     const planPhase = handle.plannotatorPhase?.() ?? "idle"
@@ -691,3 +678,26 @@ export const makePiAgentRuntime = (
       }
     }
   })
+
+function emitVisibleAgentEvent(
+  reflectionActive: boolean,
+  event: AgentSessionEvent,
+  sink: EventSink,
+  normalize: (event: AgentSessionEvent, contextWindow?: number) => StreamEvent | null,
+  handle: PiSessionHandle
+) {
+  if (!reflectionActive) {
+    const providerFailure = piProviderFailure(event)
+    if (providerFailure !== null) sink.noteProviderFailure(providerFailure)
+    if (
+      (event.type === "auto_retry_end" && event.success) ||
+      (event.type === "message_end" &&
+        event.message.role === "assistant" &&
+        event.message.stopReason !== "error")
+    ) {
+      sink.noteProviderRecovery()
+    }
+    const normalized = normalize(event, handle.contextWindow ?? undefined)
+    if (normalized) sink.emit(normalized)
+  }
+}

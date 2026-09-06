@@ -151,12 +151,8 @@ export const registerWebSearchTool = (
                     Effect.zipRight(service.search(input, toolContext.signal))
                   )
                 }
-                const provider = selected === "Set up EXA"
-                  ? "exa"
-                  : selected === "Set up Firecrawl"
-                    ? "firecrawl"
-                    : null
-                if (provider === null) return Effect.fail(error)
+                const provider = providerFromSetupChoice(selected)
+                    if (provider === null) return Effect.fail(error)
                 return service.chooseSetup!(provider).pipe(
                   Effect.zipRight(Effect.fail(new WebSearchError({
                     reason: "setup-required",
@@ -237,3 +233,7 @@ export const createJinglerTools = (
     }
     return registry
   })
+
+function providerFromSetupChoice(selected: string | undefined) {
+  return selected === "Set up EXA" ? "exa" : selected === "Set up Firecrawl" ? "firecrawl" : null
+}

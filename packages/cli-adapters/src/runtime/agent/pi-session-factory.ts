@@ -5,6 +5,7 @@ import {
   ModelRuntime,
   SessionManager,
   SettingsManager,
+  type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
   type EventBus,
@@ -442,84 +443,111 @@ const createEmbeddedSession = (
       // review (the agent chooses when a change warrants it), update refreshes
       // the live plan silently. Plan mode additionally narrows the rest of the
       // toolset to read-only capabilities.
-      const initialToolNames = spec.mode === "plan"
-        ? [
-            ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
-            ...PLAN_SCRATCHPAD_TOOLS,
-            "plannotator_submit_plan",
-            "plannotator_update_plan",
-            ...(nativeSubagentsEnabled
-              ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
-              : [])
-          ]
-        : [
-            ...customTools.map((tool) => tool.name),
-            "plannotator_submit_plan",
-            "plannotator_update_plan",
-            ...(nativeSubagentsEnabled
-              ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id)
-              : [])
-          ]
-      const result = await (options.createSession ?? createAgentSession)({
-        cwd: spec.cwd,
-        agentDir: options.agentDir,
+      var {
+        result,
+        plannotatorListeners,
+        latestPlannotatorState,
+        plannotatorNoticeListeners,
+        pendingPlannotatorNotices,
+        stopPlannotatorState,
+        stopPlannotatorNotice
+      } : {
+        result: CreateAgentSessionResult
+        plannotatorListeners: Set<
+        (state: PlannotatorProjection) => void
+      >
+        latestPlannotatorState: {
+          readonly review: {
+            readonly reviewId: string
+            readonly url?: string | undefined
+          } | null
+          readonly title?: string | null | undefined
+          readonly phase: "idle" | "planning" | "executing"
+          readonly planFilePath: string | null
+          readonly checklist: readonly {
+            readonly text: string
+            readonly completed: boolean
+            readonly step: number
+          }[]
+          readonly planContent?: string | undefined
+          readonly revision?: number | undefined
+          readonly stages?:
+            | readonly {
+                readonly id: string
+                readonly title: string
+                readonly intent: string
+                readonly approach: readonly string[]
+                readonly files: readonly {
+                  readonly path: string
+                  readonly change: "A" | "M" | "D"
+                }[]
+                readonly tasks: readonly {
+                  readonly status: "in-progress" | "completed" | "blocked" | "pending"
+                  readonly text: string
+                  readonly step: number
+                  readonly subtasks: readonly {
+                    readonly status: "in-progress" | "completed" | "blocked" | "pending"
+                    readonly text: string
+                    readonly step: number
+                  }[]
+                }[]
+                readonly acceptance: readonly {
+                  readonly status: "pending" | "passed"
+                  readonly text: string
+                  readonly step: number
+                  readonly testReferences?:
+                    | readonly {
+                        readonly path: string
+                        readonly cases: readonly string[]
+                      }[]
+                    | undefined
+                }[]
+                readonly diagrams: readonly string[]
+                readonly notes: readonly string[]
+                readonly complexity?: "low" | "medium" | "high" | undefined
+                readonly dependencies?: readonly string[] | undefined
+              }[]
+            | undefined
+          readonly sections?:
+            | readonly {
+                readonly title: string | null
+                readonly blocks: readonly (
+                  | { readonly text: string; readonly kind: "prose" }
+                  | {
+                      readonly text: string
+                      readonly kind: "heading"
+                      readonly level: 2 | 3 | 4
+                    }
+                  | {
+                      readonly kind: "list"
+                      readonly ordered: boolean
+                      readonly items: readonly string[]
+                    }
+                  | {
+                      readonly kind: "code"
+                      readonly code: string
+                      readonly language?: string | undefined
+                    }
+                  | { readonly kind: "diagram"; readonly source: string }
+                )[]
+              }[]
+            | undefined
+        } | null
+        plannotatorNoticeListeners: Set<(message: string) => void>
+        pendingPlannotatorNotices: string[]
+        stopPlannotatorState: () => void
+        stopPlannotatorNotice: () => void
+      } = await createConfiguredPiSession(spec,
+        registry,
+        nativeSubagentsEnabled,
+        customTools,
+        options,
         modelRuntime,
         model,
-        ...(thinkingLevel === undefined ? {} : { thinkingLevel }),
-        resourceLoader: resources,
+        thinkingLevel,
+        resources,
         sessionManager,
-        settingsManager: SettingsManager.inMemory({
-          packages: [],
-          extensions: [],
-          skills: [],
-          prompts: [],
-          themes: []
-        }),
-        noTools: "all",
-        tools: initialToolNames,
-        customTools
-      })
-      let latestPlannotatorState: PlannotatorProjection | null = null
-      const plannotatorListeners = new Set<
-        (state: PlannotatorProjection) => void
-      >()
-      const stopPlannotatorState = events.on(
-        PLANNOTATOR_HOST_STATE_CHANNEL,
-        (candidate) => {
-          const decoded = decodePlannotatorProjection(candidate)
-          if (Option.isNone(decoded)) return
-          latestPlannotatorState = decoded.value
-          for (const listener of plannotatorListeners) listener(decoded.value)
-        }
-      )
-      const pendingPlannotatorNotices: string[] = []
-      const plannotatorNoticeListeners = new Set<(message: string) => void>()
-      const stopPlannotatorNotice = events.on(
-        PLANNOTATOR_HOST_NOTICE_CHANNEL,
-        (candidate) => {
-          if (
-            typeof candidate !== "object" ||
-            candidate === null ||
-            !("message" in candidate) ||
-            typeof candidate.message !== "string"
-          ) return
-          if (plannotatorNoticeListeners.size === 0) {
-            pendingPlannotatorNotices.push(candidate.message)
-            return
-          }
-          for (const listener of plannotatorNoticeListeners) listener(candidate.message)
-        }
-      )
-      await result.session.bindExtensions({
-        uiContext: makeExtensionUIContext(),
-        mode: "rpc"
-      })
-      if (spec.mode === "plan") {
-        await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
-        if (options.enterPlannotatorPlanMode === undefined) {
-          await requestPlannotatorPlanMode(events, "status")
-        }
-      }
+        events)
       return {
         result,
         connection,
@@ -607,15 +635,8 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
         ) {
           subagentTasks.set(event.toolCallId, event.args.task)
         }
-        const progress = piSubagentProgress(
-          event,
-          "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
-        )
-        if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
-        if (progress) lifecycle.progress(progress)
-        const attention = piSupervisorAttention(event)
-        if (attention) lifecycle.attention(attention)
-        listener(event)
+        publishSubagentProgress(
+          event, subagentTasks, lifecycle, listener)
       })
       return unsubscribeSession
     },
@@ -692,11 +713,7 @@ const createSessionHandle = (
   Effect.gen(function* () {
     const connection = yield* options.resolveConnection(spec)
     yield* validateConnection(spec, connection)
-    const registry = options.createToolRegistry
-      ? yield* options.createToolRegistry(spec, context, tracker)
-      : typeof options.toolRegistry === "function"
-        ? options.toolRegistry(context)
-        : (options.toolRegistry ?? createJinglerControlTools(context))
+    const registry = yield* resolveSessionToolRegistry(options, spec, context, tracker)
     const toolSpec = plannotatorExecutionSpec(spec)
     if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker) {
       return yield* Effect.fail(
@@ -760,7 +777,51 @@ const createSessionHandle = (
         ? piSubagentTrustedSessionRoots(embedded.result.session.sessionFile)
         : []
     })
-    lifecycle.start()
+    return yield* bindSubagentCapabilities(
+      lifecycle,
+      options,
+      embedded,
+      spec,
+      registry,
+      context,
+      connection,
+      prepared,
+      tracker,
+      snapshot,
+      fleetEvents
+    )
+  })
+
+/** Construct the real embedded pi session from Jingler-owned contracts only. */
+export const makePiSessionFactory = (options: PiSessionFactoryOptions): PiSessionFactory => ({
+  ...(options.lockedCapabilityFingerprint === undefined
+    ? {}
+    : { lockedCapabilityFingerprint: options.lockedCapabilityFingerprint }),
+  create: (spec, context: AgentRuntimeContext) => {
+    const tracker =
+      typeof options.terminalTracker === "function"
+        ? options.terminalTracker(spec)
+        : options.terminalTracker
+    return createSessionHandle(options, spec, context, tracker).pipe(
+      Effect.onError(() => tracker?.dispose().pipe(Effect.ignore) ?? Effect.void)
+    )
+  }
+})
+
+function* bindSubagentCapabilities(
+  lifecycle: PiSubagentLifecycleAdapter,
+  options: PiSessionFactoryOptions,
+  embedded: EmbeddedSession,
+  spec: PiRunSpec,
+  registry: ToolRegistry,
+  context: AgentRuntimeContext,
+  connection: ProviderConnection,
+  prepared: Effect.Effect.Success<ReturnType<typeof createResources>>,
+  tracker: FileChangeTracker | undefined,
+  snapshot: WorktreeSnapshot | null,
+  fleetEvents: SubagentFleetEventHubShape
+) {
+  lifecycle.start()
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
       lifecycle.stop()
       embedded.result.session.dispose()
@@ -840,7 +901,35 @@ const createSessionHandle = (
           ))
         )
     }
-    const diagnostic = makeRuntimeDiagnosticObserver({
+  return yield* observeSessionDiagnostics(
+    spec,
+    connection,
+    prepared,
+    registry,
+    options,
+    embedded,
+    tracker,
+    snapshot,
+    lifecycle,
+    fleetEvents,
+    subagentCeiling
+  )
+}
+
+function* observeSessionDiagnostics(
+  spec: PiRunSpec,
+  connection: ProviderConnection,
+  prepared: Effect.Effect.Success<ReturnType<typeof createResources>>,
+  registry: ToolRegistry,
+  options: PiSessionFactoryOptions,
+  embedded: EmbeddedSession,
+  tracker: FileChangeTracker | undefined,
+  snapshot: WorktreeSnapshot | null,
+  lifecycle: PiSubagentLifecycleAdapter,
+  fleetEvents: SubagentFleetEventHubShape,
+  subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+) {
+  const diagnostic = makeRuntimeDiagnosticObserver({
       runId: spec.runId,
       sessionId: spec.sessionId,
       connection,
@@ -868,20 +957,129 @@ const createSessionHandle = (
       fleetEvents,
       ...(subagentCeiling ? { subagentCeiling } : {})
     })
-  })
-
-/** Construct the real embedded pi session from Jingler-owned contracts only. */
-export const makePiSessionFactory = (options: PiSessionFactoryOptions): PiSessionFactory => ({
-  ...(options.lockedCapabilityFingerprint === undefined
-    ? {}
-    : { lockedCapabilityFingerprint: options.lockedCapabilityFingerprint }),
-  create: (spec, context: AgentRuntimeContext) => {
-    const tracker =
-      typeof options.terminalTracker === "function"
-        ? options.terminalTracker(spec)
-        : options.terminalTracker
-    return createSessionHandle(options, spec, context, tracker).pipe(
-      Effect.onError(() => tracker?.dispose().pipe(Effect.ignore) ?? Effect.void)
-    )
   }
-})
+
+function publishSubagentProgress(
+  event: AgentSessionEvent,
+  subagentTasks: Map<string, string>,
+  lifecycle: PiSubagentLifecycleAdapter,
+  listener: (event: AgentSessionEvent) => void
+) {
+  const progress = piSubagentProgress(
+    event,
+    "toolCallId" in event ? subagentTasks.get(event.toolCallId) : undefined
+  )
+  if (event.type === "tool_execution_end") subagentTasks.delete(event.toolCallId)
+  if (progress) lifecycle.progress(progress)
+  const attention = piSupervisorAttention(event)
+  if (attention) lifecycle.attention(attention)
+  listener(event)
+}
+
+async function createConfiguredPiSession(
+  spec: PiRunSpec,
+  registry: ToolRegistry | undefined,
+  nativeSubagentsEnabled: boolean,
+  customTools: NonNullable<CreateAgentSessionOptions["customTools"]>,
+  options: PiSessionFactoryOptions,
+  modelRuntime: ModelRuntime,
+  model: NonNullable<CreateAgentSessionOptions["model"]>,
+  thinkingLevel: CreateAgentSessionOptions["thinkingLevel"],
+  resources: ResourceLoader,
+  sessionManager: SessionManager,
+  events: EventBus
+) {
+  const initialToolNames =
+    spec.mode === "plan"
+      ? [
+          ...(registry?.capabilitiesFor("plan", "plan").map(({ id }) => id) ?? []),
+          ...PLAN_SCRATCHPAD_TOOLS,
+          "plannotator_submit_plan",
+          "plannotator_update_plan",
+          ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id): [])
+        ]
+      : [
+          ...customTools.map((tool) => tool.name),
+          "plannotator_submit_plan",
+          "plannotator_update_plan",
+          ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
+        ]
+  const result = await (options.createSession ?? createAgentSession)({
+    cwd: spec.cwd,
+    agentDir: options.agentDir,
+    modelRuntime,
+    model,
+    ...(thinkingLevel === undefined
+    ? {}
+    : { thinkingLevel }),
+    resourceLoader: resources,
+    sessionManager,
+    settingsManager: SettingsManager.inMemory({
+      packages: [],
+      extensions: [],
+      skills: [],
+      prompts: [],
+      themes: []
+    }),
+    noTools: "all",
+    tools: initialToolNames,
+    customTools
+  })
+  let latestPlannotatorState: PlannotatorProjection | null = null
+  const plannotatorListeners = new Set<(state: PlannotatorProjection) => void>()
+  const stopPlannotatorState = events.on(PLANNOTATOR_HOST_STATE_CHANNEL, (candidate) => {
+    const decoded = decodePlannotatorProjection(candidate)
+    if (Option.isNone(decoded)) return
+    latestPlannotatorState = decoded.value
+    for (const listener of plannotatorListeners) listener(decoded.value)
+  })
+  const pendingPlannotatorNotices: string[] = []
+  const plannotatorNoticeListeners = new Set<(message: string) => void>()
+  const stopPlannotatorNotice = events.on(PLANNOTATOR_HOST_NOTICE_CHANNEL, (candidate) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("message" in candidate) ||
+      typeof candidate.message !== "string"
+    )
+      return
+    if (plannotatorNoticeListeners.size === 0) {
+      pendingPlannotatorNotices.push(candidate.message)
+      return
+    }
+    for (const listener of plannotatorNoticeListeners) listener(candidate.message)
+  })
+  await result.session.bindExtensions({
+    uiContext: makeExtensionUIContext(),
+    mode: "rpc"
+  })
+  if (spec.mode === "plan") {
+    await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
+    if (options.enterPlannotatorPlanMode === undefined) {
+      await requestPlannotatorPlanMode(events, "status")
+    }
+  }
+  return {
+    result,
+    plannotatorListeners,
+    latestPlannotatorState,
+    plannotatorNoticeListeners,
+    pendingPlannotatorNotices,
+    stopPlannotatorState,
+    stopPlannotatorNotice
+  }
+}
+
+const resolveSessionToolRegistry = (
+  options: PiSessionFactoryOptions,
+  spec: PiRunSpec, context: AgentRuntimeContext,
+  tracker: FileChangeTracker | undefined
+) =>
+  Effect.gen(function* () {
+    return options.createToolRegistry
+      ? yield* options.createToolRegistry(spec, context, tracker)
+      : typeof options.toolRegistry === "function"
+        ? options.toolRegistry(context)
+        : (options.toolRegistry ?? createJinglerControlTools(context)
+    )
+  })

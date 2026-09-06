@@ -198,11 +198,9 @@ function renderGithubSetup() {
            switch (step) {
 case "workspace": {
 return (renderWorkspaceSetup())
-break
 }
 case "github": {
 return (renderGithubSetup())
-break
 }
 case "provider": {
 return (<ProviderSetupStep
@@ -219,7 +217,6 @@ return (<ProviderSetupStep
             onCancel={onCancelAuth}
             onRetry={onRetryProvider}
           />)
-break
 }
 }
            return (<ResourceSetupStep

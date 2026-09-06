@@ -217,61 +217,9 @@ const heldSubagentEvents = (
   const { first, second } = heldSubagentIds(runId)
   const parentPiSessionId = `e2e-parent-${runId}`
   const at = phase === "start" ? 10 : 20
-  const fleetNode = (
-    id: string,
-    agent: string,
-    task: string
-  ): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
-    _tag: "SubagentFleetChanged",
-    event: {
-      _tag: "Upsert",
-      version: 2,
-      eventId: `${phase}:${id}`,
-      occurredAt: at,
-      node: {
-        id: `${parentPiSessionId}/${id}`,
-        subagentId: id,
-        orchestrationRunId: runId,
-        nodeKind: "agent",
-        registryRevision: at,
-        childSequence: phase === "start" ? 1 : 2,
-        runId: id,
-        parentId: null,
-        parentPiSessionId,
-        agent,
-        task,
-        model: "e2e/pi-fixture:high",
-        status: phase === "start" ? "running" : "completed",
-        health: phase === "start" ? "connected" : "disconnected",
-        phase: null,
-        blocking: null,
-        terminal: phase === "start" ? null : {
-          reason: "completed",
-          summary: "Fixture child completed",
-          at,
-          retryable: false
-        },
-        background: false,
-        sessionFile: null,
-        currentTool: phase === "start" ? "workspace_read_file" : null,
-        startedAt: 10,
-        updatedAt: at,
-        completedAt: phase === "start" ? null : at,
-        usage: {
-          inputTokens: phase === "start" ? 0 : 120,
-          outputTokens: phase === "start" ? 0 : 40,
-          totalTokens: phase === "start" ? 0 : 160,
-          costUsd: 0,
-          durationMs: phase === "start" ? 0 : 10,
-          toolCalls: phase === "start" ? 0 : 1
-        },
-        artifacts: phase === "start"
-          ? []
-          : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
-        attention: null
-      }
-    }
-  })
+  const fleetNode = (id: string, agent: string, task: string) =>
+    heldFleetNode(id, agent, task, phase, runId, parentPiSessionId, at)
+
   return direct
     ? [fleetNode(first, "Worker", "Inspect direct delegation")]
     : [
@@ -365,3 +313,63 @@ export const configureE2ePiTools: NonNullable<
     registerHoldTool(registry)
     registerReviewPauseTool(registry)
   })
+
+const heldFleetNode = (
+  id: string,
+  agent: string,
+  task: string,
+  phase: "start" | "settle",
+  runId: string,
+  parentPiSessionId: string,
+  at: number
+): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
+  _tag: "SubagentFleetChanged",
+  event: {
+    _tag: "Upsert",
+    version: 2,
+    eventId: `${phase}:${id}`,
+    occurredAt: at,
+    node: {
+      id: `${parentPiSessionId}/${id}`,
+      subagentId: id,
+      orchestrationRunId: runId,
+      nodeKind: "agent",
+      registryRevision: at,
+      childSequence: phase === "start" ? 1 : 2,
+      runId: id,
+      parentId: null,
+      parentPiSessionId,
+      agent,
+      task,
+      model: "e2e/pi-fixture:high",
+      status: phase === "start" ? "running" : "completed",
+      health: phase === "start" ? "connected" : "disconnected",
+      phase: null,
+      blocking: null,
+      terminal: phase === "start" ? null : {
+        reason: "completed",
+        summary: "Fixture child completed",
+        at,
+        retryable: false
+      },
+      background: false,
+      sessionFile: null,
+      currentTool: phase === "start" ? "workspace_read_file" : null,
+      startedAt: 10,
+      updatedAt: at,
+      completedAt: phase === "start" ? null : at,
+      usage: {
+        inputTokens: phase === "start" ? 0 : 120,
+        outputTokens: phase === "start" ? 0 : 40,
+        totalTokens: phase === "start" ? 0 : 160,
+        costUsd: 0,
+        durationMs: phase === "start" ? 0 : 10,
+        toolCalls: phase === "start" ? 0 : 1
+      },
+      artifacts: phase === "start"
+        ? []
+        : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
+      attention: null
+    }
+  }
+})

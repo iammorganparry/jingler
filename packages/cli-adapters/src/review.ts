@@ -10,7 +10,7 @@ import type {
 import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
 import { Effect, Option, PubSub, RcMap, Ref, Schema, Stream } from "effect"
-import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
+import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
@@ -18,8 +18,10 @@ import { SessionStore } from "./sessions.js"
 import { adversarialPrompt } from "./review-prompt.js"
 import {
   MemoryAttachmentService,
-  attachMemoryToSessionSpec
+  attachMemoryToSessionSpec,
+  type MemoryAttachmentServiceShape
 } from "./memory-session.js"
+import type { MemoryAttachment } from "./memory.js"
 
 /**
  * Runs the adversarial reviewer against a PR diff and returns structured findings.
@@ -86,9 +88,7 @@ export const extractJsonBlock = (text: string): string | null => {
   for (let i = start; i < text.length; i++) {
     const char = text[i]!
     if (inString) {
-      if (escaped) escaped = false
-      else if (char === "\\") escaped = true
-      else if (char === '"') inString = false
+      ;({ escaped, inString } = advanceJsonString(escaped, char, inString))
     } else if (char === '"') {
       inString = true
     } else if (char === "{") {
@@ -393,7 +393,42 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         // "found nothing", which then gets cached against the real head SHA — so a
         // transient API failure becomes a permanent false all-clear that only a
         // forced re-run can clear. An empty diff is never worth reviewing anyway.
-        if (input.diff.trim().length === 0) {
+        return yield* prepareReviewTurn(
+          input,
+          ownerFor,
+          memoryService,
+          publish,
+          resetLive,
+          adapter,
+          persistLive
+        )
+      })
+
+    const run = (input: ReviewInput): Effect.Effect<AdversarialReview, ReviewError, ReviewEnv> =>
+      // Scoped around the WHOLE run: the RcMap reference is held until the run
+      // finishes, so the semaphore entry cannot be reclaimed out from under a
+      // race between a manual and an auto review.
+      Effect.scoped(
+        Effect.gen(function* () {
+          const lock = yield* RcMap.get(lockMap, input.sessionId)
+          return yield* lock.withPermits(1)(runExclusive(input))
+        })
+      )
+
+    return { run, watch }
+  })
+}) {}
+
+function* prepareReviewTurn(
+  input: ReviewInput,
+  ownerFor: (sessionId: string) => Effect.Effect<string | null, never, ReviewEnv>,
+  memoryService: Option.Option<MemoryAttachmentServiceShape>,
+  publish: (sessionId: string, event: StreamEvent) => Effect.Effect<void>,
+  resetLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>,
+  adapter: AgentTurnDriverShape,
+  persistLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>
+) {
+  if (input.diff.trim().length === 0) {
           return yield* Effect.fail(
             new ReviewError({
               message: "Couldn't read the pull request's diff, so there was nothing to review."
@@ -438,7 +473,29 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
               `review:${input.sessionId}:${input.headSha}`
             )
           : null
-        const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
+  return yield* runReviewTurn(
+    baseSpec,
+    memoryAttachment,
+    publish,
+    input,
+    collected,
+    resetLive,
+    adapter,
+    persistLive
+  )
+}
+
+function* runReviewTurn(
+  baseSpec: AgentTurnSpec,
+  memoryAttachment: MemoryAttachment | null,
+  publish: (sessionId: string, event: StreamEvent) => Effect.Effect<void>,
+  input: ReviewInput,
+  collected: Ref.Ref<readonly string[]>,
+  resetLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>,
+  adapter: AgentTurnDriverShape,
+  persistLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>
+) {
+  const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
         const ctx: AgentContext = {
           emit: (event) =>
@@ -521,19 +578,11 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
           postedAt: null,
           postError: null
         }
-      })
+      }
 
-    const run = (input: ReviewInput): Effect.Effect<AdversarialReview, ReviewError, ReviewEnv> =>
-      // Scoped around the WHOLE run: the RcMap reference is held until the run
-      // finishes, so the semaphore entry cannot be reclaimed out from under a
-      // race between a manual and an auto review.
-      Effect.scoped(
-        Effect.gen(function* () {
-          const lock = yield* RcMap.get(lockMap, input.sessionId)
-          return yield* lock.withPermits(1)(runExclusive(input))
-        })
-      )
-
-    return { run, watch }
-  })
-}) {}
+function advanceJsonString(escaped: boolean, char: string, inString: boolean) {
+  if (escaped) escaped = false
+  else if (char === "\\") escaped = true
+  else if (char === '"') inString = false
+  return { escaped, inString }
+  }

@@ -101,11 +101,21 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     const session = yield* SessionStore.get(sessionId)
     // Only auto-named sessions are retitled. `autoTitle` absent ⇒ the session was
     // named by the user (legacy/explicit) and is left pinned.
-    if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
-    // Transcripts are owned by chats, not sessions. Legacy session-keyed
-    // transcripts are adopted into activeChatId when the session is loaded, so
-    // reading by sessionId here silently misses every modern turn.
-    const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
+    return yield* retitleEligibleSession(session, gen, sessionId)
+  }).pipe(
+    Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
+  )
+
+function* retitleEligibleSession(session: Session, gen: TitleGenerator, sessionId: string) {
+  if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
+  // Transcripts are owned by chats, not sessions. Legacy session-keyed
+  // transcripts are adopted into activeChatId when the session is loaded, so
+  // reading by sessionId here silently misses every modern turn.
+  return yield* proposeSessionMetadata(session, gen, sessionId)
+}
+
+function* proposeSessionMetadata(session: Session, gen: TitleGenerator, sessionId: string) {
+  const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
       Effect.orElseSucceed(() => [])
     )
     const proposal = yield* gen.generate(messages, session)
@@ -114,9 +124,19 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     // session's provisional creative title.
     const title =
       session.autoTitle === true && messages.length > 0 ? proposal.title : session.title
-    // A direct session never owns a task branch. Retitling still updates its
-    // display name, but branch creation belongs exclusively to linked worktrees.
-    if (workspaceModeOf(session) === "direct") {
+  // A direct session never owns a task branch. Retitling still updates its
+  // display name, but branch creation belongs exclusively to linked worktrees.
+  return yield* applySessionMetadata(session, title, sessionId, messages, proposal)
+}
+
+function* applySessionMetadata(
+  session: Session,
+  title: string,
+  sessionId: string,
+  messages: ReadonlyArray<Message>,
+  proposal: SessionMetadataProposal
+) {
+  if (workspaceModeOf(session) === "direct") {
       if (title !== session.title) yield* SessionStore.setTitle(sessionId, title)
       return { ...session, title }
     }
@@ -134,25 +154,13 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
       const persistedProposal = session.semanticBranchProposal ??
         semanticBranchProposalFromName(liveBranch) ??
         undefined
-      if (title !== session.title ||
-        liveBranch !== session.branch ||
-        session.semanticBranchPending === true ||
-        (session.semanticBranchProposal === undefined && persistedProposal !== undefined)) {
-        yield* SessionStore.setTitleAndBranch(
-          sessionId,
-          title,
+    return yield* reconcileExistingTaskBranch(title,
+      session,
           liveBranch,
-          persistedProposal
-        )
-      }
-      return {
-        ...session,
-        title,
-        branch: liveBranch,
-        ...(persistedProposal === undefined ? {} : { semanticBranchProposal: persistedProposal }),
-        semanticBranchPending: false
-      }
-    }
+          persistedProposal,
+      sessionId
+    )
+  }
 
     // An auto-named session with no transcript yet has nothing meaningful to
     // seed a branch from — keep the pending marker so the next trigger (plan,
@@ -183,6 +191,28 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
       semanticBranchProposal: safeProposal,
       semanticBranchPending: false
     }
-  }).pipe(
-    Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
-  )
+  }
+
+function* reconcileExistingTaskBranch(
+  title: string,
+  session: Session,
+  liveBranch: string,
+  persistedProposal: Session["semanticBranchProposal"],
+  sessionId: string
+) {
+  if (
+    title !== session.title ||
+    liveBranch !== session.branch ||
+    session.semanticBranchPending === true ||
+    (session.semanticBranchProposal === undefined && persistedProposal !== undefined)
+  ) {
+    yield* SessionStore.setTitleAndBranch(sessionId, title, liveBranch, persistedProposal)
+  }
+  return {
+    ...session,
+    title,
+    branch: liveBranch,
+    ...(persistedProposal === undefined ? {} : { semanticBranchProposal: persistedProposal }),
+    semanticBranchPending: false
+  }
+}

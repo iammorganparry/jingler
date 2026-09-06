@@ -230,16 +230,13 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
           (requested) =>
             Effect.gen(function* () {
               if (requested === ".git" || requested.startsWith(".git/")) return null
-              const resolved = yield* resolveInside(root, requested).pipe(Effect.option)
-              if (resolved._tag === "None") return null
-              const info = yield* fs.stat(resolved.value.absolutePath).pipe(Effect.option)
-              if (info._tag === "None" || info.value.type !== "File") return null
-              const path = relativeTo(root, resolved.value.absolutePath)
-              if (path.length === 0 || path === ".git" || path.startsWith(".git/")) return null
-              return {
-                path,
-                status: statusByPath.get(requested) ?? "clean"
-              } satisfies AssetFileEntry
+              return yield* resolveEditableAsset(
+                resolveInside,
+                root, requested,
+                fs,
+                relativeTo,
+                statusByPath
+              )
             }),
           // Real repositories routinely contain 5k+ tracked files. Each path
           // still goes through the same realpath + regular-file checks, but a
@@ -307,50 +304,8 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
         // transcript strings such as `npm.install` and cannot safely guess.
         const kind: AssetKind = extensionToKind(requested) ?? "text"
 
-        const { root, absolutePath } = yield* resolveInside(worktree, requested)
-
-        const info = yield* fs.stat(absolutePath).pipe(
-          Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
-        )
-        // A directory named `report.pdf` is not an asset. Without this the read
-        // below fails with a raw EISDIR that the viewer can't say anything
-        // useful about.
-        if (info.type !== "File") {
-          return yield* new AssetOutsideWorktreeError({ path: requested, reason: "not-a-file" })
-        }
-
-        const size = Number(info.size)
-        const cap = ASSET_SIZE_CAP[kind]
-        if (size > cap) return yield* new AssetTooLargeError({ path: requested, size, cap })
-
-        const base = { path: relativeTo(root, absolutePath), absolutePath, size } as const
-
-        if (kind === "pdf") return { ...base, kind: "pdf" } as const
-
-        if (kind === "image") {
-          const bytes = yield* fs.readFile(absolutePath).pipe(
-            Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
-          )
-          return {
-            ...base,
-            kind: "image",
-            mediaType: mediaTypeFor(absolutePath),
-            base64: Buffer.from(bytes).toString("base64")
-          } as const
-        }
-
-        const bytes = yield* fs.readFile(absolutePath).pipe(
-          Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
-        )
-        const text = decodeEditableText(bytes)
-        if (text === null) return yield* new AssetBinaryError({ path: requested })
-        return {
-          ...base,
-          kind,
-          language: kind === "code" ? extensionToLanguage(absolutePath) : null,
-          text,
-          revision: contentRevision(bytes)
-        } as const
+        return yield* readResolvedAsset(resolveInside, worktree, requested, fs,
+          kind, relativeTo)
       })
 
     /**
@@ -380,37 +335,15 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
       Effect.gen(function* () {
         const { absolutePath } = yield* resolveInside(worktree, requested)
         const info = yield* fs.stat(absolutePath).pipe(
-          Effect.mapError(
-            () =>
-              new AssetOutsideWorktreeError({
-                path: requested,
-                reason: "unreadable"
-              })
-          )
+          Effect.mapError(() => new AssetOutsideWorktreeError({ path: requested, reason: "unreadable" }))
         )
         if (info.type !== "File") {
-          return yield* new AssetOutsideWorktreeError({
-            path: requested,
-            reason: "not-a-file"
-          })
+          return yield* new AssetOutsideWorktreeError({ path: requested, reason: "not-a-file" })
         }
 
-        const kind = extensionToKind(requested) ?? "text"
-        if (kind === "image" || kind === "pdf") {
-          return yield* new AssetBinaryError({ path: requested })
-        }
-        const nextBytes = new TextEncoder().encode(text)
-        if (decodeEditableText(nextBytes) === null) {
-          return yield* new AssetBinaryError({ path: requested })
-        }
-        const cap = ASSET_SIZE_CAP[kind]
-        if (nextBytes.byteLength > cap) {
-          return yield* new AssetTooLargeError({
-            path: requested,
-            size: nextBytes.byteLength,
+        const { nextBytes,
             cap
-          })
-        }
+          } = yield* prepareEditableAssetBytes(requested, text)
 
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -423,7 +356,54 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
                   })
               )
             )
-            const openedInfo = yield* file.stat.pipe(
+            return yield* writeOpenedAsset(
+              file,
+              requested,
+              cap,
+              expectedRevision,
+              path_,
+              absolutePath,
+              fs,
+              nextBytes
+            )
+          })
+        )
+
+        const refreshed = yield* read(worktree, requested).pipe(
+          Effect.catchTag(
+            "AssetUnsupportedError",
+            () => new AssetBinaryError({ path: requested })
+          )
+        )
+        if (refreshed.kind === "image" || refreshed.kind === "pdf") {
+          return yield* new AssetBinaryError({ path: requested })
+        }
+        return refreshed
+      })
+
+    /**
+     * The absolute path to hand to the OS file manager, having proved it is
+     * inside the worktree. The service does not call `shell` itself — that is
+     * Electron, and this package is deliberately free of it.
+     */
+    const revealPath = (worktree: string, requested: string) =>
+      Effect.map(resolveInside(worktree, requested), (r) => r.absolutePath)
+
+    return { list, read, write, pdfPath, revealPath } as const
+  })
+}) {}
+
+function* writeOpenedAsset(
+  file: FileSystem.File,
+  requested: string,
+  cap: number,
+  expectedRevision: string,
+  path_: Path.Path,
+  absolutePath: string,
+  fs: FileSystem.FileSystem,
+  nextBytes: NodeJS.NonSharedUint8Array
+) {
+  const openedInfo = yield* file.stat.pipe(
               Effect.mapError(
                 () =>
                   new AssetOutsideWorktreeError({
@@ -495,29 +475,143 @@ export class AssetService extends Effect.Service<AssetService>()("AssetService",
             yield* fs.rename(replacementPath, absolutePath).pipe(
               Effect.mapError(writeFailure)
             )
-          })
-        )
+          }
 
-        const refreshed = yield* read(worktree, requested).pipe(
-          Effect.catchTag(
-            "AssetUnsupportedError",
-            () => new AssetBinaryError({ path: requested })
-          )
-        )
-        if (refreshed.kind === "image" || refreshed.kind === "pdf") {
+function* resolveEditableAsset(
+  resolveInside: (
+    worktree: string,
+    requested: string
+  ) => Effect.Effect<
+    { readonly root: string; readonly absolutePath: string },
+    AssetOutsideWorktreeError,
+    never
+  >,
+  root: string,
+  requested: string,
+  fs: FileSystem.FileSystem,
+  relativeTo: (root: string, absolutePath: string) => string,
+  statusByPath: ReadonlyMap<
+    string,
+    "clean" | "modified" | "added" | "deleted" | "renamed" | "untracked"
+  >
+) {
+  const resolved = yield* resolveInside(root, requested).pipe(
+          Effect.option)
+  if (resolved._tag === "None") return null
+  const info = yield* fs.stat(resolved.value.absolutePath).pipe(Effect.option)
+  if (info._tag === "None" || info.value.type !== "File") return null
+  const path = relativeTo(root, resolved.value.absolutePath)
+  if (path.length === 0 || path === ".git" || path.startsWith(".git/")) return null
+  return {
+    path,
+    status: statusByPath.get(requested) ?? "clean"
+  } satisfies AssetFileEntry
+}
+
+function* readResolvedAsset(
+  resolveInside: (
+    worktree: string,
+    requested: string
+  ) => Effect.Effect<
+    { readonly root: string; readonly absolutePath: string },
+    AssetOutsideWorktreeError,
+    never
+  >,
+  worktree: string,
+  requested: string,
+  fs: FileSystem.FileSystem,
+  kind: keyof typeof ASSET_SIZE_CAP,
+  relativeTo: (root: string, absolutePath: string) => string
+) {
+  const { root, absolutePath } = yield* resolveInside(worktree, requested)
+
+  const info = yield* fs.stat(absolutePath).pipe(
+    Effect.mapError(
+      () =>
+        new AssetOutsideWorktreeError({
+          path: requested,
+          reason: "unreadable"
+        })
+    )
+  )
+  // A directory named `report.pdf` is not an asset. Without this the read
+  // below fails with a raw EISDIR that the viewer can't say anything
+  // useful about.
+  if (info.type !== "File") {
+    return yield* new AssetOutsideWorktreeError({
+      path: requested,
+      reason: "not-a-file"
+    })
+  }
+
+  const size = Number(info.size)
+  const cap = ASSET_SIZE_CAP[kind]
+  if (size > cap) return yield* new AssetTooLargeError({ path: requested, size, cap })
+
+  const base = {
+    path: relativeTo(root, absolutePath),
+    absolutePath,
+    size
+  } as const
+
+  if (kind === "pdf") return { ...base, kind: "pdf" } as const
+
+  if (kind === "image") {
+    const bytes = yield* fs.readFile(absolutePath).pipe(
+      Effect.mapError(
+        () =>
+          new AssetOutsideWorktreeError({
+            path: requested,
+            reason: "unreadable"
+          })
+      )
+    )
+    return {
+      ...base,
+      kind: "image",
+      mediaType: mediaTypeFor(absolutePath),
+      base64: Buffer.from(bytes).toString("base64")
+    } as const
+  }
+
+  const bytes = yield* fs.readFile(absolutePath).pipe(
+    Effect.mapError(
+      () =>
+        new AssetOutsideWorktreeError({
+          path: requested,
+          reason: "unreadable"
+        })
+    )
+  )
+  const text = decodeEditableText(bytes)
+  if (text === null) return yield* new AssetBinaryError({ path: requested })
+  return {
+    ...base,
+    kind,
+    language: kind === "code" ? extensionToLanguage(absolutePath) : null,
+    text,
+    revision: contentRevision(bytes)
+  } as const
+}
+
+const prepareEditableAssetBytes = (requested: string, text: string) =>
+  Effect.gen(function* () {
+    const kind = extensionToKind(requested) ?? "text"
+    if (kind === "image" || kind === "pdf") {
           return yield* new AssetBinaryError({ path: requested })
         }
-        return refreshed
+    const nextBytes = new TextEncoder().encode(text)
+    if (decodeEditableText(nextBytes) === null) {
+      return yield* new AssetBinaryError({ path: requested })
+}
+    const cap = ASSET_SIZE_CAP[kind]
+    if (nextBytes.byteLength > cap) {
+      return yield* new AssetTooLargeError({
+        path: requested,
+        size: nextBytes.byteLength,
+        cap
       })
+    }
 
-    /**
-     * The absolute path to hand to the OS file manager, having proved it is
-     * inside the worktree. The service does not call `shell` itself — that is
-     * Electron, and this package is deliberately free of it.
-     */
-    const revealPath = (worktree: string, requested: string) =>
-      Effect.map(resolveInside(worktree, requested), (r) => r.absolutePath)
-
-    return { list, read, write, pdfPath, revealPath } as const
+    return { nextBytes, cap }
   })
-}) {}

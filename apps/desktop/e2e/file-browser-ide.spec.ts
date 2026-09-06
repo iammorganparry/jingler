@@ -63,56 +63,14 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
     .map((_, index) => segments.slice(0, index + 1).join("/"))
   for (let attempt = 0; attempt < 80; attempt += 1) {
     if ((await target.count()) > 0 && (await target.isVisible())) {
-      await target.click()
-      if ((await target.getAttribute("aria-selected")) !== "true") {
-        await target.focus()
-        await target.press("Enter")
-      }
-      await expect(target).toHaveAttribute("aria-selected", "true")
+      await selectVisibleTreeItem(target)
       return
     }
-    let expandedAncestor = false
-    for (const ancestorPath of ancestorPaths) {
-      const ancestor = tree.locator(
-        `[role="treeitem"][data-item-path="${ancestorPath}/"]`
-      )
-      if (
-        (await ancestor.count()) > 0 &&
-        (await ancestor.isVisible()) &&
-        (await ancestor.getAttribute("aria-expanded")) !== "true"
-      ) {
-        await ancestor.focus()
-        await ancestor.press("ArrowRight")
-        expandedAncestor = true
-        break
-      }
-    }
+    let expandedAncestor = await expandTreeAncestor(ancestorPaths, tree)
     if (expandedAncestor) continue
-    const unrelatedExpanded = tree.locator('[role="treeitem"][aria-expanded="true"]')
-    const expandedCount = await unrelatedExpanded.count()
-    let collapsedUnrelated = false
-    for (let index = 0; index < expandedCount; index += 1) {
-      const candidate = unrelatedExpanded.nth(index)
-      const candidatePath = await candidate.getAttribute("data-item-path")
-      if (candidatePath !== null && !path.startsWith(candidatePath)) {
-        await candidate.click()
-        collapsedUnrelated = true
-        break
-      }
-    }
+    let collapsedUnrelated = await collapseUnrelatedTreeFolder(tree, path)
     if (collapsedUnrelated) continue
-    const collapsed = tree.locator('[role="treeitem"][aria-expanded="false"]')
-    const count = await collapsed.count()
-    let expanded = false
-    for (let index = 0; index < count; index += 1) {
-      const candidate = collapsed.nth(index)
-      const candidatePath = await candidate.getAttribute("data-item-path")
-      if (candidatePath !== null && path.startsWith(candidatePath)) {
-        await candidate.click()
-        expanded = true
-        break
-      }
-    }
+    let expanded = await expandMatchingTreeFolder(tree, path)
     if (!expanded) {
       const advanced = await tree.evaluate((node) => {
         const ancestors: HTMLElement[] = []
@@ -642,3 +600,62 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     timeout: 20_000
   })
 })
+
+async function selectVisibleTreeItem(target: import("@playwright/test").Locator) {
+  await target.click()
+  if ((await target.getAttribute("aria-selected")) !== "true") {
+    await target.focus()
+    await target.press("Enter")
+  }
+  await expect(target).toHaveAttribute("aria-selected", "true")
+}
+
+async function expandTreeAncestor(ancestorPaths: string[], tree: import("@playwright/test").Locator) {
+  let expandedAncestor = false
+  for (const ancestorPath of ancestorPaths) {
+    const ancestor = tree.locator(
+      `[role="treeitem"][data-item-path="${ancestorPath}/"]`
+    )
+    if ((await ancestor.count()) > 0 &&
+      (await ancestor.isVisible()) &&
+      (await ancestor.getAttribute("aria-expanded")) !== "true") {
+      await ancestor.focus()
+      await ancestor.press("ArrowRight")
+      expandedAncestor = true
+      break
+    }
+  }
+  return expandedAncestor
+}
+
+async function collapseUnrelatedTreeFolder(tree: import("@playwright/test").Locator, path: string) {
+  const unrelatedExpanded = tree.locator('[role="treeitem"][aria-expanded="true"]')
+  const expandedCount = await unrelatedExpanded.count()
+  let collapsedUnrelated = false
+  for (let index = 0; index < expandedCount; index += 1) {
+    const candidate = unrelatedExpanded.nth(index)
+    const candidatePath = await candidate.getAttribute("data-item-path")
+    if (candidatePath !== null && !path.startsWith(candidatePath)) {
+      await candidate.click()
+      collapsedUnrelated = true
+      break
+    }
+  }
+  return collapsedUnrelated
+}
+
+async function expandMatchingTreeFolder(tree: import("@playwright/test").Locator, path: string) {
+  const collapsed = tree.locator('[role="treeitem"][aria-expanded="false"]')
+  const count = await collapsed.count()
+  let expanded = false
+  for (let index = 0; index < count; index += 1) {
+    const candidate = collapsed.nth(index)
+    const candidatePath = await candidate.getAttribute("data-item-path")
+    if (candidatePath !== null && path.startsWith(candidatePath)) {
+      await candidate.click()
+      expanded = true
+      break
+    }
+  }
+  return expanded
+}

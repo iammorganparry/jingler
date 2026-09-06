@@ -447,26 +447,26 @@ export class SessionStore extends Effect.Service<SessionStore>()(
   {
     accessors: true,
     sync: () => {
-      /**
-       * Serialises every read-modify-write of `sessions.json`.
-       *
-       * The whole store is one JSON file rewritten wholesale, so any two
-       * concurrent mutations race: each reads the array, edits its own session,
-       * and writes the WHOLE thing back — and the later write silently discards
-       * the earlier one's change.
-       *
-       * Two sessions created at once are enough to hit it: each reads the list,
-       * then forks a worktree (seconds), then appends to the list it read — so
-       * the second create writes a list that never contained the first session.
-       *
-       * One permit, held only across read-then-write and never across anything
-       * slow (a worktree fork, a network call), so this serialises the file and
-       * not the work.
-       *
-       * In-process only. It orders the app's own writers, which is what exists
-       * today; it would not order a second Jingler process against this one.
-       */
-      const lock = Effect.unsafeMakeSemaphore(1)
+    /**
+     * Serialises every read-modify-write of `sessions.json`.
+     *
+     * The whole store is one JSON file rewritten wholesale, so any two
+     * concurrent mutations race: each reads the array, edits its own session,
+     * and writes the WHOLE thing back — and the later write silently discards
+     * the earlier one's change.
+     *
+     * Two sessions created at once are enough to hit it: each reads the list,
+     * then forks a worktree (seconds), then appends to the list it read — so
+     * the second create writes a list that never contained the first session.
+     *
+     * One permit, held only across read-then-write and never across anything
+     * slow (a worktree fork, a network call), so this serialises the file and
+     * not the work.
+     *
+     * In-process only. It orders the app's own writers, which is what exists
+     * today; it would not order a second Jingler process against this one.
+     */
+    const lock = Effect.unsafeMakeSemaphore(1)
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
@@ -482,28 +482,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const readAll = (): Effect.Effect<ReadonlyArray<Session>, never, PersistEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
-          const paths = yield* AppPaths
-          const exists = yield* fs
-            .exists(paths.sessionsFile)
-            .pipe(Effect.orElseSucceed(() => false))
-          if (!exists) return []
-          const raw = yield* fs
-            .readFileString(paths.sessionsFile)
-            .pipe(Effect.orElseSucceed(() => ""))
-          if (raw.trim().length === 0) return []
-          const parsed = yield* Schema.decodeUnknown(Schema.parseJson(Schema.Unknown))(raw).pipe(
-            Effect.orElseSucceed(() => null)
-          )
-          if (!Array.isArray(parsed)) return []
-          const sessions: Array<Session> = []
-          for (const value of parsed) {
-            const decoded = Schema.decodeUnknownEither(SessionSchema)(
-              migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
-            )
-            if (Either.isRight(decoded)) sessions.push(decoded.right)
-          }
-          return sessions
-        })
+        return yield* readPersistedSessions(fs)
+      })
 
       const writeAll = (
         sessions: ReadonlyArray<Session>
@@ -626,7 +606,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ): Effect.Effect<
         Session,
         GitError,
-        | GitService
+      GitService
         | FileSystem.FileSystem
         | Path.Path
         | CommandExecutor.CommandExecutor
@@ -782,65 +762,36 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             )
           }
 
-          // Refuse if a live session already owns this path — the same guard
-          // `createFromPr` and `createFromIssue` carry, and for the same reason:
-          // `createDetachedWorktree` reclaims whatever is at the target path with an
-          // `rm -rf`, so without this a slug collision DELETES a working
-          // session's worktree and everything uncommitted in it.
-          //
-          // The stamp makes a collision unlikely, not impossible:
-          // `freeCreativeName` falls back to an unstamped name after enough
-          // collisions, and two creates in the same millisecond share a stamp.
-          // Unlikely is the wrong bar for an unrecoverable outcome.
-          const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
-          if (existing.some((s) => s.worktreePath === worktreePath)) {
-            return yield* Effect.fail(
-              new GitError({ message: "A session already exists for this branch name." })
-            )
-          }
-          // Every fresh isolated task starts detached at the fresh base. The
-          // first task-understanding/retitle pass proposes a semantic branch and
-          // GitService creates it; a user-supplied title pins display text only.
-          const worktree = yield* GitService.createDetachedWorktree({
-            repoPath: input.repoPath,
-            repoName: input.repoName,
+        // Refuse if a live session already owns this path — the same guard
+        // `createFromPr` and `createFromIssue` carry, and for the same reason:
+        // `createDetachedWorktree` reclaims whatever is at the target path with an
+        // `rm -rf`, so without this a slug collision DELETES a working
+        // session's worktree and everything uncommitted in it.
+        //
+        // The stamp makes a collision unlikely, not impossible:
+        // `freeCreativeName` falls back to an unstamped name after enough
+        // collisions, and two creates in the same millisecond share a stamp.
+        // Unlikely is the wrong bar for an unrecoverable outcome.
+        return yield* createIsolatedSession(
+          input,
             slug,
-            baseBranch: input.baseBranch
-          })
-          if (input.continueBranch === true) {
-            yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
-          }
-          const session = makeSession(
-            input.continueBranch === true
-              ? { ...worktree, branch: input.baseBranch }
-              : worktree,
-            "worktree"
-          )
-          // `existing` was read above (for the friendly-name collision check).
-          // Re-read INSIDE the lock rather than reusing the list read before
-          // the worktree fork: that read is now seconds stale, and appending to
-          // it would drop any session created — or any deps status written — in
-          // the meantime.
-          yield* atomically(
-            Effect.gen(function* () {
-              const current = yield* readAll()
-              yield* ensureSessionIdAvailable(current, session.id)
-              yield* writeAll([session, ...current])
+          existing,
+          makeSession,
+          atomically,
+          readAll,
+          ensureSessionIdAvailable,
+          writeAll
+        )
             })
-          )
-          // AFTER the write: the fibre patches this session by id, so the record
-          // it patches has to exist before it can run.
-          return session
-        })
 
-      /**
-       * Create a session from an *existing* PR. Lands a detached worktree on the
-       * PR's base, resolves the immutable head repository/ref through GitHub,
-       * then fetches and checks it out with ordinary git. The worktree tracks the
-       * PR's fork/branch and agent commits update that PR directly. `prNumber` is
-       * linked up front, so the sidebar badge + PR/Code-Review tabs light up.
-       */
-      const createFromPr = (
+    /**
+     * Create a session from an *existing* PR. Lands a detached worktree on the
+     * PR's base, resolves the immutable head repository/ref through GitHub,
+     * then fetches and checks it out with ordinary git. The worktree tracks the
+     * PR's fork/branch and agent commits update that PR directly. `prNumber` is
+     * linked up front, so the sidebar badge + PR/Code-Review tabs light up.
+     */
+    const createFromPr = (
         input: CreateSessionFromPrInput,
         opts: {
           allowSharedCheckout?: boolean
@@ -939,13 +890,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return session
         })
 
-      /**
-       * Create a session from a normalized issue. Like `create` it starts DETACHED
-       * from a fresh `baseBranch` (the provider identifier keys the worktree path),
-       * retains GitHub automations when supplied, and seeds `initialPrompt` from the issue
-       * title + body (the composer pre-fills it once; HITL — the user sends it).
-       */
-      const createFromIssue = (
+    /**
+     * Create a session from a normalized issue. Like `create` it starts DETACHED
+     * from a fresh `baseBranch` (the provider identifier keys the worktree path),
+     * retains GitHub automations when supplied, and seeds `initialPrompt` from the issue
+     * title + body (the composer pre-fills it once; HITL — the user sends it).
+     */
+    const createFromIssue = (
         input: CreateSessionFromIssueInput,
         options: {
           defaultMode?: PermissionMode
@@ -954,7 +905,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ): Effect.Effect<
         Session,
         GitError,
-        | GitService
+      GitService
         | FileSystem.FileSystem
         | Path.Path
         | CommandExecutor.CommandExecutor
@@ -1289,19 +1240,19 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       ) =>
         updateChat(id, chatId, (chat) => ({ ...chat, reasoning }))
 
-      /**
-       * Accrue what a finished turn reported, ADDING to the session's running
-       * total rather than replacing it — a session is many turns, and the last
-       * one's usage is not the session's usage.
-       *
-       * `costUsd` is the harness's own figure. On subscription auth it is a
-       * NOTIONAL api-equivalent price rather than money billed, which is worth
-       * knowing before treating it as spend: the billing pane is what says which
-       * of the two an operator is actually on. Recorded regardless, because "how
-       * expensive was this work" is a useful question either way; it is the
-       * interpretation that differs, not the number.
-       */
-      const addUsage = (id: string, usage: { costUsd: number; tokens: number }) =>
+    /**
+     * Accrue what a finished turn reported, ADDING to the session's running
+     * total rather than replacing it — a session is many turns, and the last
+     * one's usage is not the session's usage.
+     *
+     * `costUsd` is the harness's own figure. On subscription auth it is a
+     * NOTIONAL api-equivalent price rather than money billed, which is worth
+     * knowing before treating it as spend: the billing pane is what says which
+     * of the two an operator is actually on. Recorded regardless, because "how
+     * expensive was this work" is a useful question either way; it is the
+     * interpretation that differs, not the number.
+     */
+    const addUsage = (id: string, usage: { costUsd: number; tokens: number }) =>
         update(id, (s) => ({
           ...s,
           costUsd: s.costUsd + (Number.isFinite(usage.costUsd) ? usage.costUsd : 0),
@@ -1331,20 +1282,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
-      /**
-       * Persist the session's latest context-window OCCUPANCY.
-       *
-       * Distinct from `addUsage`, which accrues the session's lifetime totals.
-       * That number only grows; this one must be able to fall, because a
-       * compaction shrinking it is exactly the outcome being recorded. Writing
-       * both to `tokens` would make a compaction read as negative usage on the
-       * sidebar and make the meter measure a lifetime sum as a working set.
-       *
-       * It has to be persisted at all because the reading otherwise lived only
-       * in renderer state and died on reload — a session reopened at 290k would
-       * read as 0 and run to the hard ceiling before anything noticed.
-       */
-      const setContextTokens = (id: string, contextTokens: number) =>
+    /**
+     * Persist the session's latest context-window OCCUPANCY.
+     *
+     * Distinct from `addUsage`, which accrues the session's lifetime totals.
+     * That number only grows; this one must be able to fall, because a
+     * compaction shrinking it is exactly the outcome being recorded. Writing
+     * both to `tokens` would make a compaction read as negative usage on the
+     * sidebar and make the meter measure a lifetime sum as a working set.
+     *
+     * It has to be persisted at all because the reading otherwise lived only
+     * in renderer state and died on reload — a session reopened at 290k would
+     * read as 0 and run to the hard ceiling before anything noticed.
+     */
+    const setContextTokens = (id: string, contextTokens: number) =>
         update(id, (s) =>
           Number.isFinite(contextTokens) && contextTokens >= 0 ? { ...s, contextTokens } : s
         )
@@ -1366,16 +1317,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             : session
         )
 
-      /**
-       * Pin auto-compaction on or off for this session; `null` clears the
-       * override so it follows the global setting again.
-       *
-       * `undefined` on clear, not null — `autoCompact` is `optional`, so writing
-       * null would persist a key the schema rejects on the next read, and
-       * `TranscriptStore`-style best-effort decoding would then drop the whole
-       * session record.
-       */
-      const setAutoCompact = (id: string, autoCompact: boolean | null) =>
+    /**
+     * Pin auto-compaction on or off for this session; `null` clears the
+     * override so it follows the global setting again.
+     *
+     * `undefined` on clear, not null — `autoCompact` is `optional`, so writing
+     * null would persist a key the schema rejects on the next read, and
+     * `TranscriptStore`-style best-effort decoding would then drop the whole
+     * session record.
+     */
+    const setAutoCompact = (id: string, autoCompact: boolean | null) =>
         update(id, (s) => ({ ...s, autoCompact: autoCompact ?? undefined }))
 
       /** Persist and return a session's lifecycle-retention choice atomically. */
@@ -1455,25 +1406,25 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           semanticBranchPending: false
         }))
 
-      /**
-       * Re-point a direct session at the branch its shared checkout has drifted
-       * onto — the deliberate operator recovery for a `BranchDrift`. Touches only
-       * `branch`; an established branch is live state, so every other section
-       * (plans, PR link, GitHub routing) is preserved by `update`'s read-modify-write.
-       */
-      const setBranch = (id: string, branch: string) =>
+    /**
+     * Re-point a direct session at the branch its shared checkout has drifted
+     * onto — the deliberate operator recovery for a `BranchDrift`. Touches only
+     * `branch`; an established branch is live state, so every other section
+     * (plans, PR link, GitHub routing) is preserved by `update`'s read-modify-write.
+     */
+    const setBranch = (id: string, branch: string) =>
         update(id, (s) => ({ ...s, branch }))
 
       /** Manual rename — pins the title so the agent stops auto-retitling it. */
       const renameTitle = (id: string, title: string) =>
         update(id, (s) => ({ ...s, title, autoTitle: false }))
 
-      /**
-       * Record the session's lifecycle status as a turn settles. An archived
-       * session is terminal — never drag it back to idle/needs-input, or the
-       * sidebar would show a merged session as if it still wanted attention.
-       */
-      const setStatus = (id: string, status: SettledSessionStatus) =>
+    /**
+     * Record the session's lifecycle status as a turn settles. An archived
+     * session is terminal — never drag it back to idle/needs-input, or the
+     * sidebar would show a merged session as if it still wanted attention.
+     */
+    const setStatus = (id: string, status: SettledSessionStatus) =>
         update(id, (s) => (s.archived ? s : { ...s, status }))
 
       /** Add a command to the session's "always allow" list (deduped). */
@@ -1528,11 +1479,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           githubRepositoryId: link.repositoryId
         }))
 
-      /**
-       * Exactly-once claim, validated and persisted atomically before the
-       * renderer dispatches feedback into the conversation actor.
-       */
-      const claimGitHubFeedback = (
+    /**
+     * Exactly-once claim, validated and persisted atomically before the
+     * renderer dispatches feedback into the conversation actor.
+     */
+    const claimGitHubFeedback = (
         id: string,
         input: {
           readonly installationId: string
@@ -1546,72 +1497,37 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         atomically(
           Effect.gen(function* () {
             const sessions = yield* readAll()
-            const session = sessions.find((candidate) => candidate.id === id)
-            if (
-              !session ||
-              session.archived ||
-              session.githubInstallationId !== input.installationId ||
-              session.githubRepositoryId !== input.repositoryId ||
-              session.prNumber !== input.prNumber ||
-              input.event.installationId !== input.installationId ||
-              input.event.repository.id !== input.repositoryId ||
-              input.event.pullRequest?.number !== input.prNumber
-            ) {
-              return "rejected" as const
-            }
-            const deliveries = session.githubFeedbackDeliveryIds ?? []
-            const semantics = session.githubFeedbackSemanticKeys ?? []
-            if (deliveries.includes(input.deliveryId) || semantics.includes(input.semanticKey)) {
-              return "dispatched" as const
-            }
-            const outbox = yield* readFeedbackOutbox()
-            const existing = outbox.find(
-              (entry) =>
-                entry.event.deliveryId === input.deliveryId ||
-                entry.event.semanticKey === input.semanticKey
-            )
-            if (existing) {
-              return existing.sessionId === id ? existing.status : ("rejected" as const)
-            }
-            yield* writeFeedbackOutbox([
-              ...outbox,
-              {
-                sessionId: id,
-                chatId: session.activeChatId,
-                installationId: input.installationId,
-                repositoryId: input.repositoryId,
-                prNumber: input.prNumber,
-                event: input.event,
-                status: "pending",
-                createdAt: new Date().toISOString(),
-                dispatchedAt: null
-              }
-            ])
-            return "pending" as const
-          })
+          return yield* claimSessionFeedback(
+            sessions,
+            id,
+            input,
+            readFeedbackOutbox,
+            writeFeedbackOutbox
+          )
+        })
         )
 
-      /**
-       * Reconcile the durable feedback outbox after a restart, and return the
-       * pending entries that still deserve a delivery attempt.
-       *
-       * A `pending` entry means the delivery was claimed but the renderer never
-       * finished routing it — the app quit, the conversation actor discarded the
-       * dispatch, or the relay acknowledged the frame down an "ignored" branch
-       * that never marks dispatch. Nothing else ever re-reads these entries, so
-       * without this pass they are stranded forever: the relay's cursor may
-       * already be past the frame, meaning no replay will ever redeliver it.
-       *
-       * Three cases, decided against the CURRENT session state:
-       * - the session ledger already has the delivery → flip to `dispatched`
-       *   (the instruction reached the transcript; only the outbox missed it);
-       * - the session is gone, archived, or relinked → drop the entry (a fresh
-       *   claim would reject it, and keeping it blocks other sessions' claims);
-       * - still validly linked → keep it and hand it back for a replay attempt,
-       *   retargeted at the session's ACTIVE chat (the recorded chat may have
-       *   been closed since the claim).
-       */
-      const recoverGitHubFeedbackOutbox = (): Effect.Effect<
+    /**
+     * Reconcile the durable feedback outbox after a restart, and return the
+     * pending entries that still deserve a delivery attempt.
+     *
+     * A `pending` entry means the delivery was claimed but the renderer never
+     * finished routing it — the app quit, the conversation actor discarded the
+     * dispatch, or the relay acknowledged the frame down an "ignored" branch
+     * that never marks dispatch. Nothing else ever re-reads these entries, so
+     * without this pass they are stranded forever: the relay's cursor may
+     * already be past the frame, meaning no replay will ever redeliver it.
+     *
+     * Three cases, decided against the CURRENT session state:
+     * - the session ledger already has the delivery → flip to `dispatched`
+     *   (the instruction reached the transcript; only the outbox missed it);
+     * - the session is gone, archived, or relinked → drop the entry (a fresh
+     *   claim would reject it, and keeping it blocks other sessions' claims);
+     * - still validly linked → keep it and hand it back for a replay attempt,
+     *   retargeted at the session's ACTIVE chat (the recorded chat may have
+     *   been closed since the claim).
+     */
+    const recoverGitHubFeedbackOutbox = (): Effect.Effect<
         ReadonlyArray<GitHubFeedbackOutboxEntry>,
         GitError,
         PersistEnv
@@ -1622,52 +1538,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             const outbox = yield* readFeedbackOutbox()
             const kept: Array<GitHubFeedbackOutboxEntry> = []
             const replay: Array<GitHubFeedbackOutboxEntry> = []
-            let changed = false
-            for (const entry of outbox) {
-              if (entry.status !== "pending") {
-                kept.push(entry)
-                continue
-              }
-              const session = sessions.find(
-                (candidate) => candidate.id === entry.sessionId
-              )
-              const linked =
-                session !== undefined &&
-                !session.archived &&
-                session.githubInstallationId === entry.installationId &&
-                session.githubRepositoryId === entry.repositoryId &&
-                session.prNumber === entry.prNumber
-              if (!linked) {
-                changed = true
-                continue
-              }
-              const deliveries = session.githubFeedbackDeliveryIds ?? []
-              const semantics = session.githubFeedbackSemanticKeys ?? []
-              if (
-                deliveries.includes(entry.event.deliveryId) ||
-                semantics.includes(entry.event.semanticKey)
-              ) {
-                changed = true
-                kept.push({
-                  ...entry,
-                  status: "dispatched" as const,
-                  dispatchedAt: entry.dispatchedAt ?? new Date().toISOString()
-                })
-                continue
-              }
-              kept.push(entry)
-              replay.push({ ...entry, chatId: session.activeChatId })
-            }
-            if (changed) {
-              const pendingOutbox = kept.filter(
-                (candidate) => candidate.status === "pending"
-              )
-              const dispatchedOutbox = kept
-                .filter((candidate) => candidate.status === "dispatched")
-                .slice(-2_048)
-              yield* writeFeedbackOutbox([...pendingOutbox, ...dispatchedOutbox])
-            }
-            return replay
+          yield* reconcileFeedbackOutbox(outbox, kept, sessions, replay, writeFeedbackOutbox)
+          return replay
           })
         )
 
@@ -1735,15 +1607,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
         update(id, (s) => ({ ...s, publish }))
 
-      /**
-       * Record a worktree that has MOVED — not one that was re-forked.
-       *
-       * `worktreePath` is stored absolute and nothing else rewrites it, so it
-       * goes stale when `~/jingler` or the repo directory is renamed. The caller
-       * (`healedWorktreePath`) only produces a new value after confirming the
-       * directory is really there, so this never invents a path.
-       */
-      const setWorktreePath = (id: string, worktreePath: string) =>
+    /**
+     * Record a worktree that has MOVED — not one that was re-forked.
+     *
+     * `worktreePath` is stored absolute and nothing else rewrites it, so it
+     * goes stale when `~/jingler` or the repo directory is renamed. The caller
+     * (`healedWorktreePath`) only produces a new value after confirming the
+     * directory is really there, so this never invents a path.
+     */
+    const setWorktreePath = (id: string, worktreePath: string) =>
         update(id, (s) => ({ ...s, worktreePath }))
 
       /** Attach a durable project identity without changing checkout/transcript state. */
@@ -1828,17 +1700,21 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           archivedAt: undefined
         }))
 
-      /**
-       * Permanently delete a session: remove an owned worktree (best-effort) and
-       * drop it from the store. A direct checkout is never removed or unregistered.
-       * Irreversible — the UI gates this behind a confirm.
-       */
-      const remove = (
+    /**
+     * Permanently delete a session: remove an owned worktree (best-effort) and
+     * drop it from the store. A direct checkout is never removed or unregistered.
+     * Irreversible — the UI gates this behind a confirm.
+     */
+    const remove = (
         id: string
       ): Effect.Effect<
         void,
         GitError,
-        GitService | FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor | AppPaths
+        | GitService
+        | FileSystem.FileSystem
+        | Path.Path
+        | CommandExecutor.CommandExecutor
+        | AppPaths
       > =>
         Effect.gen(function* () {
           const target = (yield* readAll()).find((s) => s.id === id)
@@ -1958,3 +1834,188 @@ export class SessionStore extends Effect.Service<SessionStore>()(
     }
   }
 ) {}
+
+function* reconcileFeedbackOutbox(
+  outbox: ReadonlyArray<GitHubFeedbackOutboxEntry>,
+  kept: Array<GitHubFeedbackOutboxEntry>,
+  sessions: ReadonlyArray<Session>,
+  replay: Array<GitHubFeedbackOutboxEntry>,
+  writeFeedbackOutbox: (
+    entries: ReadonlyArray<GitHubFeedbackOutboxEntry>
+  ) => Effect.Effect<void, GitError, PersistEnv>
+) {
+  let changed = false
+  for (const entry of outbox) {
+    if (entry.status !== "pending") {
+      kept.push(entry)
+      continue
+    }
+    const session = sessions.find((candidate) => candidate.id === entry.sessionId)
+    const linked =
+      session !== undefined &&
+      !session.archived &&
+      session.githubInstallationId === entry.installationId &&
+      session.githubRepositoryId === entry.repositoryId &&
+      session.prNumber === entry.prNumber
+    if (!linked) {
+      changed = true
+      continue
+    }
+    const deliveries = session.githubFeedbackDeliveryIds ?? []
+    const semantics = session.githubFeedbackSemanticKeys ?? []
+    if (
+      deliveries.includes(entry.event.deliveryId) ||
+      semantics.includes(entry.event.semanticKey)
+    ) {
+      changed = true
+      kept.push({
+        ...entry,
+        status: "dispatched" as const,
+        dispatchedAt: entry.dispatchedAt ?? new Date().toISOString()
+      })
+      continue
+    }
+    kept.push(entry)
+    replay.push({ ...entry, chatId: session.activeChatId })
+  }
+  if (changed) {
+    const pendingOutbox = kept.filter((candidate) => candidate.status === "pending")
+    const dispatchedOutbox = kept
+      .filter((candidate) => candidate.status === "dispatched")
+      .slice(-2048)
+    yield* writeFeedbackOutbox([...pendingOutbox, ...dispatchedOutbox])
+  }
+}
+
+function* claimSessionFeedback(
+  sessions: ReadonlyArray<Session>,
+  id: string,
+  input: Parameters<SessionStore["claimGitHubFeedback"]>[1],
+  readFeedbackOutbox: () => Effect.Effect<
+    ReadonlyArray<GitHubFeedbackOutboxEntry>,
+    never,
+    PersistEnv
+  >,
+  writeFeedbackOutbox: (
+    entries: ReadonlyArray<GitHubFeedbackOutboxEntry>
+  ) => Effect.Effect<void, GitError, PersistEnv>
+) {
+  const session = sessions.find((candidate) => candidate.id === id)
+  if (
+    !session ||
+    session.archived ||
+    session.githubInstallationId !== input.installationId ||
+    session.githubRepositoryId !== input.repositoryId ||
+    session.prNumber !== input.prNumber ||
+    input.event.installationId !== input.installationId ||
+    input.event.repository.id !== input.repositoryId ||
+    input.event.pullRequest?.number !== input.prNumber
+  ) {
+    return "rejected" as const
+  }
+  const deliveries = session.githubFeedbackDeliveryIds ?? []
+  const semantics = session.githubFeedbackSemanticKeys ?? []
+  if (deliveries.includes(input.deliveryId) || semantics.includes(input.semanticKey)) {
+    return "dispatched" as const
+  }
+  const outbox = yield* readFeedbackOutbox()
+  const existing = outbox.find(
+    (entry) =>
+      entry.event.deliveryId === input.deliveryId || entry.event.semanticKey === input.semanticKey
+  )
+  if (existing) {
+    return existing.sessionId === id ? existing.status : ("rejected" as const)
+  }
+  yield* writeFeedbackOutbox([
+    ...outbox,
+    {
+      sessionId: id,
+      chatId: session.activeChatId,
+      installationId: input.installationId,
+      repositoryId: input.repositoryId,
+      prNumber: input.prNumber,
+      event: input.event,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      dispatchedAt: null
+    }
+  ])
+  return "pending" as const
+}
+
+function* createIsolatedSession(
+  input: CreateSessionInput,
+  slug: string,
+  existing: ReadonlyArray<Session>,
+  makeSession: (
+    workspace: { path: string; branch: string; repoPath: string },
+    workspaceMode: WorkspaceMode
+  ) => Session,
+  atomically: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+  readAll: () => Effect.Effect<ReadonlyArray<Session>, never, PersistEnv>,
+  ensureSessionIdAvailable: (
+    sessions: readonly Session[],
+    sessionId: string
+  ) => Effect.Effect<void, GitError>,
+  writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>
+) {
+  const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
+  if (existing.some((s) => s.worktreePath === worktreePath)) {
+    return yield* Effect.fail(
+      new GitError({
+        message: "A session already exists for this branch name."
+      })
+    )
+  }
+  // Every fresh isolated task starts detached at the fresh base. The
+  // first task-understanding/retitle pass proposes a semantic branch and
+  // GitService creates it; a user-supplied title pins display text only.
+  const worktree = yield* GitService.createDetachedWorktree({
+    repoPath: input.repoPath,
+    repoName: input.repoName,
+    slug,
+    baseBranch: input.baseBranch
+  })
+  if (input.continueBranch === true) {
+    yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
+  }
+  const session = makeSession(
+    input.continueBranch === true ? { ...worktree, branch: input.baseBranch } : worktree,
+    "worktree"
+  )
+  // `existing` was read above (for the friendly-name collision check).
+  // Re-read INSIDE the lock rather than reusing the list read before
+  // the worktree fork: that read is now seconds stale, and appending to
+  // it would drop any session created — or any deps status written — in
+  // the meantime.
+  yield* atomically(
+    Effect.gen(function* () {
+      const current = yield* readAll()
+      yield* ensureSessionIdAvailable(current, session.id)
+      yield* writeAll([session, ...current])
+    })
+  )
+  // AFTER the write: the fibre patches this session by id, so the record
+  // it patches has to exist before it can run.
+  return session
+}
+
+function* readPersistedSessions(fs: FileSystem.FileSystem) {
+  const paths = yield* AppPaths
+  const exists = yield* fs.exists(paths.sessionsFile).pipe(Effect.orElseSucceed(() => false))
+  if (!exists) return []
+  const raw = yield* fs.readFileString(paths.sessionsFile).pipe(Effect.orElseSucceed(() => ""))
+  if (raw.trim().length === 0) return []
+  const parsed = yield* Schema.decodeUnknown(Schema.parseJson(Schema.Unknown))(raw).pipe(
+    Effect.orElseSucceed(() => null)
+  )
+  if (!Array.isArray(parsed)) return []
+  const sessions: Array<Session> = []
+  for (const value of parsed) {
+    const decoded = Schema.decodeUnknownEither(SessionSchema)(
+      migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
+    )
+    if (Either.isRight(decoded)) sessions.push(decoded.right)
+  }
+  return sessions
+}

@@ -1,7 +1,8 @@
 import { OwnedDeviceOffloadResult } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { ToolError } from "./runtime/tools/tool-registry.js"
+import { ToolError, type ToolExecutionContext } from "./runtime/tools/tool-registry.js"
 import type { OffloadedCommandResult, OwnedDeviceOffloadPort } from "./offload-command-router.js"
+import type { CapturedOffloadSnapshot } from "./offload-snapshot.js"
 
 interface RemoteOwnedDeviceSession {
   readonly requestOnEnvironment: (
@@ -50,7 +51,48 @@ export const makeOwnedDeviceOffloadPort = (
           true
         ))
       )
-      if (!online) {
+      return yield* executeOwnedDeviceSnapshot(
+        online,
+        snapshot,
+        context,
+        remote,
+        deviceId,
+        jobId,
+        command,
+        limits
+      )
+    }).pipe(
+      Effect.onInterrupt(() => request(remote, deviceId, "Offload.cancel", { jobId }).pipe(Effect.ignore))
+    )
+    const cancelled = Effect.async<never, ToolError>((resume) => {
+      const onAbort = (): void => resume(Effect.fail(new ToolError(
+        "cancelled",
+        "Owned-device command cancelled",
+        true
+      )))
+      context.signal.addEventListener("abort", onAbort, { once: true })
+      if (context.signal.aborted) onAbort()
+      return Effect.sync(() => context.signal.removeEventListener("abort", onAbort))
+    })
+    return Effect.raceFirst(work, cancelled)
+  }
+})
+
+function* executeOwnedDeviceSnapshot(
+  online: boolean,
+  snapshot: CapturedOffloadSnapshot,
+  context: ToolExecutionContext,
+  remote: RemoteOwnedDeviceSession,
+  deviceId: string,
+  jobId: string,
+  command: Parameters<OwnedDeviceOffloadPort["execute"]>[0]["command"],
+  limits: {
+    readonly timeoutSeconds: number
+    readonly snapshotBytes: number
+    readonly outputBytes: number
+  }
+) {
+  if (!online) {
         return yield* Effect.fail(new ToolError(
           "execution-failed",
           "The selected owned device is not online; Offload Compute did not fall back to cloud or local execution.",
@@ -130,19 +172,4 @@ export const makeOwnedDeviceOffloadPort = (
         offloaded: true,
         jobId
       } satisfies OffloadedCommandResult
-    }).pipe(
-      Effect.onInterrupt(() => request(remote, deviceId, "Offload.cancel", { jobId }).pipe(Effect.ignore))
-    )
-    const cancelled = Effect.async<never, ToolError>((resume) => {
-      const onAbort = (): void => resume(Effect.fail(new ToolError(
-        "cancelled",
-        "Owned-device command cancelled",
-        true
-      )))
-      context.signal.addEventListener("abort", onAbort, { once: true })
-      if (context.signal.aborted) onAbort()
-      return Effect.sync(() => context.signal.removeEventListener("abort", onAbort))
-    })
-    return Effect.raceFirst(work, cancelled)
-  }
-})
+    }

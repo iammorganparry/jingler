@@ -181,51 +181,13 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
             return
           }
 
-          if (event._tag === "BackgroundTaskProgress") {
-            yield* send(sessionId, event.id, {
-              type: "PROGRESS",
-              description: event.description,
-              tokens: event.tokens,
-              toolUses: event.toolUses,
-              durationMs: event.durationMs,
-              lastTool: event.lastTool
-            })
-            return
-          }
-
-          if (event._tag === "BackgroundTaskSettled") {
-            yield* send(sessionId, event.id, {
-              type: "SETTLED",
-              status: event.status,
-              summary: event.summary,
-              outputFile: event.outputFile,
-              now: yield* now
-            })
-            return
-          }
-
-          if (event._tag === "BackgroundTasksChanged") {
-            const live = new Set(event.ids)
-            // An id in the level we have no actor for means we missed its start
-            // edge. Better a row with a placeholder label than work running with
-            // no row at all.
-            for (const id of event.ids) {
-              yield* ensure(sessionId, chatId, id, { description: "Background task", taskType: "unknown" })
-            }
-            // The level is authoritative for liveness: anything still live here
-            // but absent from the level has finished, whether or not its bookend
-            // ever arrived. Scoped to THIS chat's tasks — the level came from one
-            // chat's harness query, so a concurrent chat's tasks are simply not in
-            // it and must not be swept to ABSENT by another chat's signal.
-            const stamp = yield* now
-            for (const [id, entry] of yield* forSession(sessionId)) {
-              if (entry.chatId !== chatId) continue
-              const state = entry.actor.getSnapshot().value
-              if ((state === "running" || state === "stopping") && !live.has(id)) {
-                yield* Effect.sync(() => entry.actor.send({ type: "ABSENT", now: stamp }))
-              }
-            }
-          }
+          return yield* ingestBackgroundTaskUpdate(event,
+            send,
+            sessionId,
+            now,
+            ensure, chatId,
+            forSession
+          )
         })
 
       /**
@@ -381,3 +343,76 @@ export class BackgroundTaskStore extends Effect.Service<BackgroundTaskStore>()(
     })
   }
 ) {}
+
+function* ingestBackgroundTaskUpdate(
+  event: StreamEvent,
+  send: (
+    sessionId: string,
+    taskId: string,
+    event: Parameters<TaskActor["send"]>[0]
+  ) => Effect.Effect<void, never, never>,
+  sessionId: string,
+  now: Effect.Effect<string, never, never>,
+  ensure: (
+    sessionId: string,
+    chatId: string,
+    taskId: string,
+    init: {
+      description: string
+      taskType: string
+      subagentType?: string | null
+      toolUseId?: string | null
+    }
+  ) => Effect.Effect<TaskActor>,
+  chatId: string,
+  forSession: (sessionId: string) => Effect.Effect<Map<string, TaskEntry>>
+) {
+  if (event._tag === "BackgroundTaskProgress") {
+    yield* send(sessionId, event.id, {
+      type: "PROGRESS",
+      description: event.description,
+      tokens: event.tokens,
+      toolUses: event.toolUses,
+      durationMs: event.durationMs,
+      lastTool: event.lastTool
+    })
+    return
+  }
+
+  if (event._tag === "BackgroundTaskSettled") {
+    yield* send(sessionId, event.id, {
+      type: "SETTLED",
+      status: event.status,
+      summary: event.summary,
+      outputFile: event.outputFile,
+      now: yield* now
+    })
+    return
+  }
+
+  if (event._tag === "BackgroundTasksChanged") {
+    const live = new Set(event.ids)
+    // An id in the level we have no actor for means we missed its start
+    // edge. Better a row with a placeholder label than work running with
+    // no row at all.
+    for (const id of event.ids) {
+      yield* ensure(sessionId, chatId, id, {
+        description: "Background task",
+        taskType: "unknown"
+      })
+    }
+    // The level is authoritative for liveness: anything still live here
+    // but absent from the level has finished, whether or not its bookend
+    // ever arrived. Scoped to THIS chat's tasks — the level came from one
+    // chat's harness query, so a concurrent chat's tasks are simply not in
+    // it and must not be swept to ABSENT by another chat's signal.
+    const stamp = yield* now
+    for (const [id, entry] of yield* forSession(sessionId)) {
+      if (entry.chatId !== chatId) continue
+      const state = entry.actor.getSnapshot().value
+      if ((state === "running" || state === "stopping") && !live.has(id)) {
+        yield* Effect.sync(() => entry.actor.send({ type: "ABSENT", now: stamp }))
+      }
+    }
+  }
+}

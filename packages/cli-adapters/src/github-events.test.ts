@@ -5,6 +5,7 @@ import {
   findGitHubFeedbackTarget,
   githubFeedbackInstruction,
   parseGitHubRelayServerMessage,
+  parseGitHubRelayEvent,
   type GitHubRelayEvent
 } from "./github-events.js"
 
@@ -87,6 +88,43 @@ describe("GitHub relay protocol", () => {
     // No usable cursor: nothing to advance to, so it stays null.
     expect(parseGitHubRelayServerMessage('{"type":"event","cursor":-1}')).toBeNull()
     expect(parseGitHubRelayServerMessage('{"type":"event"}')).toBeNull()
+  })
+
+  it.each([
+    { repository: null },
+    { repository: { ...event().repository, owner: "" } },
+    { actor: null },
+    { actor: { ...event().actor, login: "" } },
+    { deliveryId: "" },
+    { semanticKey: "" },
+    { event: "unknown" },
+    { action: "" },
+    { installationId: "" },
+    { actionable: 1 },
+    { occurredAt: "invalid-date" },
+    { pullRequest: { ...event().pullRequest, number: 1.5 } },
+    { pullRequest: { ...event().pullRequest, title: null } },
+    { feedback: undefined }
+  ])("rejects invalid event fields without accepting their cursor payload: %j", (patch) => {
+    const payload = { ...event(), ...patch }
+    expect(parseGitHubRelayEvent(payload)).toBeNull()
+    expect(
+      parseGitHubRelayServerMessage({
+        type: "event",
+        cursor: 3,
+        event: payload
+      })
+    ).toEqual({ type: "event-skip", cursor: 3 })
+  })
+
+  it.each([
+    { type: "hello", cursor: 0, newestCursor: 5 },
+    { type: "replay-more", cursor: 3 },
+    { type: "pong", at: 0 },
+    { type: "error", code: "unauthorized" }
+  ])("decodes control messages from objects and JSON: %j", (message) => {
+    expect(parseGitHubRelayServerMessage(message)).toEqual(message)
+    expect(parseGitHubRelayServerMessage(JSON.stringify(message))).toEqual(message)
   })
 
   it("encodes cursor acknowledgement, replay, and heartbeat messages", () => {

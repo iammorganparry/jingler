@@ -79,39 +79,7 @@ export const validateInspectionCommand = (
   args: ReadonlyArray<string>
 ): void => {
   if (args.length === 0) throw new ToolError("invalid-input", "Inspection command needs arguments")
-  if (args.some(invalidInspectionArgument)) {
-    throw new ToolError("forbidden", "Inspection command cannot access paths outside the workspace")
-  }
-  if (program === "git") {
-    const [subcommand, ...rest] = args
-    if (!subcommand || !READ_ONLY_GIT_COMMANDS.has(subcommand)) {
-      throw new ToolError("forbidden", "Git subcommand is not read-only")
-    }
-    if (rest.some((argument) => FORBIDDEN_GIT_ARGUMENTS.has(argument) ||
-      [...FORBIDDEN_GIT_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`)))) {
-      throw new ToolError("forbidden", "Git argument can execute code or escape the workspace")
-    }
-    if (subcommand === "branch" && (
-      rest.some((argument) => MUTATING_BRANCH_ARGUMENTS.has(argument) ||
-        [...MUTATING_BRANCH_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`))) ||
-      rest.some((argument) => !argument.startsWith("-") && !rest.includes("--list"))
-    )) {
-      throw new ToolError("forbidden", "git branch is limited to listing branches")
-    }
-  } else {
-    let queryCount = 0
-    for (let index = 0; index < args.length; index += 1) {
-      const argument = args[index]!
-      if (RG_FLAGS.has(argument)) continue
-      if (argument.startsWith("-")) {
-        throw new ToolError("forbidden", `rg flag is unavailable: ${argument}`)
-      }
-      queryCount += 1
-    }
-    if (queryCount !== 1) {
-      throw new ToolError("forbidden", "rg accepts one pattern and searches only the workspace")
-    }
-  }
+  validateInspectionArguments(args, program)
 }
 
 /** Reuse AssetService's existing containment and size boundary for agent reads. */
@@ -251,4 +219,48 @@ export const registerWorkspaceInspectionTools = (
         })
     })
   )
+}
+
+function validateInspectionArguments(args: readonly string[], program: string) {
+  if (args.some(invalidInspectionArgument)) {
+    throw new ToolError("forbidden", "Inspection command cannot access paths outside the workspace")
+  }
+  validateInspectionProgram(program, args)
+}
+
+function validateInspectionProgram(program: string, args: readonly string[]) {
+  if (program === "git") {
+    const [subcommand, ...rest] = args
+    if (!subcommand || !READ_ONLY_GIT_COMMANDS.has(subcommand)) {
+      throw new ToolError("forbidden", "Git subcommand is not read-only")
+    }
+    if (rest.some((argument) => FORBIDDEN_GIT_ARGUMENTS.has(argument) ||
+      [...FORBIDDEN_GIT_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`)))) {
+      throw new ToolError("forbidden", "Git argument can execute code or escape the workspace")
+    }
+    if (subcommand === "branch" && (
+      rest.some((argument) => MUTATING_BRANCH_ARGUMENTS.has(argument) ||
+        [...MUTATING_BRANCH_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`))) ||
+      rest.some((argument) => !argument.startsWith("-") && !rest.includes("--list"))
+    )) {
+      throw new ToolError("forbidden", "git branch is limited to listing branches")
+    }
+  } else {
+    validateRipgrepArguments(args)
+  }
+}
+
+function validateRipgrepArguments(args: readonly string[]) {
+  let queryCount = 0
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (RG_FLAGS.has(argument)) continue
+    if (argument.startsWith("-")) {
+      throw new ToolError("forbidden", `rg flag is unavailable: ${argument}`)
+    }
+    queryCount += 1
+  }
+  if (queryCount !== 1) {
+    throw new ToolError("forbidden", "rg accepts one pattern and searches only the workspace")
+  }
 }

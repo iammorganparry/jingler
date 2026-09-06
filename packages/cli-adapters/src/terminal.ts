@@ -19,7 +19,7 @@
  * switches); it is reclaimed only by `kill`, session delete, or app quit
  * (`killAll`). Nothing but already-coalesced, JSON-safe frames crosses IPC.
  */
-import { spawn, type IPty } from "@homebridge/node-pty-prebuilt-multiarch"
+import { spawn, type IDisposable, type IPty } from "@homebridge/node-pty-prebuilt-multiarch"
 import { basename } from "node:path"
 import { randomUUID } from "node:crypto"
 import { TerminalError } from "@jingler/core"
@@ -252,18 +252,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
           const releasePty = (): void => {
             if (ptyReleased) return
             ptyReleased = true
-            for (const listener of listeners) {
-              try {
-                listener.dispose()
-              } catch {
-                /* already disposed */
-              }
-            }
-            try {
-              handle.pty.kill()
-            } catch {
-              /* already dead */
-            }
+            disposeTerminalPty(listeners, handle)
           }
 
           let reap: ReturnType<typeof setTimeout> | null = null
@@ -343,13 +332,9 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
                 if (pending.length === 0) return
                 if (mailbox.unsafeOffer({ _tag: "data", data: pending })) {
                   pending = ""
-                  if (paused) {
-                    safeResume(handle.pty)
-                    paused = false
-                  }
-                } else if (!paused && pending.length >= HIGH_WATER) {
-                  safePause(handle.pty)
-                  paused = true
+                  paused = resumePendingTerminal(handle, paused)
+                } else {
+                  paused = pausePendingTerminal(handle, paused, pending.length)
                 }
               }
 
@@ -436,3 +421,31 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
     return { create, attach, write, resize, kill, list, killAll } as const
   })
 }) {}
+
+const resumePendingTerminal = (handle: Handle, paused: boolean): boolean => {
+  if (paused) safeResume(handle.pty)
+  return false
+}
+
+const pausePendingTerminal = (handle: Handle, paused: boolean, bytes: number): boolean => {
+  if (!paused && bytes >= HIGH_WATER) {
+    safePause(handle.pty)
+    return true
+  }
+  return paused
+}
+
+function disposeTerminalPty(listeners: IDisposable[], handle: Handle): void {
+  for (const listener of listeners) {
+    try {
+      listener.dispose()
+    } catch {
+      /* already disposed */
+    }
+  }
+  try {
+    handle.pty.kill()
+  } catch {
+    /* already dead */
+  }
+}

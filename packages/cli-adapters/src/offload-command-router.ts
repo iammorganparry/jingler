@@ -23,7 +23,7 @@ import {
   uploadOffloadSnapshot,
   type CapturedOffloadSnapshot
 } from "./offload-snapshot.js"
-import { SecretStore } from "./secret-store.js"
+import { SecretStore, type SecretStoreShape } from "./secret-store.js"
 import {
   makeResourcePressureMonitor,
   type ResourcePressurePort
@@ -205,14 +205,7 @@ export const pollResult = async (input: PollInput): Promise<OffloadedCommandResu
     return admission
   })
   while (true) {
-    if (Date.now() >= input.deadlineAt) {
-      await cancel()
-      throw failure("Remote job status deadline expired; it was not retried locally", true)
-    }
-    if (input.context.signal.aborted) {
-      await cancel()
-      throw new ToolError("cancelled", "Remote command cancelled", true)
-    }
+    await checkPollCancellation(input, cancel)
     const response = await fetch(
       `${admission.runtimeUrl}/v1/offload/jobs/${encodeURIComponent(admission.jobId)}/events?cursor=${cursor}`,
       { headers: { authorization: `Bearer ${admission.grant}` } }
@@ -280,17 +273,13 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       if (!settings.enabled) return "disabled" as const
       resourcePressure.start()
       if (settings.target.kind === "owned-device") return "accepted" as const
-      const token = yield* secrets.get
-      if (token === null) return yield* Effect.fail(failure("Sign in before using Offload Compute"))
+      const token = yield* requireOffloadToken(secrets)
       const [remote, headSha] = yield* Effect.all([
         closeGit(git.remoteUrl(cwd)),
         closeGit(git.revision(cwd, "HEAD"))
       ]).pipe(Effect.mapError(() => failure("Offload Compute requires a GitHub origin")))
-      const repository = remote ? parseGitHubRemote(remote) : null
-      if (repository === null) {
-        return yield* Effect.fail(failure("Offload Compute requires a GitHub origin"))
-      }
-      yield* Effect.tryPromise({
+      const repository = yield* requireOffloadRepository(offloadRepository(remote))
+        yield* Effect.tryPromise({
         try: () => requestJson(
           `${serverBaseUrl()}/api/offload/prime`,
           {
@@ -350,22 +339,15 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
     const remote = yield* closeGit(git.remoteUrl(cwd)).pipe(
       Effect.match({ onFailure: () => null, onSuccess: (value) => value })
     )
-    const repository = remote ? parseGitHubRemote(remote) : null
-    const repositorySlug = repository === null
-      ? undefined
-      : `${repository.owner}/${repository.repo}`
-    const routing = classifyOffloadCommand(settings, observed.command, repositorySlug)
+    const repository = offloadRepository(remote)
+        const repositorySlug = offloadRepositorySlug(repository)
+        const routing = classifyOffloadCommand(settings, observed.command, repositorySlug)
     if (routing.target === "local") return null
     resourcePressure.start()
     if (!resourcePressure.isSqueezed()) return null
-    const invocationKey = context.idempotencyKey
-    if (!invocationKey) {
-      return yield* Effect.fail(failure(
-        "Offload Compute requires a stable tool invocation identity; nothing ran remotely or locally"
-      ))
-    }
+    const invocationKey = yield* requireOffloadInvocation(context.idempotencyKey)
 
-    context.progress({ message: "Offload Compute: capturing", completed: null, total: null })
+        context.progress({ message: "Offload Compute: capturing", completed: null, total: null })
     const snapshotStarted = Date.now()
     const snapshot = yield* captureOffloadSnapshot(cwd).pipe(
       Effect.mapError((cause) => failure(cause.message))
@@ -376,12 +358,7 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
       outputBytes: OFFLOAD_OUTPUT_MAX_BYTES
     }
     if (settings.target.kind === "owned-device") {
-      if (ownedDevice === undefined) {
-        return yield* Effect.fail(failure(
-          "The selected owned device is unavailable; Offload Compute did not fall back"
-        ))
-      }
-      return yield* ownedDevice.execute({
+          return yield* executeOnOwnedDevice(ownedDevice, {
         deviceId: settings.target.deviceId,
         jobId: opaqueId("request", `${sessionId}:${invocationKey}`).replace(/^request_/u, "job_"),
         snapshot,
@@ -390,18 +367,13 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
         context
       }).pipe(Effect.map((result) => ({ ...result, command: source })))
     }
-    if (repository === null) {
-      return yield* Effect.fail(failure("Offload Compute requires a GitHub origin"))
-    }
-    const token = yield* secrets.get
-    if (token === null) {
-      return yield* Effect.fail(failure("Sign in before using Offload Compute"))
-    }
-    const request: OffloadAdmissionRequest = {
+        const githubRepository = yield* requireOffloadRepository(repository)
+        const token = yield* requireOffloadToken(secrets)
+        const request: OffloadAdmissionRequest = {
       version: OFFLOAD_COMPUTE_PROTOCOL_VERSION,
       sessionId: opaqueId("session", sessionId),
       idempotencyKey: opaqueId("request", `${sessionId}:${invocationKey}`),
-      repositorySlug: `${repository.owner}/${repository.repo}`,
+      repositorySlug: `${githubRepository.owner}/${githubRepository.repo}`,
       snapshot: snapshot.identity,
       command: routing.command,
       clientTimings: { snapshotMs: Date.now() - snapshotStarted },
@@ -475,3 +447,55 @@ export const makeOffloadCommandRouterWithOwnedDevice = (
 })
 
 export const makeOffloadCommandRouter = makeOffloadCommandRouterWithOwnedDevice()
+
+const checkPollCancellation = async (
+  input: PollInput,
+  cancel: () => Promise<void>
+): Promise<void> => {
+  if (Date.now() >= input.deadlineAt) {
+    await cancel()
+    throw failure("Remote job status deadline expired; it was not retried locally", true)
+  }
+  if (input.context.signal.aborted) {
+    await cancel()
+    throw new ToolError("cancelled", "Remote command cancelled", true)
+  }
+}
+
+const offloadRepository = (remote: string | null) => (remote ? parseGitHubRemote(remote) : null)
+
+const offloadRepositorySlug = (repository: ReturnType<typeof parseGitHubRemote>) =>
+  repository === null ? undefined : `${repository.owner}/${repository.repo}`
+
+const requireOffloadRepository = (repository: ReturnType<typeof parseGitHubRemote>) =>
+  repository === null
+    ? Effect.fail(failure("Offload Compute requires a GitHub origin"))
+    : Effect.succeed(repository)
+
+const requireOffloadToken = (secrets: SecretStoreShape) =>
+  secrets.get.pipe(
+    Effect.flatMap((token) =>
+      token === null
+        ? Effect.fail(failure("Sign in before using Offload Compute"))
+        : Effect.succeed(token)
+    )
+  )
+
+const requireOffloadInvocation = (key: string | null | undefined) =>
+  key
+    ? Effect.succeed(key)
+    : Effect.fail(
+        failure(
+          "Offload Compute requires a stable tool invocation identity; nothing ran remotely or locally"
+        )
+      )
+
+const executeOnOwnedDevice = (
+  ownedDevice: OwnedDeviceOffloadPort | undefined,
+  input: Parameters<OwnedDeviceOffloadPort["execute"]>[0]
+) =>
+  ownedDevice === undefined
+    ? Effect.fail(
+        failure("The selected owned device is unavailable; Offload Compute did not fall back")
+      )
+    : ownedDevice.execute(input)

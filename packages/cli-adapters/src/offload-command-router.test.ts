@@ -323,16 +323,61 @@ describe("automatic Offload Compute routing", () => {
     let uploadAttempts = 0
     fetchMock.mockImplementation(async (input, init) => {
       const url = input instanceof Request ? input.url : String(input)
-      const method = input instanceof Request ? input.method : init?.method
-      if (url.endsWith("/api/offload/jobs")) return Response.json(admission)
-      if (url.endsWith("/snapshot") && method === "PUT") {
+      const result = respondToOffloadRequest(input, init, url, uploadAttempts)
+      uploadAttempts = result.uploadAttempts
+      return result.response
+    })
+    const result = await Effect.runPromise(
+      (await router()).executeIfEligible(
+        workspace,
+        "session-one",
+        "pnpm typecheck",
+        context()
+      )
+    )
+    expect(result).toMatchObject({
+      offloaded: true,
+      stdout: "remote clean",
+      command: "pnpm typecheck"
+    })
+    const admissionCall = fetchMock.mock.calls.find(([input]) =>
+      String(input).endsWith("/api/offload/jobs")
+    )
+    const requestBody = JSON.parse(String(admissionCall?.[1]?.body)) as {
+      command: { executable: string; args: string[] }
+    }
+    expect(requestBody.command).toEqual(expect.objectContaining({
+      executable: "pnpm",
+      args: ["typecheck"]
+    }))
+    expect(uploadAttempts).toBe(2)
+    expect(fetchMock.mock.calls.filter(([input]) =>
+      String(input).endsWith("/api/offload/jobs")
+    )).toHaveLength(2)
+  })
+})
+
+function respondToOffloadRequest(
+  input: string | URL | Request,
+  init: RequestInit | undefined,
+  url: string,
+  uploadAttempts: number
+) {
+  const method = input instanceof Request ? input.method : init?.method
+      if (url.endsWith("/api/offload/jobs")) return { response: Response.json(admission), uploadAttempts }
+  if (url.endsWith("/snapshot") && method === "PUT") {
         uploadAttempts += 1
-        return uploadAttempts === 1
+        return {
+      response:
+        uploadAttempts === 1
           ? Response.json({ error: "transient R2 failure" }, { status: 503 })
-          : Response.json({ accepted: true }, { status: 202 })
-      }
+          : Response.json({ accepted: true }, { status: 202 }),
+      uploadAttempts
+    }
+  }
       if (url.includes("/events?cursor=0")) {
-        return Response.json({
+        return {
+      response: Response.json({
           version: 1,
           jobId: admission.jobId,
           state: "succeeded",
@@ -383,36 +428,12 @@ describe("automatic Offload Compute routing", () => {
               commandMs: 5
             }
           }
-        })
-      }
-      return Response.json({ error: "unexpected request" }, { status: 500 })
-    })
-    const result = await Effect.runPromise(
-      (await router()).executeIfEligible(
-        workspace,
-        "session-one",
-        "pnpm typecheck",
-        context()
-      )
-    )
-    expect(result).toMatchObject({
-      offloaded: true,
-      stdout: "remote clean",
-      command: "pnpm typecheck"
-    })
-    const admissionCall = fetchMock.mock.calls.find(([input]) =>
-      String(input).endsWith("/api/offload/jobs")
-    )
-    const requestBody = JSON.parse(String(admissionCall?.[1]?.body)) as {
-      command: { executable: string; args: string[] }
+        }),
+      uploadAttempts
     }
-    expect(requestBody.command).toEqual(expect.objectContaining({
-      executable: "pnpm",
-      args: ["typecheck"]
-    }))
-    expect(uploadAttempts).toBe(2)
-    expect(fetchMock.mock.calls.filter(([input]) =>
-      String(input).endsWith("/api/offload/jobs")
-    )).toHaveLength(2)
-  })
-})
+  }
+      return {
+    response: Response.json({ error: "unexpected request" }, { status: 500 }),
+    uploadAttempts
+  }
+    }

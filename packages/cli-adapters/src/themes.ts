@@ -113,52 +113,7 @@ export class ThemeService extends Effect.Service<ThemeService>()("@jingler/Theme
     > =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = yield* themesDir
-
-        const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
-        if (!exists) return { themes: [], skipped: [], ids: [] }
-
-        const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as Array<string>))
-        const themes: Array<ThemeSummary> = []
-        const skipped: Array<ThemeLoadFailure> = []
-        const ids: Array<string> = []
-
-        for (const entry of entries) {
-          if (!entry.endsWith(".json")) continue
-          const file = path.join(dir, entry)
-          const id = entry.slice(0, -".json".length)
-          ids.push(id)
-
-          const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => null))
-          if (raw === null) {
-            skipped.push({ path: file, message: "Could not be read" })
-            continue
-          }
-
-          const decoded = yield* Schema.decodeUnknown(Schema.parseJson(VsCodeThemeSchema))(raw).pipe(
-            Effect.either
-          )
-          if (decoded._tag === "Left") {
-            skipped.push({ path: file, message: describeDecodeFailure(decoded.left) })
-            continue
-          }
-
-          // The fold can itself reject a theme whose colours are unparseable in
-          // a way the schema allows, so it is inside the guarded region too — a
-          // thrown mapper must degrade to "this one file is skipped", not to a
-          // settings screen that renders nothing.
-          const summary = yield* Effect.try(() => summaryOf(id, decoded.right, "user", file)).pipe(
-            Effect.either
-          )
-          if (summary._tag === "Left") {
-            skipped.push({ path: file, message: "Colours could not be resolved" })
-            continue
-          }
-          themes.push(summary.right)
-        }
-
-        return { themes, skipped, ids }
+        return yield* readThemeDirectory(themesDir, fs)
       })
 
     /**
@@ -455,4 +410,56 @@ const describeDecodeFailure = (cause: unknown): string => {
   }
   const text = cause instanceof Error ? cause.message : String(cause)
   return (text.split("\n").find((line) => line.trim().length > 0) ?? "unrecognised shape").trim().slice(0, 240)
+}
+
+function* readThemeDirectory(
+  themesDir: Effect.Effect<string, never, AppPaths>,
+  fs: FileSystem.FileSystem
+) {
+  const path = yield* Path.Path
+  const dir = yield* themesDir
+
+  const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
+  if (!exists) return { themes: [], skipped: [], ids: [] }
+
+  const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as Array<string>))
+  const themes: Array<ThemeSummary> = []
+  const skipped: Array<ThemeLoadFailure> = []
+  const ids: Array<string> = []
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue
+    const file = path.join(dir, entry)
+    const id = entry.slice(0, -".json".length)
+    ids.push(id)
+
+    const raw = yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => null))
+    if (raw === null) {
+      skipped.push({ path: file, message: "Could not be read" })
+      continue
+    }
+
+    const decoded = yield* Schema.decodeUnknown(Schema.parseJson(VsCodeThemeSchema))(raw).pipe(
+      Effect.either
+    )
+    if (decoded._tag === "Left") {
+      skipped.push({ path: file, message: describeDecodeFailure(decoded.left) })
+      continue
+    }
+
+    // The fold can itself reject a theme whose colours are unparseable in
+    // a way the schema allows, so it is inside the guarded region too — a
+    // thrown mapper must degrade to "this one file is skipped", not to a
+    // settings screen that renders nothing.
+    const summary = yield* Effect.try(() => summaryOf(id, decoded.right, "user", file)).pipe(
+      Effect.either
+    )
+    if (summary._tag === "Left") {
+      skipped.push({ path: file, message: "Colours could not be resolved" })
+      continue
+    }
+    themes.push(summary.right)
+  }
+
+  return { themes, skipped, ids }
 }

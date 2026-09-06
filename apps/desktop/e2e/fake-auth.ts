@@ -837,14 +837,6 @@ export const startFakeAuthServer = async (
 
   const grantFor = (organizationId: string): string =>
     `e2e-memory-grant:${organizationId}`;
-  const organizationFromGrant = (
-    authorization: string | undefined,
-  ): string | null => {
-    const prefix = "Bearer e2e-memory-grant:";
-    return authorization?.startsWith(prefix)
-      ? authorization.slice(prefix.length)
-      : null;
-  };
 
   const server: Server = createServer((req, res) => {
     const host = req.headers.host ?? "localhost";
@@ -870,144 +862,145 @@ export const startFakeAuthServer = async (
         });
       });
 
-    if (url.pathname === "/api/offload/prime" && req.method === "POST") {
-      offloadRequests.push({ kind: "prime", path: url.pathname });
-      return json(202, { accepted: true });
-    }
-    if (url.pathname === "/api/offload/sandboxes/destroy" && req.method === "POST") {
-      offloadRequests.push({ kind: "destroy", path: url.pathname });
-      return json(200, { destroyed: true });
-    }
-    if (url.pathname === "/api/offload/jobs" && req.method === "POST") {
-      offloadRequests.push({ kind: "admit", path: url.pathname });
-      const runtimeUrl = `http://${host}`;
-      return json(200, {
-        version: 1,
-        jobId: "job_e2e_aaaaaaaaaaaaaaaa",
-        runtimeUrl,
-        uploadUrl: `${runtimeUrl}/v1/offload/jobs/job_e2e_aaaaaaaaaaaaaaaa/snapshot`,
-        grant: "grant_e2e_aaaaaaaaaaaaaaaa",
-        expiresAt: Math.floor(Date.now() / 1_000) + 300,
-      });
-    }
-    if (/^\/v1\/offload\/jobs\/[^/]+\/snapshot$/u.test(url.pathname) && req.method === "PUT") {
-      offloadRequests.push({ kind: "upload", path: url.pathname });
-      req.resume();
-      req.on("end", () => json(202, { accepted: true }));
-      return;
-    }
-    if (/^\/v1\/offload\/jobs\/[^/]+\/events$/u.test(url.pathname) && req.method === "GET") {
-      offloadRequests.push({ kind: "events", path: url.pathname });
-      offloadEventReads += 1;
-      const jobId = "job_e2e_aaaaaaaaaaaaaaaa";
-      if (offloadEventReads === 1 || options.offloadResult === "hold") {
-        return json(200, {
-          version: 1,
-          jobId,
-          state: "preparing",
-          cursor: 1,
-          events: [{
+    const routes = [
+      {
+        matches: () => (url.pathname === "/api/offload/prime" && req.method === "POST"),
+        handle: function primeOffload() {
+          offloadRequests.push({ kind: "prime", path: url.pathname });
+          return json(202, { accepted: true });
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/offload/sandboxes/destroy" && req.method === "POST"),
+        handle: function destroyOffload() {
+          offloadRequests.push({ kind: "destroy", path: url.pathname });
+          return json(200, { destroyed: true });
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/offload/jobs" && req.method === "POST"),
+        handle: function admitOffload() {
+          offloadRequests.push({ kind: "admit", path: url.pathname });
+          const runtimeUrl = `http://${host}`;
+          return json(200, {
+            version: 1,
+            jobId: "job_e2e_aaaaaaaaaaaaaaaa",
+            runtimeUrl,
+            uploadUrl: `${runtimeUrl}/v1/offload/jobs/job_e2e_aaaaaaaaaaaaaaaa/snapshot`,
+            grant: "grant_e2e_aaaaaaaaaaaaaaaa",
+            expiresAt: Math.floor(Date.now() / 1_000) + 300,
+          });
+        }
+      },
+      {
+        matches: () => (/^\/v1\/offload\/jobs\/[^/]+\/snapshot$/u.test(url.pathname) && req.method === "PUT"),
+        handle: function uploadOffload() {
+          offloadRequests.push({ kind: "upload", path: url.pathname });
+          req.resume();
+          req.on("end", () => json(202, { accepted: true }));
+          return;
+        }
+      },
+      {
+        matches: () => (/^\/v1\/offload\/jobs\/[^/]+\/events$/u.test(url.pathname) && req.method === "GET"),
+        handle: function offloadEvents() {
+          offloadRequests.push({ kind: "events", path: url.pathname });
+          offloadEventReads += 1;
+          const jobId = "job_e2e_aaaaaaaaaaaaaaaa";
+          if (offloadEventReads === 1 || options.offloadResult === "hold") {
+            return json(200, {
+              version: 1,
+              jobId,
+              state: "preparing",
+              cursor: 1,
+              events: [{
+                version: 1,
+                jobId,
+                sequence: 1,
+                kind: "state",
+                state: "preparing",
+              }],
+              result: null,
+            });
+          }
+          const failed = options.offloadResult === "failed";
+          const result = offloadResult(failed, jobId);
+          return json(200, {
             version: 1,
             jobId,
-            sequence: 1,
-            kind: "state",
-            state: "preparing",
-          }],
-          result: null,
-        });
-      }
-      const failed = options.offloadResult === "failed";
-      const result = {
-        version: 1,
-        jobId,
-        state: failed ? "failed" : "succeeded",
-        exitCode: failed ? 2 : 0,
-        failureReason: failed ? "command-failed" : null,
-        stdout: failed ? "" : "remote typecheck clean",
-        stderr: failed ? "remote typecheck failed" : "",
-        outputTruncated: false,
-        timings: {
-          queuedMs: 1,
-          snapshotMs: 2,
-          hydrationMs: 3,
-          dependencyMs: 4,
-          commandMs: 5,
-        },
-      };
-      return json(200, {
-        version: 1,
-        jobId,
-        state: result.state,
-        cursor: 3,
-        events: [
-          {
-            version: 1,
-            jobId,
-            sequence: 2,
-            kind: "output",
-            stream: failed ? "stderr" : "stdout",
-            text: failed ? "remote typecheck failed" : "remote typecheck clean",
-          },
-          { version: 1, jobId, sequence: 3, kind: "result", result },
-        ],
-        result,
-      });
-    }
-    if (/^\/v1\/offload\/jobs\/[^/]+\/cancel$/u.test(url.pathname) && req.method === "POST") {
-      offloadRequests.push({ kind: "cancel", path: url.pathname });
-      return json(202, { cancelled: true });
-    }
-
-    if (options.deviceRelayUrl && url.pathname.startsWith("/api/devices")) {
-      void (async () => {
-        const body =
-          req.method === "GET" ? undefined : JSON.stringify(await readJson());
-        const forwarded = await fetch(
-          `${options.deviceRelayUrl}${url.pathname}${url.search}`,
-          {
-            method: req.method,
-            headers: {
-              ...(typeof req.headers.authorization === "string"
-                ? { authorization: req.headers.authorization }
-                : {}),
-              ...(body ? { "content-type": "application/json" } : {}),
-            },
-            ...(body ? { body } : {}),
-          },
-        );
-        res.writeHead(forwarded.status, {
-          "content-type":
-            forwarded.headers.get("content-type") ?? "application/json",
-        });
-        res.end(await forwarded.text());
-      })().catch(() => json(502, { error: "device relay unavailable" }));
-      return;
-    }
-
-    if (
-      url.pathname === "/api/environments/web-search-credential" &&
-      (req.method === "PUT" || req.method === "DELETE")
-    ) {
-      if (req.headers.authorization !== `Bearer ${options.token}`)
-        return json(401, {});
-      void readJson().then(() =>
-        json(200, { synced: req.method === "PUT" })
-      );
-      return;
-    }
-
-    if (url.pathname === "/api/environments" && req.method === "GET") {
-      if (req.headers.authorization !== `Bearer ${options.token}`)
-        return json(401, {});
-      void (async () => {
-        const owned = options.deviceRelayUrl
-          ? await fetch(`${options.deviceRelayUrl}/api/devices`, {
-              headers: { authorization: `Bearer ${options.token}` },
-            })
-              .then((response) => response.json())
-              .then((body) =>
-                Array.isArray((body as { devices?: unknown }).devices)
-                  ? (
+            state: result.state,
+            cursor: 3,
+            events: [
+              {
+                version: 1,
+                jobId,
+                sequence: 2,
+                kind: "output",
+                stream: failed ? "stderr" : "stdout",
+                text: failed ? "remote typecheck failed" : "remote typecheck clean",
+              },
+              { version: 1, jobId, sequence: 3, kind: "result", result },
+            ],
+            result,
+          });
+        }
+      },
+      {
+        matches: () => (/^\/v1\/offload\/jobs\/[^/]+\/cancel$/u.test(url.pathname) && req.method === "POST"),
+        handle: function cancelOffload() {
+          offloadRequests.push({ kind: "cancel", path: url.pathname });
+          return json(202, { cancelled: true });
+        }
+      },
+      {
+        matches: () => (options.deviceRelayUrl && url.pathname.startsWith("/api/devices")),
+        handle: function forwardDevices() {
+          void (async () => {
+            const body =
+              req.method === "GET" ? undefined : JSON.stringify(await readJson());
+            const forwarded = await fetch(
+              `${options.deviceRelayUrl}${url.pathname}${url.search}`,
+              {
+                method: req.method,
+                headers: forwardedDeviceHeaders(req.headers.authorization, body),
+                ...(body ? { body } : {}),
+              },
+            );
+            res.writeHead(forwarded.status, {
+              "content-type":
+                forwarded.headers.get("content-type") ?? "application/json",
+            });
+            res.end(await forwarded.text());
+          })().catch(() => json(502, { error: "device relay unavailable" }));
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/environments/web-search-credential" &&
+          (req.method === "PUT" || req.method === "DELETE")),
+        handle: function updateWebSearch() {
+          if (req.headers.authorization !== `Bearer ${options.token}`)
+            return json(401, {});
+          void readJson().then(() =>
+            json(200, { synced: req.method === "PUT" })
+          );
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/environments" && req.method === "GET"),
+        handle: function listEnvironments() {
+          if (req.headers.authorization !== `Bearer ${options.token}`)
+            return json(401, {});
+          void (async () => {
+            const owned = options.deviceRelayUrl
+              ? await fetch(`${options.deviceRelayUrl}/api/devices`, {
+                headers: { authorization: `Bearer ${options.token}` },
+              })
+                .then((response) => response.json())
+                .then((body) =>
+                  Array.isArray((body as { devices?: unknown }).devices)
+                    ? (
                       body as { devices: Array<Record<string, unknown>> }
                     ).devices.map((device) => ({
                       kind: "owned",
@@ -1019,624 +1012,289 @@ export const startFakeAuthServer = async (
                         Array.isArray(
                           (
                             device.capabilities as
-                              { capabilities?: unknown } | undefined
+                            { capabilities?: unknown } | undefined
                           )?.capabilities,
                         ) &&
-                        !(
-                          device.capabilities as {
-                            capabilities: Array<unknown>;
-                          }
-                        ).capabilities.includes("session.start")
+                          !(
+                            device.capabilities as {
+                              capabilities: Array<unknown>;
+                            }
+                          ).capabilities.includes("session.start")
                           ? "incompatible"
                           : ((
-                              device.presence as { state?: unknown } | undefined
-                            )?.state ?? "offline"),
+                            device.presence as { state?: unknown } | undefined
+                          )?.state ?? "offline"),
                       agentVersion: device.agentVersion ?? null,
                       lastSeenAt:
                         (
                           device.presence as
-                            { lastSeenAt?: unknown } | undefined
+                          { lastSeenAt?: unknown } | undefined
                         )?.lastSeenAt ?? null,
                     }))
-                  : [],
-              )
-          : [];
-        json(200, {
-          version: 1,
-          environments: [
-            ...owned,
-            {
-              kind: "managed",
-              id: "managed_cloud_e2e_account",
-              name: "Cloud",
-              platform: { os: "linux", arch: "x64" },
-              capabilities: {
-                version: 1,
-                capabilities: [
-                  "session.start",
-                  "session.input",
-                  "session.cancel",
-                  "session.observe",
-                ],
-                maxConcurrentSessions: 1,
-                ...(options.managedRuntime === "missing"
-                  ? {}
-                  : {
-                      runtime: {
-                        versions: {
-                          ...CURRENT_RUNTIME_CONTRACTS,
-                          ...(options.managedRuntime === "stale"
-                            ? { piSdk: "stale" }
-                            : {}),
+                    : [],
+                )
+              : [];
+            json(200, {
+              version: 1,
+              environments: [
+                ...owned,
+                {
+                  kind: "managed",
+                  id: "managed_cloud_e2e_account",
+                  name: "Cloud",
+                  platform: { os: "linux", arch: "x64" },
+                  capabilities: {
+                    version: 1,
+                    capabilities: [
+                      "session.start",
+                      "session.input",
+                      "session.cancel",
+                      "session.observe",
+                    ],
+                    maxConcurrentSessions: 1,
+                    ...(options.managedRuntime === "missing"
+                      ? {}
+                      : {
+                        runtime: {
+                          versions: {
+                            ...CURRENT_RUNTIME_CONTRACTS,
+                            ...(options.managedRuntime === "stale"
+                              ? { piSdk: "stale" }
+                              : {}),
+                          },
+                          toolIds: [],
+                          resourceIds: [],
+                          targetId: "managed_cloud_e2e_account",
                         },
-                        toolIds: [],
-                        resourceIds: [],
-                        targetId: "managed_cloud_e2e_account",
-                      },
-                    }),
-              },
-              state: "online",
-              agentVersion: null,
-              lastSeenAt: null,
-              region: null,
-              instanceType: "basic",
-              generation: 1,
-              createdAt: 0,
-              updatedAt: 0,
-            },
-          ],
-        });
-      })().catch(() =>
-        json(502, { error: "environment inventory unavailable" }),
-      );
-      return;
-    }
-
-    if (
-      url.pathname ===
-        "/api/environments/managed/managed_cloud_e2e_account/workspaces" &&
-      req.method === "POST"
-    ) {
-      if (req.headers.authorization !== `Bearer ${options.token}`)
-        return json(401, {});
-      void readJson().then((value) => {
-        const body = jsonBody(value);
-        const credential = managedCredential(
-          req.headers["x-jingler-provider-credential"],
-        );
-        managedRequests.push({
-          path: url.pathname,
-          connectionId:
-            typeof body.connectionId === "string" ? body.connectionId : null,
-          providerId:
-            typeof body.providerId === "string" ? body.providerId : null,
-          modelId: typeof body.modelId === "string" ? body.modelId : null,
-          authKind: credential?.authKind ?? null,
-          billingRoute: credential?.billingRoute ?? null,
-          accountIdPresent: credential?.accountIdPresent ?? false,
-          credentialPresent: credential !== null,
-        });
-        setTimeout(() => {
-          json(503, {
-            error: "Scripted Cloud startup stopped before allocation",
-          });
-        }, 2_000);
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/memory/organizations" && req.method === "GET") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
-      if (req.headers.authorization !== `Bearer ${options.token}`)
-        return json(401, {});
-      return json(200, {
-        organizations: options.paidOrganizationIds.map((id) => ({
-          id,
-          name: id === "org-e2e" ? "Jingler Team" : "Other Team",
-          role: "owner",
-          privileges: ["read", "propose", "review", "schema"],
-        })),
-      });
-    }
-
-    if (url.pathname === "/api/memory/grant" && req.method === "POST") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
-      if (req.headers.authorization !== `Bearer ${options.token}`)
-        return json(401, {});
-      readJson().then((value) => {
-        const body = jsonBody(value);
-        const organizationId =
-          typeof body.organizationId === "string" ? body.organizationId : "";
-        if (!options.paidOrganizationIds.includes(organizationId))
-          return json(403, { error: "active paid membership required" });
-        stateFor(organizationId);
-        return json(200, {
-          grant: grantFor(organizationId),
-          claims: {
-            version: 1,
-            issuer: "jingler",
-            audience: "jingler-memory",
-            subject: "u_e2e",
-            organizationId,
-            privileges: ["read", "propose", "review", "schema"],
-            issuedAt: 1_700_000_000,
-            expiresAt: 4_102_444_800,
-            grantId: `grant-e2e-${organizationId}`,
-          },
-        });
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/memory/sources" && req.method === "POST") {
-      const organizationId =
-        typeof req.headers["x-jingler-organization-id"] === "string"
-          ? req.headers["x-jingler-organization-id"]
-          : null;
-      requests.push({
-        path: url.pathname,
-        httpMethod: req.method,
-        rpcMethod: null,
-        mcpMethod: null,
-        mcpName: null,
-        toolName: null,
-        organizationId,
-        protocolVersion: null,
-        metadataProtocolVersion: null,
-        hasCookie: req.headers.cookie !== undefined,
-        hasSessionId: req.headers["mcp-session-id"] !== undefined,
-        requestId: null,
-        toolArguments: null,
-        assignedInstance: null,
-      });
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
-      const requestedOrganizationId = req.headers["x-jingler-organization-id"];
-      const grantOrganization = organizationFromGrant(
-        req.headers.authorization,
-      );
-      if (
-        typeof requestedOrganizationId !== "string" ||
-        grantOrganization !== requestedOrganizationId
-      )
-        return json(401, {});
-      readJson().then((value) => {
-        const body = jsonBody(value);
-        const source = jsonBody(body.source);
-        const sourceId = typeof source.id === "string" ? source.id : "";
-        const content = typeof body.content === "string" ? body.content : "";
-        if (
-          sourceId.length === 0 ||
-          req.headers["x-idempotency-key"] !== sourceId
-        )
-          return json(400, { error: "invalid digest" });
-        const state = stateFor(requestedOrganizationId);
-        if (CREDENTIAL_PATTERN.test(content)) {
-          state.secretRejections += 1;
-          state.reviewDecisions.push(`source:${sourceId}:secret-rejected`);
-          return json(422, { error: "credential-shaped content rejected" });
-        }
-        if (!state.sourceIds.has(sourceId)) {
-          state.sourceIds.add(sourceId);
-          if (
-            !state.proposals.some(
-              (proposal) => proposal.id === "proposal:captured-learning",
-            )
-          ) {
-            state.proposals.push(capturedProposal(sourceId));
-          }
-          // Production compiler workflows auto-publish retained conversation
-          // sources. Mirror that asynchronous result in the deterministic fake.
-          if (!state.pages.has("shared-learning")) {
-            for (const page of acceptedLearningPages(sourceId)) {
-              state.pages.set(page.id, page);
-            }
-          }
-        }
-        return json(201, {
-          source: { ...source, id: sourceId },
-          contentHash: "sha256:e2e-captured",
-          contentKey: `organizations/${requestedOrganizationId}/sources/blobs/e2e-captured`,
-          workflowId: "compiler-captured-learning",
-        });
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/mcp" && req.method === "POST") {
-      if (!memoryAvailable) return json(503, { error: "memory unavailable" });
-      readJson().then((value) => {
-        const body = jsonBody(value);
-        const params = jsonBody(body.params);
-        const metadata = jsonBody(params._meta);
-        const organizationId =
-          typeof req.headers["x-jingler-organization-id"] === "string"
-            ? req.headers["x-jingler-organization-id"]
-            : null;
-        const assignedInstance =
-          requestSequence % 2 === 0 ? "next-a" : "next-b";
-        requestSequence += 1;
-        const rpcMethod = typeof body.method === "string" ? body.method : null;
-        const mcpMethod =
-          typeof req.headers["mcp-method"] === "string"
-            ? req.headers["mcp-method"]
-            : null;
-        const mcpName =
-          typeof req.headers["mcp-name"] === "string"
-            ? req.headers["mcp-name"]
-            : null;
-        requests.push({
-          path: url.pathname,
-          httpMethod: req.method ?? "",
-          rpcMethod,
-          mcpMethod,
-          mcpName,
-          toolName:
-            rpcMethod === "tools/call" && typeof params.name === "string"
-              ? params.name
-              : null,
-          organizationId,
-          protocolVersion:
-            typeof req.headers["mcp-protocol-version"] === "string"
-              ? req.headers["mcp-protocol-version"]
-              : null,
-          metadataProtocolVersion:
-            typeof metadata["io.modelcontextprotocol/protocolVersion"] ===
-            "string"
-              ? metadata["io.modelcontextprotocol/protocolVersion"]
-              : null,
-          hasCookie: req.headers.cookie !== undefined,
-          hasSessionId: req.headers["mcp-session-id"] !== undefined,
-          requestId: typeof body.id === "string" ? body.id : null,
-          toolArguments:
-            rpcMethod === "tools/call"
-              ? { ...jsonBody(params.arguments) }
-              : null,
-          assignedInstance,
-        });
-
-        if (
-          organizationId === null ||
-          organizationFromGrant(req.headers.authorization) !== organizationId ||
-          req.headers["mcp-protocol-version"] !== MEMORY_PROTOCOL ||
-          !(
-            (mcpMethod === null && mcpName === null) ||
-            (mcpMethod === rpcMethod &&
-              (rpcMethod !== "tools/call" || params.name === mcpName))
-          ) ||
-          req.headers["mcp-session-id"] !== undefined
-        ) {
-          return json(
-            401,
-            { error: "invalid stateless MCP request" },
-            { "x-fake-next-instance": assignedInstance },
+                      }),
+                  },
+                  state: "online",
+                  agentVersion: null,
+                  lastSeenAt: null,
+                  region: null,
+                  instanceType: "basic",
+                  generation: 1,
+                  createdAt: 0,
+                  updatedAt: 0,
+                },
+              ],
+            });
+          })().catch(() =>
+            json(502, { error: "environment inventory unavailable" }),
           );
-        }
-        if (rpcMethod === "initialize") {
-          return json(200, {
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              protocolVersion:
-                typeof params.protocolVersion === "string"
-                  ? params.protocolVersion
-                  : "2025-06-18",
-              capabilities: { tools: { listChanged: false } },
-              serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
-            },
-          });
-        }
-        if (rpcMethod === "notifications/initialized") {
-          res.writeHead(202);
-          res.end();
           return;
         }
-        if (rpcMethod === "tools/list") {
+      },
+      {
+        matches: () => (url.pathname ===
+          "/api/environments/managed/managed_cloud_e2e_account/workspaces" &&
+          req.method === "POST"),
+        handle: function createManagedWorkspace() {
+          if (req.headers.authorization !== `Bearer ${options.token}`)
+            return json(401, {});
+          void readJson().then((value) => {
+            const body = jsonBody(value);
+            const credential = managedCredential(
+              req.headers["x-jingler-provider-credential"],
+            );
+            managedRequests.push({
+              path: url.pathname,
+              connectionId:
+                nullableString(body.connectionId),
+              providerId:
+                nullableString(body.providerId),
+              modelId: nullableString(body.modelId),
+              authKind: credential?.authKind ?? null,
+              billingRoute: credential?.billingRoute ?? null,
+              accountIdPresent: credential?.accountIdPresent ?? false,
+              credentialPresent: credential !== null,
+            });
+            setTimeout(() => {
+              json(503, {
+                error: "Scripted Cloud startup stopped before allocation",
+              });
+            }, 2_000);
+          });
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/memory/organizations" && req.method === "GET"),
+        handle: function listMemoryOrganizations() {
+          if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+          if (req.headers.authorization !== `Bearer ${options.token}`)
+            return json(401, {});
           return json(200, {
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              tools: MEMORY_TOOL_NAMES.map((name) => ({
-                name,
-                inputSchema: { type: "object", additionalProperties: true },
-              })),
-            },
+            organizations: options.paidOrganizationIds.map((id) => ({
+              id,
+              name: id === "org-e2e" ? "Jingler Team" : "Other Team",
+              role: "owner",
+              privileges: ["read", "propose", "review", "schema"],
+            })),
           });
         }
-        if (rpcMethod === "server/discover") {
-          return json(
-            200,
-            {
-              jsonrpc: "2.0",
-              id: body.id,
-              result: {
-                resultType: "complete",
-                protocolVersion: MEMORY_PROTOCOL,
-                serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
-                capabilities: { tools: { listChanged: false } },
-              },
-            },
-            { "x-fake-next-instance": assignedInstance },
-          );
-        }
-        if (
-          rpcMethod !== "tools/call" ||
-          typeof params.name !== "string" ||
-          (mcpName !== null && params.name !== mcpName)
-        ) {
-          return json(
-            400,
-            { error: "tool call headers do not match body" },
-            { "x-fake-next-instance": assignedInstance },
-          );
-        }
-        const state = stateFor(organizationId);
-        const args = jsonBody(params.arguments);
-        const graph = graphFor(organizationId, state);
-        let data: unknown;
-        switch (params.name) {
-          case "memory_dashboard":
-            data = dashboardFor(
-              state,
-              typeof args.range === "string" ? args.range : "all",
-            );
-            break;
-          case "memory_suggestions":
-            data = {
-              ...suggestionsFor(organizationId, state),
-              suggestions: suggestionsFor(
+      },
+      {
+        matches: () => (url.pathname === "/api/memory/grant" && req.method === "POST"),
+        handle: function grantMemory() {
+          if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+          if (req.headers.authorization !== `Bearer ${options.token}`)
+            return json(401, {});
+          readJson().then((value) => {
+            const body = jsonBody(value);
+            const organizationId =
+              typeof body.organizationId === "string" ? body.organizationId : "";
+            if (!options.paidOrganizationIds.includes(organizationId))
+              return json(403, { error: "active paid membership required" });
+            stateFor(organizationId);
+            return json(200, {
+              grant: grantFor(organizationId),
+              claims: {
+                version: 1,
+                issuer: "jingler",
+                audience: "jingler-memory",
+                subject: "u_e2e",
                 organizationId,
-                state,
-              ).suggestions.filter(
-                (suggestion) =>
-                  typeof args.pageId !== "string" ||
-                  suggestion.sourceId === args.pageId ||
-                  suggestion.targetId === args.pageId,
-              ),
-            };
-            break;
-          case "memory_graph":
-          case "memory_graph_neighborhood":
-            data = graph;
-            break;
-          case "memory_reviews":
-            data = { reviews: state.proposals };
-            break;
-          case "memory_navigation":
-            data = {
-              indexMarkdown: `# Index\n${[...state.pages.values()].map((page) => `- [[${page.id}|${page.title}]]`).join("\n")}\n`,
-              logMarkdown: "# Log\n",
-            };
-            break;
-          case "memory_search": {
-            const query =
-              typeof args.query === "string"
-                ? args.query.trim().toLocaleLowerCase()
-                : "";
-            const queryTerms = query.match(/[a-z0-9_:-]{4,}/gu) ?? [];
-            const results = [...state.pages.values()]
-              .filter((page) => {
-                const searchable = `${page.title} ${page.body} ${page.aliases.join(" ")}`
-                  .toLocaleLowerCase();
-                return queryTerms.some((term) => searchable.includes(term));
-              })
-              .map((page) => ({
-                pageId: page.id,
-                revisionId: `revision:${page.id}:${page.revision}`,
-                revision: page.revision,
-                path: page.path,
-                title: page.title,
-                snippet: page.body.slice(0, 180),
-              }));
-            data = { query, results, total: results.length };
-            break;
-          }
-          case "memory_export": {
-            data = {
-              format: "jingler-obsidian-vault",
-              version: 1,
-              files: [
-                { path: ".obsidian/app.json", content: "{}" },
-                ...[...state.pages.values()].map((page) => ({
-                  path: page.path,
-                  content: page.body,
-                })),
-              ],
-            };
-            break;
-          }
-          case "memory_read": {
-            const page =
-              typeof args.pageId === "string"
-                ? state.pages.get(args.pageId)
-                : undefined;
-            data = page === undefined ? {} : pageResponse(page);
-            break;
-          }
-          case "memory_propose": {
-            data = fakeMemoryProposal(state, args);
-            break;
-          }
-          case "memory_workflow_status": {
-            data = fakeMemoryWorkflowStatus(state, args);
-            break;
-          }
-          case "memory_edge_evidence": {
-            const edgeId = typeof args.edgeId === "string" ? args.edgeId : "";
-            const edge =
-              graph.edges.find((candidate) => candidate.id === edgeId) ??
-              graph.edges[0];
-            const shared = edge?.id === "edge:e2e:alpha-shared";
-            data =
-              edge === undefined
-                ? {}
-                : {
-                    edge,
-                    evidence: {
-                      kind: edge.kind,
-                      pageId: shared
-                        ? "alpha"
-                        : organizationId === "org-e2e"
-                          ? "alpha"
-                          : "other-alpha",
-                      path: shared
-                        ? "alpha.md"
-                        : organizationId === "org-e2e"
-                          ? "alpha.md"
-                          : "other-alpha.md",
-                      line: 4,
-                      column: 1,
-                      raw: shared
-                        ? "[[shared-learning]]"
-                        : organizationId === "org-e2e"
-                          ? "[[beta]]"
-                          : "[[other-beta]]",
-                    },
-                  };
-            break;
-          }
-          case "memory_review": {
-            const proposalId =
-              typeof args.proposalId === "string" ? args.proposalId : "";
-            const action = args.action === "approve" ? "approve" : "reject";
-            const proposal = state.proposals.find(
-              (candidate) => candidate.id === proposalId,
-            );
-            if (proposal === undefined) {
-              data = {
-                status: "conflict",
-                conflicts: [
-                  {
-                    pageId: "missing",
-                    expectedBaseRevisionId: "proposal",
-                    currentHeadRevisionId: "not-found",
-                  },
-                ],
-              };
-              break;
-            }
-            if (proposalId === "proposal:stale" && action === "approve") {
-              state.reviewDecisions.push("proposal:stale:conflict");
-              data = {
-                status: "conflict",
-                conflicts: [
-                  {
-                    pageId: "alpha",
-                    expectedBaseRevisionId: "revision:alpha:1",
-                    currentHeadRevisionId: "revision:alpha:2",
-                  },
-                ],
-              };
-              break;
-            }
-            if (proposalId === "proposal:secret" && action === "approve") {
-              state.secretRejections += 1;
-              state.reviewDecisions.push("proposal:secret:secret-rejected");
-              data = {
-                status: "conflict",
-                conflicts: [
-                  {
-                    pageId: "secret-page",
-                    expectedBaseRevisionId: "lint:clean",
-                    currentHeadRevisionId: "lint:credential-shaped-content",
-                  },
-                ],
-              };
-              break;
-            }
-            proposal.status = action === "approve" ? "accepted" : "rejected";
-            state.reviewDecisions.push(`${proposalId}:${proposal.status}`);
-            if (
-              proposalId === "proposal:captured-learning" &&
-              proposal.status === "accepted"
-            ) {
-              for (const page of acceptedLearningPages(proposal.sourceId))
-                state.pages.set(page.id, page);
-            }
-            data = { status: proposal.status, conflicts: [] };
-            break;
-          }
-          default:
-            data = {};
-        }
-        return json(
-          200,
-          {
-            jsonrpc: "2.0",
-            id: body.id,
-            result: {
-              resultType: "complete",
-              server: { name: "jingler-team-memory", version: "1.0.0" },
-              structuredContent: { data },
-              content: [],
-            },
-          },
-          {
-            "cache-control": "private, max-age=30",
-            "x-fake-next-instance": assignedInstance,
-          },
-        );
-      });
-      return;
-    }
-
-    if (url.pathname === "/api/mcp")
-      return json(405, { error: "POST required" });
-
-    if (url.pathname === "/api/auth/get-session") {
-      if (req.headers.authorization === `Bearer ${options.token}`) {
-        return json(200, {
-          session: { expiresAt: "2099-01-01T00:00:00Z", token: options.token },
-          user: {
-            id: "u_e2e",
-            email: "e2e@jingler.dev",
-            name: "E2E User",
-            image: null,
-          },
-        });
-      }
-      return json(401, {});
-    }
-
-    if (url.pathname === "/api/auth/sign-in/social" && req.method === "POST") {
-      readJson().then((value) => {
-        const provider = jsonBody(value).provider;
-        if (
-          (provider === "github" || provider === "google") &&
-          options.unavailableSocialProviders.includes(provider)
-        ) {
-          return json(404, {
-            message: "Provider not found",
-            code: "PROVIDER_NOT_FOUND",
+                privileges: ["read", "propose", "review", "schema"],
+                issuedAt: 1_700_000_000,
+                expiresAt: 4_102_444_800,
+                grantId: `grant-e2e-${organizationId}`,
+              },
+            });
           });
+          return;
         }
-        return json(200, {
-          url: `http://${host}/desktop/callback?token=${options.token}`,
-          redirect: true,
-        });
-      });
-      return;
-    }
-    if (url.pathname === "/desktop/callback") {
-      res.writeHead(302, {
-        Location: `jingler://auth/callback?token=${options.token}`,
-      });
-      return res.end();
-    }
-    if (
-      url.pathname === "/api/auth/sign-in/magic-link" &&
-      req.method === "POST"
-    ) {
-      readJson().then((value) => {
-        const email = jsonBody(value).email;
-        if (typeof email === "string" && email.includes("fail"))
-          return json(400, { error: "rejected" });
-        if (typeof email === "string") sentEmails.push(email);
-        return json(200, { status: true });
-      });
-      return;
-    }
-    if (url.pathname === "/api/auth/sign-out" && req.method === "POST")
-      return json(200, {});
+      },
+      {
+        matches: () => (url.pathname === "/api/memory/sources" && req.method === "POST"),
+        handle: function captureMemorySource() {
+          const organizationId =
+            nullableString(req.headers["x-jingler-organization-id"]);
+          requests.push({
+            path: url.pathname,
+            httpMethod: req.method ?? "",
+            rpcMethod: null,
+            mcpMethod: null,
+            mcpName: null,
+            toolName: null,
+            organizationId,
+            protocolVersion: null,
+            metadataProtocolVersion: null,
+            hasCookie: req.headers.cookie !== undefined,
+            hasSessionId: req.headers["mcp-session-id"] !== undefined,
+            requestId: null,
+            toolArguments: null,
+            assignedInstance: null,
+          });
+          if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+          const requestedOrganizationId = req.headers["x-jingler-organization-id"];
+          const grantOrganization = organizationFromGrant(
+            req.headers.authorization,
+          );
+          if (
+            typeof requestedOrganizationId !== "string" ||
+            grantOrganization !== requestedOrganizationId
+          )
+            return json(401, {});
+          readJson().then((value) => handleMemorySource(value, req, requestedOrganizationId, stateFor, json));
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/mcp" && req.method === "POST"),
+        handle: function dispatchMcp() {
+          if (!memoryAvailable) return json(503, { error: "memory unavailable" });
+          readJson().then((value) => handleMemoryRpc({
+            value,
+            req,
+            res,
+            url,
+            requests,
+            stateFor,
+            json,
+            requestSequence: requestSequence++
+          }));
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/mcp"),
+        handle: function rejectMcpMethod() {
+          return json(405, { error: "POST required" });
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/auth/get-session"),
+        handle: function getAuthSession() {
+          if (req.headers.authorization === `Bearer ${options.token}`) {
+            return json(200, {
+              session: { expiresAt: "2099-01-01T00:00:00Z", token: options.token },
+              user: {
+                id: "u_e2e",
+                email: "e2e@jingler.dev",
+                name: "E2E User",
+                image: null,
+              },
+            });
+          }
+          return json(401, {});
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/auth/sign-in/social" && req.method === "POST"),
+        handle: function signInSocial() {
+          readJson().then((value) => {
+            const provider = jsonBody(value).provider;
+            if (
+              (provider === "github" || provider === "google") &&
+              options.unavailableSocialProviders.includes(provider)
+            ) {
+              return json(404, {
+                message: "Provider not found",
+                code: "PROVIDER_NOT_FOUND",
+              });
+            }
+            return json(200, {
+              url: `http://${host}/desktop/callback?token=${options.token}`,
+              redirect: true,
+            });
+          });
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/desktop/callback"),
+        handle: function callbackAuth() {
+          res.writeHead(302, {
+            Location: `jingler://auth/callback?token=${options.token}`,
+          });
+          return res.end();
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/auth/sign-in/magic-link" &&
+          req.method === "POST"),
+        handle: function signInMagicLink() {
+          readJson().then((value) => {
+            const email = jsonBody(value).email;
+            if (typeof email === "string" && email.includes("fail"))
+              return json(400, { error: "rejected" });
+            if (typeof email === "string") sentEmails.push(email);
+            return json(200, { status: true });
+          });
+          return;
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/auth/sign-out" && req.method === "POST"),
+        handle: function signOut() {
+          return json(200, {});
+        }
+      }
+    ];
+const route = routes.find((candidate) => candidate.matches());
+if (route) return route.handle();
+
     return json(404, {});
   });
 
@@ -1682,3 +1340,462 @@ export const startFakeAuthServer = async (
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 };
+
+function memoryDashboardResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  return dashboardFor(
+    state,
+    typeof args.range === "string" ? args.range : "all",
+  );
+}
+
+function memorySuggestionsResult(args: Record<string, unknown>, state: FakeOrganizationMemory, organizationId: string): unknown {
+  return {
+    ...suggestionsFor(organizationId, state),
+    suggestions: suggestionsFor(
+      organizationId,
+      state,
+    ).suggestions.filter(
+      (suggestion) =>
+        typeof args.pageId !== "string" ||
+        suggestion.sourceId === args.pageId ||
+        suggestion.targetId === args.pageId,
+    ),
+  };
+}
+
+function memoryGraphNeighborhoodResult(graph: ReturnType<typeof graphFor>): unknown {
+  return graph;
+}
+
+function memoryReviewsResult(state: FakeOrganizationMemory): unknown {
+  return { reviews: state.proposals };
+}
+
+function memoryNavigationResult(state: FakeOrganizationMemory): unknown {
+  return {
+    indexMarkdown: `# Index\n${[...state.pages.values()].map((page) => `- [[${page.id}|${page.title}]]`).join("\n")}\n`,
+    logMarkdown: "# Log\n",
+  };
+}
+
+function memorySearchResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  const query =
+    typeof args.query === "string"
+      ? args.query.trim().toLocaleLowerCase()
+      : "";
+  const queryTerms = query.match(/[a-z0-9_:-]{4,}/gu) ?? [];
+  const results = [...state.pages.values()]
+    .filter((page) => {
+      const searchable = `${page.title} ${page.body} ${page.aliases.join(" ")}`
+        .toLocaleLowerCase();
+      return queryTerms.some((term) => searchable.includes(term));
+    })
+    .map((page) => ({
+      pageId: page.id,
+      revisionId: `revision:${page.id}:${page.revision}`,
+      revision: page.revision,
+      path: page.path,
+      title: page.title,
+      snippet: page.body.slice(0, 180),
+    }));
+  return { query, results, total: results.length };
+}
+
+function memoryExportResult(state: FakeOrganizationMemory): unknown {
+  return {
+    format: "jingler-obsidian-vault",
+    version: 1,
+    files: [
+      { path: ".obsidian/app.json", content: "{}" },
+      ...[...state.pages.values()].map((page) => ({
+        path: page.path,
+        content: page.body,
+      })),
+    ],
+  };
+}
+
+function memoryReadResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  const page =
+    typeof args.pageId === "string"
+      ? state.pages.get(args.pageId)
+      : undefined;
+  return page === undefined ? {} : pageResponse(page);
+}
+
+function memoryProposeResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  return fakeMemoryProposal(state, args);
+}
+
+function memoryWorkflowStatusResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  return fakeMemoryWorkflowStatus(state, args);
+}
+
+function memoryEdgeEvidenceResult(args: Record<string, unknown>, organizationId: string, graph: ReturnType<typeof graphFor>): unknown {
+  const edgeId = typeof args.edgeId === "string" ? args.edgeId : "";
+  const edge =
+    graph.edges.find((candidate) => candidate.id === edgeId) ??
+    graph.edges[0];
+  const shared = edge?.id === "edge:e2e:alpha-shared";
+  const alphaPage = shared || organizationId === "org-e2e";
+  return edge === undefined
+    ? {}
+    : {
+      edge,
+      evidence: {
+        kind: edge.kind,
+        pageId: alphaPage ? "alpha" : "other-alpha",
+        path: alphaPage ? "alpha.md" : "other-alpha.md",
+        line: 4,
+        column: 1,
+        raw: shared
+          ? "[[shared-learning]]"
+          : organizationId === "org-e2e"
+            ? "[[beta]]"
+            : "[[other-beta]]",
+      },
+    };
+}
+
+function memoryReviewResult(args: Record<string, unknown>, state: FakeOrganizationMemory): unknown {
+  const proposalId =
+    typeof args.proposalId === "string" ? args.proposalId : "";
+  const action = args.action === "approve" ? "approve" : "reject";
+  const proposal = state.proposals.find(
+    (candidate) => candidate.id === proposalId,
+  );
+  if (proposal === undefined) {
+    return {
+      status: "conflict",
+      conflicts: [
+        {
+          pageId: "missing",
+          expectedBaseRevisionId: "proposal",
+          currentHeadRevisionId: "not-found",
+        },
+      ],
+    };
+  }
+  if (proposalId === "proposal:stale" && action === "approve") {
+    state.reviewDecisions.push("proposal:stale:conflict");
+    return {
+      status: "conflict",
+      conflicts: [
+        {
+          pageId: "alpha",
+          expectedBaseRevisionId: "revision:alpha:1",
+          currentHeadRevisionId: "revision:alpha:2",
+        },
+      ],
+    };
+  }
+  if (proposalId === "proposal:secret" && action === "approve") {
+    state.secretRejections += 1;
+    state.reviewDecisions.push("proposal:secret:secret-rejected");
+    return {
+      status: "conflict",
+      conflicts: [
+        {
+          pageId: "secret-page",
+          expectedBaseRevisionId: "lint:clean",
+          currentHeadRevisionId: "lint:credential-shaped-content",
+        },
+      ],
+    };
+  }
+  proposal.status = action === "approve" ? "accepted" : "rejected";
+  state.reviewDecisions.push(`${proposalId}:${proposal.status}`);
+  if (
+    proposalId === "proposal:captured-learning" &&
+    proposal.status === "accepted"
+  ) {
+    for (const page of acceptedLearningPages(proposal.sourceId))
+      state.pages.set(page.id, page);
+  }
+  return { status: proposal.status, conflicts: [] };
+}
+
+function handleMemoryRpc({
+  value,
+  req,
+  res,
+  url,
+  requests,
+  stateFor,
+  json,
+  requestSequence
+}: {
+  value: unknown;
+  req: import("node:http").IncomingMessage;
+  res: import("node:http").ServerResponse;
+  url: URL;
+  requests: FakeMemoryRequest[];
+  stateFor: (id: string) => FakeOrganizationMemory;
+  json: (code: number, body: unknown, headers?: Readonly<Record<string, string>>) => void;
+  requestSequence: number;
+}) {
+  const body = jsonBody(value);
+  const params = jsonBody(body.params);
+  const metadata = jsonBody(params._meta);
+  const organizationId =
+    nullableString(req.headers["x-jingler-organization-id"]);
+  const assignedInstance =
+    requestSequence % 2 === 0 ? "next-a" : "next-b";
+  const rpcMethod = nullableString(body.method);
+  const mcpMethod =
+    nullableString(req.headers["mcp-method"]);
+  const mcpName =
+    nullableString(req.headers["mcp-name"]);
+  requests.push({
+    path: url.pathname,
+    httpMethod: req.method ?? "",
+    rpcMethod,
+    mcpMethod,
+    mcpName,
+    toolName:
+      rpcMethod === "tools/call" ? nullableString(params.name) : null,
+    organizationId,
+    protocolVersion:
+      nullableString(req.headers["mcp-protocol-version"]),
+    metadataProtocolVersion:
+      nullableString(metadata["io.modelcontextprotocol/protocolVersion"]),
+    hasCookie: req.headers.cookie !== undefined,
+    hasSessionId: req.headers["mcp-session-id"] !== undefined,
+    requestId: nullableString(body.id),
+    toolArguments:
+      rpcMethod === "tools/call"
+        ? { ...jsonBody(params.arguments) }
+        : null,
+    assignedInstance,
+  });
+
+  if (
+    organizationId === null ||
+    organizationFromGrant(req.headers.authorization) !== organizationId ||
+    req.headers["mcp-protocol-version"] !== MEMORY_PROTOCOL ||
+    !(
+      (mcpMethod === null && mcpName === null) ||
+      (mcpMethod === rpcMethod &&
+        (rpcMethod !== "tools/call" || params.name === mcpName))
+    ) ||
+    req.headers["mcp-session-id"] !== undefined
+  ) {
+    return json(
+      401,
+      { error: "invalid stateless MCP request" },
+      { "x-fake-next-instance": assignedInstance },
+    );
+  }
+  return dispatchMemoryMethod({
+    rpcMethod,
+    body,
+    params,
+    res,
+    json,
+    assignedInstance,
+    mcpName,
+    organizationId,
+    stateFor
+  })
+}
+
+function handleMemorySource(value: unknown, req: import("node:http").IncomingMessage, requestedOrganizationId: string, stateFor: (id: string) => FakeOrganizationMemory, json: (code: number, body: unknown) => void) {
+  const body = jsonBody(value);
+  const source = jsonBody(body.source);
+  const sourceId = typeof source.id === "string" ? source.id : "";
+  const content = typeof body.content === "string" ? body.content : "";
+  if (
+    sourceId.length === 0 ||
+    req.headers["x-idempotency-key"] !== sourceId
+  )
+    return json(400, { error: "invalid digest" });
+  const state = stateFor(requestedOrganizationId);
+  if (CREDENTIAL_PATTERN.test(content)) {
+    state.secretRejections += 1;
+    state.reviewDecisions.push(`source:${sourceId}:secret-rejected`);
+    return json(422, { error: "credential-shaped content rejected" });
+  }
+  if (!state.sourceIds.has(sourceId)) {
+    state.sourceIds.add(sourceId);
+    if (
+      !state.proposals.some(
+        (proposal) => proposal.id === "proposal:captured-learning",
+      )
+    ) {
+      state.proposals.push(capturedProposal(sourceId));
+    }
+    // Production compiler workflows auto-publish retained conversation
+    // sources. Mirror that asynchronous result in the deterministic fake.
+    if (!state.pages.has("shared-learning")) {
+      for (const page of acceptedLearningPages(sourceId)) {
+        state.pages.set(page.id, page);
+      }
+    }
+  }
+  return json(201, {
+    source: { ...source, id: sourceId },
+    contentHash: "sha256:e2e-captured",
+    contentKey: `organizations/${requestedOrganizationId}/sources/blobs/e2e-captured`,
+    workflowId: "compiler-captured-learning",
+  });
+}
+
+function dispatchMemoryMethod({
+  rpcMethod,
+  body,
+  params,
+  res,
+  json,
+  assignedInstance,
+  mcpName,
+  organizationId,
+  stateFor
+}: {
+  rpcMethod: string | null;
+  body: Record<string, unknown>;
+  params: Record<string, unknown>;
+  res: import("node:http").ServerResponse;
+  json: (code: number, body: unknown, headers?: Readonly<Record<string, string>>) => void;
+  assignedInstance: string;
+  mcpName: string | null;
+  organizationId: string;
+  stateFor: (id: string) => FakeOrganizationMemory;
+}) {
+  if (rpcMethod === "initialize") {
+    return json(200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        protocolVersion:
+          typeof params.protocolVersion === "string"
+            ? params.protocolVersion
+            : "2025-06-18",
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
+      },
+    });
+  }
+  if (rpcMethod === "notifications/initialized") {
+    res.writeHead(202);
+    res.end();
+    return;
+  }
+  if (rpcMethod === "tools/list") {
+    return json(200, {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        tools: MEMORY_TOOL_NAMES.map((name) => ({
+          name,
+          inputSchema: { type: "object", additionalProperties: true },
+        })),
+      },
+    });
+  }
+  if (rpcMethod === "server/discover") {
+    return json(
+      200,
+      {
+        jsonrpc: "2.0",
+        id: body.id,
+        result: {
+          resultType: "complete",
+          protocolVersion: MEMORY_PROTOCOL,
+          serverInfo: { name: "jingler-team-memory", version: "1.0.0" },
+          capabilities: { tools: { listChanged: false } },
+        },
+      },
+      { "x-fake-next-instance": assignedInstance },
+    );
+  }
+  if (
+    rpcMethod !== "tools/call" ||
+    typeof params.name !== "string" ||
+    (mcpName !== null && params.name !== mcpName)
+  ) {
+    return json(
+      400,
+      { error: "tool call headers do not match body" },
+      { "x-fake-next-instance": assignedInstance },
+    );
+  }
+  const state = stateFor(organizationId);
+  const args = jsonBody(params.arguments);
+  const graph = graphFor(organizationId, state);
+  let data: unknown;
+  const handlers: Record<string, () => unknown> = {
+    "memory_dashboard": () => memoryDashboardResult(args, state),
+    "memory_suggestions": () => memorySuggestionsResult(args, state, organizationId),
+    "memory_graph": () => memoryGraphNeighborhoodResult(graph),
+    "memory_graph_neighborhood": () => memoryGraphNeighborhoodResult(graph),
+    "memory_reviews": () => memoryReviewsResult(state),
+    "memory_navigation": () => memoryNavigationResult(state),
+    "memory_search": () => memorySearchResult(args, state),
+    "memory_export": () => memoryExportResult(state),
+    "memory_read": () => memoryReadResult(args, state),
+    "memory_propose": () => memoryProposeResult(args, state),
+    "memory_workflow_status": () => memoryWorkflowStatusResult(args, state),
+    "memory_edge_evidence": () => memoryEdgeEvidenceResult(args, organizationId, graph),
+    "memory_review": () => memoryReviewResult(args, state)
+  };
+  data = handlers[params.name]?.() ?? {};
+  return json(
+    200,
+    {
+      jsonrpc: "2.0",
+      id: body.id,
+      result: {
+        resultType: "complete",
+        server: { name: "jingler-team-memory", version: "1.0.0" },
+        structuredContent: { data },
+        content: [],
+      },
+    },
+    {
+      "cache-control": "private, max-age=30",
+      "x-fake-next-instance": assignedInstance,
+    },
+  );
+}
+
+function offloadResult(failed: boolean, jobId: string) {
+  return {
+    version: 1,
+    jobId,
+    state: failed ? "failed" : "succeeded",
+    exitCode: failed ? 2 : 0,
+    failureReason: failed ? "command-failed" : null,
+    stdout: failed ? "" : "remote typecheck clean",
+    stderr: failed ? "remote typecheck failed" : "",
+    outputTruncated: false,
+    timings: {
+      queuedMs: 1,
+      snapshotMs: 2,
+      hydrationMs: 3,
+      dependencyMs: 4,
+      commandMs: 5,
+    },
+  };
+}
+
+function forwardedDeviceHeaders(authorization: string | undefined, body: string | undefined) {
+  return {
+    ...(typeof authorization === "string"
+      ? { authorization: authorization }
+      : {}),
+    ...(body ? { "content-type": "application/json" } : {}),
+  };
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+  const organizationFromGrant = (
+    authorization: string | undefined,
+  ): string | null => {
+    const prefix = "Bearer e2e-memory-grant:";
+    return authorization?.startsWith(prefix)
+      ? authorization.slice(prefix.length)
+      : null;
+  };

@@ -908,7 +908,6 @@ case "ArrowDown": {
         setActiveIndex((i) => (i + 1) % count);
         return;
 
-break
 }
 case "ArrowUp": {
 
@@ -916,7 +915,6 @@ case "ArrowUp": {
         setActiveIndex((i) => (i - 1 + count) % count);
         return;
 
-break
 }
 case "Enter":
 case "Tab": {
@@ -927,7 +925,6 @@ case "Tab": {
         } else replaceToken(`@${fileMatches[activeIndex]!}`);
         return;
 
-break
 }
 case "Escape": {
 
@@ -935,7 +932,6 @@ case "Escape": {
         setMenu(null);
         return;
 
-break
 }
 }
     }

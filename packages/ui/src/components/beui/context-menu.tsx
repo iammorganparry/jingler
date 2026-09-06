@@ -441,14 +441,12 @@ case "Escape": {
       context.triggerRef.current?.focus();
       return;
 
-break
 }
 case "Tab": {
 
       context.setOpen(false);
       return;
 
-break
 }
 case "ArrowDown":
 case "ArrowUp": {
@@ -457,7 +455,6 @@ case "ArrowUp": {
       moveFocus(event.key === "ArrowDown" ? 1 : -1);
       return;
 
-break
 }
 case "Home":
 case "End": {
@@ -467,7 +464,6 @@ case "End": {
       items[event.key === "Home" ? 0 : items.length - 1]?.focus();
       return;
 
-break
 }
 }
     if (

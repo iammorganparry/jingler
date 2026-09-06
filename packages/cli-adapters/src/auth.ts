@@ -15,7 +15,7 @@
 import type { AuthProvider, AuthSession } from "@jingler/core"
 import { AuthError } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { SecretStore } from "./secret-store.js"
+import { SecretStore, type SecretStoreShape } from "./secret-store.js"
 
 /** Base URL of the auth backend. Overridable (prod deploy, e2e fake server). */
 const authBaseUrl = (): string => process.env.JINGLER_AUTH_URL ?? "http://localhost:9100"
@@ -68,37 +68,7 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
     const getSession = (): Effect.Effect<AuthSession | null> =>
       Effect.gen(function* () {
         const token = yield* secrets.get
-        if (!token) return null
-        const base = authBaseUrl()
-        const res = yield* Effect.tryPromise(() =>
-          fetch(`${base}/api/auth/get-session`, {
-            headers: { Authorization: `Bearer ${token}` }
-          })
-        ).pipe(Effect.orElseSucceed(() => null))
-        // Network error → keep the token, stay signed out for now (transient).
-        if (!res) return null
-        // Unauthorized → the token is dead; clear it so we stop retrying.
-        if (res.status === 401) {
-          yield* secrets.clear
-          return null
-        }
-        if (!res.ok) return null
-        const body = yield* Effect.tryPromise(() => res.json() as Promise<SessionResponse>).pipe(
-          Effect.orElseSucceed(() => null)
-        )
-        if (!body?.session || !body.user) {
-          yield* secrets.clear
-          return null
-        }
-        return {
-          user: {
-            id: body.user.id,
-            email: body.user.email,
-            name: body.user.name ?? "",
-            image: body.user.image ?? null
-          },
-          expiresAt: body.session.expiresAt ?? ""
-        }
+        return yield* validateStoredAuthToken(token, secrets)
       })
 
     /** POST to the auth server, mapping transport failure to a user-facing `AuthError`. */
@@ -177,3 +147,37 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
     return { getSession, startSignIn, sendMagicLink, signOut } as const
   })
 }) {}
+
+function* validateStoredAuthToken(token: string | null, secrets: SecretStoreShape) {
+  if (!token) return null
+  const base = authBaseUrl()
+  const res = yield* Effect.tryPromise(() =>
+    fetch(`${base}/api/auth/get-session`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  ).pipe(Effect.orElseSucceed(() => null))
+  // Network error → keep the token, stay signed out for now (transient).
+  if (!res) return null
+  // Unauthorized → the token is dead; clear it so we stop retrying.
+  if (res.status === 401) {
+    yield* secrets.clear
+    return null
+  }
+  if (!res.ok) return null
+  const body = yield* Effect.tryPromise(() => res.json() as Promise<SessionResponse>).pipe(
+    Effect.orElseSucceed(() => null)
+  )
+  if (!body?.session || !body.user) {
+    yield* secrets.clear
+    return null
+  }
+  return {
+    user: {
+      id: body.user.id,
+      email: body.user.email,
+      name: body.user.name ?? "",
+      image: body.user.image ?? null
+    },
+    expiresAt: body.session.expiresAt ?? ""
+  }
+}

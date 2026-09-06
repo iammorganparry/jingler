@@ -278,7 +278,56 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@jingler/PluginAut
               covers(g, request.scopes)
           )
 
-          if (!existing) {
+          return yield* authorizePluginSession(
+            existing,
+            request,
+            prompt,
+            provider,
+            atomically,
+            readGrants,
+            writeGrants
+          )
+        })
+    }
+  })
+}) {}
+
+function* authorizePluginSession(
+  existing:
+    | {
+        readonly pluginId: string
+        readonly providerId: string
+        readonly scopes: readonly string[]
+        readonly account?: string | undefined
+        readonly grantedAt: string
+      }
+    | undefined,
+  request: {
+    pluginId: string
+    pluginName: string
+    providerId: string
+    scopes: ReadonlyArray<string>
+    createIfNone?: boolean
+  },
+  prompt: ConsentPrompt | null,
+  provider: AuthProvider,
+  atomically: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+  readGrants: Effect.Effect<
+    readonly {
+      readonly pluginId: string
+      readonly providerId: string
+      readonly scopes: readonly string[]
+      readonly account?: string | undefined
+      readonly grantedAt: string
+    }[],
+    never,
+    FileSystem.FileSystem | Path.Path | AppPaths
+  >,
+  writeGrants: (
+    grants: ReadonlyArray<StoredGrant>
+  ) => Effect.Effect<void, PluginError, FileSystem.FileSystem | Path.Path | AppPaths>
+) {
+  if (!existing) {
             if (request.createIfNone === false) return null
             if (!prompt) {
               return yield* Effect.fail(
@@ -359,7 +408,38 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@jingler/PluginAut
           const granted = afterConsent.find((g) =>
             sameGrant(g, request.pluginId, request.providerId)
           )
-          return {
+          return pluginAuthSession(request, token, granted)
+}
+
+function pluginAuthSession(
+  request: {
+    pluginId: string
+    pluginName: string
+    providerId: string
+    scopes: ReadonlyArray<string>
+    createIfNone?: boolean
+  },
+  token: ProviderToken,
+  granted:
+    | {
+        readonly pluginId: string
+        readonly providerId: string
+        readonly account?: string | undefined
+        readonly scopes: readonly string[]
+        readonly grantedAt: string
+      }
+    | undefined
+): {
+  expiresAt?: string | undefined
+  apiBaseUrl?: string | undefined
+  account?: string | undefined
+  id: string
+  providerId: string
+  accessToken: string
+  scopes: readonly string[]
+  grantedAt: string
+} | null {
+  return {
             id: `${request.pluginId}:${request.providerId}`,
             providerId: request.providerId,
             accessToken: token.accessToken,
@@ -369,7 +449,4 @@ export class PluginAuth extends Effect.Service<PluginAuth>()("@jingler/PluginAut
             ...(token.apiBaseUrl ? { apiBaseUrl: token.apiBaseUrl } : {}),
             ...(token.expiresAt ? { expiresAt: token.expiresAt } : {})
           }
-        })
-    }
-  })
-}) {}
+        }

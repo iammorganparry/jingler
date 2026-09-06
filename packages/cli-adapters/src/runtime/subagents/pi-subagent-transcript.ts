@@ -160,19 +160,7 @@ export const appendPiMessagesToJingler = (
   for (const [index, message] of messages.entries()) {
     const messageIndex = indexOffset + index
     if (message.role === "toolResult") {
-      if (!settleToolResult(projected, message)) {
-        const text = textOf(message)
-        projected.push({
-          id: `child-${message.timestamp}-${messageIndex}`,
-          role: "assistant",
-          parts: [{
-            _tag: "Text",
-            text: `${message.isError ? "Tool error" : "Tool result"} (${message.toolName})${text ? `\n${text}` : ""}`
-          }],
-          streaming: false,
-          createdAt: new Date(message.timestamp).toISOString()
-        })
-      }
+      appendStandaloneToolResult(projected, message, messageIndex)
       continue
     }
     projected.push({
@@ -346,7 +334,60 @@ export const makePiSubagentTranscriptReader = (): Effect.Effect<
         Effect.tryPromise({
           try: async () => {
             const cached = current.get(file)
-            const metadata = await stat(file)
+                  return await readTranscriptDelta(file, cached, current)
+                },
+                catch: (cause) =>
+                  cause instanceof Error
+                    ? cause
+                    : new Error("Could not read pi-subagents transcript")
+              })
+            )
+          )
+        ),
+      clear: SynchronizedRef.set(cursors, new Map())
+    }
+  })
+
+export const PiSubagentTranscriptReaderLive = Layer.effect(
+  PiSubagentTranscriptReader,
+  makePiSubagentTranscriptReader()
+)
+
+export const readPiSubagentTranscript = (
+  input: PiSubagentTranscriptInput
+): Effect.Effect<ReadonlyArray<Message>, Error> => Effect.flatMap(
+  makePiSubagentTranscriptReader(),
+  (reader) => reader.read(input)
+)
+
+function appendStandaloneToolResult(
+  projected: Array<Message>,
+  message: Extract<PiMessage, { role: "toolResult" }>,
+  messageIndex: number
+) {
+  if (!settleToolResult(projected, message)) {
+    const text = textOf(message)
+    projected.push({
+      id: `child-${message.timestamp}-${messageIndex}`,
+      role: "assistant",
+      parts: [
+        {
+          _tag: "Text",
+          text: `${message.isError ? "Tool error" : "Tool result"} (${message.toolName})${text ? `\n${text}` : ""}`
+        }
+      ],
+      streaming: false,
+      createdAt: new Date(message.timestamp).toISOString()
+    })
+  }
+}
+
+async function readTranscriptDelta(
+  file: string,
+  cached: TranscriptCursor | undefined,
+  current: ReadonlyMap<string, TranscriptCursor>
+) {
+  const metadata = await stat(file)
             let next: TranscriptCursor
             if (
               !cached ||
@@ -380,25 +421,4 @@ export const makePiSubagentTranscriptReader = (): Effect.Effect<
             const updated = new Map(current)
             updated.set(file, next)
             return [next.messages, updated] as const
-          },
-          catch: (cause) => cause instanceof Error
-            ? cause
-            : new Error("Could not read pi-subagents transcript")
-        })
-      ))
-    ),
-    clear: SynchronizedRef.set(cursors, new Map())
-  }
-})
-
-export const PiSubagentTranscriptReaderLive = Layer.effect(
-  PiSubagentTranscriptReader,
-  makePiSubagentTranscriptReader()
-)
-
-export const readPiSubagentTranscript = (
-  input: PiSubagentTranscriptInput
-): Effect.Effect<ReadonlyArray<Message>, Error> => Effect.flatMap(
-  makePiSubagentTranscriptReader(),
-  (reader) => reader.read(input)
-)
+          }

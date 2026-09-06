@@ -3,6 +3,9 @@ import type {
   ContextDigest,
   ContextSnapshot,
   Message,
+  Session,
+  ProviderConnectionId,
+  ProviderModelId,
   StreamEvent
 } from "@jingler/core"
 import {
@@ -17,7 +20,7 @@ import {
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
 import { AppPaths } from "./app-paths.js"
-import type { AgentContext, AgentTurnSpec } from "./agent-turn-driver.js"
+import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import { ConfigService } from "./config.js"
@@ -140,26 +143,26 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       /** Chat context key → owning session id. Legacy callers use the same id. */
       const owners = yield* Ref.make(new Map<string, string>())
 
-      /**
-       * Record which session a chat context belongs to.
-       *
-       * NOT called `bind`. This service is declared with `accessors: true`, and the
-       * accessors are generated as statics on the class — which is a function
-       * object, so `bind` is already taken by `Function.prototype.bind` and the
-       * accessor is silently skipped. `ContextManager.bind(chatId, sessionId)` then
-       * resolves to the built-in, which returns a bound copy of the class rather
-       * than an Effect. That copy still inherits the Tag's static `pipe` and
-       * `[Symbol.iterator]`, so `.pipe(...)` and `yield*` both keep working and
-       * nothing throws — the call is simply a no-op.
-       *
-       * The damage was invisible and total: `owners` stayed empty, so `ownerOf`
-       * fell through to the chat id, `SessionStore.get` was handed `c_<id>_1`
-       * instead of a session id and failed, `settingsFor` returned null, and every
-       * caller saw `window: null`. That silently disabled the whole feature — no
-       * context meter, no Compact now button, and `auto` false so automatic
-       * compaction never ran for any session.
-       */
-      const bindContext = (contextId: string, sessionId: string): Effect.Effect<void> =>
+    /**
+     * Record which session a chat context belongs to.
+     *
+     * NOT called `bind`. This service is declared with `accessors: true`, and the
+     * accessors are generated as statics on the class — which is a function
+     * object, so `bind` is already taken by `Function.prototype.bind` and the
+     * accessor is silently skipped. `ContextManager.bind(chatId, sessionId)` then
+     * resolves to the built-in, which returns a bound copy of the class rather
+     * than an Effect. That copy still inherits the Tag's static `pipe` and
+     * `[Symbol.iterator]`, so `.pipe(...)` and `yield*` both keep working and
+     * nothing throws — the call is simply a no-op.
+     *
+     * The damage was invisible and total: `owners` stayed empty, so `ownerOf`
+     * fell through to the chat id, `SessionStore.get` was handed `c_<id>_1`
+     * instead of a session id and failed, `settingsFor` returned null, and every
+     * caller saw `window: null`. That silently disabled the whole feature — no
+     * context meter, no Compact now button, and `auto` false so automatic
+     * compaction never ran for any session.
+     */
+    const bindContext = (contextId: string, sessionId: string): Effect.Effect<void> =>
         Ref.update(owners, (map) => new Map(map).set(contextId, sessionId))
 
       const rememberMemoryContext = (
@@ -186,15 +189,15 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       ): Effect.Effect<void> =>
         Ref.update(states, (m) => new Map(m).set(sessionId, fn(m.get(sessionId) ?? EMPTY)))
 
-      /**
-       * Resolve everything the policy needs for a session: its window, its
-       * budget, and whether auto-compaction applies to it at all.
-       *
-       * Every lookup here is best-effort. This runs on the hot path of a turn
-       * ending, and a config read that failed must not take the turn down with
-       * it — it just means we don't compact.
-       */
-      const settingsFor = (sessionId: string) =>
+    /**
+     * Resolve everything the policy needs for a session: its window, its
+     * budget, and whether auto-compaction applies to it at all.
+     *
+     * Every lookup here is best-effort. This runs on the hot path of a turn
+     * ending, and a config read that failed must not take the turn down with
+     * it — it just means we don't compact.
+     */
+    const settingsFor = (sessionId: string) =>
         Effect.gen(function* () {
           const ownerId = yield* ownerOf(sessionId)
           const session = yield* SessionStore.get(ownerId).pipe(Effect.orElseSucceed(() => null))
@@ -248,12 +251,12 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           }
         })
 
-      /**
-       * Summarise the transcript through the session's pinned provider connection.
-       * The same explicit billing route and certified model resolution used for
-       * foreground turns applies here; compaction cannot switch credentials.
-       */
-      const buildDigest = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
+    /**
+     * Summarise the transcript through the session's pinned provider connection.
+     * The same explicit billing route and certified model resolution used for
+     * foreground turns applies here; compaction cannot switch credentials.
+     */
+    const buildDigest = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
         Effect.gen(function* () {
           const settings = yield* settingsFor(sessionId)
           if (settings === null) return yield* fail(sessionId, "session or config unavailable")
@@ -283,99 +286,29 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             return yield* fail(sessionId, "provider connection unavailable")
           }
 
-          const memoryContext = (yield* Ref.get(memoryContexts)).get(sessionId)
-          const compactionPrompt = [
-            digestPrompt(renderTranscript(messages)),
-            ...(memoryContext === undefined
-              ? []
-              : [
-                  "Relevant accepted memory for consolidation context only:",
-                  memoryContext
-                ])
-          ].join("\n\n")
-          const spec: AgentTurnSpec = {
-            sessionId: settings.session.id,
-            chatId: settings.chat.id,
-            connectionId: settings.chat.connectionId,
-            modelId: settings.chat.modelId,
-            role: "context-digest",
-            priorMessages: [],
-            piSessionId: null,
-            seed: null,
-            targetCapabilities: {
-              versions: CURRENT_RUNTIME_CONTRACTS,
-              toolIds: [],
-              resourceIds: [],
-              targetId: settings.session.environmentId ?? "desktop"
-            },
-            cwd: settings.session.worktreePath ?? "",
-            prompt: compactionPrompt,
-            images: [],
-            mode: "read-only"
-          }
-
-          const ctx: AgentContext = {
-            emit: (event: StreamEvent) =>
-              // Main-thread text ONLY. If the digest run spawned a sub-agent, its
-              // chatter would interleave into the reply we parse — and any JSON it
-              // happened to print would win the "last block" race in `parseDigest`,
-              // silently replacing the real summary with a fragment.
-              event._tag === "Assistant" && event.agentId === undefined
-                ? Ref.update(collected, (acc) => [...acc, event.text])
-                : Effect.void,
-            canUseTool: () => Effect.succeed("deny" as const),
-            askQuestion: () => Effect.succeed([]),
-            // Deliberately dropped. This is a nested run against a session that
-            // already has a real agent; registering a stop handle here would
-            // overwrite that agent's, aiming the dock's Stop button at the wrong
-            // process.
-            registerBackgroundStop: () => Effect.void
-          }
-
-          const ok = yield* adapter
-            .run(`digest_${sessionId}`, spec, ctx)
-            .pipe(
-              Effect.timeout(DIGEST_TIMEOUT),
-              Effect.as(true),
-              Effect.orElseSucceed(() => false)
-            )
-          if (!ok) return yield* fail(sessionId, "run errored or timed out")
-
-          // Concatenate with "", NOT "\n". `collected` holds one entry per
-          // streamed text DELTA (see `emit` above), and a harness streams its
-          // reply token by token — so joining with "\n" injects a newline at
-          // every fragment boundary. When a boundary lands inside a JSON string
-          // value (near-certain with token-level streaming) that newline becomes
-          // a raw newline inside the string, which is invalid JSON: `parseDigest`
-          // then throws and the digest fails EVERY time. The bug was invisible in
-          // tests because the scripted adapter emits the whole reply as a single
-          // event, where the separator never bites. Deltas are contiguous, so ""
-          // reproduces the harness's literal output (its own newlines included).
-          const raw = (yield* Ref.get(collected)).join("")
-          // An empty reply and an unparseable one are different failures: the
-          // first means the run produced no main-thread text at all (deny-all
-          // gate, a harness that only emitted tool chatter), the second means it
-          // spoke but not in the shape we asked for.
-          if (raw.trim().length === 0) return yield* fail(sessionId, "empty digest reply")
-          const builtAt = yield* Effect.sync(() => new Date().toISOString())
-          const digest = parseDigest(raw, through, builtAt)
-          // A null digest is a real answer, not an error to smooth over: we simply
-          // don't compact, and the session behaves exactly as it does today.
-          if (digest === null) return yield* fail(sessionId, "digest reply did not parse")
-
-          yield* setState(sessionId, (s) => ({ ...s, status: "ready", digest, failures: 0 }))
+        return yield* runDigestTurn(memoryContexts,
+          sessionId,
+          messages,
+          settings,
+          settings.chat.connectionId,
+          settings.chat.modelId,
+          collected,
+          adapter,
+          fail, through,
+          setState
+        )
         })
 
-      /**
-       * Record a failed digest attempt and say WHY.
-       *
-       * The counter + stall behaviour is unchanged — one retry then silence — but
-       * the reason is logged so a systematically-failing digest is diagnosable
-       * instead of a session that mysteriously stops compacting. This class of bug
-       * (a reply that never parsed) was invisible precisely because `fail` said
-       * nothing.
-       */
-      const fail = (sessionId: string, reason: string): Effect.Effect<void> =>
+    /**
+     * Record a failed digest attempt and say WHY.
+     *
+     * The counter + stall behaviour is unchanged — one retry then silence — but
+     * the reason is logged so a systematically-failing digest is diagnosable
+     * instead of a session that mysteriously stops compacting. This class of bug
+     * (a reply that never parsed) was invisible precisely because `fail` said
+     * nothing.
+     */
+    const fail = (sessionId: string, reason: string): Effect.Effect<void> =>
         Effect.zipRight(
           Effect.logWarning(`context digest failed for ${sessionId}: ${reason}`),
           setState(sessionId, (s) => ({
@@ -410,14 +343,14 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           yield* Ref.update(fibers, (m) => new Map(m).set(sessionId, fiber))
         })
 
-      /**
-       * Record a context reading and decide whether to start preparing.
-       *
-       * Called as a turn settles. Returns immediately in every branch — the work
-       * it may start runs on a daemon fiber, because the whole point is that the
-       * user is never waiting on it.
-       */
-      const observe = (
+    /**
+     * Record a context reading and decide whether to start preparing.
+     *
+     * Called as a turn settles. Returns immediately in every branch — the work
+     * it may start runs on a daemon fiber, because the whole point is that the
+     * user is never waiting on it.
+     */
+    const observe = (
         sessionId: string,
         tokens: number,
         window: number | null = null
@@ -441,62 +374,37 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           yield* SessionStore.setChatContextTokens(ownerId, sessionId, tokens).pipe(Effect.ignore)
         })
 
-      /**
-       * Decide whether to start preparing a digest, from the latest reading.
-       *
-       * Called only when a turn has SETTLED, and that distinction is
-       * load-bearing. Claude and opencode report usage per assistant message, so
-       * a turn that uses tools reports several times before it finishes. Forking
-       * on one of those mid-turn readings builds the digest from a transcript
-       * whose last message is still streaming — and since the digest stamps
-       * `throughMessageId` with that message's id, `tailAfter` then slices AFTER
-       * it at swap time. Every tool result and closing paragraph that landed on
-       * that same message afterwards is neither summarised nor replayed: the
-       * compacted context silently loses the tail of the very turn that
-       * triggered it.
-       *
-       * Readings still arrive continuously through `observe`; only the decision
-       * to summarise waits for a coherent transcript.
-       */
-      const settle = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
+    /**
+     * Decide whether to start preparing a digest, from the latest reading.
+     *
+     * Called only when a turn has SETTLED, and that distinction is
+     * load-bearing. Claude and opencode report usage per assistant message, so
+     * a turn that uses tools reports several times before it finishes. Forking
+     * on one of those mid-turn readings builds the digest from a transcript
+     * whose last message is still streaming — and since the digest stamps
+     * `throughMessageId` with that message's id, `tailAfter` then slices AFTER
+     * it at swap time. Every tool result and closing paragraph that landed on
+     * that same message afterwards is neither summarised nor replayed: the
+     * compacted context silently loses the tail of the very turn that
+     * triggered it.
+     *
+     * Readings still arrive continuously through `observe`; only the decision
+     * to summarise waits for a coherent transcript.
+     */
+    const settle = (sessionId: string): Effect.Effect<void, never, DigestEnv> =>
         Effect.gen(function* () {
           const settings = yield* settingsFor(sessionId)
-          if (settings === null) return
-
-          const state = yield* stateOf(sessionId)
-          // The decision reads the OCCUPANCY the harness reported, which arrives
-          // through `observe`. It deliberately takes no reading of its own: the
-          // caller's end-of-turn number is cumulative spend on at least one
-          // harness, and passing it here is what made compaction fire every turn.
-          // Falling back to the persisted value keeps a session that was reopened
-          // near its ceiling from reading as empty on its first turn.
-          const tokens = state.tokens > 0 ? state.tokens : settings.chat.contextTokens ?? 0
-          if (!Number.isFinite(tokens) || tokens <= 0) return
-
-          // A session that has failed repeatedly stops trying, rather than
-          // forking a doomed fiber on every turn forever.
-          if (state.failures >= MAX_FAILURES) return
-          if (state.status !== "idle") return
-
-          const phase = contextPhase({
-            tokens,
-            window: settings.window,
-            budget: settings.budget,
-            auto: settings.auto,
-            digestReady: state.digest !== null
-          })
-          if (phase !== "prepare") return
-          yield* fork(sessionId)
+        return yield* prepareDigestIfNeeded(settings, stateOf, sessionId, fork)
         })
 
-      /**
-       * Force a digest regardless of the budget.
-       *
-       * Manual compaction remains background work. A hard-overflow recovery opts
-       * into `waitForReady`, which prevents only that session's immediate retry
-       * from reusing the known-full harness thread.
-       */
-      const compactNow = (
+    /**
+     * Force a digest regardless of the budget.
+     *
+     * Manual compaction remains background work. A hard-overflow recovery opts
+     * into `waitForReady`, which prevents only that session's immediate retry
+     * from reusing the known-full harness thread.
+     */
+    const compactNow = (
         sessionId: string,
         options: { readonly waitForReady?: boolean } = {}
       ): Effect.Effect<void, never, DigestEnv> =>
@@ -519,19 +427,19 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           yield* fork(sessionId, options.waitForReady === true)
         })
 
-      /**
-       * The structural half of the mid-flow question, which no summary can see.
-       *
-       * These are facts about the session's CURRENT state rather than its
-       * narrative: a plan the agent is still executing, a question the user never
-       * answered, a gate waiting on approval, a background task still running.
-       * Each one means the next turn is a continuation, and a continuation that
-       * starts from a summary has lost the thing it was continuing.
-       *
-       * Best-effort in every branch — a transcript read that fails must not take
-       * the turn down with it, it just means we don't hold.
-       */
-      const midFlowLocally = (
+    /**
+     * The structural half of the mid-flow question, which no summary can see.
+     *
+     * These are facts about the session's CURRENT state rather than its
+     * narrative: a plan the agent is still executing, a question the user never
+     * answered, a gate waiting on approval, a background task still running.
+     * Each one means the next turn is a continuation, and a continuation that
+     * starts from a summary has lost the thing it was continuing.
+     *
+     * Best-effort in every branch — a transcript read that fails must not take
+     * the turn down with it, it just means we don't hold.
+     */
+    const midFlowLocally = (
         sessionId: string
       ): Effect.Effect<
         boolean,
@@ -564,20 +472,20 @@ export class ContextManager extends Effect.Service<ContextManager>()(
           )
         })
 
-      /**
-       * Consume a ready digest, if there is one. Called at the top of a turn.
-       *
-       * Returns the digest exactly once — the state flips to idle in the same
-       * update — so a swap can never be applied twice, which would reseed a fresh
-       * conversation with a summary of the conversation it just replaced.
-       *
-       * `tokensBefore` is the occupancy the swap happened AT, reported so the
-       * transcript marker can say "compacted from 290k". It is read here, from
-       * this service's own `Usage`-fed reading, precisely because the caller's
-       * obvious alternative — `Session.tokens` — is the session's LIFETIME total
-       * and rendered as "compacted from 49894.2k" on a long-running session.
-       */
-      const applyIfReady = (
+    /**
+     * Consume a ready digest, if there is one. Called at the top of a turn.
+     *
+     * Returns the digest exactly once — the state flips to idle in the same
+     * update — so a swap can never be applied twice, which would reseed a fresh
+     * conversation with a summary of the conversation it just replaced.
+     *
+     * `tokensBefore` is the occupancy the swap happened AT, reported so the
+     * transcript marker can say "compacted from 290k". It is read here, from
+     * this service's own `Usage`-fed reading, precisely because the caller's
+     * obvious alternative — `Session.tokens` — is the session's LIFETIME total
+     * and rendered as "compacted from 49894.2k" on a long-running session.
+     */
+    const applyIfReady = (
         sessionId: string
       ): Effect.Effect<
         { digest: ContextDigest; tokensBefore: number } | null,
@@ -591,81 +499,19 @@ export class ContextManager extends Effect.Service<ContextManager>()(
       > =>
         Effect.gen(function* () {
           const state = yield* stateOf(sessionId)
-          if (state.status !== "ready" || state.digest === null) return null
-          const at = yield* Effect.sync(() => new Date().toISOString())
-          const ownerId = yield* ownerOf(sessionId)
-          const session = yield* SessionStore.get(ownerId).pipe(Effect.orElseSucceed(() => null))
-          const chat = session?.chats.find((candidate) => candidate.id === sessionId)
-          const tokensBefore = state.tokens > 0 ? state.tokens : chat?.contextTokens ?? 0
+        return yield* applyPreparedDigest(state, ownerOf, sessionId, midFlowLocally, setState)
+      })
 
-          // Would swapping RIGHT NOW cost more than it saves? The digest is not
-          // discarded when it would — it stays ready and is re-offered next turn,
-          // so a hold costs one turn of extra context and nothing else.
-          // A forced recovery has no usable old conversation to preserve. The
-          // normal mid-flow hold is valuable for proactive/background digests,
-          // but applying it after a hard overflow (or an unsafe legacy resume)
-          // sends the next turn straight back to the already-dead vendor thread.
-          const hold =
-            !state.waitForReady &&
-            shouldHoldSwap({
-              // Absent means the digest predates the verdict (or the model omitted
-              // it): "we don't know" must never hold a session open.
-              midFlow: state.digest.midFlow ?? false,
-              localHold: yield* midFlowLocally(sessionId),
-              tokens: tokensBefore,
-              window:
-                state.window ??
-                  contextWindowFor(
-                    chat?.providerId ?? session?.providerId ?? null,
-                    chat?.modelId ?? session?.modelId ?? null
-                  ),
-              deferrals: state.deferrals
-            })
-          if (hold) {
-            const reason =
-              state.digest.midFlowReason ?? "the session is in the middle of something"
-            yield* setState(sessionId, (s) => ({
-              ...s,
-              deferrals: s.deferrals + 1,
-              heldReason: reason
-            }))
-            return null
-          }
-
-          yield* setState(sessionId, (s) => ({
-            ...s,
-            status: "idle",
-            digest: null,
-            waitForReady: false,
-            // The reseed starts a NEW harness conversation, so the reading that
-            // described the old one is not merely stale — it is about a
-            // conversation that no longer exists. Leaving it in place made the
-            // meter read "compacting soon" over a 40k session and made the very
-            // next `settle` fork a second digest against the pre-swap number.
-            tokens: 0,
-            failures: 0,
-            compactions: s.compactions + 1,
-            lastCompactedAt: at,
-            deferrals: 0,
-            heldReason: null
-          }))
-          // The persisted copy is what `settle` and `snapshot` fall back to when
-          // no live reading has arrived yet, so clearing only the in-memory one
-          // would let the stale number come straight back on the next turn.
-          yield* SessionStore.setChatContextTokens(ownerId, sessionId, 0).pipe(Effect.ignore)
-          return { digest: state.digest, tokensBefore }
-        })
-
-      /**
-       * Consume a digest, waiting when its background build is already running.
-       *
-       * The ordinary path remains instant: idle and ready states return on the
-       * first inspection. Waiting matters after a context-overflow failure,
-       * where the recovery digest starts at turn end and an immediate retry
-       * would otherwise resume the same full harness thread before that digest
-       * became ready.
-       */
-      const applyWhenReady = (
+    /**
+     * Consume a digest, waiting when its background build is already running.
+     *
+     * The ordinary path remains instant: idle and ready states return on the
+     * first inspection. Waiting matters after a context-overflow failure,
+     * where the recovery digest starts at turn end and an immediate retry
+     * would otherwise resume the same full harness thread before that digest
+     * became ready.
+     */
+    const applyWhenReady = (
         sessionId: string
       ): Effect.Effect<
         { digest: ContextDigest; tokensBefore: number } | null,
@@ -791,3 +637,219 @@ export class ContextManager extends Effect.Service<ContextManager>()(
     })
   }
 ) {}
+
+function* applyPreparedDigest(
+  state: SessionContext,
+  ownerOf: (contextId: string) => Effect.Effect<string>,
+  sessionId: string,
+  midFlowLocally: (
+    sessionId: string
+  ) => Effect.Effect<
+    boolean,
+    never,
+    TranscriptStore | BackgroundTaskStore | FileSystem.FileSystem | Path.Path | AppPaths
+  >,
+  setState: (sessionId: string, fn: (prev: SessionContext) => SessionContext) => Effect.Effect<void>
+) {
+  if (state.status !== "ready" || state.digest === null) return null
+  const at = yield* Effect.sync(() => new Date().toISOString())
+  const ownerId = yield* ownerOf(sessionId)
+  const session = yield* SessionStore.get(ownerId).pipe(Effect.orElseSucceed(() => null))
+  const chat = session?.chats.find((candidate) => candidate.id === sessionId)
+  const tokensBefore = state.tokens > 0 ? state.tokens : (chat?.contextTokens ?? 0)
+
+  // Would swapping RIGHT NOW cost more than it saves? The digest is not
+  // discarded when it would — it stays ready and is re-offered next turn,
+  // so a hold costs one turn of extra context and nothing else.
+  // A forced recovery has no usable old conversation to preserve. The
+  // normal mid-flow hold is valuable for proactive/background digests,
+  // but applying it after a hard overflow (or an unsafe legacy resume)
+  // sends the next turn straight back to the already-dead vendor thread.
+  const hold =
+    !state.waitForReady &&
+    shouldHoldSwap({
+      // Absent means the digest predates the verdict (or the model omitted
+      // it): "we don't know" must never hold a session open.
+      midFlow: state.digest.midFlow ?? false,
+      localHold: yield* midFlowLocally(sessionId),
+      tokens: tokensBefore,
+      window:
+        state.window ??
+        contextWindowFor(
+          chat?.providerId ?? session?.providerId ?? null,
+          chat?.modelId ?? session?.modelId ?? null
+        ),
+      deferrals: state.deferrals
+    })
+  if (hold) {
+    const reason = state.digest.midFlowReason ?? "the session is in the middle of something"
+    yield* setState(sessionId, (s) => ({
+      ...s,
+      deferrals: s.deferrals + 1,
+      heldReason: reason
+    }))
+    return null
+  }
+
+  yield* setState(sessionId, (s) => ({
+    ...s,
+    status: "idle",
+    digest: null,
+    waitForReady: false,
+    // The reseed starts a NEW harness conversation, so the reading that
+    // described the old one is not merely stale — it is about a
+    // conversation that no longer exists. Leaving it in place made the
+    // meter read "compacting soon" over a 40k session and made the very
+    // next `settle` fork a second digest against the pre-swap number.
+    tokens: 0,
+    failures: 0,
+    compactions: s.compactions + 1,
+    lastCompactedAt: at,
+    deferrals: 0,
+    heldReason: null
+  }))
+  // The persisted copy is what `settle` and `snapshot` fall back to when
+  // no live reading has arrived yet, so clearing only the in-memory one
+  // would let the stale number come straight back on the next turn.
+  yield* SessionStore.setChatContextTokens(ownerId, sessionId, 0).pipe(Effect.ignore)
+  return { digest: state.digest, tokensBefore }
+}
+
+function* prepareDigestIfNeeded(
+  settings: DigestSettings | null,
+  stateOf: (sessionId: string) => Effect.Effect<SessionContext>,
+  sessionId: string,
+  fork: (sessionId: string, waitForReady?: boolean) => Effect.Effect<void, never, DigestEnv>
+) {
+  if (settings === null) return
+
+  const state = yield* stateOf(sessionId)
+  // The decision reads the OCCUPANCY the harness reported, which arrives
+  // through `observe`. It deliberately takes no reading of its own: the
+  // caller's end-of-turn number is cumulative spend on at least one
+  // harness, and passing it here is what made compaction fire every turn.
+  // Falling back to the persisted value keeps a session that was reopened
+  // near its ceiling from reading as empty on its first turn.
+  const tokens = state.tokens > 0 ? state.tokens : (settings.chat.contextTokens ?? 0)
+  if (!Number.isFinite(tokens) || tokens <= 0) return
+
+  // A session that has failed repeatedly stops trying, rather than
+  // forking a doomed fiber on every turn forever.
+  if (state.failures >= MAX_FAILURES) return
+  if (state.status !== "idle") return
+
+  const phase = contextPhase({
+    tokens,
+    window: settings.window,
+    budget: settings.budget,
+    auto: settings.auto,
+    digestReady: state.digest !== null
+  })
+  if (phase !== "prepare") return
+  yield* fork(sessionId)
+}
+
+function* runDigestTurn(
+  memoryContexts: Ref.Ref<Map<string, string>>,
+  sessionId: string,
+  messages: ReadonlyArray<Message>,
+  settings: DigestSettings,
+  connectionId: ProviderConnectionId,
+  modelId: ProviderModelId,
+  collected: Ref.Ref<readonly string[]>,
+  adapter: AgentTurnDriverShape,
+  fail: (sessionId: string, reason: string) => Effect.Effect<void>,
+  through: string,
+  setState: (sessionId: string, fn: (prev: SessionContext) => SessionContext) => Effect.Effect<void>
+) {
+  const memoryContext = (yield* Ref.get(memoryContexts)).get(sessionId)
+  const compactionPrompt = [
+    digestPrompt(renderTranscript(messages)),
+    ...(memoryContext === undefined
+      ? []
+      : ["Relevant accepted memory for consolidation context only:", memoryContext])
+  ].join("\n\n")
+  const spec: AgentTurnSpec = {
+    sessionId: settings.session.id,
+    chatId: settings.chat.id,
+    connectionId,
+    modelId,
+    role: "context-digest",
+    priorMessages: [],
+    piSessionId: null,
+    seed: null,
+    targetCapabilities: {
+      versions: CURRENT_RUNTIME_CONTRACTS,
+      toolIds: [],
+      resourceIds: [],
+      targetId: settings.session.environmentId ?? "desktop"
+    },
+    cwd: settings.session.worktreePath ?? "",
+    prompt: compactionPrompt,
+    images: [],
+    mode: "read-only"
+  }
+
+  const ctx: AgentContext = {
+    emit: (event: StreamEvent) =>
+      // Main-thread text ONLY. If the digest run spawned a sub-agent, its
+      // chatter would interleave into the reply we parse — and any JSON it
+      // happened to print would win the "last block" race in `parseDigest`,
+      // silently replacing the real summary with a fragment.
+      event._tag === "Assistant" && event.agentId === undefined
+        ? Ref.update(collected, (acc) => [...acc, event.text])
+        : Effect.void,
+    canUseTool: () => Effect.succeed("deny" as const),
+    askQuestion: () => Effect.succeed([]),
+    // Deliberately dropped. This is a nested run against a session that
+    // already has a real agent; registering a stop handle here would
+    // overwrite that agent's, aiming the dock's Stop button at the wrong
+    // process.
+    registerBackgroundStop: () => Effect.void
+  }
+
+  const ok = yield* adapter.run(`digest_${sessionId}`, spec, ctx).pipe(
+    Effect.timeout(DIGEST_TIMEOUT),
+    Effect.as(true),
+    Effect.orElseSucceed(() => false)
+  )
+  if (!ok) return yield* fail(sessionId, "run errored or timed out")
+
+  // Concatenate with "", NOT "\n". `collected` holds one entry per
+  // streamed text DELTA (see `emit` above), and a harness streams its
+  // reply token by token — so joining with "\n" injects a newline at
+  // every fragment boundary. When a boundary lands inside a JSON string
+  // value (near-certain with token-level streaming) that newline becomes
+  // a raw newline inside the string, which is invalid JSON: `parseDigest`
+  // then throws and the digest fails EVERY time. The bug was invisible in
+  // tests because the scripted adapter emits the whole reply as a single
+  // event, where the separator never bites. Deltas are contiguous, so ""
+  // reproduces the harness's literal output (its own newlines included).
+  const raw = (yield* Ref.get(collected)).join("")
+  // An empty reply and an unparseable one are different failures: the
+  // first means the run produced no main-thread text at all (deny-all
+  // gate, a harness that only emitted tool chatter), the second means it
+  // spoke but not in the shape we asked for.
+  if (raw.trim().length === 0) return yield* fail(sessionId, "empty digest reply")
+  const builtAt = yield* Effect.sync(() => new Date().toISOString())
+  const digest = parseDigest(raw, through, builtAt)
+  // A null digest is a real answer, not an error to smooth over: we simply
+  // don't compact, and the session behaves exactly as it does today.
+  if (digest === null) return yield* fail(sessionId, "digest reply did not parse")
+
+  yield* setState(sessionId, (s) => ({
+    ...s,
+    status: "ready",
+    digest,
+    failures: 0
+  }))
+}
+
+interface DigestSettings {
+  readonly session: Session
+  readonly chat: Session["chats"][number]
+  readonly ownerId: string
+  readonly auto: boolean
+  readonly budget: number
+  readonly window: number | null
+}

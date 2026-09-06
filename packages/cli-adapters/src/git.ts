@@ -437,15 +437,15 @@ export class GitService extends Effect.Service<GitService>()(
           return worktreePath
         })
 
-      /**
-       * Reclaim a leftover worktree directory at `worktreePath` before adding a
-       * new one there — an earlier attempt may have created the worktree but
-       * failed before persisting a session, orphaning the directory. Unregister
-       * it (`git worktree remove --force` + `prune`) and delete any remainder.
-       * All best-effort: a clean path is a no-op. The caller is responsible for
-       * not calling this on a path a live session still owns.
-       */
-      const reclaimStaleWorktree = (
+    /**
+     * Reclaim a leftover worktree directory at `worktreePath` before adding a
+     * new one there — an earlier attempt may have created the worktree but
+     * failed before persisting a session, orphaning the directory. Unregister
+     * it (`git worktree remove --force` + `prune`) and delete any remainder.
+     * All best-effort: a clean path is a no-op. The caller is responsible for
+     * not calling this on a path a live session still owns.
+     */
+    const reclaimStaleWorktree = (
         repoPath: string,
         worktreePath: string
       ): Effect.Effect<void, never, FileSystem.FileSystem | CommandExecutor.CommandExecutor> =>
@@ -458,15 +458,14 @@ export class GitService extends Effect.Service<GitService>()(
           yield* fs.remove(worktreePath, { recursive: true }).pipe(Effect.ignore)
         })
 
-
-      /**
-       * Best-effort refresh of `baseBranch` from origin so a new worktree forks
-       * from the up-to-date remote tip rather than a stale local ref. MUST NOT
-       * fail creation: offline, no `origin`, or a local-only base branch all fold
-       * to a no-op (the caller then forks from the local ref). Single-branch,
-       * `--no-tags` to keep the cost bounded on large repos.
-       */
-      const fetchBase = (
+    /**
+     * Best-effort refresh of `baseBranch` from origin so a new worktree forks
+     * from the up-to-date remote tip rather than a stale local ref. MUST NOT
+     * fail creation: offline, no `origin`, or a local-only base branch all fold
+     * to a no-op (the caller then forks from the local ref). Single-branch,
+     * `--no-tags` to keep the cost bounded on large repos.
+     */
+    const fetchBase = (
         repoPath: string,
         baseBranch: string
       ): Effect.Effect<boolean, never, CommandExecutor.CommandExecutor> =>
@@ -475,13 +474,13 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.orElseSucceed(() => false)
         )
 
-      /**
-       * The start-point to fork the session branch from: the fresh
-       * remote-tracking `origin/<baseBranch>` when it exists, else the local
-       * `baseBranch`. `gitLine` folds a missing ref (rev-parse exits non-zero) to
-       * null, so a local-only base or a repo without `origin` falls back cleanly.
-       */
-      const resolveStartPoint = (
+    /**
+     * The start-point to fork the session branch from: the fresh
+     * remote-tracking `origin/<baseBranch>` when it exists, else the local
+     * `baseBranch`. `gitLine` folds a missing ref (rev-parse exits non-zero) to
+     * null, so a local-only base or a repo without `origin` falls back cleanly.
+     */
+    const resolveStartPoint = (
         repoPath: string,
         baseBranch: string,
         fetched: boolean
@@ -492,12 +491,12 @@ export class GitService extends Effect.Service<GitService>()(
             )
           : Effect.succeed(baseBranch)
 
-      /**
-       * Add a worktree with a DETACHED HEAD at the fresh base tip (no new
-       * branch). Used for every fresh isolated task awaiting semantic metadata
-       * and as the landing pad for a "session from PR" flow.
-       */
-      const createDetachedWorktree = (
+    /**
+     * Add a worktree with a DETACHED HEAD at the fresh base tip (no new
+     * branch). Used for every fresh isolated task awaiting semantic metadata
+     * and as the landing pad for a "session from PR" flow.
+     */
+    const createDetachedWorktree = (
         input: CreateWorktreeInput
       ): Effect.Effect<Worktree, GitError, GitEnv> =>
         Effect.gen(function* () {
@@ -526,27 +525,27 @@ export class GitService extends Effect.Service<GitService>()(
           }
         })
 
-      /**
-       * Switch the repository's primary checkout to an existing local branch.
-       *
-       * Direct sessions deliberately use the checkout the developer already
-       * owns: no fetch, task branch, or linked worktree is created here.
-       */
-      const switchBranch = (
+    /**
+     * Switch the repository's primary checkout to an existing local branch.
+     *
+     * Direct sessions deliberately use the checkout the developer already
+     * owns: no fetch, task branch, or linked worktree is created here.
+     */
+    const switchBranch = (
         repoPath: string,
         branch: string
       ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
         runGit(repoPath, ["switch", branch]).pipe(Effect.as(branch))
 
-      /**
-       * Resolve aliases to one physical repository identity.
-       *
-       * `realPath` collapses symlinks, `..`, and filesystem case aliases while
-       * Git's common directory collapses linked-worktree paths back to the same
-       * repository. Direct-session exclusion is keyed by `commonDir`, not by
-       * whichever spelling a caller happened to choose.
-       */
-      const repositoryIdentity = (
+    /**
+     * Resolve aliases to one physical repository identity.
+     *
+     * `realPath` collapses symlinks, `..`, and filesystem case aliases while
+     * Git's common directory collapses linked-worktree paths back to the same
+     * repository. Direct-session exclusion is keyed by `commonDir`, not by
+     * whichever spelling a caller happened to choose.
+     */
+    const repositoryIdentity = (
         repoPath: string
       ): Effect.Effect<
         RepositoryIdentity,
@@ -579,12 +578,12 @@ export class GitService extends Effect.Service<GitService>()(
           return { repoPath: canonicalRepo, commonDir }
         })
 
-      /**
-       * Keep commits made on a detached session reachable before its worktree is
-       * removed. A detached HEAD already contained by any local or remote ref is
-       * safe; otherwise create a collision-safe semantic recovery branch at HEAD.
-       */
-      const preserveDetachedHead = (
+    /**
+     * Keep commits made on a detached session reachable before its worktree is
+     * removed. A detached HEAD already contained by any local or remote ref is
+     * safe; otherwise create a collision-safe semantic recovery branch at HEAD.
+     */
+    const preserveDetachedHead = (
         cwd: string,
         slug: string
       ): Effect.Effect<string | null, GitError, CommandExecutor.CommandExecutor> =>
@@ -668,12 +667,12 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.flatMap((sha) => sha ? Effect.succeed(sha) : Effect.fail(new GitError({ message: "Git did not return the new commit SHA." })))
         )
 
-      /**
-       * Push with the credentials already configured on the execution device.
-       * This is intentionally non-interactive and never accepts a brokered
-       * desktop token; remote environments own their Git credential boundary.
-       */
-      const pushConfigured = (cwd: string, branch: string) =>
+    /**
+     * Push with the credentials already configured on the execution device.
+     * This is intentionally non-interactive and never accepts a brokered
+     * desktop token; remote environments own their Git credential boundary.
+     */
+    const pushConfigured = (cwd: string, branch: string) =>
         runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
           Effect.zipRight(
             runGitWithEnv(
@@ -688,13 +687,13 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.asVoid
         )
 
-      /**
-       * Push through an API-derived GitHub HTTPS URL without consulting the
-       * configured origin/push URL. The token is brokered to askpass over an
-       * ephemeral IPC socket, so it never enters argv, environment,
-       * process listings, git config, remotes, logs, or a file.
-       */
-      const pushWithInstallationToken = (
+    /**
+     * Push through an API-derived GitHub HTTPS URL without consulting the
+     * configured origin/push URL. The token is brokered to askpass over an
+     * ephemeral IPC socket, so it never enters argv, environment,
+     * process listings, git config, remotes, logs, or a file.
+     */
+    const pushWithInstallationToken = (
         cwd: string,
         branch: string,
         repositoryFullName: string,
@@ -736,27 +735,27 @@ export class GitService extends Effect.Service<GitService>()(
         ).pipe(Effect.asVoid)
       }
 
-      /**
-       * Check out an existing local `branch` into the worktree at `cwd`, even
-       * when that branch is already checked out in ANOTHER SESSION's worktree.
-       * `--ignore-other-worktrees` bypasses git's safeguard so a PR whose branch
-       * you already have checked out locally can still be opened as a session —
-       * the two worktrees then share the branch ref.
-       *
-       * REFUSES when the holder is the repo's MAIN working tree. Sharing a ref
-       * with the developer's own checkout is not a milder version of the same
-       * trade-off, it is a different one: every commit the agent lands moves the
-       * branch under the developer's feet, with no indication in either place
-       * that it happened. The user-facing "share checked-out branches" lever
-       * opts into sharing with other SESSIONS; it was never a request to have an
-       * agent write into the checkout you are standing in.
-       *
-       * The caller (`createFromPr`) already treats a failure here as "this PR
-       * cannot be opened as a session", which is the correct outcome — the fix
-       * is to check the PR out in your main repo yourself, or move it off the
-       * shared branch.
-       */
-      const checkoutBranch = (
+    /**
+     * Check out an existing local `branch` into the worktree at `cwd`, even
+     * when that branch is already checked out in ANOTHER SESSION's worktree.
+     * `--ignore-other-worktrees` bypasses git's safeguard so a PR whose branch
+     * you already have checked out locally can still be opened as a session —
+     * the two worktrees then share the branch ref.
+     *
+     * REFUSES when the holder is the repo's MAIN working tree. Sharing a ref
+     * with the developer's own checkout is not a milder version of the same
+     * trade-off, it is a different one: every commit the agent lands moves the
+     * branch under the developer's feet, with no indication in either place
+     * that it happened. The user-facing "share checked-out branches" lever
+     * opts into sharing with other SESSIONS; it was never a request to have an
+     * agent write into the checkout you are standing in.
+     *
+     * The caller (`createFromPr`) already treats a failure here as "this PR
+     * cannot be opened as a session", which is the correct outcome — the fix
+     * is to check the PR out in your main repo yourself, or move it off the
+     * shared branch.
+     */
+    const checkoutBranch = (
         cwd: string,
         branch: string
       ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
@@ -776,23 +775,186 @@ export class GitService extends Effect.Service<GitService>()(
           yield* runGit(cwd, ["checkout", "--ignore-other-worktrees", branch])
         })
 
-      /**
-       * Fetch and check out an API-resolved pull-request head with ordinary git.
-       *
-       * The remote is keyed by the immutable repository id, so renamed forks do
-       * not accumulate aliases and two forks with the same branch name cannot be
-       * conflated. A normal checkout preserves git's other-worktree safeguard;
-       * the explicit sharing preference uses `checkoutBranch`, including its
-       * refusal to share a ref with the developer's main working tree.
-       */
-      const checkoutPullRequestHead = (
+    /**
+     * Fetch and check out an API-resolved pull-request head with ordinary git.
+     *
+     * The remote is keyed by the immutable repository id, so renamed forks do
+     * not accumulate aliases and two forks with the same branch name cannot be
+     * conflated. A normal checkout preserves git's other-worktree safeguard;
+     * the explicit sharing preference uses `checkoutBranch`, including its
+     * refusal to share a ref with the developer's main working tree.
+     */
+    const checkoutPullRequestHead = (
         cwd: string,
         head: GitHubPullRequestHead,
         allowSharedCheckout = false
       ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
         Effect.gen(function* () {
           const safeId = head.repositoryId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 40)
-          const remoteName = `jingler-pr-${safeId || "head"}`
+        return yield* checkoutFetchedPullRequest(
+          safeId,
+          cwd,
+          head,
+          allowSharedCheckout,
+          checkoutBranch
+        )
+      })
+
+    /**
+     * Remove the worktree at `worktreePath` (deleting a session). Resolves the
+     * owning repo from the worktree list — `git worktree remove` must run from
+     * the main working tree, not from inside the worktree being removed — then
+     * `--force`s the removal. Best-effort: a missing/dirty worktree is ignored.
+     */
+    const removeWorktreeAt = (
+      worktreePath: string,
+      /**
+       * The origin repo, when the caller knows it.
+       *
+       * Only needed for the case this function could not previously handle at
+       * all: the worktree DIRECTORY is already gone (deleted by hand, or by a
+       * cleanup that did not tell git). Locating the main tree normally means
+       * asking git from inside the worktree, which a missing directory makes
+       * impossible — so the old code silently did nothing and left the
+       * registration behind forever.
+       */
+      repoPath?: string
+    ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
+      Effect.gen(function* () {
+        // The first `worktree <path>` line of the porcelain list is the main tree.
+        // Returns null when the directory is gone — git cannot run there.
+        const listRaw = yield* runString(
+          "git",
+          "-C",
+          worktreePath,
+          "worktree",
+          "list",
+          "--porcelain"
+        )
+        const discovered =
+          listRaw
+            ?.split("\n")[0]
+            ?.replace(/^worktree\s+/, "")
+            .trim() ?? null
+        const mainPath = discovered !== worktreePath ? discovered : null
+        if (mainPath) {
+          yield* runGit(mainPath, ["worktree", "remove", "--force", worktreePath]).pipe(
+            Effect.ignore
+          )
+        }
+        // Prune ONLY when the directory was already gone.
+        //
+        // `worktree remove` handles the normal case completely, and prune is
+        // not scoped to one worktree: it drops the registration of EVERY
+        // worktree of the repo whose directory is not currently present. Run
+        // unconditionally that reaches beyond this session — a developer's own
+        // worktree of the same repo on an unmounted volume would be
+        // unregistered by deleting an unrelated session, and orphaned when the
+        // volume came back.
+        //
+        // When `mainPath` is null the directory is gone, `worktree remove`
+        // cannot run at all, and prune is the only thing that clears the
+        // registration. That is the case worth its blast radius, because a
+        // vanished directory is exactly what prune is defined to collect.
+        if (mainPath === null && repoPath) {
+          yield* runGit(repoPath, ["worktree", "prune"]).pipe(Effect.ignore)
+        }
+      })
+
+    /**
+     * The commits landed at `cwd` since `sinceSha`, OLDEST FIRST, each with the
+     * files it touched. Feeds `resolveFindings`, which credits the first commit
+     * touching a finding's file with fixing it — so the order is contractual,
+     * hence the explicit `--reverse`.
+     *
+     * Folds to `[]` rather than failing on ANY git error, and the common error
+     * here is not exotic: `sinceSha` is the PR head the review ran against, and
+     * a force-push or a fresh clone can leave that object absent from this
+     * worktree. There is nothing to do about that but decline to attribute —
+     * an unresolved finding is the safe direction, a crashed review pane is not.
+     *
+     * Parsing: `%H<US>%s` marks a commit header (US = 0x1f, which cannot appear
+     * in a subject), and `--name-only` lists that commit's paths beneath it. A
+     * merge commit lists no paths under this format and simply contributes
+     * nothing, which is correct — a merge fixes nothing on its own.
+     */
+    const commitsSince = (
+      cwd: string,
+      sinceSha: string
+    ): Effect.Effect<ReadonlyArray<ResolvingCommit>, never, CommandExecutor.CommandExecutor> =>
+      runString(
+        "git",
+        "-C",
+        cwd,
+        "log",
+        `${sinceSha}..HEAD`,
+        "--reverse",
+        "--name-only",
+        "--pretty=format:%H\x1f%s"
+      ).pipe(
+        Effect.map((out) => {
+          if (out === null) return []
+          const commits: Array<{
+            sha: string
+            subject: string
+            files: Array<string>
+          }> = []
+          for (const line of out.split("\n")) {
+            const sep = line.indexOf("\x1f")
+            if (sep !== -1) {
+              commits.push({
+                sha: line.slice(0, sep),
+                subject: line.slice(sep + 1).trim(),
+                files: []
+              })
+              continue
+            }
+            const path = line.trim()
+            // A path before any header cannot be attributed to a commit; drop it
+            // rather than guessing (this shouldn't happen, but the parse must not
+            // reach into `commits[-1]`).
+            if (path.length > 0 && commits.length > 0) commits[commits.length - 1]!.files.push(path)
+          }
+          return commits
+        })
+      )
+
+    return {
+      worktreePathFor,
+      createDetachedWorktree,
+      switchBranch,
+      repositoryIdentity,
+      branchAt,
+      createTaskBranch,
+      preserveDetachedHead,
+      publishInspection,
+      stageAll,
+      hasStagedChanges,
+      remoteUrl,
+      revision,
+      commit,
+      pushConfigured,
+      pushWithInstallationToken,
+      cloneWithInstallationToken,
+      checkoutBranch,
+      checkoutPullRequestHead,
+      commitsSince,
+      removeWorktreeAt
+    }
+  }
+}) {}
+
+function* checkoutFetchedPullRequest(
+  safeId: string,
+  cwd: string,
+  head: GitHubPullRequestHead,
+  allowSharedCheckout: boolean,
+  checkoutBranch: (
+    cwd: string,
+    branch: string
+  ) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
+) {
+  const remoteName = `jingler-pr-${safeId || "head"}`
           const originUrl = yield* runString("git", "-C", cwd, "remote", "get-url", "origin")
           const fetchUrl = originUrl?.startsWith("git@") && head.sshUrl ? head.sshUrl : head.cloneUrl
           const currentUrl = yield* runString("git", "-C", cwd, "remote", "get-url", remoteName)
@@ -844,141 +1006,4 @@ export class GitService extends Effect.Service<GitService>()(
           yield* runGit(cwd, ["config", `branch.${head.ref}.remote`, remoteName])
           yield* runGit(cwd, ["config", `branch.${head.ref}.merge`, `refs/heads/${head.ref}`])
           return head.ref
-        })
-
-      /**
-       * Remove the worktree at `worktreePath` (deleting a session). Resolves the
-       * owning repo from the worktree list — `git worktree remove` must run from
-       * the main working tree, not from inside the worktree being removed — then
-       * `--force`s the removal. Best-effort: a missing/dirty worktree is ignored.
-       */
-      const removeWorktreeAt = (
-        worktreePath: string,
-        /**
-         * The origin repo, when the caller knows it.
-         *
-         * Only needed for the case this function could not previously handle at
-         * all: the worktree DIRECTORY is already gone (deleted by hand, or by a
-         * cleanup that did not tell git). Locating the main tree normally means
-         * asking git from inside the worktree, which a missing directory makes
-         * impossible — so the old code silently did nothing and left the
-         * registration behind forever.
-         */
-        repoPath?: string
-      ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
-        Effect.gen(function* () {
-          // The first `worktree <path>` line of the porcelain list is the main tree.
-          // Returns null when the directory is gone — git cannot run there.
-          const listRaw = yield* runString(
-            "git",
-            "-C",
-            worktreePath,
-            "worktree",
-            "list",
-            "--porcelain"
-          )
-          const discovered = listRaw?.split("\n")[0]?.replace(/^worktree\s+/, "").trim() ?? null
-          const mainPath = discovered !== worktreePath ? discovered : null
-          if (mainPath) {
-            yield* runGit(mainPath, ["worktree", "remove", "--force", worktreePath]).pipe(
-              Effect.ignore
-            )
-          }
-          // Prune ONLY when the directory was already gone.
-          //
-          // `worktree remove` handles the normal case completely, and prune is
-          // not scoped to one worktree: it drops the registration of EVERY
-          // worktree of the repo whose directory is not currently present. Run
-          // unconditionally that reaches beyond this session — a developer's own
-          // worktree of the same repo on an unmounted volume would be
-          // unregistered by deleting an unrelated session, and orphaned when the
-          // volume came back.
-          //
-          // When `mainPath` is null the directory is gone, `worktree remove`
-          // cannot run at all, and prune is the only thing that clears the
-          // registration. That is the case worth its blast radius, because a
-          // vanished directory is exactly what prune is defined to collect.
-          if (mainPath === null && repoPath) {
-            yield* runGit(repoPath, ["worktree", "prune"]).pipe(Effect.ignore)
-          }
-        })
-
-      /**
-       * The commits landed at `cwd` since `sinceSha`, OLDEST FIRST, each with the
-       * files it touched. Feeds `resolveFindings`, which credits the first commit
-       * touching a finding's file with fixing it — so the order is contractual,
-       * hence the explicit `--reverse`.
-       *
-       * Folds to `[]` rather than failing on ANY git error, and the common error
-       * here is not exotic: `sinceSha` is the PR head the review ran against, and
-       * a force-push or a fresh clone can leave that object absent from this
-       * worktree. There is nothing to do about that but decline to attribute —
-       * an unresolved finding is the safe direction, a crashed review pane is not.
-       *
-       * Parsing: `%H<US>%s` marks a commit header (US = 0x1f, which cannot appear
-       * in a subject), and `--name-only` lists that commit's paths beneath it. A
-       * merge commit lists no paths under this format and simply contributes
-       * nothing, which is correct — a merge fixes nothing on its own.
-       */
-      const commitsSince = (
-        cwd: string,
-        sinceSha: string
-      ): Effect.Effect<ReadonlyArray<ResolvingCommit>, never, CommandExecutor.CommandExecutor> =>
-        runString(
-          "git",
-          "-C",
-          cwd,
-          "log",
-          `${sinceSha}..HEAD`,
-          "--reverse",
-          "--name-only",
-          "--pretty=format:%H\x1f%s"
-        ).pipe(
-          Effect.map((out) => {
-            if (out === null) return []
-            const commits: Array<{ sha: string; subject: string; files: Array<string> }> = []
-            for (const line of out.split("\n")) {
-              const sep = line.indexOf("\x1f")
-              if (sep !== -1) {
-                commits.push({
-                  sha: line.slice(0, sep),
-                  subject: line.slice(sep + 1).trim(),
-                  files: []
-                })
-                continue
-              }
-              const path = line.trim()
-              // A path before any header cannot be attributed to a commit; drop it
-              // rather than guessing (this shouldn't happen, but the parse must not
-              // reach into `commits[-1]`).
-              if (path.length > 0 && commits.length > 0) commits[commits.length - 1]!.files.push(path)
-            }
-            return commits
-          })
-        )
-
-      return {
-        worktreePathFor,
-        createDetachedWorktree,
-        switchBranch,
-        repositoryIdentity,
-        branchAt,
-        createTaskBranch,
-        preserveDetachedHead,
-        publishInspection,
-        stageAll,
-        hasStagedChanges,
-        remoteUrl,
-        revision,
-        commit,
-        pushConfigured,
-        pushWithInstallationToken,
-        cloneWithInstallationToken,
-        checkoutBranch,
-        checkoutPullRequestHead,
-        commitsSince,
-        removeWorktreeAt
-      }
-    }
-  }
-) {}
+        }

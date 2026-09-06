@@ -23,7 +23,13 @@
       },
 
       "a11y": "warn",
-      "complexity": "warn",
+      "complexity": {
+        "recommended": true,
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": { "maxAllowedComplexity": 15 }
+        }
+      },
       "performance": "warn",
       "security": "warn",
 

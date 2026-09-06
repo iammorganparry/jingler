@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type {
   AgentRosterEntry,
+  ContextDigest,
   ApprovalGate,
   Attachment,
   ExplanationPayload,
@@ -68,7 +69,9 @@ import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
 import { branchAt, ensureWorktreeLinked } from "./git.js"
-import { BrowserControlMcpService } from "./browser-control-mcp-service.js"
+import { BrowserControlMcpService,
+  type BrowserControlMcpAttachment
+} from "./browser-control-mcp-service.js"
 import { MemoryService, MemoryServiceLive } from "./memory.js"
 import {
   memoryRecallQuery,
@@ -459,30 +462,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.suspend(() =>
         Effect.gen(function* () {
           const adapter = yield* AgentTurnDriver
-          const session: Session | null = yield* getSessionOrNull(sessionId)
-          const chat =
-            session?.chats.find((candidate) => candidate.id === chatId) ??
-            (chatId === sessionId
-              ? session?.chats.find(
-                  (candidate) => candidate.id === session.activeChatId
-                ) ?? null
-              : null)
-          if (session === null || chat === null) {
-            return yield* Effect.fail(
-              new AgentRunError({
-                kind: "chat",
-                message: "The selected chat no longer exists."
-              })
-            )
-          }
-          if (chat.connectionId === undefined || chat.modelId === undefined) {
-            return yield* Effect.fail(
-              new AgentRunError({
-                kind: session.providerId ?? "provider",
-                message: "Choose a certified provider connection before continuing."
-              })
-            )
-          }
+          const { session, chat, connectionId, modelId } = yield* resolveTurnChat(sessionId, chatId)
           yield* TranscriptStore.adoptLegacy(sessionId, chatId)
 
           const sessionMode =
@@ -520,52 +500,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // the worktree sits perfectly intact one name over.
           //
           // Costs one `stat` on the overwhelmingly common healthy path.
-          const storedWorktree = session?.worktreePath ?? ""
-          const healPaths = yield* AppPaths
-          const worktreePath = session
-            ? workspaceModeOf(session) === "direct"
-              ? storedWorktree
-              : yield* healedWorktreePath(
-                  storedWorktree,
-                  session.repo,
-                  healPaths.worktreesDir
-                )
-            : storedWorktree
-          if (worktreePath !== storedWorktree) {
-            yield* SessionStore.setWorktreePath(sessionId, worktreePath).pipe(
-              Effect.ignore
-            )
-          }
-          // Re-point the worktree at its repo if the repo directory has moved
-          // since the worktree was forked. A worktree's link to its repo is an
-          // ABSOLUTE path, so renaming the repo leaves the directory intact but
-          // every git command inside it failing — the agent would run, edit
-          // files, and only fail at diff/commit time with "not a git
-          // repository". Memoised per worktree, so this is one `rev-parse` on
-          // the first turn and nothing after.
-          if (
-            worktreePath.length > 0 &&
-            session?.repoPath &&
-            workspaceModeOf(session) === "worktree"
-          ) {
-            yield* ensureWorktreeLinked(session.repoPath, worktreePath)
-          }
-          // A direct session shares the repository's primary checkout with the
-          // developer. Refuse every turn after that checkout moves: continuing
-          // would run the agent on a branch different from the one recorded in
-          // the session, while plans and review state still name the old branch.
-          if (workspaceModeOf(session) === "direct") {
-            const liveBranch = yield* branchAt(worktreePath)
-            if (liveBranch !== session.branch) {
-              return yield* Effect.fail(
-                new BranchDriftError({
-                  sessionId: session.id,
-                  pinnedBranch: session.branch,
-                  liveBranch
-                })
-              )
-            }
-          }
+          const worktreePath = yield* resolveTurnWorktree(sessionId, session)
           const mode: PermissionMode = sessionMode
           yield* ContextManager.bindContext(chatId, sessionId)
           /**
@@ -577,36 +512,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * digest; an immediate retry waits here rather than resuming the same
            * full thread. Sub-agents never reach this top-level path.
            */
-          const applied = yield* ContextManager.applyWhenReady(chatId)
-          const digest = applied?.digest ?? null
-          // The WORKING SET at the moment of the swap, straight from the manager.
-          //
-          // Deliberately NOT `session.tokens`: that is the session's lifetime
-          // total (see `Session.contextTokens` in domain.ts) and only ever grows,
-          // which is how the marker came to read "Context compacted from
-          // 49894.2k" — ~49.9M lifetime tokens rendered as a working set. The
-          // persisted `contextTokens` is the fallback for a session whose live
-          // reading has not arrived yet; 0 hides the clause entirely.
-          const compactedFrom =
-            applied === null
-              ? 0
-              : applied.tokensBefore > 0
-                ? applied.tokensBefore
-                : session?.contextTokens ?? 0
-          // Everything that landed after the digest was built is replayed
-          // verbatim, so preparing in the background never races the user.
-          const tail =
-            digest === null
-              ? []
-              : tailAfter(
-                  yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => [])),
-                  digest.throughMessageId
-                )
-
-          // Renamed from `planNote` when the plan-mode protocol note arrived: two
-          // different plan-related prefixes with one name is a trap.
-          const planPointer = null
-          const primer = digest === null ? null : renderPrimer(digest, tail)
+          const { digest, compactedFrom, primer, planPointer } = yield* prepareTurnDigest(
+            session,
+            chatId
+          )
           // ADHD mode rides in the same per-turn prefix as the primer and plan
           // pointer so a Settings change applies immediately. Its own scope makes
           // the format dormant during work and active only for the final summary.
@@ -644,94 +553,37 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // machine-local checkout path; MemoryService redacts and bounds it at
           // the network boundary.
           const memoryConfig = workspaceConfig?.memory ?? MEMORY_CONFIG_DEFAULT
-          const memoryAttempted =
-            memoryConfig.enabled &&
-            memoryConfig.organizationId !== null &&
-            memoryConfig.organizationId.length > 0
-          const memoryAttachment = yield* memoryService.attachment(
-            memoryRecallQuery({
-              operatorText,
-              repo: session.repo,
-              branch: session.branch,
-              recentTurns: recentMemoryRecallTurns(priorMessages)
-            }),
-            `${sessionId}:${chatId}`
-          )
-          yield* ContextManager.rememberMemoryContext(
-            chatId,
-            memoryAttachment?.instructions ?? null
-          )
-          // Operator-configured mcp.json servers are resolved inside the pi
-          // runtime per run (`pi-runtime-live`), not here.
-          const mcp = {
-            memory: null,
-            browser: browserAttachment
-          }
-
-          const baseSpec: AgentTurnSpec = {
+          const { baseSpec, memoryAttachment } = yield* prepareMemoryTurnSpec(
+            memoryConfig,
+            memoryService,
+            operatorText,
+            session,
+            priorMessages,
             sessionId,
             chatId,
-            connectionId: chat.connectionId,
-            modelId: chat.modelId,
-            role:
-              mode === "plan"
-                ? "plan"
-                : activePlanExecutionId
-                  ? "plan-execution"
-                  : "conversation",
-            priorMessages,
-            piSessionId: digest === null ? chat.piSessionId ?? null : null,
-            seed:
-              digest === null &&
-              chat.piSessionId === undefined &&
-              priorMessages.length > 0
-                ? { reason: "migration", messages: priorMessages }
-                : null,
-            targetCapabilities: {
-              versions: CURRENT_RUNTIME_CONTRACTS,
-              toolIds: [],
-              resourceIds: [],
-              targetId: session.environmentId ?? "desktop"
-            },
-            cwd: worktreePath,
-            // A slash command is only expanded by the harness when it is the FIRST
-            // thing in the message. Prefixing a compaction primer or a plan pointer
-            // turned `/babysit-pr …` into prose, and the turn came back instantly
-            // with nothing to say — the empty "CLAUDE" block. When the operator
-            // opens with a command, the context rides along AFTER it instead.
-            prompt: promptText.trim() === "/plannotator-resume-review"
-              ? "/plannotator-resume-review"
-              : composeTurnPrompt(
-                  promptText,
-                  {
-                    primer,
+            browserAttachment,
+            chat,
+            connectionId,
+            modelId,
+            mode,
+            activePlanExecutionId,
+            digest,
+            worktreePath,
+            promptText,
+            primer,
                     planPointer,
                     adhd,
-                    tools: managedToolsNote(),
-                    research: researchFirstNote(),
-                    ask,
-                    planProtocol
-                  },
-                  { leadWithText: leadsWithCommand(promptText) }
-                ),
+            ask,
+                    planProtocol,
             images,
-            mode,
-            reasoning: reasoning ?? chat.reasoning ?? null,
-            mcp,
-            memoryAttachmentStatus: !memoryAttempted
-              ? "disabled"
-              : memoryAttachment === null
-                ? "failed"
-                : "available"
-          }
+            reasoning
+          )
           const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread
           // whose context we have already decided to abandon.
-          if (digest !== null) {
-            yield* SessionStore.clearPiSessionId(sessionId, chatId).pipe(Effect.ignore)
-          }
+          yield* clearCompactedSessionId(sessionId, chatId, digest)
 
           // Capture the persistence services so `emit`/`run` handed to the
           // adapter have no residual requirements (R = never).
@@ -793,13 +645,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const replyGate = yield* Effect.makeSemaphore(1)
           const turnMutation = yield* Effect.makeSemaphore(1)
           const out = yield* Mailbox.make<StreamEvent>()
-          if (externalInstruction !== undefined) {
-            yield* out.offer({
-              _tag: "ExternalInstructionAccepted",
-              identity: externalInstruction,
-              duplicate: false
-            })
-          }
+          yield* acknowledgeExternalInstruction(out, externalInstruction)
 
           /**
            * ── Instrumentation: turns that end without settling ────────────────
@@ -842,132 +688,67 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Codex can surface one app-server failure as both `turn.failed`
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
-              if (isTerminal(event)) {
-                if (yield* Ref.get(sawTerminal)) return
-                yield* Ref.set(sawTerminal, true)
-                yield* Deferred.succeed(turnSettled, void 0)
-              }
-              // Tracked before the early returns below, so background-task and
-              // sub-agent events still count toward "what did this run actually
-              // emit" — a run that produced only sub-agent chatter and then
-              // vanished is a different failure from one that emitted nothing.
-              yield* Ref.update(eventCount, (n) => n + 1)
+              if (!(yield* claimTurnTerminal(event, sawTerminal, turnSettled))) return
+                  // Tracked before the early returns below, so background-task and
+                  // sub-agent events still count toward "what did this run actually
+                  // emit" — a run that produced only sub-agent chatter and then
+                  // vanished is a different failure from one that emitted nothing.
+                  yield* Ref.update(eventCount, (n) => n + 1)
               yield* Ref.set(lastEvent, event._tag)
-              if (event._tag === "Assistant") {
-                const waiter = yield* Ref.get(steeredReply)
-                if (waiter !== null) {
-                  yield* appendSteeredReply(waiter, event.text)
-                }
-              }
-              // Where this event belongs, and why, lives in `turn-events.ts`.
-              const route = routeOf(event)
-              if (route === "background-task") {
-                // Into the session's task registry — it outlives this turn — and on
-                // to the renderer so the dock updates live.
-                yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.provide(env), Effect.ignore)
+                  yield* appendTurnAssistantReply(steeredReply, event)
+                  // Where this event belongs, and why, lives in `turn-events.ts`.
+                  const route = routeOf(event)
+              if (route !== "transcript") {
+                    yield* ingestBackgroundTurnEvent(sessionId, chatId, event, route)
                 yield* out.offer(event)
                 return
               }
-              if (route === "subagent" || route === "stream-only") {
-                yield* out.offer(event)
-                return
-              }
-              // A finished turn reports what it used. Accrued here rather than
-              // in the adapters so every harness lands in one place — and so a
-              // harness that reports nothing simply adds zero instead of needing
-              // its own bookkeeping.
-              if (event._tag === "Done") {
-                yield* SessionStore.addUsage(sessionId, {
-                  costUsd: event.costUsd,
-                  tokens: event.tokens
-                }).pipe(Effect.provide(env), Effect.ignore)
-              }
-              const next = applyStreamEvent(yield* Ref.get(acc), event)
+                  // A finished turn reports what it used. Accrued here rather than
+                  // in the adapters so every harness lands in one place — and so a
+                  // harness that reports nothing simply adds zero instead of needing
+                  // its own bookkeeping.
+                  yield* accountTurnUsage(sessionId, event)
+                  const next = applyStreamEvent(yield* Ref.get(acc), event)
               yield* Ref.set(acc, next)
               yield* TranscriptStore.patchLast(chatId, () => next).pipe(Effect.ignore)
-              // Persist the pi session id (carried on Started) so the NEXT
-              // prompt resumes this conversation — even after an app restart wiped
-              // the runtime's in-memory resume map. `event.sessionId` is the
-              // pi session id, not our `sessionId` (the Jingler session key).
-              if (event._tag === "Started" && event.sessionId.length > 0) {
-                yield* SessionStore.setPiSessionId(
+                  // Persist the pi session id (carried on Started) so the NEXT
+                  // prompt resumes this conversation — even after an app restart wiped
+                  // the runtime's in-memory resume map. `event.sessionId` is the
+                  // pi session id, not our `sessionId` (the Jingler session key).
+                  yield* persistTurnSessionId(
                   sessionId,
                   chatId,
-                  event.sessionId
-                ).pipe(Effect.ignore)
-              }
-              // Remember an edit's target path so its ToolEnd can tie back to a step.
-              if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
-                const path = normalizePath(event.target).replace(
-                  `${normalizePath(worktreePath).replace(/\/$/, "")}/`,
-                  ""
-                )
-                yield* Ref.update(touchedFiles, (current) => {
-                  const paths = current.get(chatId) ?? []
-                  return paths.includes(path)
-                    ? current
-                    : new Map(current).set(chatId, [...paths, path].slice(-20))
-                })
-              }
-              // Canonical plan writes must land BEFORE the event is offered.
-              // `Done` makes the renderer leave its invoked stream immediately;
-              // publishing it first lets that cancellation interrupt everything
-              // below the offer, stranding a fully verified document in
-              // `approved`/`executing`.
-              if (event._tag === "Done") {
-                yield* ContextManager.settle(chatId).pipe(Effect.ignore)
-                const assistantText = next.parts
-                  .filter((part) => part._tag === "Text")
-                  .map((part) => part.text)
-                  .join("\n")
-                yield* memoryService.retainSettledTurn({
-                  sessionId,
+                  event)
+                  // Remember an edit's target path so its ToolEnd can tie back to a step.
+                  yield* rememberTurnFile(touchedFiles, chatId, worktreePath, event)
+                  // Canonical plan writes must land BEFORE the event is offered.
+                  // `Done` makes the renderer leave its invoked stream immediately;
+                  // publishing it first lets that cancellation interrupt everything
+                  // below the offer, stranding a fully verified document in
+                  // `approved`/`executing`.
+                  yield* retainCompletedTurn(
+                    memoryService,
+                    sessionId,
                   chatId,
-                  turnId: next.id,
-                  repository: session.repo,
-                  userText: operatorText,
-                  assistantText,
-                  settledAt: new Date().toISOString()
-                }).pipe(Effect.ignore)
-              }
-              yield* out.offer(event)
-              // Hand every context reading to the manager, but only let a SETTLED
-              // turn start a digest.
-              //
-              // Claude and opencode report usage per assistant message, so a turn
-              // that uses tools reports several times before it ends. Summarising
-              // from one of those mid-turn readings would capture a transcript
-              // whose last message is still streaming, and the digest's
-              // `throughMessageId` would then cause the rest of that same turn to
-              // be skipped at swap time — neither summarised nor replayed.
-              //
-              // `Done` is the only point at which the transcript is coherent.
-              if (event._tag === "Usage") {
-                yield* ContextManager.observe(chatId, event.tokens, event.window ?? null).pipe(
-                  Effect.ignore
-                )
-              }
-              // `Done` says WHEN to decide, never WHAT the context is. Its
-              // `tokens` is the run's cumulative spend (see the Claude adapter),
-              // which counts resident context once per tool call — reading it as
-              // occupancy meant a long tool-using turn reported several times the
-              // window size and compacted on every single turn, at a threshold
-              // that moved with the tool count rather than the context. The
-              // manager uses the latest `Usage` reading instead.
-              // A hard context failure has no Done event, so the ordinary settle
-              // path above can never prepare a digest. Force one from the
-              // persisted last-good reading; the next turn can then swap onto
-              // the compacted primer instead of failing against the same thread
-              // forever.
-              if (
-                event._tag === "Failed" &&
-                isContextOverflowFailure(event.message)
-              ) {
-                yield* ContextManager.compactNow(chatId, {
-                  waitForReady: true
-                }).pipe(Effect.ignore)
-              }
-            })).pipe(Effect.provide(env), Effect.asVoid)
+                    session.repo,
+                    operatorText,
+                    next,
+                    event
+                  )
+                  yield* out.offer(event)
+                  // Hand every context reading to the manager, but only let a SETTLED
+                  // turn start a digest.
+                  //
+                  // Claude and opencode report usage per assistant message, so a turn
+                  // that uses tools reports several times before it ends. Summarising
+                  // from one of those mid-turn readings would capture a transcript
+                  // whose last message is still streaming, and the digest's
+                  // `throughMessageId` would then cause the rest of that same turn to
+                  // be skipped at swap time — neither summarised nor replayed.
+                  //
+                  // `Done` is the only point at which the transcript is coherent.
+                  yield* observeTurnContext(chatId, event)
+                })).pipe(Effect.provide(env), Effect.asVoid)
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
@@ -1038,52 +819,18 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }
             | { readonly status: "deferred" | "unsupported" }
           > =>
-            turnMutation.withPermits(1)(Effect.gen(function* () {
-              const handler = yield* Ref.get(turnSteer)
-              if (handler === null) {
-                // No handle is a PHASE, not a verdict: the driver registers it a
-                // beat into the run (on `Started`) and retracts it at teardown,
-                // and some runs — plan execution — never have a channel at all.
-                // `deferred` keeps the message queued for the next boundary or
-                // the turn's end; escalating here would let an early "Send now"
-                // stop a run that was about to become steerable.
-                return { status: "deferred" } as const
-              }
-              const replyWaiter: RunReplyWaiter | null = captureReply
-                ? yield* makeSteeredReplyWaiter
-                : null
-              if (replyWaiter !== null) {
-                yield* Ref.set(steeredReply, replyWaiter)
-              }
-              const steered = yield* invokeSteer(handler, text, images)
-              // `unsupported` passes through: the handler is saying this message
-              // can NEVER land on this run's channel (pi steering is text-only),
-              // and only that status licenses "Send now" to stop and replay.
-              // Timeouts and failures stay `deferred` — they may clear.
-              const outcome =
-                steered === "accepted" || steered === "unsupported"
-                  ? steered
-                  : "deferred"
-              if (outcome !== "accepted") {
-                if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
-                return { status: outcome } as const
-              }
-
-              const at = yield* Effect.sync(() => new Date().toISOString())
-              const settled = settleStreaming(yield* Ref.get(acc))
-              const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images)
-              const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, chat.providerId)
-              yield* Ref.set(acc, assistant)
-              yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
-              yield* TranscriptStore.append(chatId, user)
-              yield* TranscriptStore.append(chatId, assistant)
-              return {
-                status: "accepted",
-                user,
-                assistant,
-                replyWaiter
-              } as const
-            })).pipe(Effect.provide(env))
+            turnMutation.withPermits(1)(
+                steerActiveTurn(
+                  {
+                    turnSteer,
+                    steeredReply,
+                    acc,
+                    nextId,
+                    chatId,
+                    providerId: chat.providerId
+                  }, text, images,
+                  captureReply
+                )).pipe(Effect.provide(env))
 
           yield* Ref.update(active, (m) =>
             new Map(m).set(chatId, {
@@ -1113,9 +860,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // model kept is legible: without it the context meter would simply drop
           // with no explanation, which is how `/compact` behaves today and exactly
           // why it feels like the app lost your history.
-          if (digest !== null) {
-            yield* emit({ _tag: "ContextCompacted", digest, tokensBefore: compactedFrom })
-          }
+          yield* emitCompactedContext(emit, digest, compactedFrom)
 
           const listPeerAgents = (): Effect.Effect<ReadonlyArray<AgentRosterEntry>> =>
             Effect.gen(function* () {
@@ -1181,29 +926,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             registerBackgroundStop,
             registerTurnSteer
           })
-          const guardedRun =
-            session !== null && workspaceModeOf(session) === "direct"
-              ? Effect.raceFirst(
-                  adapterRun,
-                  Effect.forever(
-                    Effect.sleep("250 millis").pipe(
-                      Effect.zipRight(
-                        Effect.gen(function* () {
-                          const liveBranch = yield* branchAt(worktreePath)
-                          if (liveBranch === session.branch) return
-                          return yield* Effect.fail(
-                            new BranchDriftError({
-                              sessionId: session.id,
-                              pinnedBranch: session.branch,
-                              liveBranch
-                            })
-                          )
-                        })
-                      )
-                    )
-                  )
-                )
-              : adapterRun
+          const guardedRun = guardWorkspaceBranch(session, worktreePath, adapterRun)
           const run = guardedRun.pipe(
             // An operator stop arrives as an interruption. Record it as the turn's
             // terminal event so the message settles (and the transcript says why)
@@ -1645,3 +1368,469 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
     } as const
   })
 }) {}
+
+function* prepareMemoryTurnSpec(
+  memoryConfig: {
+    readonly enabled: boolean
+    readonly organizationId: string | null
+  },
+  memoryService: MemoryService,
+  operatorText: string,
+  session: Session,
+  priorMessages: ReadonlyArray<Message>,
+  sessionId: string,
+  chatId: string,
+  browserAttachment: BrowserControlMcpAttachment | null,
+  chat: Session["chats"][number],
+  connectionId: ProviderConnectionId,
+  modelId: ProviderModelId,
+  mode: PermissionMode,
+  activePlanExecutionId: null,
+  digest: ContextDigest | null,
+  worktreePath: string,
+  promptText: string,
+  primer: string | null,
+  planPointer: null,
+  adhd: string | null,
+  ask: string,
+  planProtocol: null,
+  images: readonly {
+    readonly id: string
+    readonly name: string
+    readonly mediaType: string
+    readonly data: string
+  }[],
+  reasoning:
+    | {
+        readonly enabled: boolean
+        readonly effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined
+      }
+    | null
+    | undefined
+) {
+  const memoryAttempted =
+    memoryConfig.enabled &&
+    memoryConfig.organizationId !== null &&
+    memoryConfig.organizationId.length > 0
+  const memoryAttachment = yield* memoryService.attachment(
+    memoryRecallQuery({
+      operatorText,
+      repo: session.repo,
+      branch: session.branch,
+      recentTurns: recentMemoryRecallTurns(priorMessages)
+    }),
+    `${sessionId}:${chatId}`
+  )
+  yield* ContextManager.rememberMemoryContext(chatId, memoryAttachment?.instructions ?? null)
+  // Operator-configured mcp.json servers are resolved inside the pi
+  // runtime per run (`pi-runtime-live`), not here.
+  const mcp = {
+    memory: null,
+    browser: browserAttachment
+  }
+
+  const baseSpec: AgentTurnSpec = {
+    sessionId,
+    chatId,
+    connectionId,
+    modelId,
+    role: mode === "plan" ? "plan" : activePlanExecutionId ? "plan-execution" : "conversation",
+    priorMessages,
+    piSessionId: digest === null ? (chat.piSessionId ?? null) : null,
+    seed:
+      digest === null && chat.piSessionId === undefined && priorMessages.length > 0
+        ? { reason: "migration", messages: priorMessages }
+        : null,
+    targetCapabilities: {
+      versions: CURRENT_RUNTIME_CONTRACTS,
+      toolIds: [],
+      resourceIds: [],
+      targetId: session.environmentId ?? "desktop"
+    },
+    cwd: worktreePath,
+    // A slash command is only expanded by the harness when it is the FIRST
+    // thing in the message. Prefixing a compaction primer or a plan pointer
+    // turned `/babysit-pr …` into prose, and the turn came back instantly
+    // with nothing to say — the empty "CLAUDE" block. When the operator
+    // opens with a command, the context rides along AFTER it instead.
+    prompt:
+      promptText.trim() === "/plannotator-resume-review"
+        ? "/plannotator-resume-review"
+        : composeTurnPrompt(
+            promptText,
+            {
+              primer,
+              planPointer,
+              adhd,
+              tools: managedToolsNote(),
+              research: researchFirstNote(),
+              ask,
+              planProtocol
+            },
+            { leadWithText: leadsWithCommand(promptText) }
+          ),
+    images,
+    mode,
+    reasoning: reasoning ?? chat.reasoning ?? null,
+    mcp,
+    memoryAttachmentStatus: !memoryAttempted
+      ? "disabled"
+      : memoryAttachment === null
+        ? "failed"
+        : "available"
+  }
+  return { baseSpec, memoryAttachment }
+}
+
+const resolveTurnChat = (sessionId: string, chatId: string) =>
+  Effect.gen(function* () {
+    const session: Session | null = yield* SessionStore.get(sessionId).pipe(
+      Effect.orElseSucceed(() => null)
+    )
+    const chat =
+      session?.chats.find((candidate) => candidate.id === chatId) ??
+      (chatId === sessionId
+        ? (session?.chats.find((candidate) => candidate.id === session.activeChatId) ?? null)
+        : null)
+    if (session === null || chat === null) {
+      return yield* Effect.fail(
+        new AgentRunError({
+          kind: "chat",
+          message: "The selected chat no longer exists."
+        })
+      )
+    }
+    if (chat.connectionId === undefined || chat.modelId === undefined) {
+      return yield* Effect.fail(
+        new AgentRunError({
+          kind: session.providerId ?? "provider",
+          message: "Choose a certified provider connection before continuing."
+        })
+      )
+    }
+    return {
+      session,
+      chat,
+      connectionId: chat.connectionId,
+      modelId: chat.modelId
+    }
+  })
+
+const resolveTurnWorktree = (sessionId: string, session: Session) =>
+  Effect.gen(function* () {
+    const storedWorktree = session?.worktreePath ?? ""
+    const healPaths = yield* AppPaths
+    const worktreePath =
+      workspaceModeOf(session) === "direct"
+        ? storedWorktree
+        : yield* healedWorktreePath(storedWorktree, session.repo, healPaths.worktreesDir)
+    if (worktreePath !== storedWorktree) {
+      yield* SessionStore.setWorktreePath(sessionId, worktreePath).pipe(Effect.ignore)
+    }
+    // Re-point the worktree at its repo if the repo directory has moved
+    // since the worktree was forked. A worktree's link to its repo is an
+    // ABSOLUTE path, so renaming the repo leaves the directory intact but
+    // every git command inside it failing — the agent would run, edit
+    // files, and only fail at diff/commit time with "not a git
+    // repository". Memoised per worktree, so this is one `rev-parse` on
+    // the first turn and nothing after.
+    if (worktreePath.length > 0 && session?.repoPath && workspaceModeOf(session) === "worktree") {
+      yield* ensureWorktreeLinked(session.repoPath, worktreePath)
+    }
+    // A direct session shares the repository's primary checkout with the
+    // developer. Refuse every turn after that checkout moves: continuing
+    // would run the agent on a branch different from the one recorded in
+    // the session, while plans and review state still name the old branch.
+    if (workspaceModeOf(session) === "direct") {
+      const liveBranch = yield* branchAt(worktreePath)
+      if (liveBranch !== session.branch) {
+        return yield* Effect.fail(
+          new BranchDriftError({
+            sessionId: session.id,
+            pinnedBranch: session.branch,
+            liveBranch
+          })
+        )
+      }
+    }
+    return worktreePath
+  })
+
+const persistTurnSessionId = (sessionId: string, chatId: string, event: StreamEvent) =>
+  Effect.gen(function* () {
+    if (event._tag === "Started" && event.sessionId.length > 0) {
+      yield* SessionStore.setPiSessionId(sessionId, chatId, event.sessionId).pipe(Effect.ignore)
+    }
+  })
+
+const rememberTurnFile = (
+  touchedFiles: Ref.Ref<Map<string, ReadonlyArray<string>>>,
+  chatId: string,
+  worktreePath: string,
+  event: StreamEvent
+) =>
+  Effect.gen(function* () {
+    if (event._tag === "ToolStart" && isFileMutationTool(event.name) && event.target) {
+      const path = normalizePath(event.target).replace(
+        `${normalizePath(worktreePath).replace(/\/$/, "")}/`,
+        ""
+      )
+      yield* Ref.update(touchedFiles, (current) => {
+        const paths = current.get(chatId) ?? []
+        return paths.includes(path)
+          ? current
+          : new Map(current).set(chatId, [...paths, path].slice(-20))
+      })
+    }
+  })
+
+const observeTurnContext = (chatId: string, event: StreamEvent) =>
+  Effect.gen(function* () {
+    if (event._tag === "Usage") {
+      yield* ContextManager.observe(chatId, event.tokens, event.window ?? null).pipe(Effect.ignore)
+    }
+    // `Done` says WHEN to decide, never WHAT the context is. Its
+    // `tokens` is the run's cumulative spend (see the Claude adapter),
+    // which counts resident context once per tool call — reading it as
+    // occupancy meant a long tool-using turn reported several times the
+    // window size and compacted on every single turn, at a threshold
+    // that moved with the tool count rather than the context. The
+    // manager uses the latest `Usage` reading instead.
+    // A hard context failure has no Done event, so the ordinary settle
+    // path above can never prepare a digest. Force one from the
+    // persisted last-good reading; the next turn can then swap onto
+    // the compacted primer instead of failing against the same thread
+    // forever.
+    if (event._tag === "Failed" && isContextOverflowFailure(event.message)) {
+      yield* ContextManager.compactNow(chatId, {
+        waitForReady: true
+      }).pipe(Effect.ignore)
+    }
+  })
+
+const retainCompletedTurn = (
+  memoryService: MemoryService,
+  sessionId: string,
+  chatId: string,
+  repository: string,
+  operatorText: string,
+  next: Message,
+  event: StreamEvent
+) =>
+  Effect.gen(function* () {
+    if (event._tag === "Done") {
+      yield* ContextManager.settle(chatId).pipe(Effect.ignore)
+      const assistantText = next.parts
+        .filter((part) => part._tag === "Text")
+        .map((part) => part.text)
+        .join("\n")
+      yield* memoryService
+        .retainSettledTurn({
+          sessionId,
+          chatId,
+          turnId: next.id,
+          repository,
+          userText: operatorText,
+          assistantText,
+          settledAt: new Date().toISOString()
+        })
+        .pipe(Effect.ignore)
+    }
+  })
+
+interface ActiveTurnSteering {
+  readonly turnSteer: Ref.Ref<SteerTurn | null>
+  readonly steeredReply: Ref.Ref<RunReplyWaiter | null>
+  readonly acc: Ref.Ref<Message>
+  readonly nextId: Effect.Effect<number>
+  readonly chatId: string
+  readonly providerId: Session["chats"][number]["providerId"]
+}
+
+const steerActiveTurn = (
+  state: ActiveTurnSteering,
+  text: string,
+  images: ReadonlyArray<Attachment>,
+  captureReply: boolean
+) => {
+  const { turnSteer, steeredReply, acc, nextId, chatId, providerId } = state
+  return Effect.gen(function* () {
+    const handler = yield* Ref.get(turnSteer)
+    if (handler === null) {
+      // No handle is a PHASE, not a verdict: the driver registers it a
+      // beat into the run (on `Started`) and retracts it at teardown,
+      // and some runs — plan execution — never have a channel at all.
+      // `deferred` keeps the message queued for the next boundary or
+      // the turn's end; escalating here would let an early "Send now"
+      // stop a run that was about to become steerable.
+      return { status: "deferred" } as const
+    }
+    const replyWaiter: RunReplyWaiter | null = captureReply ? yield* makeSteeredReplyWaiter : null
+    if (replyWaiter !== null) {
+      yield* Ref.set(steeredReply, replyWaiter)
+    }
+    const steered = yield* invokeSteer(handler, text, images)
+    // `unsupported` passes through: the handler is saying this message
+    // can NEVER land on this run's channel (pi steering is text-only),
+    // and only that status licenses "Send now" to stop and replay.
+    // Timeouts and failures stay `deferred` — they may clear.
+    const outcome = steered === "accepted" || steered === "unsupported" ? steered : "deferred"
+    if (outcome !== "accepted") {
+      if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
+      return { status: outcome } as const
+    }
+
+    const at = yield* Effect.sync(() => new Date().toISOString())
+    const settled = settleStreaming(yield* Ref.get(acc))
+    const user = userMessage(`u_${chatId}_${yield* nextId}`, text, at, images)
+    const assistant = assistantMessage(`a_${chatId}_${yield* nextId}`, at, providerId)
+    yield* Ref.set(acc, assistant)
+    yield* TranscriptStore.patchLast(chatId, () => settled).pipe(Effect.ignore)
+    yield* TranscriptStore.append(chatId, user)
+    yield* TranscriptStore.append(chatId, assistant)
+    return {
+      status: "accepted",
+      user,
+      assistant,
+      replyWaiter
+    } as const
+  })
+}
+
+const prepareTurnDigest = (session: Session, chatId: string) =>
+  Effect.gen(function* () {
+    const applied = yield* ContextManager.applyWhenReady(chatId)
+    const digest = applied?.digest ?? null
+    // The WORKING SET at the moment of the swap, straight from the manager.
+    //
+    // Deliberately NOT `session.tokens`: that is the session's lifetime
+    // total (see `Session.contextTokens` in domain.ts) and only ever grows,
+    // which is how the marker came to read "Context compacted from
+    // 49894.2k" — ~49.9M lifetime tokens rendered as a working set. The
+    // persisted `contextTokens` is the fallback for a session whose live
+    // reading has not arrived yet; 0 hides the clause entirely.
+    const compactedFrom =
+      applied === null
+        ? 0
+        : applied.tokensBefore > 0
+          ? applied.tokensBefore
+          : (session?.contextTokens ?? 0)
+    // Everything that landed after the digest was built is replayed
+    // verbatim, so preparing in the background never races the user.
+    const tail =
+      digest === null
+        ? []
+        : tailAfter(
+            yield* TranscriptStore.list(chatId).pipe(Effect.orElseSucceed(() => [])),
+            digest.throughMessageId
+          )
+
+    // Renamed from `planNote` when the plan-mode protocol note arrived: two
+    // different plan-related prefixes with one name is a trap.
+    const planPointer = null
+    const primer = digest === null ? null : renderPrimer(digest, tail)
+    return { digest, compactedFrom, primer, planPointer }
+  })
+
+const appendTurnAssistantReply = (
+  steeredReply: Ref.Ref<RunReplyWaiter | null>,
+  event: StreamEvent
+) =>
+  Effect.gen(function* () {
+    if (event._tag === "Assistant") {
+      const waiter = yield* Ref.get(steeredReply)
+      if (waiter !== null) {
+        yield* appendSteeredReply(waiter, event.text)
+      }
+    }
+  })
+
+const accountTurnUsage = (sessionId: string, event: StreamEvent) =>
+  Effect.gen(function* () {
+    if (event._tag === "Done") {
+      yield* SessionStore.addUsage(sessionId, {
+        costUsd: event.costUsd,
+        tokens: event.tokens
+      }).pipe(Effect.ignore)
+    }
+  })
+
+const claimTurnTerminal = (
+  event: StreamEvent,
+  sawTerminal: Ref.Ref<boolean>,
+  turnSettled: Deferred.Deferred<void>
+) =>
+  Effect.gen(function* () {
+    if (!isTerminal(event)) return true
+    if (yield* Ref.get(sawTerminal)) return false
+    yield* Ref.set(sawTerminal, true)
+    yield* Deferred.succeed(turnSettled, void 0)
+    return true
+  })
+
+const guardWorkspaceBranch = <A, E, R>(
+  session: Session,
+  worktreePath: string,
+  adapterRun: Effect.Effect<A, E, R>
+) =>
+  session !== null && workspaceModeOf(session) === "direct"
+    ? Effect.raceFirst(
+        adapterRun,
+        Effect.forever(
+          Effect.sleep("250 millis").pipe(
+            Effect.zipRight(
+              Effect.gen(function* () {
+                const liveBranch = yield* branchAt(worktreePath)
+                if (liveBranch === session.branch) return
+                return yield* Effect.fail(
+                  new BranchDriftError({
+                    sessionId: session.id,
+                    pinnedBranch: session.branch,
+                    liveBranch
+                  })
+                )
+              })
+            )
+          )
+        )
+      )
+    : adapterRun
+
+const acknowledgeExternalInstruction = (
+  out: Mailbox.Mailbox<StreamEvent>,
+  externalInstruction: ExternalInstructionIdentity | undefined
+) =>
+  Effect.gen(function* () {
+    if (externalInstruction !== undefined) {
+      yield* out.offer({
+        _tag: "ExternalInstructionAccepted",
+        identity: externalInstruction,
+        duplicate: false
+      })
+    }
+  })
+
+const clearCompactedSessionId = (sessionId: string, chatId: string, digest: ContextDigest | null) =>
+  Effect.gen(function* () {
+    if (digest !== null) yield* SessionStore.clearPiSessionId(sessionId, chatId).pipe(Effect.ignore)
+  })
+
+const emitCompactedContext = (
+  emit: (event: StreamEvent) => Effect.Effect<void>,
+  digest: ContextDigest | null,
+  tokensBefore: number
+) =>
+  Effect.gen(function* () {
+    if (digest !== null) yield* emit({ _tag: "ContextCompacted", digest, tokensBefore })
+  })
+
+const ingestBackgroundTurnEvent = (
+  sessionId: string,
+  chatId: string,
+  event: StreamEvent,
+  route: ReturnType<typeof routeOf>
+) =>
+  Effect.gen(function* () {
+    if (route === "background-task")
+      yield* BackgroundTaskStore.ingest(sessionId, chatId, event).pipe(Effect.ignore)
+  })

@@ -18,13 +18,16 @@ import { AgentSecretStore } from "../auth/agent-secret-store.js"
 import { RuntimeDiagnostics } from "../diagnostics/runtime-diagnostics.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
-import { BrowserControlPort } from "../../browser-control-port.js"
+import { BrowserControlPort, type BrowserControlPortShape } from "../../browser-control-port.js"
 import {
   browserWebSearchPort,
   WebSearchService,
+  type WebSearchServiceShape,
   withWebSearchFallback
 } from "../../web-search.js"
-import { ProviderConnections } from "../providers/provider-connections.js"
+import { ProviderConnections,
+  type ProviderConnectionsShape
+} from "../providers/provider-connections.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { McpConfigService } from "../../mcp-config-service.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
@@ -136,18 +139,8 @@ export const makePiAgentRuntimeLive = (
       Option.isSome(remoteSessions) && Option.isSome(environments)
         ? makeOwnedDeviceOffloadPort(
             remoteSessions.value,
-            (deviceId) => Effect.gen(function* () {
-              for (let attempt = 0; attempt < 3; attempt += 1) {
-                const inventory = yield* environments.value.list
-                if (inventory.some((environment) =>
-                  environment.id === deviceId &&
-                  environment.kind === "owned" &&
-                  environment.state === "online"
-                )) return true
-                if (attempt < 2) yield* Effect.sleep(250)
-              }
-              return false
-            })
+            (deviceId) =>
+              waitForOwnedDevice(environments.value.list, deviceId)
           )
         : undefined
     )
@@ -177,58 +170,7 @@ export const makePiAgentRuntimeLive = (
       credentials,
       childCredentials,
       subagentBroker,
-      resolveConnection: (spec) =>
-        Effect.gen(function* () {
-          const connections = yield* providers.status.pipe(
-            Effect.mapError((cause) =>
-              connectionFailure("Could not read provider connections", cause)
-            )
-          )
-          const connection = connections.find(
-            (candidate) => candidate.id === spec.connectionId
-          )
-          if (connection === undefined) {
-            return yield* Effect.fail(
-              connectionFailure("Provider connection not found")
-            )
-          }
-          if (connection.status !== "authenticated") {
-            return yield* Effect.fail(
-              connectionFailure("Provider connection requires authentication")
-            )
-          }
-          if (connection.targetId !== spec.targetCapabilities.targetId) {
-            return yield* Effect.fail(
-              new AgentRuntimeError({
-                reason: "incompatible-target",
-                message:
-                  `Provider connection targets ${connection.targetId}, ` +
-                  `but this run targets ${spec.targetCapabilities.targetId}`
-              })
-            )
-          }
-          const catalog = yield* providers.list.pipe(
-            Effect.mapError((cause) =>
-              new AgentRuntimeError({
-                reason: "certification",
-                message: "Could not verify model certification",
-                cause
-              })
-            )
-          )
-          const model = catalog.connections
-            .find((entry) => entry.connection.id === connection.id)
-            ?.models.find((candidate) => candidate.id === spec.modelId)
-          if (model?.selectable !== true) {
-            return yield* Effect.fail(
-              new AgentRuntimeError({
-                reason: "certification",
-                message: "The selected model is not available on this connection"
-              })
-            )
-          }
-          return connection
-        }),
+      resolveConnection: (spec) => validateProviderConnection(providers, spec),
       terminalTracker: (spec) => new FileChangeTracker({
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.piSessionId ?? spec.runId
@@ -323,15 +265,8 @@ export const makePiAgentRuntimeLive = (
         Effect.runFork(
           offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
         )
-        const runWebSearch = Option.isSome(webSearch)
-          ? Option.isSome(browserControl) && context.mcp?.browser != null
-            ? withWebSearchFallback(
-                webSearch.value,
-                browserWebSearchPort(browserControl.value.forAgent(spec.sessionId, spec.chatId))
-              )
-            : webSearch.value
-          : undefined
-        const preparedPlugins = preparedCatalog === undefined
+        const runWebSearch = selectRunWebSearch(webSearch, browserControl, context, spec)
+          const preparedPlugins = preparedCatalog === undefined
           ? Effect.all({
               catalog: pluginRegistry.list().pipe(
                 Effect.provideService(FileSystem.FileSystem, fs),
@@ -380,9 +315,7 @@ export const makePiAgentRuntimeLive = (
           )
         }
         return Effect.all({
-          managedMcp: preparedCatalog === undefined
-            ? configuredMcp
-            : Effect.succeed(preparedCatalog.managedMcp),
+          managedMcp: configuredCatalogMcp(preparedCatalog, configuredMcp),
           managedFiles: preparedCatalog === undefined
             ? managedResources.enabledForTarget(spec.targetCapabilities.targetId)
             : Effect.succeed(preparedCatalog.managedFiles),
@@ -414,18 +347,7 @@ export const makePiAgentRuntimeLive = (
             ...(runWebSearch === undefined ? {} : { webSearch: runWebSearch }),
             mcp: {
               ...context.mcp,
-              configured: managedMcp.map((server) =>
-                server.transport === "stdio"
-                  // An explicit cwd in mcp.json wins; otherwise servers run
-                  // from the session's worktree.
-                  ? {
-                      ...server,
-                      cwd: server.cwd === undefined || server.cwd === ""
-                        ? spec.cwd
-                        : isAbsolute(server.cwd) ? server.cwd : resolve(spec.cwd, server.cwd)
-                    }
-                  : server
-              )
+              configured: managedMcp.map((server) => resolveManagedMcpCwd(server, spec.cwd))
             },
             // Per-run attachments (the browser lease rotates every turn on a
             // retained session) resolve from the LIVE context at call time.
@@ -538,3 +460,113 @@ export const makePiAgentRuntimeLive = (
 
 /** Production composition: no alternate provider transport is installed. */
 export const PiAgentRuntimeLive = makePiAgentRuntimeLive()
+
+function validateProviderConnection(providers: ProviderConnectionsShape, spec: PiRunSpec) {
+  return Effect.gen(function* () {
+    const connections = yield* providers.status.pipe(
+      Effect.mapError((cause) => connectionFailure("Could not read provider connections", cause))
+    )
+    const connection = connections.find((candidate) => candidate.id === spec.connectionId)
+    if (connection === undefined) {
+      return yield* Effect.fail(connectionFailure("Provider connection not found"))
+    }
+    if (connection.status !== "authenticated") {
+      return yield* Effect.fail(connectionFailure("Provider connection requires authentication"))
+    }
+    if (connection.targetId !== spec.targetCapabilities.targetId) {
+      return yield* Effect.fail(
+        new AgentRuntimeError({
+          reason: "incompatible-target",
+          message:
+            `Provider connection targets ${connection.targetId}, ` +
+            `but this run targets ${spec.targetCapabilities.targetId}`
+        })
+      )
+    }
+    const catalog = yield* providers.list.pipe(
+      Effect.mapError(
+        (cause) =>
+          new AgentRuntimeError({
+            reason: "certification",
+            message: "Could not verify model certification",
+            cause
+          })
+      )
+    )
+    const model = catalog.connections
+      .find((entry) => entry.connection.id === connection.id)
+      ?.models.find((candidate) => candidate.id === spec.modelId)
+    if (model?.selectable !== true) {
+      return yield* Effect.fail(
+        new AgentRuntimeError({
+          reason: "certification",
+          message: "The selected model is not available on this connection"
+        })
+      )
+    }
+    return connection
+  })
+}
+
+const waitForOwnedDevice = <E, R>(
+  inventoryEffect: Effect.Effect<
+    ReadonlyArray<{
+      readonly id: string
+      readonly kind: string
+      readonly state: string
+    }>,
+    E,
+    R
+  >,
+  deviceId: string
+) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const inventory = yield* inventoryEffect
+      if (
+        inventory.some(
+          (environment) =>
+            environment.id === deviceId &&
+            environment.kind === "owned" &&
+            environment.state === "online"
+        )
+      )
+        return true
+      if (attempt < 2) yield* Effect.sleep(250)
+    }
+    return false
+  })
+
+const selectRunWebSearch = (
+  webSearch: Option.Option<WebSearchServiceShape>,
+  browserControl: Option.Option<BrowserControlPortShape>,
+  context: AgentRuntimeContext,
+  spec: PiRunSpec
+) =>
+  Option.isSome(webSearch)
+    ? Option.isSome(browserControl) && context.mcp?.browser != null
+      ? withWebSearchFallback(
+          webSearch.value,
+          browserWebSearchPort(browserControl.value.forAgent(spec.sessionId, spec.chatId))
+        )
+      : webSearch.value
+    : undefined
+
+const resolveManagedMcpCwd = (server: RuntimeMcpServer, cwd: string): RuntimeMcpServer => {
+  if (server.transport !== "stdio") return server
+  const configuredCwd = server.cwd
+  return {
+    ...server,
+    cwd:
+      configuredCwd === undefined || configuredCwd === ""
+        ? cwd
+        : isAbsolute(configuredCwd)
+          ? configuredCwd
+          : resolve(cwd, configuredCwd)
+  }
+}
+
+const configuredCatalogMcp = <E, R>(
+  prepared: PreparedLockedCatalog | undefined,
+  configured: Effect.Effect<ReadonlyArray<RuntimeMcpServer>, E, R>
+) => (prepared === undefined ? configured : Effect.succeed(prepared.managedMcp))

@@ -291,7 +291,6 @@ export function SettingsView({
            switch (section) {
 case "devices": {
 return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
-break
 }
 case "general": {
 return (<GeneralSection
@@ -314,11 +313,9 @@ return (<GeneralSection
           onSaveFontScale={onSaveFontScale}
           webSearch={webSearch}
         />)
-break
 }
 case "providers": {
 return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
-break
 }
 case "context": {
 return (<ContextSection
@@ -326,7 +323,6 @@ return (<ContextSection
           sessions={contextSessions}
           onSaveContext={onSaveContext}
         />)
-break
 }
 case "plan": {
 return (<div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
@@ -342,29 +338,23 @@ return (<div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6
             </p>
           </div>
         </div>)
-break
 }
 case "agents": {
 return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
-break
 }
 case "runtime": {
 return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
-break
 }
 case "connectors": {
 return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
           {renderOptionalSection(mcp, (props) => <McpSettings {...props} />, "MCP servers")}
         </div>)
-break
 }
 case "plugins": {
 return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
-break
 }
 case "themes": {
 return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
-break
 }
 case "github": {
 return (<GithubSection
@@ -379,7 +369,6 @@ return (<GithubSection
           onSaveGithub={onSaveGithub}
           onSaveGit={onSaveGit}
         />)
-break
 }
 }
            return (<StubSection
@@ -561,15 +550,12 @@ export function DevicesSection({
                                  switch (environment.state) {
 case "online": {
 return ("bg-green/10 text-green")
-break
 }
 case "incompatible": {
 return ("bg-yellow/10 text-yellow")
-break
 }
 case "revoked": {
 return ("bg-red/10 text-red")
-break
 }
 }
                                  return ("bg-surface text-muted-foreground")
@@ -980,7 +966,6 @@ case "priming": {
 return (<p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
               Saving Offload Compute settings…
             </p>)
-break
 }
 case "ready": {
 return (<p className="px-1 py-2 text-[11px] text-success" role="status">
@@ -988,13 +973,11 @@ return (<p className="px-1 py-2 text-[11px] text-success" role="status">
                 ? "Cloud compute is enabled; eligible sessions prime in the background."
                 : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
             </p>)
-break
 }
 case "failed": {
 return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
               Offload Compute settings could not be saved.
             </p>)
-break
 }
 }
     return (null)
@@ -1315,15 +1298,12 @@ function GithubSection({
     switch (connection.mode) {
 case "connected": {
 return ("bg-green")
-break
 }
 case "error": {
 return ("bg-red")
-break
 }
 case "disconnected": {
 return ("bg-line-strong")
-break
 }
 }
     return ("bg-yellow")
