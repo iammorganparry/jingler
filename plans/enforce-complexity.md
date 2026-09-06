@@ -11,4 +11,4 @@ Baseline: 312 Biome cognitive-complexity findings across 186 files and 117 Oxlin
 - [x] Refactor managed-runtime below both limits.
 - [x] Refactor remaining core, themes, plugin, and plannotator files below both limits.
 - [x] Enable both rules as errors at their strict defaults.
-- [ ] Run package tests, full tests, typechecks, builds, lint gates, and independent review.
+- [x] Run package tests, full tests, typechecks, builds, lint gates, and independent review.
