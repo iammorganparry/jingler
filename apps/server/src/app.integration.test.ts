@@ -1,6 +1,4 @@
 import { afterAll, describe, expect, it, vi } from "vitest"
-import { POST as grantMemory } from "../app/api/memory/grant/route.js"
-import { GET as listMemoryOrganizations } from "../app/api/memory/organizations/route.js"
 import { app } from "./app.js"
 import { getSql } from "./db/client.js"
 import { GitHubSessionRouteRepository } from "./db/repositories/github-session-route-repository.js"
@@ -31,7 +29,6 @@ describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
   })
 
   it("magic link → session → bearer → /api/me → sign out", async () => {
-    const sql = getSql()
     const email = `it_${Date.now()}@example.com`
 
     // 1. Request a magic link; capture the verify URL logged to the console.
@@ -69,55 +66,7 @@ describe.skipIf(!RUN)("auth backend (integration, needs Postgres)", () => {
     const meBody = (await me.json()) as { user: { email: string } }
     expect(meBody.user.email).toBe(email)
 
-    // 5. The same BetterAuth bearer can mint a short-lived grant only for its
-    // exact active paid organization membership.
-    const organizationId = `org_${Date.now()}`
-    await sql`
-      insert into organization (id, name, slug, metadata, created_at)
-      values (
-        ${organizationId},
-        'Integration Team',
-        ${`integration-${Date.now()}`},
-        ${JSON.stringify({ plan: "team", status: "active" })},
-        now()
-      )
-    `
-    await sql`
-      insert into member (id, organization_id, user_id, role, created_at)
-      select ${`member_${Date.now()}`}, ${organizationId}, id, 'owner', now()
-      from "user"
-      where email = ${email}
-    `
-    const grantResponse = await grantMemory(
-      new Request("http://localhost:9100/api/memory/grant", {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ organizationId })
-      })
-    )
-    expect(grantResponse.status).toBe(200)
-    expect(await grantResponse.json()).toMatchObject({
-      claims: {
-        organizationId,
-        privileges: ["read", "propose", "review", "schema"]
-      }
-    })
-    const organizationsResponse = await listMemoryOrganizations(
-      new Request("http://localhost:9100/api/memory/organizations", {
-        headers: { authorization: `Bearer ${token}` }
-      })
-    )
-    expect(organizationsResponse.status).toBe(200)
-    expect(await organizationsResponse.json()).toMatchObject({
-      organizations: [{
-        id: organizationId,
-        name: "Integration Team",
-        role: "owner",
-        privileges: ["read", "propose", "review", "schema"]
-      }]
-    })
-
-    // 6. Sign out revokes the session.
+    // 5. Sign out revokes the session.
     const out = await app.request("/api/auth/sign-out", {
       method: "POST",
       headers: { Authorization: `Bearer ${token}` }

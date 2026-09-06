@@ -18,10 +18,7 @@ import {
   GitHubAuth,
   GitHubApi,
   GitService,
-  InMemorySecretStoreLive,
-  MemoryService,
   makeAgentResourceService,
-  ExplanationStore,
   PluginAuth,
   PluginHost,
   PluginRegistry,
@@ -41,11 +38,7 @@ import type {
   AgentTurnSpec,
 } from "@jingler/cli-adapters";
 import type {
-  Attachment,
-  PlanDocument,
-  PlanPrd,
   Session,
-  StreamEvent,
   GitHubSessionRoute,
   GitHubRelayDelivery,
 } from "@jingler/core";
@@ -62,32 +55,22 @@ import {
 import { NodeContext } from "@effect/platform-node";
 import type { CommandExecutor } from "@effect/platform";
 import {
-  Chunk,
-  Deferred,
   Effect,
-  Either,
-  Fiber,
   Layer,
   Logger,
   Schema,
-  Stream,
 } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DialogService } from "./dialog.js";
 import {
   adoptBranch,
   forkOntoBranch,
   transcriptForFork,
-  chooseReposDir,
   awaitRelayAcknowledgement,
-  explanationWatch,
   completeDurableGitHubFeedbackReplay,
   assetList,
   assetRead,
   assetWrite,
-  configGet,
   createTerminal,
-  memoryExport,
   githubDetectPr,
   githubSubmitReview,
   githubPr,
@@ -465,15 +448,6 @@ describe("RPC handlers", () => {
     );
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  const fakeDialog = (
-    chosen: string | null,
-    saveDestination: string | null = null,
-  ) =>
-    Layer.succeed(DialogService, {
-      chooseDirectory: () => Effect.succeed(chosen),
-      saveFile: () => Effect.succeed(saveDestination),
-    });
 
   it("restores WebSearch configuration when its credential mutation fails", async () => {
     await Effect.runPromise(ConfigService.setWebSearch({
@@ -2129,113 +2103,6 @@ describe("RPC handlers", () => {
         expect(stamp).not.toBeNull();
       });
     });
-  });
-});
-
-describe("memoryExport", () => {
-  let exportDir: string;
-  let exportBase: Layer.Layer<
-    ConfigService | AppPaths | NodeContext.NodeContext
-  >;
-  beforeEach(() => {
-    exportDir = mkdtempSync(join(tmpdir(), "jingler-export-"));
-    exportBase = Layer.mergeAll(
-      ConfigService.Default,
-      Layer.succeed(AppPaths, appPathsFor(join(exportDir, "jingler"))),
-      NodeContext.layer,
-    );
-  });
-  afterEach(() => rmSync(exportDir, { recursive: true, force: true }));
-
-  const vault = {
-    format: "jingler-obsidian-vault" as const,
-    version: 1 as const,
-    files: [
-      {
-        path: "runbook.md",
-        content: "# Runbook\n\nSee [[Incident Response]].\n",
-      },
-    ],
-  };
-
-  // `MemoryService` is an Effect.Service, so its Context value carries `_tag`.
-  const fakeMemory = (payload: unknown, onUiRequest: () => void) =>
-    Layer.succeed(
-      MemoryService,
-      MemoryService.make({
-        attachment: () => Effect.succeed(null),
-        retainSettledTurn: () => Effect.succeed(false),
-        recoverCaptures: () => Effect.succeed(null),
-        diagnostics: () => Effect.succeed({
-          attachmentStatus: "disabled",
-          queuedRetentions: 0,
-          retryingRetentions: 0
-        }),
-        diagnosticsSnapshot: () => ({
-          attachmentStatus: "disabled",
-          queuedRetentions: 0,
-          retryingRetentions: 0
-        }),
-        access: () => Effect.succeed(null),
-        uiRequest: () => {
-          onUiRequest();
-          return Effect.succeed(payload);
-        },
-        suggestions: () => Effect.succeed(null),
-      }),
-    );
-
-  const saveDialog = (saveDestination: string | null) =>
-    Layer.succeed(DialogService, {
-      chooseDirectory: () => Effect.succeed(null),
-      saveFile: () => Effect.succeed(saveDestination),
-    });
-
-  it("never touches the memory backend when the save dialog is cancelled", async () => {
-    let backendCalls = 0;
-    const result = await Effect.runPromise(
-      memoryExport("org-1").pipe(
-        Effect.provide(
-          fakeMemory(vault, () => {
-            backendCalls += 1;
-          }),
-        ),
-        Effect.provide(saveDialog(null)),
-        Effect.provide(InMemorySecretStoreLive),
-        Effect.provide(exportBase),
-      ),
-    );
-    expect(result).toEqual({
-      filename: "jingler-memory-org-1.zip",
-      saved: false,
-    });
-    expect(backendCalls).toBe(0);
-  });
-
-  it("writes a ZIP of the exported vault to the chosen path", async () => {
-    const destination = join(exportDir, "export.zip");
-    let backendCalls = 0;
-    const result = await Effect.runPromise(
-      memoryExport("org-1").pipe(
-        Effect.provide(
-          fakeMemory(vault, () => {
-            backendCalls += 1;
-          }),
-        ),
-        Effect.provide(saveDialog(destination)),
-        Effect.provide(InMemorySecretStoreLive),
-        Effect.provide(exportBase),
-      ),
-    );
-    expect(result).toEqual({
-      filename: "jingler-memory-org-1.zip",
-      saved: true,
-    });
-    expect(backendCalls).toBe(1);
-    const archive = readFileSync(destination);
-    expect(archive.readUInt32LE(0)).toBe(0x04034b50);
-    expect(archive.toString("utf8")).toContain("runbook.md");
-    expect(archive.toString("utf8")).toContain("[[Incident Response]]");
   });
 });
 

@@ -880,26 +880,6 @@ export const DEFAULT_CONTEXT_CONFIG: ContextConfig = {
 };
 
 /**
- * Team-memory selection persisted with the workspace.
- *
- * This is deliberately only a choice and an organization scope. The user's
- * Jingler bearer remains in `SecretStore`, while the short-lived memory grant is
- * obtained in the main process for each stateless attachment.
- */
-export const MemoryConfig = Schema.Struct({
-  /** Master switch for retrieval and settled-session capture. */
-  enabled: Schema.Boolean,
-  /** The exact paid organization selected by the operator. */
-  organizationId: Schema.NullOr(Schema.String),
-});
-export type MemoryConfig = Schema.Schema.Type<typeof MemoryConfig>;
-
-export const MEMORY_CONFIG_DEFAULT: MemoryConfig = {
-  enabled: false,
-  organizationId: null,
-};
-
-/**
  * Persisted app configuration, stored at `~/jingler/config.json`. `reposDir` is
  * null until the user completes first-run setup by choosing a repos directory.
  */
@@ -997,11 +977,6 @@ export const WorkspaceConfig = Schema.Struct({
    * credential storage and never cross this persistence boundary.
    */
   webSearch: Schema.optional(WebSearchConfig),
-  /**
-   * Stateless team-memory attachment. Older configs omit it, which is the same
-   * as `MEMORY_CONFIG_DEFAULT`: disabled and with no selected organization.
-   */
-  memory: Schema.optional(MemoryConfig),
   /**
    * Automatic Cloudflare compute routing. Absent on older configs and therefore
    * disabled; explicit command allowlists contain argv only and never secrets.

@@ -69,12 +69,12 @@ describe("parseClaudeMcp", () => {
   it("flags reserved names and unrecognised shapes instead of dropping them", () => {
     const candidates = parseClaudeMcp(JSON.stringify({
       mcpServers: {
-        memory: { command: "npx" },
+        browser: { command: "npx" },
         weird: { neither: true }
       }
     }))
     expect(candidates).toEqual([
-      expect.objectContaining({ name: "memory", entry: null, problem: expect.stringContaining("reserved") }),
+      expect.objectContaining({ name: "browser", entry: null, problem: expect.stringContaining("reserved") }),
       expect.objectContaining({ name: "weird", entry: null, problem: "Unrecognised server shape" })
     ])
   })

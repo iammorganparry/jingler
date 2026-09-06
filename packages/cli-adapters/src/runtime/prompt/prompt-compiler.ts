@@ -66,9 +66,6 @@ const charsForTokens = (tokens: number): number => tokens * 4
 const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray<string> => {
   const ids = new Set(tools.map(({ id }) => id))
   const hasMcp = tools.some(({ id }) => id.startsWith("mcp__"))
-  const hasMemory = tools.some(({ id }) =>
-    id.startsWith("mcp__jingler-memory__memory_")
-  )
   return [
     "Treat Jingler's active tools as first-class runtime capabilities. Prefer them over inferred shell workflows or provider-native substitutes that duplicate the same operation.",
     "Use capability metadata progressively: choose the narrowest relevant catalog or server from its name and description, search or list with a bounded query, then load or call only what the task needs. Do not enumerate every server or load every resource speculatively.",
@@ -80,11 +77,6 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
     ...(hasMcp
       ? [
           "For MCP tools, select the relevant Jingler-attached server and tool directly from the active catalog. Expand to another server only when the first relevant source cannot answer the task."
-        ]
-      : []),
-    ...(hasMemory
-      ? [
-          "Jingler memory is private working context: recall narrowly, read accepted evidence before relying on it, use it silently, and propose only durable non-sensitive learnings. Poll any returned memory workflow until it reaches a terminal result."
         ]
       : []),
     ...(ids.has("jingler_ask_question")

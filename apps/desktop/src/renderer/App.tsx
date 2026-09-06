@@ -34,34 +34,16 @@ import {
 import {
   ConfirmDialog,
   ExplanationView,
-  MemoryAnalytics,
-  MemoryBrowser,
-  MemoryDashboard,
-  MemoryInspector,
-  MemoryMap,
   LoadingScreen,
   LoginScreen,
   SetupScreen,
   JinglerApp,
   PullRequestInbox,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
 } from "@jingler/ui";
-import type { MemorySubview } from "@jingler/ui";
 import {
-  BarChart3,
-  BookOpen,
-  Download,
-  LayoutDashboard,
-  Map as MapIcon,
-  RotateCcw,
-  Search,
 } from "lucide-react";
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
@@ -131,7 +113,6 @@ import {
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
 import { useDebugSessions } from "./debug-session.js";
-import { useMemory } from "./use-memory.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
 import { GitHubFeedbackRouter } from "./github-feedback.js";
@@ -149,227 +130,6 @@ const PR_STATE_STALE_MS = 5 * 60_000;
  * surface; a genuine outage outlasts it and does.
  */
 const RELAY_UNHEALTHY_GRACE_MS = 4_000;
-
-const MEMORY_TABS: ReadonlyArray<{
-  readonly id: MemorySubview;
-  readonly label: string;
-  readonly icon: typeof LayoutDashboard;
-}> = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "map", label: "Map", icon: MapIcon },
-  { id: "wiki", label: "Wiki", icon: BookOpen },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-];
-
-function MemoryWorkspaceHeader({ memory }: { memory: ReturnType<typeof useMemory> }) {
-  const { context } = memory;
-  return (
-      <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
-        <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
-        <Select
-          value={context.organizationId ?? ""}
-          onValueChange={memory.changeOrganization}
-          className="max-w-48"
-        >
-          <SelectTrigger
-            ariaLabel="Memory organization"
-            className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"
-          >
-            <SelectValue placeholder="Choose a paid team…" />
-          </SelectTrigger>
-          <SelectContent>
-            {context.access?.organizations.map((organization) => (
-              <SelectItem key={organization.id} value={organization.id}>
-                {organization.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <label className="flex min-w-40 flex-1 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-1.5 focus-within:ring-2 focus-within:ring-ring">
-          <Search size={13} className="text-muted-foreground" />
-          <span className="sr-only">Search all memory</span>
-          <input
-            disabled={context.organizationId === null}
-            value={context.searchQuery}
-            onChange={(event) => {
-              memory.setQuery(event.currentTarget.value);
-              if (context.view !== "wiki") memory.navigate({ view: "wiki" });
-            }}
-            placeholder="Search memory"
-            className="min-w-0 flex-1 bg-transparent text-[10.5px] text-text outline-none placeholder:text-dim"
-          />
-        </label>
-        <Select
-          disabled={context.organizationId === null}
-          value={context.range}
-          onValueChange={memory.changeRange}
-        >
-          <SelectTrigger
-            ariaLabel="Memory time range"
-            className="h-8 bg-sunken px-2 py-1.5 text-[10.5px]"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="7d">7 days</SelectItem>
-            <SelectItem value="30d">30 days</SelectItem>
-            <SelectItem value="90d">90 days</SelectItem>
-            <SelectItem value="all">All time</SelectItem>
-          </SelectContent>
-        </Select>
-        <button
-          type="button"
-          disabled={context.organizationId === null || memory.exporting}
-          onClick={memory.requestExport}
-          className="flex items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-        >
-          <Download size={12} />{" "}
-          {context.exported?.saved
-            ? "Exported"
-            : memory.exporting
-              ? "Preparing…"
-              : "Export"}
-        </button>
-      </header>
-  );
-}
-
-function MemoryRecoveryNotice({ memory }: { memory: ReturnType<typeof useMemory> }) {
-  const { context } = memory;
-  return <>
-{(context.error !== null || context.recovery !== null) && (
-            <div
-              role="alert"
-              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
-            >
-              <p className="min-w-0 text-[10.5px] text-text">
-                {context.error !== null
-                  ? context.error
-                  : context.recovery?.retained
-                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
-                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
-              </p>
-              {context.error !== null && (
-                <button
-                  type="button"
-                  disabled={memory.recovering}
-                  onClick={memory.recover}
-                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  <RotateCcw
-                    size={12}
-                    className={memory.recovering ? "animate-spin" : undefined}
-                  />
-                  {memory.recovering ? "Recovering…" : "Recover memory"}
-                </button>
-              )}
-            </div>
-          )}
-  </>;
-}
-
-function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
-  const { context } = memory;
-  return (
-    <div
-      className="relative flex min-h-0 flex-1 flex-col bg-editor"
-      data-testid="memory-workspace"
-    >
-      <MemoryWorkspaceHeader memory={memory} />
-      {context.organizationId === null ? (
-        <main className="grid min-h-0 flex-1 place-items-center p-6">
-          <div className="max-w-md rounded-xl border border-line bg-panel p-5 text-center">
-            <h2 className="text-sm font-semibold text-text-bright">
-              Choose a team memory vault
-            </h2>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              Select one of your paid teams above. Jingler will remember the
-              choice and attach its shared memory to future agent sessions.
-            </p>
-          </div>
-        </main>
-      ) : (
-        <>
-          <nav
-            className="flex flex-none items-center gap-1 border-b border-hairline bg-panel px-3 py-1.5"
-            aria-label="Memory views"
-          >
-            {MEMORY_TABS.map(({ id, label, icon: Icon }) => (
-              <button
-                type="button"
-                key={id}
-                aria-current={context.view === id ? "page" : undefined}
-                onClick={() => memory.navigate({ view: id })}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[10.5px] text-muted-foreground outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring aria-[current=page]:bg-surface aria-[current=page]:text-text-bright"
-              >
-                <Icon size={12} /> {label}
-              </button>
-            ))}
-          </nav>
-          <MemoryRecoveryNotice memory={memory} />
-          {context.view === "dashboard" && (
-            <MemoryDashboard
-              summary={context.summary}
-              loading={memory.loading}
-              error={null}
-              onNavigate={memory.navigate}
-              onRetry={memory.retry}
-            />
-          )}
-          {context.view === "map" && (
-            <MemoryMap
-              graph={context.graph}
-              positions={memory.positions}
-              filters={context.filters}
-              viewport={context.viewport}
-              selectedNodeId={context.selectedNodeId}
-              selectedEdgeId={context.selectedEdgeId}
-              loading={memory.loading}
-              onSelectNode={memory.selectNode}
-              onSelectEdge={memory.selectEdge}
-              onExpandNode={memory.expandNode}
-              onViewportChange={memory.setViewport}
-              onFiltersChange={memory.setFilters}
-            />
-          )}
-          {context.view === "wiki" && (
-            <MemoryBrowser
-              query={context.searchQuery}
-              results={context.searchResults}
-              page={context.page}
-              loading={memory.loading}
-              filter={
-                context.filters.healthOnly
-                  ? "health findings"
-                  : context.filters.freshness
-              }
-              onQueryChange={memory.setQuery}
-              onOpenPage={memory.openPage}
-              onBack={memory.backFromPage}
-            />
-          )}
-          {context.view === "analytics" && (
-            <MemoryAnalytics summary={context.summary} />
-          )}
-          {(context.selectedNodeId || context.selectedEdgeId) && (
-            <MemoryInspector
-              node={memory.selectedNode}
-              evidence={context.evidence}
-              page={context.page}
-              loading={memory.loading}
-              suggestions={context.suggestions?.suggestions ?? []}
-              suggestionsSource={context.suggestions?.vectorSource ?? "lexical"}
-              onBack={memory.closeInspector}
-              onOpenPage={memory.openPage}
-              onExpandNeighborhood={memory.expandNode}
-              onPromoteSuggestion={(fromPageId) => memory.openPage(fromPageId)}
-            />
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
@@ -445,8 +205,6 @@ function AuthedApp({
         : []
     )
   ), [debugSessions]);
-  const memory = useMemory();
-
   // The conversation machine persists a session's settled status by itself, with
   // no route back here. Fold those records into the list, or the sidebar keeps
   // rendering the pre-write status (its fallback when a session has no live
@@ -1488,13 +1246,6 @@ function AuthedApp({
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
-        memory={{
-          eligible: memory.eligible,
-          active: memory.active,
-          content: <MemoryWorkspace memory={memory} />,
-          onOpen: memory.open,
-          onClose: memory.close,
-        }}
         onSignOut={onSignOut}
         repos={repos}
         projects={projectController.projects}

@@ -3,7 +3,6 @@ import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDis
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
-  BrainCircuit,
   CircleAlert,
   Cloud,
   Columns2,
@@ -116,10 +115,6 @@ export interface SessionSidebarProps {
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** App version (from `__APP_VERSION__`), shown in the footer. */
   version?: string
-  /** Paid-team memory is a first-class destination, not a session row. */
-  memoryEligible?: boolean
-  memoryActive?: boolean
-  onOpenMemory?: () => void
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -181,9 +176,6 @@ function SidebarBody({
   onToggleCollapsed,
   version,
   defaultFilters,
-  memoryEligible = false,
-  memoryActive = false,
-  onOpenMemory,
   pullRequestsActive = false,
   onOpenPullRequests,
   pendingEnvironmentSession,
@@ -204,29 +196,6 @@ function SidebarBody({
   /** Collapse to the icon rail (the header's `PanelLeft` button). */
   onCollapse?: () => void
 }) {
-  function renderMemoryLink() {
-    return (memoryEligible && (
-        <div className="px-2 pb-2">
-          <button
-            type="button"
-            data-testid="memory-sidebar-item"
-            aria-current={memoryActive ? "page" : undefined}
-            onClick={onOpenMemory}
-            className={cn(
-              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-              memoryActive
-                ? "bg-surface text-text-bright"
-                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
-            )}
-          >
-            <BrainCircuit size={15} className={memoryActive ? "text-blue" : undefined} />
-            <span className="flex-1">Memory</span>
-            {memoryActive && <span className="text-[10px] text-blue">Open</span>}
-          </button>
-        </div>
-      ))
-  }
-
   function renderSessionList() {
     return (<div className="flex flex-1 flex-col overflow-auto px-2 pb-2 pt-0.5">
         {sessions.length === 0 ? (
@@ -729,8 +698,6 @@ return (renderExpandedGroupHeading())
         <>
       {renderPullRequestsLink()}
 
-      {renderMemoryLink()}
-
       {renderPendingEnvironment()}
 
       {/* Groups (or the empty hint when there are no sessions yet) */}
@@ -807,9 +774,6 @@ function SessionRail({
   prStates,
   onSelect,
   onNewSession,
-  memoryEligible,
-  memoryActive,
-  onOpenMemory,
   pullRequestsActive,
   onOpenPullRequests,
   pendingEnvironmentSession,
@@ -823,9 +787,6 @@ function SessionRail({
   prStates?: Record<string, SessionPrStatus>
   onSelect?: (id: string) => void
   onNewSession?: () => void
-  memoryEligible?: boolean
-  memoryActive?: boolean
-  onOpenMemory?: () => void
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
   pendingEnvironmentSession?: PendingEnvironmentSession | null
@@ -953,24 +914,6 @@ function SessionRail({
           <GitPullRequest size={16} />
         </button>
       )}
-      {memoryEligible && (
-        <button
-          type="button"
-          data-testid="memory-rail-item"
-          onClick={onOpenMemory}
-          aria-current={memoryActive ? "page" : undefined}
-          aria-label="Memory"
-          title="Memory"
-          className={cn(
-            "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-            memoryActive
-              ? "bg-surface text-blue"
-              : "text-dim hover:bg-surface hover:text-text"
-          )}
-        >
-          <BrainCircuit size={16} />
-        </button>
-      )}
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
         {pendingEnvironmentSession && (
           <button
@@ -1079,9 +1022,6 @@ export function SessionSidebar(props: SessionSidebarProps) {
       prStates={props.prStates}
       onSelect={props.onSelect}
       onNewSession={props.onNewSession}
-      memoryEligible={props.memoryEligible}
-      memoryActive={props.memoryActive}
-      onOpenMemory={props.onOpenMemory}
       pullRequestsActive={props.pullRequestsActive}
       onOpenPullRequests={props.onOpenPullRequests}
       pendingEnvironmentSession={props.pendingEnvironmentSession}

@@ -42,25 +42,19 @@ describe("PromptCompiler", () => {
         { id: "jingler_load_resource", version: "2", description: "Load one resource." },
         { id: "jingler_ask_question", version: "1", description: "Ask the operator." },
         { id: "jingler_publish_explanation", version: "1", description: "Publish an explanation." },
-        { id: "mcp__jingler-memory__memory_search", version: "1", description: "Search memory." }
+        { id: "mcp__example__search", version: "1", description: "Search examples." }
       ],
       tokenBudget: 2_000
     })
     expect(result.text).toContain("Use capability metadata progressively")
     expect(result.text).toContain("jingler_list_resources with a narrow query")
-    expect(result.text).toContain("Jingler memory is private working context")
     expect(result.text).toContain("Use jingler_ask_question")
     expect(result.text).not.toContain("jingler_submit_plan")
     expect(result.text).toContain("jingler_publish_explanation")
     expect(result.text).toContain("Treat /explain as an explicit hard trigger")
     expect(result.text).toContain("Keep short factual answers")
 
-    const withoutMemory = new PromptCompiler().compile({
-      layers: runtimeInvariantLayers("conversation", "ask"),
-      tools: [tool],
-      tokenBudget: 2_000
-    })
-    expect(withoutMemory.text).not.toContain("Jingler memory is private working context")
+
   })
 
   it("requires native Fleet delegation instead of shell-launched coding CLIs", () => {

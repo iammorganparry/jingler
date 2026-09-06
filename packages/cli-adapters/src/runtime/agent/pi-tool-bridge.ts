@@ -42,11 +42,8 @@ const renderResult = (result: ToolResultEnvelope): string => {
       value = output.length > 0 ? output : `Command exited ${command.exitCode}`
     }
   }
-  return result.advisory === undefined ? value : `${result.advisory}\n\n${value}`
+  return value
 }
-
-export const isMemoryReflectionTool = (toolId: string): boolean =>
-  /^mcp__jingler-memory__memory_(?:search|read|propose|workflow_status)$/u.test(toolId)
 
 export interface PiToolBridgeOptions {
   readonly allowTool?: (toolId: string) => boolean

@@ -69,8 +69,8 @@ re-read in the main process when you apply). Existing names are skipped.
   `packages/core/src/mcp.ts`.
 - Values typed into the Settings add form travel inbound once and land in the
   file; nothing echoes them back.
-- The internal `jingler-browser` (Preview control) and team-memory attachments
-  are app capabilities, not entries in this file, and always win a name clash.
+- The internal `jingler-browser` (Preview control) is an app capability, not an
+  entry in this file, and always wins a name clash.
 
 ## Where things live
 

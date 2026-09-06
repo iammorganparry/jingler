@@ -14,7 +14,6 @@ import {
 } from "./agent-runtime.js"
 import {
   makePiAgentRuntime,
-  MEMORY_REFLECTION_TIMEOUT_MS,
   type PiSessionHandle
 } from "./pi-agent-runtime.js"
 
@@ -255,148 +254,6 @@ describe("PiAgentRuntime", () => {
     ).toHaveLength(1)
     expect(dispose).toHaveBeenCalledOnce()
     expect(disposed).toBe(true)
-  })
-
-  it("runs one hidden memory reflection before emitting Done", async () => {
-    let listener: ((event: AgentSessionEvent) => void) | null = null
-    const prompts: string[] = []
-    const reflectionPrompt = vi.fn(() => "<memory-reflection>Reflect silently.</memory-reflection>")
-    const setMemoryReflectionActive = vi.fn()
-    const handle: PiSessionHandle = {
-      ...fleetSeams,
-      id: "pi-session-memory-reflection",
-      modelId: "anthropic/claude-sonnet",
-      contextWindow: 200_000,
-      subscribe: (next) => {
-        listener = next
-        return vi.fn()
-      },
-      prompt: async (prompt) => {
-        prompts.push(prompt)
-        listener?.({
-          type: "message_update",
-          message: {} as never,
-          assistantMessageEvent: {
-            type: "text_delta",
-            delta: prompts.length === 1 ? "visible answer" : "hidden reflection prose"
-          } as never
-        })
-        listener?.({ type: "agent_settled" })
-      },
-      steer: async () => undefined,
-      interrupt: async () => undefined,
-      dispose: vi.fn(),
-      usage: () => ({ costUsd: 0, tokens: 5 }),
-      memoryReflectionPrompt: reflectionPrompt,
-      setMemoryReflectionActive
-    }
-    const runtime = await Effect.runPromise(
-      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
-    )
-
-    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
-
-    expect(prompts).toEqual([
-      "hello",
-      "<memory-reflection>Reflect silently.</memory-reflection>"
-    ])
-    expect(reflectionPrompt).toHaveBeenCalledOnce()
-    expect(setMemoryReflectionActive.mock.calls).toEqual([[true], [false]])
-    expect(events.map((event) => event._tag)).toEqual(["Started", "Assistant", "Done"])
-    expect(events.flatMap((event) => event._tag === "Assistant" ? [event.text] : []))
-      .toEqual(["visible answer"])
-  })
-
-  it("ignores provider failures from the optional hidden reflection", async () => {
-    let listener: ((event: AgentSessionEvent) => void) | null = null
-    let promptCount = 0
-    const handle: PiSessionHandle = {
-      ...fleetSeams,
-      id: "pi-session-reflection-provider-failure",
-      modelId: "anthropic/claude-sonnet",
-      contextWindow: 200_000,
-      subscribe: (next) => {
-        listener = next
-        return vi.fn()
-      },
-      prompt: async () => {
-        promptCount += 1
-        if (promptCount === 2) {
-          listener?.({
-            type: "message_end",
-            message: {
-              role: "assistant",
-              stopReason: "error",
-              errorMessage: "reflection provider unavailable"
-            } as never
-          })
-        }
-        listener?.({ type: "agent_settled" })
-      },
-      steer: async () => undefined,
-      interrupt: async () => undefined,
-      dispose: vi.fn(),
-      usage: () => ({ costUsd: 0, tokens: 3 }),
-      memoryReflectionPrompt: () => "<memory-reflection>Reflect.</memory-reflection>"
-    }
-    const runtime = await Effect.runPromise(
-      makePiAgentRuntime({ create: () => Effect.succeed(handle) })
-    )
-
-    const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
-
-    expect(events.at(-1)).toMatchObject({ _tag: "Done" })
-    expect(events.some((event) => event._tag === "Failed")).toBe(false)
-  })
-
-  it("interrupts and settles a hidden reflection at its hard deadline", async () => {
-    vi.useFakeTimers()
-    try {
-      let listener: ((event: AgentSessionEvent) => void) | null = null
-      let promptCount = 0
-      const interrupt = vi.fn(async () => {
-        listener?.({
-          type: "message_end",
-          message: {
-            role: "assistant",
-            stopReason: "error",
-            errorMessage: "reflection interrupted at deadline"
-          } as never
-        })
-        listener?.({ type: "agent_settled" })
-      })
-      const handle: PiSessionHandle = {
-        ...fleetSeams,
-        id: "pi-session-reflection-timeout",
-        modelId: "anthropic/claude-sonnet",
-        contextWindow: 200_000,
-        subscribe: (next) => {
-          listener = next
-          return vi.fn()
-        },
-        prompt: async () => {
-          promptCount += 1
-          if (promptCount === 1) listener?.({ type: "agent_settled" })
-          else await new Promise<void>(() => undefined)
-        },
-        steer: async () => undefined,
-        interrupt,
-        dispose: vi.fn(),
-        usage: () => ({ costUsd: 0, tokens: 3 }),
-        memoryReflectionPrompt: () => "<memory-reflection>Reflect.</memory-reflection>"
-      }
-      const runtime = await Effect.runPromise(
-        makePiAgentRuntime({ create: () => Effect.succeed(handle) })
-      )
-      const eventsPromise = Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
-      await vi.advanceTimersByTimeAsync(MEMORY_REFLECTION_TIMEOUT_MS)
-
-      const events = [...(await eventsPromise)]
-      expect(interrupt).toHaveBeenCalledOnce()
-      expect(events.at(-1)).toMatchObject({ _tag: "Done" })
-    } finally {
-      vi.useRealTimers()
-    }
   })
 
   it("delivers the terminal event before closing a slow consumer", async () => {
@@ -769,55 +626,6 @@ describe("PiAgentRuntime", () => {
     fleet.childActive = false
   })
 
-  it("rebuilds a retained session when memory tool availability changes", async () => {
-    const fleet = { childActive: true }
-    const handles: PiSessionHandle[] = []
-    const createdContexts: AgentRuntimeContext[] = []
-    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
-      const handle = settlingHandle(fleet)
-      handles.push(handle)
-      createdContexts.push(created)
-      return Effect.succeed(handle)
-    })
-    const runtime = await Effect.runPromise(
-      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
-    )
-    const browser = {
-      name: "jingler-browser",
-      url: "http://127.0.0.1:1111/mcp",
-      headers: {}
-    }
-    const memory = {
-      name: "jingler-memory",
-      url: "http://127.0.0.1:2222/mcp",
-      headers: {}
-    }
-
-    await Effect.runPromise(Stream.runCollect(runtime.run(
-      spec,
-      { ...context, mcp: { browser } }
-    )))
-    await Effect.runPromise(Stream.runCollect(runtime.run(
-      { ...spec, runId: "run-2", prompt: "memory recovered", piSessionId: "/sessions/parent.jsonl" },
-      { ...context, mcp: { browser, memory } }
-    )))
-
-    expect(create).toHaveBeenCalledTimes(2)
-    expect(handles[0]?.dispose).toHaveBeenCalledOnce()
-    expect(createdContexts[1]?.mcp?.memory?.name).toBe("jingler-memory")
-    expect(create.mock.calls[1]?.[0].piSessionId).toBe("/sessions/parent.jsonl")
-
-    await Effect.runPromise(Stream.runCollect(runtime.run(
-      { ...spec, runId: "run-3", prompt: "memory disabled", piSessionId: "/sessions/parent.jsonl" },
-      { ...context, mcp: { browser } }
-    )))
-
-    expect(create).toHaveBeenCalledTimes(3)
-    expect(handles[1]?.dispose).toHaveBeenCalledOnce()
-    expect(createdContexts[2]?.mcp?.memory).toBeUndefined()
-    fleet.childActive = false
-  })
-
   it("rebuilds a retained session when a dynamically resolved catalog changes", async () => {
     const fleet = { childActive: true }
     let catalog = "managed-mcp:alpha"
@@ -851,57 +659,6 @@ describe("PiAgentRuntime", () => {
     expect(lockedCapabilityFingerprint).toHaveBeenCalledTimes(3)
     expect(create).toHaveBeenCalledTimes(2)
     expect(handles[0]?.dispose).toHaveBeenCalledOnce()
-    fleet.childActive = false
-  })
-
-  it("keeps a retained session when only MCP endpoint details rotate", async () => {
-    let listener: ((event: AgentSessionEvent) => void) | null = null
-    let createdContext: AgentRuntimeContext | null = null
-    const fleet = { childActive: true }
-    const handle: PiSessionHandle = {
-      ...settlingHandle(fleet),
-      subscribe: (next) => {
-        listener = next
-        return vi.fn()
-      },
-      prompt: async () => {
-        listener?.({ type: "agent_settled" })
-      }
-    }
-    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
-      createdContext = created
-      return Effect.succeed(handle)
-    })
-    const runtime = await Effect.runPromise(
-      makePiAgentRuntime({ create }, { retainedSessionPollMs: 10 })
-    )
-    const attachments = (port: number) => ({
-      browser: {
-        name: "jingler-browser",
-        url: `http://127.0.0.1:${port}/browser`,
-        headers: { authorization: `Bearer browser-${port}` }
-      },
-      memory: {
-        name: "jingler-memory",
-        url: `http://127.0.0.1:${port}/memory`,
-        headers: { authorization: `Bearer memory-${port}` }
-      }
-    })
-
-    await Effect.runPromise(Stream.runCollect(runtime.run(
-      spec,
-      { ...context, mcp: attachments(1111) }
-    )))
-    await Effect.runPromise(Stream.runCollect(runtime.run(
-      { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
-      { ...context, mcp: attachments(2222) }
-    )))
-
-    expect(create).toHaveBeenCalledOnce()
-    expect(handle.dispose).not.toHaveBeenCalled()
-    expect(createdContext!.mcp?.memory && "url" in createdContext!.mcp.memory
-      ? createdContext!.mcp.memory.url
-      : null).toBe("http://127.0.0.1:2222/memory")
     fleet.childActive = false
   })
 

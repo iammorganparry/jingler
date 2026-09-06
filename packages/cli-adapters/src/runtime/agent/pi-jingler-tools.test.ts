@@ -154,27 +154,6 @@ describe("Jingler target-owned tools", () => {
     expect(askQuestion).not.toHaveBeenCalled()
   })
 
-  it("reports an attempted unavailable memory attachment without memory tools", async () => {
-    const registry = await Effect.runPromise(createJinglerTools({
-      context: runtimeContext({ memoryAttachmentStatus: "failed" }),
-      cwd: "/workspace"
-    }))
-
-    expect(registry.mcpHealth()).toContainEqual({
-      name: "jingler-memory",
-      status: "failed"
-    })
-    expect(registry.capabilitiesFor("conversation", "ask").map(({ id }) => id))
-      .not.toContain("mcp__jingler-memory__memory_search")
-
-    const disabledRegistry = await Effect.runPromise(createJinglerTools({
-      context: runtimeContext({ memoryAttachmentStatus: "disabled" }),
-      cwd: "/workspace"
-    }))
-    expect(disabledRegistry.mcpHealth().map(({ name }) => name))
-      .not.toContain("jingler-memory")
-  })
-
   it("registers WebSearch only when the runtime target supplies an executable route", async () => {
     const withoutSearch = await Effect.runPromise(createJinglerTools({
       context: runtimeContext(),

@@ -23,8 +23,6 @@ import {
   GitHubAuth,
   GitHubEventStore,
   GitService,
-  MemoryServiceLive,
-  MemoryAttachmentServiceLive,
   makePiAgentRuntimeLive,
   PiAgentRuntimeLive,
   ExplanationStore,
@@ -97,15 +95,7 @@ const StoreLayers = Layer.mergeAll(
  */
 const RuntimeRoleLayers = Layer.mergeAll(
   AgentRunner.Default,
-  // AgentRunner.Default also depends on this exact layer reference. Effect's
-  // layer memoization therefore builds one app-lifetime MemoryService for both
-  // runner captures and renderer RPCs, keeping the outbox lock and proxy shared.
-  MemoryServiceLive,
-  ReviewService.Default.pipe(
-    Layer.provide(
-      MemoryAttachmentServiceLive.pipe(Layer.provide(MemoryServiceLive))
-    )
-  ),
+  ReviewService.Default,
   ContextManager.Default
 )
 
@@ -153,9 +143,6 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(AssetLayer),
   Layer.provide(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
-  Layer.provide(
-    MemoryAttachmentServiceLive.pipe(Layer.provide(MemoryServiceLive))
-  ),
   Layer.provide(ConfigService.Default),
   Layer.provide(SecretStoreLayer)
 )

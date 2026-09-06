@@ -7,7 +7,6 @@ import { AppPaths } from "../../app-paths.js"
 import { ConfigService } from "../../config.js"
 import { EnvironmentService } from "../../environment.js"
 import { SecretStore } from "../../secret-store.js"
-import { MemoryAttachmentService } from "../../memory-session.js"
 import { PluginHost, type PluginHostRuntime } from "../../plugin-host.js"
 import { PluginRegistry } from "../../plugins.js"
 import { SessionStore } from "../../sessions.js"
@@ -45,7 +44,6 @@ import type {
   ToolRegistry,
   ToolSuccessfulResult
 } from "../tools/tool-registry.js"
-import { makeToolMemory } from "../tools/tool-memory.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import {
   makeWorkspaceMutationPort,
@@ -128,7 +126,6 @@ export const makePiAgentRuntimeLive = (
     const pluginRegistry = yield* PluginRegistry
     const pluginHost = yield* PluginHost
     const sessionStore = yield* SessionStore
-    const memory = yield* Effect.serviceOption(MemoryAttachmentService)
     const workspace = yield* makeWorkspaceInspectionPort
     const webSearch = yield* Effect.serviceOption(WebSearchService)
     const browserControl = yield* Effect.serviceOption(BrowserControlPort)
@@ -319,14 +316,7 @@ export const makePiAgentRuntimeLive = (
           managedFiles: preparedCatalog === undefined
             ? managedResources.enabledForTarget(spec.targetCapabilities.targetId)
             : Effect.succeed(preparedCatalog.managedFiles),
-          plugins: pluginSetup,
-          memoryLifecycle: Option.isSome(memory) && memory.value.diagnostics !== undefined
-            ? memory.value.diagnostics()
-            : Effect.succeed({
-                attachmentStatus: "disabled" as const,
-                queuedRetentions: 0,
-                retryingRetentions: 0
-              })
+          plugins: pluginSetup
         }).pipe(
           Effect.mapError((cause) =>
             new AgentRuntimeError({
@@ -335,12 +325,7 @@ export const makePiAgentRuntimeLive = (
               cause
             })
           ),
-          Effect.flatMap(({
-            managedMcp,
-            managedFiles,
-            plugins,
-            memoryLifecycle
-          }) => createJinglerTools({
+          Effect.flatMap(({ managedMcp, managedFiles, plugins }) => createJinglerTools({
             context,
             cwd: spec.cwd,
             workspace,
@@ -360,19 +345,6 @@ export const makePiAgentRuntimeLive = (
                 : { ...current, configured: undefined }
             },
             registryOptions: {
-              memoryLifecycle: () => {
-                const snapshot = Option.isSome(memory) &&
-                  memory.value.diagnosticsSnapshot !== undefined
-                  ? memory.value.diagnosticsSnapshot()
-                  : memoryLifecycle
-                return Object.assign(snapshot, {
-                  attachmentStatus:
-                    context.memoryAttachmentStatus ?? snapshot.attachmentStatus
-                })
-              },
-              ...(Option.isSome(memory)
-                ? { memory: makeToolMemory({ memory: memory.value, runId: spec.runId }) }
-                : {}),
               ...(plugins
                 ? {
                     onSuccessfulResult: async (result: ToolSuccessfulResult) => {

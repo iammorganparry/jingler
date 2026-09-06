@@ -30,7 +30,6 @@ const SEED: readonly PrFileChange[] = [
   file("apps/desktop/e2e/fixtures.ts", 13, 2, true),
   file("apps/desktop/e2e/memory-map.spec.ts", 91, 0),
   file("packages/cli-adapters/src/memory-electron.ts", 33, 0),
-  file("packages/cli-adapters/src/shared-memory.ts", 165, 0),
   file("packages/contracts/src/rpc.ts", 335, 4),
   file("packages/cli-adapters/src/runtime.ts", 2, 0),
   file("packages/cli-adapters/src/zip.test.ts", 21, 0),

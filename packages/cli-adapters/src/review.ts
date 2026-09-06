@@ -9,20 +9,13 @@ import type {
 } from "@jingler/core"
 import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
-import { Effect, Option, PubSub, RcMap, Ref, Schema, Stream } from "effect"
+import { Effect, PubSub, RcMap, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AppPaths } from "./app-paths.js"
 import { ReviewStore } from "./review-store.js"
 import { SessionStore } from "./sessions.js"
 import { adversarialPrompt } from "./review-prompt.js"
-import {
-  MemoryAttachmentService,
-  attachMemoryToSessionSpec,
-  type MemoryAttachmentServiceShape
-} from "./memory-session.js"
-import type { MemoryAttachment } from "./memory.js"
-
 /**
  * Runs the adversarial reviewer against a PR diff and returns structured findings.
  *
@@ -194,8 +187,6 @@ const REPLAY_CAP = 2000
 export class ReviewService extends Effect.Service<ReviewService>()("@jingler/ReviewService", {
   accessors: true,
   scoped: Effect.gen(function* () {
-    const memoryService = yield* Effect.serviceOption(MemoryAttachmentService)
-
     /**
      * Per-session broadcast of the running reviewer's events, so the UI can watch
      * an agent it did not start.
@@ -396,7 +387,6 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
         return yield* prepareReviewTurn(
           input,
           ownerFor,
-          memoryService,
           publish,
           resetLive,
           adapter,
@@ -422,7 +412,6 @@ export class ReviewService extends Effect.Service<ReviewService>()("@jingler/Rev
 function* prepareReviewTurn(
   input: ReviewInput,
   ownerFor: (sessionId: string) => Effect.Effect<string | null, never, ReviewEnv>,
-  memoryService: Option.Option<MemoryAttachmentServiceShape>,
   publish: (sessionId: string, event: StreamEvent) => Effect.Effect<void>,
   resetLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>,
   adapter: AgentTurnDriverShape,
@@ -438,10 +427,6 @@ function* prepareReviewTurn(
 
         const collected = yield* Ref.make<ReadonlyArray<string>>([])
         const reviewChatId = yield* ownerFor(input.sessionId)
-        const memoryConfigured = Option.isSome(memoryService)
-          ? yield* (memoryService.value.isConfigured?.() ?? Effect.succeed(true))
-          : false
-
         const baseSpec: AgentTurnSpec = {
           sessionId: input.sessionId,
           chatId: reviewChatId ?? input.sessionId,
@@ -464,18 +449,10 @@ function* prepareReviewTurn(
             baseBranch: input.baseBranch
           }),
           images: [],
-          mode: "read-only",
-          memoryAttachmentStatus: memoryConfigured ? "failed" : "disabled"
+          mode: "read-only"
         }
-        const memoryAttachment = Option.isSome(memoryService)
-          ? yield* memoryService.value.attachment(
-              `${input.repo} ${input.branch} review ${input.baseBranch ?? ""}`.trim(),
-              `review:${input.sessionId}:${input.headSha}`
-            )
-          : null
   return yield* runReviewTurn(
     baseSpec,
-    memoryAttachment,
     publish,
     input,
     collected,
@@ -486,8 +463,7 @@ function* prepareReviewTurn(
 }
 
 function* runReviewTurn(
-  baseSpec: AgentTurnSpec,
-  memoryAttachment: MemoryAttachment | null,
+  spec: AgentTurnSpec,
   publish: (sessionId: string, event: StreamEvent) => Effect.Effect<void>,
   input: ReviewInput,
   collected: Ref.Ref<readonly string[]>,
@@ -495,8 +471,6 @@ function* runReviewTurn(
   adapter: AgentTurnDriverShape,
   persistLive: (sessionId: string) => Effect.Effect<void, never, ReviewEnv>
 ) {
-  const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
-
         const ctx: AgentContext = {
           emit: (event) =>
             Effect.zipRight(

@@ -3,16 +3,12 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type {
   GateDecision,
-  MemoryGrantResponse,
-  Message,
   PermissionMode,
-  Plan,
   Session,
   StreamEvent
 } from "@jingler/core"
 import {
   AgentRunError,
-  findApprovedPlan,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -32,14 +28,11 @@ import type {
 import { ConfigService } from "./config.js"
 import {
   InMemorySecretStoreLive,
-  makeInMemorySecretStore,
-  SecretStore
 } from "./secret-store.js"
 import {
   AgentRunner,
   isContextOverflowFailure,
 } from "./agent-runner.js"
-import { composeRemoteMcpServers } from "./runtime/mcp/attachment.js"
 import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -296,233 +289,10 @@ describe("AgentRunner remote MCP attachments", () => {
     expect(browserAcquireCalls).toStrictEqual([
       { sessionId: SESSION, chatId: SESSION, ownerId: `${SESSION}:${SESSION}` }
     ])
-    expect(captured[0]!.mcp).toStrictEqual({
-      memory: null,
-      browser: PREVIEW_MCP
-    })
+    expect(captured[0]!.mcp).toStrictEqual({ browser: PREVIEW_MCP })
     const persistedSession = readFileSync(join(temp.root, "sessions.json"), "utf8")
     expect(persistedSession).not.toContain("preview-secret")
     expect(persistedSession).not.toContain("remoteMcpServers")
-  })
-
-  it("keeps a Jingler-owned attachment when an operator connector claims its name", () => {
-    const memory = {
-      name: "jingler-memory",
-      url: "https://memory.jingler.test/api/mcp",
-      headers: { Authorization: "Bearer memory" }
-    }
-    const operator = {
-      name: "jingler-memory",
-      url: "https://operator.example/mcp",
-      headers: { Authorization: "Bearer operator" }
-    }
-    expect(composeRemoteMcpServers(memory, operator)).toStrictEqual([memory])
-  })
-})
-
-describe("AgentRunner team memory", () => {
-  const memoryGrant = (): MemoryGrantResponse => ({
-    grant: "memory-grant-value",
-    claims: {
-      version: 1,
-      issuer: "jingler",
-      audience: "jingler-memory",
-      subject: "user-1",
-      organizationId: "org-team",
-      privileges: ["read", "propose"],
-      issuedAt: 1_785_600_000,
-      expiresAt: 4_102_444_800,
-      grantId: "grant-runner"
-    }
-  })
-
-  const installMemoryFetch = (requests: Request[]): void => {
-    const fetchImplementation: typeof fetch = async (input, init) => {
-      const request = new Request(input, init)
-      requests.push(request)
-      if (request.url.endsWith("/api/memory/grant")) {
-        return Response.json(memoryGrant())
-      }
-      if (request.url.endsWith("/api/mcp")) {
-        const body = (await request.clone().json()) as { method?: string }
-        if (body.method === "tools/call") {
-          return Response.json({
-            jsonrpc: "2.0",
-            id: "recall",
-            result: {
-              resultType: "complete",
-              structuredContent: { data: { results: [] } }
-            }
-          })
-        }
-        return Response.json({
-          jsonrpc: "2.0",
-          id: "discover",
-          result: { resultType: "complete" }
-        })
-      }
-      return Response.json({ accepted: true }, { status: 202 })
-    }
-    vi.stubGlobal("fetch", fetchImplementation)
-  }
-
-  const signedInSecrets = Layer.effect(
-    SecretStore,
-    makeInMemorySecretStore("jingler-user-token")
-  )
-
-  it("injects bounded reflection and retains only the redacted visible settled turn", async () => {
-    const requests: Request[] = []
-    installMemoryFetch(requests)
-    const captured: AgentTurnSpec[] = []
-    const recordingAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (_sessionId, spec, ctx) =>
-          Effect.sync(() => captured.push(spec)).pipe(
-            Effect.zipRight(
-              ctx.emit({
-                _tag: "ToolStart",
-                id: "memory-search",
-                name: "mcp__jingler-memory__memory_search",
-                target: null
-              })
-            ),
-            Effect.zipRight(ctx.emit({ _tag: "Assistant", text: "Use api_key=private-value" })),
-            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
-          ),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      BrowserControlMcpServiceTest,
-      signedInSecrets,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      recordingAdapter,
-      ContextManager.Default,
-      temp.layer
-    )
-
-    const transcript = await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
-        const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, SESSION, "Authorization: Bearer private-user-value").pipe(
-          Stream.runDrain
-        )
-        return yield* TranscriptStore.list(SESSION)
-      }).pipe(Effect.provide(base))
-    )
-
-    expectMemoryTurnSpec(captured[0])
-    const searchRequest = requests.find(
-      (request) => request.headers.get("mcp-name") === "memory_search"
-    )
-    const searchBody = await searchRequest?.clone().json() as {
-      params?: { arguments?: { query?: string } }
-    } | undefined
-    expect(searchBody?.params?.arguments?.query).toContain("Project: widget")
-    expect(searchBody?.params?.arguments?.query).toContain("Branch: chore/test")
-    await vi.waitFor(() => expect(
-      requests.some((request) => request.url.endsWith("/api/memory/sources"))
-    ).toBe(true))
-    const sourceRequest = requests.find((request) =>
-      request.url.endsWith("/api/memory/sources")
-    )
-    const sourceBody = await sourceRequest?.clone().json() as {
-      content?: string
-      source?: { id?: string }
-    } | undefined
-    expect(sourceBody?.source?.id).toMatch(/^session-digest:/u)
-    expect(sourceBody?.content).toContain("Repository: widget")
-    expect(sourceBody?.content).toContain("api_key=[REDACTED]")
-    expect(sourceBody?.content).not.toContain("private-value")
-    expect(sourceBody?.content).not.toContain("memory_navigation")
-    expect(sourceBody?.content).not.toContain("memory-grant-value")
-    expect(JSON.stringify(transcript)).not.toContain("memory-grant-value")
-    expect(JSON.stringify(transcript)).not.toContain("jingler-user-token")
-    expect(readFileSync(join(temp.root, "sessions.json"), "utf8")).not.toContain(
-      "memory-grant-value"
-    )
-  })
-
-  it("publishes no source for a failed turn", async () => {
-    const requests: Request[] = []
-    installMemoryFetch(requests)
-    const failedAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: (_sessionId, _spec, ctx) =>
-          ctx.emit({ _tag: "Failed", message: "provider failed" }),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      BrowserControlMcpServiceTest,
-      signedInSecrets,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      failedAdapter,
-      ContextManager.Default,
-      temp.layer
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
-        const runner = yield* AgentRunner
-        yield* runner.prompt(SESSION, SESSION, "fail").pipe(Stream.runDrain)
-      }).pipe(Effect.provide(base))
-    )
-    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
-  })
-
-  it("publishes no source when the operator cancels an unsettled turn", async () => {
-    const requests: Request[] = []
-    installMemoryFetch(requests)
-    let announceStarted = (): void => undefined
-    const started = new Promise<void>((resolve) => {
-      announceStarted = resolve
-    })
-    const pendingAdapter = Layer.succeed(
-      AgentTurnDriver,
-      AgentTurnDriver.of({
-        run: () => Effect.sync(announceStarted).pipe(Effect.zipRight(Effect.never)),
-        stop: () => Effect.void
-      })
-    )
-    const base = Layer.mergeAll(
-      AgentRunner.Default,
-      BrowserControlMcpServiceTest,
-      signedInSecrets,
-      ConfigService.Default,
-      SessionStore.Default,
-      TranscriptStore.Default,
-      BackgroundTaskStore.Default,
-      pendingAdapter,
-      ContextManager.Default,
-      temp.layer
-    )
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
-        const runner = yield* AgentRunner
-        const consumer = yield* runner.prompt(SESSION, SESSION, "cancel").pipe(
-          Stream.runDrain,
-          Effect.fork
-        )
-        yield* Effect.promise(() => started)
-        yield* runner.stop(SESSION, SESSION)
-        yield* Fiber.await(consumer)
-      }).pipe(Effect.provide(base))
-    )
-    expect(requests.some((request) => request.url.endsWith("/api/memory/sources"))).toBe(false)
   })
 })
 
@@ -2116,13 +1886,3 @@ describe("AgentRunner usage accrual", () => {
     expect(totals.afterTwo.tokens).toBe(84_200)
   })
 })
-
-const expectMemoryTurnSpec = (spec: AgentTurnSpec | undefined): void => {
-  expect(spec?.mcp?.memory?.name).toBe("jingler-memory")
-  expect(spec?.mcp?.browser?.name).toBe("jingler-browser")
-  expect(spec?.prompt).toContain("memory_navigation")
-  expect(spec?.prompt).toContain("memory_workflow_status")
-  expect(spec?.prompt).toContain("at most three standalone decisions")
-  expect(spec?.prompt).toContain("Exclude progress narration")
-  expect(spec?.prompt).toContain("Initial recall completed with no accepted matches")
-}

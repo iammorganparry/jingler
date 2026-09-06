@@ -107,8 +107,7 @@ const validateGitHubSecrets = (environment: Environment): void => {
  * `optional`, but in prod a missing or localhost value is a misconfiguration that
  * must fail loudly — otherwise the app silently talks to localhost (a dead worker,
  * an auth callback pointing at a dev port) with no boot-time signal. `require`
- * lets a URL be prod-mandatory only when the feature using it is on (e.g. the
- * memory worker URL only matters when memory is enabled).
+ * lets a URL be prod-mandatory only when the feature using it is on.
  */
 const prodUrl = (
   environment: Environment,
@@ -130,7 +129,6 @@ const prodUrl = (
 
 export const loadEnv = (environment: Environment = process.env) => {
   const nodeEnv = optional(environment, "NODE_ENV", "development")
-  const memoryEnabled = enabled(environment, "MEMORY_ENABLED")
   const githubAppEnabled = enabled(environment, "GITHUB_APP_ENABLED", false)
   const deviceRelayEnabled = enabled(environment, "DEVICE_RELAY_ENABLED", false)
   const managedEnvironmentsEnabled = enabled(
@@ -334,31 +332,11 @@ export const loadEnv = (environment: Environment = process.env) => {
     googleClientSecret: optional(environment, "GOOGLE_CLIENT_SECRET"),
     resendApiKey: optional(environment, "RESEND_API_KEY"),
     emailFrom: optional(environment, "EMAIL_FROM", "Jingler <login@jingler.local>"),
-    /** Global paid-team rollout/circuit-breaker. Disabling it never mutates the vault. */
-    memoryEnabled: enabled(environment, "MEMORY_ENABLED"),
-    /** HMAC key for short-lived team-memory grants. Keep distinct from BetterAuth. */
-    memoryGrantSecret: secret(
-      environment,
-      "MEMORY_GRANT_SECRET",
-      "dev-memory-grant-secret-change-me"
-    ),
-    memoryGrantAudience: optional(environment, "MEMORY_GRANT_AUDIENCE", "jingler-memory-mcp"),
-    memoryGrantTtlSeconds: positiveNumber(environment, "MEMORY_GRANT_TTL_SECONDS", 3600),
-    /** Private Cloudflare Worker origin and its rotating Next.js service credential. */
-  memoryWorkerUrl: prodUrl(environment, "MEMORY_WORKER_URL", "http://localhost:8787", {
-    require: memoryEnabled
-  }),
-  memoryWorkerServiceSecret: secret(
-    environment,
-    "MEMORY_WORKER_SERVICE_SECRET",
-    "dev-memory-worker-secret-change-me"
-  ),
-  memoryRequestTimeoutMs: positiveNumber(environment, "MEMORY_REQUEST_TIMEOUT_MS", 5000),
-  /** Deep-link the desktop app registers; magic links + OAuth bounce back here. */
+    /** Deep-link the desktop app registers; magic links + OAuth bounce back here. */
     desktopRedirect: optional(environment, "DESKTOP_REDIRECT", "jingler://auth/callback"),
     /** Vercel Cron bearer used only by autonomous maintenance endpoints. */
     cronSecret
-} as const
+  } as const
 
   function validateDeviceRelayConfiguration() {
     if (deviceRelayConfigured) {

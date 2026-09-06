@@ -12,9 +12,6 @@ const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
 
 const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   ...(spec.mcp === undefined ? {} : { mcp: spec.mcp }),
-  ...(spec.memoryAttachmentStatus === undefined
-    ? {}
-    : { memoryAttachmentStatus: spec.memoryAttachmentStatus }),
   publishEvent: context.emit,
   registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: (request: {
@@ -35,11 +32,7 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
 })
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {
-  const {
-    mcp: _mcp,
-    memoryAttachmentStatus: _memoryAttachmentStatus,
-    ...runtime
-  } = spec
+  const { mcp: _mcp, ...runtime } = spec
   return {
     runId,
     ...runtime

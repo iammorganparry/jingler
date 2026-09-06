@@ -82,7 +82,6 @@ interface McpDiscovery {
 
 export interface JinglerMcpAttachments {
   readonly browser?: RuntimeMcpServer | null
-  readonly memory?: RuntimeMcpServer | null
   /** Operator-configured servers from `~/jingler/mcp.json`. */
   readonly configured?: ReadonlyArray<RuntimeMcpServer>
 }
@@ -100,9 +99,6 @@ export const mcpCapabilityFingerprint = (
   ...(attachments?.browser
     ? [`browser:${serverCapabilityIdentity(attachments.browser)}`]
     : []),
-  ...(attachments?.memory
-    ? [`memory:${serverCapabilityIdentity(attachments.memory)}`]
-    : []),
   ...(attachments?.configured ?? [])
     .map((server) => `configured:${serverCapabilityIdentity(server)}`)
     .sort()
@@ -119,13 +115,6 @@ export const jinglerMcpSources = (
         server: attachments.browser,
         risk: "execute" as const,
         ...(live ? { resolveServer: () => live()?.browser ?? null } : {})
-      }]
-    : []),
-  ...(attachments.memory
-    ? [{
-        server: attachments.memory,
-        risk: "network" as const,
-        ...(live ? { resolveServer: () => live()?.memory ?? null } : {})
       }]
     : []),
   ...(attachments.configured ?? []).map((server) => ({

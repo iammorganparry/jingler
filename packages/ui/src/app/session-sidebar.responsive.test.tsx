@@ -48,14 +48,6 @@ describe("SessionSidebar at shell width", () => {
     expect(screen.getByTestId("pull-requests-rail-item").getAttribute("aria-current")).toBe("page")
   })
 
-  it("keeps the eligible Memory destination reachable from the collapsed rail", () => {
-    const onOpenMemory = vi.fn()
-    renderAt(820, { memoryEligible: true, memoryActive: true, onOpenMemory })
-    fireEvent.click(screen.getByRole("button", { name: "Memory" }))
-    expect(onOpenMemory).toHaveBeenCalledTimes(1)
-    expect(screen.getByTestId("memory-rail-item").getAttribute("aria-current")).toBe("page")
-  })
-
   it("stays docked while the shell is unmeasured, so launch doesn't flash a rail", () => {
     renderAt(0)
     expect(screen.getByTestId("session-sidebar")).toBeTruthy()

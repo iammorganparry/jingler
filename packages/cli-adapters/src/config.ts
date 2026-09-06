@@ -3,7 +3,6 @@ import type {
   ExecutionMode,
   GitConfig,
   GithubConfig,
-  MemoryConfig,
   NotificationsConfig,
   OffloadComputeSettings,
   PlanTemplateConfig,
@@ -33,7 +32,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   const truthyKeys = [
     "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "planTemplate", "notifications", "theme", "webSearch", "memory", "offloadCompute",
+    "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
@@ -242,9 +241,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setDisabledPlugins = (disabledPlugins: ReadonlyArray<string>) =>
         patch({ disabledPlugins })
 
-      /** Save only renderer-safe memory enablement and organization selection. */
-      const setMemory = (memory: MemoryConfig) => patch({ memory })
-
       /** Persist automatic compute routing and its shell-free project allowlist. */
       const setOffloadCompute = (offloadCompute: OffloadComputeSettings) =>
         patch({ offloadCompute })
@@ -298,7 +294,6 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setActiveTheme,
         setThemeCustomizations,
         setWebSearch,
-        setMemory,
         setOffloadCompute,
         setDisabledPlugins
       }
