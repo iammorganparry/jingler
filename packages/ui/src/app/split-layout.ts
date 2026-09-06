@@ -610,6 +610,35 @@ const isPane = (value: unknown): value is Pane =>
  * empty workspace, not crash the whole app shell on boot. Same defensive posture
  * as `draft-store`'s `read`.
  */
+const takeStoredPanes = (storedPanes: ReadonlyArray<unknown>, seen: Set<string>): Array<Pane> => {
+      const panes: Array<Pane> = []
+      for (const p of storedPanes) {
+        if (panes.length >= MAX_PANES) break
+        if (!isPane(p) || seen.has(p.sessionId)) continue
+        seen.add(p.sessionId)
+        panes.push(p)
+      }
+  return panes
+}
+
+const restoreStoredGroups = (storedGroups: ReadonlyArray<SplitGroup>): Array<SplitGroup> => {
+    const seen = new Set<string>()
+    const groups: Array<SplitGroup> = []
+    for (const g of storedGroups) {
+      if (typeof g !== "object" || g === null || !Array.isArray(g.panes)) continue
+      // Cap and record in LOCKSTEP. Filtering first and slicing after left the
+      // dropped overflow in `seen`, so a stale store with a five-pane group
+      // burned its fifth session's id: a LATER group naming that session skipped
+      // it too, and it vanished from the workspace entirely rather than being
+      // kept by the group that still had room for it.
+      const panes = takeStoredPanes(g.panes, seen)
+      if (panes.length === 0) continue
+      const focused = typeof g.focused === "number" && Number.isInteger(g.focused) ? g.focused : 0
+      groups.push(withPanes({ id: "", panes, focused: 0 }, restoreRatios(panes), focused))
+    }
+    return groups
+}
+
 export const load = (): Workspace => {
   try {
     const raw = localStorage.getItem(WORKSPACE_STORAGE_KEY)
@@ -625,26 +654,7 @@ export const load = (): Workspace => {
     // or stale store naming the same session twice would mount two panes onto ONE
     // conversation actor, which then has two subtrees fighting over its
     // subscription.
-    const seen = new Set<string>()
-    const groups: Array<SplitGroup> = []
-    for (const g of parsed.groups) {
-      if (typeof g !== "object" || g === null || !Array.isArray(g.panes)) continue
-      // Cap and record in LOCKSTEP. Filtering first and slicing after left the
-      // dropped overflow in `seen`, so a stale store with a five-pane group
-      // burned its fifth session's id: a LATER group naming that session skipped
-      // it too, and it vanished from the workspace entirely rather than being
-      // kept by the group that still had room for it.
-      const panes: Array<Pane> = []
-      for (const p of g.panes as ReadonlyArray<unknown>) {
-        if (panes.length >= MAX_PANES) break
-        if (!isPane(p) || seen.has(p.sessionId)) continue
-        seen.add(p.sessionId)
-        panes.push(p)
-      }
-      if (panes.length === 0) continue
-      const focused = typeof g.focused === "number" && Number.isInteger(g.focused) ? g.focused : 0
-      groups.push(withPanes({ id: "", panes, focused: 0 }, restoreRatios(panes), focused))
-    }
+    const groups = restoreStoredGroups(parsed.groups)
     if (groups.length === 0) return EMPTY_WORKSPACE
     const activeGroupId =
       typeof parsed.activeGroupId === "string" && groups.some((g) => g.id === parsed.activeGroupId)

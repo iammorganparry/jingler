@@ -191,46 +191,45 @@ const issueForPage = (
   ...(line === undefined ? {} : { line })
 })
 
-const lintPageContent = (
+const lintWikiLinkAnchor = (
+  page: MemoryPage,
+  link: ReturnType<typeof extractWikiLinks>[number],
+  target: MemoryPage,
+  headingsByPage: Map<string, ReadonlySet<string>>,
+  issues: Array<MemoryLintIssue>
+): void => {
+  if (link.anchor !== undefined) {
+    let headings = headingsByPage.get(target.id)
+    if (headings === undefined) {
+      headings = extractMarkdownHeadings(target.body)
+      headingsByPage.set(target.id, headings)
+    }
+    if (!headings.has(slugifyMarkdownHeading(link.anchor))) {
+      issues.push(
+        issueForPage(
+          page,
+          "broken-reference",
+          `wikilink anchor "${link.anchor}" does not exist on "${link.target}"`,
+          link.line
+        )
+      )
+    }
+  }
+}
+
+const lintWikiLinks = (
   page: MemoryPage,
   identities: ReadonlyMap<string, ReadonlyArray<MemoryPage>>,
   headingsByPage: Map<string, ReadonlySet<string>>,
-  sources: ReadonlyMap<string, MemorySource>,
-  options: Required<Pick<MemoryLintOptions, "maxPageBytes" | "requireCitations">>
-): Array<MemoryLintIssue> => {
-  const issues: Array<MemoryLintIssue> = []
-  const unsafeReason = unsafeMemoryPathReason(page.path)
-  if (unsafeReason !== undefined) issues.push(issueForPage(page, "unsafe-path", unsafeReason))
-
-  const serialized = serializeMemoryMarkdown(page)
-  const size = utf8ByteLength(serialized)
-  if (size > options.maxPageBytes) {
-    issues.push(
-      issueForPage(
-        page,
-        "oversized-page",
-        `page is ${size} bytes; maximum is ${options.maxPageBytes} bytes`
-      )
-    )
-  }
-  for (const finding of findCredentialShapedContent(serialized)) {
-    issues.push(
-      issueForPage(
-        page,
-        "credential",
-        `${finding.kind}-shaped content is not allowed`,
-        finding.line
-      )
-    )
-  }
-
-  for (const link of extractWikiLinks(page.body)) {
+  issues: Array<MemoryLintIssue>
+): void => {
+  const lintLink = (link: ReturnType<typeof extractWikiLinks>[number]): void => {
     const unsafeTargetReason = unsafeMemoryPathReason(link.target)
     if (link.target !== "" && unsafeTargetReason !== undefined) {
       issues.push(
         issueForPage(page, "unsafe-path", `wikilink target is unsafe: ${unsafeTargetReason}`, link.line)
       )
-      continue
+      return
     }
     const matches =
       link.target === "" ? [page] : (identities.get(normalizeMemoryIdentity(link.target)) ?? [])
@@ -238,7 +237,7 @@ const lintPageContent = (
       issues.push(
         issueForPage(page, "broken-reference", `wikilink target "${link.target}" does not exist`, link.line)
       )
-      continue
+      return
     }
     if (matches.length > 1) {
       issues.push(
@@ -249,28 +248,18 @@ const lintPageContent = (
           link.line
         )
       )
-      continue
+      return
     }
-    if (link.anchor !== undefined) {
-      const target = matches[0]!
-      let headings = headingsByPage.get(target.id)
-      if (headings === undefined) {
-        headings = extractMarkdownHeadings(target.body)
-        headingsByPage.set(target.id, headings)
-      }
-      if (!headings.has(slugifyMarkdownHeading(link.anchor))) {
-        issues.push(
-          issueForPage(
-            page,
-            "broken-reference",
-            `wikilink anchor "${link.anchor}" does not exist on "${link.target}"`,
-            link.line
-          )
-        )
-      }
-    }
+    lintWikiLinkAnchor(page, link, matches[0]!, headingsByPage, issues)
   }
+  extractWikiLinks(page.body).forEach(lintLink)
+}
 
+const lintDependencies = (
+  page: MemoryPage,
+  identities: ReadonlyMap<string, ReadonlyArray<MemoryPage>>,
+  issues: Array<MemoryLintIssue>
+): void => {
   for (const relationship of page.relationships) {
     if (relationship.kind !== "dependency") continue
     const unsafeTargetReason = unsafeMemoryPathReason(relationship.target)
@@ -303,7 +292,30 @@ const lintPageContent = (
       )
     }
   }
+}
 
+const lintClaimCitations = (
+  page: MemoryPage, requireCitations: boolean, knownCitations: ReadonlySet<string>,
+  issues: Array<MemoryLintIssue>
+): void => {
+  const citationPolicy = page.metadata.citationPolicy
+  if (requireCitations && citationPolicy !== "none") {
+    for (const claim of extractMarkdownClaims(page.body)) {
+      if (!claim.citationIds.some((citationId) => knownCitations.has(citationId))) {
+        issues.push(
+          issueForPage(page, "uncited-claim", "prose claim must include a citation", claim.line)
+        )
+      }
+    }
+  }
+}
+
+const lintCitations = (
+  page: MemoryPage,
+  sources: ReadonlyMap<string, MemorySource>,
+  options: Required<Pick<MemoryLintOptions, "maxPageBytes" | "requireCitations">>,
+  issues: Array<MemoryLintIssue>
+): void => {
   const pageSources = new Map(sources)
   for (const source of page.sources) pageSources.set(source.id, source)
   const knownCitations = new Set<string>()
@@ -340,16 +352,48 @@ const lintPageContent = (
     }
   }
 
-  const citationPolicy = page.metadata.citationPolicy
-  if (options.requireCitations && citationPolicy !== "none") {
-    for (const claim of extractMarkdownClaims(page.body)) {
-      if (!claim.citationIds.some((citationId) => knownCitations.has(citationId))) {
-        issues.push(
-          issueForPage(page, "uncited-claim", "prose claim must include a citation", claim.line)
-        )
-      }
-    }
+  lintClaimCitations(page, options.requireCitations, knownCitations, issues)
+}
+
+const lintPageContent = (
+  page: MemoryPage,
+  identities: ReadonlyMap<string, ReadonlyArray<MemoryPage>>,
+  headingsByPage: Map<string, ReadonlySet<string>>,
+  sources: ReadonlyMap<string, MemorySource>,
+  options: Required<Pick<MemoryLintOptions, "maxPageBytes" | "requireCitations">>
+): Array<MemoryLintIssue> => {
+  const issues: Array<MemoryLintIssue> = []
+  const unsafeReason = unsafeMemoryPathReason(page.path)
+  if (unsafeReason !== undefined) issues.push(issueForPage(page, "unsafe-path", unsafeReason))
+
+  const serialized = serializeMemoryMarkdown(page)
+  const size = utf8ByteLength(serialized)
+  if (size > options.maxPageBytes) {
+    issues.push(
+      issueForPage(
+        page,
+        "oversized-page",
+        `page is ${size} bytes; maximum is ${options.maxPageBytes} bytes`
+      )
+    )
   }
+  for (const finding of findCredentialShapedContent(serialized)) {
+    issues.push(
+      issueForPage(
+        page,
+        "credential",
+        `${finding.kind}-shaped content is not allowed`,
+        finding.line
+      )
+    )
+  }
+
+  lintWikiLinks(page, identities, headingsByPage, issues)
+
+  lintDependencies(page, identities, issues)
+
+  lintCitations(page, sources, options, issues)
+
   return issues
 }
 
@@ -437,19 +481,10 @@ const revisionHeads = (
   return heads
 }
 
-const lintRevisionsAndProposals = (
-  pages: ReadonlyArray<MemoryPage>,
-  revisions: ReadonlyArray<MemoryRevision>,
-  proposals: ReadonlyArray<MemoryProposal>,
-  options: MemoryLintOptions,
-  issues: Array<MemoryLintIssue>
+const lintRevisionReferences = (
+  revisions: ReadonlyArray<MemoryRevision>, pageIds: ReadonlySet<string>,
+  revisionIds: ReadonlySet<string>, issues: Array<MemoryLintIssue>
 ): void => {
-  const pageIds = new Set(pages.map((page) => page.id))
-  const revisionIds = new Set(revisions.map((revision) => revision.id))
-  const heads = revisionHeads(revisions, options.headRevisionIds ?? {})
-  lintUniqueRecordIds(revisions, "revision", issues)
-  lintUniqueRecordIds(proposals, "proposal", issues)
-
   for (const revision of revisions) {
     if (!pageIds.has(revision.pageId)) {
       issues.push({
@@ -468,6 +503,23 @@ const lintRevisionsAndProposals = (
       })
     }
   }
+
+}
+
+const lintRevisionsAndProposals = (
+  pages: ReadonlyArray<MemoryPage>,
+  revisions: ReadonlyArray<MemoryRevision>,
+  proposals: ReadonlyArray<MemoryProposal>,
+  options: MemoryLintOptions,
+  issues: Array<MemoryLintIssue>
+): void => {
+  const pageIds = new Set(pages.map((page) => page.id))
+  const revisionIds = new Set(revisions.map((revision) => revision.id))
+  const heads = revisionHeads(revisions, options.headRevisionIds ?? {})
+  lintUniqueRecordIds(revisions, "revision", issues)
+  lintUniqueRecordIds(proposals, "proposal", issues)
+
+  lintRevisionReferences(revisions, pageIds, revisionIds, issues)
 
   for (const proposal of proposals) {
     if (!pageIds.has(proposal.pageId)) {
@@ -516,17 +568,21 @@ const lintRolesAndAuditEvents = (
   const proposals = new Set((repository.proposals ?? []).map((proposal) => proposal.id))
   const auditEvents = repository.auditEvents ?? []
   lintUniqueRecordIds(auditEvents, "audit event", issues)
-  for (const role of repository.roles ?? []) {
-    if (role.pageId !== undefined && !pages.has(role.pageId)) {
-      issues.push({
-        code: "unknown-page",
-        severity: "error",
-        message: `role for "${role.principalId}" refers to missing page "${role.pageId}"`,
-        pageId: role.pageId
-      })
+  const lintRoleReferences = (): void => {
+    for (const role of repository.roles ?? []) {
+      if (role.pageId !== undefined && !pages.has(role.pageId)) {
+        issues.push({
+          code: "unknown-page",
+          severity: "error",
+          message: `role for "${role.principalId}" refers to missing page "${role.pageId}"`,
+          pageId: role.pageId
+        })
+      }
     }
   }
-  for (const event of auditEvents) {
+  lintRoleReferences()
+
+  const lintAuditEvent = (event: (typeof auditEvents)[number]): void => {
     if (event.pageId !== undefined && !pages.has(event.pageId)) {
       issues.push({
         code: "unknown-page",
@@ -552,6 +608,7 @@ const lintRolesAndAuditEvents = (
       })
     }
   }
+  auditEvents.forEach(lintAuditEvent)
 }
 
 const isPageArray = (

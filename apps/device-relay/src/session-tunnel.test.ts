@@ -530,3 +530,34 @@ describe("encrypted session tunnel", () => {
     expect(response.status).toBe(403)
   })
 })
+
+describe("tunnel connection identity validation", () => {
+  it.each([
+    ["x-jingler-session-id", "another-session"],
+    ["x-jingler-subject", "another-user"],
+    ["x-jingler-device-id", "another-device"],
+    ["x-jingler-device-generation", "2"],
+    ["x-jingler-expires-at", "0"]
+  ])("rejects a mismatched %s before attaching a client", async (header, value) => {
+    const input = initialization(`session_identity_${crypto.randomUUID()}`)
+    const tunnel = env.SESSION_TUNNEL.getByName(input.sessionId)
+    await tunnel.initialize(input, nowSeconds)
+    const response = await tunnel.fetch(new Request("https://relay.internal/tunnel", {
+      headers: {
+        Upgrade: "websocket",
+        "x-jingler-endpoint": "desktop",
+        "x-jingler-session-id": input.sessionId,
+        "x-jingler-subject": input.subject,
+        "x-jingler-device-id": input.deviceId,
+        "x-jingler-device-generation": "1",
+        "x-jingler-client-instance-id": clientInstanceId,
+        "x-jingler-attachment-generation": "1",
+        "x-jingler-controller-lease-generation": "1",
+        "x-jingler-expires-at": String(input.expiresAt),
+        [header]: value
+      }
+    }))
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({ error: "Tunnel admission rejected" })
+  })
+})

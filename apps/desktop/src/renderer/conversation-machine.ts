@@ -98,30 +98,14 @@ export const boundedFleetEvents = (
   const terminalIds = new Set<string>()
   for (const event of events) {
     if (event._tag === "Remove") {
-      if (parentPiSessionId !== "" && !event.id.startsWith(`${parentPiSessionId}/`)) continue
-      const current = tombstones.get(event.id)
-      if (event.registryRevision >= (current?.registryRevision ?? -1)) {
-        tombstones.delete(event.id)
-        tombstones.set(event.id, event)
-      }
+      recordFleetTombstone(tombstones, event, parentPiSessionId)
       continue
     }
     if (event._tag === "Snapshot" && event.snapshot.parentPiSessionId === parentPiSessionId) {
-      if (
-        latestSnapshot === null ||
-        event.snapshot.registryRevision > latestSnapshot.snapshot.registryRevision ||
-        (event.snapshot.registryRevision === latestSnapshot.snapshot.registryRevision &&
-          event.snapshot.generatedAt > latestSnapshot.snapshot.generatedAt)
-      ) latestSnapshot = event
+      if (isNewerFleetSnapshot(event, latestSnapshot)) latestSnapshot = event
     }
-    const nodes = event._tag === "Upsert"
-      ? event.node.parentPiSessionId === parentPiSessionId ? [event.node] : []
-      : event.snapshot.parentPiSessionId === parentPiSessionId ? event.snapshot.nodes : []
-    for (const node of nodes) {
-      if (node.nodeKind === "agent" && COMPLETED_FLEET_STATUSES.has(node.status)) {
-        terminalIds.add(node.id)
-      }
-    }
+    const nodes = fleetNodesForParent(event, parentPiSessionId)
+    recordTerminalFleetIds(terminalIds, nodes)
   }
 
   const activeNodes = parentPiSessionId === ""
@@ -1120,14 +1104,7 @@ export const conversationMachine = setup({
         }
       }
       if (remote._tag === "DiffChanged") {
-        const diff = remote.changes?.totals ??
-          Object.values(remote.files ?? {}).reduce(
-            (total, file) => ({
-              added: total.added + file.added,
-              removed: total.removed + file.removed
-            }),
-            { added: 0, removed: 0 }
-          )
+        const diff = remoteDiffTotals(remote)
         return {
           sessionEventCursor: admission.cursor,
           session: { ...context.session, diff }
@@ -1481,23 +1458,7 @@ export const conversationMachine = setup({
       }
       // Sub-agent-scoped events drive the watch-only tabs, not the main turn.
       if (isSubagentEvent(e)) {
-        const next = applySubagentEvent(context.subagents, e)
-        // Sub-agent rolling messages accrue the same heavy tool payloads as the
-        // main turn but were invisible to compaction — a fleet-heavy turn held
-        // every sub-agent's full outputs for the whole run. Compact them at the
-        // same boundary the main path uses (a tool card leaving the window, or
-        // the sub-agent settling), never per delta: `compactMessageParts` is
-        // reference-preserving, so idle sub-agents keep identity and the tabs'
-        // render comparators still short-circuit.
-        if (e._tag !== "ToolEnd" && e._tag !== "SubagentEnded") {
-          return { subagents: next }
-        }
-        return {
-          subagents: next.map((s) => {
-            const compacted = compactMessageParts(s.message)
-            return compacted === s.message ? s : { ...s, message: compacted }
-          })
-        }
+        return foldSubagentStream(context, e)
       }
       // This is the latest context size, not a high-water mark. Compaction can
       // legitimately make it smaller during a run.
@@ -1543,66 +1504,8 @@ export const conversationMachine = setup({
           sharedPlan: e.plan
         }
       }
-      const folded = patchLast(context.messages, (last) => applyStreamEvent(last, e))
-      // A tool boundary is the moment a card can leave the recent window, so it
-      // always triggers a parts walk. Without this a multi-hour turn
-      // accumulates every settled card's output and previews on ONE message — a
-      // shape no message-count trim can ever reach — and the actor holding it
-      // is never evictable while running. The fold counter backstops turns
-      // with no tool boundaries at all (pure reasoning, one long tool's
-      // deltas), which otherwise never compact mid-turn. See
-      // `transcript-compaction.ts` for what compaction keeps.
-      const foldCount = context.foldsSinceCompaction + 1
-      const compactDue = e._tag === "ToolEnd" || foldCount >= COMPACT_EVERY_N_FOLDS
-      const foldsSinceCompaction = compactDue ? 0 : foldCount
-      const messages = compactDue
-        ? patchLast(folded, (last) => compactMessageParts(last))
-        : folded
-      // A finished/failed turn KEEPS its sub-agents (their tabs stay readable) —
-      // any still marked "working" (e.g. an interrupted run, or a sub-agent whose
-      // `task_notification` never arrived) settle to "done" so no tab shows a live
-      // spinner. The spinner is driven by the message's `streaming` flag, NOT by
-      // `status`, so the rolling message has to settle too — flipping the status
-      // alone left the dots pulsing forever. The list resets when the next run
-      // starts (`clearSubagents`). Keep a live context reading when one arrived;
-      // Done's tokens are only a fallback for harnesses that report at turn end.
-      const settled = context.subagents.map((s) =>
-        s.status === "working"
-          ? { ...s, status: "done" as const, message: settleStreaming(s.message) }
-          : s
-      )
-      // `Done.tokens` NEVER reaches the context meter. It is the run's
-      // cumulative spend (see the `Usage` schema note in conversation.ts) —
-      // cache reads counted once per tool call — so on a long session it runs
-      // to hundreds of millions. It used to be a fallback when the live
-      // reading was 0, and the post-compaction reset made that 0 routine: the
-      // meter then showed lifetime spend ("239239.4k context") until the next
-      // turn's first Usage event corrected it. Occupancy comes from `Usage`
-      // alone; a harness that only knows it at turn end must emit one.
-      if (e._tag === "Done") {
-        return {
-          messages,
-          foldsSinceCompaction,
-          subagents: settled,
-          runStartedAt: null,
-          lastOutcome: "done" as const,
-          pendingExternalInstruction: null,
-          pendingExternalAcceptances: []
-        }
-      }
-      if (e._tag === "Failed") {
-        return {
-          messages,
-          foldsSinceCompaction,
-          subagents: settled,
-          runStartedAt: null,
-          lastOutcome: "failed" as const,
-          pendingExternalInstruction: null,
-          pendingExternalAcceptances: []
-        }
-      }
-      return { messages, foldsSinceCompaction }
-    }),
+      return foldMainStreamEvent(context, e)
+}),
     clearSubagents: assign(() => ({ subagents: [] as ReadonlyArray<Subagent> })),
     settleStoppedFleet: assign(({ context }) => ({
       subagentFleetEvents: boundedFleetEvents(
@@ -2530,3 +2433,138 @@ export const conversationMachine = setup({
     }
   }
 })
+
+function recordFleetTombstone(
+  tombstones: Map<string, Extract<SubagentFleetEvent, { _tag: "Remove" }>>,
+  event: Extract<SubagentFleetEvent, { _tag: "Remove" }>,
+  parentPiSessionId: string
+): void {
+  if (parentPiSessionId !== "" && !event.id.startsWith(`${parentPiSessionId}/`)) return
+  const current = tombstones.get(event.id)
+  if (event.registryRevision >= (current?.registryRevision ?? -1)) {
+    tombstones.delete(event.id)
+    tombstones.set(event.id, event)
+  }
+}
+
+function isNewerFleetSnapshot(
+  event: Extract<SubagentFleetEvent, { _tag: "Snapshot" }>,
+  latestSnapshot: Extract<SubagentFleetEvent, { _tag: "Snapshot" }> | null
+): boolean {
+  return (
+    latestSnapshot === null ||
+    event.snapshot.registryRevision > latestSnapshot.snapshot.registryRevision ||
+    (event.snapshot.registryRevision === latestSnapshot.snapshot.registryRevision &&
+      event.snapshot.generatedAt > latestSnapshot.snapshot.generatedAt)
+  )
+}
+
+function fleetNodesForParent(
+  event: Exclude<SubagentFleetEvent, { _tag: "Remove" }>,
+  parentPiSessionId: string
+) {
+  return event._tag === "Upsert"
+    ? event.node.parentPiSessionId === parentPiSessionId ? [event.node] : []
+    : event.snapshot.parentPiSessionId === parentPiSessionId ? event.snapshot.nodes : []
+}
+
+function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {
+  const folded = patchLast(context.messages, (last) => applyStreamEvent(last, e))
+  // A tool boundary is the moment a card can leave the recent window, so it
+  // always triggers a parts walk. Without this a multi-hour turn
+  // accumulates every settled card's output and previews on ONE message — a
+  // shape no message-count trim can ever reach — and the actor holding it
+  // is never evictable while running. The fold counter backstops turns
+  // with no tool boundaries at all (pure reasoning, one long tool's
+  // deltas), which otherwise never compact mid-turn. See
+  // `transcript-compaction.ts` for what compaction keeps.
+  const foldCount = context.foldsSinceCompaction + 1
+  const compactDue = e._tag === "ToolEnd" || foldCount >= COMPACT_EVERY_N_FOLDS
+  const foldsSinceCompaction = compactDue ? 0 : foldCount
+  const messages = compactDue
+    ? patchLast(folded, (last) => compactMessageParts(last))
+    : folded
+  // A finished/failed turn KEEPS its sub-agents (their tabs stay readable) —
+  // any still marked "working" (e.g. an interrupted run, or a sub-agent whose
+  // `task_notification` never arrived) settle to "done" so no tab shows a live
+  // spinner. The spinner is driven by the message's `streaming` flag, NOT by
+  // `status`, so the rolling message has to settle too — flipping the status
+  // alone left the dots pulsing forever. The list resets when the next run
+  // starts (`clearSubagents`). Keep a live context reading when one arrived;
+  // Done's tokens are only a fallback for harnesses that report at turn end.
+  const settled = context.subagents.map((s) =>
+    s.status === "working"
+      ? { ...s, status: "done" as const, message: settleStreaming(s.message) }
+      : s
+  )
+  // `Done.tokens` NEVER reaches the context meter. It is the run's
+  // cumulative spend (see the `Usage` schema note in conversation.ts) —
+  // cache reads counted once per tool call — so on a long session it runs
+  // to hundreds of millions. It used to be a fallback when the live
+  // reading was 0, and the post-compaction reset made that 0 routine: the
+  // meter then showed lifetime spend ("239239.4k context") until the next
+  // turn's first Usage event corrected it. Occupancy comes from `Usage`
+  // alone; a harness that only knows it at turn end must emit one.
+  if (e._tag === "Done") {
+    return {
+      messages,
+      foldsSinceCompaction,
+      subagents: settled,
+      runStartedAt: null,
+      lastOutcome: "done" as const,
+      pendingExternalInstruction: null,
+      pendingExternalAcceptances: []
+    }
+  }
+  if (e._tag === "Failed") {
+    return {
+      messages,
+      foldsSinceCompaction,
+      subagents: settled,
+      runStartedAt: null,
+      lastOutcome: "failed" as const,
+      pendingExternalInstruction: null,
+      pendingExternalAcceptances: []
+    }
+  }
+  return { messages, foldsSinceCompaction }
+}
+
+function remoteDiffTotals(remote: Extract<SessionEventEnvelope["event"], { _tag: "DiffChanged" }>) {
+  return remote.changes?.totals ??
+    Object.values(remote.files ?? {}).reduce(
+      (total, file) => ({
+        added: total.added + file.added,
+        removed: total.removed + file.removed
+      }),
+      { added: 0, removed: 0 }
+    )
+}
+
+function recordTerminalFleetIds(terminalIds: Set<string>, nodes: ReturnType<typeof fleetNodesForParent>): void {
+  for (const node of nodes) {
+    if (node.nodeKind === "agent" && COMPLETED_FLEET_STATUSES.has(node.status)) {
+      terminalIds.add(node.id)
+    }
+  }
+}
+
+function foldSubagentStream(context: ConversationContext, e: StreamEvent) {
+  const next = applySubagentEvent(context.subagents, e)
+  // Sub-agent rolling messages accrue the same heavy tool payloads as the
+  // main turn but were invisible to compaction — a fleet-heavy turn held
+  // every sub-agent's full outputs for the whole run. Compact them at the
+  // same boundary the main path uses (a tool card leaving the window, or
+  // the sub-agent settling), never per delta: `compactMessageParts` is
+  // reference-preserving, so idle sub-agents keep identity and the tabs'
+  // render comparators still short-circuit.
+  if (e._tag !== "ToolEnd" && e._tag !== "SubagentEnded") {
+    return { subagents: next }
+  }
+  return {
+    subagents: next.map((s) => {
+      const compacted = compactMessageParts(s.message)
+      return compacted === s.message ? s : { ...s, message: compacted }
+    })
+  }
+}

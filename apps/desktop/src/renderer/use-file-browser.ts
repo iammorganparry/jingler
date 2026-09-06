@@ -208,6 +208,21 @@ export interface FileBrowserController {
   ) => void
 }
 
+export function fileBrowserStatus(snapshot: ReturnType<FileBrowserActor["getSnapshot"]>): FileBrowserStatus {
+  if (snapshot.matches({ document: "idle" })) return "idle"
+  if (snapshot.matches({ document: "loading" })) return "loading"
+  if (snapshot.matches({ document: { ready: "clean" } })) return "clean"
+  if (snapshot.matches({ document: { ready: "dirty" } })) return "dirty"
+  if (snapshot.matches({ document: { ready: "saved" } })) return "saved"
+  if (snapshot.matches({ document: { ready: "readOnly" } })) return "read-only"
+  if (snapshot.matches({ document: "saving" })) return "saving"
+  if (snapshot.matches({ document: "conflict" })) return "conflict"
+  if (snapshot.matches({ document: "refreshingConflict" })) return "conflict"
+  if (snapshot.matches({ document: "binary" })) return "binary"
+  if (snapshot.matches({ document: "tooLarge" })) return "too-large"
+  return "error"
+}
+
 export function useFileBrowser(
   sessionId: string,
   worktreePath?: string,
@@ -249,28 +264,7 @@ export function useFileBrowser(
     [actor]
   )
 
-  const status: FileBrowserStatus = snapshot.matches({ document: "idle" })
-    ? "idle"
-    : snapshot.matches({ document: "loading" })
-      ? "loading"
-      : snapshot.matches({ document: { ready: "clean" } })
-        ? "clean"
-        : snapshot.matches({ document: { ready: "dirty" } })
-          ? "dirty"
-          : snapshot.matches({ document: { ready: "saved" } })
-            ? "saved"
-            : snapshot.matches({ document: { ready: "readOnly" } })
-              ? "read-only"
-              : snapshot.matches({ document: "saving" })
-                ? "saving"
-                : snapshot.matches({ document: "conflict" }) ||
-                    snapshot.matches({ document: "refreshingConflict" })
-                  ? "conflict"
-                  : snapshot.matches({ document: "binary" })
-                    ? "binary"
-                    : snapshot.matches({ document: "tooLarge" })
-                      ? "too-large"
-                      : "error"
+  const status = fileBrowserStatus(snapshot)
   const payload = snapshot.context.payload
   const dirty =
     snapshot.context.draft !== null &&

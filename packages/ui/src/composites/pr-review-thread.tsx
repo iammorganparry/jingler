@@ -151,56 +151,8 @@ export function PrReviewThreadView({
   /** Pierre already supplies the annotation frame and source context. */
   inline?: boolean
 }) {
-  const [open, setOpen] = useState(!thread.isResolved)
-  const [draft, setDraft] = useState("")
-
-  // Follow resolution when it changes underneath us — resolving refetches the PR
-  // and hands us new props, and GitHub collapses the thread the moment it's
-  // resolved (and re-opens it on unresolve). Adjusted during render rather than
-  // in an effect: an effect would paint the stale state first, flashing the
-  // thread open-but-Resolved. Keyed on the previous value so a MANUAL toggle of
-  // an already-resolved thread survives an unrelated re-render.
-  const [wasResolved, setWasResolved] = useState(thread.isResolved)
-  if (wasResolved !== thread.isResolved) {
-    setWasResolved(thread.isResolved)
-    setOpen(!thread.isResolved)
-  }
-
-  const caption = anchorCaption(thread)
-  const replyTo = thread.comments[0]?.databaseId ?? null
-  const Container = inline ? "div" : Card
-
-  return (
-    <Container data-review-thread-annotation={inline || undefined}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 border-b border-hairline px-[13px] py-2.5 text-left hover:bg-hover"
-      >
-        {open ? (
-          <ChevronDown size={13} className="flex-none text-dim" />
-        ) : (
-          <ChevronRight size={13} className="flex-none text-dim" />
-        )}
-        <span className="truncate font-mono text-[12px] text-text-bright">{thread.path}</span>
-        {thread.isOutdated && (
-          <Badge tone="neutral" size="xs" title="The diff has moved since this comment">
-            Outdated
-          </Badge>
-        )}
-        <div className="flex-1" />
-        <span className="font-mono text-[11px] text-dim">
-          {thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}
-        </span>
-        {thread.isResolved && (
-          <Badge tone="green" size="xs">
-            Resolved
-          </Badge>
-        )}
-      </button>
-
-      {open && (
-        <>
+         function renderThreadDetails() {
+           return (<>
           {caption && (
             <div className="border-b border-hairline px-[14px] py-[7px] font-mono text-[11px] text-muted-foreground">
               {caption}
@@ -267,7 +219,59 @@ export function PrReviewThreadView({
               )}
             </div>
           )}
-        </>
+        </>)
+         }
+
+  const [open, setOpen] = useState(!thread.isResolved)
+  const [draft, setDraft] = useState("")
+
+  // Follow resolution when it changes underneath us — resolving refetches the PR
+  // and hands us new props, and GitHub collapses the thread the moment it's
+  // resolved (and re-opens it on unresolve). Adjusted during render rather than
+  // in an effect: an effect would paint the stale state first, flashing the
+  // thread open-but-Resolved. Keyed on the previous value so a MANUAL toggle of
+  // an already-resolved thread survives an unrelated re-render.
+  const [wasResolved, setWasResolved] = useState(thread.isResolved)
+  if (wasResolved !== thread.isResolved) {
+    setWasResolved(thread.isResolved)
+    setOpen(!thread.isResolved)
+  }
+
+  const caption = anchorCaption(thread)
+  const replyTo = thread.comments[0]?.databaseId ?? null
+  const Container = inline ? "div" : Card
+
+  return (
+    <Container data-review-thread-annotation={inline || undefined}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 border-b border-hairline px-[13px] py-2.5 text-left hover:bg-hover"
+      >
+        {open ? (
+          <ChevronDown size={13} className="flex-none text-dim" />
+        ) : (
+          <ChevronRight size={13} className="flex-none text-dim" />
+        )}
+        <span className="truncate font-mono text-[12px] text-text-bright">{thread.path}</span>
+        {thread.isOutdated && (
+          <Badge tone="neutral" size="xs" title="The diff has moved since this comment">
+            Outdated
+          </Badge>
+        )}
+        <div className="flex-1" />
+        <span className="font-mono text-[11px] text-dim">
+          {thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}
+        </span>
+        {thread.isResolved && (
+          <Badge tone="green" size="xs">
+            Resolved
+          </Badge>
+        )}
+      </button>
+
+      {open && (
+        renderThreadDetails()
       )}
     </Container>
   )

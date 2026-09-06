@@ -132,69 +132,7 @@ export const makeAgentResourceService = (
       return Effect.tryPromise({
         try: async () => {
           const sourceRoot = await realpath(candidate.provenance.sourceRoot)
-          const source = await realpath(candidate.provenance.sourcePath)
-          if (!inside(sourceRoot, source)) {
-            throw new Error("Resource source escapes its detected root")
-          }
-          const sourceInfo = await stat(source)
-          if (!sourceInfo.isFile()) throw new Error("Resource source is not a file")
-          if (sourceInfo.size > MAX_RESOURCE_BYTES) throw new Error("Resource exceeds the 256 KiB import limit")
-          const content = await readFile(source, "utf8")
-          let importedId: ManagedResourceId | null = null
-          let createdPath: string | null = null
-
-          try {
-            await catalog.update(async (current) => {
-              if (current.some((resource) =>
-                resource.kind === kind &&
-                resource.provenance.sourcePath === source
-              )) {
-                throw new DuplicateResourceError("Resource source is already imported")
-              }
-              const id = await nextId(candidate.id, current, root, kind)
-              const target = targetFor(root, kind, id)
-              if (!inside(root, target)) throw new Error("Managed destination escapes its root")
-              await mkdir(dirname(target), { recursive: true })
-              const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
-              try {
-                await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
-                await rename(temporary, target)
-              } catch (error) {
-                await rm(temporary, { force: true }).catch(() => undefined)
-                throw error
-              }
-              importedId = id
-              createdPath = target
-              return [
-                ...current,
-                {
-                  id,
-                  kind,
-                  name: candidate.name,
-                  description: candidate.description,
-                  enabled: true,
-                  trust: "operator-approved",
-                  scope,
-                  managedPath: target,
-                  byteLength: Buffer.byteLength(content),
-                  provenance: {
-                    ...candidate.provenance,
-                    sourcePath: source,
-                    importedAt: new Date().toISOString()
-                  }
-                }
-              ]
-            })
-          } catch (error) {
-            if (createdPath !== null) {
-              const importedPath: string = createdPath
-              const cleanup = kind === "skill" ? dirname(importedPath) : importedPath
-              await rm(cleanup, { recursive: kind === "skill", force: true }).catch(() => undefined)
-            }
-            throw error
-          }
-          if (importedId === null) throw new Error("Resource import did not produce an id")
-          return importedId
+          return await importResourceSource(candidate, sourceRoot, catalog, kind, root, scope)
         },
         catch: (cause) => diagnostic(
           candidate,
@@ -255,26 +193,7 @@ export const makeAgentResourceService = (
         Effect.flatMap((target) => Effect.tryPromise({
           try: async () => {
             const moved: { removal?: string; trash?: string } = {}
-            try {
-              await catalog.update(async (current) => {
-                const resource = current.find((item) => item.id === id)
-                if (resource === undefined) throw new Error("Managed resource does not exist")
-                const removal = resource.kind === "skill" ? dirname(target) : target
-                if (!inside(root, removal)) throw new Error("Managed resource removal escapes its root")
-                const trash = join(root, ".trash", `${id}.${randomUUID()}`)
-                await mkdir(dirname(trash), { recursive: true })
-                await rename(removal, trash)
-                moved.removal = removal
-                moved.trash = trash
-                return current.filter((item) => item.id !== id)
-              })
-            } catch (error) {
-              if (moved.trash !== undefined && moved.removal !== undefined) {
-                await rename(moved.trash, moved.removal).catch(() => undefined)
-              }
-              throw error
-            }
-            if (moved.trash !== undefined) await rm(moved.trash, { recursive: true, force: true })
+              await removeManagedResource(catalog, id, target, root, moved)
           },
           catch: () => serviceError("remove", `Could not remove managed resource "${id}"`)
         })),
@@ -313,3 +232,109 @@ export const makeAgentResourceService = (
       watch: () => Stream.concat(Stream.fromEffect(list.pipe(Effect.orElseSucceed(() => []))), Stream.fromPubSub(changes))
     }
   })
+
+async function removeManagedResource(
+  catalog: AtomicJsonFile<ReadonlyArray<ManagedResource>>,
+  id: ManagedResourceId,
+  target: string,
+  root: string,
+  moved: { removal?: string; trash?: string }
+) {
+  try {
+    await catalog.update(async (current) => {
+      const resource = current.find((item) => item.id === id)
+      if (resource === undefined) throw new Error("Managed resource does not exist")
+      const removal = resource.kind === "skill" ? dirname(target) : target
+      if (!inside(root, removal)) throw new Error("Managed resource removal escapes its root")
+      const trash = join(root, ".trash", `${id}.${randomUUID()}`)
+      await mkdir(dirname(trash), { recursive: true })
+      await rename(removal, trash)
+      moved.removal = removal
+      moved.trash = trash
+      return current.filter((item) => item.id !== id)
+    })
+  } catch (error) {
+    if (moved.trash !== undefined && moved.removal !== undefined) {
+      await rename(moved.trash, moved.removal).catch(() => undefined)
+    }
+    throw error
+  }
+  if (moved.trash !== undefined) await rm(moved.trash, { recursive: true, force: true })
+}
+
+async function importResourceSource(
+  candidate: DetectedResourceCandidate,
+  sourceRoot: string,
+  catalog: AtomicJsonFile<ReadonlyArray<ManagedResource>>,
+  kind: "skill" | "prompt",
+  root: string,
+  scope:
+    | { readonly kind: "portable"; readonly allowedTargets: readonly string[] }
+    | { readonly kind: "device-local"; readonly targetId: string }
+) {
+  const source = await realpath(candidate.provenance.sourcePath)
+  if (!inside(sourceRoot, source)) {
+    throw new Error("Resource source escapes its detected root")
+  }
+  const sourceInfo = await stat(source)
+  if (!sourceInfo.isFile()) throw new Error("Resource source is not a file")
+  if (sourceInfo.size > MAX_RESOURCE_BYTES)
+    throw new Error("Resource exceeds the 256 KiB import limit")
+  const content = await readFile(source, "utf8")
+  let importedId: ManagedResourceId | null = null
+  let createdPath: string | null = null
+
+  try {
+    await catalog.update(async (current) => {
+      if (
+        current.some(
+          (resource) => resource.kind === kind && resource.provenance.sourcePath === source
+        )
+      ) {
+        throw new DuplicateResourceError("Resource source is already imported")
+      }
+      const id = await nextId(candidate.id, current, root, kind)
+      const target = targetFor(root, kind, id)
+      if (!inside(root, target)) throw new Error("Managed destination escapes its root")
+      await mkdir(dirname(target), { recursive: true })
+      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`
+      try {
+        await writeFile(temporary, content, { encoding: "utf8", flag: "wx" })
+        await rename(temporary, target)
+      } catch (error) {
+        await rm(temporary, { force: true }).catch(() => undefined)
+        throw error
+      }
+      importedId = id
+      createdPath = target
+      return [
+        ...current,
+        {
+          id,
+          kind,
+          name: candidate.name,
+          description: candidate.description,
+          enabled: true,
+          trust: "operator-approved",
+          scope,
+          managedPath: target,
+          byteLength: Buffer.byteLength(content),
+          provenance: {
+            ...candidate.provenance,
+            sourcePath: source,
+            importedAt: new Date().toISOString()
+          }
+        }
+      ]
+    })
+  } catch (error) {
+    if (createdPath !== null) {
+      const importedPath: string = createdPath
+      const cleanup = kind === "skill" ? dirname(importedPath) : importedPath
+      await rm(cleanup, { recursive: kind === "skill", force: true }).catch(() => undefined)
+    }
+    throw error
+  }
+  if (importedId === null) throw new Error("Resource import did not produce an id")
+  return importedId
+}

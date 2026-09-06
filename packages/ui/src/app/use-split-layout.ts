@@ -55,6 +55,21 @@ const structureOf = (ws: Workspace): string =>
  * Takes the smallest shape it actually reads rather than `Session`, so the tests
  * can drive it with two-field literals.
  */
+const eligibleSessionIds = (
+  current: Workspace,
+  sessionIndex: { exists: ReadonlySet<string>; archived: ReadonlySet<string> }
+): ReadonlySet<string> => {
+      const eligible = new Set<string>()
+      for (const group of current.groups) {
+        for (const pane of group.panes) {
+          if (!sessionIndex.exists.has(pane.sessionId)) continue
+          if (group.panes.length > 1 && sessionIndex.archived.has(pane.sessionId)) continue
+          eligible.add(pane.sessionId)
+        }
+      }
+  return eligible
+}
+
 export function useSplitLayout(
   sessions: ReadonlyArray<{ readonly id: string; readonly archived?: boolean }>,
   initialSessionId?: string | null
@@ -190,14 +205,7 @@ export function useSplitLayout(
     // old grid holding ids of deleted sessions and persisting them across
     // restarts.
     setWorkspace((current) => {
-      const eligible = new Set<string>()
-      for (const group of current.groups) {
-        for (const pane of group.panes) {
-          if (!sessionIndex.exists.has(pane.sessionId)) continue
-          if (group.panes.length > 1 && sessionIndex.archived.has(pane.sessionId)) continue
-          eligible.add(pane.sessionId)
-        }
-      }
+      const eligible = eligibleSessionIds(current, sessionIndex)
       return prune(current, eligible)
     })
   }, [sessionIndex])

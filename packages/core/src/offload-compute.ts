@@ -389,33 +389,7 @@ export const parseObservedAgentShellCommand = (
     word = ""
     started = false
   }
-  for (const character of source) {
-    if (escaped) {
-      word += character
-      started = true
-      escaped = false
-      continue
-    }
-    if (quote === "single") {
-      if (character === "'") quote = null
-      else word += character
-      started = true
-      continue
-    }
-    if (character === "\\") {
-      escaped = true
-      started = true
-      continue
-    }
-    if (quote === "double") {
-      if (character === '"') quote = null
-      else {
-        word += character
-        if (character === "$" || character === "`") usesShellFeatures = true
-      }
-      started = true
-      continue
-    }
+  const readUnquoted = (character: string): void => {
     if (character === "'") {
       quote = "single"
       started = true
@@ -433,6 +407,39 @@ export const parseObservedAgentShellCommand = (
       }
     }
   }
+  const readDoubleQuoted = (character: string): void => {
+    if (character === '"') quote = null
+    else {
+      word += character
+      if (character === "$" || character === "`") usesShellFeatures = true
+    }
+    started = true
+  }
+  const readCharacter = (character: string): void => {
+    if (escaped) {
+      word += character
+      started = true
+      escaped = false
+      return
+    }
+    if (quote === "single") {
+      if (character === "'") quote = null
+      else word += character
+      started = true
+      return
+    }
+    if (character === "\\") {
+      escaped = true
+      started = true
+      return
+    }
+    if (quote === "double") {
+      readDoubleQuoted(character)
+      return
+    }
+    readUnquoted(character)
+  }
+  for (const character of source) readCharacter(character)
   if (escaped) usesShellFeatures = true
   finish()
   const [executable = "", ...args] = argv

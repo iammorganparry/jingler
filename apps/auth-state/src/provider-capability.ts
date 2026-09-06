@@ -90,6 +90,11 @@ export const capabilityRouteMetadata = (
 ): Schema.Schema.Type<typeof CapabilityRouteMetadata> | null =>
   decodeProjection(CapabilityRouteMetadata, body);
 
+const codexUpstream = (value: CapabilityUpstream | undefined): CapabilityUpstream | null => {
+  if (value === undefined || value === "openai-api") return "openai-api";
+  return value === "chatgpt-codex" ? value : null;
+};
+
 const upstreamOf = (
   provider: CapabilityProvider,
   value: CapabilityUpstream | undefined,
@@ -100,13 +105,8 @@ const upstreamOf = (
     return value === "exa-api" ? "exa-api" : null;
   if (provider === "firecrawl")
     return value === "firecrawl-api" ? "firecrawl-api" : null;
-  if (provider === "codex") {
-    return value === undefined || value === "openai-api"
-      ? "openai-api"
-      : value === "chatgpt-codex"
-        ? value
-        : null;
-  }
+  if (provider === "codex") return codexUpstream(value);
+
   return value === undefined || value === "anthropic-api"
     ? "anthropic-api"
     : null;

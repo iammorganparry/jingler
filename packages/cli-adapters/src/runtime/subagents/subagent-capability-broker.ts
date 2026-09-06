@@ -193,46 +193,7 @@ const handleRequest = (
   if (request.method !== "POST" || request.url !== "/v1/subagent-tool") {
     return yield* writeJson(response, 404, { error: "not-found" })
   }
-  const raw = yield* readBody(request)
-  const decoded = yield* Schema.decodeUnknown(Schema.parseJson(SubagentToolRequest))(raw, {
-    onExcessProperty: "error"
-  })
-  const state = yield* Ref.get(ref)
-  const child = state.children.get(decoded.token)
-  if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
-    return yield* writeJson(response, 403, { error: "forbidden" })
-  }
-  if (!child.grantedToolIds.has(decoded.toolId)) {
-    return yield* writeJson(response, 403, { error: "forbidden-tool" })
-  }
-  if (decoded.toolId === SUPERVISOR_STATE_TOOL.id) {
-    return yield* writeJson(response, 200, {
-      version: SUBAGENT_CAPABILITY_VERSION,
-      status: "success",
-      value: Schema.decodeUnknownSync(SubagentJsonValue)(
-        JSON.parse(JSON.stringify(child.supervisorState()))
-      ),
-      preview: null,
-      error: null
-    } satisfies SubagentToolResponse)
-  }
-  const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
-  if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
-  const execution = {
-    id: decoded.toolId,
-    arguments: decoded.arguments,
-    role: child.role,
-    mode: child.mode,
-    callId: decoded.callId,
-    idempotencyKey: decoded.callId
-  } as const
-  const permitted = risk === "read"
-    ? "allow"
-    : yield* child.context.canUseTool({ toolId: decoded.toolId, risk })
-  const result = yield* permitted === "allow"
-    ? child.registry.execute(execution)
-    : child.registry.deny(execution)
-  yield* writeJson(response, 200, responseFrom(result))
+    return yield* executeCapabilityRequest(request, ref, response)
 }).pipe(
   Effect.catchAll((cause) => writeJson(
     response,
@@ -338,3 +299,50 @@ export const SubagentCapabilityBrokerLive = Layer.scoped(
   SubagentCapabilityBrokerService,
   Effect.acquireRelease(makeSubagentCapabilityBroker(), (broker) => broker.close)
 )
+
+function* executeCapabilityRequest(
+  request: IncomingMessage,
+  ref: Ref.Ref<BrokerState>,
+  response: ServerResponse<IncomingMessage>
+) {
+  const raw = yield* readBody(request)
+  const decoded = yield* Schema.decodeUnknown(Schema.parseJson(SubagentToolRequest))(raw, {
+    onExcessProperty: "error"
+  })
+  const state = yield* Ref.get(ref)
+  const child = state.children.get(decoded.token)
+  if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
+    return yield* writeJson(response, 403, { error: "forbidden" })
+  }
+  if (!child.grantedToolIds.has(decoded.toolId)) {
+    return yield* writeJson(response, 403, { error: "forbidden-tool" })
+  }
+  if (decoded.toolId === SUPERVISOR_STATE_TOOL.id) {
+    return yield* writeJson(response, 200, {
+      version: SUBAGENT_CAPABILITY_VERSION,
+      status: "success",
+      value: Schema.decodeUnknownSync(SubagentJsonValue)(
+        JSON.parse(JSON.stringify(child.supervisorState()))
+      ),
+      preview: null,
+      error: null
+    } satisfies SubagentToolResponse)
+  }
+  const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
+  if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
+  const execution = {
+    id: decoded.toolId,
+    arguments: decoded.arguments,
+    role: child.role,
+    mode: child.mode,
+    callId: decoded.callId,
+    idempotencyKey: decoded.callId
+  } as const
+  const permitted = risk === "read"
+    ? "allow"
+    : yield* child.context.canUseTool({ toolId: decoded.toolId, risk })
+  const result = yield* permitted === "allow"
+    ? child.registry.execute(execution)
+    : child.registry.deny(execution)
+  yield* writeJson(response, 200, responseFrom(result))
+}

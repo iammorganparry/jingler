@@ -433,27 +433,39 @@ export function ContextMenuContent({
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
+    switch (event.key) {
+case "Escape": {
+
       event.preventDefault();
       context.setOpen(false);
       context.triggerRef.current?.focus();
       return;
-    }
-    if (event.key === "Tab") {
+
+}
+case "Tab": {
+
       context.setOpen(false);
       return;
-    }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+
+}
+case "ArrowDown":
+case "ArrowUp": {
+
       event.preventDefault();
       moveFocus(event.key === "ArrowDown" ? 1 : -1);
       return;
-    }
-    if (event.key === "Home" || event.key === "End") {
+
+}
+case "Home":
+case "End": {
+
       event.preventDefault();
       const items = getEnabledItems(context.contentRef.current);
       items[event.key === "Home" ? 0 : items.length - 1]?.focus();
       return;
-    }
+
+}
+}
     if (
       event.key.length === 1 &&
       !event.ctrlKey &&

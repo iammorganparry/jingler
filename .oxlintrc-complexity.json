@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": [
+    ".agent/**",
+    ".agents/**",
+    ".claude/**",
+    ".codex/**",
+    ".continue/**",
+    ".cursor/**",
+    ".gemini/**",
+    ".opencode/**",
+    ".pi/**",
+    ".roo/**",
+    ".windsurf/**",
+    ".githooks/**",
+    "tools/oxlint/anti-slop/**",
+    "**/node_modules/**",
+    "**/out/**",
+    "**/dist/**",
+    "**/.turbo/**",
+    "**/.next/**",
+    "**/coverage/**",
+    "**/storybook-static/**"
+  ],
+  "rules": {
+    "complexity": ["error", 20]
+  }
+}

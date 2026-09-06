@@ -174,3 +174,27 @@ describe("device control connection", () => {
     expect(receivedAbort).toBe(true)
   })
 })
+
+describe("control reconnect backoff", () => {
+  it("increments refresh failures and resets backoff only after announcing a connection", async () => {
+    const controller = new AbortController()
+    let refreshes = 0
+    const sleeps: number[] = []
+    const sent: string[] = []
+    await runControlConnection({
+      refreshGrant: async () => {
+        refreshes += 1
+        if (refreshes < 3) throw new Error("Temporarily offline")
+        return grant(refreshes)
+      },
+      discover: async () => discovery,
+      connect: async () => socket(1000, "retry", sent),
+      sleep: async (duration) => {
+        sleeps.push(duration)
+        if (sleeps.length === 3) controller.abort()
+      }
+    }, controller.signal)
+    expect(sleeps).toEqual([1_000, 2_000, 500])
+    expect(sent.map((message) => JSON.parse(message).type)).toEqual(["announce"])
+  })
+})

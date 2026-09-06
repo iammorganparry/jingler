@@ -1,3 +1,8 @@
+function hugeDiffLineType(line: number): "del" | "add" | "normal" {
+  if (line % 4 === 0) return "del"
+  return line % 3 === 0 ? "add" : "normal"
+}
+
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
 import { ThemeProvider } from "../theme-provider.js"
@@ -64,7 +69,7 @@ export const HugeDiff: Story = {
       })
       rows.push({ kind: "hunk", key: `f${f}h`, header: `@@ -1,50 +1,50 @@ module ${f}` })
       for (let l = 0; l < 48; l++) {
-        const type = l % 4 === 0 ? "del" : l % 3 === 0 ? "add" : "normal"
+        const type = hugeDiffLineType(l)
         rows.push({
           kind: "line",
           key: `f${f}l${l}`,

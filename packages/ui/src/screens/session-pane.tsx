@@ -308,7 +308,193 @@ export function SessionPane(props: SessionPaneProps) {
   )
 }
 
+function surfaceChatId(surface: SessionSurface, fallbackChatId: string): string {
+  if (surface.kind === "chat") return surface.id
+  if (surface.kind === "view" && surface.chatId) return surface.chatId
+  return fallbackChatId
+}
+
+function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): TabKey {
+  if (tabs.some((contribution) => contribution.id === tab)) return tab
+  return tabs[0]?.id ?? BUILTIN_TAB.conversation
+}
+
 function SessionPaneBody(props: SessionPaneProps) {
+  function buildProviderMenus() {
+  const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
+  if (!props.onSelectIssue) return providerMenus
+    for (const contribution of tabs) {
+      const providerId = contribution.issueProviderId
+      if (!providerId) continue
+      const issues = issueReferencesOf(active).filter(
+        (issue) => issue.providerId === providerId
+      )
+      if (issues.length < 2) continue
+      const selected =
+        selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
+      providerMenus[contribution.id] = {
+        value: issueMenuValue(selected),
+        ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
+        options: issues.map((issue) => ({
+          value: issueMenuValue(issue),
+          label: issue.identifier,
+          description: issue.title,
+          ariaLabel: `${issue.identifier} ${issue.title}`,
+          searchText: `${issue.identifier} ${issue.title}`
+        })),
+        onSelect: (value) => {
+          const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
+          if (!issue) return
+          props.onSelectIssue?.(active.id, {
+            providerId: issue.providerId,
+            ...(issue.providerAccountId
+              ? { providerAccountId: issue.providerAccountId }
+              : {}),
+            id: issue.id
+          })
+        }
+      }
+    }
+    return providerMenus
+  }
+
+  function renderPaneLayout() {
+    return (<>
+      {titleBarTarget === null
+        ? tabBar
+        : (props.pane === undefined || props.pane.focused)
+          ? createPortal(tabBar, titleBarTarget)
+          : null}
+      {viewRailTarget !== null && paneFocused
+        ? createPortal(viewRail, viewRailTarget)
+        : null}
+      {props.renderSubagentTabs?.(active, {
+        activeTabId: activeTab,
+        onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
+      })}
+
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+        <SplitView<SessionSurfacePane>
+          group={surfaceLayout}
+          renderPane={renderSurfacePane}
+          paneId={surfacePaneKey}
+          dragMime={SESSION_SURFACE_DND_MIME}
+          testIdPrefix="surface"
+          paneCapacity={maxSessionSurfacesForWidth}
+          onFocusPane={focusSurface}
+          onSplitWith={(payload, at) => {
+            const surface = parseSessionSurfaceKey(payload)
+            if (!surface) return
+            setSurfaceLayout((current) =>
+              splitSessionSurface(
+                current,
+                surface,
+                at,
+                maxSessionSurfacesForWidth(paneWidth)
+              )
+            )
+          }}
+          onReplacePane={(index, payload) => {
+            const surface = parseSessionSurfaceKey(payload)
+            if (!surface) return
+            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface))
+          }}
+          onResize={(index, delta) =>
+            setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
+          }
+        />
+        {viewRailTarget === null ? viewRail : null}
+      </div>
+    </>)
+  }
+
+  function renderTabBar() {
+    return (<TabBar
+            inTitleBar={titleBarTarget !== null}
+            tabs={[]}
+            active={activeTab}
+            onChange={selectTab}
+            status={
+              activeActivity
+                ? {
+                    // ONE vocabulary for a session's state, shared with the sidebar:
+                    // "Thinking", "Running", "Needs Input", "Monitoring", "Idle". The
+                    // pill used to read the raw activity ("Running npm test…"), so
+                    // the same session answered "what are you doing?" two different
+                    // ways depending on which part of the window you looked at — and
+                    // the target string grew the pill on every tool call.
+                    label: displayStatusLabel[displayStatusOf(activeActivity, active.status)],
+                    tone: DISPLAY_TONE[displayStatusOf(activeActivity, active.status)],
+                    // The specifics survive on hover, exactly as they do in the row.
+                    detail: activityLabel(activeActivity)
+                  }
+                : undefined
+            }
+            // The title comes from the session rather than from the caller, so the
+            // pane identity follows a rename the moment it lands.
+            sessionTitle={active.title || UNTITLED_SESSION}
+            repoName={active.repo}
+            onRenameTitle={
+              props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
+            }
+            // The chat pills share the tab row, behind a divider. Built by the
+            // renderer (RPCs + live activity), threaded in as an opaque node.
+            chatSlot={props.renderChatTabs?.(active, {
+              activeTabId: activeTab,
+              onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
+              onSelectFiles: () => selectTab(BUILTIN_TAB.files),
+              activeSurface: focusedSurface,
+              onSelectSurface: (surface) => {
+                setSurfaceLayout((current) =>
+                  openSessionSurface(
+                    current,
+                    surface,
+                    maxSessionSurfacesForWidth(paneWidth)
+                  )
+                )
+              },
+              onCloseSurface: (surface) => {
+                if (
+                  surface.kind === "chat" &&
+                  props.isBrowserActive?.(active.id, surface.id)
+                ) {
+                  props.onToggleBrowser?.(active.id, surface.id)
+                }
+                setSurfaceLayout((current) => {
+                  const withoutOwnedViews =
+                    surface.kind === "chat"
+                      ? current.openViews
+                          .filter((view) => view.chatId === surface.id)
+                          .reduce(
+                            (layout, view) =>
+                              closeSessionSurface(layout, view, fallbackChatSurface),
+                            current
+                          )
+                      : current
+                  return closeSessionSurface(
+                    withoutOwnedViews,
+                    surface,
+                    fallbackChatSurface
+                  )
+                })
+              },
+              onRequestCloseFile: props.onRequestCloseFile
+                ? (path) => props.onRequestCloseFile?.(active.id, path) ?? true
+                : undefined,
+              viewSlot,
+              viewCount: surfaceLayout.openViews.length,
+              viewsActive:
+                focusedSurface.kind === "view" && focusedSurface.id !== BUILTIN_TAB.files,
+              onCloseAllViews: closeAllViews,
+              viewLauncherItems,
+              paneFocused: props.pane === undefined || props.pane.focused
+            })}
+            // The title comes from the session rather than from the caller, so the
+            // chip follows a rename the moment it lands.
+            pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
+          />)
+  }
+
   const paneWidth = usePaneWidth().width
   const [titleBarTarget, setTitleBarTarget] = useState<HTMLElement | null>(null)
   const [viewRailTarget, setViewRailTarget] = useState<HTMLElement | null>(null)
@@ -531,8 +717,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     previousBrowser.current = { chatId: active.activeChatId, active: browserActive }
   }, [active.activeChatId, browserActive, paneWidth])
 
-  const selectTab = useCallback(
-    (nextTab: TabKey) => {
+  function selectTabIssue(nextTab: TabKey) {
       const providerId = props.tabContributions?.find(
         (contribution) => contribution.id === nextTab
       )?.issueProviderId
@@ -551,6 +736,11 @@ function SessionPaneBody(props: SessionPaneProps) {
           })
         }
       }
+  }
+
+  const selectTab = useCallback(
+    (nextTab: TabKey) => {
+      selectTabIssue(nextTab)
       if (nextTab === BUILTIN_TAB.plan) {
         openPlanReview()
         return
@@ -736,9 +926,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   // or after the plugin that owned the selected tab was disabled). Falling back
   // to the first visible tab rather than the literal "conversation" keeps this
   // honest if the built-in set ever changes.
-  const activeTab = tabs.some((contribution) => contribution.id === tab)
-    ? tab
-    : (tabs[0]?.id ?? BUILTIN_TAB.conversation)
+  const activeTab = resolveVisibleTab(tabs, tab)
   const conversationContribution = tabs.find((c) => c.id === BUILTIN_TAB.conversation)
   useEffect(() => {
     props.onActiveTabChange?.(active.id, activeTab)
@@ -759,41 +947,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     .map((contribution) => describeTab(contribution, tabCtx))
 
   const selectedIssue = issueReferenceOf(active)
-  const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
-  if (props.onSelectIssue) {
-    for (const contribution of tabs) {
-      const providerId = contribution.issueProviderId
-      if (!providerId) continue
-      const issues = issueReferencesOf(active).filter(
-        (issue) => issue.providerId === providerId
-      )
-      if (issues.length < 2) continue
-      const selected =
-        selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
-      providerMenus[contribution.id] = {
-        value: issueMenuValue(selected),
-        ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
-        options: issues.map((issue) => ({
-          value: issueMenuValue(issue),
-          label: issue.identifier,
-          description: issue.title,
-          ariaLabel: `${issue.identifier} ${issue.title}`,
-          searchText: `${issue.identifier} ${issue.title}`
-        })),
-        onSelect: (value) => {
-          const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
-          if (!issue) return
-          props.onSelectIssue?.(active.id, {
-            providerId: issue.providerId,
-            ...(issue.providerAccountId
-              ? { providerAccountId: issue.providerAccountId }
-              : {}),
-            id: issue.id
-          })
-        }
-      }
-    }
-  }
+  const providerMenus = buildProviderMenus()
   const viewRailMenus = { ...providerMenus, ...props.viewRailMenus }
   const fallbackChatSurface: SessionSurface = { kind: "chat", id: active.activeChatId }
   const closeViewSurface = (surface: Extract<SessionSurface, { kind: "view" }>) => {
@@ -908,12 +1062,7 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const renderSurfaceContent = (pane: SessionSurfacePane, index: number) => {
     const surface = pane.surface
-    const chatId =
-      surface.kind === "chat"
-        ? surface.id
-        : surface.kind === "view" && surface.chatId
-          ? surface.chatId
-          : active.activeChatId
+    const chatId = surfaceChatId(surface, active.activeChatId)
     const paneSession =
       chatId === active.activeChatId ? active : { ...active, activeChatId: chatId }
     const paneFocused =
@@ -983,7 +1132,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     <>
       <div
         data-testid={`surface-pane-toolbar-${index}`}
-        className="flex h-8 flex-none items-center justify-end border-b border-hairline bg-sunken/70 px-1.5"
+        className="flex h-8 flex-none items-center justify-end px-1.5"
       >
         {index > 0 && (
           <button
@@ -1033,102 +1182,22 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (!paneFocused) return
     const onCommand = (event: Event) => {
       const command = (event as CustomEvent<SessionSurfaceCommand>).detail
-      if (command === "close") closeFocusedSurface()
-      else if (command === "move-left") moveFocusedSurface(-1)
-      else if (command === "move-right") moveFocusedSurface(1)
-      else if (command === "focus-left") focusSurface(surfaceLayout.focused - 1)
-      else if (command === "focus-right") focusSurface(surfaceLayout.focused + 1)
-      else if (command.startsWith("focus-")) focusSurface(Number(command.slice(6)))
+      switch (command) {
+        case "close": closeFocusedSurface(); return
+        case "move-left": moveFocusedSurface(-1); return
+        case "move-right": moveFocusedSurface(1); return
+        case "focus-left": focusSurface(surfaceLayout.focused - 1); return
+        case "focus-right": focusSurface(surfaceLayout.focused + 1); return
+        default:
+          if (command.startsWith("focus-")) focusSurface(Number(command.slice(6)))
+      }
     }
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
   }, [closeFocusedSurface, focusSurface, moveFocusedSurface, paneFocused, surfaceLayout.focused])
 
   const tabBar = (
-    <TabBar
-            inTitleBar={titleBarTarget !== null}
-            tabs={[]}
-            active={activeTab}
-            onChange={selectTab}
-            status={
-              activeActivity
-                ? {
-                    // ONE vocabulary for a session's state, shared with the sidebar:
-                    // "Thinking", "Running", "Needs Input", "Monitoring", "Idle". The
-                    // pill used to read the raw activity ("Running npm test…"), so
-                    // the same session answered "what are you doing?" two different
-                    // ways depending on which part of the window you looked at — and
-                    // the target string grew the pill on every tool call.
-                    label: displayStatusLabel[displayStatusOf(activeActivity, active.status)],
-                    tone: DISPLAY_TONE[displayStatusOf(activeActivity, active.status)],
-                    // The specifics survive on hover, exactly as they do in the row.
-                    detail: activityLabel(activeActivity)
-                  }
-                : undefined
-            }
-            // The title comes from the session rather than from the caller, so the
-            // pane identity follows a rename the moment it lands.
-            sessionTitle={active.title || UNTITLED_SESSION}
-            repoName={active.repo}
-            onRenameTitle={
-              props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
-            }
-            // The chat pills share the tab row, behind a divider. Built by the
-            // renderer (RPCs + live activity), threaded in as an opaque node.
-            chatSlot={props.renderChatTabs?.(active, {
-              activeTabId: activeTab,
-              onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
-              onSelectFiles: () => selectTab(BUILTIN_TAB.files),
-              activeSurface: focusedSurface,
-              onSelectSurface: (surface) => {
-                setSurfaceLayout((current) =>
-                  openSessionSurface(
-                    current,
-                    surface,
-                    maxSessionSurfacesForWidth(paneWidth)
-                  )
-                )
-              },
-              onCloseSurface: (surface) => {
-                if (
-                  surface.kind === "chat" &&
-                  props.isBrowserActive?.(active.id, surface.id)
-                ) {
-                  props.onToggleBrowser?.(active.id, surface.id)
-                }
-                setSurfaceLayout((current) => {
-                  const withoutOwnedViews =
-                    surface.kind === "chat"
-                      ? current.openViews
-                          .filter((view) => view.chatId === surface.id)
-                          .reduce(
-                            (layout, view) =>
-                              closeSessionSurface(layout, view, fallbackChatSurface),
-                            current
-                          )
-                      : current
-                  return closeSessionSurface(
-                    withoutOwnedViews,
-                    surface,
-                    fallbackChatSurface
-                  )
-                })
-              },
-              onRequestCloseFile: props.onRequestCloseFile
-                ? (path) => props.onRequestCloseFile?.(active.id, path) ?? true
-                : undefined,
-              viewSlot,
-              viewCount: surfaceLayout.openViews.length,
-              viewsActive:
-                focusedSurface.kind === "view" && focusedSurface.id !== BUILTIN_TAB.files,
-              onCloseAllViews: closeAllViews,
-              viewLauncherItems,
-              paneFocused: props.pane === undefined || props.pane.focused
-            })}
-            // The title comes from the session rather than from the caller, so the
-            // chip follows a rename the moment it lands.
-            pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
-          />
+    renderTabBar()
   )
   const viewRail = (
     <ViewRail
@@ -1140,52 +1209,6 @@ function SessionPaneBody(props: SessionPaneProps) {
   )
 
   return (
-    <>
-      {titleBarTarget === null
-        ? tabBar
-        : (props.pane === undefined || props.pane.focused)
-          ? createPortal(tabBar, titleBarTarget)
-          : null}
-      {viewRailTarget !== null && paneFocused
-        ? createPortal(viewRail, viewRailTarget)
-        : null}
-      {props.renderSubagentTabs?.(active, {
-        activeTabId: activeTab,
-        onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
-      })}
-
-      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
-        <SplitView<SessionSurfacePane>
-          group={surfaceLayout}
-          renderPane={renderSurfacePane}
-          paneId={surfacePaneKey}
-          dragMime={SESSION_SURFACE_DND_MIME}
-          testIdPrefix="surface"
-          paneCapacity={maxSessionSurfacesForWidth}
-          onFocusPane={focusSurface}
-          onSplitWith={(payload, at) => {
-            const surface = parseSessionSurfaceKey(payload)
-            if (!surface) return
-            setSurfaceLayout((current) =>
-              splitSessionSurface(
-                current,
-                surface,
-                at,
-                maxSessionSurfacesForWidth(paneWidth)
-              )
-            )
-          }}
-          onReplacePane={(index, payload) => {
-            const surface = parseSessionSurfaceKey(payload)
-            if (!surface) return
-            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface))
-          }}
-          onResize={(index, delta) =>
-            setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
-          }
-        />
-        {viewRailTarget === null ? viewRail : null}
-      </div>
-    </>
+    renderPaneLayout()
   )
 }

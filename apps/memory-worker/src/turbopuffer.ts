@@ -377,7 +377,7 @@ export class HttpTurbopufferClient implements TurbopufferClient {
       const lastId = rows.at(-1)?.id
       // Never spin forever or append duplicates if a backend ignores the cursor.
       if (after !== undefined && lastId !== undefined && lastId <= after) break
-      for (const row of rows) heads.push({ id: row.id, contentHash: row.contentHash ?? "" })
+      heads.push(...rows.map(storedHeadFromRow))
       if (rows.length < HEADS_PAGE_SIZE || lastId === undefined) break
       after = lastId
     }
@@ -389,6 +389,11 @@ export class HttpTurbopufferClient implements TurbopufferClient {
     return heads
   }
 }
+
+const storedHeadFromRow = (row: TurbopufferHttpRow): TurbopufferStoredHead => ({
+  id: row.id,
+  contentHash: row.contentHash ?? ""
+})
 
 export interface TurbopufferEnvLike {
   readonly TURBOPUFFER_API_KEY?: string

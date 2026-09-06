@@ -102,56 +102,59 @@ const repositoryFor = (database: Database) => ({
           } as const
         }
 
-        const windowStart = new Date(input.now)
-        windowStart.setUTCHours(0, 0, 0, 0)
-        const rows = await tx
-          .select({
-            activeReservations: sum(sql<number>`case when ${managedUsageReservation.state} in ('reserved', 'active') then 1 else 0 end`),
-            committedMicrousd: sum(sql<number>`coalesce(${managedUsageReservation.settledMicrousd}, ${managedUsageReservation.estimatedMicrousd})`)
-          })
-          .from(managedUsageReservation)
-          .where(and(
-            eq(managedUsageReservation.userId, input.userId),
-            gte(managedUsageReservation.windowStart, windowStart),
-            inArray(managedUsageReservation.state, ["reserved", "active", "settled"])
-          ))
-        const current = rows[0]
-        const decision = admitManagedUsage({
-          policy: input.policy,
-          activeReservations: Number(current?.activeReservations ?? 0),
-          committedMicrousd: Number(current?.committedMicrousd ?? 0)
-        })
-        if (!decision.admitted) return { status: "denied", reason: decision.reason } as const
-        const expiresAt = new Date(input.now.getTime() + input.policy.maxActiveSeconds * 1_000)
-        if (existing[0]) {
-          await tx.update(managedUsageReservation)
-            .set({
-              state: "reserved",
-              windowStart,
-              estimatedMicrousd: decision.estimatedMicrousd,
-              settledMicrousd: null,
-              updatedAt: input.now,
-              expiresAt
+        const reserveNewUsageInterval = async (): Promise<ManagedUsageReservationResult> => {
+          const windowStart = new Date(input.now)
+          windowStart.setUTCHours(0, 0, 0, 0)
+          const rows = await tx
+            .select({
+              activeReservations: sum(sql<number>`case when ${managedUsageReservation.state} in ('reserved', 'active') then 1 else 0 end`),
+              committedMicrousd: sum(sql<number>`coalesce(${managedUsageReservation.settledMicrousd}, ${managedUsageReservation.estimatedMicrousd})`)
             })
-            .where(eq(managedUsageReservation.id, existing[0].id))
-          return { status: "reserved", reservationId: existing[0].id } as const
+            .from(managedUsageReservation)
+            .where(and(
+              eq(managedUsageReservation.userId, input.userId),
+              gte(managedUsageReservation.windowStart, windowStart),
+              inArray(managedUsageReservation.state, ["reserved", "active", "settled"])
+            ))
+          const current = rows[0]
+          const decision = admitManagedUsage({
+            policy: input.policy,
+            activeReservations: Number(current?.activeReservations ?? 0),
+            committedMicrousd: Number(current?.committedMicrousd ?? 0)
+          })
+          if (!decision.admitted) return { status: "denied", reason: decision.reason } as const
+          const expiresAt = new Date(input.now.getTime() + input.policy.maxActiveSeconds * 1_000)
+          if (existing[0]) {
+            await tx.update(managedUsageReservation)
+              .set({
+                state: "reserved",
+                windowStart,
+                estimatedMicrousd: decision.estimatedMicrousd,
+                settledMicrousd: null,
+                updatedAt: input.now,
+                expiresAt
+              })
+              .where(eq(managedUsageReservation.id, existing[0].id))
+            return { status: "reserved", reservationId: existing[0].id } as const
+          }
+          await tx.insert(managedUsageReservation).values({
+            id: input.id,
+            userId: input.userId,
+            environmentId: input.environmentId,
+            sessionId: input.sessionId,
+            runtimeId: null,
+            state: "reserved",
+            windowStart,
+            estimatedMicrousd: decision.estimatedMicrousd,
+            settledMicrousd: null,
+            idempotencyKey: input.idempotencyKey,
+            createdAt: input.now,
+            updatedAt: input.now,
+            expiresAt
+          })
+          return { status: "reserved", reservationId: input.id } as const
         }
-        await tx.insert(managedUsageReservation).values({
-          id: input.id,
-          userId: input.userId,
-          environmentId: input.environmentId,
-          sessionId: input.sessionId,
-          runtimeId: null,
-          state: "reserved",
-          windowStart,
-          estimatedMicrousd: decision.estimatedMicrousd,
-          settledMicrousd: null,
-          idempotencyKey: input.idempotencyKey,
-          createdAt: input.now,
-          updatedAt: input.now,
-          expiresAt
-        })
-        return { status: "reserved", reservationId: input.id } as const
+        return reserveNewUsageInterval()
       })
     ),
 

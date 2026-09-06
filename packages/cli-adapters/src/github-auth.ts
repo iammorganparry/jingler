@@ -309,39 +309,7 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
 
   const authenticatedRequest = async (path: string, init: RequestInit = {}): Promise<Response> => {
     const bearer = await options.bearer()
-    if (!bearer) {
-      throw new GitHubApiError({
-        reason: "token-expired",
-        message: "Sign in to Jingler before using the GitHub App."
-      })
-    }
-    let response: Response
-    try {
-      response = await request(`${baseUrl()}${path}`, {
-        ...init,
-        headers: {
-          ...(init.body === undefined ? {} : { "content-type": "application/json" }),
-          ...init.headers,
-          authorization: `Bearer ${bearer}`
-        }
-      })
-    } catch {
-      throw new GitHubApiError({
-        reason: "unavailable",
-        message: "Could not reach the GitHub connection service."
-      })
-    }
-    if (!response.ok) {
-      const reset = response.headers.get("x-ratelimit-reset")
-      const resetSeconds = reset === null ? null : Number(reset)
-      const retryAt =
-        resetSeconds !== null && Number.isFinite(resetSeconds)
-          ? new Date(resetSeconds * 1_000).toISOString()
-          : undefined
-      const body = record(await response.json().catch(() => null))
-      const serverError = string(body?.error) ?? undefined
-      throw errorForStatus(response.status, retryAt, serverError)
-    }
+    let response: Response = await requestWithGitHubBearer(bearer, request, baseUrl, path, init)
     return response
   }
 
@@ -785,3 +753,46 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
     } as const
   })
 }) {}
+
+async function requestWithGitHubBearer(
+  bearer: string | null,
+  request: (input: string | URL | Request, init?: RequestInit) => Promise<Response>,
+  baseUrl: () => string,
+  path: string,
+  init: RequestInit
+) {
+  if (!bearer) {
+    throw new GitHubApiError({
+      reason: "token-expired",
+      message: "Sign in to Jingler before using the GitHub App."
+    })
+  }
+  let response: Response
+  try {
+    response = await request(`${baseUrl()}${path}`, {
+      ...init,
+      headers: {
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+        ...init.headers,
+        authorization: `Bearer ${bearer}`
+      }
+    })
+  } catch {
+    throw new GitHubApiError({
+      reason: "unavailable",
+      message: "Could not reach the GitHub connection service."
+    })
+  }
+  if (!response.ok) {
+    const reset = response.headers.get("x-ratelimit-reset")
+    const resetSeconds = reset === null ? null : Number(reset)
+    const retryAt =
+      resetSeconds !== null && Number.isFinite(resetSeconds)
+        ? new Date(resetSeconds * 1000).toISOString()
+        : undefined
+    const body = record(await response.json().catch(() => null))
+    const serverError = string(body?.error) ?? undefined
+    throw errorForStatus(response.status, retryAt, serverError)
+  }
+  return response
+}

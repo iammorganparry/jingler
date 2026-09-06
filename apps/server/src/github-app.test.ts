@@ -235,17 +235,20 @@ describe("GitHub API client", () => {
           ]
         })
       }
-      if (url.endsWith("/app")) return Response.json({ slug: "jingler-test" })
-      if (url.endsWith("/access_tokens")) {
-        return Response.json({
-          token: "ghs_installation_secret",
-          expires_at: "2026-08-04T11:00:00Z"
-        })
+      const installationResponse = () => {
+        if (url.endsWith("/app")) return Response.json({ slug: "jingler-test" })
+        if (url.endsWith("/access_tokens")) {
+          return Response.json({
+            token: "ghs_installation_secret",
+            expires_at: "2026-08-04T11:00:00Z"
+          })
+        }
+        if (url.endsWith("/repos/acme/widget/pulls")) {
+          return Response.json({ number: 1731 }, { status: 201 })
+        }
+        return new Response(null, { status: 204 })
       }
-      if (url.endsWith("/repos/acme/widget/pulls")) {
-        return Response.json({ number: 1731 }, { status: 201 })
-      }
-      return new Response(null, { status: 204 })
+      return installationResponse()
     })
     const client = createGitHubAppClient(config, {
       fetch: fetchMock as typeof fetch,
@@ -342,5 +345,30 @@ describe("GitHub API client", () => {
       expect(String(error)).not.toContain("secret-that-must-not-escape")
       expect(String(error)).not.toContain("ghu_request-secret")
     }
+  })
+})
+
+describe("GitHub installation pagination", () => {
+  it("skips malformed installations without ending a full page early", async () => {
+    const requests: string[] = []
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1, account: { id: 8, login: "acme" }
+    }))
+    const client = createGitHubAppClient(config, {
+      fetch: vi.fn(async (input: string | URL | Request) => {
+        const url = String(input)
+        requests.push(url)
+        return Response.json({ installations: url.endsWith("page=1")
+          ? [null, ...firstPage.slice(1)]
+          : [{ id: 999, account: { id: 9, login: "second-page" } }]
+        })
+      }) as typeof fetch
+    })
+    const installations = await client.listInstallations("user-token")
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toContain("page=2")
+    expect(installations).toHaveLength(100)
+    expect(installations[0]).toMatchObject({ id: "2", account: { type: "Unknown" } })
+    expect(installations.at(-1)).toMatchObject({ id: "999", account: { login: "second-page" } })
   })
 })

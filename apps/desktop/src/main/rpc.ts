@@ -1133,45 +1133,20 @@ const provisionRemoteSession = (
       yield* reportSessionCreation(progress, "resolving-repository");
       const sessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
       managedSessionId = sessionId;
-      const remoteUrl = yield* GitService.remoteUrl(input.repoPath);
-      const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
-      if (!repository) {
-        return yield* Effect.fail(
-          new GitError({
-            message:
-              "Managed environments currently require a GitHub repository remote.",
-          }),
-        );
-      }
-      const branch =
-        operation === "Sessions.createFromPr"
-          ? (input as CreateSessionFromPrInput).pr.headRefName
-          : (input as CreateSessionInput | CreateSessionFromIssueInput)
-              .baseBranch;
+      const repository = yield* managedRepositoryIdentity(input.repoPath);
+      const { branch, baseBranch, source } = remoteProvisioningSource(operation, input);
       const headSha = yield* GitService.revision(input.repoPath, branch).pipe(
         Effect.orElse(() =>
           GitService.revision(input.repoPath, `origin/${branch}`),
         ),
       );
-      const baseBranch =
-        operation === "Sessions.createFromPr"
-          ? (input as CreateSessionFromPrInput).pr.baseRefName
-          : (input as CreateSessionInput | CreateSessionFromIssueInput)
-              .baseBranch;
       const plan = createWorkspaceProvisioningPlan({
         githubSlug: `${repository.owner}/${repository.repo}`,
         headSha,
         branch,
         baseBranch,
         createBranch: false,
-        source:
-          operation === "Sessions.createFromPr"
-            ? {
-                kind: "pull-request",
-                pullRequestNumber: (input as CreateSessionFromPrInput).pr
-                  .number,
-              }
-            : { kind: "new" },
+        source,
       });
       yield* reportSessionCreation(progress, "starting-sandbox");
       yield* environmentService
@@ -1377,371 +1352,7 @@ export const continueOnEnvironment = (
       environments: () => environments.list,
       persist: (id, target) => sessions.setEnvironment(id, target),
       continueSession: (source, target) =>
-        Effect.gen(function* () {
-          const sourceMessages = yield* TranscriptStore.list(
-            source.activeChatId,
-          ).pipe(Effect.orElseSucceed(() => []));
-          const checkpoint = yield* source.environmentId === undefined
-            ? source.worktreePath
-              ? Effect.tryPromise({
-                  try: () =>
-                    exportWorkspaceHandoff({
-                      workspacePath: source.worktreePath!,
-                      sourceSessionId: source.id,
-                      eventCursor: sourceMessages.length,
-                    }),
-                  catch: (cause) =>
-                    new EnvironmentHandoffError({
-                      reason: "unavailable",
-                      message:
-                        "The source workspace could not be checkpointed.",
-                      sessionId: source.id,
-                    }),
-                })
-              : Effect.fail(
-                  new EnvironmentHandoffError({
-                    reason: "unavailable",
-                    message: "The source session has no workspace to hand off.",
-                    sessionId: source.id,
-                  }),
-                )
-            : remote
-                .request(source, "Workspace.exportHandoff", {
-                  eventCursor: sourceMessages.length,
-                })
-                .pipe(
-                  Effect.flatMap(
-                    Schema.decodeUnknown(WorkspaceTransferCheckpointSchema),
-                  ),
-                  Effect.mapError(
-                    (cause) =>
-                      new EnvironmentHandoffError({
-                        reason: "unavailable",
-                        message:
-                          "The source environment could not checkpoint the workspace.",
-                        sessionId: source.id,
-                        environmentId: source.environmentId,
-                      }),
-                  ),
-                );
-          const sourceRepositories = yield* continuationRepositories(
-            environments,
-            source.environmentId,
-          ).pipe(Effect.orElseSucceed(() => []));
-          const sourceRepository =
-            sourceRepositories.find(
-              (candidate) => candidate.path === source.repoPath,
-            ) ??
-            sourceRepositories.find(
-              (candidate) => candidate.name === source.repo,
-            );
-          const sourceIdentity = {
-            name: sourceRepository?.name ?? source.repo,
-            githubSlug:
-              checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
-          };
-          const targetEnvironment =
-            target === undefined
-              ? undefined
-              : yield* environments.environment(target).pipe(
-                  Effect.mapError(
-                    (cause) =>
-                      new EnvironmentHandoffError({
-                        reason: "unavailable",
-                        message:
-                          "The target environment is no longer available.",
-                        sessionId: source.id,
-                        environmentId: target,
-                      }),
-                  ),
-                );
-          const targetRepositories = yield* continuationRepositories(
-            environments,
-            target,
-          ).pipe(
-            targetEnvironment?.kind === "managed"
-              ? Effect.orElseSucceed(() => [])
-              : (effect) => effect,
-            Effect.mapError(
-              () =>
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "The target environment could not list its repositories.",
-                  sessionId: source.id,
-                  ...(target === undefined ? {} : { environmentId: target }),
-                }),
-            ),
-          );
-          const targetRepository = selectContinuationRepository(
-            sourceIdentity,
-            targetRepositories,
-          );
-          if (
-            targetRepository === null &&
-            targetEnvironment?.kind !== "managed"
-          ) {
-            return yield* Effect.fail(
-              new EnvironmentHandoffError({
-                reason: "unavailable",
-                message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
-                sessionId: source.id,
-                ...(target === undefined ? {} : { environmentId: target }),
-              }),
-            );
-          }
-          const targetBaseBranch =
-            source.baseBranch ??
-            targetRepository?.defaultBranch ??
-            source.branch;
-          if (
-            source.connectionId === undefined ||
-            source.providerId === undefined ||
-            source.modelId === undefined
-          ) {
-            return yield* Effect.fail(
-              new EnvironmentHandoffError({
-                reason: "unavailable",
-                message:
-                  "Choose a provider connection before continuing this session.",
-                sessionId: source.id,
-                ...(target === undefined ? {} : { environmentId: target }),
-              }),
-            );
-          }
-          if (target === undefined) {
-            const created = yield* createSession({
-              repoPath: targetRepository!.path,
-              repoName: targetRepository!.name,
-              connectionId: source.connectionId,
-              providerId: source.providerId,
-              modelId: source.modelId,
-              baseBranch: targetBaseBranch,
-              title: `${source.title} continuation`,
-            }).pipe(
-              Effect.mapError(
-                () =>
-                  new EnvironmentHandoffError({
-                    reason: "unavailable",
-                    message:
-                      "The desktop could not provision the continuation workspace.",
-                    sessionId: source.id,
-                  }),
-              ),
-            );
-            if (!created.worktreePath) {
-              return yield* Effect.fail(
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message: "The local continuation has no verified workspace.",
-                  sessionId: source.id,
-                }),
-              );
-            }
-            yield* Effect.tryPromise({
-              try: async () => {
-                await checkoutWorkspaceHandoffBase(
-                  created.worktreePath!,
-                  checkpoint,
-                );
-                await importWorkspaceHandoff(created.worktreePath!, checkpoint);
-              },
-              catch: (cause) =>
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "The local continuation did not match the source checkpoint.",
-                  sessionId: source.id,
-                }),
-            });
-            for (const message of sourceMessages) {
-              yield* TranscriptStore.append(created.activeChatId, message);
-            }
-            return created;
-          }
-          let requestedSessionId: string | undefined;
-          if (targetEnvironment?.kind === "managed") {
-            if (!environmentRuntimeIsCurrent(targetEnvironment)) {
-              return yield* Effect.fail(
-                new EnvironmentHandoffError({
-                  reason: "incompatible",
-                  message:
-                    "Cloud is running an incompatible agent runtime. Update Cloud before continuing this pi session.",
-                  sessionId: source.id,
-                  environmentId: target,
-                }),
-              );
-            }
-            if (checkpoint.repositorySlug === null) {
-              return yield* Effect.fail(
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "Managed handoff requires a GitHub repository identity.",
-                  sessionId: source.id,
-                  environmentId: target,
-                }),
-              );
-            }
-            requestedSessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
-            yield* environments
-              .hydrateManagedWorkspace(
-                targetEnvironment,
-                requestedSessionId,
-                createWorkspaceProvisioningPlan({
-                  githubSlug: checkpoint.repositorySlug,
-                  headSha: checkpoint.headSha,
-                  branch: checkpoint.branch ?? source.baseBranch ?? "main",
-                  baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
-                  createBranch: false,
-                  source: {
-                    kind: "handoff",
-                    sourceSessionId: source.id,
-                    checkpointId: checkpoint.checkpointId,
-                    eventCursor: checkpoint.eventCursor,
-                  },
-                }),
-                {
-                  connectionId: source.connectionId,
-                  providerId: source.providerId,
-                  modelId: source.modelId,
-                },
-              )
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new EnvironmentHandoffError({
-                      reason: "unavailable",
-                      message:
-                        "The managed target could not verify the source Git base.",
-                      sessionId: source.id,
-                      environmentId: target,
-                    }),
-                ),
-              );
-          }
-          const targetSession = requestedSessionId
-            ? {
-                id: requestedSessionId,
-                environmentId: target,
-                connectionId: source.connectionId,
-                providerId: source.providerId,
-                modelId: source.modelId,
-              }
-            : null;
-          const value = yield* (
-            targetSession
-              ? remote.request(
-                  targetSession,
-                  "Sessions.continueOnEnvironment",
-                  {
-                    sourceSession: {
-                      ...source,
-                      title: `${source.title} continuation`,
-                      environmentId: target,
-                      repo: targetRepository?.name ?? source.repo,
-                      repoPath: "/workspace",
-                      worktreePath: undefined,
-                      baseBranch: targetBaseBranch,
-                    },
-                    requestedSessionId,
-                  },
-                )
-              : remote.requestOnEnvironment(
-                  target,
-                  "Sessions.continueOnEnvironment",
-                  {
-                    sourceSession: {
-                      ...source,
-                      title: `${source.title} continuation`,
-                      environmentId: target,
-                      repo: targetRepository!.name,
-                      repoPath: targetRepository!.path,
-                      worktreePath: undefined,
-                      baseBranch: targetBaseBranch,
-                    },
-                  },
-                )
-          ).pipe(
-            Effect.mapError(
-              () =>
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "The target device did not admit a continuation workspace.",
-                  sessionId: source.id,
-                  environmentId: target,
-                }),
-            ),
-          );
-          const created = yield* Schema.decodeUnknown(SessionSchema)(
-            value,
-          ).pipe(
-            Effect.mapError(
-              () =>
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "The target device returned invalid continuation metadata.",
-                  sessionId: source.id,
-                  environmentId: target,
-                }),
-            ),
-          );
-          if (created.environmentId !== target) {
-            return yield* Effect.fail(
-              new EnvironmentHandoffError({
-                reason: "unavailable",
-                message:
-                  "The remote device returned a continuation for a different environment.",
-                sessionId: source.id,
-                environmentId: target,
-              }),
-            );
-          }
-          yield* remote
-            .request(created, "Workspace.importHandoff", { checkpoint })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new EnvironmentHandoffError({
-                    reason: "unavailable",
-                    message:
-                      "The target workspace did not verify the source checkpoint.",
-                    sessionId: source.id,
-                    environmentId: target,
-                  }),
-              ),
-            );
-          yield* remote
-            .request(created, "Sessions.importConversation", {
-              messages: sourceMessages,
-            })
-            .pipe(
-              Effect.mapError(
-                () =>
-                  new EnvironmentHandoffError({
-                    reason: "unavailable",
-                    message:
-                      "The target session could not restore the source conversation.",
-                    sessionId: source.id,
-                    environmentId: target,
-                  }),
-              ),
-            );
-          return yield* sessions.upsertRemote(created).pipe(
-            Effect.mapError(
-              () =>
-                new EnvironmentHandoffError({
-                  reason: "unavailable",
-                  message:
-                    "The desktop could not persist the remote continuation.",
-                  sessionId: source.id,
-                  environmentId: target,
-                }),
-            ),
-          );
-        }),
+        continueWorkspace(source, target, environments, remote),
     });
   });
 
@@ -3271,34 +2882,7 @@ export const githubPublishRouted = (sessionId: string) =>
                   ) =>
                     remote.execute(session, operation, payload).pipe(
                       Stream.runCollect,
-                      Effect.flatMap((events) => {
-                        const terminal = Array.from(events).at(-1);
-                        if (!terminal || terminal.kind === "failed") {
-                          const message =
-                            terminal?.payload &&
-                            typeof terminal.payload === "object" &&
-                            "message" in terminal.payload &&
-                            typeof terminal.payload.message === "string"
-                              ? terminal.payload.message
-                              : `Remote ${operation} failed.`;
-                          return Effect.fail(new Error(message));
-                        }
-                        if (terminal.kind !== "complete") {
-                          return Effect.fail(
-                            new Error(`Remote ${operation} did not complete.`),
-                          );
-                        }
-                        return Schema.decodeUnknown(schema)(
-                          terminal.payload,
-                        ).pipe(
-                          Effect.mapError(
-                            () =>
-                              new Error(
-                                `Remote ${operation} returned an invalid result.`,
-                              ),
-                          ),
-                        );
-                      }),
+                      Effect.flatMap(decodeRemotePublishResult<A, I>(operation, schema)),
                     );
 
                   yield* Effect.forkScoped(
@@ -6274,59 +5858,9 @@ const ServerProtocolLive = Layer.effect(
        * spamming the console once per interrupted stream on every reload.
        * There is no one to deliver to: drop them.
        */
-      const clientGone = (error: unknown): boolean =>
-        error instanceof Error && /destroyed|disposed/i.test(error.message);
 
-      const sendServerFrame = (response: FromServerEncoded): void => {
-        const target = sender;
-        if (target === null || target.isDestroyed()) return;
-        try {
-          target.send(RPC_CHANNEL, response);
-        } catch (error) {
-          if (clientGone(error)) return;
-          const frame = response as {
-            readonly _tag?: string;
-            readonly requestId?: unknown;
-          };
-          console.error(
-            `[rpc] server frame failed to serialize (tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")}); retrying JSON-normalised`,
-            error,
-          );
-          // DIAGNOSTIC (temporary): record the offending frame so the culprit RPC
-          // and payload shape are recoverable — this reproduces on bot/automation
-          // PR comments (e.g. Devin). JSON survives values structured-clone
-          // rejects (functions/symbols), so it still names the frame.
-          try {
-            let preview: string;
-            try {
-              preview = JSON.stringify(response) ?? "undefined";
-            } catch (previewError) {
-              preview = `<unstringifiable: ${String(previewError)}>`;
-            }
-            appendFileSync(
-              "/tmp/jingler-relay-diag.log",
-              `[${new Date().toISOString()}] serialize-fail tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")} error=${String(error)} frame=${preview.slice(0, 6000)}\n`,
-            );
-          } catch {
-            // diagnostics must never throw
-          }
-          try {
-            if (!target.isDestroyed()) {
-              target.send(
-                RPC_CHANNEL,
-                JSON.parse(JSON.stringify(response)) as FromServerEncoded,
-              );
-            }
-          } catch (fallbackError) {
-            if (!clientGone(fallbackError)) {
-              console.error(
-                "[rpc] server frame is unrecoverable; dropping it to keep the transport alive",
-                fallbackError,
-              );
-            }
-          }
-        }
-      };
+      const sendServerFrame = (response: FromServerEncoded): void =>
+        sendRpcServerFrame(sender, response);
 
       return {
         disconnects,
@@ -6409,3 +5943,522 @@ export type RpcServerRequirements =
   | ProviderConnections;
 export const RpcServerLive: Layer.Layer<never, never, RpcServerRequirements> =
   RpcServerLayer;
+
+const clientGone = (error: unknown): boolean =>
+        error instanceof Error && /destroyed|disposed/i.test(error.message);
+
+const sendRpcServerFrame = (target: WebContents | null, response: FromServerEncoded): void => {
+  if (target === null || target.isDestroyed()) return;
+  try {
+    target.send(RPC_CHANNEL, response);
+  } catch (error) {
+    if (clientGone(error)) return;
+    const frame = response as {
+      readonly _tag?: string;
+      readonly requestId?: unknown;
+    };
+    console.error(
+      `[rpc] server frame failed to serialize (tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")}); retrying JSON-normalised`,
+      error,
+    );
+    recordSerializationFailure(response, frame, error);
+    try {
+      if (!target.isDestroyed()) {
+        target.send(
+          RPC_CHANNEL,
+          JSON.parse(JSON.stringify(response)) as FromServerEncoded,
+        );
+      }
+    } catch (fallbackError) {
+      if (!clientGone(fallbackError)) {
+        console.error(
+          "[rpc] server frame is unrecoverable; dropping it to keep the transport alive",
+          fallbackError,
+        );
+      }
+    }
+  }
+};
+
+function decodeRemotePublishResult<A, I>(operation: string, schema: Schema.Schema<A, I, never>) {
+  return (events: Iterable<import("@jingler/core").RemoteSessionEvent>) => {
+    const terminal = Array.from(events).at(-1);
+    if (!terminal || terminal.kind === "failed") {
+      const message = terminal?.payload &&
+        typeof terminal.payload === "object" &&
+        "message" in terminal.payload &&
+        typeof terminal.payload.message === "string"
+        ? terminal.payload.message
+        : `Remote ${operation} failed.`;
+      return Effect.fail(new Error(message));
+    }
+    if (terminal.kind !== "complete") {
+      return Effect.fail(
+        new Error(`Remote ${operation} did not complete.`)
+      );
+    }
+    return Schema.decodeUnknown(schema)(
+      terminal.payload
+    ).pipe(
+      Effect.mapError(
+        () => new Error(
+          `Remote ${operation} returned an invalid result.`
+        )
+      )
+    );
+  };
+}
+
+const continueWorkspace = (source: Session, target: string | undefined, environments: EnvironmentService, remote: RemoteSessionService) => Effect.gen(function* () {
+  const sourceMessages = yield* TranscriptStore.list(
+    source.activeChatId,
+  ).pipe(Effect.orElseSucceed(() => []));
+  const checkpoint = yield* continuationCheckpoint(source, sourceMessages.length, remote);
+  const { targetEnvironment, targetRepository, targetBaseBranch } = yield* resolveContinuationTarget(source, checkpoint, target, environments);
+  if (
+    source.connectionId === undefined ||
+    source.providerId === undefined ||
+    source.modelId === undefined
+  ) {
+    return yield* Effect.fail(
+      new EnvironmentHandoffError({
+        reason: "unavailable",
+        message:
+          "Choose a provider connection before continuing this session.",
+        sessionId: source.id,
+        ...(target === undefined ? {} : { environmentId: target }),
+      }),
+    );
+  }
+  if (target === undefined) {
+    return yield* continueLocalWorkspace(source, targetRepository!, targetBaseBranch, checkpoint, sourceMessages);
+  }
+  const requestedSessionId = yield* prepareManagedContinuation(
+    targetEnvironment, target, source, checkpoint, environments
+  );
+  return yield* admitRemoteContinuation(source, target, requestedSessionId, targetRepository, targetBaseBranch, checkpoint, sourceMessages, remote)
+});
+
+const continuationCheckpoint = (source: Session, eventCursor: number, remote: RemoteSessionService) =>
+  source.environmentId === undefined
+    ? source.worktreePath
+      ? Effect.tryPromise({
+        try: () =>
+          exportWorkspaceHandoff({
+            workspacePath: source.worktreePath!,
+            sourceSessionId: source.id,
+            eventCursor: eventCursor,
+          }),
+        catch: (cause) =>
+          new EnvironmentHandoffError({
+            reason: "unavailable",
+            message:
+              "The source workspace could not be checkpointed.",
+            sessionId: source.id,
+          }),
+      })
+      : Effect.fail(
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message: "The source session has no workspace to hand off.",
+          sessionId: source.id,
+        }),
+      )
+    : remote
+      .request(source, "Workspace.exportHandoff", {
+        eventCursor: eventCursor,
+      })
+      .pipe(
+        Effect.flatMap(
+          Schema.decodeUnknown(WorkspaceTransferCheckpointSchema),
+        ),
+        Effect.mapError(
+          (cause) =>
+            new EnvironmentHandoffError({
+              reason: "unavailable",
+              message:
+                "The source environment could not checkpoint the workspace.",
+              sessionId: source.id,
+              environmentId: source.environmentId,
+            }),
+        ),
+      );
+
+const prepareManagedContinuation = (
+  targetEnvironment: Environment | undefined,
+  target: string,
+  source: Session,
+  checkpoint: WorkspaceTransferCheckpoint,
+  environments: EnvironmentService
+) => Effect.gen(function* () {
+  let requestedSessionId: string | undefined;
+  if (targetEnvironment?.kind === "managed") {
+    if (!environmentRuntimeIsCurrent(targetEnvironment)) {
+      return yield* Effect.fail(
+        new EnvironmentHandoffError({
+          reason: "incompatible",
+          message:
+            "Cloud is running an incompatible agent runtime. Update Cloud before continuing this pi session.",
+          sessionId: source.id,
+          environmentId: target,
+        }),
+      );
+    }
+    if (checkpoint.repositorySlug === null) {
+      return yield* Effect.fail(
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "Managed handoff requires a GitHub repository identity.",
+          sessionId: source.id,
+          environmentId: target,
+        }),
+      );
+    }
+    requestedSessionId = `s_cloud_${randomBytes(18).toString("base64url")}`;
+    yield* environments
+      .hydrateManagedWorkspace(
+        targetEnvironment,
+        requestedSessionId,
+        createWorkspaceProvisioningPlan({
+          githubSlug: checkpoint.repositorySlug,
+          headSha: checkpoint.headSha,
+          branch: checkpoint.branch ?? source.baseBranch ?? "main",
+          baseBranch: source.baseBranch ?? checkpoint.branch ?? "main",
+          createBranch: false,
+          source: {
+            kind: "handoff",
+            sourceSessionId: source.id,
+            checkpointId: checkpoint.checkpointId,
+            eventCursor: checkpoint.eventCursor,
+          },
+        }),
+        {
+          connectionId: source.connectionId!,
+          providerId: source.providerId!,
+          modelId: source.modelId!,
+        },
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new EnvironmentHandoffError({
+              reason: "unavailable",
+              message:
+                "The managed target could not verify the source Git base.",
+              sessionId: source.id,
+              environmentId: target,
+            }),
+        ),
+      );
+  }
+
+  return requestedSessionId;
+});
+
+const continueLocalWorkspace = (
+  source: Session,
+  targetRepository: ContinuationRepository,
+  targetBaseBranch: string,
+  checkpoint: WorkspaceTransferCheckpoint,
+  sourceMessages: ReadonlyArray<Message>
+) => Effect.gen(function* () {
+  const created = yield* createSession({
+    repoPath: targetRepository!.path,
+    repoName: targetRepository!.name,
+    connectionId: source.connectionId!,
+    providerId: source.providerId!,
+    modelId: source.modelId!,
+    baseBranch: targetBaseBranch,
+    title: `${source.title} continuation`,
+  }).pipe(
+    Effect.mapError(
+      () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "The desktop could not provision the continuation workspace.",
+          sessionId: source.id,
+        }),
+    ),
+  );
+  if (!created.worktreePath) {
+    return yield* Effect.fail(
+      new EnvironmentHandoffError({
+        reason: "unavailable",
+        message: "The local continuation has no verified workspace.",
+        sessionId: source.id,
+      }),
+    );
+  }
+  yield* Effect.tryPromise({
+    try: async () => {
+      await checkoutWorkspaceHandoffBase(
+        created.worktreePath!,
+        checkpoint,
+      );
+      await importWorkspaceHandoff(created.worktreePath!, checkpoint);
+    },
+    catch: (cause) =>
+      new EnvironmentHandoffError({
+        reason: "unavailable",
+        message:
+          "The local continuation did not match the source checkpoint.",
+        sessionId: source.id,
+      }),
+  });
+  for (const message of sourceMessages) {
+    yield* TranscriptStore.append(created.activeChatId, message);
+  }
+  return created;
+});
+
+const admitRemoteContinuation = (source: Session, target: string, requestedSessionId: string | undefined, targetRepository: ContinuationRepository | null, targetBaseBranch: string, checkpoint: WorkspaceTransferCheckpoint, sourceMessages: ReadonlyArray<Message>, remote: RemoteSessionService) => Effect.gen(function* () {
+  const targetSession = requestedSessionId
+    ? {
+      id: requestedSessionId,
+      environmentId: target,
+      connectionId: source.connectionId,
+      providerId: source.providerId,
+      modelId: source.modelId,
+    }
+    : null;
+  const value = yield* (
+    targetSession
+      ? remote.request(
+        targetSession,
+        "Sessions.continueOnEnvironment",
+        {
+          sourceSession: {
+            ...source,
+            title: `${source.title} continuation`,
+            environmentId: target,
+            repo: targetRepository?.name ?? source.repo,
+            repoPath: "/workspace",
+            worktreePath: undefined,
+            baseBranch: targetBaseBranch,
+          },
+          requestedSessionId,
+        },
+      )
+      : remote.requestOnEnvironment(
+        target,
+        "Sessions.continueOnEnvironment",
+        {
+          sourceSession: {
+            ...source,
+            title: `${source.title} continuation`,
+            environmentId: target,
+            repo: targetRepository!.name,
+            repoPath: targetRepository!.path,
+            worktreePath: undefined,
+            baseBranch: targetBaseBranch,
+          },
+        },
+      )
+  ).pipe(
+    Effect.mapError(
+      () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "The target device did not admit a continuation workspace.",
+          sessionId: source.id,
+          environmentId: target,
+        }),
+    ),
+  );
+  const created = yield* Schema.decodeUnknown(SessionSchema)(
+    value,
+  ).pipe(
+    Effect.mapError(
+      () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "The target device returned invalid continuation metadata.",
+          sessionId: source.id,
+          environmentId: target,
+        }),
+    ),
+  );
+  if (created.environmentId !== target) {
+    return yield* Effect.fail(
+      new EnvironmentHandoffError({
+        reason: "unavailable",
+        message:
+          "The remote device returned a continuation for a different environment.",
+        sessionId: source.id,
+        environmentId: target,
+      }),
+    );
+  }
+  yield* remote
+    .request(created, "Workspace.importHandoff", { checkpoint })
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new EnvironmentHandoffError({
+            reason: "unavailable",
+            message:
+              "The target workspace did not verify the source checkpoint.",
+            sessionId: source.id,
+            environmentId: target,
+          }),
+      ),
+    );
+  yield* remote
+    .request(created, "Sessions.importConversation", {
+      messages: sourceMessages,
+    })
+    .pipe(
+      Effect.mapError(
+        () =>
+          new EnvironmentHandoffError({
+            reason: "unavailable",
+            message:
+              "The target session could not restore the source conversation.",
+            sessionId: source.id,
+            environmentId: target,
+          }),
+      ),
+    );
+  return yield* SessionStore.upsertRemote(created).pipe(
+    Effect.mapError(
+      () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "The desktop could not persist the remote continuation.",
+          sessionId: source.id,
+          environmentId: target,
+        }),
+    ),
+  );
+})
+
+function recordSerializationFailure(
+  response: FromServerEncoded,
+  frame: { readonly _tag?: string; readonly requestId?: unknown },
+  error: unknown
+): void {
+  // DIAGNOSTIC (temporary): record the offending frame so the culprit RPC
+  // and payload shape are recoverable — this reproduces on bot/automation
+  // PR comments (e.g. Devin). JSON survives values structured-clone
+  // rejects (functions/symbols), so it still names the frame.
+  try {
+    let preview: string;
+    try {
+      preview = JSON.stringify(response) ?? "undefined";
+    } catch (previewError) {
+      preview = `<unstringifiable: ${String(previewError)}>`;
+    }
+    appendFileSync(
+      "/tmp/jingler-relay-diag.log",
+      `[${new Date().toISOString()}] serialize-fail tag=${frame._tag ?? "?"} requestId=${String(frame.requestId ?? "?")} error=${String(error)} frame=${preview.slice(0, 6000)}\n`,
+    );
+  } catch {
+    // diagnostics must never throw
+  }
+}
+
+function remoteProvisioningSource(
+  operation: "Sessions.create" | "Sessions.createFromPr" | "Sessions.createFromIssue",
+  input: CreateSessionInput | CreateSessionFromPrInput | CreateSessionFromIssueInput
+) {
+  if (operation === "Sessions.createFromPr") {
+    const { pr } = input as CreateSessionFromPrInput;
+    return { branch: pr.headRefName, baseBranch: pr.baseRefName, source: { kind: "pull-request" as const, pullRequestNumber: pr.number } };
+  }
+  const { baseBranch } = input as CreateSessionInput | CreateSessionFromIssueInput;
+  return { branch: baseBranch, baseBranch, source: { kind: "new" as const } };
+}
+
+const resolveContinuationTarget = (source: Session, checkpoint: WorkspaceTransferCheckpoint, target: string | undefined, environments: EnvironmentService) => Effect.gen(function* () {
+  const sourceRepositories = yield* continuationRepositories(
+    environments,
+    source.environmentId,
+  ).pipe(Effect.orElseSucceed(() => []));
+  const sourceRepository =
+    sourceRepositories.find(
+      (candidate) => candidate.path === source.repoPath,
+    ) ??
+    sourceRepositories.find(
+      (candidate) => candidate.name === source.repo,
+    );
+  const sourceIdentity = {
+    name: sourceRepository?.name ?? source.repo,
+    githubSlug:
+      checkpoint.repositorySlug ?? sourceRepository?.githubSlug ?? null,
+  };
+  const targetEnvironment =
+    target === undefined
+      ? undefined
+      : yield* environments.environment(target).pipe(
+        Effect.mapError(
+          (cause) =>
+            new EnvironmentHandoffError({
+              reason: "unavailable",
+              message:
+                "The target environment is no longer available.",
+              sessionId: source.id,
+              environmentId: target,
+            }),
+        ),
+      );
+  const targetRepositories = yield* continuationRepositories(
+    environments,
+    target,
+  ).pipe(
+    targetEnvironment?.kind === "managed"
+      ? Effect.orElseSucceed(() => [])
+      : (effect) => effect,
+    Effect.mapError(
+      () =>
+        new EnvironmentHandoffError({
+          reason: "unavailable",
+          message:
+            "The target environment could not list its repositories.",
+          sessionId: source.id,
+          ...(target === undefined ? {} : { environmentId: target }),
+        }),
+    ),
+  );
+  const targetRepository = selectContinuationRepository(
+    sourceIdentity,
+    targetRepositories,
+  );
+  if (
+    targetRepository === null &&
+    targetEnvironment?.kind !== "managed"
+  ) {
+    return yield* Effect.fail(
+      new EnvironmentHandoffError({
+        reason: "unavailable",
+        message: `${sourceIdentity.githubSlug ?? sourceIdentity.name} is not available on the target environment.`,
+        sessionId: source.id,
+        ...(target === undefined ? {} : { environmentId: target }),
+      }),
+    );
+  }
+  const targetBaseBranch =
+    source.baseBranch ??
+    targetRepository?.defaultBranch ??
+    source.branch;
+
+  return { targetEnvironment, targetRepository, targetBaseBranch };
+});
+
+const managedRepositoryIdentity = (repoPath: string) => Effect.gen(function* () {
+  const remoteUrl = yield* GitService.remoteUrl(repoPath);
+  const repository = remoteUrl ? parseGitHubRemote(remoteUrl) : null;
+  if (!repository) {
+    return yield* Effect.fail(
+      new GitError({
+        message:
+          "Managed environments currently require a GitHub repository remote.",
+      }),
+    );
+  }
+  return repository;
+});

@@ -10,7 +10,7 @@ import type {
 } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import { Chunk, Effect, Fiber, Layer, Schema, Stream } from "effect"
-import { WebSocketServer } from "ws"
+import { type WebSocket, WebSocketServer } from "ws"
 import { EnvironmentService, environmentFromRemoteDevice } from "./environment.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
 import {
@@ -397,18 +397,11 @@ process.stdin.on("data", (chunk) => {
           runCommandId = command.commandId
           return
         }
-        if (command.operation === "Agent.stop" && runCommandId) {
-          for (const [commandId, payload] of [[command.commandId, "stopped"], [runCommandId, "run-finished"]] as const) {
-            eventSequence += 1
-            socket.send(JSON.stringify({
-              type: "envelope",
-              envelope: encryptRemotePayload(key, "session_concurrent_abcdefgh", eventSequence, "device", {
-                version: 1, commandId, sessionId: "session_concurrent_abcdefgh",
-                eventSequence: 1, kind: "complete", payload
-              }, 1)
-            }))
-          }
-        }
+        eventSequence = completeStopAndRunCommands(command,
+          runCommandId, eventSequence,
+          socket,
+          key
+        )
       })
     })
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
@@ -441,9 +434,12 @@ process.stdin.on("data", (chunk) => {
       cleanupManagedSession: () => Effect.void,
       rename: () => Effect.never, revoke: () => Effect.never
     }
-    const services = RemoteSessionService.Default.pipe(Layer.provide(Layer.mergeAll(
-      Layer.succeed(EnvironmentService, environment), Layer.succeed(SecretStore, secrets)
-    )))
+    const services = RemoteSessionService.Default.pipe(
+      Layer.provide(Layer.mergeAll(
+        Layer.succeed(EnvironmentService, environment),
+        Layer.succeed(SecretStore, secrets)
+      ))
+    )
     const result = await Effect.runPromise(Effect.gen(function* () {
       const remote = yield* RemoteSessionService
       const session = { id: "session_concurrent_abcdefgh", environmentId: "device_buildbox" }
@@ -457,3 +453,47 @@ process.stdin.on("data", (chunk) => {
     expect(operations).toEqual(["Agent.run", "Agent.stop"])
   })
 })
+
+function completeStopAndRunCommands(
+  command: {
+    readonly version: 1
+    readonly sessionId: string
+    readonly commandId: string
+    readonly operation: string
+    readonly payload: unknown
+  },
+  runCommandId: string | undefined,
+  eventSequence: number,
+  socket: WebSocket,
+  key: Uint8Array<ArrayBufferLike>
+) {
+  if (command.operation === "Agent.stop" && runCommandId) {
+    for (const [commandId, payload] of [
+      [command.commandId, "stopped"],
+      [runCommandId, "run-finished"]
+    ] as const) {
+      eventSequence += 1
+      socket.send(
+        JSON.stringify({
+          type: "envelope",
+          envelope: encryptRemotePayload(
+            key,
+            "session_concurrent_abcdefgh",
+            eventSequence,
+            "device",
+            {
+              version: 1,
+              commandId,
+              sessionId: "session_concurrent_abcdefgh",
+              eventSequence: 1,
+              kind: "complete",
+              payload
+            },
+            1
+          )
+        })
+      )
+    }
+  }
+  return eventSequence
+}

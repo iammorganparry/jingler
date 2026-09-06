@@ -84,3 +84,24 @@ describe("managed runtime grants", () => {
     ).resolves.toEqual({ ok: false, reason: "stale-environment" })
   })
 })
+
+describe("managed grant rejection precedence", () => {
+  it.each([
+    [{ sessionGeneration: 99, subject: "other" }, "stale-session"],
+    [{ action: "session.cancel", subject: "other" }, "action-denied"],
+    [{ subject: "other" }, "wrong-scope"],
+    [{ environmentId: "other" }, "wrong-scope"],
+    [{ sessionId: "other" }, "wrong-scope"]
+  ] as const)("retains claim validation order for %j", async (override, reason) => {
+    const issued = await issue()
+    const expected = {
+      action: "session.start" as const,
+      authStateVersion: 7,
+      environmentGeneration: 3,
+      sessionGeneration: 2,
+      ...override
+    }
+    expect(await verifyManagedRuntimeGrant(issued.grant, secret, expected, 101)).toEqual({ ok: false, reason })
+    expect(await verifyManagedRuntimeGrant(issued.grant, secret, expected, issued.claims.expiresAt)).toEqual({ ok: false, reason: "expired" })
+  })
+})

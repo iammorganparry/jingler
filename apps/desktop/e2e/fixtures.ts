@@ -451,24 +451,7 @@ export const test = base.extend<{
       // rather than state the test seeded. Without it, "survives a restart" can
       // only ever assert that seeded fixtures render. Skip re-registering
       // cleanups so the first launch's teardown isn't run twice.
-      const reused = options.home !== undefined;
-      const home =
-        options.home ?? mkdtempSync(join(tmpdir(), "jingler-e2e-home-"));
-      const jinglerDir = join(home, "jingler");
-      const reposDir =
-        options.reposDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-repos-"));
-      const piFixture = options.piFixture ?? DEFAULT_PI_FIXTURE;
-      if (!reused) {
-        cleanups.push(() => rmSync(home, { recursive: true, force: true }));
-        cleanups.push(() => rmSync(reposDir, { recursive: true, force: true }));
-      }
-
-      let repoPath = "";
-      if (options.withRepo) {
-        repoPath = join(reposDir, "widget");
-        // A reused home already has its repo; re-initialising would wipe it.
-        if (!existsSync(repoPath)) initRepo(repoPath);
-      }
+      var { jinglerDir, reused, reposDir, piFixture, repoPath, home } = createFixtureDirectories(options, cleanups);
 
       /**
        * Seed config.json — but NEVER over a reused home's existing one.
@@ -478,224 +461,21 @@ export const test = base.extend<{
        * wrote (a managed-resource toggle, say) vanished, and the spec read the
        * absence as "it didn't persist" rather than "the fixture deleted it".
        */
-      const configPath = join(jinglerDir, "config.json");
-      if (options.configured && !(reused && existsSync(configPath))) {
-        mkdirSync(jinglerDir, { recursive: true });
-        const seededConfig: FixtureConfig = {
-          reposDir,
-          createdAt: "2026-07-11T00:00:00.000Z",
-        };
-        if (piFixture.seedConnection !== false) {
-          Object.assign(seededConfig, {
-            defaultConnectionId: E2E_PI_CONNECTION_ID,
-            defaultProviderId: E2E_PI_PROVIDER_ID,
-            defaultModelId: E2E_PI_MODEL_ID,
-            connectionSelectionRequired: false,
-          });
-        }
-        Object.assign(seededConfig, options.config);
-        writeFileSync(configPath, JSON.stringify(seededConfig, null, 2));
-      }
-      if (options.sessions) {
-        const sessions = Array.isArray(options.sessions)
-          ? options.sessions
-          : options.sessions({ reposDir, repoPath });
-        mkdirSync(jinglerDir, { recursive: true });
-        writeFileSync(
-          join(jinglerDir, "sessions.json"),
-          JSON.stringify(sessions.map(withCanonicalRuntimeIdentity), null, 2),
-        );
-      }
-      if (options.transcripts) {
-        const dir = join(jinglerDir, "transcripts");
-        mkdirSync(dir, { recursive: true });
-        for (const [sessionId, messages] of Object.entries(
-          options.transcripts,
-        )) {
-          writeFileSync(
-            join(dir, `${sessionId}.json`),
-            JSON.stringify(messages, null, 2),
-          );
-        }
-      }
-      if (options.reviewTranscripts) {
-        const dir = join(jinglerDir, "reviews");
-        mkdirSync(dir, { recursive: true });
-        for (const [sessionId, events] of Object.entries(
-          options.reviewTranscripts,
-        )) {
-          writeFileSync(
-            join(dir, `${sessionId}.transcript.json`),
-            JSON.stringify(events),
-          );
-        }
-      }
+      const { binDir, piFixtureFile } = seedFixtureWorkspace({
+        jinglerDir,
+        options,
+        reused,
+        reposDir,
+        piFixture,
+        repoPath,
+        home
+      });
 
-      // Seed extra fixtures (e.g. project skills) before launch, so they exist
-      // when the app first scans them.
-      options.seed?.({ home, reposDir, repoPath });
-
-      const piFixtureFile = join(jinglerDir, "e2e-pi-fixture.json");
-      if (!(
-        reused &&
-        options.piFixture === undefined &&
-        existsSync(piFixtureFile)
-      )) {
-        mkdirSync(jinglerDir, { recursive: true });
-        writeFileSync(piFixtureFile, JSON.stringify(piFixture, null, 2));
-      }
-
-      const binDir = join(home, "bin");
-      mkdirSync(binDir, { recursive: true });
-      // A connected App fixture needs an origin for immutable repository
-      // resolution and API-driven checkout.
-      if (options.githubApp?.connected && repoPath) {
-        const remotes = execFileSync("git", ["remote"], {
-          cwd: repoPath,
-          encoding: "utf8",
-        }).trim();
-        if (!remotes.split("\n").includes("origin")) {
-          git(repoPath, [
-            "remote",
-            "add",
-            "origin",
-            "git@github.com:acme/widget.git",
-          ]);
-        }
-        for (const pr of options.githubApp.prs ?? []) {
-          git(repoPath, ["branch", "--force", pr.headRefName, "main"]);
-        }
-      }
-
-      let deviceRelay: FakeDeviceRelay | undefined;
-      let deviceHome: string | undefined;
-      if (options.remoteEnvironment || options.realRemoteEnvironment) {
-        deviceHome = mkdtempSync(join(tmpdir(), "jingler-e2e-device-"));
-        cleanups.push(() =>
-          rmSync(deviceHome, { recursive: true, force: true }),
-        );
-        const deviceRepo = join(deviceHome, "repos", "widget");
-        mkdirSync(join(deviceHome, "repos"), { recursive: true });
-        if (options.remoteRepo !== false) initRepo(deviceRepo);
-        mkdirSync(join(deviceHome, "jingler"), { recursive: true });
-        writeFileSync(
-          join(deviceHome, "jingler", "config.json"),
-          JSON.stringify(
-            {
-              reposDir: join(deviceHome, "repos"),
-              createdAt: "2026-08-08T00:00:00.000Z",
-            },
-            null,
-            2,
-          ),
-        );
-        const relayOptions = {
-          deviceAgentBundle: DEVICE_AGENT_ENTRY,
-          deviceHome,
-          deviceBinDir: binDir,
-          piFixture: {
-            file: piFixtureFile,
-            connectionId: E2E_PI_CONNECTION_ID,
-            providerId: E2E_PI_PROVIDER_ID,
-            modelId: E2E_PI_MODEL_ID,
-          },
-          spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
-        };
-        if (options.realRemoteEnvironment) {
-          Object.assign(relayOptions, {
-            listenHost: "0.0.0.0",
-            publicHost: options.realRemoteEnvironment.relayHost,
-          });
-        }
-        deviceRelay = await startFakeDeviceRelay(relayOptions);
-        cleanups.push(() => deviceRelay?.close());
-        if (options.realRemoteEnvironment) {
-          const target = options.realRemoteEnvironment;
-          const sshDir = join(home, ".ssh");
-          mkdirSync(sshDir, { recursive: true, mode: 0o700 });
-          const quotedIdentity = target.identityFile.replaceAll('"', '\\"');
-          writeFileSync(
-            join(sshDir, "config"),
-            `Host ${target.host}\n  HostName ${target.host}\n  User ${target.username}\n  IdentityFile "${quotedIdentity}"\n  IdentitiesOnly yes\n`,
-            { mode: 0o600 },
-          );
-          const hostKeys = execFileSync(
-            "/usr/bin/ssh-keyscan",
-            ["-T", "5", target.host],
-            {
-              encoding: "utf8",
-              stdio: ["ignore", "pipe", "ignore"],
-            },
-          );
-          writeFileSync(join(sshDir, "known_hosts"), hostKeys, { mode: 0o600 });
-        } else {
-          installFakeSshHost({
-            binDir,
-            desktopHome: home,
-            deviceHome,
-            deviceAgentBundle: DEVICE_AGENT_ENTRY,
-            relayUrl: deviceRelay.url,
-          });
-        }
-      }
+      let { deviceRelay, deviceHome }: { deviceRelay: FakeDeviceRelay | undefined; deviceHome: string | undefined; } = await prepareRemoteFixture(options, cleanups, binDir, piFixtureFile, home);
 
       // Offline auth backend. Signed-in by default: seed the token file that the
       // e2e plaintext SecretStore reads, so the app boots past the wall.
-      const authServer =
-        options.authServer ??
-        (await startFakeAuthServer((() => {
-          if (!deviceRelay) return {};
-          const authOptions = { deviceRelayUrl: deviceRelay.url };
-          if (options.realRemoteEnvironment) {
-            Object.assign(authOptions, {
-              listenHost: "0.0.0.0",
-              publicHost: options.realRemoteEnvironment.relayHost,
-            });
-          }
-          return authOptions;
-        })()));
-      if (options.authServer === undefined) {
-        cleanups.push(() => {
-          authServer.close().catch(() => {});
-        });
-      }
-      const signedIn = options.signedIn ?? true;
-      const authSessionServer = options.authSessionServer ?? authServer;
-      if (signedIn) {
-        mkdirSync(jinglerDir, { recursive: true });
-        writeFileSync(
-          join(jinglerDir, "auth.enc"),
-          deviceRelay?.token ?? authSessionServer.token,
-        );
-      }
-
-      const githubRelay = options.githubRelay ?? (await startFakeGitHubRelay());
-      if (options.githubRelay === undefined) {
-        cleanups.push(() => {
-          githubRelay.close().catch(() => {});
-        });
-      }
-
-      const githubServer =
-        options.githubServer ??
-        (await startFakeGitHubServer(authServer.token, (() => {
-          const githubOptions = {
-            ...options.githubApp,
-            relayUrl: githubRelay.url,
-            relayGrant: githubRelay.grant,
-          };
-          // A native App fixture normally resolves PR heads from the repository
-          // created for this launch. Callers can still supply a fork checkout.
-          if (repoPath && options.githubApp?.cloneUrl === undefined) {
-            Object.assign(githubOptions, { cloneUrl: repoPath });
-          }
-          return githubOptions;
-        })()));
-      if (options.githubServer === undefined) {
-        cleanups.push(() => {
-          githubServer.close().catch(() => {});
-        });
-      }
+      const { authSessionServer, githubServer, authServer, githubRelay } = await startFixtureServices(options, deviceRelay, cleanups, jinglerDir, repoPath);
 
       // A throwaway Chromium profile per launch. `JINGLER_HOME` isolates the
       // app's own JSON state, but NOT `localStorage` — which lives in Electron's
@@ -716,43 +496,15 @@ export const test = base.extend<{
         );
       }
 
-      const inheritedEnv = { ...process.env };
-      for (const name of [
-        "PI_CODING_AGENT_DIR",
-        "PI_SUBAGENT_ELECTRON_RUN_AS_NODE",
-        "JINGLER_SUBAGENT_CREDENTIAL_ROOT",
-        "JINGLER_SUBAGENT_NODE",
-        "JINGLER_SUBAGENT_PROCESS_ISOLATION",
-        "JINGLER_SUBAGENT_PROCESS_WORKER",
-        "JINGLER_SUBAGENT_CHILD_TOOLS",
-        "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
-      ]) delete inheritedEnv[name];
-      const launchEnv = {
-        ...inheritedEnv,
-        // Run every built-app scenario against the same clean-machine boundary.
-        PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
-        JINGLER_HOME: home,
-        PI_CODING_AGENT_DIR: join(home, "jingler", "agent-resources"),
-        ELECTRON_RENDERER_URL: "",
-        JINGLER_AUTH_URL: authSessionServer.url,
-        JINGLER_GITHUB_URL: githubServer.url,
-        JINGLER_GITHUB_API_URL: githubServer.url,
-        JINGLER_SECRET_STORE: "memory",
-        JINGLER_E2E_PI_FIXTURE: piFixtureFile,
-        JINGLER_E2E: "1",
-        JINGLER_E2E_HEADLESS:
-          process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
-        ...options.e2eEnv,
-      };
-      if (options.isolateSystemHome) Object.assign(launchEnv, { HOME: home });
-      if (deviceRelay) {
-        Object.assign(launchEnv, {
-          JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
-          JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
-          JINGLER_SSH_DIR: join(home, ".ssh"),
-          JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
-        });
-      }
+      const launchEnv = fixtureLaunchEnvironment({
+        binDir,
+        home,
+        authSessionServer,
+        githubServer,
+        piFixtureFile,
+        options,
+        deviceRelay
+      });
       const app = await electron.launch({
         args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`],
         env: launchEnv,
@@ -826,3 +578,330 @@ export const test = base.extend<{
 });
 
 export { expect } from "@playwright/test";
+
+function createFixtureDirectories(options: LaunchOptions, cleanups: (() => void | Promise<void>)[]) {
+  const reused = options.home !== undefined;
+  const home = options.home ?? mkdtempSync(join(tmpdir(), "jingler-e2e-home-"));
+  const jinglerDir = join(home, "jingler");
+  const reposDir = options.reposDir ?? mkdtempSync(join(tmpdir(), "jingler-e2e-repos-"));
+  const piFixture = options.piFixture ?? DEFAULT_PI_FIXTURE;
+  if (!reused) {
+    cleanups.push(() => rmSync(home, { recursive: true, force: true }));
+    cleanups.push(() => rmSync(reposDir, { recursive: true, force: true }));
+  }
+
+  let repoPath = "";
+  if (options.withRepo) {
+    repoPath = join(reposDir, "widget");
+    // A reused home already has its repo; re-initialising would wipe it.
+    if (!existsSync(repoPath)) initRepo(repoPath);
+  }
+  return { jinglerDir, reused, reposDir, piFixture, repoPath, home };
+}
+
+async function startFixtureServices(options: LaunchOptions, deviceRelay: FakeDeviceRelay | undefined, cleanups: (() => void | Promise<void>)[], jinglerDir: string, repoPath: string) {
+  const authServer = options.authServer ??
+    (await startFakeAuthServer((() => {
+      if (!deviceRelay) return {};
+      const authOptions = { deviceRelayUrl: deviceRelay.url };
+      if (options.realRemoteEnvironment) {
+        Object.assign(authOptions, {
+          listenHost: "0.0.0.0",
+          publicHost: options.realRemoteEnvironment.relayHost,
+        });
+      }
+      return authOptions;
+    })()));
+  if (options.authServer === undefined) {
+    cleanups.push(() => {
+      authServer.close().catch(() => { });
+    });
+  }
+  const signedIn = options.signedIn ?? true;
+  const authSessionServer = options.authSessionServer ?? authServer;
+  if (signedIn) {
+    mkdirSync(jinglerDir, { recursive: true });
+    writeFileSync(
+      join(jinglerDir, "auth.enc"),
+      deviceRelay?.token ?? authSessionServer.token
+    );
+  }
+
+  const githubRelay = options.githubRelay ?? (await startFakeGitHubRelay());
+  if (options.githubRelay === undefined) {
+    cleanups.push(() => {
+      githubRelay.close().catch(() => { });
+    });
+  }
+
+  const githubServer = options.githubServer ??
+    (await startFakeGitHubServer(authServer.token, (() => {
+      const githubOptions = {
+        ...options.githubApp,
+        relayUrl: githubRelay.url,
+        relayGrant: githubRelay.grant,
+      };
+      // A native App fixture normally resolves PR heads from the repository
+      // created for this launch. Callers can still supply a fork checkout.
+      if (repoPath && options.githubApp?.cloneUrl === undefined) {
+        Object.assign(githubOptions, { cloneUrl: repoPath });
+      }
+      return githubOptions;
+    })()));
+  if (options.githubServer === undefined) {
+    cleanups.push(() => {
+      githubServer.close().catch(() => { });
+    });
+  }
+  return { authSessionServer, githubServer, authServer, githubRelay };
+}
+
+function seedFixtureWorkspace({
+  jinglerDir,
+  options,
+  reused,
+  reposDir,
+  piFixture,
+  repoPath,
+  home
+}: {
+  jinglerDir: string;
+  options: LaunchOptions;
+  reused: boolean;
+  reposDir: string;
+  piFixture: {
+    readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
+      "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+    >; readonly seedConnection?: boolean; readonly modelCount?: number;
+  };
+  repoPath: string;
+  home: string;
+}) {
+  seedFixtureRecords(jinglerDir, options, reused, reposDir, piFixture, repoPath);
+
+  // Seed extra fixtures (e.g. project skills) before launch, so they exist
+  // when the app first scans them.
+  options.seed?.({ home, reposDir, repoPath });
+
+  const piFixtureFile = join(jinglerDir, "e2e-pi-fixture.json");
+  if (!(
+    reused &&
+    options.piFixture === undefined &&
+    existsSync(piFixtureFile)
+  )) {
+    mkdirSync(jinglerDir, { recursive: true });
+    writeFileSync(piFixtureFile, JSON.stringify(piFixture, null, 2));
+  }
+
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  // A connected App fixture needs an origin for immutable repository
+  // resolution and API-driven checkout.
+  if (options.githubApp?.connected && repoPath) {
+    const remotes = execFileSync("git", ["remote"], {
+      cwd: repoPath,
+      encoding: "utf8",
+    }).trim();
+    if (!remotes.split("\n").includes("origin")) {
+      git(repoPath, [
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:acme/widget.git",
+      ]);
+    }
+    for (const pr of options.githubApp.prs ?? []) {
+      git(repoPath, ["branch", "--force", pr.headRefName, "main"]);
+    }
+  }
+  return { binDir, piFixtureFile };
+}
+
+function seedFixtureRecords(jinglerDir: string, options: LaunchOptions, reused: boolean, reposDir: string, piFixture: {
+  readonly scenarioId: string; readonly authRoute: "claude-setup-token" | "openai-codex-oauth" | "api-key"; readonly reasoning?: ReadonlyArray<
+    "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+  >; readonly seedConnection?: boolean; readonly modelCount?: number;
+}, repoPath: string) {
+  const configPath = join(jinglerDir, "config.json");
+  if (options.configured && !(reused && existsSync(configPath))) {
+    mkdirSync(jinglerDir, { recursive: true });
+    const seededConfig: FixtureConfig = {
+      reposDir,
+      createdAt: "2026-07-11T00:00:00.000Z",
+    };
+    if (piFixture.seedConnection !== false) {
+      Object.assign(seededConfig, {
+        defaultConnectionId: E2E_PI_CONNECTION_ID,
+        defaultProviderId: E2E_PI_PROVIDER_ID,
+        defaultModelId: E2E_PI_MODEL_ID,
+        connectionSelectionRequired: false,
+      });
+    }
+    Object.assign(seededConfig, options.config);
+    writeFileSync(configPath, JSON.stringify(seededConfig, null, 2));
+  }
+  if (options.sessions) {
+    const sessions = Array.isArray(options.sessions)
+      ? options.sessions
+      : options.sessions({ reposDir, repoPath });
+    mkdirSync(jinglerDir, { recursive: true });
+    writeFileSync(
+      join(jinglerDir, "sessions.json"),
+      JSON.stringify(sessions.map(withCanonicalRuntimeIdentity), null, 2)
+    );
+  }
+  if (options.transcripts) {
+    const dir = join(jinglerDir, "transcripts");
+    mkdirSync(dir, { recursive: true });
+    for (const [sessionId, messages] of Object.entries(
+      options.transcripts
+    )) {
+      writeFileSync(
+        join(dir, `${sessionId}.json`),
+        JSON.stringify(messages, null, 2)
+      );
+    }
+  }
+  if (options.reviewTranscripts) {
+    const dir = join(jinglerDir, "reviews");
+    mkdirSync(dir, { recursive: true });
+    for (const [sessionId, events] of Object.entries(
+      options.reviewTranscripts
+    )) {
+      writeFileSync(
+        join(dir, `${sessionId}.transcript.json`),
+        JSON.stringify(events)
+      );
+    }
+  }
+}
+
+async function prepareRemoteFixture(options: LaunchOptions, cleanups: (() => void | Promise<void>)[], binDir: string, piFixtureFile: string, home: string) {
+  let deviceRelay: FakeDeviceRelay | undefined;
+  let deviceHome: string | undefined;
+  if (options.remoteEnvironment || options.realRemoteEnvironment) {
+    deviceHome = mkdtempSync(join(tmpdir(), "jingler-e2e-device-"));
+    cleanups.push(() => rmSync(deviceHome!, { recursive: true, force: true })
+    );
+    const deviceRepo = join(deviceHome, "repos", "widget");
+    mkdirSync(join(deviceHome, "repos"), { recursive: true });
+    if (options.remoteRepo !== false) initRepo(deviceRepo);
+    mkdirSync(join(deviceHome, "jingler"), { recursive: true });
+    writeFileSync(
+      join(deviceHome, "jingler", "config.json"),
+      JSON.stringify(
+        {
+          reposDir: join(deviceHome, "repos"),
+          createdAt: "2026-08-08T00:00:00.000Z",
+        },
+        null,
+        2
+      )
+    );
+    const relayOptions = {
+      deviceAgentBundle: DEVICE_AGENT_ENTRY,
+      deviceHome,
+      deviceBinDir: binDir,
+      piFixture: {
+        file: piFixtureFile,
+        connectionId: E2E_PI_CONNECTION_ID,
+        providerId: E2E_PI_PROVIDER_ID,
+        modelId: E2E_PI_MODEL_ID,
+      },
+      spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
+    };
+    if (options.realRemoteEnvironment) {
+      Object.assign(relayOptions, {
+        listenHost: "0.0.0.0",
+        publicHost: options.realRemoteEnvironment.relayHost,
+      });
+    }
+    deviceRelay = await startFakeDeviceRelay(relayOptions);
+    cleanups.push(() => deviceRelay?.close());
+    if (options.realRemoteEnvironment) {
+      const target = options.realRemoteEnvironment;
+      const sshDir = join(home, ".ssh");
+      mkdirSync(sshDir, { recursive: true, mode: 0o700 });
+      const quotedIdentity = target.identityFile.replaceAll('"', '\\"');
+      writeFileSync(
+        join(sshDir, "config"),
+        `Host ${target.host}\n  HostName ${target.host}\n  User ${target.username}\n  IdentityFile "${quotedIdentity}"\n  IdentitiesOnly yes\n`,
+        { mode: 0o600 }
+      );
+      const hostKeys = execFileSync(
+        "/usr/bin/ssh-keyscan",
+        ["-T", "5", target.host],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }
+      );
+      writeFileSync(join(sshDir, "known_hosts"), hostKeys, { mode: 0o600 });
+    } else {
+      installFakeSshHost({
+        binDir,
+        desktopHome: home,
+        deviceHome,
+        deviceAgentBundle: DEVICE_AGENT_ENTRY,
+        relayUrl: deviceRelay.url,
+      });
+    }
+  }
+  return { deviceRelay, deviceHome };
+}
+
+function fixtureLaunchEnvironment({
+  binDir,
+  home,
+  authSessionServer,
+  githubServer,
+  piFixtureFile,
+  options,
+  deviceRelay
+}: {
+  binDir: string;
+  home: string;
+  authSessionServer: { readonly url: string; readonly token: string; };
+  githubServer: FakeGitHubServer;
+  piFixtureFile: string;
+  options: LaunchOptions;
+  deviceRelay: FakeDeviceRelay | undefined;
+}) {
+  const inheritedEnv = { ...process.env };
+  for (const name of [
+    "PI_CODING_AGENT_DIR",
+    "PI_SUBAGENT_ELECTRON_RUN_AS_NODE",
+    "JINGLER_SUBAGENT_CREDENTIAL_ROOT",
+    "JINGLER_SUBAGENT_NODE",
+    "JINGLER_SUBAGENT_PROCESS_ISOLATION",
+    "JINGLER_SUBAGENT_PROCESS_WORKER",
+    "JINGLER_SUBAGENT_CHILD_TOOLS",
+    "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
+  ]) delete inheritedEnv[name];
+  const launchEnv = {
+    ...inheritedEnv,
+    // Run every built-app scenario against the same clean-machine boundary.
+    PATH: `${binDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+    JINGLER_HOME: home,
+    PI_CODING_AGENT_DIR: join(home, "jingler", "agent-resources"),
+    ELECTRON_RENDERER_URL: "",
+    JINGLER_AUTH_URL: authSessionServer.url,
+    JINGLER_GITHUB_URL: githubServer.url,
+    JINGLER_GITHUB_API_URL: githubServer.url,
+    JINGLER_SECRET_STORE: "memory",
+    JINGLER_E2E_PI_FIXTURE: piFixtureFile,
+    JINGLER_E2E: "1",
+    JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
+    ...options.e2eEnv,
+  };
+  if (options.isolateSystemHome) Object.assign(launchEnv, { HOME: home });
+  if (deviceRelay) {
+    Object.assign(launchEnv, {
+      JINGLER_DEVICE_RELAY_URL: deviceRelay.url,
+      JINGLER_DEVICE_AGENT_BUNDLE: DEVICE_AGENT_ARCHIVE,
+      JINGLER_SSH_DIR: join(home, ".ssh"),
+      JINGLER_E2E_SSH_LOG: join(home, "ssh-invocations.jsonl"),
+    });
+  }
+  return launchEnv;
+}

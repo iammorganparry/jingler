@@ -135,12 +135,19 @@ export function SessionSplit(props: SessionSplitProps) {
   const dockSession =
     dockSessionId === null ? null : (sessions.find((s) => s.id === dockSessionId) ?? null)
 
+  const movePaneAction = (index: number, direction: -1 | 1) => {
+    if (single || !props.onMovePane) return undefined
+    if (index + direction < 0 || index + direction >= panes.length) return undefined
+    return () => props.onMovePane?.(index, direction)
+  }
+
   const renderPane = (pane: Pane, index: number) => {
     const session = sessions.find((s) => s.id === pane.sessionId)
     // A pane pointing at a session that has gone is transient — `prune` in
     // `useSplitLayout` removes it on the next tick. Render nothing rather than
     // throwing in the frame between.
     if (!session) return null
+    const focused = index === (group?.focused ?? 0)
     return (
       <SessionPane
         session={session}
@@ -168,8 +175,8 @@ export function SessionSplit(props: SessionSplitProps) {
         onOpenProviderSettings={props.onOpenProviderSettings}
         // Identity only where it disambiguates: a group of one needs no chip,
         // and `group` is non-null wherever a pane is being rendered at all.
-        pane={single ? undefined : { index, focused: index === (group?.focused ?? 0) }}
-        selectTabRequest={index === (group?.focused ?? 0) ? props.selectTabRequest : undefined}
+        pane={single ? undefined : { index, focused }}
+        selectTabRequest={focused ? props.selectTabRequest : undefined}
         onTabRequestHandled={props.onTabRequestHandled}
         onActiveTabChange={reportActiveTab}
         renderPullRequest={props.renderPullRequest}
@@ -182,16 +189,8 @@ export function SessionSplit(props: SessionSplitProps) {
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
         // Reordering only means something with a neighbour to trade places with;
         // the ends are handled by the reducer refusing to move past them.
-        onMovePaneLeft={
-          single || !props.onMovePane || index === 0
-            ? undefined
-            : () => props.onMovePane?.(index, -1)
-        }
-        onMovePaneRight={
-          single || !props.onMovePane || index === panes.length - 1
-            ? undefined
-            : () => props.onMovePane?.(index, 1)
-        }
+        onMovePaneLeft={movePaneAction(index, -1)}
+        onMovePaneRight={movePaneAction(index, 1)}
       />
     )
   }

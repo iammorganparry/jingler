@@ -243,6 +243,25 @@ const explicitlyLinkedPairs = (graph: MemoryGraph): ReadonlySet<string> => {
   return pairs
 }
 
+const deduplicateUndirectedCandidates = (
+  eligible: ReadonlyArray<SuggestionCandidate>
+): ReadonlyArray<SuggestionCandidate> => {
+  const byPair = new Map<string, SuggestionCandidate>()
+  for (const candidate of eligible) {
+    const [first, second] =
+      candidate.sourceId <= candidate.targetId
+        ? [candidate.sourceId, candidate.targetId]
+        : [candidate.targetId, candidate.sourceId]
+    const canonical: SuggestionCandidate = { ...candidate, sourceId: first, targetId: second }
+    const key = `${first} ${second}`
+    const existing = byPair.get(key)
+    if (existing === undefined || compareCandidate(canonical, existing) < 0) {
+      byPair.set(key, canonical)
+    }
+  }
+  return [...byPair.values()]
+}
+
 /**
  * Apply a {@link SuggestionPolicy} to raw scored pairs: drop self-pairs, drop
  * pairs already joined by an accepted wikilink/dependency edge, apply `minScore`,
@@ -271,20 +290,7 @@ export const materializeSuggestions = (
   if (policy.directed) {
     deduped = eligible
   } else {
-    const byPair = new Map<string, SuggestionCandidate>()
-    for (const candidate of eligible) {
-      const [first, second] =
-        candidate.sourceId <= candidate.targetId
-          ? [candidate.sourceId, candidate.targetId]
-          : [candidate.targetId, candidate.sourceId]
-      const canonical: SuggestionCandidate = { ...candidate, sourceId: first, targetId: second }
-      const key = `${first} ${second}`
-      const existing = byPair.get(key)
-      if (existing === undefined || compareCandidate(canonical, existing) < 0) {
-        byPair.set(key, canonical)
-      }
-    }
-    deduped = [...byPair.values()]
+    deduped = deduplicateUndirectedCandidates(eligible)
   }
 
   const sorted = [...deduped].sort(compareCandidate)

@@ -98,6 +98,16 @@ export interface ReviewState {
 
 const localKey = (sessionId: string) => ["local", "diff", sessionId] as const
 
+const availableReviewSource = (
+  source: ReviewSource,
+  prAvailable: boolean,
+  localAvailable: boolean
+): ReviewSource => {
+  if (source === "local" && !localAvailable && prAvailable) return "pr"
+  if (source === "pr" && !prAvailable && localAvailable) return "local"
+  return source
+}
+
 export function useReview(session: Session): ReviewState {
   const qc = useQueryClient()
   const [source, setSourceRaw] = useState<ReviewSource>("pr")
@@ -175,12 +185,7 @@ export function useReview(session: Session): ReviewState {
   const localAvailable = localFiles.length > 0
 
   // Fall back to whichever source actually has data.
-  const effective: ReviewSource =
-    source === "local" && !localAvailable && prAvailable
-      ? "pr"
-      : source === "pr" && !prAvailable && localAvailable
-        ? "local"
-        : source
+  const effective = availableReviewSource(source, prAvailable, localAvailable)
 
   const sourceFiles = effective === "local" ? localFiles : prFiles
   // Overlay the reviewer's local "viewed" markers onto the source's file list.

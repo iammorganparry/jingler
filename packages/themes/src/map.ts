@@ -178,18 +178,7 @@ const wash = (raw: string | undefined, fallback: Rgba): string => {
 const ACCENT_MIN_CONTRAST = 3
 const TEXT_MIN_CONTRAST = 4.5
 
-/**
- * Fold a VS Code theme down to the values `:root` needs.
- *
- * `overrides` is `config.theme.colorCustomizations` — VS Code's
- * `workbench.colorCustomizations` in miniature. It merges into `colors` BEFORE
- * the fold rather than being applied to the output, so an override is written
- * in the same vocabulary as the theme it modifies and survives switching
- * themes, exactly as it does in VS Code.
- */
-export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens => {
-  const colors: Colors = { ...(theme.colors ?? {}), ...(overrides ?? {}) }
-  const kind = normalizeThemeKind(theme.type)
+const resolveSurfaces = (colors: Colors, kind: ThemeKind) => {
   const defaults = DEFAULTS[kind]
   const steps = SURFACE_STEPS[kind]
 
@@ -218,6 +207,11 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
       step(editor, steps.surface)
   })
 
+  return { editor, canvas, panel, sunken, surface }
+}
+
+const resolveText = (colors: Colors, kind: ThemeKind, panel: Rgba) => {
+  const defaults = DEFAULTS[kind]
   // ── Text ramp ──────────────────────────────────────────────────────────────
 
   const textRaw = pick(colors, "editor.foreground", "foreground") ?? parseHex(defaults.text)!
@@ -244,6 +238,27 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
       mix(baseText, panel, 0.55)
   })
 
+  return { textBright, textBody, text, muted, dim }
+}
+
+const resolveEffects = (kind: ThemeKind, editor: Rgba) => {
+  const dark = isDark(editor)
+  const overlay = kind === "high-contrast"
+    ? "rgb(0 0 0 / 0.72)"
+    : dark
+      ? "rgb(0 0 0 / 0.55)"
+      : "rgb(15 23 42 / 0.32)"
+  const shadow = dark ? "rgb(0 0 0 / 0.45)" : "rgb(15 23 42 / 0.12)"
+  const shadowStrong = dark ? "rgb(0 0 0 / 0.62)" : "rgb(15 23 42 / 0.22)"
+  // Hover is a wash over an *unknown* surface, so it must stay translucent —
+  // baking it opaque would make every hovered row the wrong colour on three of
+  // the five surfaces it appears on.
+  const hover = dark ? "rgb(255 255 255 / 0.055)" : "rgb(0 0 0 / 0.045)"
+
+  return { dark, overlay, shadow, shadowStrong, hover }
+}
+
+const resolveBorders = (colors: Colors, kind: ThemeKind, panel: Rgba, text: Rgba) => {
   // ── Borders ────────────────────────────────────────────────────────────────
 
   const hairline =
@@ -256,6 +271,27 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
 
   const lineStrong =
     pickOpaque(colors, panel, "contrastBorder", "focusBorder", "menu.border") ?? mix(line, text, 0.3)
+
+  return { hairline, line, lineStrong }
+}
+
+/**
+ * Fold a VS Code theme down to the values `:root` needs.
+ *
+ * `overrides` is `config.theme.colorCustomizations` — VS Code's
+ * `workbench.colorCustomizations` in miniature. It merges into `colors` BEFORE
+ * the fold rather than being applied to the output, so an override is written
+ * in the same vocabulary as the theme it modifies and survives switching
+ * themes, exactly as it does in VS Code.
+ */
+export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens => {
+  const colors: Colors = { ...(theme.colors ?? {}), ...(overrides ?? {}) }
+  const kind = normalizeThemeKind(theme.type)
+  const defaults = DEFAULTS[kind]
+  const { editor, canvas, panel, sunken, surface } = resolveSurfaces(colors, kind)
+  const { textBright, textBody, text, muted, dim } = resolveText(colors, kind, panel)
+
+  const { hairline, line, lineStrong } = resolveBorders(colors, kind, panel, text)
 
   // ── Accents ────────────────────────────────────────────────────────────────
   // Terminal ANSI first: it is the only place a theme states a *palette* rather
@@ -309,18 +345,7 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
   // kill the contrast of what is behind it, and no theme states a colour whose
   // meaning is that; the closest keys (`widget.shadow`) mean something else.
 
-  const dark = isDark(editor)
-  const overlay = kind === "high-contrast"
-    ? "rgb(0 0 0 / 0.72)"
-    : dark
-      ? "rgb(0 0 0 / 0.55)"
-      : "rgb(15 23 42 / 0.32)"
-  const shadow = dark ? "rgb(0 0 0 / 0.45)" : "rgb(15 23 42 / 0.12)"
-  const shadowStrong = dark ? "rgb(0 0 0 / 0.62)" : "rgb(15 23 42 / 0.22)"
-  // Hover is a wash over an *unknown* surface, so it must stay translucent —
-  // baking it opaque would make every hovered row the wrong colour on three of
-  // the five surfaces it appears on.
-  const hover = dark ? "rgb(255 255 255 / 0.055)" : "rgb(0 0 0 / 0.045)"
+  const { dark, overlay, shadow, shadowStrong, hover } = resolveEffects(kind, editor)
 
   const selectionRaw = pick(colors, "editor.selectionBackground", "selection.background")
   const selection = selectionRaw

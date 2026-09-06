@@ -241,64 +241,8 @@ export function MorphPopoverContent({
   matchTriggerWidth = false,
   className,
 }: MorphPopoverContentProps) {
-  const ctx = useMorphContext("MorphPopoverContent");
-  const reduce = useReducedMotion() ?? false;
-  const [portalReady, setPortalReady] = useState(false);
-  const layout = usePopoverPortalPosition(
-    ctx.triggerRef,
-    ctx.contentRef,
-    portalReady && ctx.open,
-  );
-
-  useEffect(() => setPortalReady(true), []);
-  const contentWidth = layout && matchTriggerWidth ? layout.trigger.width : layout?.content.width ?? 0;
-  const left = layout
-    ? side === "left"
-      ? layout.trigger.left - contentWidth - sideOffset
-      : side === "right"
-        ? layout.trigger.left + layout.trigger.width + sideOffset
-        : align === "end"
-          ? layout.trigger.left + layout.trigger.width - contentWidth
-          : layout.trigger.left
-    : 0;
-  const top = layout
-    ? side === "bottom"
-      ? layout.trigger.top + layout.trigger.height + sideOffset
-      : side === "top"
-        ? layout.trigger.top - layout.content.height - sideOffset
-        : align === "end"
-          ? layout.trigger.top + layout.trigger.height - layout.content.height
-          : layout.trigger.top
-    : 0;
-
-  // Both directions travel between the exact same hidden/show states. Exit
-  // targets "hidden" directly instead of introducing separate choreography.
-  const wrap = reduce
-    ? undefined
-    : {
-        hidden: { opacity: 0, scale: 0.96, transition: SPRING_PANEL },
-        show: { opacity: 1, scale: 1, transition: SPRING_PANEL },
-      };
-  const clip = reduce
-    ? undefined
-    : {
-        hidden: {
-          clipPath: clipHidden(side, align, radius),
-          transition: MORPH_CLIP_TRANSITION,
-        },
-        show: {
-          clipPath: clipShown(radius),
-          transition: MORPH_CLIP_TRANSITION,
-        },
-      };
-
-  // Keep the server and first client render identical, then mount the portal.
-  if (!portalReady) return null;
-
-  return createPortal(
-    <AnimatePresence>
-      {ctx.open ? (
-        <motion.div
+         function renderPopoverPortal() {
+           return (<motion.div
           data-morph-popover-portal=""
           data-side={side}
           // Wrapper carries the shadow as a drop-shadow filter, which hugs the
@@ -330,7 +274,69 @@ export function MorphPopoverContent({
           >
             {children}
           </motion.div>
-        </motion.div>
+        </motion.div>)
+         }
+
+         function getTop(layout: NonNullable<ReturnType<typeof usePopoverPortalPosition>>) {
+           if (side === "bottom") return (layout.trigger.top + layout.trigger.height + sideOffset)
+           if (side === "top") return (layout.trigger.top - layout.content.height - sideOffset)
+           if (align === "end") return (layout.trigger.top + layout.trigger.height - layout.content.height)
+           return (layout.trigger.top)
+         }
+
+         function getLeft(layout: NonNullable<ReturnType<typeof usePopoverPortalPosition>>) {
+           if (side === "left") return (layout.trigger.left - contentWidth - sideOffset)
+           if (side === "right") return (layout.trigger.left + layout.trigger.width + sideOffset)
+           if (align === "end") return (layout.trigger.left + layout.trigger.width - contentWidth)
+           return (layout.trigger.left)
+         }
+
+  const ctx = useMorphContext("MorphPopoverContent");
+  const reduce = useReducedMotion() ?? false;
+  const [portalReady, setPortalReady] = useState(false);
+  const layout = usePopoverPortalPosition(
+    ctx.triggerRef,
+    ctx.contentRef,
+    portalReady && ctx.open,
+  );
+
+  useEffect(() => setPortalReady(true), []);
+  const contentWidth = layout && matchTriggerWidth ? layout.trigger.width : layout?.content.width ?? 0;
+  const left = layout
+    ? getLeft(layout)
+    : 0;
+  const top = layout
+    ? getTop(layout)
+    : 0;
+
+  // Both directions travel between the exact same hidden/show states. Exit
+  // targets "hidden" directly instead of introducing separate choreography.
+  const wrap = reduce
+    ? undefined
+    : {
+        hidden: { opacity: 0, scale: 0.96, transition: SPRING_PANEL },
+        show: { opacity: 1, scale: 1, transition: SPRING_PANEL },
+      };
+  const clip = reduce
+    ? undefined
+    : {
+        hidden: {
+          clipPath: clipHidden(side, align, radius),
+          transition: MORPH_CLIP_TRANSITION,
+        },
+        show: {
+          clipPath: clipShown(radius),
+          transition: MORPH_CLIP_TRANSITION,
+        },
+      };
+
+  // Keep the server and first client render identical, then mount the portal.
+  if (!portalReady) return null;
+
+  return createPortal(
+    <AnimatePresence>
+      {ctx.open ? (
+        renderPopoverPortal()
       ) : null}
     </AnimatePresence>,
     document.body,

@@ -240,82 +240,16 @@ export const normalizeGitHubWebhook = async (input: {
 }): Promise<NormalizedGitHubEvent | null> => {
   if (!SUPPORTED_EVENTS.has(input.eventName as SupportedGitHubEvent)) return null
   const event = input.eventName as SupportedGitHubEvent
-  const payload = record(input.payload)
-  const installation = record(payload?.installation)
-  const repository = record(payload?.repository)
-  const owner = record(repository?.owner)
-  const sender = record(payload?.sender)
-  const installationId = identifier(installation?.id)
-  const repositoryId = identifier(repository?.id)
-  const repositoryName = string(repository?.name)
-  const repositoryOwner = string(owner?.login)
-  const actorId = identifier(sender?.id)
-  const actorLogin = string(sender?.login)
-  const actorType = string(sender?.type)
-  const action =
-    string(payload?.action) ?? (event === "status" ? string(payload?.state) : null) ?? "unknown"
-  if (
-    !payload ||
-    !installationId ||
-    !repository ||
-    !repositoryId ||
-    !repositoryName ||
-    !repositoryOwner ||
-    !actorId ||
-    !actorLogin ||
-    !actorType
-  ) {
-    return null
-  }
+  const identity = webhookIdentity(record(input.payload), event)
+  if (!identity) return null
+  const { payload, repository, installationId, repositoryId, repositoryName, repositoryOwner, actorId, actorLogin, actorType, action } = identity
   const feedback = feedbackFrom(event, payload)
   const routePullRequests = event === "status" ? [] : pullRequestsFrom(payload)
   const pullRequest = routePullRequests[0] ?? null
   if (event === "issue_comment" && !pullRequest) return null
-  const actionableAction =
-    (event === "pull_request_review" && action === "submitted") ||
-    ((event === "pull_request_review_comment" || event === "issue_comment") &&
-      action === "created")
-  // Which authors' feedback the agent acts on. Humans are trusted on every
-  // surface. Bots are trusted on the review surface, while known review agents
-  // are also trusted for PR conversation comments because they may emit findings
-  // there as well as inline comments. Other issue-comment bots (Vercel deploy
-  // notices, CI chatter) stay out. And a
-  // review this very GitHub App posted (Jingler's own "submitReview") must never
-  // route back into the session it came from, so exclude our own app's posts.
-  const human = actorType.toLocaleLowerCase("en-US") === "user"
-  const normalizedActorLogin = actorLogin.toLocaleLowerCase("en-US")
-  const trustedReviewAgent = TRUSTED_REVIEW_AGENT_LOGINS.some(
-    (login) => login === normalizedActorLogin
-  )
-  const reviewSurface =
-    event === "pull_request_review" || event === "pull_request_review_comment"
-  const feedbackSource =
-    event === "pull_request_review"
-      ? record(payload.review)
-      : event === "pull_request_review_comment" || event === "issue_comment"
-        ? record(payload.comment)
-        : null
-  const performedViaAppId = identifier(
-    record(feedbackSource?.performed_via_github_app)?.id
-  )
-  const postedByOurApp =
-    input.ourAppId != null &&
-    input.ourAppId.length > 0 &&
-    performedViaAppId === input.ourAppId
-  const actionable =
-    actionableAction &&
-    feedback !== null &&
-    !postedByOurApp &&
-    (human || reviewSurface || trustedReviewAgent)
+  const actionable = isActionableFeedback()
   const occurrence =
-    (event === "status"
-      ? string(payload.updated_at) ?? string(payload.created_at)
-      : string(record(payload.review)?.submitted_at) ??
-        string(record(payload.comment)?.created_at) ??
-        string(record(payload.pull_request)?.updated_at) ??
-        string(record(payload.check_run)?.updated_at) ??
-        string(record(payload.check_suite)?.updated_at)) ??
-    new Date().toISOString()
+    eventOccurrence()
   const semanticSource = feedback
     ? `${event}:${feedback.id}:${feedback.state ?? ""}:${feedback.body}`
     : `${event}:${action}:${pullRequest?.id ?? repositoryId}:${occurrence}`
@@ -339,4 +273,86 @@ export const normalizeGitHubWebhook = async (input: {
     actionable,
     occurredAt: occurrence
   }
+
+  function eventOccurrence() {
+    return (event === "status"
+      ? string(payload.updated_at) ?? string(payload.created_at)
+      : string(record(payload.review)?.submitted_at) ??
+      string(record(payload.comment)?.created_at) ??
+      string(record(payload.pull_request)?.updated_at) ??
+      string(record(payload.check_run)?.updated_at) ??
+      string(record(payload.check_suite)?.updated_at)) ??
+      new Date().toISOString()
+  }
+
+  function isActionableFeedback() {
+    const actionableAction = (event === "pull_request_review" && action === "submitted") ||
+      ((event === "pull_request_review_comment" || event === "issue_comment") &&
+        action === "created")
+    // Which authors' feedback the agent acts on. Humans are trusted on every
+    // surface. Bots are trusted on the review surface, while known review agents
+    // are also trusted for PR conversation comments because they may emit findings
+    // there as well as inline comments. Other issue-comment bots (Vercel deploy
+    // notices, CI chatter) stay out. And a
+    // review this very GitHub App posted (Jingler's own "submitReview") must never
+    // route back into the session it came from, so exclude our own app's posts.
+    const human = actorType.toLocaleLowerCase("en-US") === "user"
+    const normalizedActorLogin = actorLogin.toLocaleLowerCase("en-US")
+    const trustedReviewAgent = TRUSTED_REVIEW_AGENT_LOGINS.some(
+      (login) => login === normalizedActorLogin
+    )
+    const reviewSurface = event === "pull_request_review" || event === "pull_request_review_comment"
+    const feedbackSource = event === "pull_request_review"
+      ? record(payload.review)
+      : event === "pull_request_review_comment" || event === "issue_comment"
+        ? record(payload.comment)
+        : null
+    const performedViaAppId = identifier(
+      record(feedbackSource?.performed_via_github_app)?.id
+    )
+    const postedByOurApp = input.ourAppId != null &&
+      input.ourAppId.length > 0 &&
+      performedViaAppId === input.ourAppId
+    const actionable = actionableAction &&
+      feedback !== null &&
+      !postedByOurApp &&
+      (human || reviewSurface || trustedReviewAgent)
+    return actionable
+  }
 }
+
+const webhookIdentity = (payload: Record<string, unknown> | null, event: SupportedGitHubEvent) => {
+  const installation = record(payload?.installation)
+  const repository = record(payload?.repository)
+  const owner = record(repository?.owner)
+  const sender = record(payload?.sender)
+  const installationId = identifier(installation?.id)
+  const repositoryId = identifier(repository?.id)
+  const repositoryName = string(repository?.name)
+  const repositoryOwner = string(owner?.login)
+  const { actorId, actorLogin, actorType } = webhookActor(sender)
+  const action = webhookAction(payload, event)
+  if (
+    !payload ||
+    !installationId ||
+    !repository ||
+    !repositoryId ||
+    !repositoryName ||
+    !repositoryOwner ||
+    !actorId ||
+    !actorLogin ||
+    !actorType
+  ) {
+    return null
+  }
+  return { payload, repository, installationId, repositoryId, repositoryName, repositoryOwner, actorId, actorLogin, actorType, action }
+}
+
+const webhookActor = (sender: Record<string, unknown> | null) => ({
+  actorId: identifier(sender?.id),
+  actorLogin: string(sender?.login),
+  actorType: string(sender?.type)
+})
+
+const webhookAction = (payload: Record<string, unknown> | null, event: SupportedGitHubEvent): string =>
+  string(payload?.action) ?? (event === "status" ? string(payload?.state) : null) ?? "unknown"

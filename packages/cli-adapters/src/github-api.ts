@@ -225,12 +225,46 @@ const messageFrom = (error: unknown): string => {
   return text(data.message) ?? text(record(error).message) ?? ""
 }
 
-const githubError = (
-  error: unknown,
-  repository?: string,
-  installationId?: string
-): GitHubApiError => {
-  if (error instanceof GitHubApiError) return error
+const githubFailureDetails = (
+  status: number | undefined,
+  upstreamMessage: string,
+  repository: string | undefined
+): Pick<GitHubApiError, "reason" | "message"> => {
+  if (status === 403 && /suspend/i.test(upstreamMessage)) {
+    return {
+      reason: "installation-suspended",
+      message: "This GitHub App installation is suspended. Resume it in GitHub and refresh."
+    }
+  }
+  if (status === 403) {
+    return {
+      reason: "repository-access",
+      message: repository
+        ? `${repository} is outside the GitHub App installation's repository access. Manage repositories, then refresh.`
+        : "The GitHub App installation does not grant access to this repository."
+    }
+  }
+  if (status === 422) {
+    return {
+      reason: "validation",
+      message: "GitHub rejected the submitted values. Refresh the pull request and correct the highlighted action."
+    }
+  }
+  if (status === 404) {
+    return {
+      reason: "not-found",
+      message: repository
+        ? `${repository} or the requested GitHub resource was not found. Refresh repository access.`
+        : "The requested GitHub resource was not found."
+    }
+  }
+  return {
+    reason: "unavailable",
+    message: "GitHub could not complete the request. Check the connection and retry."
+  }
+}
+
+const githubErrorContext = (error: unknown) => {
   const raw = record(error)
   const response = record(raw.response)
   const status = number(raw.status) ?? number(response.status) ?? undefined
@@ -243,13 +277,26 @@ const githubError = (
       /secondary rate limit|abuse detection|temporarily blocked/i.test(upstreamMessage))
   const retryAt = retryAtFrom(responseHeaders) ??
     (secondaryRateLimit ? new Date(Date.now() + 60_000).toISOString() : undefined)
+  return { status, remaining, secondaryRateLimit, retryAt, upstreamMessage }
+}
+
+const githubError = (
+  error: unknown,
+  repository?: string,
+  installationId?: string
+): GitHubApiError => {
+  if (error instanceof GitHubApiError) return error
+  const { status, remaining, secondaryRateLimit, retryAt, upstreamMessage } = githubErrorContext(error)
+  const identity = {
+    ...(repository ? { repository } : {}),
+    ...(installationId ? { installationId } : {})
+  }
   if (status === 401) {
     return new GitHubApiError({
       reason: "token-expired",
       message: "The short-lived GitHub grant expired. Refresh GitHub and retry.",
       status,
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
+      ...identity
     })
   }
   if (status === 429 || remaining === "0" || secondaryRateLimit) {
@@ -260,58 +307,22 @@ const githubError = (
         : "GitHub's rate limit was reached. Retry after it resets.",
       ...(status === undefined ? {} : { status }),
       ...(retryAt ? { retryAt } : {}),
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
-    })
-  }
-  if (status === 403 && /suspend/i.test(upstreamMessage)) {
-    return new GitHubApiError({
-      reason: "installation-suspended",
-      message: "This GitHub App installation is suspended. Resume it in GitHub and refresh.",
-      status,
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
-    })
-  }
-  if (status === 403) {
-    return new GitHubApiError({
-      reason: "repository-access",
-      message: repository
-        ? `${repository} is outside the GitHub App installation's repository access. Manage repositories, then refresh.`
-        : "The GitHub App installation does not grant access to this repository.",
-      status,
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
-    })
-  }
-  if (status === 422) {
-    return new GitHubApiError({
-      reason: "validation",
-      message: "GitHub rejected the submitted values. Refresh the pull request and correct the highlighted action.",
-      status,
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
-    })
-  }
-  if (status === 404) {
-    return new GitHubApiError({
-      reason: "not-found",
-      message: repository
-        ? `${repository} or the requested GitHub resource was not found. Refresh repository access.`
-        : "The requested GitHub resource was not found.",
-      status,
-      ...(repository ? { repository } : {}),
-      ...(installationId ? { installationId } : {})
+      ...identity
     })
   }
   return new GitHubApiError({
-    reason: "unavailable",
-    message: "GitHub could not complete the request. Check the connection and retry.",
+    ...githubFailureDetails(status, upstreamMessage, repository),
     ...(status === undefined ? {} : { status }),
-    ...(repository ? { repository } : {}),
-    ...(installationId ? { installationId } : {})
+    ...identity
   })
 }
+
+const isNotFound = (error: unknown): boolean =>
+  error instanceof GitHubApiError && error.reason === "not-found"
+
+const canReconstructDiff = (error: unknown): boolean =>
+  error instanceof GitHubApiError &&
+  (error.status === 406 || error.reason === "unavailable" || error.reason === "repository-access")
 
 const reviewEvent = (kind: ReviewSubmitKind): "COMMENT" | "APPROVE" | "REQUEST_CHANGES" =>
   kind === "approve" ? "APPROVE" : kind === "request-changes" ? "REQUEST_CHANGES" : "COMMENT"
@@ -533,7 +544,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       )
     ).data
 
-  const checksFor = async (cwd: string, sha: string): Promise<ReadonlyArray<PrCheck>> => {
+  const checkRunsFor = async (cwd: string, sha: string): Promise<ReadonlyArray<PrCheck>> => {
     const checks: Array<PrCheck> = []
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       const response = await repositoryCall<Record<string, unknown>>(
@@ -548,6 +559,11 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       if (pageRows.length < PAGE_SIZE) break
       if (page === MAX_PAGES) throw paginationLimitError("check runs")
     }
+    return checks
+  }
+
+  const statusesFor = async (cwd: string, sha: string): Promise<ReadonlyArray<PrCheck>> => {
+    const checks: Array<PrCheck> = []
     for (let page = 1; page <= MAX_PAGES; page += 1) {
       let response: GitHubApiResult<Record<string, unknown>>
       try {
@@ -559,7 +575,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
           ["statuses:read"]
         )
       } catch (error) {
-        if (error instanceof GitHubApiError && error.reason === "not-found") break
+        if (isNotFound(error)) break
         throw error
       }
       const pageRows = records(response.data.statuses)
@@ -567,7 +583,39 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
       if (pageRows.length < PAGE_SIZE) break
       if (page === MAX_PAGES) throw paginationLimitError("commit statuses")
     }
-    return dedupeChecks(checks)
+    return checks
+  }
+
+  const diffFromFiles = async (cwd: string, pullNumber: number): Promise<string> => {
+    const repository = await resolveRepository(cwd)
+    const grant = await grantForRepository(repository, ["pull_requests:read"])
+    const files: Array<Record<string, unknown>> = []
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const response = await call<unknown[]>(
+        grant,
+        "GET",
+        "/repos/{owner}/{repo}/pulls/{pull_number}/files",
+        {
+          owner: repository.owner,
+          repo: repository.name,
+          pull_number: pullNumber,
+          per_page: PAGE_SIZE,
+          page
+        },
+        repository.fullName
+      )
+      const pageRows = records(response.data)
+      files.push(...pageRows)
+      if (pageRows.length < PAGE_SIZE) break
+      if (page === MAX_PAGES) throw paginationLimitError("pull-request files")
+    }
+    return unifiedDiffFromApiFiles(files)
+  }
+
+  const checksFor = async (cwd: string, sha: string): Promise<ReadonlyArray<PrCheck>> => {
+    const checks = await checkRunsFor(cwd, sha)
+    const statuses = await statusesFor(cwd, sha)
+    return dedupeChecks([...checks, ...statuses])
   }
 
   const reviewThreads = async (
@@ -813,37 +861,8 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         // on `pull_requests:read` and carries each file's patch, so reconstruct
         // from it instead of failing — no `contents` grant required. If the repo
         // is genuinely out of reach, that call throws in turn.
-        if (
-          !(error instanceof GitHubApiError) ||
-          (error.status !== 406 &&
-            error.reason !== "unavailable" &&
-            error.reason !== "repository-access")
-        ) {
-          throw error
-        }
-        const repository = await resolveRepository(cwd)
-        const grant = await grantForRepository(repository, ["pull_requests:read"])
-        const files: Array<Record<string, unknown>> = []
-        for (let page = 1; page <= MAX_PAGES; page += 1) {
-          const response = await call<unknown[]>(
-            grant,
-            "GET",
-            "/repos/{owner}/{repo}/pulls/{pull_number}/files",
-            {
-              owner: repository.owner,
-              repo: repository.name,
-              pull_number: pullNumber,
-              per_page: PAGE_SIZE,
-              page
-            },
-            repository.fullName
-          )
-          const pageRows = records(response.data)
-          files.push(...pageRows)
-          if (pageRows.length < PAGE_SIZE) break
-          if (page === MAX_PAGES) throw paginationLimitError("pull-request files")
-        }
-        return unifiedDiffFromApiFiles(files)
+        if (!canReconstructDiff(error)) throw error
+        return await diffFromFiles(cwd, pullNumber)
       }
     },
     prCheckout: async (cwd, pullNumber) => {

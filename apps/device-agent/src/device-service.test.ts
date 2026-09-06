@@ -107,3 +107,30 @@ describe("device service installation", () => {
     ])
   })
 })
+
+describe("launchd domain fallback", () => {
+  it("tries the user domain after a GUI rejection and starts only the admitted domain", async () => {
+    const home = await mkdtemp(join(tmpdir(), "jingler-launchd-fallback-"))
+    const calls: ReadonlyArray<string>[] = []
+    const installed = await installDeviceService({
+      platform: "darwin", uid: 501, home,
+      nodePath: "/opt/jingler/node", agentPath: "/opt/jingler/agent.mjs"
+    }, {
+      run: async (_binary, args) => {
+        calls.push(args)
+        if (args[0] === "bootout") throw new Error("No existing job")
+        return args[1] === "gui/501"
+          ? { exitCode: 1, stderr: "GUI domain unavailable" }
+          : { exitCode: 0, stderr: "" }
+      }
+    })
+    expect(installed.manager).toBe("launchd")
+    expect(calls).toEqual([
+      ["bootout", "gui/501", installed.definitionPath],
+      ["bootstrap", "gui/501", installed.definitionPath],
+      ["bootout", "user/501", installed.definitionPath],
+      ["bootstrap", "user/501", installed.definitionPath],
+      ["kickstart", "-k", "user/501/app.jingler.device-agent"]
+    ])
+  })
+})

@@ -68,21 +68,54 @@ export const providerFromLegacy = (
   return null
 }
 
+type ExistingRuntime = Pick<typeof LegacyChatObject.Type, "connectionId" | "providerId" | "modelId">
+
+const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null)
+
+const resolvedFields = (
+  existing: ExistingRuntime,
+  resolved: ResolvedRuntimeIdentity | null,
+  providerId: string | null
+) => ({
+  ...(existing.connectionId === undefined && resolved
+    ? { connectionId: resolved.connectionId }
+    : {}),
+  ...(existing.providerId === undefined && (resolved?.providerId ?? providerId)
+    ? { providerId: resolved?.providerId ?? providerId }
+    : {}),
+  ...(existing.modelId === undefined && resolved ? { modelId: resolved.modelId } : {})
+})
+
+const preservedRuntimeFields = (existing: ExistingRuntime) => ({
+  ...(existing.connectionId === undefined ? {} : { connectionId: existing.connectionId }),
+  ...(existing.providerId === undefined ? {} : { providerId: existing.providerId }),
+  ...(existing.modelId === undefined ? {} : { modelId: existing.modelId })
+})
+
+const legacyHistory = (legacyModel: string | null, legacyResumeId: string | null) => ({
+  ...(legacyModel === null ? {} : { legacyModel }),
+  ...(legacyResumeId === null ? {} : { legacyResumeId })
+})
+
+const resolveLegacyCandidate = (
+  cli: unknown,
+  model: string | null,
+  resolve?: LegacyRuntimeResolver
+) => {
+  const providerId = providerFromLegacy(cli, model)
+  const resolved = resolve?.({ providerId, model, cli: stringOrNull(cli) }) ?? null
+  return { providerId, resolved }
+}
+
 const migrateChat = (
   chat: unknown,
   legacyCli: unknown,
   resolve?: LegacyRuntimeResolver
 ): unknown => {
   if (!Schema.is(LegacyChatObject)(chat)) return chat
-  const legacyModel = typeof chat.model === "string" ? chat.model : null
-  const legacyResumeId =
-    typeof chat.resumeId === "string" ? chat.resumeId : null
-  const providerId = providerFromLegacy(legacyCli, legacyModel)
-  const resolved = resolve?.({
-    providerId,
-    model: legacyModel,
-    cli: typeof legacyCli === "string" ? legacyCli : null
-  }) ?? null
+  const legacyModel = stringOrNull(chat.model)
+  const legacyResumeId = stringOrNull(chat.resumeId)
+  const { providerId, resolved } = resolveLegacyCandidate(legacyCli, legacyModel, resolve)
   const {
     resumeId: _resumeId,
     model: _model,
@@ -94,27 +127,16 @@ const migrateChat = (
 
   return {
     ...rest,
-    ...(existingConnection === undefined && resolved
-      ? { connectionId: resolved.connectionId }
-      : existingConnection === undefined
-        ? {}
-        : { connectionId: existingConnection }),
-    ...(existingProvider === undefined && (resolved?.providerId ?? providerId)
-      ? { providerId: resolved?.providerId ?? providerId }
-      : existingProvider === undefined
-        ? {}
-        : { providerId: existingProvider }),
-    ...(existingModel === undefined && resolved
-      ? { modelId: resolved.modelId }
-      : existingModel === undefined
-        ? {}
-        : { modelId: existingModel }),
+    ...preservedRuntimeFields({ connectionId: existingConnection,
+      providerId: existingProvider,
+      modelId: existingModel
+    }),
+    ...resolvedFields(chat, resolved, providerId),
     piSessionId: typeof chat.piSessionId === "string" ? chat.piSessionId : undefined,
     connectionSelectionRequired:
       existingConnection === undefined && resolved === null,
     modelSelectionRequired: existingModel === undefined && resolved === null,
-    ...(legacyModel === null ? {} : { legacyModel }),
-    ...(legacyResumeId === null ? {} : { legacyResumeId })
+    ...legacyHistory(legacyModel, legacyResumeId)
   }
 }
 
@@ -133,24 +155,9 @@ export const migrateLegacyRuntimeIdentity = (
       )
     : null
   const activeRecord = Schema.is(LegacyChatObject)(active) ? active : null
-  const legacyModel =
-    typeof activeRecord?.legacyModel === "string"
-      ? activeRecord.legacyModel
-      : typeof value.model === "string"
-        ? value.model
-        : null
-  const legacyResumeId =
-    typeof activeRecord?.legacyResumeId === "string"
-      ? activeRecord.legacyResumeId
-      : typeof value.resumeId === "string"
-        ? value.resumeId
-        : null
-  const providerId = providerFromLegacy(value.cli, legacyModel)
-  const resolved = resolve?.({
-    providerId,
-    model: legacyModel,
-    cli: typeof value.cli === "string" ? value.cli : null
-  }) ?? null
+  const legacyModel = stringOrNull(activeRecord?.legacyModel) ?? stringOrNull(value.model)
+  const legacyResumeId = stringOrNull(activeRecord?.legacyResumeId) ?? stringOrNull(value.resumeId)
+  const { providerId, resolved } = resolveLegacyCandidate(value.cli, legacyModel, resolve)
 
   const {
     cli: _cli,
@@ -162,23 +169,14 @@ export const migrateLegacyRuntimeIdentity = (
   return {
     ...session,
     ...(chats === undefined ? {} : { chats }),
-    ...(value.connectionId === undefined && resolved
-      ? { connectionId: resolved.connectionId }
-      : {}),
-    ...(value.providerId === undefined && (resolved?.providerId ?? providerId)
-      ? { providerId: resolved?.providerId ?? providerId }
-      : {}),
-    ...(value.modelId === undefined && resolved
-      ? { modelId: resolved.modelId }
-      : {}),
+    ...resolvedFields(value, resolved, providerId),
     piSessionId:
       typeof value.piSessionId === "string" ? value.piSessionId : undefined,
     connectionSelectionRequired:
       value.connectionId === undefined && resolved === null,
     modelSelectionRequired: value.modelId === undefined && resolved === null,
     ...(typeof value.cli === "string" ? { legacyCli: value.cli } : {}),
-    ...(legacyModel === null ? {} : { legacyModel }),
-    ...(legacyResumeId === null ? {} : { legacyResumeId }),
+    ...legacyHistory(legacyModel, legacyResumeId)
   }
 }
 

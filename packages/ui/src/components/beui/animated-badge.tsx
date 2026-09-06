@@ -134,6 +134,43 @@ export function AnimatedBadge({
   className,
   ...rest
 }: AnimatedBadgeProps) {
+function renderLoadingIcon() {
+             return (status === "loading" && !reduce && !icon ? (
+                <motion.span
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="inline-flex"
+                >
+                  <Icon className={ICON_CLASS[size]} />
+                </motion.span>
+              ) : (
+                (icon ?? <Icon className={ICON_CLASS[size]} />)
+              ))
+           }
+
+         function renderStatusIcon() {
+
+
+           return (showIcon ? (
+        <span className="relative z-10 inline-flex items-center justify-center overflow-hidden">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={status}
+              aria-hidden
+              data-badge-icon
+              variants={ICON_ROLL_VARIANTS}
+              initial={reduce ? false : "initial"}
+              animate={reduce ? { opacity: 1 } : "animate"}
+              exit={reduce ? undefined : "exit"}
+              className="inline-flex will-change-transform"
+            >
+              {renderLoadingIcon()}
+            </motion.span>
+          </AnimatePresence>
+        </span>
+      ) : null)
+         }
+
   const reduce = useReducedMotion();
   const Icon = ICONS[status];
   const resolvedContentKey =
@@ -163,34 +200,7 @@ export function AnimatedBadge({
           transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
         />
       ) : null}
-      {showIcon ? (
-        <span className="relative z-10 inline-flex items-center justify-center overflow-hidden">
-          <AnimatePresence mode="popLayout" initial={false}>
-            <motion.span
-              key={status}
-              aria-hidden
-              data-badge-icon
-              variants={ICON_ROLL_VARIANTS}
-              initial={reduce ? false : "initial"}
-              animate={reduce ? { opacity: 1 } : "animate"}
-              exit={reduce ? undefined : "exit"}
-              className="inline-flex will-change-transform"
-            >
-              {status === "loading" && !reduce && !icon ? (
-                <motion.span
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="inline-flex"
-                >
-                  <Icon className={ICON_CLASS[size]} />
-                </motion.span>
-              ) : (
-                (icon ?? <Icon className={ICON_CLASS[size]} />)
-              )}
-            </motion.span>
-          </AnimatePresence>
-        </span>
-      ) : null}
+      {renderStatusIcon()}
       {children != null ? (
         <span className="relative z-10 inline-flex overflow-hidden">
           <AnimatePresence mode="popLayout" initial={false}>

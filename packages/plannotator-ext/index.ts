@@ -646,7 +646,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				details: { approved: false },
 			};
 		}
-	
+
 		if (result.approved) {
 			if (resolveExecutionMode(plannotatorConfig) === "external") {
 				await handoffApprovedPlan(ctx, inputPath, planContent, result.feedback);
@@ -660,7 +660,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					terminate: true,
 				};
 			}
-	
+
 			phase = "executing";
 			framingDelivered = false;
 			await applyPhaseConfig(ctx, { restoreSavedState: true });
@@ -668,12 +668,12 @@ export default function plannotator(pi: ExtensionAPI): void {
 			persistState();
 			publishHostState();
 			justApprovedPlan = true;
-	
+
 			const doneMsg =
 				checklistItems.length > 0
 					? `After completing each step, include [DONE:n] in your response where n is the step number.`
 					: "";
-	
+
 			if (result.feedback) {
 				const { getPlanApprovedWithNotesPrompt } = await loadPlannotatorPrompts();
 				return {
@@ -691,7 +691,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 					terminate: true,
 				};
 			}
-	
+
 			const { getPlanApprovedPrompt } = await loadPlannotatorPrompts();
 			return {
 				content: [
@@ -707,7 +707,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				terminate: true,
 			};
 		}
-	
+
 		// Denied
 		persistState();
 		const feedbackText = result.feedback || "Plan rejected. Please revise.";
@@ -1057,6 +1057,19 @@ export default function plannotator(pi: ExtensionAPI): void {
 		}
 	});
 
+	function appendPlanningContext(content: string): string {
+		if (phase === "planning") {
+			const hook = readImprovementHook("enterplanmode-improve");
+			const pfmEnabled = loadConfig().pfmReminder === true;
+			const improveContext = composeImproveContext({
+				pfmEnabled,
+				improvementHookContent: hook?.content ?? null,
+			});
+			if (improveContext) content += "\n\n---\n\n" + improveContext;
+		}
+		return content;
+	}
+
 	// Deliver phase framing once per phase entry, plus per-turn todo status.
 	// Plannotator never returns or modifies systemPrompt: Pi's base prompt
 	// (AGENTS.md context, skills catalog, tools guidance, user append text) is
@@ -1164,15 +1177,7 @@ Emit [ACTIVE:n] when work starts, then [DONE:n], [BLOCKED:n], [SKIPPED:n], [FAIL
 		}
 
 		let content = rendered.text;
-		if (phase === "planning") {
-			const hook = readImprovementHook("enterplanmode-improve");
-			const pfmEnabled = loadConfig().pfmReminder === true;
-			const improveContext = composeImproveContext({
-				pfmEnabled,
-				improvementHookContent: hook?.content ?? null,
-			});
-			if (improveContext) content += "\n\n---\n\n" + improveContext;
-		}
+		content = appendPlanningContext(content);
 		// Instructions render an entry-time todo snapshot when they reference
 		// ${todoList}; otherwise append the snapshot so the first executing
 		// prompt still carries the checklist.
@@ -1294,45 +1299,26 @@ Emit [ACTIVE:n] when work starts, then [DONE:n], [BLOCKED:n], [SKIPPED:n], [FAIL
 		}
 	});
 
-	// Restore state on session start/resume
-	/**
-	 * Re-derive phase, framing latch, and checklist state from the ACTIVE
-	 * session path (root to current leaf). Shared by session_start (resume) and
-	 * session_tree (branch navigation): a branch switch can land on a path
-	 * whose plannotator state differs from memory, or where the delivered
-	 * framing message is absent because it lives on another branch.
-	 */
-	async function resyncPhaseFromSession(
-		ctx: ExtensionContext,
-		options: { phaseWhenUnrecorded: Phase; warnOnPlanning: boolean },
-	): Promise<void> {
-		const entries = ctx.sessionManager.getBranch();
-		const stateEntry = entries
-			.filter(
-				(e: { type: string; customType?: string }) =>
-					e.type === "custom" && e.customType === "plannotator",
-			)
-			.pop() as { data?: PersistedPlannotatorState } | undefined;
-
-		if (stateEntry?.data) {
-			phase = stateEntry.data.phase ?? options.phaseWhenUnrecorded;
-			lastSubmittedPath = stateEntry.data.lastSubmittedPath ?? lastSubmittedPath;
-			savedState = stateEntry.data.savedState ?? savedState;
-			phaseAddedTools = stateEntry.data.phaseAddedTools ?? phaseAddedTools;
+	function restoreRecordedPhase(data: PersistedPlannotatorState | undefined, phaseWhenUnrecorded: Phase): void {
+		if (data) {
+			phase = data.phase ?? phaseWhenUnrecorded;
+			lastSubmittedPath = data.lastSubmittedPath ?? lastSubmittedPath;
+			savedState = data.savedState ?? savedState;
+			phaseAddedTools = data.phaseAddedTools ?? phaseAddedTools;
 			// The framing message persists in the restored conversation history,
 			// so a resumed phase must not deliver it again. A path recorded
 			// before delivery restores the latch open and re-delivers.
-			framingDelivered = stateEntry.data.framingDelivered ?? false;
+			framingDelivered = data.framingDelivered ?? false;
 			// Same contract for the plan-mode-off notice: a path that recorded
 			// the transition but not yet the delivery still owes it; a path
 			// that recorded the delivery must not repeat it.
-			idleNoticePending = stateEntry.data.idleNoticePending ?? false;
-			reviewPending = stateEntry.data.reviewPending ?? false;
+			idleNoticePending = data.idleNoticePending ?? false;
+			reviewPending = data.reviewPending ?? false;
 		} else {
 			// No plannotator activity on this path. Memory savedState and
 			// phaseAddedTools are kept so the idle branch below can hand back
 			// tools and settings a now-abandoned branch's phase had taken.
-			phase = options.phaseWhenUnrecorded;
+			phase = phaseWhenUnrecorded;
 			framingDelivered = false;
 			// A path with no plannotator state never had plan mode, so no
 			// countermand is owed — and injecting one here would break the
@@ -1340,11 +1326,12 @@ Emit [ACTIVE:n] when work starts, then [DONE:n], [BLOCKED:n], [SKIPPED:n], [FAIL
 			idleNoticePending = false;
 			reviewPending = false;
 		}
+	}
 
-		if (phase === "planning" && !savedState) {
-			captureSavedState(ctx);
-		}
-
+	async function rebuildExecutionState(
+		ctx: ExtensionContext,
+		entries: ReturnType<ExtensionContext["sessionManager"]["getBranch"]>,
+	): Promise<void> {
 		// Rebuild execution state from disk + session messages
 		if (phase === "executing") {
 			if (lastSubmittedPath) {
@@ -1391,6 +1378,35 @@ Emit [ACTIVE:n] when work starts, then [DONE:n], [BLOCKED:n], [SKIPPED:n], [FAIL
 				idleNoticePending = true;
 			}
 		}
+	}
+
+	// Restore state on session start/resume
+	/**
+	 * Re-derive phase, framing latch, and checklist state from the ACTIVE
+	 * session path (root to current leaf). Shared by session_start (resume) and
+	 * session_tree (branch navigation): a branch switch can land on a path
+	 * whose plannotator state differs from memory, or where the delivered
+	 * framing message is absent because it lives on another branch.
+	 */
+	async function resyncPhaseFromSession(
+		ctx: ExtensionContext,
+		options: { phaseWhenUnrecorded: Phase; warnOnPlanning: boolean },
+	): Promise<void> {
+		const entries = ctx.sessionManager.getBranch();
+		const stateEntry = entries
+			.filter(
+				(e: { type: string; customType?: string }) =>
+					e.type === "custom" && e.customType === "plannotator",
+			)
+			.pop() as { data?: PersistedPlannotatorState } | undefined;
+
+		restoreRecordedPhase(stateEntry?.data, options.phaseWhenUnrecorded);
+
+		if (phase === "planning" && !savedState) {
+			captureSavedState(ctx);
+		}
+
+		await rebuildExecutionState(ctx, entries);
 
 		if (phase === "planning") {
 			checklistItems = [];

@@ -104,39 +104,201 @@ export function SessionRow({
   onDelete?: (id: string) => void | Promise<void>
   className?: string
 }) {
-  // One rollup, three jobs: what the row says, what colour it says it in, and
-  // whether it dims. The label is one of five words — never the tool or target.
-  const display = displayStatusOf(activity, session.status)
-  const status = displayStatusTone[display]
-  const label = displayStatusLabel[display]
-  const linkedIssue = issueReferenceOf(session)
-  // The detail the label no longer shows ("Running npm test -- auth") survives on
-  // hover. It's genuinely useful when you want it, and it was the reason the
-  // label used to be unbounded — a title attribute gives it a home that can't
-  // push the branch name out of the row.
-  const detail = activity ? activityLabel(activity) : label
-  const [draft, setDraft] = useState<string | null>(null)
-  const [pendingAction, setPendingAction] = useState<"archive" | null>(null)
-  const [now, setNow] = useState(() => Date.now())
-  const activeStartedAt =
-    activity?.startedAt ?? (idleStatus(display) ? null : Date.parse(session.updatedAt))
-  useEffect(() => {
-    if (activeStartedAt === null || Number.isNaN(activeStartedAt)) return
-    const tick = window.setInterval(() => setNow(Date.now()), 30_000)
-    return () => window.clearInterval(tick)
-  }, [activeStartedAt])
+         function renderActiveRow() {
+           return (<motion.div
+      layoutId={session.archived ? undefined : `session-${session.id}`}
+      layout
+      transition={SPRING}
+    >
+      <div
+        data-testid={`session-row-${session.id}`}
+        {...dragProps}
+        onClick={() => pendingAction === null && onSelect?.(session.id)}
+        aria-busy={pendingAction !== null}
+        className={cn(
+          "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
+          active ? "border-blue/[0.32] bg-surface" : "border-transparent hover:bg-surface/40",
+          idle && !active && "opacity-55",
+          pendingAction !== null && "cursor-wait opacity-60",
+          className
+        )}
+      >
+        {hoverActions}
+        <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+          <RepoMark repo={session.repo} owner={repoOwner} />
+          <span className="min-w-0 flex-1 truncate font-medium">{session.repo}</span>
+          <span
+            title={detail}
+            className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
+          >
+            {display === "thinking" || display === "running" ? (
+              <ThinkingOrb compact label={label} />
+            ) : null}
+            {label}
+            {age ? ` ${age}` : ""}
+          </span>
+        </div>
+        {renderEditableSessionTitle()}
+        {renderActiveMetadata()}
+      </div>
+    </motion.div>)
+         }
 
-  const runArchive = () => {
-    if (onArchive === undefined || pendingAction !== null) return
-    setPendingAction("archive")
-    void Promise.resolve(onArchive(session.id))
-      .catch(() => {})
-      .finally(() => setPendingAction(null))
+  function renderEditableSessionTitle() {
+    return (<div className="flex items-center gap-2">
+          {draft !== null ? (
+            <input
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commit()
+                else if (e.key === "Escape") setDraft(null)
+              }}
+              onBlur={commit}
+              className="flex-1 rounded border border-blue/50 bg-editor px-1 py-px text-[13px] text-text-bright outline-none"
+            />
+          ) : (
+            <span
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                if (onRename) setDraft(session.title)
+              }}
+              title={onRename ? "Double-click to rename" : undefined}
+              className={cn(
+                "flex-1 truncate text-[13px]",
+                active ? "font-semibold text-text-bright" : "font-medium text-text"
+              )}
+            >
+              {session.title}
+            </span>
+          )}
+        </div>)
   }
 
-  // Quick actions — archive/restore + delete — surfaced on hover and via a
-  // right-click context menu. The action set depends on whether it's archived.
-  const actions: ContextMenuItem[] = pendingAction !== null ? [] : [
+  function renderActiveMetadata() {
+    function renderBranchLabel() {
+      return (<span
+            className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}
+            title={session.semanticBranchPending === true ? "Task branch will be named after task understanding" : undefined}
+          >
+            {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
+          </span>)
+    }
+
+    return (<div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+          {renderBranchLabel()}
+          {linkedIssue && (
+            <span
+              className="flex-none text-green"
+              aria-label={`Linked issue ${linkedIssue.identifier}`}
+              title={`${linkedIssue.identifier}: ${linkedIssue.title}`}
+            >
+              {linkedIssue.identifier}
+            </span>
+          )}
+          {session.prNumber !== null && (
+            <span
+              className="flex flex-none items-center gap-1"
+              title={`Pull request #${session.prNumber}`}
+            >
+              <PrStatusGlyph pr={prState} />
+              <span>#{session.prNumber}</span>
+            </span>
+          )}
+          <div className="flex-1" />
+          {environment && (
+            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] truncate text-dim" title={`${environment.name} · ${environment.state}`}>
+              {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
+            </span>
+          )}
+          {(session.diff.added > 0 || session.diff.removed > 0) && (
+            <DiffStat added={session.diff.added} removed={session.diff.removed} />
+          )}
+          <span
+            data-testid={`session-location-${session.id}`}
+            title={getTitle()}
+            className="flex size-4 flex-none items-center justify-center text-dim"
+          >
+            {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}
+          </span>
+          <span
+            title={providerLabel(session.providerId)}
+            className="flex size-4 flex-none items-center justify-center"
+          >
+            <ProviderIcon providerId={session.providerId ?? undefined} size={12} />
+          </span>
+        </div>)
+  }
+
+  function renderArchivedTitle(closed: boolean) {
+    return (<div className="flex items-center gap-2">
+          <GitMerge size={13} className={cn("flex-none", closed ? "text-red" : "text-purple")} />
+          <span
+            className={cn(
+              "flex-1 truncate text-[13px]",
+              active ? "font-medium text-text" : "text-muted-foreground"
+            )}
+          >
+            {session.title}
+          </span>
+        </div>)
+  }
+
+  function renderArchivedMetadata(closed: boolean) {
+  function renderSessionMetadata() {
+    return (<div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+          <Badge tone={closed ? "red" : "purple"} size="sm">
+            {closed ? "Closed" : "Merged"}
+            {session.prNumber !== null ? ` #${session.prNumber}` : ""}
+          </Badge>
+          <div className="flex-1" />
+          {session.archivedAt && <span>{relativeTime(session.archivedAt)}</span>}
+        </div>)
+  }
+
+    return (renderSessionMetadata())
+  }
+
+         function renderRowActions() {
+           return (<div
+      className="absolute right-1.5 top-1.5 z-10 hidden items-center gap-0.5 rounded-md bg-panel/90 group-hover:flex"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {/* Names include the title so icon-only buttons are unambiguous for screen
+          readers and never collide with the archived-session banner's controls. */}
+      {pendingAction !== null ? (
+        <ThinkingOrb compact label="Archiving session…" className="p-0.5" />
+      ) : session.archived
+        ? onRestore && (
+            <RowAction
+              icon={ArchiveRestore}
+              label={`Restore ${session.title}`}
+              onClick={() => onRestore(session.id)}
+            />
+          )
+        : onArchive && (
+            <RowAction
+              icon={Archive}
+              label={`Archive ${session.title}`}
+              onClick={runArchive}
+            />
+          )}
+      {onDelete && pendingAction === null && (
+        <RowAction
+          icon={Trash2}
+          label={`Delete ${session.title}`}
+          danger
+          onClick={() => onDelete(session.id)}
+        />
+      )}
+    </div>)
+         }
+
+         function getSessionActions() {
+           if (pendingAction !== null) return ([])
+return ([
     ...(!session.archived && !persistentOf(session) && onSetPersistent
       ? [
           {
@@ -176,41 +338,52 @@ export function SessionRow({
           }
         ]
       : [])
-  ]
+  ])
+         }
+
+         function getTitle() {
+           if (environment) return (`Environment: ${environment.name} · ${environment.state}`)
+           if (session.environmentId) return (`Environment: ${session.environmentId}`)
+           if (executionLocation === "cloud") return ("Cloud session")
+           return ("Local session")
+         }
+
+  // One rollup, three jobs: what the row says, what colour it says it in, and
+  // whether it dims. The label is one of five words — never the tool or target.
+  const display = displayStatusOf(activity, session.status)
+  const status = displayStatusTone[display]
+  const label = displayStatusLabel[display]
+  const linkedIssue = issueReferenceOf(session)
+  // The detail the label no longer shows ("Running npm test -- auth") survives on
+  // hover. It's genuinely useful when you want it, and it was the reason the
+  // label used to be unbounded — a title attribute gives it a home that can't
+  // push the branch name out of the row.
+  const detail = activity ? activityLabel(activity) : label
+  const [draft, setDraft] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<"archive" | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const activeStartedAt =
+    activity?.startedAt ?? (idleStatus(display) ? null : Date.parse(session.updatedAt))
+  useEffect(() => {
+    if (activeStartedAt === null || Number.isNaN(activeStartedAt)) return
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000)
+    return () => window.clearInterval(tick)
+  }, [activeStartedAt])
+
+  const runArchive = () => {
+    if (onArchive === undefined || pendingAction !== null) return
+    setPendingAction("archive")
+    void Promise.resolve(onArchive(session.id))
+      .catch(() => {})
+      .finally(() => setPendingAction(null))
+  }
+
+  // Quick actions — archive/restore + delete — surfaced on hover and via a
+  // right-click context menu. The action set depends on whether it's archived.
+  const actions: ContextMenuItem[] = getSessionActions()
 
   const hoverActions = (actions.length > 0 || pendingAction !== null) && (
-    <div
-      className="absolute right-1.5 top-1.5 z-10 hidden items-center gap-0.5 rounded-md bg-panel/90 group-hover:flex"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Names include the title so icon-only buttons are unambiguous for screen
-          readers and never collide with the archived-session banner's controls. */}
-      {pendingAction !== null ? (
-        <ThinkingOrb compact label="Archiving session…" className="p-0.5" />
-      ) : session.archived
-        ? onRestore && (
-            <RowAction
-              icon={ArchiveRestore}
-              label={`Restore ${session.title}`}
-              onClick={() => onRestore(session.id)}
-            />
-          )
-        : onArchive && (
-            <RowAction
-              icon={Archive}
-              label={`Archive ${session.title}`}
-              onClick={runArchive}
-            />
-          )}
-      {onDelete && pendingAction === null && (
-        <RowAction
-          icon={Trash2}
-          label={`Delete ${session.title}`}
-          danger
-          onClick={() => onDelete(session.id)}
-        />
-      )}
-    </div>
+    renderRowActions()
   )
 
   // Wrap the row in a right-click menu only when there's at least one action.
@@ -259,25 +432,8 @@ export function SessionRow({
         )}
       >
         {hoverActions}
-        <div className="flex items-center gap-2">
-          <GitMerge size={13} className={cn("flex-none", closed ? "text-red" : "text-purple")} />
-          <span
-            className={cn(
-              "flex-1 truncate text-[13px]",
-              active ? "font-medium text-text" : "text-muted-foreground"
-            )}
-          >
-            {session.title}
-          </span>
-        </div>
-        <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
-          <Badge tone={closed ? "red" : "purple"} size="sm">
-            {closed ? "Closed" : "Merged"}
-            {session.prNumber !== null ? ` #${session.prNumber}` : ""}
-          </Badge>
-          <div className="flex-1" />
-          {session.archivedAt && <span>{relativeTime(session.archivedAt)}</span>}
-        </div>
+        {renderArchivedTitle(closed)}
+        {renderArchivedMetadata(closed)}
       </div>
     )
   }
@@ -309,119 +465,7 @@ export function SessionRow({
     // if a stale persisted workspace ever named an archived session, both
     // elements would mount with the same id for a frame, which is undefined in
     // motion and can snap either one to the other's box.
-    <motion.div
-      layoutId={session.archived ? undefined : `session-${session.id}`}
-      layout
-      transition={SPRING}
-    >
-      <div
-        data-testid={`session-row-${session.id}`}
-        {...dragProps}
-        onClick={() => pendingAction === null && onSelect?.(session.id)}
-        aria-busy={pendingAction !== null}
-        className={cn(
-          "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
-          active ? "border-blue/[0.32] bg-surface" : "border-transparent hover:bg-surface/40",
-          idle && !active && "opacity-55",
-          pendingAction !== null && "cursor-wait opacity-60",
-          className
-        )}
-      >
-        {hoverActions}
-        <div className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
-          <RepoMark repo={session.repo} owner={repoOwner} />
-          <span className="min-w-0 flex-1 truncate font-medium">{session.repo}</span>
-          <span
-            title={detail}
-            className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
-          >
-            {display === "thinking" || display === "running" ? (
-              <ThinkingOrb compact label={label} />
-            ) : null}
-            {label}
-            {age ? ` ${age}` : ""}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {draft !== null ? (
-            <input
-              value={draft}
-              autoFocus
-              onChange={(e) => setDraft(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commit()
-                else if (e.key === "Escape") setDraft(null)
-              }}
-              onBlur={commit}
-              className="flex-1 rounded border border-blue/50 bg-editor px-1 py-px text-[13px] text-text-bright outline-none"
-            />
-          ) : (
-            <span
-              onDoubleClick={(e) => {
-                e.stopPropagation()
-                if (onRename) setDraft(session.title)
-              }}
-              title={onRename ? "Double-click to rename" : undefined}
-              className={cn(
-                "flex-1 truncate text-[13px]",
-                active ? "font-semibold text-text-bright" : "font-medium text-text"
-              )}
-            >
-              {session.title}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
-          <span
-            className={cn("min-w-0 truncate", active ? "text-blue" : "text-muted-foreground")}
-            title={session.semanticBranchPending === true ? "Task branch will be named after task understanding" : undefined}
-          >
-            {session.semanticBranchPending === true ? "Naming branch…" : session.branch}
-          </span>
-          {linkedIssue && (
-            <span
-              className="flex-none text-green"
-              aria-label={`Linked issue ${linkedIssue.identifier}`}
-              title={`${linkedIssue.identifier}: ${linkedIssue.title}`}
-            >
-              {linkedIssue.identifier}
-            </span>
-          )}
-          {session.prNumber !== null && (
-            <span
-              className="flex flex-none items-center gap-1"
-              title={`Pull request #${session.prNumber}`}
-            >
-              <PrStatusGlyph pr={prState} />
-              <span>#{session.prNumber}</span>
-            </span>
-          )}
-          <div className="flex-1" />
-          {environment && (
-            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] truncate text-dim" title={`${environment.name} · ${environment.state}`}>
-              {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
-            </span>
-          )}
-          {(session.diff.added > 0 || session.diff.removed > 0) && (
-            <DiffStat added={session.diff.added} removed={session.diff.removed} />
-          )}
-          <span
-            data-testid={`session-location-${session.id}`}
-            title={environment ? `Environment: ${environment.name} · ${environment.state}` : session.environmentId ? `Environment: ${session.environmentId}` : executionLocation === "cloud" ? "Cloud session" : "Local session"}
-            className="flex size-4 flex-none items-center justify-center text-dim"
-          >
-            {executionLocation === "cloud" ? <Cloud size={12} /> : <Monitor size={12} />}
-          </span>
-          <span
-            title={providerLabel(session.providerId)}
-            className="flex size-4 flex-none items-center justify-center"
-          >
-            <ProviderIcon providerId={session.providerId ?? undefined} size={12} />
-          </span>
-        </div>
-      </div>
-    </motion.div>
+    renderActiveRow()
   )
 }
 

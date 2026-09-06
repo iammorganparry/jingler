@@ -106,11 +106,15 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
     if (subject === null) return json({ error: "subject is required" }, 400)
     await this.ctx.storage.put(USER_KEY, subject)
     const ledger = await this.#ledger(subject)
-
-    if (url.pathname === "/v1/offload/authorize" && request.method === "POST") {
-      const now = Math.floor(Date.now() / 1_000)
+    const connectedLedger = async (now: number) => {
       const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
-      const current = connected ? await this.#ledger(subject) : ledger
+      return { connected, current: connected ? await this.#ledger(subject) : ledger }
+    }
+    const handleV1OffloadAuthorize = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/offload/authorize" && request.method === "POST")) return null
+
+      const now = Math.floor(Date.now() / 1_000)
+      const { connected, current } = await connectedLedger(now)
       const auth = current.authorize("managed.session.execute", now)
       const githubCapabilityHandle = current.credentialHandle("github", now)
       return connected && auth.admitted && githubCapabilityHandle !== null
@@ -118,44 +122,48 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
         : json({ error: "Managed offload is not authorized" }, 403)
     }
 
-    if (url.pathname === "/v1/offload/register" && request.method === "POST") {
+    const handleV1OffloadRegister = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/offload/register" && request.method === "POST")) return null
+
       const jobId = typeof body?.jobId === "string" ? body.jobId : null
-      const idempotencyKey = typeof body?.idempotencyKey === "string"
-        ? body.idempotencyKey
-        : null
+      const idempotencyKey = typeof body?.idempotencyKey === "string" ? body.idempotencyKey : null
       if (jobId === null || idempotencyKey === null) {
         return json({ error: "job scope is required" }, 400)
       }
       const now = Math.floor(Date.now() / 1_000)
-      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
-      const current = connected ? await this.#ledger(subject) : ledger
+      const { connected, current } = await connectedLedger(now)
       const auth = current.authorize("managed.session.execute", now)
       const githubCapabilityHandle = current.credentialHandle("github", now)
       if (!(connected && auth.admitted && githubCapabilityHandle !== null)) {
         return json({ error: "Managed offload is not authorized" }, 403)
       }
-      const active = (
-        (await this.ctx.storage.get<ReadonlyArray<ActiveOffloadJob>>(OFFLOAD_JOBS_KEY)) ?? []
-      ).filter((candidate) => candidate.expiresAt > now)
-      const existing = active.find((candidate) => candidate.idempotencyKey === idempotencyKey)
-      if (existing !== undefined && existing.jobId !== jobId) {
-        return json({ error: "Offload idempotency scope changed" }, 409)
+      const claimOffloadSlot = async (): Promise<Response> => {
+        const active = (
+          (await this.ctx.storage.get<ReadonlyArray<ActiveOffloadJob>>(OFFLOAD_JOBS_KEY)) ?? []
+        ).filter((candidate) => candidate.expiresAt > now)
+        const existing = active.find((candidate) => candidate.idempotencyKey === idempotencyKey)
+        if (existing !== undefined && existing.jobId !== jobId) {
+          return json({ error: "Offload idempotency scope changed" }, 409)
+        }
+        if (existing === undefined && active.length >= 1) {
+          return json({ error: "Offload concurrency exceeded" }, 429)
+        }
+        if (existing === undefined) {
+          active.push({ jobId, idempotencyKey, expiresAt: now + OFFLOAD_SLOT_SECONDS })
+          await this.ctx.storage.put(OFFLOAD_JOBS_KEY, active)
+        }
+        return json({
+          authStateVersion: auth.authStateVersion,
+          githubCapabilityHandle,
+          claimed: existing === undefined
+        })
       }
-      if (existing === undefined && active.length >= 1) {
-        return json({ error: "Offload concurrency exceeded" }, 429)
-      }
-      if (existing === undefined) {
-        active.push({ jobId, idempotencyKey, expiresAt: now + OFFLOAD_SLOT_SECONDS })
-        await this.ctx.storage.put(OFFLOAD_JOBS_KEY, active)
-      }
-      return json({
-        authStateVersion: auth.authStateVersion,
-        githubCapabilityHandle,
-        claimed: existing === undefined
-      })
+      return await claimOffloadSlot()
     }
 
-    if (url.pathname === "/v1/offload/unregister" && request.method === "POST") {
+    const handleV1OffloadUnregister = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/offload/unregister" && request.method === "POST")) return null
+
       const jobId = typeof body?.jobId === "string" ? body.jobId : null
       if (jobId === null) return json({ error: "jobId is required" }, 400)
       const active =
@@ -167,7 +175,9 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       return json({ ok: true })
     }
 
-    if (url.pathname === "/v1/offload/grants/consume" && request.method === "POST") {
+    const handleV1OffloadGrantsConsume = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/offload/grants/consume" && request.method === "POST")) return null
+
       const use = typeof body?.use === "string" ? body.use : null
       if (use === null) return json({ error: "grant use is required" }, 400)
       const uses = new Set(
@@ -179,14 +189,15 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       return json({ consumed: true })
     }
 
-    if (url.pathname === "/v1/sessions/register" && request.method === "POST") {
+    const handleV1SessionsRegister = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/sessions/register" && request.method === "POST")) return null
+
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
       const claimSlot = typeof body?.claimSlot === "boolean" ? body.claimSlot : null
       if (sessionId === null) return json({ error: "sessionId is required" }, 400)
       if (claimSlot === null) return json({ error: "claimSlot is required" }, 400)
       const now = Math.floor(Date.now() / 1_000)
-      const connected = !ledger.needsSubscription(now) || (await this.#subscribe(subject))
-      const current = connected ? await this.#ledger(subject) : ledger
+      const { connected, current } = await connectedLedger(now)
       const auth = current.authorize("managed.session.execute", now)
       const providerConnections = current.providerConnections(now)
       const webSearchCapabilities = current.webSearchCapabilities(now)
@@ -200,24 +211,29 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
           githubCapabilityHandle
         })
       }
-      if (claimSlot) {
-        try {
-          current.registerSession(sessionId, now)
-        } catch {
-          return json({ error: "Managed session concurrency exceeded" }, 429)
+      const registerSessionSlot = async (): Promise<Response> => {
+        if (claimSlot) {
+          try {
+            current.registerSession(sessionId, now)
+          } catch {
+            return json({ error: "Managed session concurrency exceeded" }, 429)
+          }
+          await this.#persist(current)
         }
-        await this.#persist(current)
+        return json({
+          connected,
+          auth,
+          providerConnections,
+          webSearchCapabilities,
+          githubCapabilityHandle
+        })
       }
-      return json({
-        connected,
-        auth,
-        providerConnections,
-        webSearchCapabilities,
-        githubCapabilityHandle
-      })
+      return await registerSessionSlot()
     }
 
-    if (url.pathname === "/v1/sessions/unregister" && request.method === "POST") {
+    const handleV1SessionsUnregister = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/sessions/unregister" && request.method === "POST")) return null
+
       const sessionId = typeof body?.sessionId === "string" ? body.sessionId : null
       if (sessionId === null) return json({ error: "sessionId is required" }, 400)
       ledger.unregisterSession(sessionId)
@@ -225,13 +241,17 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       return json({ ok: true })
     }
 
-    if (url.pathname === "/v1/authorize" && request.method === "POST") {
+    const handleV1Authorize = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/authorize" && request.method === "POST")) return null
+
       const capability = typeof body?.capability === "string" ? body.capability : null
       if (capability === null) return json({ error: "capability is required" }, 400)
       return json(ledger.authorize(capability, Math.floor(Date.now() / 1_000)))
     }
 
-    if (url.pathname === "/v1/capabilities" && request.method === "POST") {
+    const handleV1Capabilities = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/capabilities" && request.method === "POST")) return null
+
       const now = Math.floor(Date.now() / 1_000)
       const initial = ledger.authorize("managed.session.execute", now)
       const current =
@@ -244,11 +264,15 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       })
     }
 
-    if (url.pathname === "/v1/sessions/list" && request.method === "POST") {
+    const handleV1SessionsList = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/sessions/list" && request.method === "POST")) return null
+
       return json({ sessionIds: ledger.snapshot().activeSessionIds })
     }
 
-    if (url.pathname === "/v1/auth-state" && request.method === "POST") {
+    const handleV1AuthState = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/auth-state" && request.method === "POST")) return null
+
       const snapshot = decodeManagedAuthSnapshot(body?.snapshot)
       const leaseExpiresAt = body?.leaseExpiresAt
       if (
@@ -264,6 +288,22 @@ export class ManagedAccountObject extends DurableObject<ManagedRuntimeEnv> {
       await this.#persist(ledger)
       await this.#fanOut(ledger.snapshot())
       return json({ ok: true, version: snapshot.version })
+    }
+
+    for (const handle of [
+      handleV1OffloadAuthorize,
+      handleV1OffloadRegister,
+      handleV1OffloadUnregister,
+      handleV1OffloadGrantsConsume,
+      handleV1SessionsRegister,
+      handleV1SessionsUnregister,
+      handleV1Authorize,
+      handleV1Capabilities,
+      handleV1SessionsList,
+      handleV1AuthState
+    ]) {
+      const response = await handle()
+      if (response !== null) return response
     }
 
     return json({ error: "Not found" }, 404)

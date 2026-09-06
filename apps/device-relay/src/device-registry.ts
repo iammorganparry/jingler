@@ -680,27 +680,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       return { status: "rate-limited" }
     }
     if (!matches) {
-      this.ctx.storage.sql.exec(
-        `UPDATE pending_devices SET failed_attempts = failed_attempts + 1
-         WHERE pending_device_id = ? AND claimed_subject IS NULL`,
-        pendingDeviceId
-      )
-      this.audit("pairing-rejected", row.device_id, nowSeconds, {
-        reason: "invalid-code"
-      })
-      this.pairingTelemetry(
-        row.failed_attempts + 1 >= MAX_PAIRING_ATTEMPTS
-          ? "rate-limited"
-          : "invalid-code",
-        row.device_id,
-        row.failed_attempts + 1
-      )
-      return {
-        status:
-          row.failed_attempts + 1 >= MAX_PAIRING_ATTEMPTS
-            ? "rate-limited"
-            : "invalid-code"
-      }
+      return this.rejectPairingCode(row, pendingDeviceId, nowSeconds)
     }
 
     const claimedRows = this.ctx.storage.sql
@@ -732,6 +712,29 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     )
     await this.scheduleAlarm()
     return { status: "claimed", device: this.claimed(claimedRow) }
+  }
+
+  private rejectPairingCode(row: PendingDeviceRow, pendingDeviceId: string, nowSeconds: number): PairingClaimResult {
+    this.ctx.storage.sql.exec(
+      `UPDATE pending_devices SET failed_attempts = failed_attempts + 1
+       WHERE pending_device_id = ? AND claimed_subject IS NULL`,
+      pendingDeviceId
+    )
+    this.audit("pairing-rejected", row.device_id, nowSeconds, {
+      reason: "invalid-code"
+    })
+    this.pairingTelemetry(
+      row.failed_attempts + 1 >= MAX_PAIRING_ATTEMPTS
+        ? "rate-limited"
+        : "invalid-code",
+      row.device_id,
+      row.failed_attempts + 1
+    )
+    return {
+      status: row.failed_attempts + 1 >= MAX_PAIRING_ATTEMPTS
+        ? "rate-limited"
+        : "invalid-code"
+    }
   }
 
   async adoptClaim(

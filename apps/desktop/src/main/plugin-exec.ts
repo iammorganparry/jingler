@@ -20,6 +20,9 @@
 import { spawn } from "node:child_process"
 import type { ExecReply, ExecRequest } from "@jingler/cli-adapters"
 
+const truncateChunk = (chunk: Buffer, room: number): Buffer =>
+  chunk.byteLength > room ? chunk.subarray(0, room) : chunk
+
 /**
  * Hard ceiling on captured output PER STREAM, so a runaway process cannot
  * exhaust memory and a chatty stdout cannot starve stderr.
@@ -113,14 +116,15 @@ export const runShell = (
       reject(new Error(`\`${request.command}\` output exceeded ${maxStreamBytes} bytes`))
     }
 
+    const markTruncated = (into: "out" | "err") => {
+      if (into === "out") outTruncated = true
+      else errTruncated = true
+    }
+
     const capture = (chunk: Buffer, into: "out" | "err") => {
       const used = into === "out" ? outBytes : errBytes
-      const markTruncated = () => {
-        if (into === "out") outTruncated = true
-        else errTruncated = true
-      }
       if (used >= maxStreamBytes) {
-        markTruncated()
+        markTruncated(into)
         overflow()
         return
       }
@@ -128,9 +132,9 @@ export const runShell = (
       // what is kept, and checking only before the append let one oversized
       // chunk through in full.
       const room = maxStreamBytes - used
-      const kept = chunk.byteLength > room ? chunk.subarray(0, room) : chunk
+      const kept = truncateChunk(chunk, room)
       if (kept.byteLength < chunk.byteLength) {
-        markTruncated()
+        markTruncated(into)
         overflow()
       }
 

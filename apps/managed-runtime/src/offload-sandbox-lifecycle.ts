@@ -42,9 +42,7 @@ export class OffloadSandboxLifecycleObject extends DurableObject<ManagedRuntimeE
       await this.#destroy(metadata)
       return
     }
-    await this.ctx.storage.setAlarm(
-      (metadata.lastActiveAt + OFFLOAD_SANDBOX_IDLE_SECONDS) * 1_000
-    )
+    await this.ctx.storage.setAlarm((metadata.lastActiveAt + OFFLOAD_SANDBOX_IDLE_SECONDS) * 1_000)
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -56,18 +54,17 @@ export class OffloadSandboxLifecycleObject extends DurableObject<ManagedRuntimeE
       return json({ error: "subject and sessionId are required" }, 400)
     }
     const existing = await this.#metadata()
-    if (
-      existing !== null &&
-      (existing.subject !== subject || existing.sessionId !== sessionId)
-    ) {
+    if (existing !== null && (existing.subject !== subject || existing.sessionId !== sessionId)) {
       return json({ error: "sandbox lifecycle scope changed" }, 409)
     }
-    if (url.pathname === "/v1/touch" && request.method === "POST") {
+    const handleV1Touch = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/touch" && request.method === "POST")) return null
+
       const now = Math.floor(Date.now() / 1_000)
       const metadata: OffloadSandboxLifecycleMetadata = {
         subject,
         sessionId,
-        sandboxId: existing?.sandboxId ?? await sandboxIdForSession(`offload_${sessionId}`),
+        sandboxId: existing?.sandboxId ?? (await sandboxIdForSession(`offload_${sessionId}`)),
         generation: (existing?.generation ?? 0) + 1,
         lastActiveAt: now
       }
@@ -75,13 +72,25 @@ export class OffloadSandboxLifecycleObject extends DurableObject<ManagedRuntimeE
       await this.ctx.storage.setAlarm((now + OFFLOAD_SANDBOX_IDLE_SECONDS) * 1_000)
       return json(metadata)
     }
-    if (url.pathname === "/v1/destroy" && request.method === "POST") {
+
+    const handleV1Destroy = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/destroy" && request.method === "POST")) return null
+
       if (existing !== null) await this.#destroy(existing)
       return json({ destroyed: existing !== null })
     }
-    if (url.pathname === "/v1/status" && request.method === "POST") {
+
+    const handleV1Status = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/status" && request.method === "POST")) return null
+
       return json({ metadata: existing })
     }
+
+    for (const handle of [handleV1Touch, handleV1Destroy, handleV1Status]) {
+      const response = await handle()
+      if (response !== null) return response
+    }
+
     return json({ error: "Not found" }, 404)
   }
 }

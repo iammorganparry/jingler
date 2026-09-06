@@ -120,6 +120,13 @@ export const fuzzyScore = (haystack: string, query: string): number => {
  * length of a session title is not a cost worth optimising away.
  */
 const rawScore = (h: string, q: string, preferBoundary: boolean): number => {
+                   function getBonus(at: number) {
+                     if (at === 0) return (4)
+                     if (SEPARATORS.has(h[at - 1] ?? "")) return (3)
+                     if (at === previous + 1) return (2)
+                     return (0)
+                   }
+
   const startsWord = (at: number) => at === 0 || SEPARATORS.has(h[at - 1] ?? "")
 
   let cursor = 0
@@ -143,7 +150,7 @@ const rawScore = (h: string, q: string, preferBoundary: boolean): number => {
     // its predecessor, and stacking the bonuses would let a long weak match beat
     // a short strong one.
     const bonus =
-      at === 0 ? 4 : SEPARATORS.has(h[at - 1] ?? "") ? 3 : at === previous + 1 ? 2 : 0
+      getBonus(at)
 
     raw += 1 + bonus
     previous = at

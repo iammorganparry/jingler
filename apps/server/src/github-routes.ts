@@ -496,7 +496,7 @@ const activeUserToken = async (
     | "refreshTokenExpiresAt"
   >
 }> => {
-  const now = (dependencies.now ?? (() => new Date()))()
+  const now = githubRequestTime(dependencies)
   const needsRefresh =
     authorization.accessTokenExpiresAt !== null &&
     authorization.accessTokenExpiresAt.getTime() <= now.getTime() + TOKEN_REFRESH_SKEW_MS
@@ -564,7 +564,7 @@ export const managedGitHubCapabilityForRepository = async (
         authorizationHeader: `Bearer ${token.accessToken}`,
         expiresAt:
           token.fields.accessTokenExpiresAt ??
-          new Date((dependencies.now ?? (() => new Date()))().getTime() + 24 * 60 * 60 * 1_000)
+          new Date(githubRequestTime(dependencies).getTime() + 24 * 60 * 60 * 1_000)
       }
     }
   }
@@ -586,7 +586,7 @@ export const managedGitHubCapabilityForUser = async (
     authorizationHeader: `Bearer ${token.accessToken}`,
     expiresAt:
       token.fields.accessTokenExpiresAt ??
-      new Date((dependencies.now ?? (() => new Date()))().getTime() + 24 * 60 * 60 * 1_000)
+      new Date(githubRequestTime(dependencies).getTime() + 24 * 60 * 60 * 1_000)
   }
 }
 
@@ -598,7 +598,7 @@ export const flushGitHubRelayOutbox = async (
   dependencies: GitHubRoutesDependencies
 ): Promise<void> => {
   if (!dependencies.syncRelayRegistration) return
-  const now = (dependencies.now ?? (() => new Date()))()
+  const now = githubRequestTime(dependencies)
   const mutations = await dependencies.store.listPendingRelayMutations(now, 50)
   for (const mutation of mutations) {
     try {
@@ -611,10 +611,10 @@ export const flushGitHubRelayOutbox = async (
       })
       await dependencies.store.markRelayMutationDelivered(
         mutation.id,
-        (dependencies.now ?? (() => new Date()))()
+        githubRequestTime(dependencies)
       )
     } catch (error) {
-      const updatedAt = (dependencies.now ?? (() => new Date()))()
+      const updatedAt = githubRequestTime(dependencies)
       await dependencies.store.markRelayMutationFailed({
         id: mutation.id,
         retryAt: new Date(updatedAt.getTime() + relayRetryDelayMs(mutation.attemptCount)),
@@ -630,7 +630,7 @@ export const flushGitHubSessionRouteOutbox = async (
   dependencies: GitHubRoutesDependencies
 ): Promise<void> => {
   if (!dependencies.syncRelaySessionRoute) return
-  const now = (dependencies.now ?? (() => new Date()))()
+  const now = githubRequestTime(dependencies)
   const mutations = await dependencies.sessionRoutes.listPendingMutations(now, 50)
   for (const mutation of mutations) {
     try {
@@ -646,10 +646,10 @@ export const flushGitHubSessionRouteOutbox = async (
       })
       await dependencies.sessionRoutes.markMutationDelivered(
         mutation.id,
-        (dependencies.now ?? (() => new Date()))()
+        githubRequestTime(dependencies)
       )
     } catch (error) {
-      const updatedAt = (dependencies.now ?? (() => new Date()))()
+      const updatedAt = githubRequestTime(dependencies)
       await dependencies.sessionRoutes.markMutationFailed({
         id: mutation.id,
         retryAt: new Date(updatedAt.getTime() + relayRetryDelayMs(mutation.attemptCount)),
@@ -724,7 +724,7 @@ const reconcile = async (
     dependencies.github.getUser(token.accessToken),
     dependencies.github.listInstallations(token.accessToken)
   ])
-  const refreshedAt = (dependencies.now ?? (() => new Date()))()
+  const refreshedAt = githubRequestTime(dependencies)
   const saved = await dependencies.store.saveConnection({
     authorization: {
       id: authorization.id,
@@ -797,29 +797,14 @@ const installationTokenScope = (
   const repositories: string[] = []
   for (const scope of [...new Set(scopes)]) {
     if (scope.startsWith("repository:")) {
-      const qualified = scope.slice("repository:".length)
-      const [owner, name, extra] = qualified.split("/")
-      if (
-        !(owner &&name ) ||
-        extra !== undefined ||
-        owner.toLowerCase() !== installation.accountLogin.toLowerCase()
-      ) {
-        return null
-      }
+      const name = repositoryScopeName(scope, installation.accountLogin)
+      if (name === null) return null
       repositories.push(name)
       continue
     }
-    const match = /^([a-z][a-z0-9_]*):(read|write)$/.exec(scope)
-    if (!match?.[1] || (match[2] !== "read" && match[2] !== "write")) return null
-    const permission = match[1]
-    const requested = match[2]
-    // Metadata is implicit and cannot narrow an installation token. Accepting
-    // it here would turn a metadata-only request into an omitted permissions
-    // object, which GitHub interprets as every permission on the installation.
-    const allowed = INSTALLATION_TOKEN_PERMISSION_ALLOWLIST[permission]
-    if (!allowed?.has(requested)) return null
-    const installed = installation.permissions[permission]
-    if (installed !== "write" && !(installed === "read" && requested === "read")) return null
+    const parsed = installationPermission(scope, installation)
+    if (!parsed) return null
+    const { permission, requested } = parsed
     permissions[permission] = requested
   }
   // Built-in credentials are always for exactly one repository and at least
@@ -850,7 +835,7 @@ export const createGitHubRoutes = (
     dependencies: GitHubRoutesDependencies,
     userId: string
   ): Promise<GitHubAppConnectionStatus> => {
-    const now = (dependencies.now ?? (() => new Date()))().getTime()
+    const now = githubRequestTime(dependencies).getTime()
     const cached = statusCache.get(userId)
     if (cached && cached.expiresAt > now) return cached.value
     const value = await statusFor(dependencies, userId)
@@ -880,7 +865,7 @@ export const createGitHubRoutes = (
   ): Promise<GitHubAuthorizationRecord | null> => {
     const authorization = await dependencies.store.findAuthorizationByUserId(userId)
     if (!authorization) return null
-    const now = (dependencies.now ?? (() => new Date()))().getTime()
+    const now = githubRequestTime(dependencies).getTime()
     if (now - authorization.lastRefreshedAt.getTime() < RECONCILE_TTL_MS) {
       return authorization
     }
@@ -915,10 +900,10 @@ export const createGitHubRoutes = (
         : dependencies.desktopRedirect
     const state = (dependencies.randomState ?? (() => randomBytes(32).toString("base64url")))()
     const pkce = createGitHubPkce()
-    const now = (dependencies.now ?? (() => new Date()))()
+    const now = githubRequestTime(dependencies)
     const expiresAt = new Date(now.getTime() + STATE_TTL_MS)
     await dependencies.store.createCallbackState({
-      id: (dependencies.randomId ?? randomUUID)(),
+      id: githubRequestId(dependencies),
       stateHash: hashGitHubCallbackState(state),
       userId,
       kind,
@@ -944,7 +929,7 @@ export const createGitHubRoutes = (
     const state = url.searchParams.get("state")
     const code = url.searchParams.get("code")
     if (!state) return callbackError()
-    const now = (dependencies.now ?? (() => new Date()))()
+    const now = githubRequestTime(dependencies)
     const callbackState = await dependencies.store.consumeCallbackState({
       stateHash: hashGitHubCallbackState(state),
       // GitHub's request_oauth_on_install flow starts from the installation
@@ -966,18 +951,12 @@ export const createGitHubRoutes = (
         dependencies.github.getUser(token.accessToken),
         dependencies.github.listInstallations(token.accessToken)
       ])
-      const requestedInstallation = parseInstallationId(
-        url.searchParams.get("installation_id") ?? undefined
-      )
-      if (
-        requestedInstallation &&
-        !installations.some((installation) => installation.id === requestedInstallation)
-      ) {
+      if (!requestedInstallationAllowed(installations, url.searchParams.get("installation_id"))) {
         return callbackError()
       }
       await dependencies.store.saveConnection({
         authorization: {
-          id: (dependencies.randomId ?? randomUUID)(),
+          id: githubRequestId(dependencies),
           userId,
           githubUserId: githubUser.id,
           githubLogin: githubUser.login,
@@ -1005,7 +984,7 @@ export const createGitHubRoutes = (
     const state = url.searchParams.get("state")
     const installationId = parseInstallationId(url.searchParams.get("installation_id") ?? undefined)
     if (!(state && installationId)) return callbackError()
-    const now = (dependencies.now ?? (() => new Date()))()
+    const now = githubRequestTime(dependencies)
     const callbackState = await dependencies.store.consumeCallbackState({
       stateHash: hashGitHubCallbackState(state),
       kinds: ["install"],
@@ -1132,7 +1111,7 @@ export const createGitHubRoutes = (
     }
     // The local delete and durable relay revocations commit first. External
     // availability can never keep this user connected in Jingler.
-    const disconnectedAt = (dependencies.now ?? (() => new Date()))()
+    const disconnectedAt = githubRequestTime(dependencies)
     await dependencies.sessionRoutes.removeAllForUser(userId, disconnectedAt)
     await dependencies.store.disconnect(userId)
     invalidateStatus(userId)
@@ -1163,58 +1142,20 @@ export const createGitHubRoutes = (
     if (!available(dependencies)) {
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
-    let input: {
-      readonly sessionId: string | null
-      readonly installationId: string | null
-      readonly repositoryId: string | null
-      readonly pullRequestNumber: number | null
-    } = {
-      sessionId: null,
-      installationId: null,
-      repositoryId: null,
-      pullRequestNumber: null
-    }
-    try {
-      const body: unknown = await c.req.json()
-      const record =
-        body && typeof body === "object" && !Array.isArray(body)
-          ? (body as Record<string, unknown>)
-          : {}
-      input = {
-        sessionId: parseSessionId(record.sessionId),
-        installationId: parseInstallationId(
-          typeof record.installationId === "string" ? record.installationId : undefined
-        ),
-        repositoryId: parseRepositoryId(record.repositoryId),
-        pullRequestNumber: parsePullRequestNumber(record.pullRequestNumber)
-      }
-    } catch {
-      // The uniform validation response below deliberately reveals no ownership state.
-    }
+
+    const input = await parseSessionRouteRequest(c)
     if (
       !(((input.sessionId &&input.installationId ) &&input.repositoryId ) &&input.pullRequestNumber)
     ) {
       return c.json({ error: "Valid session route fields are required" }, 400, noStore)
     }
     try {
-      await reconcileIfStale(dependencies, userId)
-      const installation = await dependencies.store.findInstallationForUser(
-        userId,
-        input.installationId
+      const access = await authorizedRepositoryAccess(
+        c, dependencies, userId, input.installationId,
+        () => reconcileIfStale(dependencies, userId),
+        (repository) => repository.id === input.repositoryId
       )
-      if (!installation || installation.suspendedAt) {
-        return c.json({ error: "Active installation required" }, 403, noStore)
-      }
-      const authorization = await dependencies.store.findAuthorizationByUserId(userId)
-      if (!authorization) return c.json({ error: "GitHub authorization required" }, 403, noStore)
-      const token = await activeUserToken(dependencies, authorization)
-      const repositories = await dependencies.github.listInstallationRepositories(
-        token.accessToken,
-        input.installationId
-      )
-      if (!repositories.some((repository) => repository.id === input.repositoryId)) {
-        return c.json({ error: "Repository is not available to this installation" }, 403, noStore)
-      }
+      if ("error" in access) return access.error
       const route = await dependencies.sessionRoutes.upsertActive({
         userId,
         sessionId: input.sessionId,
@@ -1224,7 +1165,7 @@ export const createGitHubRoutes = (
         installationId: input.installationId,
         repositoryId: input.repositoryId,
         pullRequestNumber: input.pullRequestNumber,
-        at: (dependencies.now ?? (() => new Date()))()
+        at: githubRequestTime(dependencies)
       })
       await flushGitHubSessionRouteOutbox(dependencies)
       return c.json({ route: sessionRouteView(route) }, 200, noStore)
@@ -1240,15 +1181,8 @@ export const createGitHubRoutes = (
     if (!available(dependencies)) {
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
-    let relaySessionId: string | null = null
-    try {
-      const body: unknown = await c.req.json()
-      if (body && typeof body === "object" && !Array.isArray(body)) {
-        relaySessionId = parseRelaySessionId((body as Record<string, unknown>).relaySessionId)
-      }
-    } catch {
-      relaySessionId = null
-    }
+
+    const relaySessionId = await parseSessionGrantRequest(c)
     if (!relaySessionId) return c.json({ error: "relaySessionId is required" }, 400, noStore)
     try {
       await reconcileIfStale(dependencies, userId)
@@ -1266,7 +1200,7 @@ export const createGitHubRoutes = (
     if (!installation || installation.suspendedAt) {
       return c.json({ error: "Active installation required" }, 403, noStore)
     }
-    const nowSeconds = Math.floor((dependencies.now ?? (() => new Date()))().getTime() / 1_000)
+    const nowSeconds = Math.floor(githubRequestTime(dependencies).getTime() / 1_000)
     return c.json(
       issueGitHubSessionRelayGrant(
         { userId, installationId: route.installationId, relaySessionId },
@@ -1275,7 +1209,7 @@ export const createGitHubRoutes = (
           relaySigningSecret: dependencies.relaySigningSecret
         },
         nowSeconds,
-        (dependencies.randomId ?? randomUUID)()
+        githubRequestId(dependencies)
       ),
       200,
       noStore
@@ -1295,7 +1229,7 @@ export const createGitHubRoutes = (
       userId,
       relaySessionId,
       state,
-      at: (dependencies.now ?? (() => new Date()))()
+      at: githubRequestTime(dependencies)
     })
     if (!route) return c.json({ error: "Session route not found" }, 404, noStore)
     await flushGitHubSessionRouteOutbox(dependencies)
@@ -1317,19 +1251,8 @@ export const createGitHubRoutes = (
     if (!available(dependencies)) {
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
-    let installationId: string | null = null
-    try {
-      const body: unknown = await c.req.json()
-      if (body && typeof body === "object" && !Array.isArray(body)) {
-        installationId = parseInstallationId(
-          typeof (body as Record<string, unknown>).installationId === "string"
-            ? String((body as Record<string, unknown>).installationId)
-            : undefined
-        )
-      }
-    } catch {
-      installationId = null
-    }
+
+    const installationId = await parseDesktopGrantRequest(c)
     if (!installationId) return c.json({ error: "installationId is required" }, 400, noStore)
     try {
       await reconcileIfStale(dependencies, userId)
@@ -1337,7 +1260,7 @@ export const createGitHubRoutes = (
       if (!installation || installation.suspendedAt) {
         return c.json({ error: "Active installation required" }, 403, noStore)
       }
-      const nowSeconds = Math.floor((dependencies.now ?? (() => new Date()))().getTime() / 1_000)
+      const nowSeconds = Math.floor(githubRequestTime(dependencies).getTime() / 1_000)
       return c.json(
         issueGitHubRelayGrant(
           { userId, installationId },
@@ -1346,7 +1269,7 @@ export const createGitHubRoutes = (
             relaySigningSecret: dependencies.relaySigningSecret
           },
           nowSeconds,
-          (dependencies.randomId ?? (() => randomUUID()))()
+          githubRequestId(dependencies)
         ),
         200,
         noStore
@@ -1367,27 +1290,8 @@ export const createGitHubRoutes = (
     if (!available(dependencies)) {
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
-    let installationId: string | null = null
-    let scopes: ReadonlyArray<string> | null = []
-    try {
-      const body: unknown = await c.req.json()
-      if (body && typeof body === "object" && !Array.isArray(body)) {
-        const record = body as Record<string, unknown>
-        installationId = parseInstallationId(
-          typeof record.installationId === "string" ? record.installationId : undefined
-        )
-        scopes =
-          record.scopes === undefined
-            ? []
-            : Array.isArray(record.scopes) &&
-                record.scopes.every((scope) => typeof scope === "string")
-              ? record.scopes
-              : null
-      }
-    } catch {
-      installationId = null
-      scopes = null
-    }
+
+    const { installationId, scopes } = await parseInstallationCredentialRequest(c)
     if (!installationId || scopes === null) {
       return c.json({ error: "installationId and valid scopes are required" }, 400, noStore)
     }
@@ -1430,49 +1334,12 @@ export const createGitHubRoutes = (
     if (!available(dependencies)) {
       return c.json({ error: "GitHub App is not configured" }, 503, noStore)
     }
-    let input: {
-      installationId: string | null
-      repository: string | null
-      title: string | null
-      body: string | null
-      head: string | null
-      base: string | null
-      draft: boolean | null
-    } = {
-      installationId: null,
-      repository: null,
-      title: null,
-      body: null,
-      head: null,
-      base: null,
-      draft: null
-    }
-    try {
-      const value: unknown = await c.req.json()
-      const record =
-        value && typeof value === "object" && !Array.isArray(value)
-          ? (value as Record<string, unknown>)
-          : {}
-      const text = (candidate: unknown, maximum: number): string | null =>
-        typeof candidate === "string" && candidate.length > 0 && candidate.length <= maximum
-          ? candidate
-          : null
-      input = {
-        installationId: parseInstallationId(
-          typeof record.installationId === "string" ? record.installationId : undefined
-        ),
-        repository: text(record.repository, 200),
-        title: text(record.title, 256),
-        body: typeof record.body === "string" && record.body.length <= 100_000 ? record.body : null,
-        head: text(record.head, 300),
-        base: text(record.base, 300),
-        draft: typeof record.draft === "boolean" ? record.draft : null
-      }
-    } catch {
-      // The uniform validation response below reveals no connection state.
-    }
+
+    const input = await parsePullRequestRequest(c)
     if (
-      !((input.installationId &&input.repository ) &&input.title ) ||
+      !input.installationId ||
+      !input.repository ||
+      !input.title ||
       input.body === null ||
       !input.head ||
       !input.base ||
@@ -1482,28 +1349,13 @@ export const createGitHubRoutes = (
       return c.json({ error: "Valid pull request fields are required" }, 400, noStore)
     }
     try {
-      await reconcileIfStale(dependencies, userId)
-      const installation = await dependencies.store.findInstallationForUser(
-        userId,
-        input.installationId
+      const access = await authorizedRepositoryAccess(
+        c, dependencies, userId, input.installationId,
+        () => reconcileIfStale(dependencies, userId),
+        (repository) => repository.fullName.toLowerCase() === input.repository!.toLowerCase()
       )
-      if (!installation || installation.suspendedAt) {
-        return c.json({ error: "Active installation required" }, 403, noStore)
-      }
-      const authorization = await dependencies.store.findAuthorizationByUserId(userId)
-      if (!authorization) return c.json({ error: "GitHub authorization required" }, 403, noStore)
-      const token = await activeUserToken(dependencies, authorization)
-      const repositories = await dependencies.github.listInstallationRepositories(
-        token.accessToken,
-        input.installationId
-      )
-      if (
-        !repositories.some(
-          (repository) => repository.fullName.toLowerCase() === input.repository!.toLowerCase()
-        )
-      ) {
-        return c.json({ error: "Repository is not available to this installation" }, 403, noStore)
-      }
+      if ("error" in access) return access.error
+      const token = access.token
       const pullRequestNumber = await dependencies.github.createPullRequest(token.accessToken, {
         repository: input.repository,
         title: input.title,
@@ -1525,3 +1377,202 @@ export const createGitHubRoutes = (
 }
 
 export { createGitHubRoutes as createGithubRoutes }
+
+const parseSessionRouteRequest = async (c: Context) => {
+  let input: {
+    readonly sessionId: string | null
+    readonly installationId: string | null
+    readonly repositoryId: string | null
+    readonly pullRequestNumber: number | null
+  } = {
+    sessionId: null,
+    installationId: null,
+    repositoryId: null,
+    pullRequestNumber: null
+  }
+  try {
+    const body: unknown = await c.req.json()
+    const record =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {}
+    input = {
+      sessionId: parseSessionId(record.sessionId),
+      installationId: parseInstallationId(
+        typeof record.installationId === "string" ? record.installationId : undefined
+      ),
+      repositoryId: parseRepositoryId(record.repositoryId),
+      pullRequestNumber: parsePullRequestNumber(record.pullRequestNumber)
+    }
+  } catch {
+    // The uniform validation response below deliberately reveals no ownership state.
+  }
+  return input
+}
+
+const parseSessionGrantRequest = async (c: Context) => {
+  let relaySessionId: string | null = null
+  try {
+    const body: unknown = await c.req.json()
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      relaySessionId = parseRelaySessionId((body as Record<string, unknown>).relaySessionId)
+    }
+  } catch {
+    relaySessionId = null
+  }
+  return relaySessionId
+}
+
+const parseDesktopGrantRequest = async (c: Context) => {
+  let installationId: string | null = null
+  try {
+    const body: unknown = await c.req.json()
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      installationId = parseInstallationId(
+        typeof (body as Record<string, unknown>).installationId === "string"
+          ? String((body as Record<string, unknown>).installationId)
+          : undefined
+      )
+    }
+  } catch {
+    installationId = null
+  }
+  return installationId
+}
+
+const parseInstallationCredentialRequest = async (c: Context) => {
+  let installationId: string | null = null
+  let scopes: ReadonlyArray<string> | null = []
+  try {
+    const body: unknown = await c.req.json()
+    if (body && typeof body === "object" && !Array.isArray(body)) {
+      const record = body as Record<string, unknown>
+      installationId = parseInstallationId(
+        typeof record.installationId === "string" ? record.installationId : undefined
+      )
+      scopes =
+        record.scopes === undefined
+          ? []
+          : Array.isArray(record.scopes) &&
+            record.scopes.every((scope) => typeof scope === "string")
+            ? record.scopes
+            : null
+    }
+  } catch {
+    installationId = null
+    scopes = null
+  }
+  return { installationId, scopes }
+}
+
+const parsePullRequestRequest = async (c: Context) => {
+  let input: {
+    installationId: string | null
+    repository: string | null
+    title: string | null
+    body: string | null
+    head: string | null
+    base: string | null
+    draft: boolean | null
+  } = {
+    installationId: null,
+    repository: null,
+    title: null,
+    body: null,
+    head: null,
+    base: null,
+    draft: null
+  }
+  try {
+    const value: unknown = await c.req.json()
+    const record =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {}
+    const text = (candidate: unknown, maximum: number): string | null =>
+      typeof candidate === "string" && candidate.length > 0 && candidate.length <= maximum
+        ? candidate
+        : null
+    input = {
+      installationId: parseInstallationId(
+        typeof record.installationId === "string" ? record.installationId : undefined
+      ),
+      repository: text(record.repository, 200),
+      title: text(record.title, 256),
+      body: typeof record.body === "string" && record.body.length <= 100_000 ? record.body : null,
+      head: text(record.head, 300),
+      base: text(record.base, 300),
+      draft: typeof record.draft === "boolean" ? record.draft : null
+    }
+  } catch {
+    // The uniform validation response below reveals no connection state.
+  }
+  return input
+}
+
+const githubRequestTime = (dependencies: GitHubRoutesDependencies): Date =>
+  (dependencies.now ?? (() => new Date()))()
+
+const githubRequestId = (dependencies: GitHubRoutesDependencies): string =>
+  (dependencies.randomId ?? randomUUID)()
+
+const repositoryScopeName = (scope: string, accountLogin: string): string | null => {
+  const qualified = scope.slice("repository:".length)
+  const [owner, name, extra] = qualified.split("/")
+  if (
+    !(owner && name) ||
+    extra !== undefined ||
+    owner.toLowerCase() !== accountLogin.toLowerCase()
+  ) {
+    return null
+  }
+  return name
+}
+
+const installationPermission = (scope: string, installation: GitHubInstallationRecord): { permission: string; requested: "read" | "write" } | null => {
+  const match = /^([a-z][a-z0-9_]*):(read|write)$/.exec(scope)
+  if (!match?.[1] || (match[2] !== "read" && match[2] !== "write")) return null
+  const permission = match[1]
+  const requested = match[2]
+  // Metadata is implicit and cannot narrow an installation token. Accepting
+  // it here would turn a metadata-only request into an omitted permissions
+  // object, which GitHub interprets as every permission on the installation.
+  const allowed = INSTALLATION_TOKEN_PERMISSION_ALLOWLIST[permission]
+  if (!allowed?.has(requested)) return null
+  const installed = installation.permissions[permission]
+  if (installed !== "write" && !(installed === "read" && requested === "read")) return null
+  return { permission, requested }
+}
+
+const requestedInstallationAllowed = (
+  installations: ReadonlyArray<{ readonly id: string }>,
+  installationId: string | null
+): boolean => {
+  const requested = parseInstallationId(installationId ?? undefined)
+  return !requested || installations.some((installation) => installation.id === requested)
+}
+
+const authorizedRepositoryAccess = async (
+  c: Context,
+  dependencies: GitHubRoutesDependencies,
+  userId: string,
+  installationId: string,
+  reconcile: () => Promise<unknown>,
+  matchesRepository: (repository: { readonly id: string; readonly fullName: string }) => boolean
+): Promise<{ error: Response } | { token: Awaited<ReturnType<typeof activeUserToken>> }> => {
+  await reconcile()
+  const installation = await dependencies.store.findInstallationForUser(userId, installationId)
+  if (!installation || installation.suspendedAt) {
+    return { error: c.json({ error: "Active installation required" }, 403, noStore) }
+  }
+  const authorization = await dependencies.store.findAuthorizationByUserId(userId)
+  if (!authorization) {
+    return { error: c.json({ error: "GitHub authorization required" }, 403, noStore) }
+  }
+  const token = await activeUserToken(dependencies, authorization)
+  const repositories = await dependencies.github.listInstallationRepositories(token.accessToken, installationId)
+  if (!repositories.some(matchesRepository)) {
+    return { error: c.json({ error: "Repository is not available to this installation" }, 403, noStore) }
+  }
+  return { token }
+}

@@ -1,3 +1,4 @@
+import { defaultProps } from "../lib/default-props.js"
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   Attachment,
@@ -227,51 +228,7 @@ function ComposerSelect<T extends string>({
  * Shift+Enter newline, plus two typeahead palettes: `/` surfaces the harness's
  * skills (harness-agnostic) and `@` references worktree files as code chips.
  */
-export function Composer({
-  skills = [],
-  files = [],
-  onAddMcp,
-  onSend,
-  onStop,
-  branch,
-  branchPending = false,
-  repo,
-  diff = null,
-  environments = [],
-  environmentId,
-  environmentPending = false,
-  onSetEnvironment,
-  providerCatalog,
-  connectionId = null,
-  modelId = null,
-  onSetModel,
-  mode = "auto",
-  onSetMode,
-  followAgent = false,
-  onToggleFollowAgent,
-  reasoningEffort,
-  thinkingEnabled,
-  onSetReasoning,
-  allowPlan = false,
-  paused = false,
-  disabledReason,
-  busy = false,
-  placeholder,
-  autoFocus = false,
-  focusKey,
-  initialValue,
-  value: controlledValue,
-  onValueChange,
-  attachments: controlledAttachments,
-  onAttachmentsChange,
-  codeReferences = [],
-  onCodeReferenceRemove,
-  onCodeReferencesClear,
-  planDocument,
-  onOpenPlanStage,
-  contextControls,
-  className,
-}: {
+type ComposerProps =  {
   skills?: ReadonlyArray<Skill>;
   files?: ReadonlyArray<string>;
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>;
@@ -359,7 +316,365 @@ export function Composer({
    */
   focusKey?: string;
   className?: string;
-}) {
+}
+
+function composerReasoningOptions(
+  selectedModel: NonNullable<ComposerProps["providerCatalog"]>["connections"][number]["models"][number] | undefined
+) {
+  const reasoningEfforts = selectedModel?.capabilities.reasoning ?? [];
+  const reasoningDefault = selectedModel?.capabilities.reasoningDefault;
+  const reasoningDefaultLabel = reasoningDefault
+    ? `${reasoningDefault[0]!.toUpperCase()}${reasoningDefault.slice(1)} (default)`
+    : "Default";
+  const reasoningOptions: ReadonlyArray<ComposerOption<ReasoningChoice | "off">> = [
+    { value: "default", label: reasoningDefaultLabel },
+    ...(reasoningEfforts.length > 0 &&
+    selectedModel?.capabilities.reasoningCanDisable !== false
+      ? [{ value: "off" as const, label: "Off" }]
+      : []),
+    ...reasoningEfforts.filter((effort) => effort !== reasoningDefault).map((effort) => ({
+      value: effort,
+      label: effort[0]!.toUpperCase() + effort.slice(1),
+    })),
+  ];
+  return { reasoningEfforts, reasoningOptions }
+}
+
+export function Composer(props: ComposerProps) {
+         function renderAutocomplete() {
+           return (menu && count > 0 && (
+        <div className="absolute inset-x-0 bottom-full z-10 mb-2">
+          {menu.kind === "slash" ? (
+            <CommandMenu
+              skills={skillMatches}
+              activeIndex={activeIndex}
+              onSelect={(skill) => replaceToken(skillInsertion(skill))}
+              onHover={setActiveIndex}
+            />
+          ) : (
+            <MentionMenu
+              files={fileMatches}
+              activeIndex={activeIndex}
+              onSelect={(p) => replaceToken(`@${p}`)}
+              onHover={setActiveIndex}
+            />
+          )}
+        </div>
+      ))
+         }
+
+  function renderContextControls() {
+    return (contextControls ? (
+          <div className="flex min-w-0 items-center gap-1 px-1 pt-1">
+            {contextControls}
+          </div>
+        ) : (repo || branch || branchPending) && (
+          <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
+            {repo ? (
+              renderRepositoryMetadata()
+            ) : (
+              <span />
+            )}
+            {(branch || branchPending) && (
+              renderBranchMetadata()
+            )}
+          </div>
+        ))
+  }
+
+  function renderComposerToolbar() {
+    return (<div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 [&>button]:min-h-8">
+          <MorphPopover open={actionsOpen} onOpenChange={setActionsOpen}>
+            <MorphPopoverTrigger>
+              <button
+                type="button"
+                aria-label="Composer menu"
+                title="Add context"
+                disabled={paused || disabledReason !== undefined}
+                className="flex size-8 flex-none items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span
+                  aria-hidden
+                  style={{ transform: `rotate(${actionsOpen ? 45 : 0}deg)` }}
+                  className="inline-flex transition-transform duration-300 ease-out motion-reduce:duration-0"
+                >
+                  <Plus size={16} />
+                </span>
+              </button>
+            </MorphPopoverTrigger>
+            <MorphPopoverContent side="top" sideOffset={8} align="start" radius={12} className="w-56 p-1.5">
+              <div>
+                <button type="button" onClick={() => { fileInputRef.current?.click(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
+                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><ImagePlus size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Add image</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Attach visual context</span></span>
+                </button>
+                <button type="button" disabled={skills.length === 0} onClick={() => { openSkills(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface disabled:pointer-events-none disabled:opacity-50">
+                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Sparkles size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Skills</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Insert a harness command</span></span>
+                  {skills.length > 0 && <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>}
+                </button>
+                {onAddMcp !== undefined && (
+                  <button type="button" onClick={() => { setActionsOpen(false); setMcpDialogOpen(true); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
+                    <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Server size={15} /></span>
+                    <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Connect MCP server</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Add tools for local sessions</span></span>
+                  </button>
+                )}
+              </div>
+            </MorphPopoverContent>
+          </MorphPopover>
+          {onToggleFollowAgent !== undefined && (
+            <button
+              type="button"
+              className={cn(
+                "jingler-mode-toggle inline-flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors active:scale-[0.96]",
+                followAgent
+                  ? "is-active"
+                  : "text-muted-foreground hover:text-text",
+              )}
+              aria-label="Follow agent"
+              aria-pressed={followAgent}
+              title={
+                followAgent
+                  ? "Stop following files edited by this chat's agent"
+                  : "Follow files edited by this chat's agent"
+              }
+              onClick={() => onToggleFollowAgent(!followAgent)}
+            >
+              <MousePointer2
+                size={15}
+                aria-hidden
+                className="jingler-mode-toggle__mark"
+              />
+            </button>
+          )}
+          {compactSettings ? (
+            renderCompactSettings()
+          ) : (
+            renderInlineSettings()
+          )}
+          {/* `min-w-[8px]` so the spacer still exists after a wrap — a bare
+              `flex-1` on a wrapped line collapses to nothing and the send button
+              ends up butted against the last chip. */}
+          <div className="min-w-[8px] flex-1" />
+          {/* The send/stop control is `flex-none` and LAST in DOM order, which
+              together decide what a squeeze does: the row wraps the chips above
+              it and the primary action keeps its full size on the trailing line,
+              rather than being the thing pushed past the border. */}
+          <span className="flex-none">
+            {getDisabledReason()}
+          </span>
+        </div>)
+  }
+
+  function renderBranchMetadata() {
+    return (<span
+                title={branchPending ? "Task branch will be named after task understanding" : `Working branch: ${branch}`}
+                className="flex min-w-0 max-w-[180px] items-center gap-1"
+                data-testid="composer-branch"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <GitBranch size={12} className="flex-none" />
+                <span className="truncate">{branchPending ? "Naming branch…" : branch}</span>
+              </span>)
+  }
+
+  function renderRepositoryMetadata() {
+    return (<span className="flex min-w-0 items-center gap-2">
+                <span
+                  title={`Repository: ${repo}`}
+                  className="flex min-w-0 items-center gap-1"
+                >
+                  <FolderGit2 size={12} className="flex-none" />
+                  <span className="truncate">{repo}</span>
+                </span>
+                {/* Dirty-tree badge: a clean tree says nothing. */}
+                {diff !== null && (diff.files > 0 || diff.added > 0 || diff.removed > 0) && (
+                  <span
+                    title={`Uncommitted changes: ${diff.files} file${diff.files === 1 ? "" : "s"}, +${diff.added} −${diff.removed}`}
+                    className="flex flex-none items-center gap-1"
+                    data-testid="composer-dirty"
+                  >
+                    <FileDiff size={12} className="flex-none" />
+                    <span>{diff.files}</span>
+                    <span className="text-green">+{diff.added}</span>
+                    <span className="text-red">−{diff.removed}</span>
+                  </span>
+                )}
+              </span>)
+  }
+
+  function renderInlineSettings() {
+    return (<>
+              {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
+              {providerCatalog && <ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
+              {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
+            </>)
+  }
+
+  function renderCompactSettings() {
+    return (<MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
+              <MorphPopoverTrigger>
+                <button type="button" aria-label="Composer options" className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring">
+                  <SlidersHorizontal size={14} aria-hidden />
+                  <span>Options</span>
+                </button>
+              </MorphPopoverTrigger>
+              <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-72 max-w-[calc(100vw-24px)] p-2">
+                <div className="space-y-1.5">
+                  {providerCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
+                  {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
+                  <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
+                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
+                </div>
+              </MorphPopoverContent>
+            </MorphPopover>)
+  }
+
+  const { skills, files, onAddMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+    skills: [],
+    files: [],
+    branchPending: false,
+    diff: null,
+    environments: [],
+    environmentPending: false,
+    connectionId: null,
+    modelId: null,
+    mode: "auto",
+    followAgent: false,
+    allowPlan: false,
+    paused: false,
+    busy: false,
+    autoFocus: false,
+    codeReferences: []
+  })
+
+         function renderDraftInput() {
+           return (<textarea
+          ref={ref}
+          value={value}
+          disabled={paused || disabledReason !== undefined}
+          placeholder={
+            disabledReason ??
+            (paused
+              ? "Reply, or answer the prompt above…"
+              : busy
+                // An explicit placeholder wins even while busy: a composer
+                // aimed at a subagent steers live ("Steer worker…"), and
+                // the queue default would promise semantics it doesn't have.
+                ? placeholder ?? "Queue a message while the agent works…"
+                : prompt)
+          }
+          onChange={(e) =>
+            sync(
+              e.target.value,
+              e.target.selectionStart ?? e.target.value.length,
+            )
+          }
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          /*
+           * `field-sizing-content` — the height is a LAYOUT property, resolved
+           * by the browser from the content at whatever width the composer
+           * currently has, on every frame it changes.
+           *
+           * It replaces a `useLayoutEffect` that set `height: auto`, read
+           * `scrollHeight` and wrote it back, keyed on `[value]`. That ran
+           * exactly once per value change — and a pane MOUNTS about a pixel
+           * wide, because `paneVariants.hidden` enters from `flexGrow: 0.001`.
+           * At zero content width Chromium wraps the placeholder one glyph per
+           * line, so "Message Claude…" measured ~315px, was written to
+           * `style.height`, and stuck there (nothing re-measures — there is no
+           * ResizeObserver) until the first keystroke re-ran the effect at the
+           * real width. The composer opened at its `max-h` and snapped back as
+           * you typed. The same staleness sat under every divider drag and
+           * window resize; a measurement that has to be re-taken by hand is a
+           * measurement that will be missed.
+           *
+           * `min-h` still guarantees one line, `max-h` still caps the growth,
+           * and past the cap `overflow-y-auto` scrolls. Chromium 123+; this app
+           * ships its own (Electron 43 → Chromium 140).
+           */
+          className="field-sizing-content max-h-64 min-h-[22px] w-full resize-none overflow-y-auto bg-transparent text-[14px] leading-[1.5] text-text-body outline-none placeholder:text-dim"
+        />)
+         }
+
+         function renderPlanDrawer() {
+           return (planDocument && (
+          <div className="-mx-4 -mt-3.5">
+            <div role="tablist" aria-label="Plan" className="flex items-stretch gap-0.5 border-b border-line px-2.5 pt-1.5">
+              <DrawerTab
+                active
+                icon={<ListChecks className="size-3.5" />}
+                label="Plan"
+                badge={planDrawerCounts ? `${planDrawerCounts.completed}/${planDrawerCounts.total}` : undefined}
+                onClick={() => setDrawerOpen(true)}
+              />
+              <span className="flex-1" />
+              {drawerOpen && (
+                <button
+                  type="button"
+                  aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
+                  aria-pressed={planExtended}
+                  onClick={() => setPlanExtended((value) => !value)}
+                  className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {planExtended ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
+                aria-expanded={drawerOpen}
+                onClick={() => setDrawerOpen((open) => !open)}
+                className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <ChevronDown className={cn("size-3.5 transition-transform", !drawerOpen && "-rotate-90")} />
+              </button>
+            </div>
+            {drawerOpen && (
+              <div className="max-h-[280px] overflow-y-auto">
+                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
+              </div>
+            )}
+          </div>
+        ))
+         }
+
+         function renderSendButton() {
+           return (<Button
+                variant="primary"
+                size="icon"
+                className="size-7 rounded-full"
+              aria-label={busy ? "Queue ↵" : "Send ↵"}
+              title={busy ? "Queue this message (↵)" : "Send (↵)"}
+              onClick={send}
+            >
+              <ArrowUp size={14} />
+            </Button>)
+  }
+
+  function getDisabledReason() {
+           if (disabledReason !== undefined) return (<Pill tone="yellow" dot>
+                {roomy ? disabledReason : "unavailable"}
+              </Pill>)
+           if (paused) return (<Pill tone="yellow" dot>
+              {roomy ? "paused for approval" : "paused"}
+            </Pill>)
+           if (busy && onStop) return (<Button
+              variant="primary"
+              size="icon"
+              className="size-7 rounded-full"
+              aria-label="Stop"
+              title="Stop the agent"
+              onClick={onStop}
+            >
+              <Square size={12} fill="currentColor" />
+            </Button>)
+           return renderSendButton()
+         }
+
   const selectedModel = providerCatalog?.connections
     .flatMap(({ models }) => models)
     .find((candidate) => candidate.id === modelId);
@@ -384,22 +699,7 @@ export function Composer({
         option.label,
       description: option.description,
     }));
-  const reasoningEfforts = selectedModel?.capabilities.reasoning ?? [];
-  const reasoningDefault = selectedModel?.capabilities.reasoningDefault;
-  const reasoningDefaultLabel = reasoningDefault
-    ? `${reasoningDefault[0]!.toUpperCase()}${reasoningDefault.slice(1)} (default)`
-    : "Default";
-  const reasoningOptions: ReadonlyArray<ComposerOption<ReasoningChoice | "off">> = [
-    { value: "default", label: reasoningDefaultLabel },
-    ...(reasoningEfforts.length > 0 &&
-    selectedModel?.capabilities.reasoningCanDisable !== false
-      ? [{ value: "off" as const, label: "Off" }]
-      : []),
-    ...reasoningEfforts.filter((effort) => effort !== reasoningDefault).map((effort) => ({
-      value: effort,
-      label: effort[0]!.toUpperCase() + effort.slice(1),
-    })),
-  ];
+  const { reasoningEfforts, reasoningOptions } = composerReasoningOptions(selectedModel)
   // The chip's value and its bar count are the same fact; deriving it once keeps
   // the glyph from drifting out of step with the label beside it.
   const reasoningChoice: ReasoningChoice | "off" =
@@ -601,28 +901,39 @@ export function Composer({
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (menu && count > 0) {
-      if (e.key === "ArrowDown") {
+      switch (e.key) {
+case "ArrowDown": {
+
         e.preventDefault();
         setActiveIndex((i) => (i + 1) % count);
         return;
-      }
-      if (e.key === "ArrowUp") {
+
+}
+case "ArrowUp": {
+
         e.preventDefault();
         setActiveIndex((i) => (i - 1 + count) % count);
         return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
+
+}
+case "Enter":
+case "Tab": {
+
         e.preventDefault();
         if (menu.kind === "slash") {
           replaceToken(skillInsertion(skillMatches[activeIndex]!));
         } else replaceToken(`@${fileMatches[activeIndex]!}`);
         return;
-      }
-      if (e.key === "Escape") {
+
+}
+case "Escape": {
+
         e.preventDefault();
         setMenu(null);
         return;
-      }
+
+}
+}
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -638,25 +949,7 @@ export function Composer({
       data-testid="composer"
       className={cn("relative flex flex-col gap-2", className)}
     >
-      {menu && count > 0 && (
-        <div className="absolute inset-x-0 bottom-full z-10 mb-2">
-          {menu.kind === "slash" ? (
-            <CommandMenu
-              skills={skillMatches}
-              activeIndex={activeIndex}
-              onSelect={(skill) => replaceToken(skillInsertion(skill))}
-              onHover={setActiveIndex}
-            />
-          ) : (
-            <MentionMenu
-              files={fileMatches}
-              activeIndex={activeIndex}
-              onSelect={(p) => replaceToken(`@${p}`)}
-              onHover={setActiveIndex}
-            />
-          )}
-        </div>
-      )}
+      {renderAutocomplete()}
 
       <PromptInputSurface
         // Keep the mode available to tests and integrations without tinting the
@@ -685,45 +978,7 @@ export function Composer({
           dragging && "border-cyan/60 bg-cyan/5 shadow-none",
         )}
       >
-        {planDocument && (
-          <div className="-mx-4 -mt-3.5">
-            <div role="tablist" aria-label="Plan" className="flex items-stretch gap-0.5 border-b border-line px-2.5 pt-1.5">
-              <DrawerTab
-                active
-                icon={<ListChecks className="size-3.5" />}
-                label="Plan"
-                badge={planDrawerCounts ? `${planDrawerCounts.completed}/${planDrawerCounts.total}` : undefined}
-                onClick={() => setDrawerOpen(true)}
-              />
-              <span className="flex-1" />
-              {drawerOpen && (
-                <button
-                  type="button"
-                  aria-label={planExtended ? "Collapse plan overview" : "Extend to plan overview"}
-                  aria-pressed={planExtended}
-                  onClick={() => setPlanExtended((value) => !value)}
-                  className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {planExtended ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label={drawerOpen ? "Collapse drawer" : "Expand drawer"}
-                aria-expanded={drawerOpen}
-                onClick={() => setDrawerOpen((open) => !open)}
-                className="my-auto rounded p-1 text-dim outline-none transition-colors hover:bg-hover hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <ChevronDown className={cn("size-3.5 transition-transform", !drawerOpen && "-rotate-90")} />
-              </button>
-            </div>
-            {drawerOpen && (
-              <div className="max-h-[280px] overflow-y-auto">
-                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
-              </div>
-            )}
-          </div>
-        )}
+        {renderPlanDrawer()}
         {(codeReferences.length > 0 || mentions.length > 0) && (
           <div className="flex flex-wrap gap-1.5">
             {codeReferences.map((reference, index) => (
@@ -774,53 +1029,7 @@ export function Composer({
             )}
           </div>
         )}
-        <textarea
-          ref={ref}
-          value={value}
-          disabled={paused || disabledReason !== undefined}
-          placeholder={
-            disabledReason ??
-            (paused
-              ? "Reply, or answer the prompt above…"
-              : busy
-                // An explicit placeholder wins even while busy: a composer
-                // aimed at a subagent steers live ("Steer worker…"), and
-                // the queue default would promise semantics it doesn't have.
-                ? placeholder ?? "Queue a message while the agent works…"
-                : prompt)
-          }
-          onChange={(e) =>
-            sync(
-              e.target.value,
-              e.target.selectionStart ?? e.target.value.length,
-            )
-          }
-          onKeyDown={onKeyDown}
-          onPaste={onPaste}
-          /*
-           * `field-sizing-content` — the height is a LAYOUT property, resolved
-           * by the browser from the content at whatever width the composer
-           * currently has, on every frame it changes.
-           *
-           * It replaces a `useLayoutEffect` that set `height: auto`, read
-           * `scrollHeight` and wrote it back, keyed on `[value]`. That ran
-           * exactly once per value change — and a pane MOUNTS about a pixel
-           * wide, because `paneVariants.hidden` enters from `flexGrow: 0.001`.
-           * At zero content width Chromium wraps the placeholder one glyph per
-           * line, so "Message Claude…" measured ~315px, was written to
-           * `style.height`, and stuck there (nothing re-measures — there is no
-           * ResizeObserver) until the first keystroke re-ran the effect at the
-           * real width. The composer opened at its `max-h` and snapped back as
-           * you typed. The same staleness sat under every divider drag and
-           * window resize; a measurement that has to be re-taken by hand is a
-           * measurement that will be missed.
-           *
-           * `min-h` still guarantees one line, `max-h` still caps the growth,
-           * and past the cap `overflow-y-auto` scrolls. Chromium 123+; this app
-           * ships its own (Electron 43 → Chromium 140).
-           */
-          className="field-sizing-content max-h-64 min-h-[22px] w-full resize-none overflow-y-auto bg-transparent text-[14px] leading-[1.5] text-text-body outline-none placeholder:text-dim"
-        />
+        {renderDraftInput()}
         <input
           ref={fileInputRef}
           type="file"
@@ -844,192 +1053,8 @@ export function Composer({
           a composer toolbar is a set of unrelated controls, not a sequence, so a
           second line costs nothing but 26px of height.
         */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1.5 [&>button]:min-h-8">
-          <MorphPopover open={actionsOpen} onOpenChange={setActionsOpen}>
-            <MorphPopoverTrigger>
-              <button
-                type="button"
-                aria-label="Composer menu"
-                title="Add context"
-                disabled={paused || disabledReason !== undefined}
-                className="flex size-8 flex-none items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <span
-                  aria-hidden
-                  style={{ transform: `rotate(${actionsOpen ? 45 : 0}deg)` }}
-                  className="inline-flex transition-transform duration-300 ease-out motion-reduce:duration-0"
-                >
-                  <Plus size={16} />
-                </span>
-              </button>
-            </MorphPopoverTrigger>
-            <MorphPopoverContent side="top" sideOffset={8} align="start" radius={12} className="w-56 p-1.5">
-              <div>
-                <button type="button" onClick={() => { fileInputRef.current?.click(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
-                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><ImagePlus size={15} /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Add image</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Attach visual context</span></span>
-                </button>
-                <button type="button" disabled={skills.length === 0} onClick={() => { openSkills(); setActionsOpen(false); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface disabled:pointer-events-none disabled:opacity-50">
-                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Sparkles size={15} /></span>
-                  <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Skills</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Insert a harness command</span></span>
-                  {skills.length > 0 && <span className="font-mono text-[10.5px] text-dim">{skills.length}</span>}
-                </button>
-                {onAddMcp !== undefined && (
-                  <button type="button" onClick={() => { setActionsOpen(false); setMcpDialogOpen(true); }} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
-                    <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Server size={15} /></span>
-                    <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Connect MCP server</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Add tools for local sessions</span></span>
-                  </button>
-                )}
-              </div>
-            </MorphPopoverContent>
-          </MorphPopover>
-          {onToggleFollowAgent !== undefined && (
-            <button
-              type="button"
-              className={cn(
-                "jingler-mode-toggle inline-flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors active:scale-[0.96]",
-                followAgent
-                  ? "is-active"
-                  : "text-muted-foreground hover:text-text",
-              )}
-              aria-label="Follow agent"
-              aria-pressed={followAgent}
-              title={
-                followAgent
-                  ? "Stop following files edited by this chat's agent"
-                  : "Follow files edited by this chat's agent"
-              }
-              onClick={() => onToggleFollowAgent(!followAgent)}
-            >
-              <MousePointer2
-                size={15}
-                aria-hidden
-                className="jingler-mode-toggle__mark"
-              />
-            </button>
-          )}
-          {compactSettings ? (
-            <MorphPopover open={settingsOpen} onOpenChange={setSettingsOpen}>
-              <MorphPopoverTrigger>
-                <button type="button" aria-label="Composer options" className="flex h-8 items-center gap-1.5 rounded-xl px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring">
-                  <SlidersHorizontal size={14} aria-hidden />
-                  <span>Options</span>
-                </button>
-              </MorphPopoverTrigger>
-              <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-72 max-w-[calc(100vw-24px)] p-2">
-                <div className="space-y-1.5">
-                  {providerCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
-                  {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
-                  <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
-                  {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
-                </div>
-              </MorphPopoverContent>
-            </MorphPopover>
-          ) : (
-            <>
-              {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              {providerCatalog && <ProviderModelBrowser catalog={providerCatalog} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
-              <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
-              {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
-            </>
-          )}
-          {/* `min-w-[8px]` so the spacer still exists after a wrap — a bare
-              `flex-1` on a wrapped line collapses to nothing and the send button
-              ends up butted against the last chip. */}
-          <div className="min-w-[8px] flex-1" />
-          {/* The send/stop control is `flex-none` and LAST in DOM order, which
-              together decide what a squeeze does: the row wraps the chips above
-              it and the primary action keeps its full size on the trailing line,
-              rather than being the thing pushed past the border. */}
-          <span className="flex-none">
-            {disabledReason !== undefined ? (
-              <Pill tone="yellow" dot>
-                {roomy ? disabledReason : "unavailable"}
-              </Pill>
-            ) : paused ? (
-            <Pill tone="yellow" dot>
-              {roomy ? "paused for approval" : "paused"}
-            </Pill>
-          ) : busy && onStop ? (
-            /* While the agent works, the button halts it. Queueing doesn't go
-               away — it moves to the keyboard: ↵ still queues a follow-up, which
-               is what the placeholder advertises. No "⎋" hint here: Escape only
-               fires while the composer is UNfocused, so it wouldn't work from
-               where the cursor is when you're reading this button.
-
-               Icon-only, so `aria-label` IS the accessible name — the label the
-               tests and screen readers both read. `title` carries the longer
-               form the visible text used to. */
-            <Button
-              variant="primary"
-              size="icon"
-              className="size-7 rounded-full"
-              aria-label="Stop"
-              title="Stop the agent"
-              onClick={onStop}
-            >
-              <Square size={12} fill="currentColor" />
-            </Button>
-          ) : (
-              <Button
-                variant="primary"
-                size="icon"
-                className="size-7 rounded-full"
-              aria-label={busy ? "Queue ↵" : "Send ↵"}
-              title={busy ? "Queue this message (↵)" : "Send (↵)"}
-              onClick={send}
-            >
-              <ArrowUp size={14} />
-            </Button>
-          )}
-          </span>
-        </div>
-        {contextControls ? (
-          <div className="flex min-w-0 items-center gap-1 px-1 pt-1">
-            {contextControls}
-          </div>
-        ) : (repo || branch || branchPending) && (
-          <div className="flex items-center justify-between gap-2 px-1.5 pt-1 font-mono text-[10.5px] text-dim">
-            {repo ? (
-              <span className="flex min-w-0 items-center gap-2">
-                <span
-                  title={`Repository: ${repo}`}
-                  className="flex min-w-0 items-center gap-1"
-                >
-                  <FolderGit2 size={12} className="flex-none" />
-                  <span className="truncate">{repo}</span>
-                </span>
-                {/* Dirty-tree badge: a clean tree says nothing. */}
-                {diff !== null && (diff.files > 0 || diff.added > 0 || diff.removed > 0) && (
-                  <span
-                    title={`Uncommitted changes: ${diff.files} file${diff.files === 1 ? "" : "s"}, +${diff.added} −${diff.removed}`}
-                    className="flex flex-none items-center gap-1"
-                    data-testid="composer-dirty"
-                  >
-                    <FileDiff size={12} className="flex-none" />
-                    <span>{diff.files}</span>
-                    <span className="text-green">+{diff.added}</span>
-                    <span className="text-red">−{diff.removed}</span>
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span />
-            )}
-            {(branch || branchPending) && (
-              <span
-                title={branchPending ? "Task branch will be named after task understanding" : `Working branch: ${branch}`}
-                className="flex min-w-0 max-w-[180px] items-center gap-1"
-                data-testid="composer-branch"
-                aria-live="polite"
-                aria-atomic="true"
-              >
-                <GitBranch size={12} className="flex-none" />
-                <span className="truncate">{branchPending ? "Naming branch…" : branch}</span>
-              </span>
-            )}
-          </div>
-        )}
+        {renderComposerToolbar()}
+        {renderContextControls()}
       </PromptInputSurface>
       {onAddMcp !== undefined && (
         <McpServerDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} add={onAddMcp} />

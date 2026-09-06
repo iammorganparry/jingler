@@ -449,7 +449,7 @@ function LinearIssueView({ session }: { readonly session: SessionSnapshot }) {
     input: { linkedIssue: session.linkedIssue, services }
   })
   const { context } = snapshot
-  const waiting = snapshot.matches("checkingConfiguration") || snapshot.matches("loadingContext") || snapshot.matches("loadingIssue") || snapshot.matches("searching") || snapshot.matches("creating") || snapshot.matches("linking") || snapshot.matches("unlinking")
+  const waiting = isIssueWaiting(snapshot)
 
   return (
     <div data-testid="linear-issue-body" className="relative flex min-h-0 flex-1 flex-col overflow-auto bg-editor">
@@ -484,3 +484,7 @@ export function IssueTab({ session }: TabProps) {
 }
 
 export default definePlugin(manifest, { views: { "linear.issue": IssueTab } })
+
+function isIssueWaiting(snapshot: LinearIssueSnapshot): boolean {
+  return snapshot.matches("checkingConfiguration") || snapshot.matches("loadingContext") || snapshot.matches("loadingIssue") || snapshot.matches("searching") || snapshot.matches("creating") || snapshot.matches("linking") || snapshot.matches("unlinking")
+}

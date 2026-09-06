@@ -177,6 +177,38 @@ export function ToolResult({
   className,
   contentClassName,
 }: ToolResultProps) {
+         function renderResultActions() {
+           return (<div className="flex items-center gap-0.5 px-2 pb-1.5">
+              {canCopy ? (
+                <ToolResultAction
+                  label={copied ? "Copied" : "Copy result"}
+                  onClick={handleCopy}
+                >
+                  {copied ? (
+                    <Check className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                </ToolResultAction>
+              ) : null}
+              {onRetry ? (
+                <ToolResultAction label="Run again" onClick={onRetry}>
+                  <RotateCcw className="size-3.5" />
+                </ToolResultAction>
+              ) : null}
+              {running && onStop ? (
+                <ToolResultAction label="Stop tool" onClick={onStop}>
+                  <CircleStop className="size-3.5" />
+                </ToolResultAction>
+              ) : null}
+              <span className="ml-auto text-[11px] text-muted-foreground/55">
+                <ActionSwapRollText value={status}>
+                  {statusLabel}
+                </ActionSwapRollText>
+              </span>
+              </div>)
+         }
+
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const triggerId = `${baseId}-trigger`;
@@ -326,35 +358,7 @@ export function ToolResult({
           </div>
 
             {canCopy || onRetry || (running && onStop) ? (
-              <div className="flex items-center gap-0.5 px-2 pb-1.5">
-              {canCopy ? (
-                <ToolResultAction
-                  label={copied ? "Copied" : "Copy result"}
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <Copy className="size-3.5" />
-                  )}
-                </ToolResultAction>
-              ) : null}
-              {onRetry ? (
-                <ToolResultAction label="Run again" onClick={onRetry}>
-                  <RotateCcw className="size-3.5" />
-                </ToolResultAction>
-              ) : null}
-              {running && onStop ? (
-                <ToolResultAction label="Stop tool" onClick={onStop}>
-                  <CircleStop className="size-3.5" />
-                </ToolResultAction>
-              ) : null}
-              <span className="ml-auto text-[11px] text-muted-foreground/55">
-                <ActionSwapRollText value={status}>
-                  {statusLabel}
-                </ActionSwapRollText>
-              </span>
-              </div>
+              renderResultActions()
             ) : null}
           </div>
         </div>

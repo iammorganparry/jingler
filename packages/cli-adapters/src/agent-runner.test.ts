@@ -339,13 +339,7 @@ describe("AgentRunner team memory", () => {
       }).pipe(Effect.provide(base))
     )
 
-    expect(captured[0]?.mcp?.memory?.name).toBe("jingler-memory")
-    expect(captured[0]?.mcp?.browser?.name).toBe("jingler-browser")
-    expect(captured[0]?.prompt).toContain("memory_navigation")
-    expect(captured[0]?.prompt).toContain("memory_workflow_status")
-    expect(captured[0]?.prompt).toContain("at most three standalone decisions")
-    expect(captured[0]?.prompt).toContain("Exclude progress narration")
-    expect(captured[0]?.prompt).toContain("Initial recall completed with no accepted matches")
+    expectMemoryTurnSpec(captured[0])
     const searchRequest = requests.find(
       (request) => request.headers.get("mcp-name") === "memory_search"
     )
@@ -2043,3 +2037,13 @@ describe("AgentRunner usage accrual", () => {
     expect(totals.afterTwo.tokens).toBe(84_200)
   })
 })
+
+const expectMemoryTurnSpec = (spec: AgentTurnSpec | undefined): void => {
+  expect(spec?.mcp?.memory?.name).toBe("jingler-memory")
+  expect(spec?.mcp?.browser?.name).toBe("jingler-browser")
+  expect(spec?.prompt).toContain("memory_navigation")
+  expect(spec?.prompt).toContain("memory_workflow_status")
+  expect(spec?.prompt).toContain("at most three standalone decisions")
+  expect(spec?.prompt).toContain("Exclude progress narration")
+  expect(spec?.prompt).toContain("Initial recall completed with no accepted matches")
+}

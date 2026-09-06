@@ -224,21 +224,7 @@ export const runControlConnection = async (
           typeof request.grant !== "string"
         )
           return
-        const clientInstanceId =
-          typeof request.clientInstanceId === "string" &&
-          clientInstanceIdPattern.test(request.clientInstanceId)
-            ? request.clientInstanceId
-            : legacyClientInstanceId(request.sessionId)
-        const attachmentGeneration =
-          Number.isSafeInteger(request.attachmentGeneration) &&
-          (request.attachmentGeneration as number) >= 1
-            ? request.attachmentGeneration as number
-            : 1
-        const controllerLeaseGeneration =
-          Number.isSafeInteger(request.controllerLeaseGeneration) &&
-          (request.controllerLeaseGeneration as number) >= 1
-            ? request.controllerLeaseGeneration as number
-            : 1
+        const { clientInstanceId, attachmentGeneration, controllerLeaseGeneration } = sessionRequestScope(request.sessionId)
         void dependencies
           .handleSessionRequest({
             relayUrl: refreshed.relayUrl,
@@ -253,24 +239,55 @@ export const runControlConnection = async (
             // The control socket remains healthy; a failed session tunnel is
             // independently retried by the desktop with a fresh scoped grant.
           })
+
+        function sessionRequestScope(sessionId: string) {
+          const clientInstanceId = typeof request.clientInstanceId === "string" &&
+            clientInstanceIdPattern.test(request.clientInstanceId)
+            ? request.clientInstanceId
+            : legacyClientInstanceId(sessionId)
+          const attachmentGeneration = Number.isSafeInteger(request.attachmentGeneration) &&
+            (request.attachmentGeneration as number) >= 1
+            ? request.attachmentGeneration as number
+            : 1
+          const controllerLeaseGeneration = Number.isSafeInteger(request.controllerLeaseGeneration) &&
+            (request.controllerLeaseGeneration as number) >= 1
+            ? request.controllerLeaseGeneration as number
+            : 1
+          return { clientInstanceId, attachmentGeneration, controllerLeaseGeneration }
+        }
       })
       socket.send(JSON.stringify({ type: "announce", discovery }))
       failures = 0
       const closed = await socket.waitForClose(signal)
       stopMessages()
-      if (closed.code === 4003 || /revoked/iu.test(closed.reason)) return "revoked"
+      if (isRevokedSocketClose(closed)) return "revoked"
     } catch (error) {
-      if (error instanceof DeviceControlError && (error.status === 403 || /revoked/iu.test(error.message))) {
+      if (isRevokedControlError(error)) {
         return "revoked"
       }
-      if (!signal.aborted) failures += 1
+      failures = failuresAfterError(failures, signal)
     } finally {
       socket?.close()
     }
+    await sleepBeforeReconnect()
+  }
+  return "stopped"
+
+  function isRevokedSocketClose(closed: { readonly code: number; readonly reason: string }) {
+    return closed.code === 4003 || /revoked/iu.test(closed.reason)
+  }
+
+  async function sleepBeforeReconnect() {
     if (!signal.aborted) {
       const backoff = Math.min(30_000, 500 * 2 ** Math.min(failures, 6))
       await dependencies.sleep(backoff, signal)
     }
   }
-  return "stopped"
+
+  function isRevokedControlError(error: unknown) {
+    return error instanceof DeviceControlError && (error.status === 403 || /revoked/iu.test(error.message))
+  }
 }
+
+const failuresAfterError = (failures: number, signal: AbortSignal): number =>
+  signal.aborted ? failures : failures + 1

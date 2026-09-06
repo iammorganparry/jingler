@@ -221,13 +221,7 @@ export const startFakeGitHubServer = async (
   >();
   const failures = new Set<"create-pr" | "update-pr">();
   const grant = options.relayGrant ?? "e2e-short-lived-github-grant";
-  let publishedPr: {
-    number: number;
-    title: string;
-    body: string;
-    head: string;
-    base: string;
-  } | null = null;
+  let publishedPr: PublishedPull | null = null;
 
   const status = (): GitHubAppConnectionStatus => ({
     enabled: true,
@@ -245,14 +239,11 @@ export const startFakeGitHubServer = async (
   });
 
   const pullJson = (pr: FakeGitHubPr) => {
-    const upperState = (pr.state ?? "OPEN").toUpperCase();
-    const merged = upperState === "MERGED";
     return {
       id: 10_000 + pr.number,
       node_id: `PR_${pr.number}`,
       number: pr.number,
-      state: merged || upperState === "CLOSED" ? "closed" : "open",
-      merged_at: merged ? (pr.updatedAt ?? "2026-07-11T00:00:00Z") : null,
+      ...pullStateFields(pr),
       draft: pr.isDraft ?? false,
       title: pr.title,
       body: pr.body ?? "",
@@ -261,17 +252,7 @@ export const startFakeGitHubServer = async (
       head: {
         ref: pr.headRefName,
         sha: `e2ehead${pr.number}`,
-        repo: {
-          id: pr.headRepository?.id ?? 301,
-          full_name:
-            pr.headRepository?.fullName ??
-            `${installation.account.login}/widget`,
-          clone_url:
-            pr.headRepository?.cloneUrl ??
-            options.cloneUrl ??
-            "https://github.com/acme/widget.git",
-          ssh_url: pr.headRepository?.sshUrl ?? null,
-        },
+        repo: pullHeadRepository(pr, installation.account.login, options.cloneUrl),
       },
       base: { ref: pr.baseRefName },
       created_at: pr.updatedAt ?? "2026-07-11T00:00:00Z",
@@ -311,45 +292,45 @@ export const startFakeGitHubServer = async (
   });
 
   let server!: Server;
-  const url = await new Promise<string>((resolve, reject) => {
-    server = createServer(async (req, res) => {
-      const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
-      const method = req.method ?? "GET";
-      requests.push({ method, path: requestUrl.pathname });
+  const handleHostedRequest = async (req: IncomingMessage, res: ServerResponse, requestUrl: URL, method: string) => {
+    if (req.headers.authorization !== `Bearer ${token}`) {
+      json(res, 401, { error: "Authentication required" });
+      return;
+    }
 
-      if (requestUrl.pathname === "/browser/install") {
-        res.writeHead(200, { "content-type": "text/html" });
-        res.end(
-          "<!doctype html><title>Fake GitHub App</title><p>Installation ready.</p>",
-        );
-        return;
-      }
+    const sessionRouteMatch = requestUrl.pathname.match(
+      /^\/api\/github\/session-routes\/([^/]+)(\/archive)?$/,
+    );
 
-      if (requestUrl.pathname.startsWith("/api/github/")) {
-        if (req.headers.authorization !== `Bearer ${token}`) {
-          json(res, 401, { error: "Authentication required" });
-          return;
-        }
-        if (requestUrl.pathname === "/api/github/status" && method === "GET") {
+    const routes = [
+      {
+        matches: () => (requestUrl.pathname === "/api/github/status" && method === "GET"),
+        handle: function githubStatus() {
           json(res, 200, status());
           return;
         }
-        if (requestUrl.pathname === "/api/github/repositories" && method === "GET") {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/repositories" && method === "GET"),
+        handle: function githubRepositories() {
           const repositories = installation.repositories ?? [
             { id: "301", fullName: `${installation.account.login}/widget` },
           ];
           json(res, 200, {
             repositories: connected && installation.status === "active"
               ? repositories.map((repository) => ({
-                  installationId: installation.id,
-                  repositoryId: repository.id,
-                  fullName: repository.fullName,
-                }))
+                installationId: installation.id,
+                repositoryId: repository.id,
+                fullName: repository.fullName,
+              }))
               : [],
           });
           return;
         }
-        if (requestUrl.pathname === "/api/github/install" && method === "GET") {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/install" && method === "GET"),
+        handle: function githubInstall() {
           const address = server.address() as AddressInfo;
           json(res, 200, {
             url: `http://127.0.0.1:${address.port}/browser/install`,
@@ -357,36 +338,40 @@ export const startFakeGitHubServer = async (
           });
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/refresh" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/refresh" &&
+          method === "POST"),
+        handle: function githubRefresh() {
           lastRefreshedAt = new Date(
             Date.parse(lastRefreshedAt ?? "2026-08-04T09:00:00.000Z") + 1_000,
           ).toISOString();
           json(res, 200, status());
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/disconnect" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/disconnect" &&
+          method === "POST"),
+        handle: function githubDisconnect() {
           connected = false;
           lastRefreshedAt = null;
           res.writeHead(204, { "cache-control": "no-store" }).end();
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/session-routes" &&
-          method === "GET"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/session-routes" &&
+          method === "GET"),
+        handle: function listSessionRoutes() {
           json(res, 200, { routes: [...sessionRoutes.values()] });
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/session-routes" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/session-routes" &&
+          method === "POST"),
+        handle: async function registerSessionRoute() {
           const body = await requestBody(req);
           const sessionId = String(body.sessionId ?? "");
           const installationId = String(body.installationId ?? "");
@@ -423,10 +408,11 @@ export const startFakeGitHubServer = async (
           json(res, 200, { route });
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/session-grant" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/session-grant" &&
+          method === "POST"),
+        handle: async function grantSession() {
           const body = await requestBody(req);
           const relaySessionId = String(body.relaySessionId ?? "");
           const route = [...sessionRoutes.values()].find(
@@ -457,15 +443,13 @@ export const startFakeGitHubServer = async (
           });
           return;
         }
-        const sessionRouteMatch = requestUrl.pathname.match(
-          /^\/api\/github\/session-routes\/([^/]+)(\/archive)?$/,
-        );
-        if (
-          sessionRouteMatch &&
+      },
+      {
+        matches: () => (sessionRouteMatch &&
           method === "POST" &&
-          sessionRouteMatch[2] === "/archive"
-        ) {
-          const relaySessionId = decodeURIComponent(sessionRouteMatch[1]!);
+          sessionRouteMatch![2] === "/archive"),
+        handle: function archiveSessionRoute() {
+          const relaySessionId = decodeURIComponent(sessionRouteMatch![1]!);
           const route = [...sessionRoutes.values()].find(
             (candidate) => candidate.relaySessionId === relaySessionId,
           );
@@ -474,8 +458,11 @@ export const startFakeGitHubServer = async (
           res.writeHead(204, { "cache-control": "no-store" }).end();
           return;
         }
-        if (sessionRouteMatch && method === "DELETE" && !sessionRouteMatch[2]) {
-          const relaySessionId = decodeURIComponent(sessionRouteMatch[1]!);
+      },
+      {
+        matches: () => (sessionRouteMatch && method === "DELETE" && !sessionRouteMatch![2]),
+        handle: function deleteSessionRoute() {
+          const relaySessionId = decodeURIComponent(sessionRouteMatch![1]!);
           const route = [...sessionRoutes.values()].find(
             (candidate) => candidate.relaySessionId === relaySessionId,
           );
@@ -483,10 +470,11 @@ export const startFakeGitHubServer = async (
           res.writeHead(204, { "cache-control": "no-store" }).end();
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/desktop-grant" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/desktop-grant" &&
+          method === "POST"),
+        handle: async function grantDesktop() {
           const body = await requestBody(req);
           if (!connected || installation.status === "suspended") {
             json(res, 403, { error: "Active installation required" });
@@ -515,10 +503,11 @@ export const startFakeGitHubServer = async (
           });
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/installation-credentials" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/installation-credentials" &&
+          method === "POST"),
+        handle: async function installationCredentials() {
           const body = await requestBody(req);
           const installationId = String(body.installationId ?? "");
           if (
@@ -531,11 +520,7 @@ export const startFakeGitHubServer = async (
             });
             return;
           }
-          const scopes = Array.isArray(body.scopes)
-            ? body.scopes.filter(
-                (scope): scope is string => typeof scope === "string",
-              )
-            : [];
+          const scopes = credentialScopes(body.scopes);
           const repositoryScope = scopes.find((scope) =>
             scope.startsWith("repository:"),
           );
@@ -559,7 +544,7 @@ export const startFakeGitHubServer = async (
           });
           if (
             repository.toLowerCase() !==
-              `${installation.account.login}/widget`.toLowerCase() ||
+            `${installation.account.login}/widget`.toLowerCase() ||
             !selectedRepositoryAvailable ||
             permissions.length === 0 ||
             !supported
@@ -580,10 +565,11 @@ export const startFakeGitHubServer = async (
           });
           return;
         }
-        if (
-          requestUrl.pathname === "/api/github/pull-requests" &&
-          method === "POST"
-        ) {
+      },
+      {
+        matches: () => (requestUrl.pathname === "/api/github/pull-requests" &&
+          method === "POST"),
+        handle: async function createHostedPull() {
           const body = await requestBody(req);
           const installationId = String(body.installationId ?? "");
           const repository = String(body.repository ?? "");
@@ -592,7 +578,7 @@ export const startFakeGitHubServer = async (
             installation.status === "suspended" ||
             installationId !== installation.id ||
             repository.toLowerCase() !==
-              `${installation.account.login}/widget`.toLowerCase()
+            `${installation.account.login}/widget`.toLowerCase()
           ) {
             json(res, 403, { error: "Repository is not accessible" });
             return;
@@ -604,6 +590,110 @@ export const startFakeGitHubServer = async (
             });
             return;
           }
+          operations.push(`pr create ${String(body.head ?? "")}`);
+          publishedPr = publishedPull(body);
+          const headRefName = publishedHeadName(publishedPr.head);
+          prs.push({
+            number: 900,
+            title: publishedPr.title,
+            body: publishedPr.body,
+            headRefName,
+            baseRefName: publishedPr.base,
+            author: { login: options.userLogin ?? "octocat" },
+          });
+          json(res, 201, { number: 900 });
+          return;
+        }
+      }
+    ];
+    const route = routes.find((candidate) => candidate.matches());
+    if (route) return route.handle();
+
+    json(res, 404, { error: "Not found" });
+    return;
+  };
+
+  const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
+    const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    const method = req.method ?? "GET";
+    requests.push({ method, path: requestUrl.pathname });
+
+    if (requestUrl.pathname === "/browser/install") {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(
+        "<!doctype html><title>Fake GitHub App</title><p>Installation ready.</p>",
+      );
+      return;
+    }
+
+    if (requestUrl.pathname.startsWith("/api/github/")) {
+      return handleHostedRequest(req, res, requestUrl, method);
+    }
+
+    const grantedPermissions = authenticateInstallation(req, res, installationTokens, connected, installation);
+    if (grantedPermissions === null) return;
+
+    const hasPermission = (required: string): boolean => {
+      const [name, level] = required.split(":");
+      if (!name || !level) return false;
+      return (
+        grantedPermissions.has(required) ||
+        (level === "read" && grantedPermissions.has(`${name}:write`))
+      );
+    };
+    const requirePermissions = (
+      ...required: ReadonlyArray<string>
+    ): boolean => {
+      if (required.every(hasPermission)) return true;
+      json(res, 403, { message: "Resource not accessible by integration" });
+      return false;
+    };
+    if (requestUrl.pathname === "/graphql" && method === "POST") {
+      return handleGraphql(req, res, requirePermissions, operations);
+    }
+
+    const repository = repositoryRequest(requestUrl, installation, res);
+    if (repository === null) return;
+    const { owner, repo, suffix } = repository;
+    const pullMatch = /^\/pulls\/(\d+)(.*)$/.exec(suffix);
+
+    const checksMatch = /^\/commits\/([^/]+)\/check-runs$/.exec(suffix);
+
+    const issueMatch = /^\/issues\/(\d+)(.*)$/.exec(suffix);
+
+    const routes = [
+      {
+        matches: () => (suffix === "" && method === "GET"),
+        handle: function readRepository() {
+          if (!requirePermissions("contents:read")) return;
+          json(res, 200, {
+            id: 301,
+            node_id: "R_widget",
+            name: repo,
+            full_name: `${owner}/${repo}`,
+            private: true,
+          });
+          return;
+        }
+      },
+      {
+        matches: () => (suffix === "/pulls" && method === "GET"),
+        handle: function listPullRequests() {
+          if (!requirePermissions("pull_requests:read")) return;
+          json(res, 200, page(prs.map(pullJson), requestUrl));
+          return;
+        }
+      },
+      {
+        matches: () => (suffix === "/pulls" && method === "POST"),
+        handle: async function createPullRequest() {
+          if (!requirePermissions("pull_requests:write")) return;
+          if (failures.delete("create-pr")) {
+            operations.push("fail create-pr");
+            json(res, 503, { message: "Injected pull request creation failure" });
+            return;
+          }
+          const body = await requestBody(req);
           operations.push(`pr create ${String(body.head ?? "")}`);
           publishedPr = {
             number: 900,
@@ -619,6 +709,8 @@ export const startFakeGitHubServer = async (
             number: 900,
             title: publishedPr.title,
             body: publishedPr.body,
+            // GitHub accepts an owner-qualified create payload but returns the
+            // branch-only ref alongside its repository identity.
             headRefName,
             baseRefName: publishedPr.base,
             author: { login: options.userLogin ?? "octocat" },
@@ -626,315 +718,240 @@ export const startFakeGitHubServer = async (
           json(res, 201, { number: 900 });
           return;
         }
-        json(res, 404, { error: "Not found" });
-        return;
-      }
+      },
+      {
+        matches: () => (pullMatch),
+        handle: async function routePullRequest() {
+          const number = Number(pullMatch![1]);
+          const tail = pullMatch![2] ?? "";
+          const pr = prs.find((candidate) => candidate.number === number);
+          if (!pr) {
+            json(res, 404, { message: "Not Found" });
+            return;
+          }
 
-      const authorization = req.headers.authorization ?? "";
-      const installationToken = authorization.startsWith("Bearer ")
-        ? authorization.slice("Bearer ".length)
-        : "";
-      const grantedPermissions = installationTokens.get(installationToken);
-      if (!grantedPermissions) {
-        json(res, 401, { message: "Bad credentials" });
-        return;
-      }
-      if (!connected) {
-        json(res, 403, { message: "Installation disconnected" });
-        return;
-      }
-      if (installation.status === "suspended") {
-        json(res, 403, { message: "Installation suspended" });
-        return;
-      }
+          const replyMatch = /^\/comments\/(\d+)\/replies$/.exec(tail);
 
-      const hasPermission = (required: string): boolean => {
-        const [name, level] = required.split(":");
-        if (!name || !level) return false;
-        return (
-          grantedPermissions.has(required) ||
-          (level === "read" && grantedPermissions.has(`${name}:write`))
-        );
-      };
-      const requirePermissions = (
-        ...required: ReadonlyArray<string>
-      ): boolean => {
-        if (required.every(hasPermission)) return true;
-        json(res, 403, { message: "Resource not accessible by integration" });
-        return false;
-      };
-      if (requestUrl.pathname === "/graphql" && method === "POST") {
-        const body = await requestBody(req);
-        const query = String(body.query ?? "");
-        const writesPullRequest =
-          query.includes("markPullRequestReadyForReview") ||
-          query.includes("resolveReviewThread") ||
-          query.includes("unresolveReviewThread");
-        if (
-          !requirePermissions(
-            writesPullRequest ? "pull_requests:write" : "pull_requests:read",
-          )
-        ) {
+          const routes = [
+            {
+              matches: () => (tail === "" && method === "GET"),
+              handle: function readPull() {
+                if (!requirePermissions("pull_requests:read")) return;
+                if (
+                  String(req.headers.accept ?? "").includes(
+                    "application/vnd.github.diff",
+                  )
+                ) {
+                  text(
+                    res,
+                    200,
+                    options.diff ??
+                    "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1 +1,2 @@\n one\n+two\n",
+                  );
+                } else {
+                  json(res, 200, pullJson(pr));
+                }
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "" && method === "PATCH"),
+              handle: async function updatePull() {
+                if (!requirePermissions("pull_requests:write")) return;
+                if (failures.delete("update-pr")) {
+                  operations.push("fail update-pr");
+                  json(res, 503, { message: "Injected pull request update failure" });
+                  return;
+                }
+                const body = await requestBody(req);
+                publishedPr = updatePublishedPull(publishedPr, number, body);
+                operations.push(`pr update ${number}`);
+                json(
+                  res,
+                  200,
+                  pullJson({
+                    ...pr,
+                    title: String(body.title ?? pr.title),
+                    body: String(body.body ?? pr.body),
+                  }),
+                );
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/files" && method === "GET"),
+              handle: function listPullFiles() {
+                if (!requirePermissions("pull_requests:read")) return;
+                json(res, 200, [
+                  {
+                    filename: "src/auth.ts",
+                    additions: pr.additions ?? 0,
+                    deletions: pr.deletions ?? 0,
+                    patch: "@@ -1 +1,2 @@\n one\n+two",
+                  },
+                ]);
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/reviews" && method === "GET"),
+              handle: function listPullReviews() {
+                if (!requirePermissions("pull_requests:read")) return;
+                json(res, 200, []);
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/reviews" && method === "POST"),
+              handle: function submitPullReview() {
+                if (!requirePermissions("pull_requests:write")) return;
+                operations.push(`pr review ${number}`);
+                json(res, 200, {});
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/requested_reviewers" && method === "GET"),
+              handle: function requestedReviewers() {
+                if (!requirePermissions("pull_requests:read")) return;
+                json(res, 200, { users: [], teams: [] });
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/merge" && method === "PUT"),
+              handle: async function mergePull() {
+                if (!requirePermissions("contents:write")) return;
+                const body = await requestBody(req);
+                operations.push(
+                  `pr merge ${number} --${String(body.merge_method ?? "merge")}`,
+                );
+                json(res, 200, { merged: true });
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/update-branch" && method === "PUT"),
+              handle: function updatePullBranch() {
+                if (!requirePermissions("pull_requests:write", "contents:write"))
+                  return;
+                operations.push(`pr update-branch ${number}`);
+                json(res, 202, { message: "Updating" });
+                return;
+              }
+            },
+            {
+              matches: () => (replyMatch && method === "POST"),
+              handle: function replyToReview() {
+                if (!requirePermissions("pull_requests:write")) return;
+                operations.push(`pr reply ${number}`);
+                json(res, 201, {});
+                return;
+              }
+            }
+          ];
+          const route = routes.find((candidate) => candidate.matches());
+          if (route) return route.handle();
+          json(res, 404, { message: "Not found" });
           return;
         }
-        if (query.includes("markPullRequestReadyForReview"))
-          operations.push("pr ready");
-        if (query.includes("resolveReviewThread"))
-          operations.push("review thread resolve");
-        if (query.includes("unresolveReviewThread"))
-          operations.push("review thread unresolve");
-        if (query.includes("reviewThreads")) {
+      },
+      {
+        matches: () => (checksMatch && method === "GET"),
+        handle: function readChecks() {
+          if (!requirePermissions("checks:read")) return;
+          const pr = prs.find(
+            (candidate) => `e2ehead${candidate.number}` === checksMatch![1],
+          );
           json(res, 200, {
-            data: {
-              repository: {
-                pullRequest: {
-                  reviewThreads: {
-                    pageInfo: { hasNextPage: false, endCursor: null },
-                    nodes: [],
-                  },
-                },
-              },
-            },
+            check_runs: (pr?.checks ?? []).map((check) => ({
+              name: check.name,
+              status: check.status ?? "completed",
+              conclusion: check.conclusion ?? "success",
+              details_url: check.detailsUrl ?? null,
+              started_at: "2026-07-11T00:00:00Z",
+              completed_at: "2026-07-11T00:00:48Z",
+            })),
           });
           return;
         }
-        json(res, 200, { data: {} });
-        return;
-      }
-
-      const repositoryMatch = /^\/repos\/([^/]+)\/([^/]+)(.*)$/.exec(
-        requestUrl.pathname,
-      );
-      if (!repositoryMatch) {
-        json(res, 404, { message: "Not found" });
-        return;
-      }
-      const owner = decodeURIComponent(repositoryMatch[1]!);
-      const repo = decodeURIComponent(repositoryMatch[2]!);
-      const suffix = repositoryMatch[3] ?? "";
-      if (owner.toLowerCase() !== installation.account.login.toLowerCase()) {
-        json(res, 403, { message: "Resource not accessible by integration" });
-        return;
-      }
-      if (suffix === "" && method === "GET") {
-        if (!requirePermissions("contents:read")) return;
-        json(res, 200, {
-          id: 301,
-          node_id: "R_widget",
-          name: repo,
-          full_name: `${owner}/${repo}`,
-          private: true,
-        });
-        return;
-      }
-
-      if (suffix === "/pulls" && method === "GET") {
-        if (!requirePermissions("pull_requests:read")) return;
-        json(res, 200, page(prs.map(pullJson), requestUrl));
-        return;
-      }
-      if (suffix === "/pulls" && method === "POST") {
-        if (!requirePermissions("pull_requests:write")) return;
-        if (failures.delete("create-pr")) {
-          operations.push("fail create-pr");
-          json(res, 503, { message: "Injected pull request creation failure" });
+      },
+      {
+        matches: () => (/^\/commits\/[^/]+\/status$/.test(suffix) && method === "GET"),
+        handle: function readCommitStatus() {
+          if (!requirePermissions("statuses:read")) return;
+          json(res, 200, { statuses: [] });
           return;
         }
-        const body = await requestBody(req);
-        operations.push(`pr create ${String(body.head ?? "")}`);
-        publishedPr = {
-          number: 900,
-          title: String(body.title ?? ""),
-          body: String(body.body ?? ""),
-          head: String(body.head ?? ""),
-          base: String(body.base ?? ""),
-        };
-        const headRefName = publishedPr.head.includes(":")
-          ? publishedPr.head.slice(publishedPr.head.indexOf(":") + 1)
-          : publishedPr.head;
-        prs.push({
-          number: 900,
-          title: publishedPr.title,
-          body: publishedPr.body,
-          // GitHub accepts an owner-qualified create payload but returns the
-          // branch-only ref alongside its repository identity.
-          headRefName,
-          baseRefName: publishedPr.base,
-          author: { login: options.userLogin ?? "octocat" },
-        });
-        json(res, 201, { number: 900 });
-        return;
-      }
-      const pullMatch = /^\/pulls\/(\d+)(.*)$/.exec(suffix);
-      if (pullMatch) {
-        const number = Number(pullMatch[1]);
-        const tail = pullMatch[2] ?? "";
-        const pr = prs.find((candidate) => candidate.number === number);
-        if (!pr) {
-          json(res, 404, { message: "Not Found" });
-          return;
-        }
-        if (tail === "" && method === "GET") {
-          if (!requirePermissions("pull_requests:read")) return;
-          if (
-            String(req.headers.accept ?? "").includes(
-              "application/vnd.github.diff",
-            )
-          ) {
-            text(
-              res,
-              200,
-              options.diff ??
-                "diff --git a/src/auth.ts b/src/auth.ts\n--- a/src/auth.ts\n+++ b/src/auth.ts\n@@ -1 +1,2 @@\n one\n+two\n",
-            );
-          } else {
-            json(res, 200, pullJson(pr));
-          }
-          return;
-        }
-        if (tail === "" && method === "PATCH") {
-          if (!requirePermissions("pull_requests:write")) return;
-          if (failures.delete("update-pr")) {
-            operations.push("fail update-pr");
-            json(res, 503, { message: "Injected pull request update failure" });
-            return;
-          }
-          const body = await requestBody(req);
-          if (publishedPr?.number === number) {
-            publishedPr = {
-              ...publishedPr,
-              title: String(body.title ?? publishedPr.title),
-              body: String(body.body ?? publishedPr.body),
-            };
-          }
-          operations.push(`pr update ${number}`);
-          json(
-            res,
-            200,
-            pullJson({
-              ...pr,
-              title: String(body.title ?? pr.title),
-              body: String(body.body ?? pr.body),
-            }),
-          );
-          return;
-        }
-        if (tail === "/files" && method === "GET") {
-          if (!requirePermissions("pull_requests:read")) return;
-          json(res, 200, [
-            {
-              filename: "src/auth.ts",
-              additions: pr.additions ?? 0,
-              deletions: pr.deletions ?? 0,
-              patch: "@@ -1 +1,2 @@\n one\n+two",
-            },
-          ]);
-          return;
-        }
-        if (tail === "/reviews" && method === "GET") {
-          if (!requirePermissions("pull_requests:read")) return;
-          json(res, 200, []);
-          return;
-        }
-        if (tail === "/reviews" && method === "POST") {
-          if (!requirePermissions("pull_requests:write")) return;
-          operations.push(`pr review ${number}`);
-          json(res, 200, {});
-          return;
-        }
-        if (tail === "/requested_reviewers" && method === "GET") {
-          if (!requirePermissions("pull_requests:read")) return;
-          json(res, 200, { users: [], teams: [] });
-          return;
-        }
-        if (tail === "/merge" && method === "PUT") {
-          if (!requirePermissions("contents:write")) return;
-          const body = await requestBody(req);
-          operations.push(
-            `pr merge ${number} --${String(body.merge_method ?? "merge")}`,
-          );
-          json(res, 200, { merged: true });
-          return;
-        }
-        if (tail === "/update-branch" && method === "PUT") {
-          if (!requirePermissions("pull_requests:write", "contents:write"))
-            return;
-          operations.push(`pr update-branch ${number}`);
-          json(res, 202, { message: "Updating" });
-          return;
-        }
-        const replyMatch = /^\/comments\/(\d+)\/replies$/.exec(tail);
-        if (replyMatch && method === "POST") {
-          if (!requirePermissions("pull_requests:write")) return;
-          operations.push(`pr reply ${number}`);
-          json(res, 201, {});
-          return;
-        }
-      }
-
-      const checksMatch = /^\/commits\/([^/]+)\/check-runs$/.exec(suffix);
-      if (checksMatch && method === "GET") {
-        if (!requirePermissions("checks:read")) return;
-        const pr = prs.find(
-          (candidate) => `e2ehead${candidate.number}` === checksMatch[1],
-        );
-        json(res, 200, {
-          check_runs: (pr?.checks ?? []).map((check) => ({
-            name: check.name,
-            status: check.status ?? "completed",
-            conclusion: check.conclusion ?? "success",
-            details_url: check.detailsUrl ?? null,
-            started_at: "2026-07-11T00:00:00Z",
-            completed_at: "2026-07-11T00:00:48Z",
-          })),
-        });
-        return;
-      }
-      if (/^\/commits\/[^/]+\/status$/.test(suffix) && method === "GET") {
-        if (!requirePermissions("statuses:read")) return;
-        json(res, 200, { statuses: [] });
-        return;
-      }
-
-      if (suffix === "/issues" && method === "GET") {
-        if (!requirePermissions("issues:read")) return;
-        json(res, 200, page(issues.map(issueJson), requestUrl));
-        return;
-      }
-      const issueMatch = /^\/issues\/(\d+)(.*)$/.exec(suffix);
-      if (issueMatch) {
-        const number = Number(issueMatch[1]);
-        const tail = issueMatch[2] ?? "";
-        const issue = issues.find((candidate) => candidate.number === number);
-        const pr = prs.find((candidate) => candidate.number === number);
-        if (tail === "" && method === "GET" && issue) {
+      },
+      {
+        matches: () => (suffix === "/issues" && method === "GET"),
+        handle: function listIssues() {
           if (!requirePermissions("issues:read")) return;
-          json(res, 200, issueJson(issue));
+          json(res, 200, page(issues.map(issueJson), requestUrl));
           return;
         }
-        if (tail === "/comments" && method === "GET") {
-          if (!requirePermissions(pr ? "pull_requests:read" : "issues:read"))
-            return;
-          json(res, 200, []);
-          return;
-        }
-        if (tail === "/comments" && method === "POST") {
-          if (!requirePermissions(pr ? "pull_requests:write" : "issues:write"))
-            return;
-          operations.push(`${pr ? "pr" : "issue"} comment ${number}`);
-          json(res, 201, {});
-          return;
-        }
-        if (tail === "" && method === "PATCH") {
-          if (!requirePermissions("issues:write")) return;
-          operations.push(`issue close ${number}`);
-          json(res, 200, issue ? { ...issueJson(issue), state: "closed" } : {});
+      },
+      {
+        matches: () => (issueMatch),
+        handle: function routeIssue() {
+          const number = Number(issueMatch![1]);
+          const tail = issueMatch![2] ?? "";
+          const issue = issues.find((candidate) => candidate.number === number);
+          const pr = prs.find((candidate) => candidate.number === number);
+
+          const routes = [
+            {
+              matches: () => (tail === "" && method === "GET" && issue),
+              handle: function readIssue() {
+                if (!requirePermissions("issues:read")) return;
+                json(res, 200, issueJson(issue!));
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/comments" && method === "GET"),
+              handle: function readIssueComments() {
+                if (!requirePermissions(pr ? "pull_requests:read" : "issues:read"))
+                  return;
+                json(res, 200, []);
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "/comments" && method === "POST"),
+              handle: function createIssueComment() {
+                if (!requirePermissions(pr ? "pull_requests:write" : "issues:write"))
+                  return;
+                operations.push(`${pr ? "pr" : "issue"} comment ${number}`);
+                json(res, 201, {});
+                return;
+              }
+            },
+            {
+              matches: () => (tail === "" && method === "PATCH"),
+              handle: function updateIssue() {
+                if (!requirePermissions("issues:write")) return;
+                operations.push(`issue close ${number}`);
+                json(res, 200, issue ? { ...issueJson(issue!), state: "closed" } : {});
+                return;
+              }
+            }
+          ];
+          const route = routes.find((candidate) => candidate.matches());
+          if (route) return route.handle();
+          json(res, 404, { message: "Not found" });
           return;
         }
       }
-
-      json(res, 404, { message: "Not found" });
-    });
+    ];
+    const route = routes.find((candidate) => candidate.matches());
+    if (route) return route.handle();
+    json(res, 404, { message: "Not found" });
+    return;
+  };
+  const url = await new Promise<string>((resolve, reject) => {
+    server = createServer(handleRequest);
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address() as AddressInfo;
@@ -979,3 +996,140 @@ export const startFakeGitHubServer = async (
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 };
+
+function pullHeadRepository(pr: FakeGitHubPr, login: string, cloneUrl: string | undefined) {
+  return {
+    id: pr.headRepository?.id ?? 301,
+    full_name:
+      pr.headRepository?.fullName ??
+      `${login}/widget`,
+    clone_url:
+      pr.headRepository?.cloneUrl ??
+      cloneUrl ??
+      "https://github.com/acme/widget.git",
+    ssh_url: pr.headRepository?.sshUrl ?? null,
+  };
+}
+
+async function handleGraphql(req: IncomingMessage, res: ServerResponse, requirePermissions: (...permissions: readonly string[]) => boolean, operations: string[]) {
+  const body = await requestBody(req);
+  const query = String(body.query ?? "");
+  const writesPullRequest =
+    query.includes("markPullRequestReadyForReview") ||
+    query.includes("resolveReviewThread") ||
+    query.includes("unresolveReviewThread");
+  if (
+    !requirePermissions(
+      writesPullRequest ? "pull_requests:write" : "pull_requests:read",
+    )
+  ) {
+    return;
+  }
+  if (query.includes("markPullRequestReadyForReview"))
+    operations.push("pr ready");
+  if (query.includes("resolveReviewThread"))
+    operations.push("review thread resolve");
+  if (query.includes("unresolveReviewThread"))
+    operations.push("review thread unresolve");
+  if (query.includes("reviewThreads")) {
+    json(res, 200, {
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: [],
+            },
+          },
+        },
+      },
+    });
+    return;
+  }
+  json(res, 200, { data: {} });
+  return;
+}
+
+function authenticateInstallation(req: IncomingMessage, res: ServerResponse, installationTokens: Map<string, ReadonlySet<string>>, connected: boolean, installation: GitHubAppInstallation): ReadonlySet<string> | null {
+  const authorization = req.headers.authorization ?? "";
+  const installationToken = authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : "";
+  const grantedPermissions = installationTokens.get(installationToken);
+  if (!grantedPermissions) {
+    json(res, 401, { message: "Bad credentials" });
+    return null;
+  }
+  if (!connected) {
+    json(res, 403, { message: "Installation disconnected" });
+    return null;
+  }
+  if (installation.status === "suspended") {
+    json(res, 403, { message: "Installation suspended" });
+    return null;
+  }
+
+  return grantedPermissions;
+}
+
+function repositoryRequest(requestUrl: URL, installation: GitHubAppInstallation, res: ServerResponse) {
+  const repositoryMatch = /^\/repos\/([^/]+)\/([^/]+)(.*)$/.exec(
+    requestUrl.pathname,
+  );
+  if (!repositoryMatch) {
+    json(res, 404, { message: "Not found" });
+    return null;
+  }
+  const owner = decodeURIComponent(repositoryMatch[1]!);
+  const repo = decodeURIComponent(repositoryMatch[2]!);
+  const suffix = repositoryMatch[3] ?? "";
+  if (owner.toLowerCase() !== installation.account.login.toLowerCase()) {
+    json(res, 403, { message: "Resource not accessible by integration" });
+    return null;
+  }
+
+  return { owner, repo, suffix };
+}
+
+function pullStateFields(pr: FakeGitHubPr) {
+  const upperState = (pr.state ?? "OPEN").toUpperCase();
+  const merged = upperState === "MERGED";
+  return {
+    state: merged || upperState === "CLOSED" ? "closed" : "open",
+    merged_at: merged ? (pr.updatedAt ?? "2026-07-11T00:00:00Z") : null,
+  };
+}
+
+function credentialScopes(scopes: unknown): string[] {
+  return Array.isArray(scopes)
+    ? scopes.filter(
+      (scope): scope is string => typeof scope === "string",
+    )
+    : [];
+}
+
+type PublishedPull = {
+  number: number;
+  title: string;
+  body: string;
+  head: string;
+  base: string;
+};
+
+function publishedPull(body: Record<string, unknown>): PublishedPull {
+  return { number: 900, title: String(body.title ?? ""), body: String(body.body ?? ""), head: String(body.head ?? ""), base: String(body.base ?? "") };
+}
+function publishedHeadName(head: string): string {
+  return head.includes(":") ? head.slice(head.indexOf(":") + 1) : head;
+}
+
+function updatePublishedPull(publishedPr: PublishedPull | null, number: number, body: Record<string, unknown>): PublishedPull | null {
+  if (publishedPr?.number === number) {
+    publishedPr = {
+      ...publishedPr,
+      title: String(body.title ?? publishedPr.title),
+      body: String(body.body ?? publishedPr.body),
+    };
+  }
+  return publishedPr;
+}

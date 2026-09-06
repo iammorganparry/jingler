@@ -47,15 +47,15 @@ import {
   disposeChatActor,
   getConversationActor
 } from "./conversation-registry.js"
-import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft } from "./draft-store.js"
-import { useSessionDiffs } from "./diff-presence.js"
+import { clearDraft, getDraft, markDraftSeeded, seedDraftOnce, setDraft, useDraft, type Draft } from "./draft-store.js"
+import { useSessionDiffs, type LiveDiffStat } from "./diff-presence.js"
 import { takeFirstMessage } from "./first-message-store.js"
 import {
   codeReferenceDisplayLabel,
   serializeCodeReferences
 } from "./code-reference.js"
-import { useConversation } from "./use-conversation.js"
-import { MAIN_FLEET_AGENT, useSubagentFleet } from "./use-subagent-fleet.js"
+import { useConversation, type Conversation } from "./use-conversation.js"
+import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from "./use-subagent-fleet.js"
 import {
   publishSubagentTabs,
   recentSubagentNodes,
@@ -64,7 +64,7 @@ import {
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
-import { useFileBrowser } from "./use-file-browser.js"
+import { useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
@@ -204,7 +204,7 @@ export function ConversationPane({
   )
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
-    const reviewId = convo.plannotator?.review?.reviewId ?? null
+    const reviewId = plannotatorReviewId(convo.plannotator)
     if (reviewId === null || reviewId === presentedPlannotatorReview.current) return
     presentedPlannotatorReview.current = reviewId
     if (
@@ -213,7 +213,7 @@ export function ConversationPane({
     ) {
       onPlanDraftAvailable()
     }
-  }, [activeChat.id, convo.plannotator?.review?.reviewId, onPlanDraftAvailable])
+  }, [activeChat.id, plannotatorReviewId(convo.plannotator), onPlanDraftAvailable])
   // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
   // memoised transcript turns don't re-render while a turn streams. Adopt updates
   // this session in place; fork publishes a NEW worktree session into the sidebar
@@ -295,32 +295,14 @@ export function ConversationPane({
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const providerSelection = {
-    ...convo,
-    connectionSelectionRequired: session.connectionSelectionRequired,
-    modelSelectionRequired: session.modelSelectionRequired,
-    targetId: session.environmentId ?? "desktop",
-    target: environments.find((environment) => environment.id === session.environmentId)
-  }
-  const providerRecovery = providerCatalog
-    ? providerRecoveryOf(providerCatalog, providerSelection)
-    : undefined
-  // Reconnecting a removed account mints a new connection id, so the pinned one
-  // never reappears and the recovery card would stay up after the operator has
-  // already fixed the problem. When the refreshed catalog has an unambiguous
-  // replacement, rebind through the same SET_MODEL path the picker uses.
-  const rebindConnectionId = providerCatalog
-    ? providerRebindOf(providerCatalog, providerSelection)
-    : undefined
+  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(session, convo, providerCatalog, environments)
   const { providerId: convoProviderId, modelId: convoModelId, setModel } = convo
   useEffect(() => {
     if (rebindConnectionId === undefined) return
     if (convoProviderId == null || convoModelId == null) return
     setModel(rebindConnectionId, convoProviderId, convoModelId)
   }, [rebindConnectionId, convoProviderId, convoModelId, setModel])
-  const composerDisabledReason = typeof providerRecovery === "string"
-    ? providerRecovery
-    : providerRecovery?.message
+
   const mutationRecovery = useMutation({
     mutationFn: (input: { readonly runId: string; readonly callId: string }) =>
       rpc.sessionsResolveRuntimeRecovery(session.id, input.runId, input.callId),
@@ -332,10 +314,8 @@ export function ConversationPane({
   // conversation, never a PR description, plan or asset preview — which render the
   // same markdown but stay put, per the setting's stated scope. Elements outside
   // this wrapper never see the var, so their calc() falls back to 1×.
-  const fontScale = clampFontScale(providersQuery.data?.fontScale)
-  const handoffModel = providerCatalog?.connections
-    .flatMap(({ models }) => models)
-    .find(({ id }) => id === convo.modelId)?.label ?? null
+  const fontScale = configuredFontScale(providersQuery.data)
+  const handoffModel = handoffModelLabel(providerCatalog, convo)
   const bgTasks = useBackgroundTasks(session.id)
 
   /**
@@ -377,8 +357,7 @@ export function ConversationPane({
     refetchInterval: (query) =>
       requested || query.state.data?.preparing || convo.busy ? 1500 : false
   })
-  const preparing = contextQuery.data?.preparing ?? false
-  const digestReady = contextQuery.data?.digestReady ?? false
+  const { preparing, digestReady } = contextReadiness(contextQuery.data)
   // The manual request is only needed until the manager reports the fiber it
   // started; after that `preparing` is the authoritative signal.
   useEffect(() => {
@@ -459,7 +438,7 @@ export function ConversationPane({
     }
   }, [activeChat.id, session.id, session.initialPrompt])
 
-  const pendingReviewId = convo.plannotator?.review?.reviewId ?? null
+  const pendingReviewId = plannotatorReviewId(convo.plannotator)
   const sendPrompt: typeof convo.sendPrompt = (text, images) => {
     // Structured ranges stay out of the editable textarea, but every harness
     // receives the same deterministic plain-text context at the turn boundary.
@@ -552,28 +531,7 @@ export function ConversationPane({
 
   useEffect(() => {
     if (!paneFocused) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
-      const target = event.target
-      if (
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT")
-      ) return
-      if (event.key.toLowerCase() === "w") {
-        event.preventDefault()
-        closeChat(activeChat.id)
-        return
-      }
-      const index = Number(event.key) - 1
-      if (index >= 0 && index < Math.min(session.chats.length, 9)) {
-        event.preventDefault()
-        selectChat(session.chats[index]!.id)
-      }
-    }
+    const onKeyDown = conversationChatShortcut(closeChat, activeChat, session, selectChat)
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [session.id, session.chats, activeChat.id, paneFocused])
@@ -621,42 +579,8 @@ export function ConversationPane({
     return outcome
   })
   useEffect(() => setSubagentControlOutcome(null), [fleet.selectedNode?.id])
-  const childTranscriptQuery = useQuery({
-    queryKey: [
-      "subagent-transcript",
-      session.id,
-      activeChat.id,
-      fleet.selectedNode?.parentPiSessionId,
-      fleet.selectedNode?.runId
-    ],
-    queryFn: () => rpc.agentSubagentTranscript(
-      session.id,
-      activeChat.id,
-      fleet.selectedNode!.parentPiSessionId,
-      fleet.selectedNode!.runId
-    ),
-    enabled:
-      fleet.selectedNode !== null &&
-      fleet.selectedLegacyAgent === null &&
-      fleet.selectedNode.sessionFile !== null
-  })
-  useEffect(() => {
-    if (
-      fleet.selectedNode?.status === "running" &&
-      fleet.selectedNode.sessionFile !== null
-    ) void childTranscriptQuery.refetch()
-  }, [
-    childTranscriptQuery.refetch,
-    fleet.selectedNode?.id,
-    fleet.selectedNode?.sessionFile,
-    fleet.selectedNode?.status,
-    fleet.selectedNode?.updatedAt
-  ])
-  // Selecting a Fleet agent redirects the file browser's Follow to THAT
-  // agent's edits: its file activity is derived from its own transcript with
-  // the same pure deriver the main chat uses, and published as the session's
-  // fleet override (which wins in `useAgentFileActivity`). Cleared whenever
-  // the selection returns to Main — Follow then tracks the main chat again.
+  const childTranscriptQuery = useFleetChildTranscript(session, fleet, activeChat.id)
+
   const selectedChildMessages: ReadonlyArray<Message> | null = useMemo(
     () =>
       fleet.selectedNode === null
@@ -764,18 +688,7 @@ export function ConversationPane({
   )
   // The plan surface persists for as long as a plan exists. Plannotator owns
   // review actions while pending, then stays read-only as the checklist advances.
-  const planSurface = plannotatorDocument !== null
-    ? (
-        <PlanReview
-          key={pendingReviewId ?? "plan"}
-          document={plannotatorDocument}
-          canApprove={pendingReviewId !== null}
-          host={window.jingler}
-          onApprove={() => decideReview(true)}
-          onRevise={(feedback) => decideReview(false, feedback)}
-        />
-      )
-    : null
+  const planSurface = renderPlanSurface(plannotatorDocument, pendingReviewId, decideReview)
 
   if (view === "plan") {
     return (
@@ -811,94 +724,15 @@ export function ConversationPane({
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {continuationEnvironmentId !== null && (
-        <div
-          role="alert"
-          className="flex flex-none items-center gap-2 border-b border-yellow/30 bg-yellow/[0.06] px-3 py-2 text-[11px] text-fg"
-        >
-          <span className="min-w-0 flex-1">
-            {convo.busy
-              ? "Stop the active turn, checkpoint its current work, and continue as a new session on the selected environment?"
-              : "This session already has work. Continue it as a new session on the selected environment?"}
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              if (convo.busy) {
-                setHandoffAfterStop({
-                  environmentId: continuationEnvironmentId
-                })
-                convo.stop()
-                return
-              }
-              continueEnvironmentMutation.mutate(continuationEnvironmentId)
-            }}
-            disabled={
-              continueEnvironmentMutation.isPending || handoffAfterStop !== null
-            }
-            className="flex-none rounded border border-border px-2 py-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-          >
-            {convo.busy ? "Stop and continue there" : "Continue there"}
-          </button>
-          <button
-            type="button"
-            aria-label="Cancel environment continuation"
-            onClick={() => {
-              setContinuationEnvironmentId(null)
-              setHandoffAfterStop(null)
-            }}
-            className="flex-none rounded px-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {environmentMutation.error !== null &&
-        !(
-          rpcFailureTag(environmentMutation.error) === "EnvironmentHandoffError" &&
-          rpcFailureReason(environmentMutation.error) === "has-work"
-        ) && (
-          <div
-            role="alert"
-            className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
-          >
-            <span className="min-w-0 flex-1">
-              {rpcFailureMessage(
-                environmentMutation.error,
-                "Could not update the session environment."
-              )}
-            </span>
-            <button
-              type="button"
-              aria-label="Dismiss environment error"
-              onClick={() => environmentMutation.reset()}
-              className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              ×
-            </button>
-          </div>
-        )}
-      {continueEnvironmentMutation.error !== null && (
-        <div
-          role="alert"
-          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
-        >
-          <span className="min-w-0 flex-1">
-            {rpcFailureMessage(
-              continueEnvironmentMutation.error,
-              "Could not continue the session on that environment."
-            )}
-          </span>
-          <button
-            type="button"
-            aria-label="Dismiss environment continuation error"
-            onClick={() => continueEnvironmentMutation.reset()}
-            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      {renderEnvironmentNotices({
+              convo,
+              continuationEnvironmentId,
+              handoffAfterStop,
+              continueEnvironmentMutation,
+              environmentMutation,
+              setHandoffAfterStop,
+              setContinuationEnvironmentId
+            })}
       {typeof providerRecovery !== "string" && providerRecovery !== undefined && (
         <RuntimeRecoveryCard
           title={providerRecovery.title}
@@ -946,201 +780,56 @@ export function ConversationPane({
         // mode, and environment pickers are omitted — those are main-turn
         // choices — and the composer's follow toggle points at this agent.
         <>
-          <FleetAgentView
-            node={fleet.selectedNode}
-            messages={
-              fleet.selectedLegacyAgent === null
-                ? (childTranscriptQuery.data ?? [])
-                : [fleet.selectedLegacyAgent.message]
-            }
-            providerId={session.providerId}
-            controlOutcome={subagentControlOutcome}
-            onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
-            loading={
-              fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading
-            }
-            error={
-              fleet.selectedLegacyAgent === null && childTranscriptQuery.error
-                ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
-                : null
-            }
-          />
+          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile)}
           {/* Same gutter + centered max-width as the transcript column above —
               a full-bleed composer read as a different surface entirely. */}
           <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
           <div className="mx-auto w-full max-w-[760px]">
-          <Composer
-            repo={session.repo}
-            branch={session.branch}
-            onAddMcp={addLocalMcp}
-            branchPending={session.semanticBranchPending === true}
-            busy={
-              fleet.selectedNode.status === "queued" ||
-              fleet.selectedNode.status === "running" ||
-              fleet.selectedNode.status === "paused" ||
-              fleet.selectedNode.status === "needs-attention"
-            }
-            placeholder={
-              fleet.selectedNode.status === "paused"
-                ? `Resume ${fleet.selectedNode.agent} with a continuation…`
-                : fleet.selectedNode.attention
-                  ? `Reply to ${fleet.selectedNode.agent}…`
-                  : `Steer ${fleet.selectedNode.agent}…`
-            }
-            disabledReason={
-              fleet.selectedLegacyAgent !== null
-                ? "Inline agents are watch-only — steer them through the main chat."
-                : undefined
-            }
-            onSend={(text) => {
-              const node = fleet.selectedNode
-              if (node === null || fleet.selectedLegacyAgent !== null) return
-              controlSubagent(
-                node,
-                node.status === "paused"
-                  ? "resume"
-                  : node.attention
-                    ? "reply"
-                    : "steer",
-                text,
-                node.attention?.requestId
-              ).catch(() => {})
-            }}
-            onStop={() => {
-              const node = fleet.selectedNode
-              if (node === null) return
-              const legacy = fleet.legacyAgentFor(node)
-              if (legacy !== null) {
-                if (legacy.status === "working") convo.stopSubagent(legacy.id)
-                return
-              }
-              controlSubagent(node, "stop").catch(() => {})
-            }}
-            followAgent={fileBrowser.followEnabled}
-            onToggleFollowAgent={toggleFollowAgent}
-            autoFocus={paneFocused}
-            focusKey={fleet.selectedNode.id}
-          />
+          {renderFleetComposer({
+                      session,
+                      addLocalMcp,
+                      fleet,
+                      controlSubagent,
+                      convo,
+                      fileBrowser,
+                      toggleFollowAgent,
+                      paneFocused
+                    })}
           </div>
           </div>
         </>
       ) : (
-        <ConversationView
-          messages={convo.messages}
-          hasMoreHistory={convo.hasMoreHistory}
-          loadingHistory={convo.loadingHistory}
-          onLoadEarlier={convo.loadOlder}
-          mode={convo.mode}
-          skills={convo.skills}
-          files={convo.files}
-          onAddMcp={addLocalMcp}
-          paused={convo.paused}
-          branch={session.branch}
-          branchPending={session.semanticBranchPending === true}
-          repo={session.repo}
-          diff={liveDiffs[session.id] ?? null}
-          environments={environments}
-          environmentId={session.environmentId}
-          environmentPending={environmentMutation.isPending}
-          onSetEnvironment={(environmentId) => {
-            if (convo.busy && environmentId !== session.environmentId) {
-              // The persisted Session can lag the renderer's live actor during
-              // its first turn. A running checkout is never safe to reassign in
-              // place, so enter the explicit stop/checkpoint/continue flow here
-              // instead of waiting for stale counters to catch up.
-              setContinuationEnvironmentId(environmentId)
-              return
-            }
-            environmentMutation.mutate(environmentId)
-          }}
-          busy={convo.busy}
-          tokens={convo.tokens}
-          contextTriggerAt={contextQuery.data?.triggerAt ?? null}
-          contextPhase={contextQuery.data?.phase ?? "unknown"}
-          contextPreparing={preparing || requested}
-          contextDigestReady={digestReady}
-          contextStalled={contextQuery.data?.stalled ?? false}
-          contextHeld={contextQuery.data?.held ?? false}
-          contextHeldReason={contextQuery.data?.heldReason ?? null}
-          onCompactNow={() => {
-            setRequested(true)
-            void rpc
-              .contextCompactNow(session.id, activeChat.id)
-              .catch(() => setRequested(false))
-          }}
-          runStartedAt={convo.runStartedAt}
-          queued={convo.queued}
-          onUnqueue={convo.unqueue}
-          onSendNow={convo.sendNow}
-          onEditQueued={convo.editQueued}
-          onHandoffQueued={handoffQueued}
-          steeringId={convo.steeringId}
-          handoffHint={
-            handoffModel
-              ? `Hand off — run this in a new chat on ${handoffModel}`
-              : "Hand off — run this in a new chat"
-          }
-          providerCatalog={providerCatalog}
-          connectionId={convo.connectionId}
-          providerId={convo.providerId}
-          modelId={convo.modelId}
-          composerDisabledReason={composerDisabledReason}
-          onSetModel={({ connectionId, providerId, modelId }) =>
-            convo.setModel(connectionId, providerId, modelId)
-          }
-          onSend={sendPrompt}
-          onStop={convo.stop}
-          onDecideGate={convo.decideGate}
-          onSetMode={convo.setMode}
-          reasoningEffort={convo.reasoning?.effort}
-          thinkingEnabled={convo.reasoning?.enabled}
-          onSetReasoning={convo.setReasoning}
-          question={convo.question}
-          onAnswerQuestion={convo.answerQuestion}
-          onOpenPlanReview={onOpenPlanReview}
-          onForkOntoBranch={onForkOntoBranchStable}
-          onAdoptBranch={onAdoptBranchStable}
-          planDocument={plannotatorDocument}
-          draft={draft.text}
-          // Merge against the LIVE draft, never the render-time `draft` closure:
-          // on send the composer fires onSend → setValue("") → setAttachments([])
-          // in one go, so a stale spread would resurrect the text it just sent.
-          onDraftChange={(text) =>
-            setDraft(activeChat.id, { ...getDraft(activeChat.id), text })
-          }
-          draftAttachments={draft.attachments}
-          onDraftAttachmentsChange={(attachments) =>
-            setDraft(activeChat.id, { ...getDraft(activeChat.id), attachments })
-          }
-          draftCodeReferences={draftCodeReferences}
-          onDraftCodeReferenceRemove={(index) => {
-            const current = getDraft(activeChat.id)
-            setDraft(activeChat.id, {
-              ...current,
-              references: current.references.filter((_, currentIndex) => currentIndex !== index)
-            })
-          }}
-          onDraftCodeReferencesClear={() =>
-            setDraft(activeChat.id, { ...getDraft(activeChat.id), references: [] })
-          }
-          // The Plan face returns early above, so reaching here already means the
-          // transcript is on screen — only the focused pane still has to be checked.
-          autoFocusComposer={paneFocused}
-          focusKey={activeChat.id}
-          followAgent={fileBrowser.followEnabled}
-          onToggleFollowAgent={toggleFollowAgent}
-          archived={
-            session.archived
-              ? {
-                  reason: session.archiveReason ?? "merged",
-                  prNumber: session.prNumber,
-                  base: session.baseBranch,
-                  onRestore: () => onRestore?.(session.id),
-                  onDelete: () => onDelete?.(session.id)
-                }
-              : undefined
-          }
-        />
+        renderMainConversation({
+                convo,
+                addLocalMcp,
+                session,
+                liveDiffs,
+                environments,
+                environmentMutation,
+                setContinuationEnvironmentId,
+                contextQuery,
+                preparing,
+                requested,
+                digestReady,
+                setRequested,
+                activeChat,
+                handoffQueued,
+                handoffModel,
+                providerCatalog,
+                composerDisabledReason,
+                sendPrompt,
+                onOpenPlanReview,
+                onForkOntoBranchStable,
+                onAdoptBranchStable,
+                plannotatorDocument,
+                draft,
+                draftCodeReferences,
+                paneFocused,
+                fileBrowser,
+                toggleFollowAgent,
+                onRestore,
+                onDelete
+              })
       )}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
@@ -1197,4 +886,493 @@ export function ConversationPane({
     </AttachmentSourceProvider>
     </OpenAssetProvider>
   )
+}
+
+function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined) {
+  return <FleetAgentView
+    node={fleet.selectedNode!}
+    messages={fleet.selectedLegacyAgent === null
+      ? (childTranscriptQuery.data ?? [])
+      : [fleet.selectedLegacyAgent.message]}
+    providerId={session.providerId}
+    controlOutcome={subagentControlOutcome}
+    onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+    loading={fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading}
+    error={fleet.selectedLegacyAgent === null && childTranscriptQuery.error
+      ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
+      : null} />
+}
+
+function handoffModelLabel(providerCatalog: ProviderCatalog | null | undefined, convo: Conversation) {
+  return providerCatalog?.connections
+    .flatMap(({ models }) => models)
+    .find(({ id }) => id === convo.modelId)?.label ?? null
+}
+
+function renderFleetComposer({
+  session,
+  addLocalMcp,
+  fleet,
+  controlSubagent,
+  convo,
+  fileBrowser,
+  toggleFollowAgent,
+  paneFocused
+}: {
+  session: Session;
+  addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
+  fleet: SubagentFleetController;
+  controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>;
+  convo: Conversation;
+  fileBrowser: FileBrowserController;
+  toggleFollowAgent: (enabled: boolean) => void;
+  paneFocused: boolean;
+}) {
+  return <Composer
+    repo={session.repo}
+    branch={session.branch}
+    onAddMcp={addLocalMcp}
+    branchPending={session.semanticBranchPending === true}
+    busy={fleet.selectedNode!.status === "queued" ||
+      fleet.selectedNode!.status === "running" ||
+      fleet.selectedNode!.status === "paused" ||
+      fleet.selectedNode!.status === "needs-attention"}
+    placeholder={fleet.selectedNode!.status === "paused"
+      ? `Resume ${fleet.selectedNode!.agent} with a continuation…`
+      : fleet.selectedNode!.attention
+        ? `Reply to ${fleet.selectedNode!.agent}…`
+        : `Steer ${fleet.selectedNode!.agent}…`}
+    disabledReason={fleet.selectedLegacyAgent !== null
+      ? "Inline agents are watch-only — steer them through the main chat."
+      : undefined}
+    onSend={(text) => {
+      const node = fleet.selectedNode
+      if (node === null || fleet.selectedLegacyAgent !== null) return
+      controlSubagent(
+        node,
+        node.status === "paused"
+          ? "resume"
+          : node.attention
+            ? "reply"
+            : "steer",
+        text,
+        node.attention?.requestId
+      ).catch(() => { })
+    }}
+    onStop={() => {
+      const node = fleet.selectedNode
+      if (node === null) return
+      const legacy = fleet.legacyAgentFor(node)
+      if (legacy !== null) {
+        if (legacy.status === "working") convo.stopSubagent(legacy.id)
+        return
+      }
+      controlSubagent(node, "stop").catch(() => { })
+    }}
+    followAgent={fileBrowser.followEnabled}
+    onToggleFollowAgent={toggleFollowAgent}
+    autoFocus={paneFocused}
+    focusKey={fleet.selectedNode!.id} />
+}
+
+function renderMainConversation({
+  convo,
+  addLocalMcp,
+  session,
+  liveDiffs,
+  environments,
+  environmentMutation,
+  setContinuationEnvironmentId,
+  contextQuery,
+  preparing,
+  requested,
+  digestReady,
+  setRequested,
+  activeChat,
+  handoffQueued,
+  handoffModel,
+  providerCatalog,
+  composerDisabledReason,
+  sendPrompt,
+  onOpenPlanReview,
+  onForkOntoBranchStable,
+  onAdoptBranchStable,
+  plannotatorDocument,
+  draft,
+  draftCodeReferences,
+  paneFocused,
+  fileBrowser,
+  toggleFollowAgent,
+  onRestore,
+  onDelete
+}: {
+  convo: Conversation;
+  addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
+  session: Session;
+  liveDiffs: Record<string, LiveDiffStat>;
+  environments: Parameters<typeof ConversationPane>[0]["environments"];
+  environmentMutation: EnvironmentMutationView;
+  setContinuationEnvironmentId: (value: string | undefined | null) => void;
+  contextQuery: { data: Awaited<ReturnType<typeof rpc.contextState>> | undefined };
+  preparing: boolean;
+  requested: boolean;
+  digestReady: boolean;
+  setRequested: (value: boolean) => void;
+  activeChat: Session["chats"][number];
+  handoffQueued: (id: string) => void;
+  handoffModel: string | null;
+  providerCatalog: ProviderCatalog | null | undefined;
+  composerDisabledReason: string | undefined;
+  sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
+  onOpenPlanReview: ((stepId?: string) => void) | undefined;
+  onForkOntoBranchStable: () => Promise<void>;
+  onAdoptBranchStable: () => Promise<void>;
+  plannotatorDocument: import("@jingler/core").PlanDocument | null;
+  draft: Draft;
+  draftCodeReferences: { path: string; startLine: number; endLine: number; label: string }[];
+  paneFocused: boolean;
+  fileBrowser: FileBrowserController;
+  toggleFollowAgent: (enabled: boolean) => void;
+  onRestore: ((sessionId: string) => void) | undefined;
+  onDelete: ((sessionId: string) => void) | undefined;
+}) {
+  return <ConversationView
+    messages={convo.messages}
+    hasMoreHistory={convo.hasMoreHistory}
+    loadingHistory={convo.loadingHistory}
+    onLoadEarlier={convo.loadOlder}
+    mode={convo.mode}
+    skills={convo.skills}
+    files={convo.files}
+    onAddMcp={addLocalMcp}
+    paused={convo.paused}
+    branch={session.branch}
+    branchPending={session.semanticBranchPending === true}
+    repo={session.repo}
+    diff={liveDiffs[session.id] ?? null}
+    environments={environments}
+    environmentId={session.environmentId}
+    environmentPending={environmentMutation.isPending}
+    onSetEnvironment={(environmentId) => {
+      if (convo.busy && environmentId !== session.environmentId) {
+        // The persisted Session can lag the renderer's live actor during
+        // its first turn. A running checkout is never safe to reassign in
+        // place, so enter the explicit stop/checkpoint/continue flow here
+        // instead of waiting for stale counters to catch up.
+        setContinuationEnvironmentId(environmentId)
+        return
+      }
+      environmentMutation.mutate(environmentId)
+    }}
+    busy={convo.busy}
+    tokens={convo.tokens}
+    contextTriggerAt={contextQuery.data?.triggerAt ?? null}
+    contextPhase={contextQuery.data?.phase ?? "unknown"}
+    contextPreparing={preparing || requested}
+    contextDigestReady={digestReady}
+    contextStalled={contextQuery.data?.stalled ?? false}
+    contextHeld={contextQuery.data?.held ?? false}
+    contextHeldReason={contextQuery.data?.heldReason ?? null}
+    onCompactNow={() => {
+      setRequested(true)
+      void rpc
+        .contextCompactNow(session.id, activeChat.id)
+        .catch(() => setRequested(false))
+    }}
+    runStartedAt={convo.runStartedAt}
+    queued={convo.queued}
+    onUnqueue={convo.unqueue}
+    onSendNow={convo.sendNow}
+    onEditQueued={convo.editQueued}
+    onHandoffQueued={handoffQueued}
+    steeringId={convo.steeringId}
+    handoffHint={handoffModel
+      ? `Hand off — run this in a new chat on ${handoffModel}`
+      : "Hand off — run this in a new chat"}
+    providerCatalog={providerCatalog}
+    connectionId={convo.connectionId}
+    providerId={convo.providerId}
+    modelId={convo.modelId}
+    composerDisabledReason={composerDisabledReason}
+    onSetModel={({ connectionId, providerId, modelId }) => convo.setModel(connectionId, providerId, modelId)}
+    onSend={sendPrompt}
+    onStop={convo.stop}
+    onDecideGate={convo.decideGate}
+    onSetMode={convo.setMode}
+    reasoningEffort={convo.reasoning?.effort}
+    thinkingEnabled={convo.reasoning?.enabled}
+    onSetReasoning={convo.setReasoning}
+    question={convo.question}
+    onAnswerQuestion={convo.answerQuestion}
+    onOpenPlanReview={onOpenPlanReview}
+    onForkOntoBranch={onForkOntoBranchStable}
+    onAdoptBranch={onAdoptBranchStable}
+    planDocument={plannotatorDocument}
+    draft={draft.text}
+    // Merge against the LIVE draft, never the render-time `draft` closure:
+    // on send the composer fires onSend → setValue("") → setAttachments([])
+    // in one go, so a stale spread would resurrect the text it just sent.
+    onDraftChange={(text) => setDraft(activeChat.id, { ...getDraft(activeChat.id), text })}
+    draftAttachments={draft.attachments}
+    onDraftAttachmentsChange={(attachments) => setDraft(activeChat.id, { ...getDraft(activeChat.id), attachments })}
+    draftCodeReferences={draftCodeReferences}
+    onDraftCodeReferenceRemove={(index) => {
+      const current = getDraft(activeChat.id)
+      setDraft(activeChat.id, {
+        ...current,
+        references: current.references.filter((_, currentIndex) => currentIndex !== index)
+      })
+    }}
+    onDraftCodeReferencesClear={() => setDraft(activeChat.id, { ...getDraft(activeChat.id), references: [] })}
+    // The Plan face returns early above, so reaching here already means the
+    // transcript is on screen — only the focused pane still has to be checked.
+    autoFocusComposer={paneFocused}
+    focusKey={activeChat.id}
+    followAgent={fileBrowser.followEnabled}
+    onToggleFollowAgent={toggleFollowAgent}
+    archived={session.archived
+      ? {
+        reason: session.archiveReason ?? "merged",
+        prNumber: session.prNumber,
+        base: session.baseBranch,
+        onRestore: () => onRestore?.(session.id),
+        onDelete: () => onDelete?.(session.id)
+      }
+      : undefined} />
+}
+
+function conversationChatShortcut(closeChat: (chatId: string) => void, activeChat: Session["chats"][number], session: Session, selectChat: (chatId: string) => void) {
+  return (event: KeyboardEvent) => {
+    if (event.defaultPrevented) return
+    if ((!event.metaKey && !event.ctrlKey) || event.altKey) return
+    const target = event.target
+    if (target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT")) return
+    if (event.key.toLowerCase() === "w") {
+      event.preventDefault()
+      closeChat(activeChat.id)
+      return
+    }
+    const index = Number(event.key) - 1
+    if (index >= 0 && index < Math.min(session.chats.length, 9)) {
+      event.preventDefault()
+      selectChat(session.chats[index]!.id)
+    }
+  }
+}
+
+type EnvironmentMutationView = {
+  readonly error: Error | null
+  readonly isPending: boolean
+  readonly mutate: (environmentId: string | undefined) => void
+  readonly reset: () => void
+}
+
+function renderEnvironmentNotices(
+  {
+    convo,
+    continuationEnvironmentId,
+    handoffAfterStop,
+    continueEnvironmentMutation,
+    environmentMutation,
+    setHandoffAfterStop,
+    setContinuationEnvironmentId
+  }: {
+    convo: Conversation;
+    continuationEnvironmentId: string | undefined | null;
+    handoffAfterStop: { environmentId: string | undefined } | null;
+    continueEnvironmentMutation: EnvironmentMutationView;
+    environmentMutation: EnvironmentMutationView;
+    setHandoffAfterStop: (value: { environmentId: string | undefined } | null) => void;
+    setContinuationEnvironmentId: (value: string | undefined | null) => void;
+  }
+) {
+  return <>
+    {continuationEnvironmentId !== null && (
+      <div
+        role="alert"
+        className="flex flex-none items-center gap-2 border-b border-yellow/30 bg-yellow/[0.06] px-3 py-2 text-[11px] text-fg"
+      >
+        <span className="min-w-0 flex-1">
+          {convo.busy
+            ? "Stop the active turn, checkpoint its current work, and continue as a new session on the selected environment?"
+            : "This session already has work. Continue it as a new session on the selected environment?"}
+        </span>
+        <button
+          type="button"
+          onClick={() => {
+            if (convo.busy) {
+              setHandoffAfterStop({
+                environmentId: continuationEnvironmentId
+              })
+              convo.stop()
+              return
+            }
+            continueEnvironmentMutation.mutate(continuationEnvironmentId)
+          }}
+          disabled={
+            continueEnvironmentMutation.isPending || handoffAfterStop !== null
+          }
+          className="flex-none rounded border border-border px-2 py-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+        >
+          {convo.busy ? "Stop and continue there" : "Continue there"}
+        </button>
+        <button
+          type="button"
+          aria-label="Cancel environment continuation"
+          onClick={() => {
+            setContinuationEnvironmentId(null)
+            setHandoffAfterStop(null)
+          }}
+          className="flex-none rounded px-1 outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          ×
+        </button>
+      </div>
+    )}
+    {environmentMutation.error !== null &&
+      !(
+        rpcFailureTag(environmentMutation.error) === "EnvironmentHandoffError" &&
+        rpcFailureReason(environmentMutation.error) === "has-work"
+      ) && (
+        <div
+          role="alert"
+          className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+        >
+          <span className="min-w-0 flex-1">
+            {rpcFailureMessage(
+              environmentMutation.error,
+              "Could not update the session environment."
+            )}
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss environment error"
+            onClick={() => environmentMutation.reset()}
+            className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            ×
+          </button>
+        </div>
+      )}
+    {continueEnvironmentMutation.error !== null && (
+      <div
+        role="alert"
+        className="flex flex-none items-center gap-2 border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red"
+      >
+        <span className="min-w-0 flex-1">
+          {rpcFailureMessage(
+            continueEnvironmentMutation.error,
+            "Could not continue the session on that environment."
+          )}
+        </span>
+        <button
+          type="button"
+          aria-label="Dismiss environment continuation error"
+          onClick={() => continueEnvironmentMutation.reset()}
+          className="flex-none rounded px-1 text-red outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          ×
+        </button>
+      </div>
+    )}
+  </>
+}
+
+function useFleetChildTranscript(session: Session, fleet: SubagentFleetController, chatId: string) {
+  const childTranscriptQuery = useQuery({
+    queryKey: [
+      "subagent-transcript",
+      session.id,
+      chatId,
+      fleet.selectedNode?.parentPiSessionId,
+      fleet.selectedNode?.runId
+    ],
+    queryFn: () => rpc.agentSubagentTranscript(
+      session.id,
+      chatId,
+      fleet.selectedNode!.parentPiSessionId,
+      fleet.selectedNode!.runId
+    ),
+    enabled:
+      fleet.selectedNode !== null &&
+      fleet.selectedLegacyAgent === null &&
+      fleet.selectedNode.sessionFile !== null
+  })
+  useEffect(() => {
+    if (
+      fleet.selectedNode?.status === "running" &&
+      fleet.selectedNode.sessionFile !== null
+    ) void childTranscriptQuery.refetch()
+  }, [
+    childTranscriptQuery.refetch,
+    fleet.selectedNode?.id,
+    fleet.selectedNode?.sessionFile,
+    fleet.selectedNode?.status,
+    fleet.selectedNode?.updatedAt
+  ])
+  // Selecting a Fleet agent redirects the file browser's Follow to THAT
+  // agent's edits: its file activity is derived from its own transcript with
+  // the same pure deriver the main chat uses, and published as the session's
+  // fleet override (which wins in `useAgentFileActivity`). Cleared whenever
+  // the selection returns to Main — Follow then tracks the main chat again.
+  return childTranscriptQuery
+}
+
+function plannotatorReviewId(projection: Conversation["plannotator"]): string | null {
+  return projection?.review?.reviewId ?? null
+}
+
+function conversationProviderRecovery(session: Session, convo: Conversation, providerCatalog: ProviderCatalog | undefined | null, environments: ReadonlyArray<Environment>) {
+  const providerSelection = {
+    ...convo,
+    connectionSelectionRequired: session.connectionSelectionRequired,
+    modelSelectionRequired: session.modelSelectionRequired,
+    targetId: session.environmentId ?? "desktop",
+    target: environments.find((environment) => environment.id === session.environmentId)
+  }
+  const providerRecovery = providerCatalog
+    ? providerRecoveryOf(providerCatalog, providerSelection)
+    : undefined
+  // Reconnecting a removed account mints a new connection id, so the pinned one
+  // never reappears and the recovery card would stay up after the operator has
+  // already fixed the problem. When the refreshed catalog has an unambiguous
+  // replacement, rebind through the same SET_MODEL path the picker uses.
+  const rebindConnectionId = providerCatalog
+    ? providerRebindOf(providerCatalog, providerSelection)
+    : undefined
+  const composerDisabledReason = typeof providerRecovery === "string"
+    ? providerRecovery
+    : providerRecovery?.message
+  return { providerRecovery, rebindConnectionId, composerDisabledReason }
+}
+
+function contextReadiness(context: Awaited<ReturnType<typeof rpc.contextState>> | undefined) {
+  return { preparing: context?.preparing ?? false, digestReady: context?.digestReady ?? false }
+}
+
+function configuredFontScale(config: Awaited<ReturnType<typeof rpc.configGet>> | undefined): number {
+  return clampFontScale(config?.fontScale)
+}
+
+function renderPlanSurface(
+  plannotatorDocument: import("@jingler/core").PlanDocument | null,
+  pendingReviewId: string | null,
+  decideReview: (approved: boolean, feedback?: string) => Promise<void>
+) {
+  return plannotatorDocument !== null
+    ? (
+      <PlanReview
+        key={pendingReviewId ?? "plan"}
+        document={plannotatorDocument}
+        canApprove={pendingReviewId !== null}
+        host={window.jingler}
+        onApprove={() => decideReview(true)}
+        onRevise={(feedback) => decideReview(false, feedback)}
+      />
+    )
+    : null
 }

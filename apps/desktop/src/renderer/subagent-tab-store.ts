@@ -69,6 +69,16 @@ export const recentSubagentNodes = (
   )
   .slice(0, 8)
 
+const retainNewestNode = (
+  nodes: Map<string, SubagentFleetNode>,
+  node: SubagentFleetNode
+): void => {
+  const current = nodes.get(node.id)
+  if (current === undefined || !isSubagentFleetNodeNewer(current, node)) {
+    nodes.set(node.id, node)
+  }
+}
+
 export const completedSubagentNodes = (
   events: ReadonlyArray<SubagentFleetEvent>
 ): ReadonlyArray<SubagentFleetNode> => {
@@ -86,15 +96,9 @@ export const completedSubagentNodes = (
         ? event.snapshot.nodes
         : []
     for (const node of nodes) {
-      const current = latest.get(node.id)
-      if (current === undefined || !isSubagentFleetNodeNewer(current, node)) {
-        latest.set(node.id, node)
-      }
+      retainNewestNode(latest, node)
       if (node.nodeKind === "agent" && COMPLETED.has(node.status)) {
-        const completed = terminal.get(node.id)
-        if (completed === undefined || !isSubagentFleetNodeNewer(completed, node)) {
-          terminal.set(node.id, node)
-        }
+        retainNewestNode(terminal, node)
       }
     }
   }

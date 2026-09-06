@@ -181,7 +181,7 @@ export function usePullRequest(
             }
           : null
       if (!found) return
-      const ref = found.path ? ` (on ${found.path}${found.line ? ` line ${found.line}` : ""})` : ""
+      const ref = reviewFeedbackReference(found.path, found.line)
       routeToAgent(`Review feedback from @${found.author}${ref}:\n\n${found.body}\n\nPlease address this.`)
       if (session.prNumber !== null) markRouted(session.id, session.prNumber, entryId)
     },
@@ -217,4 +217,9 @@ export function usePullRequest(
     replyToThread,
     openOnGithub
   }
+}
+
+function reviewFeedbackReference(path: string | null, line: number | null): string {
+  if (!path) return ""
+  return ` (on ${path}${line ? ` line ${line}` : ""})`
 }

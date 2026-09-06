@@ -2,7 +2,7 @@ import { FileSystem } from "@effect/platform"
 import type { McpConfigEntry } from "@jingler/core"
 import { ManagedResourceId, mcpNameError } from "@jingler/core"
 import { Effect, Schema } from "effect"
-import { AppPaths } from "./app-paths.js"
+import { AppPaths, type AppPathsShape } from "./app-paths.js"
 import { McpConfigService } from "./mcp-config-service.js"
 import { AgentSecretStore } from "./runtime/auth/agent-secret-store.js"
 import { SecretStore } from "./secret-store.js"
@@ -88,6 +88,50 @@ const importedEntries = Effect.gen(function* () {
   const secretStore = yield* SecretStore
   const secrets = new AgentSecretStore(secretStore)
   if (!(yield* fs.exists(paths.importedMcpFile))) return []
+  return yield* readLegacyMcpEntries(fs, paths, secrets)
+})
+
+export const migrateMcpConfig = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem
+  const paths = yield* AppPaths
+  const exists = yield* fs.exists(paths.mcpConfigFile)
+  if (exists) return
+  const connector = yield* openConnectorEntry
+  const imported = yield* importedEntries
+  const entries = [...(connector === null ? [] : [connector]), ...imported]
+  if (entries.length === 0) return
+  const names = entries.map(({ name }) => name)
+  if (new Set(names).size !== names.length) {
+    return yield* Effect.fail(new Error("Legacy MCP sources contain duplicate server names"))
+  }
+  yield* McpConfigService.writeAll(
+    Object.fromEntries(entries.map(({ name, entry }) => [name, entry]))
+  )
+  // The old stores are now duplicates of mcp.json; leaving them would re-run
+  // this migration's sources against an operator-edited file forever.
+  yield* fs.remove(paths.importedMcpFile).pipe(Effect.ignore)
+  const secretStore = yield* SecretStore
+  const agentSecrets = new AgentSecretStore(secretStore)
+  yield* Effect.forEach(
+    imported,
+    ({ resourceId, targetId }) => agentSecrets.deleteMcp(resourceId, targetId).pipe(Effect.ignore),
+    { discard: true }
+  )
+  if (connector !== null) {
+    yield* secretStore.clearOpenConnectorToken.pipe(Effect.ignore)
+  }
+}).pipe(
+  Effect.provide(McpConfigService.Default),
+  Effect.catchAll((cause) =>
+    Effect.logWarning(`MCP config migration skipped: ${String(cause)}`)
+  )
+)
+
+function* readLegacyMcpEntries(
+  fs: FileSystem.FileSystem,
+  paths: AppPathsShape,
+  secrets: AgentSecretStore
+) {
   const raw = yield* fs.readFileString(paths.importedMcpFile)
   const catalog = decodeCatalog(raw)
   if (catalog._tag === "Left") {
@@ -132,40 +176,4 @@ const importedEntries = Effect.gen(function* () {
     })
   }
   return entries
-})
-
-export const migrateMcpConfig = Effect.gen(function* () {
-  const fs = yield* FileSystem.FileSystem
-  const paths = yield* AppPaths
-  const exists = yield* fs.exists(paths.mcpConfigFile)
-  if (exists) return
-  const connector = yield* openConnectorEntry
-  const imported = yield* importedEntries
-  const entries = [...(connector === null ? [] : [connector]), ...imported]
-  if (entries.length === 0) return
-  const names = entries.map(({ name }) => name)
-  if (new Set(names).size !== names.length) {
-    return yield* Effect.fail(new Error("Legacy MCP sources contain duplicate server names"))
-  }
-  yield* McpConfigService.writeAll(
-    Object.fromEntries(entries.map(({ name, entry }) => [name, entry]))
-  )
-  // The old stores are now duplicates of mcp.json; leaving them would re-run
-  // this migration's sources against an operator-edited file forever.
-  yield* fs.remove(paths.importedMcpFile).pipe(Effect.ignore)
-  const secretStore = yield* SecretStore
-  const agentSecrets = new AgentSecretStore(secretStore)
-  yield* Effect.forEach(
-    imported,
-    ({ resourceId, targetId }) => agentSecrets.deleteMcp(resourceId, targetId).pipe(Effect.ignore),
-    { discard: true }
-  )
-  if (connector !== null) {
-    yield* secretStore.clearOpenConnectorToken.pipe(Effect.ignore)
-  }
-}).pipe(
-  Effect.provide(McpConfigService.Default),
-  Effect.catchAll((cause) =>
-    Effect.logWarning(`MCP config migration skipped: ${String(cause)}`)
-  )
-)
+}

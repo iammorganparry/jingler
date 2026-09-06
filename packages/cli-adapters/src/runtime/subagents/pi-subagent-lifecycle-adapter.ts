@@ -36,6 +36,7 @@ import {
   type SubagentStartRecord,
   type SubagentSupervisionServiceShape
 } from "./subagent-supervision-service.js"
+import type { SubagentRunTreeContext } from "./subagent-run-tree-reducer.js"
 
 const RPC_REQUEST_EVENT = "subagents:rpc:v1:request"
 const RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:"
@@ -466,7 +467,23 @@ export class PiSubagentLifecycleAdapter {
     // missed — the durable-status poll and completion events enrich or settle
     // it later. Never resurrect a settled root from a stale trailing report.
     if (input.children.length === 0) {
-      const existing = context.nodes.find((node) => node.id === rootId)
+      this.#publishEmptyProgress(input, context, rootId, now)
+      return
+    }
+    // A single/parallel/chain root is a redundant placeholder once real
+    // children report — remove it. A WORKFLOW root stays: it is the container
+    // its children nest under (mirroring the durable projection), rendered as
+    // an unselectable group header in the Fleet tree.
+    this.#publishProgressChildren(input, context, rootId, now)
+  }
+
+  #publishEmptyProgress(
+    input: PiSubagentProgressInput,
+    context: SubagentRunTreeContext,
+    rootId: string,
+    now: number
+  ): void {
+    const existing = context.nodes.find((node) => node.id === rootId)
       if (existing !== undefined && existing.terminal !== null) return
       // A settled run with no children reported nothing worth keeping — a
       // failed/empty foreground workflow. Clear its root instead of leaving a
@@ -498,15 +515,11 @@ export class PiSubagentLifecycleAdapter {
           runId: input.runId,
           parentId: null,
           parentPiSessionId: this.#parentPiSessionId,
-          agent: existing?.agent ?? input.mode,
-          task: existing?.task ?? "Delegated work",
-          model: existing?.model ?? null,
+        ...emptyProgressIdentity(existing, input.mode),
           status: "running",
           terminal: null,
           background: true,
-          sessionFile: existing?.sessionFile ?? null,
-          currentTool: existing?.currentTool ?? null,
-          startedAt: existing?.startedAt ?? now,
+        ...priorProgressLocation(existing, now),
           updatedAt: now,
           completedAt: null,
           usage: existing?.usage ?? emptyUsage(),
@@ -516,10 +529,13 @@ export class PiSubagentLifecycleAdapter {
       })
       return
     }
-    // A single/parallel/chain root is a redundant placeholder once real
-    // children report — remove it. A WORKFLOW root stays: it is the container
-    // its children nest under (mirroring the durable projection), rendered as
-    // an unselectable group header in the Fleet tree.
+
+  #publishProgressChildren(
+    input: PiSubagentProgressInput,
+    context: SubagentRunTreeContext,
+    rootId: string,
+    now: number
+  ) {
     if (
       input.children.length > 0 &&
       input.mode !== "workflow" &&
@@ -538,17 +554,20 @@ export class PiSubagentLifecycleAdapter {
       input.mode === "workflow" && context.nodes.some((node) => node.id === rootId)
         ? rootId
         : null
-    for (const child of input.children) {
+    this.#publishAndSettleProgress(input, context, now, childParentId, rootId)
+  }
+
+  #publishProgressChild(
+    input: PiSubagentProgressInput,
+    child: PiSubagentProgressInput["children"][number],
+    context: SubagentRunTreeContext,
+    now: number,
+    childParentId: string | null
+  ): void {
       const subagentId = child.runId ?? `${input.runId}:step:${child.index}`
       const existing = context.nodes.find((node) => node.subagentId === subagentId)
-      const status: SubagentFleetStatus = child.status === "pending"
-        ? "queued"
-        : child.status === "completed"
-          ? "completed"
-          : child.status === "failed"
-            ? "failed"
-            : "running"
-      this.#publish({
+      const status = progressChildStatus(child.status)
+    this.#publish({
         _tag: "Upsert",
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
         eventId: `progress:${input.runId}:${child.index}:${now}:${child.toolCount}`,
@@ -561,8 +580,7 @@ export class PiSubagentLifecycleAdapter {
           parentPiSessionId: this.#parentPiSessionId,
           agent: child.agent,
           task: cleanTaskLabel(child.task),
-          model: child.model ?? existing?.model ?? null,
-          status,
+        status,
           terminal: status === "completed" || status === "failed"
             ? {
                 reason: status,
@@ -571,24 +589,63 @@ export class PiSubagentLifecycleAdapter {
                 retryable: false
               }
             : null,
-          background: existing?.background ?? false,
-          sessionFile: child.sessionFile ?? existing?.sessionFile ?? null,
-          currentTool: child.currentTool ?? null,
-          startedAt: existing?.startedAt ?? Math.max(0, now - child.durationMs),
+        ...progressChildLocation(child, existing, now),
           updatedAt: now,
           completedAt: status === "completed" || status === "failed" ? now : null,
-          usage: {
-            inputTokens: child.inputTokens ?? existing?.usage.inputTokens ?? 0,
-            outputTokens: child.outputTokens ?? existing?.usage.outputTokens ?? 0,
-            totalTokens: child.tokens,
-            costUsd: existing?.usage.costUsd ?? 0,
-            durationMs: child.durationMs,
-            toolCalls: child.toolCount
-          },
+          usage: progressChildUsage(child, existing),
           artifacts: existing?.artifacts ?? [],
           attention: existing?.attention ?? null
         }
       })
+  }
+
+  #removeCompletedNodes(completion: typeof Completion.Type, rootId: string, now: number): void {
+    const completedIds = new Set([
+      rootId,
+      ...(completion.results ?? []).map((child, position) => subagentFleetNodeId(
+        this.#parentPiSessionId,
+        child.runId ?? `${completion.runId}:step:${child.index ?? position}`
+      ))
+    ])
+    for (const node of this.#state().tree.nodes.filter(
+      (candidate) => candidate.parentId === rootId && !completedIds.has(candidate.id)
+    )) {
+      this.#publish({
+        _tag: "Upsert",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `complete-reparent:${completion.runId}:${node.subagentId}:${now}`,
+        occurredAt: now,
+        node: {
+          ...node,
+          ...this.#identity(node.subagentId, node.orchestrationRunId, node.nodeKind),
+          parentId: null,
+          updatedAt: now
+        }
+      })
+    }
+    for (const node of this.#state().tree.nodes.filter(
+      (candidate) => completedIds.has(candidate.id)
+    )) {
+      this.#publish({
+        _tag: "Remove",
+        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
+        eventId: `complete-remove:${completion.runId}:${node.subagentId}:${now}`,
+        occurredAt: now,
+        registryRevision: this.#nextRevision(),
+        id: node.id
+      })
+    }
+    Effect.runSync(this.#supervision.removeStart(completion.runId))
+  }
+  #publishAndSettleProgress(
+    input: PiSubagentProgressInput,
+    context: SubagentRunTreeContext,
+    now: number,
+    childParentId: string | null,
+    rootId: string
+  ) {
+    for (const child of input.children) {
+      this.#publishProgressChild(input, child, context, now, childParentId)
     }
     // The run settled with this report: its nodes leave the dock, exactly as
     // an async completion's do. The upserts above are published FIRST so the
@@ -1157,14 +1214,7 @@ export class PiSubagentLifecycleAdapter {
         task: cleanTaskLabel(start?.goal ?? start?.task ?? completion.summary),
         model: null,
         status: rootStatus,
-        terminal: {
-          reason: rootStatus === "completed"
-            ? "completed"
-            : rootStatus === "stopped" ? "stopped" : "failed",
-          summary: completion.summary ?? "Subagent run completed",
-          at: now,
-          retryable: false
-        },
+        terminal: completedRootTerminal(rootStatus, completion, now),
         background,
         sessionFile: completion.sessionFile ?? null,
         currentTool: null,
@@ -1188,42 +1238,7 @@ export class PiSubagentLifecycleAdapter {
         now
       })
     })
-    const completedIds = new Set([
-      rootId,
-      ...(completion.results ?? []).map((child, position) => subagentFleetNodeId(
-        this.#parentPiSessionId,
-        child.runId ?? `${completion.runId}:step:${child.index ?? position}`
-      ))
-    ])
-    for (const node of this.#state().tree.nodes.filter(
-      (candidate) => candidate.parentId === rootId && !completedIds.has(candidate.id)
-    )) {
-      this.#publish({
-        _tag: "Upsert",
-        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-        eventId: `complete-reparent:${completion.runId}:${node.subagentId}:${now}`,
-        occurredAt: now,
-        node: {
-          ...node,
-          ...this.#identity(node.subagentId, node.orchestrationRunId, node.nodeKind),
-          parentId: null,
-          updatedAt: now
-        }
-      })
-    }
-    for (const node of this.#state().tree.nodes.filter(
-      (candidate) => completedIds.has(candidate.id)
-    )) {
-      this.#publish({
-        _tag: "Remove",
-        version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-        eventId: `complete-remove:${completion.runId}:${node.subagentId}:${now}`,
-        occurredAt: now,
-        registryRevision: this.#nextRevision(),
-        id: node.id
-      })
-    }
-    Effect.runSync(this.#supervision.removeStart(completion.runId))
+    this.#removeCompletedNodes(completion, rootId, now)
   }
 
   #publishCompletedChild(input: {
@@ -1252,22 +1267,11 @@ export class PiSubagentLifecycleAdapter {
         parentId: existing === undefined ? input.rootId : existing.parentId,
         parentPiSessionId: this.#parentPiSessionId,
         agent: input.child.agent ?? existing?.agent ?? `step-${index + 1}`,
-        task: cleanTaskLabel(
-          input.child.task ?? existing?.task ?? input.start?.goal ?? input.start?.task
-        ),
-        model: input.child.model ?? existing?.model ?? null,
+        ...completedChildPresentation(
+          input.child, existing, input.start),
         status: statusFrom(input.child),
         phase: input.child.phase ?? null,
-        terminal: {
-          reason: input.child.timedOut
-            ? "timed-out"
-            : input.child.stopped || input.child.interrupted
-              ? "stopped"
-              : input.child.success === false ? "failed" : "completed",
-          summary: input.child.output ?? input.child.summary ?? input.child.error ?? "Subagent child completed",
-          at: input.now,
-          retryable: false
-        },
+        terminal: completedChildTerminal(input.child, input.now),
         background: input.background,
         sessionFile: input.child.sessionPath ?? input.child.sessionFile ?? existing?.sessionFile ?? null,
         currentTool: null,
@@ -1368,3 +1372,87 @@ export class PiSubagentLifecycleAdapter {
     }
   }
 }
+
+const progressChildStatus = (
+  status: PiSubagentProgressInput["children"][number]["status"]
+): SubagentFleetStatus => {
+  if (status === "pending") return "queued"
+  if (status === "completed") return "completed"
+  if (status === "failed") return "failed"
+  return "running"
+}
+
+const progressChildUsage = (
+  child: PiSubagentProgressInput["children"][number],
+  existing: SubagentFleetNode | undefined
+): SubagentFleetNode["usage"] => ({
+  inputTokens: child.inputTokens ?? existing?.usage.inputTokens ?? 0,
+  outputTokens: child.outputTokens ?? existing?.usage.outputTokens ?? 0,
+  totalTokens: child.tokens,
+  costUsd: existing?.usage.costUsd ?? 0,
+  durationMs: child.durationMs,
+  toolCalls: child.toolCount
+})
+
+const completedChildTerminal = (
+  child: typeof CompletionChild.Type,
+  now: number
+): SubagentFleetNode["terminal"] => ({
+  reason: child.timedOut
+    ? "timed-out"
+    : child.stopped || child.interrupted
+      ? "stopped"
+      : child.success === false
+        ? "failed"
+        : "completed",
+  summary: child.output ?? child.summary ?? child.error ?? "Subagent child completed",
+  at: now,
+  retryable: false
+})
+
+const emptyProgressIdentity = (
+  existing: SubagentFleetNode | undefined,
+  mode: PiSubagentProgressInput["mode"]
+) => ({
+  agent: existing?.agent ?? mode,
+  task: existing?.task ?? "Delegated work",
+  model: existing?.model ?? null
+})
+
+const priorProgressLocation = (existing: SubagentFleetNode | undefined, now: number) => ({
+  sessionFile: existing?.sessionFile ?? null,
+  currentTool: existing?.currentTool ?? null,
+  startedAt: existing?.startedAt ?? now
+})
+
+const progressChildLocation = (
+  child: PiSubagentProgressInput["children"][number],
+  existing: SubagentFleetNode | undefined,
+  now: number
+) => ({
+  model: child.model ?? existing?.model ?? null,
+  background: existing?.background ?? false,
+  sessionFile: child.sessionFile ?? existing?.sessionFile ?? null,
+  currentTool: child.currentTool ?? null,
+  startedAt: existing?.startedAt ?? Math.max(0, now - child.durationMs)
+})
+
+const completedRootTerminal = (
+  status: SubagentFleetStatus,
+  completion: typeof Completion.Type,
+  now: number
+): SubagentFleetNode["terminal"] => ({
+  reason: status === "completed" ? "completed" : status === "stopped" ? "stopped" : "failed",
+  summary: completion.summary ?? "Subagent run completed",
+  at: now,
+  retryable: false
+})
+
+const completedChildPresentation = (
+  child: typeof CompletionChild.Type,
+  existing: SubagentFleetNode | undefined,
+  start: SubagentStartRecord | undefined
+) => ({
+  task: cleanTaskLabel(child.task ?? existing?.task ?? start?.goal ?? start?.task),
+  model: child.model ?? existing?.model ?? null
+})

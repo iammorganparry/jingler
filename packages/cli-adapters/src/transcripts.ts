@@ -88,13 +88,13 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           )
         })
 
-      /**
-       * Persist an already-serialized transcript (the exact `[…]` text) plus its
-       * byte-offset index. Shared by `writeAll` (full re-encode) and the bounded
-       * mutation paths below, which splice raw bytes and must produce byte-for-byte
-       * the same file/index shape this writes.
-       */
-      const writeSerialized = (
+    /**
+     * Persist an already-serialized transcript (the exact `[…]` text) plus its
+     * byte-offset index. Shared by `writeAll` (full re-encode) and the bounded
+     * mutation paths below, which splice raw bytes and must produce byte-for-byte
+     * the same file/index shape this writes.
+     */
+    const writeSerialized = (
         chatId: string,
         serialized: string,
         offsets: ReadonlyArray<readonly [number, number]>
@@ -187,26 +187,26 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           Effect.orElseSucceed((): Message | null => null)
         )
 
-      /**
-       * The transcript's raw bytes together with a VALIDATED index, or null.
-       *
-       * This is the entry ticket to the bounded mutation paths: every write used
-       * to be readAll → schema-decode of the ENTIRE message array → re-encode →
-       * rewrite, which on a long session (a 58MB transcript was measured live)
-       * costs seconds of main-process CPU and hundreds of MB of allocation per
-       * turn boundary — the "session gets slower as it ages" failure. With a
-       * trustworthy index the mutations below splice raw bytes instead and only
-       * ever encode/decode the one message they touch.
-       *
-       * Trust is earned, not assumed: `readIndex` already checks size + inode
-       * against the live file, and this re-checks the actual bytes read (the
-       * stat and the read are two steps) plus the structural invariants the
-       * splice math relies on — offsets that start at byte 1, abut with exactly
-       * one separator byte, and end flush against the closing bracket. Anything
-       * off → null, and the caller falls back to the readAll/writeAll path,
-       * which rebuilds the index as it always has.
-       */
-      const readValidRaw = (
+    /**
+     * The transcript's raw bytes together with a VALIDATED index, or null.
+     *
+     * This is the entry ticket to the bounded mutation paths: every write used
+     * to be readAll → schema-decode of the ENTIRE message array → re-encode →
+     * rewrite, which on a long session (a 58MB transcript was measured live)
+     * costs seconds of main-process CPU and hundreds of MB of allocation per
+     * turn boundary — the "session gets slower as it ages" failure. With a
+     * trustworthy index the mutations below splice raw bytes instead and only
+     * ever encode/decode the one message they touch.
+     *
+     * Trust is earned, not assumed: `readIndex` already checks size + inode
+     * against the live file, and this re-checks the actual bytes read (the
+     * stat and the read are two steps) plus the structural invariants the
+     * splice math relies on — offsets that start at byte 1, abut with exactly
+     * one separator byte, and end flush against the closing bracket. Anything
+     * off → null, and the caller falls back to the readAll/writeAll path,
+     * which rebuilds the index as it always has.
+     */
+    const readValidRaw = (
         chatId: string
       ): Effect.Effect<
         { readonly raw: Buffer; readonly index: TranscriptIndex } | null,
@@ -227,11 +227,11 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           return structurallySound(index) ? { raw, index } : null
         })
 
-      /**
-       * Append already-decoded messages by splicing their encoded chunks onto the
-       * raw tail. Caller holds the lock and has verified the index is non-empty.
-       */
-      const appendRaw = (
+    /**
+     * Append already-decoded messages by splicing their encoded chunks onto the
+     * raw tail. Caller holds the lock and has verified the index is non-empty.
+     */
+    const appendRaw = (
         chatId: string,
         state: { readonly raw: Buffer; readonly index: TranscriptIndex },
         toAppend: ReadonlyArray<Message>
@@ -251,12 +251,12 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           yield* writeSerialized(chatId, Buffer.concat(parts).toString("utf8"), offsets)
         })
 
-      /**
-       * Replace message `i` with an already-encoded chunk: copy the bytes either
-       * side verbatim and shift every later offset by the size delta. For the
-       * last message the suffix is just the closing bracket.
-       */
-      const writeSpliced = (
+    /**
+     * Replace message `i` with an already-encoded chunk: copy the bytes either
+     * side verbatim and shift every later offset by the size delta. For the
+     * last message the suffix is just the closing bracket.
+     */
+    const writeSpliced = (
         chatId: string,
         state: { readonly raw: Buffer; readonly index: TranscriptIndex },
         i: number,
@@ -276,14 +276,14 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         return writeSerialized(chatId, serialized, offsets)
       }
 
-      /**
-       * `patchById`'s bounded path. The target is located by scanning raw slices
-       * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
-       * so each hit is verified by decoding just that slice). Returns true when
-       * the outcome is settled — patched, or no slice carries the id — and false
-       * when a candidate slice failed to decode and the caller must fall back.
-       */
-      const patchByIdRaw = (
+    /**
+     * `patchById`'s bounded path. The target is located by scanning raw slices
+     * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
+     * so each hit is verified by decoding just that slice). Returns true when
+     * the outcome is settled — patched, or no slice carries the id — and false
+     * when a candidate slice failed to decode and the caller must fall back.
+     */
+    const patchByIdRaw = (
         chatId: string,
         state: { readonly raw: Buffer; readonly index: TranscriptIndex },
         messageId: string,
@@ -305,17 +305,17 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           return true
         })
 
-      /**
-       * Whether any message carries this external-instruction identity, decided
-       * from raw bytes: a message whose `deliveryId`/`semanticKey` EQUALS the
-       * needle necessarily CONTAINS its JSON encoding (both sides are serialized
-       * by the same JSON.stringify), so slices without either needle can't
-       * match and are never parsed. Containment can false-positive (the value
-       * quoted inside unrelated text), so hits are verified by decoding just
-       * that slice. Returns null — "couldn't decide" — when a candidate slice
-       * fails to decode; the caller then falls back to the readAll semantics.
-       */
-      const scanExternalInstruction = (
+    /**
+     * Whether any message carries this external-instruction identity, decided
+     * from raw bytes: a message whose `deliveryId`/`semanticKey` EQUALS the
+     * needle necessarily CONTAINS its JSON encoding (both sides are serialized
+     * by the same JSON.stringify), so slices without either needle can't
+     * match and are never parsed. Containment can false-positive (the value
+     * quoted inside unrelated text), so hits are verified by decoding just
+     * that slice. Returns null — "couldn't decide" — when a candidate slice
+     * fails to decode; the caller then falls back to the readAll semantics.
+     */
+    const scanExternalInstruction = (
         state: { readonly raw: Buffer; readonly index: TranscriptIndex },
         identity: ExternalInstructionIdentity
       ): Effect.Effect<boolean | null> =>
@@ -447,19 +447,19 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           catch: () => undefined
         }).pipe(Effect.orElseSucceed(() => ""))
 
-      /**
-       * A window of the transcript, newest-anchored, for lazy back-loading.
-       *
-       * The renderer opens a session with only the tail in hand (a 46MB
-       * transcript held whole as a parsed `Message[]` was hundreds of MB of
-       * renderer heap per live session), then pages older turns in on demand.
-       *
-       * `before` is an opaque positional cursor returned by the previous page.
-       * It never depends on message ids, so legacy duplicate ids remain fully
-       * reachable. A validated offset sidecar lets each request read only its
-       * byte window instead of reparsing the complete transcript.
-       */
-      const listPage = (
+    /**
+     * A window of the transcript, newest-anchored, for lazy back-loading.
+     *
+     * The renderer opens a session with only the tail in hand (a 46MB
+     * transcript held whole as a parsed `Message[]` was hundreds of MB of
+     * renderer heap per live session), then pages older turns in on demand.
+     *
+     * `before` is an opaque positional cursor returned by the previous page.
+     * It never depends on message ids, so legacy duplicate ids remain fully
+     * reachable. A validated offset sidecar lets each request read only its
+     * byte window instead of reparsing the complete transcript.
+     */
+    const listPage = (
         chatId: string,
         options: { before?: string; limit: number }
       ): Effect.Effect<
@@ -473,63 +473,15 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
       > =>
         lock.withPermits(1)(Effect.gen(function* () {
           const index = yield* ensureIndex(chatId)
-          const match =
-            options.before === undefined
-              ? null
-              : PAGE_CURSOR.exec(options.before)
-          if (options.before !== undefined && match === null) {
-            return { messages: [], hasMore: false }
-          }
-          const requestedEnd =
-            match === null ? index.offsets.length : Number(match[1])
-          if (
-            !Number.isSafeInteger(requestedEnd) ||
-            requestedEnd < 0 ||
-            requestedEnd > index.offsets.length
-          ) {
-            return { messages: [], hasMore: false }
-          }
-          const limit = Math.max(1, Math.min(500, Math.floor(options.limit)))
-          // Walk back from the newest requested message until either the
-          // count limit or the byte budget trips (see PAGE_BYTE_BUDGET).
-          let start = requestedEnd
-          let pageBytes = 0
-          while (start > 0 && requestedEnd - start < limit) {
-            const span = index.offsets[start - 1]
-            if (span === undefined) break
-            const size = span[1] - span[0]
-            if (requestedEnd - start > 0 && pageBytes + size > PAGE_BYTE_BUDGET)
-              break
-            pageBytes += size
-            start--
-          }
-          if (start === requestedEnd) return { messages: [], hasMore: false }
-          const first = index.offsets[start]
-          const last = index.offsets[requestedEnd - 1]
-          if (first === undefined || last === undefined) {
-            return { messages: [], hasMore: false }
-          }
-          const file = yield* fileFor(chatId)
-          const raw = yield* readWindow(file, first[0], last[1])
-          const messages = yield* Schema.decodeUnknown(
-            Schema.parseJson(MessageArray)
-          )(`[${raw}]`).pipe(
-            Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
-          )
-          const hasMore = start > 0
-          return {
-            messages,
-            hasMore,
-            ...(hasMore ? { cursor: `v1:${start}` } : {})
-          }
+          return yield* readIndexedTranscriptPage(options, index, fileFor, chatId, readWindow)
         }))
 
-      /**
-       * Move a legacy session-keyed transcript into its synthesized first chat.
-       * Rename makes adoption one-shot and atomic; if the chat already has a
-       * transcript it always wins.
-       */
-      const adoptLegacy = (sessionId: string, chatId: string) =>
+    /**
+     * Move a legacy session-keyed transcript into its synthesized first chat.
+     * Rename makes adoption one-shot and atomic; if the chat already has a
+     * transcript it always wins.
+     */
+    const adoptLegacy = (sessionId: string, chatId: string) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             if (sessionId === chatId) return
@@ -562,13 +514,13 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /**
-       * Append a message to the end of the transcript. Bounded: with a valid
-       * index only the NEW message is encoded — existing bytes are copied, never
-       * schema-decoded. Falls back to the whole-file path (which rebuilds the
-       * index) when the index is missing, stale, or the transcript is empty.
-       */
-      const append = (chatId: string, message: Message) =>
+    /**
+     * Append a message to the end of the transcript. Bounded: with a valid
+     * index only the NEW message is encoded — existing bytes are copied, never
+     * schema-decoded. Falls back to the whole-file path (which rebuilds the
+     * index) when the index is missing, stale, or the transcript is empty.
+     */
+    const append = (chatId: string, message: Message) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const state = yield* readValidRaw(chatId)
@@ -587,12 +539,12 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
         message.externalInstruction?.deliveryId === identity.deliveryId ||
         message.externalInstruction?.semanticKey === identity.semanticKey
 
-      /**
-       * `appendTurn`'s bounded path: replay-check from raw bytes, then splice
-       * the pair onto the tail. Returns the appendTurn result, or null when a
-       * candidate slice failed to decode and the caller must fall back.
-       */
-      const appendTurnRaw = (
+    /**
+     * `appendTurn`'s bounded path: replay-check from raw bytes, then splice
+     * the pair onto the tail. Returns the appendTurn result, or null when a
+     * candidate slice failed to decode and the caller must fall back.
+     */
+    const appendTurnRaw = (
         chatId: string,
         state: { readonly raw: Buffer; readonly index: TranscriptIndex },
         turn: readonly [user: Message, assistant: Message],
@@ -626,11 +578,11 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /**
-       * Atomically persist a complete visible turn. External identities are
-       * checked in the same transcript lock/write that appends the pair.
-       */
-      const appendTurn = (
+    /**
+     * Atomically persist a complete visible turn. External identities are
+     * checked in the same transcript lock/write that appends the pair.
+     */
+    const appendTurn = (
         chatId: string,
         user: Message,
         assistant: Message,
@@ -658,12 +610,12 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /**
-       * Replace the last message via `fn` (a no-op when the transcript is empty).
-       * Bounded: only the last message is decoded and re-encoded; every earlier
-       * message rides along as raw bytes.
-       */
-      const patchLast = (chatId: string, fn: (last: Message) => Message) =>
+    /**
+     * Replace the last message via `fn` (a no-op when the transcript is empty).
+     * Bounded: only the last message is decoded and re-encoded; every earlier
+     * message rides along as raw bytes.
+     */
+    const patchLast = (chatId: string, fn: (last: Message) => Message) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             const state = yield* readValidRaw(chatId)
@@ -685,21 +637,21 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
           })
         )
 
-      /**
-       * Replace the message with `messageId` via `fn`. A no-op when no message
-       * carries that id.
-       *
-       * `patchLast` can only reach the newest message, which is wrong for state
-       * that lives further back — notably a plan part, which stays in the message
-       * of the turn it was proposed in while execution continues across later
-       * turns.
-       *
-       * Bounded like `patchLast`: the target is located by scanning raw slices
-       * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
-       * so each hit is verified by decoding just that slice), then spliced in
-       * place with the trailing offsets shifted by the size delta.
-       */
-      const patchById = (
+    /**
+     * Replace the message with `messageId` via `fn`. A no-op when no message
+     * carries that id.
+     *
+     * `patchLast` can only reach the newest message, which is wrong for state
+     * that lives further back — notably a plan part, which stays in the message
+     * of the turn it was proposed in while execution continues across later
+     * turns.
+     *
+     * Bounded like `patchLast`: the target is located by scanning raw slices
+     * for the id's JSON encoding (`"id":"…"` — nested part ids can false-hit,
+     * so each hit is verified by decoding just that slice), then spliced in
+     * place with the trailing offsets shifted by the size delta.
+     */
+    const patchById = (
         chatId: string,
         messageId: string,
         fn: (msg: Message) => Message
@@ -737,3 +689,76 @@ export class TranscriptStore extends Effect.Service<TranscriptStore>()(
     }
   }
 ) {}
+
+function* readIndexedTranscriptPage(
+  options: { before?: string; limit: number },
+  index: TranscriptIndex,
+  fileFor: (chatId: string) => Effect.Effect<string, never, Path.Path | AppPaths>,
+  chatId: string,
+  readWindow: (file: string, start: number, end: number) => Effect.Effect<string, never>
+) {
+  const match = options.before === undefined ? null : PAGE_CURSOR.exec(options.before)
+  return yield* validateTranscriptCursor(options, match, index, fileFor, chatId, readWindow)
+}
+
+function* validateTranscriptCursor(
+  options: { before?: string; limit: number },
+  match: RegExpExecArray | null,
+  index: TranscriptIndex,
+  fileFor: (chatId: string) => Effect.Effect<string, never, Path.Path | AppPaths>,
+  chatId: string,
+  readWindow: (file: string, start: number, end: number) => Effect.Effect<string, never>
+) {
+  if (options.before !== undefined && match === null) {
+    return { messages: [], hasMore: false }
+  }
+  return yield* readTranscriptWindow(match, index, options, fileFor, chatId, readWindow)
+}
+
+function* readTranscriptWindow(
+  match: RegExpExecArray | null,
+  index: TranscriptIndex,
+  options: { before?: string; limit: number },
+  fileFor: (chatId: string) => Effect.Effect<string, never, Path.Path | AppPaths>,
+  chatId: string,
+  readWindow: (file: string, start: number, end: number) => Effect.Effect<string, never>
+) {
+  const requestedEnd = match === null ? index.offsets.length : Number(match[1])
+  if (
+    !Number.isSafeInteger(requestedEnd) ||
+    requestedEnd < 0 ||
+    requestedEnd > index.offsets.length
+  ) {
+    return { messages: [], hasMore: false }
+  }
+  const limit = Math.max(1, Math.min(500, Math.floor(options.limit)))
+  // Walk back from the newest requested message until either the
+  // count limit or the byte budget trips (see PAGE_BYTE_BUDGET).
+  let start = requestedEnd
+  let pageBytes = 0
+  while (start > 0 && requestedEnd - start < limit) {
+    const span = index.offsets[start - 1]
+    if (span === undefined) break
+    const size = span[1] - span[0]
+    if (requestedEnd - start > 0 && pageBytes + size > PAGE_BYTE_BUDGET) break
+    pageBytes += size
+    start--
+  }
+  if (start === requestedEnd) return { messages: [], hasMore: false }
+  const first = index.offsets[start]
+  const last = index.offsets[requestedEnd - 1]
+  if (first === undefined || last === undefined) {
+    return { messages: [], hasMore: false }
+  }
+  const file = yield* fileFor(chatId)
+  const raw = yield* readWindow(file, first[0], last[1])
+  const messages = yield* Schema.decodeUnknown(Schema.parseJson(MessageArray))(`[${raw}]`).pipe(
+    Effect.orElseSucceed(() => [] as ReadonlyArray<Message>)
+  )
+  const hasMore = start > 0
+  return {
+    messages,
+    hasMore,
+    ...(hasMore ? { cursor: `v1:${start}` } : {})
+  }
+}

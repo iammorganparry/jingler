@@ -1,3 +1,5 @@
+import { defaultProps } from "../lib/default-props.js"
+import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
 import {
   type ReactNode,
   useCallback,
@@ -433,112 +435,367 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
  * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
-export function JinglerApp({
-  sessions,
-  user,
-  onSignOut,
-  repos = [],
-  projects = [],
-  onBrowseProject,
-  onBrowseCloneDestination,
-  onListProjectDirectories,
-  onListGitHubRepositories,
-  onRegisterProject,
-  onCreateProjectDirectory,
-  onCloneProjectFromGitHub,
-  onEnsureProjectOnEnvironment,
-  starredRepos = [],
-  onToggleStar,
-  collapsedRepos = [],
-  onToggleCollapsed,
-  defaultRepoPath,
-  githubConnection = GITHUB_DISCONNECTED,
-  githubBusy,
-  onGithubConnect,
-  onGithubManage,
-  onGithubRefresh,
-  onGithubDisconnect,
-  liveActivity,
-  prStates,
-  liveDiff,
-  debugStopSequences,
-  usage,
-  onLoadUsage,
-  githubConfig,
-  onSaveGithubConfig,
-  contextConfig,
-  onSaveContextConfig,
-  contextSessions,
-  gitConfig,
-  onSaveGitConfig,
-  notificationsConfig,
-  onSaveNotificationsConfig,
-  offloadCompute,
-  onSaveOffloadCompute,
-  offloadStatus,
-  webSearch,
-  defaultMode,
-  onSaveDefaultMode,
-  planAutoRun,
-  onSavePlanAutoRun,
-  adhdMode,
-  themes,
-  plugins,
-  devices,
-  providerConnections,
-  agents,
-  runtimeInspector,
-  onSaveAdhdMode,
-  fontScale,
-  onSaveFontScale,
-  mcp,
-  renderPullRequest,
-  tabContributions,
-  onSelectIssue,
-  paneContributions,
-  renderReview,
-  renderCode,
-  renderTerminalDock,
-  pluginCommands,
-  onRunPluginCommand,
-  renderBrowser,
-  onFocusChat,
-  onToggleBrowser,
-  isBrowserActive,
-  activeSessionId,
-  selectSessionRequest,
-  newSessionRequest,
-  onVisibleSessionsChange,
-  patch = SEED_PATCH,
-  renderConversation,
-  renderExplanation,
-  renderFiles,
-  onOpenFile,
-  onRequestCloseFile,
-  renderFileQuickOpen,
-  renderChatTabs,
-  renderSubagentTabs,
-  planSessions,
-  explanationSessions,
-  loadBranches = noBranches,
-  environments = [],
-  loadEnvironmentDiscovery,
-  onCreateSession,
-  issueProviders = [],
-  loadPullRequests,
-  loadGithubIssues,
-  loadProviderIssues,
-  onCreateSessionFromPr,
-  onCreateSessionFromIssue,
-  onRenameSession,
-  onSetSessionPersistent,
-  onArchiveSession,
-  onRestoreSession,
-  onDeleteSession,
-  version,
-  pullRequestsView,
-  memory
-}: JinglerAppProps) {
+export function JinglerApp(props:  JinglerAppProps) {
+  function workspaceNavigationProps() {
+    return {
+onNewSession: onCreateSession ? openNewSession : undefined,
+onOpenUsage: onLoadUsage ? openUsage : undefined,
+onOpenSettings: providerConnections
+            ? () => openSettings("providers")
+            : undefined,
+onOpenProviderSettings: providerConnections ? () => openSettings("providers") : undefined,
+onOpenGithubSettings: providerConnections ? () => openSettings("github") : undefined
+    }
+  }
+
+         function renderSessionWorkspace() {
+           return (<SessionConversation
+        search={
+          <TitleSearch
+            onOpen={() => setPaletteOpen(true)}
+            className="w-full"
+          />
+        }
+        sessions={sessions}
+        environments={environments}
+        activeSessionId={selected}
+        onSelectSession={selectSession}
+        pendingEnvironmentSession={pendingEnvironmentSession}
+        onSelectPendingEnvironmentSession={openPendingEnvironmentSession}
+        group={group}
+        splitGroups={split.workspace.groups}
+        activeGroupId={split.workspace.activeGroupId}
+        onFocusPane={(index) => group && split.focusPane(group.id, index)}
+        onFocusGroupPane={(groupId, index) => {
+          // A sidebar segment belongs to a group that may not be on screen, so
+          // showing it is part of focusing it.
+          split.activateGroup(groupId)
+          split.focusPane(groupId, index)
+        }}
+        onSplitWith={splitActiveWith}
+        onSplitGroupWith={split.splitInto}
+        onReplacePane={(index, sessionId) => {
+          // One reducer, not close-then-insert: group ids derive from the
+          // leftmost pane, so closing pane 0 re-ids the group and the second
+          // call would look up an id that no longer exists.
+          if (!group) return
+          if (group.panes.length === 1) return setSelected(sessionId)
+          split.replacePane(group.id, index, sessionId)
+        }}
+        onClosePane={(index) => group && split.closePane(group.id, index)}
+        onCloseGroupPane={split.closePane}
+        onMovePane={(index, direction) =>
+          group && split.movePane(group.id, index, direction)
+        }
+        onSeparateAll={split.separateAll}
+        onResizePane={(index, delta) =>
+          group && split.resizePane(group.id, index, delta)
+        }
+        onRenameSession={onRenameSession}
+        onFocusChat={onFocusChat}
+        onToggleBrowser={onToggleBrowser}
+        isBrowserActive={isBrowserActive}
+        onSetSessionPersistent={onSetSessionPersistent}
+        onArchiveSession={onArchiveSession}
+        onRestoreSession={onRestoreSession}
+        onDeleteSession={onDeleteSession}
+        renderConversation={renderConversation}
+        renderExplanation={renderExplanation}
+        renderFiles={renderFiles}
+        renderBrowser={renderBrowser}
+        onOpenFile={onOpenFile}
+        onRequestCloseFile={onRequestCloseFile}
+        renderChatTabs={renderChatTabs}
+        renderSubagentTabs={renderSubagentTabs}
+        planSessions={planSessions}
+        explanationSessions={explanationSessions}
+        showEmpty={showEmpty}
+        patch={patch}
+        liveActivity={liveActivity}
+        prStates={prStates}
+        repoOwners={repoOwners}
+        liveDiff={liveDiff}
+        debugStopSequences={debugStopSequences}
+        {...workspaceNavigationProps()}
+        user={user}
+        onSignOut={onSignOut}
+
+
+
+
+        pullRequestsActive={pullRequestsOpen}
+        onOpenPullRequests={
+          pullRequestsView
+            ? () => {
+                memory?.onClose()
+                setSettingsOpen(false)
+                setNewOpen(false)
+                setPullRequestsOpen(true)
+              }
+            : undefined
+        }
+        pullRequestsView={pullRequestsOpen ? pullRequestsView : undefined}
+        memoryEligible={memory?.eligible}
+        memoryActive={memory?.active}
+        onOpenMemory={
+          memory
+            ? () => {
+              setPullRequestsOpen(false)
+              setSettingsOpen(false)
+              setNewOpen(false)
+              memory.onOpen()
+              }
+            : undefined
+        }
+        memoryView={memory?.active ? memory.content : undefined}
+        newSessionViewActive={newOpen}
+        newSessionView={
+          renderNewWorkspace()
+        }
+        settingsView={
+          renderSettings()
+        }
+        ghConnected={ghConnected}
+        starredRepoNames={starredRepoNames}
+        onToggleStar={onToggleStar ? toggleStarByName : undefined}
+        collapsedRepoNames={collapsedRepoNames}
+        onToggleCollapsed={
+          onToggleCollapsed ? toggleCollapsedByName : undefined
+        }
+        renderPullRequest={renderPullRequest}
+        tabContributions={tabContributions}
+        onSelectIssue={onSelectIssue}
+        paneContributions={paneContributions}
+        renderReview={renderReview}
+        renderCode={renderCode}
+        renderTerminalDock={renderTerminalDock}
+        selectTabRequest={tabRequest}
+        onTabRequestHandled={clearTabRequest}
+        version={version}
+      />)
+         }
+
+function getAddProjectAction() {
+    return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub
+                  ? () => setAddProjectOpen(true)
+                  : undefined)
+  }
+
+function getActiveTabContext(active: Session) {
+      return ({
+        session: active,
+        hasPlan: planSessions?.has(active.id) ?? false,
+        hasExplanation: explanationSessions?.has(active.id) ?? false,
+        diff: liveDiff?.[active.id] ?? null
+      })
+    }
+
+         function renderAddProjectDialog() {
+           return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub && (
+        <AddProjectDialog
+          open={addProjectOpen}
+          onClose={() => setAddProjectOpen(false)}
+          browse={onBrowseProject}
+          browseCloneDestination={onBrowseCloneDestination}
+          listDirectories={onListProjectDirectories}
+          listGitHubRepositories={onListGitHubRepositories}
+          register={onRegisterProject}
+          createDirectory={onCreateProjectDirectory}
+          cloneFromGitHub={onCloneProjectFromGitHub}
+          onAdded={() => {
+            setAddProjectOpen(false)
+          }}
+        />
+      ))
+         }
+
+  function renderSettings() {
+    return (settingsOpen && providerConnections ? (
+            <SettingsView
+              key={settingsSection}
+              initialSection={settingsSection}
+              providerConnections={providerConnections}
+              agents={agents}
+              runtimeInspector={runtimeInspector}
+              mcp={mcp}
+              githubConnection={githubConnection}
+              githubBusy={githubBusy}
+              onGithubConnect={onGithubConnect}
+              onGithubManage={onGithubManage}
+              onGithubRefresh={onGithubRefresh}
+              onGithubDisconnect={onGithubDisconnect}
+              github={githubConfig}
+              git={gitConfig}
+              context={contextConfig}
+              onSaveContext={onSaveContextConfig}
+              contextSessions={contextSessions}
+              onSaveGithub={onSaveGithubConfig}
+              onSaveGit={onSaveGitConfig}
+              notifications={notificationsConfig}
+              onSaveNotifications={onSaveNotificationsConfig}
+              offloadCompute={offloadCompute}
+              onSaveOffloadCompute={onSaveOffloadCompute}
+              offloadStatus={offloadStatus}
+              webSearch={webSearch}
+              defaultMode={defaultMode}
+              onSaveDefaultMode={onSaveDefaultMode}
+              planAutoRun={planAutoRun}
+              onSavePlanAutoRun={onSavePlanAutoRun}
+              adhdMode={adhdMode}
+              onSaveAdhdMode={onSaveAdhdMode}
+              fontScale={fontScale}
+              onSaveFontScale={onSaveFontScale}
+              themes={themes}
+              plugins={plugins}
+              devices={devices}
+              onClose={() => setSettingsOpen(false)}
+            />
+          ) : undefined)
+  }
+
+  function renderNewWorkspace() {
+
+
+    return ((newOpen || pendingEnvironmentSession !== null) && onCreateSession ? (
+            <NewWorkspaceView
+              open={newOpen || pendingEnvironmentSession !== null}
+              onClose={() => {
+                setNewOpen(false)
+                setRequestedNewSession(null)
+                if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
+              }}
+              onAddProject={
+                getAddProjectAction()
+              }
+              projects={projects}
+              environments={environments}
+              environmentStartup={pendingEnvironmentSession}
+              defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
+              requestedProjectId={requestedNewSession?.projectId}
+              requestedPr={requestedNewSession?.pr}
+              providerCatalog={providerConnections?.catalog}
+              defaultConnectionId={providerConnections?.defaultConnectionId}
+              defaultModelId={providerConnections?.defaultModelId}
+              defaultMode={defaultMode}
+              issueProviders={issueProviders}
+              loadPullRequests={loadPullRequests}
+              loadGithubIssues={loadGithubIssues}
+              loadProviderIssues={loadProviderIssues}
+              loadBranches={loadBranches}
+              prepareProject={async (projectId, environmentId) => {
+                const project = projects.find((candidate) => candidate.id === projectId)
+                if (project === undefined) throw new Error("Project not found.")
+                if (environmentId === undefined) return project
+                if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
+                return onEnsureProjectOnEnvironment(projectId, environmentId)
+              }}
+              onCreate={handleCreate}
+              onCreateFromPr={onCreateSessionFromPr ? handleCreateFromPr : undefined}
+              onCreateFromIssue={onCreateSessionFromIssue ? handleCreateFromIssue : undefined}
+            />
+          ) : undefined)
+  }
+
+  const { sessions, user, onSignOut, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, onLoadUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, renderReview, renderCode, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, onOpenFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onSetSessionPersistent, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, memory } = defaultProps(props, {
+    repos: [],
+    projects: [],
+    starredRepos: [],
+    collapsedRepos: [],
+    githubConnection: GITHUB_DISCONNECTED,
+    patch: SEED_PATCH,
+    loadBranches: noBranches,
+    environments: [],
+    issueProviders: []
+  })
+
+  function handleSessionShortcut(e: KeyboardEvent) {
+      const shortcut = matchSplitShortcut(e)
+      if (shortcut === null) return
+
+      if (shortcut.type === "new-session") {
+        if (!onCreateSession) return
+        e.preventDefault()
+        openNewSession()
+        return
+      }
+      // Only consume an add request when there is room and an eligible session.
+      if (shortcut.type === "add-pane") {
+        if (addNextSessionAsPane()) e.preventDefault()
+        return
+      }
+      if (!group) return
+      const detail = surfaceCommandForShortcut(shortcut)!
+      e.preventDefault()
+      window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail }))
+  }
+
+  function handleFileQuickOpen(e: KeyboardEvent) {
+      if (!matchFileQuickOpenChord(e)) return false
+      {
+        if (!renderFileQuickOpen || active?.worktreePath == null) return true
+        e.preventDefault()
+        setFileQuickOpenSessionId(active.id)
+        return true
+      }
+  }
+
+  const onKey = (e: KeyboardEvent) => {
+      if (handleFileQuickOpen(e)) return
+      // The palette goes FIRST, and in this listener rather than one of its own.
+      // Three window-level keydown handlers racing for the same event is how a
+      // chord ends up meaning two things depending on mount order.
+      // `setPaletteOpen(true)` is idempotent, so holding ⌘K cannot stack dialogs.
+      if (matchPaletteChord(e)) {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+
+      if (
+        matchTerminalChord(e) &&
+        active &&
+        renderTerminalDock
+      ) {
+        e.preventDefault()
+        setTabRequest((previous) => ({
+          tabId: BUILTIN_TAB.terminal,
+          nonce: (previous?.nonce ?? 0) + 1
+        }))
+        return
+      }
+
+      // ⌘F lands here too, now that search is global.
+      //
+      // It used to live in the sidebar and focus its "Filter sessions…" field.
+      // That field is gone — search moved to the title bar and is served by the
+      // palette, which already indexes every session, every archived session and
+      // every action. Leaving ⌘F bound to nothing would have been a regression
+      // paid for by whoever had learnt it, and binding it to a second, narrower
+      // search would be two implementations over one index.
+      if (
+        matchGlobalSearchChord(e)
+      ) {
+        e.preventDefault()
+        setPaletteOpen(true)
+        return
+      }
+
+      if (
+        matchBrowserChord(e) &&
+        active &&
+        renderBrowser
+      ) {
+        e.preventDefault()
+        setTabRequest((previous) => ({
+          tabId: BUILTIN_TAB.browser,
+          nonce: (previous?.nonce ?? 0) + 1
+        }))
+        return
+      }
+
+      handleSessionShortcut(e)
+    }
+
   // The split replaces what used to be a single `selected` useState. The focused
   // pane's session IS the old "selected" — every existing call site below still
   // reads `selected` / calls `setSelected` and behaves as it always did when the
@@ -784,131 +1041,7 @@ export function JinglerApp({
   // "{"). What is left here is only the part that needs the app's state: whether
   // the thing the chord asked for is possible right now.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (matchFileQuickOpenChord(e)) {
-        if (!renderFileQuickOpen || active?.worktreePath == null) return
-        e.preventDefault()
-        setFileQuickOpenSessionId(active.id)
-        return
-      }
-      // The palette goes FIRST, and in this listener rather than one of its own.
-      // Three window-level keydown handlers racing for the same event is how a
-      // chord ends up meaning two things depending on mount order.
-      // `setPaletteOpen(true)` is idempotent, so holding ⌘K cannot stack dialogs.
-      if (matchPaletteChord(e)) {
-        e.preventDefault()
-        setPaletteOpen(true)
-        return
-      }
 
-      if (
-        e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        (e.code === "Backquote" || e.key === "`") &&
-        active &&
-        renderTerminalDock
-      ) {
-        e.preventDefault()
-        setTabRequest((previous) => ({
-          tabId: BUILTIN_TAB.terminal,
-          nonce: (previous?.nonce ?? 0) + 1
-        }))
-        return
-      }
-
-      // ⌘F lands here too, now that search is global.
-      //
-      // It used to live in the sidebar and focus its "Filter sessions…" field.
-      // That field is gone — search moved to the title bar and is served by the
-      // palette, which already indexes every session, every archived session and
-      // every action. Leaving ⌘F bound to nothing would have been a regression
-      // paid for by whoever had learnt it, and binding it to a second, narrower
-      // search would be two implementations over one index.
-      if (
-        (e.metaKey || e.ctrlKey) &&
-        !e.shiftKey &&
-        !e.altKey &&
-        e.key.toLowerCase() === "f"
-      ) {
-        e.preventDefault()
-        setPaletteOpen(true)
-        return
-      }
-
-      if (
-        e.ctrlKey &&
-        e.shiftKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        (e.key === "B" || e.code === "KeyB") &&
-        active &&
-        renderBrowser
-      ) {
-        e.preventDefault()
-        setTabRequest((previous) => ({
-          tabId: BUILTIN_TAB.browser,
-          nonce: (previous?.nonce ?? 0) + 1
-        }))
-        return
-      }
-
-      const shortcut = matchSplitShortcut(e)
-      if (shortcut === null) return
-
-      switch (shortcut.type) {
-        case "new-session": {
-          if (!onCreateSession) return
-          e.preventDefault()
-          openNewSession()
-          return
-        }
-        // Swallow the chord only if it actually added a pane — at the cap, or
-        // with every session already on screen, ⌃⇧= has nothing to do and
-        // shouldn't pretend otherwise.
-        case "add-pane": {
-          if (addNextSessionAsPane()) e.preventDefault()
-          return
-        }
-        // Out-of-range is a no-op rather than a clamp: ⌃⇧4 in a two-pane split
-        // means "the fourth pane", and there isn't one.
-        case "focus-pane": {
-          if (!group) return
-          e.preventDefault()
-          const detail = `focus-${shortcut.index}` as SessionSurfaceCommand
-          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
-          return
-        }
-        // Stops at the ends (the reducer refuses to wrap): wrapping from the
-        // last pane to the first reads as a jump, and in a two-pane split it
-        // makes the two keys indistinguishable.
-        case "focus-neighbour": {
-          if (!group) return
-          e.preventDefault()
-          const detail: SessionSurfaceCommand =
-            shortcut.direction === -1 ? "focus-left" : "focus-right"
-          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
-          return
-        }
-        case "move-pane": {
-          if (!group) return
-          e.preventDefault()
-          const detail: SessionSurfaceCommand =
-            shortcut.direction === -1 ? "move-left" : "move-right"
-          window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail }))
-          return
-        }
-        case "close-pane": {
-          if (!group) return
-          e.preventDefault()
-          window.dispatchEvent(
-            new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, {
-              detail: "close"
-            })
-          )
-        }
-      }
-    }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [
@@ -942,34 +1075,7 @@ export function JinglerApp({
    * group at the bottom instead, because `groupPaletteItems` keeps the order
    * this array is built in.
    */
-  const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
-    const items: PaletteItem[] = []
-
-    const sessionItem = (s: Session): PaletteItem => ({
-      id: `session:${s.id}`,
-      kind: "session",
-      label: s.title || UNTITLED_SESSION,
-      detail: `${s.repo} · ${s.branch}`,
-      group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
-      run: () => selectSession(s.id)
-    })
-
-    for (const s of sessions) if (!s.archived) items.push(sessionItem(s))
-
-    if (onCreateSession) {
-      items.push({
-        id: "action:new-session",
-        kind: "action",
-        label: "New Workspace",
-        group: PALETTE_GROUP.actions,
-        hint: "⌘N",
-        icon: SquareTerminal,
-        run: openNewSession
-      })
-    }
-
-    // Archive and Restore are the SAME row in two states, and only ever one of
-    // them, because a session is either archived or it is not.
+  function appendSessionActions(items: PaletteItem[]) {
     if (active && !active.archived && onArchiveSession) {
       items.push({
         id: "action:archive-session",
@@ -992,6 +1098,88 @@ export function JinglerApp({
         run: () => onRestoreSession(active.id)
       })
     }
+
+  }
+
+  function tabShortcutHint(tabId: TabKey) {
+    if (tabId === BUILTIN_TAB.browser) return "⌃⇧B"
+    if (tabId === BUILTIN_TAB.terminal) return "⌃`"
+    return undefined
+  }
+
+  function appendTabActions(items: PaletteItem[]) {
+
+
+    if (!active) return
+      const tabCtx: TabContext = getActiveTabContext(active)
+      for (const tab of visibleTabs(tabCtx, [
+        ...TAB_SHAPES,
+        ...(tabContributions ?? [])
+      ])) {
+        if (tab.id === BUILTIN_TAB.browser && !renderBrowser) continue
+        if (tab.id === BUILTIN_TAB.terminal && !renderTerminalDock) continue
+        items.push({
+          id: `tab:${tab.id}`,
+          kind: "tab",
+          label: `Go to ${tab.label}`,
+          group: PALETTE_GROUP.tabs,
+          icon: tab.icon,
+          hint: tabShortcutHint(tab.id),
+          run: () =>
+            setTabRequest((prev) => ({
+              tabId: tab.id,
+              nonce: (prev?.nonce ?? 0) + 1
+            }))
+        })
+      }
+
+  }
+
+  function appendPluginCommands(items: PaletteItem[]) {
+    if (onRunPluginCommand) {
+      for (const command of pluginCommands ?? []) {
+        items.push({
+          id: `plugin:${command.commandId}`,
+          kind: "plugin",
+          label: command.title,
+          detail: command.pluginName,
+          group: pluginGroupName(command.category, command.pluginName),
+          run: () => onRunPluginCommand(command.pluginId, command.commandId)
+        })
+      }
+    }
+
+  }
+
+  const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
+    const items: PaletteItem[] = []
+
+    const sessionItem = (s: Session): PaletteItem => ({
+      id: `session:${s.id}`,
+      kind: "session",
+      label: s.title || UNTITLED_SESSION,
+      detail: `${s.repo} · ${s.branch}`,
+      group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
+      run: () => selectSession(s.id)
+    })
+
+    items.push(...sessions.filter((session) => !session.archived).map(sessionItem))
+
+    if (onCreateSession) {
+      items.push({
+        id: "action:new-session",
+        kind: "action",
+        label: "New Workspace",
+        group: PALETTE_GROUP.actions,
+        hint: "⌘N",
+        icon: SquareTerminal,
+        run: openNewSession
+      })
+    }
+
+    // Archive and Restore are the SAME row in two states, and only ever one of
+    // them, because a session is either archived or it is not.
+    appendSessionActions(items)
 
     // Gated on provider connections for the same reason the sidebar's menu item is:
     // that prop is what makes the Settings view renderable at all.
@@ -1028,58 +1216,15 @@ export function JinglerApp({
      * a tab that cannot open would be worse than offering none: the palette
      * would close, nothing would change, and there is no error to read.
      */
-    if (active) {
-      const tabCtx: TabContext = {
-        session: active,
-        hasPlan: planSessions?.has(active.id) ?? false,
-        hasExplanation: explanationSessions?.has(active.id) ?? false,
-        diff: liveDiff?.[active.id] ?? null
-      }
-      for (const tab of visibleTabs(tabCtx, [
-        ...TAB_SHAPES,
-        ...(tabContributions ?? [])
-      ])) {
-        if (tab.id === BUILTIN_TAB.browser && !renderBrowser) continue
-        if (tab.id === BUILTIN_TAB.terminal && !renderTerminalDock) continue
-        items.push({
-          id: `tab:${tab.id}`,
-          kind: "tab",
-          label: `Go to ${tab.label}`,
-          group: PALETTE_GROUP.tabs,
-          icon: tab.icon,
-          hint:
-            tab.id === BUILTIN_TAB.browser
-              ? "⌃⇧B"
-              : tab.id === BUILTIN_TAB.terminal
-                ? "⌃`"
-                : undefined,
-          run: () =>
-            setTabRequest((prev) => ({
-              tabId: tab.id,
-              nonce: (prev?.nonce ?? 0) + 1
-            }))
-        })
-      }
-    }
+    appendTabActions(items)
 
     // Grouped by the manifest's `category`, falling back to the plugin's name —
     // a heading of "Commands" over two plugins' rows would hide which one is
     // about to run, and a plugin command is the one row here that executes
     // third-party code.
-    if (onRunPluginCommand) {
-      for (const command of pluginCommands ?? []) {
-        items.push({
-          id: `plugin:${command.commandId}`,
-          kind: "plugin",
-          label: command.title,
-          detail: command.pluginName,
-          group: pluginGroupName(command.category, command.pluginName),
-          run: () => onRunPluginCommand(command.pluginId, command.commandId)
-        })
-      }
-    }
+    appendPluginCommands(items)
 
-    for (const s of sessions) if (s.archived) items.push(sessionItem(s))
+    items.push(...sessions.filter((session) => session.archived).map(sessionItem))
 
     return items
   }, [
@@ -1173,233 +1318,8 @@ export function JinglerApp({
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
     <AppShell title="Jingler">
-      <SessionConversation
-        search={
-          <TitleSearch
-            onOpen={() => setPaletteOpen(true)}
-            className="w-full"
-          />
-        }
-        sessions={sessions}
-        environments={environments}
-        activeSessionId={selected}
-        onSelectSession={selectSession}
-        pendingEnvironmentSession={pendingEnvironmentSession}
-        onSelectPendingEnvironmentSession={openPendingEnvironmentSession}
-        group={group}
-        splitGroups={split.workspace.groups}
-        activeGroupId={split.workspace.activeGroupId}
-        onFocusPane={(index) => group && split.focusPane(group.id, index)}
-        onFocusGroupPane={(groupId, index) => {
-          // A sidebar segment belongs to a group that may not be on screen, so
-          // showing it is part of focusing it.
-          split.activateGroup(groupId)
-          split.focusPane(groupId, index)
-        }}
-        onSplitWith={splitActiveWith}
-        onSplitGroupWith={split.splitInto}
-        onReplacePane={(index, sessionId) => {
-          // One reducer, not close-then-insert: group ids derive from the
-          // leftmost pane, so closing pane 0 re-ids the group and the second
-          // call would look up an id that no longer exists.
-          if (!group) return
-          if (group.panes.length === 1) return setSelected(sessionId)
-          split.replacePane(group.id, index, sessionId)
-        }}
-        onClosePane={(index) => group && split.closePane(group.id, index)}
-        onCloseGroupPane={split.closePane}
-        onMovePane={(index, direction) =>
-          group && split.movePane(group.id, index, direction)
-        }
-        onSeparateAll={split.separateAll}
-        onResizePane={(index, delta) =>
-          group && split.resizePane(group.id, index, delta)
-        }
-        onRenameSession={onRenameSession}
-        onFocusChat={onFocusChat}
-        onToggleBrowser={onToggleBrowser}
-        isBrowserActive={isBrowserActive}
-        onSetSessionPersistent={onSetSessionPersistent}
-        onArchiveSession={onArchiveSession}
-        onRestoreSession={onRestoreSession}
-        onDeleteSession={onDeleteSession}
-        renderConversation={renderConversation}
-        renderExplanation={renderExplanation}
-        renderFiles={renderFiles}
-        renderBrowser={renderBrowser}
-        onOpenFile={onOpenFile}
-        onRequestCloseFile={onRequestCloseFile}
-        renderChatTabs={renderChatTabs}
-        renderSubagentTabs={renderSubagentTabs}
-        planSessions={planSessions}
-        explanationSessions={explanationSessions}
-        showEmpty={showEmpty}
-        patch={patch}
-        liveActivity={liveActivity}
-        prStates={prStates}
-        repoOwners={repoOwners}
-        liveDiff={liveDiff}
-        debugStopSequences={debugStopSequences}
-        onNewSession={onCreateSession ? openNewSession : undefined}
-        user={user}
-        onSignOut={onSignOut}
-        onOpenUsage={onLoadUsage ? openUsage : undefined}
-        onOpenSettings={
-          providerConnections
-            ? () => openSettings("providers")
-            : undefined
-        }
-        onOpenProviderSettings={
-          providerConnections ? () => openSettings("providers") : undefined
-        }
-        onOpenGithubSettings={
-          providerConnections ? () => openSettings("github") : undefined
-        }
-        pullRequestsActive={pullRequestsOpen}
-        onOpenPullRequests={
-          pullRequestsView
-            ? () => {
-                memory?.onClose()
-                setSettingsOpen(false)
-                setNewOpen(false)
-                setPullRequestsOpen(true)
-              }
-            : undefined
-        }
-        pullRequestsView={pullRequestsOpen ? pullRequestsView : undefined}
-        memoryEligible={memory?.eligible}
-        memoryActive={memory?.active}
-        onOpenMemory={
-          memory
-            ? () => {
-              setPullRequestsOpen(false)
-              setSettingsOpen(false)
-              setNewOpen(false)
-              memory.onOpen()
-              }
-            : undefined
-        }
-        memoryView={memory?.active ? memory.content : undefined}
-        newSessionViewActive={newOpen}
-        newSessionView={
-          (newOpen || pendingEnvironmentSession !== null) && onCreateSession ? (
-            <NewWorkspaceView
-              open={newOpen || pendingEnvironmentSession !== null}
-              onClose={() => {
-                setNewOpen(false)
-                setRequestedNewSession(null)
-                if (pendingEnvironmentSession?.error) sendEnvironmentStartup({ type: "DISMISS" })
-              }}
-              onAddProject={
-                onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub
-                  ? () => setAddProjectOpen(true)
-                  : undefined
-              }
-              projects={projects}
-              environments={environments}
-              environmentStartup={pendingEnvironmentSession}
-              defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
-              requestedProjectId={requestedNewSession?.projectId}
-              requestedPr={requestedNewSession?.pr}
-              providerCatalog={providerConnections?.catalog}
-              defaultConnectionId={providerConnections?.defaultConnectionId}
-              defaultModelId={providerConnections?.defaultModelId}
-              defaultMode={defaultMode}
-              issueProviders={issueProviders}
-              loadPullRequests={loadPullRequests}
-              loadGithubIssues={loadGithubIssues}
-              loadProviderIssues={loadProviderIssues}
-              loadBranches={loadBranches}
-              prepareProject={async (projectId, environmentId) => {
-                const project = projects.find((candidate) => candidate.id === projectId)
-                if (project === undefined) throw new Error("Project not found.")
-                if (environmentId === undefined) return project
-                if (!onEnsureProjectOnEnvironment) throw new Error("Remote project provisioning is unavailable.")
-                return onEnsureProjectOnEnvironment(projectId, environmentId)
-              }}
-              onCreate={handleCreate}
-              onCreateFromPr={onCreateSessionFromPr ? handleCreateFromPr : undefined}
-              onCreateFromIssue={onCreateSessionFromIssue ? handleCreateFromIssue : undefined}
-            />
-          ) : undefined
-        }
-        settingsView={
-          settingsOpen && providerConnections ? (
-            <SettingsView
-              key={settingsSection}
-              initialSection={settingsSection}
-              providerConnections={providerConnections}
-              agents={agents}
-              runtimeInspector={runtimeInspector}
-              mcp={mcp}
-              githubConnection={githubConnection}
-              githubBusy={githubBusy}
-              onGithubConnect={onGithubConnect}
-              onGithubManage={onGithubManage}
-              onGithubRefresh={onGithubRefresh}
-              onGithubDisconnect={onGithubDisconnect}
-              github={githubConfig}
-              git={gitConfig}
-              context={contextConfig}
-              onSaveContext={onSaveContextConfig}
-              contextSessions={contextSessions}
-              onSaveGithub={onSaveGithubConfig}
-              onSaveGit={onSaveGitConfig}
-              notifications={notificationsConfig}
-              onSaveNotifications={onSaveNotificationsConfig}
-              offloadCompute={offloadCompute}
-              onSaveOffloadCompute={onSaveOffloadCompute}
-              offloadStatus={offloadStatus}
-              webSearch={webSearch}
-              defaultMode={defaultMode}
-              onSaveDefaultMode={onSaveDefaultMode}
-              planAutoRun={planAutoRun}
-              onSavePlanAutoRun={onSavePlanAutoRun}
-              adhdMode={adhdMode}
-              onSaveAdhdMode={onSaveAdhdMode}
-              fontScale={fontScale}
-              onSaveFontScale={onSaveFontScale}
-              themes={themes}
-              plugins={plugins}
-              devices={devices}
-              onClose={() => setSettingsOpen(false)}
-            />
-          ) : undefined
-        }
-        ghConnected={ghConnected}
-        starredRepoNames={starredRepoNames}
-        onToggleStar={onToggleStar ? toggleStarByName : undefined}
-        collapsedRepoNames={collapsedRepoNames}
-        onToggleCollapsed={
-          onToggleCollapsed ? toggleCollapsedByName : undefined
-        }
-        renderPullRequest={renderPullRequest}
-        tabContributions={tabContributions}
-        onSelectIssue={onSelectIssue}
-        paneContributions={paneContributions}
-        renderReview={renderReview}
-        renderCode={renderCode}
-        renderTerminalDock={renderTerminalDock}
-        selectTabRequest={tabRequest}
-        onTabRequestHandled={clearTabRequest}
-        version={version}
-      />
-      {onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub && (
-        <AddProjectDialog
-          open={addProjectOpen}
-          onClose={() => setAddProjectOpen(false)}
-          browse={onBrowseProject}
-          browseCloneDestination={onBrowseCloneDestination}
-          listDirectories={onListProjectDirectories}
-          listGitHubRepositories={onListGitHubRepositories}
-          register={onRegisterProject}
-          createDirectory={onCreateProjectDirectory}
-          cloneFromGitHub={onCloneProjectFromGitHub}
-          onAdded={() => {
-            setAddProjectOpen(false)
-          }}
-        />
-      )}
+      {renderSessionWorkspace()}
+      {renderAddProjectDialog()}
       {onLoadUsage && (
         <UsageModal
           open={usageOpen}

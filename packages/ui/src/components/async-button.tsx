@@ -66,6 +66,25 @@ export function AsyncButton({
   size?: "sm" | "md"
   className?: string
 }) {
+         function getEffective() {
+           if (effective === "pending") return (<>
+          <Loader size={13} label="Working" />
+          {pendingLabel ?? children}
+        </>)
+           if (effective === "success") return (<>
+          <CheckDraw />
+          {held ? (doneLabel ?? successLabel) : successLabel}
+        </>)
+           if (effective === "error") return (<>
+          <TriangleAlert size={14} />
+          {errorLabel}
+        </>)
+           return (<>
+          {icon}
+          {children}
+        </>)
+         }
+
   const [state, setState] = useState<AsyncState>("idle")
   const ref = useRef<HTMLButtonElement>(null)
   const [minW, setMinW] = useState<number>()
@@ -110,27 +129,7 @@ export function AsyncButton({
       style={minW ? { minWidth: minW } : undefined}
       className={cn(tone, className)}
     >
-      {effective === "pending" ? (
-        <>
-          <Loader size={13} label="Working" />
-          {pendingLabel ?? children}
-        </>
-      ) : effective === "success" ? (
-        <>
-          <CheckDraw />
-          {held ? (doneLabel ?? successLabel) : successLabel}
-        </>
-      ) : effective === "error" ? (
-        <>
-          <TriangleAlert size={14} />
-          {errorLabel}
-        </>
-      ) : (
-        <>
-          {icon}
-          {children}
-        </>
-      )}
+      {getEffective()}
     </Button>
   )
 }

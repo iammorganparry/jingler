@@ -77,6 +77,17 @@ export interface PierreAnnotationLocation {
   readonly side: JinglerDiffSide
 }
 
+const findingAnnotationLocation = (finding: ReviewFinding): PierreAnnotationLocation | null => {
+
+      if (finding.path === null) return null
+      if ((finding.endLine ?? finding.line ?? 0) < 1) return null
+      return {
+        path: canonicalPierrePath(finding.path),
+        lineNumber: finding.endLine ?? finding.line ?? 0,
+        side: "new"
+      }
+}
+
 /** Resolve application payloads onto Pierre's documented line annotation API. */
 export const pierreAnnotationLocation = (
   payload: PierreAnnotationPayload
@@ -107,13 +118,7 @@ export const pierreAnnotationLocation = (
       }
     }
     case "finding":
-      if (payload.finding.path === null) return null
-      if ((payload.finding.endLine ?? payload.finding.line ?? 0) < 1) return null
-      return {
-        path: canonicalPierrePath(payload.finding.path),
-        lineNumber: payload.finding.endLine ?? payload.finding.line ?? 0,
-        side: "new"
-      }
+      return findingAnnotationLocation(payload.finding)
   }
 }
 

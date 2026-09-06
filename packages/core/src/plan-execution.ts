@@ -46,6 +46,67 @@ const invalidRepositoryPath = (path: string): boolean =>
   /^[A-Za-z]:[\\/]/.test(path) ||
   path.split(/[\\/]/).some((segment) => segment === "..")
 
+const collectComponent = (root: string, neighbors: ReadonlyMap<string, Set<string>>): Set<string> => {
+  const component = new Set<string>()
+  const pending = [root]
+  while (pending.length > 0) {
+    const id = pending.pop()!
+    if (component.has(id)) continue
+    component.add(id)
+    for (const neighbor of neighbors.get(id) ?? []) pending.push(neighbor)
+  }
+  return component
+}
+
+const connectNeighbors = (stageById: ReadonlyMap<string, PlanPrdStage>, neighbors: Map<string, Set<string>>): void => {
+  for (const stage of stageById.values()) {
+    for (const dependency of stage.dependencies ?? []) {
+      if (!neighbors.has(dependency) || dependency === stage.id) continue
+      neighbors.get(stage.id)?.add(dependency)
+      neighbors.get(dependency)?.add(stage.id)
+    }
+  }
+}
+
+const connectDependencies = (
+  unique: ReadonlyArray<PlanPrdStage>,
+  ids: ReadonlySet<string>,
+  outgoing: Map<string, Set<string>>,
+  indegree: Map<string, number>
+): void => {
+  for (const stage of unique) {
+    for (const dependency of stage.dependencies ?? []) {
+      if (!ids.has(dependency) || dependency === stage.id) continue
+      if (!outgoing.get(dependency)!.has(stage.id)) {
+        outgoing.get(dependency)!.add(stage.id)
+        indegree.set(stage.id, (indegree.get(stage.id) ?? 0) + 1)
+      }
+    }
+  }
+}
+
+const stageDiagnostics = (stage: PlanPrdStage, ids: ReadonlySet<string>, diagnostics: Array<PlanExecutionDiagnostic>): void => {
+  for (const dependency of stage.dependencies ?? []) {
+    if (dependency === stage.id) diagnostics.push({
+      code: "self-dependency",
+      message: `Stage "${stage.id}" cannot depend on itself.`,
+      stageIds: [stage.id]
+    })
+    else if (!ids.has(dependency)) diagnostics.push({
+      code: "dangling-dependency",
+      message: `Stage "${stage.id}" depends on unknown stage "${dependency}".`,
+      stageIds: [stage.id]
+    })
+  }
+  for (const file of stage.files) {
+    if (invalidRepositoryPath(file.path)) diagnostics.push({
+      code: "invalid-file-path",
+      message: `Stage "${stage.id}" must use a repository-relative file path.`,
+      stageIds: [stage.id]
+    })
+  }
+}
+
 const graphDiagnostics = (
   stages: ReadonlyArray<PlanPrdStage>
 ): Array<PlanExecutionDiagnostic> => {
@@ -61,27 +122,7 @@ const graphDiagnostics = (
   }
 
   const ids = new Set(stages.map((stage) => stage.id))
-  for (const stage of stages) {
-    for (const dependency of stage.dependencies ?? []) {
-      if (dependency === stage.id) diagnostics.push({
-        code: "self-dependency",
-        message: `Stage "${stage.id}" cannot depend on itself.`,
-        stageIds: [stage.id]
-      })
-      else if (!ids.has(dependency)) diagnostics.push({
-        code: "dangling-dependency",
-        message: `Stage "${stage.id}" depends on unknown stage "${dependency}".`,
-        stageIds: [stage.id]
-      })
-    }
-    for (const file of stage.files) {
-      if (invalidRepositoryPath(file.path)) diagnostics.push({
-        code: "invalid-file-path",
-        message: `Stage "${stage.id}" must use a repository-relative file path.`,
-        stageIds: [stage.id]
-      })
-    }
-  }
+  for (const stage of stages) stageDiagnostics(stage, ids, diagnostics)
   return diagnostics
 }
 
@@ -94,15 +135,7 @@ const topologicalOrder = (
   const ids = new Set(unique.map((stage) => stage.id))
   const indegree = new Map(unique.map((stage) => [stage.id, 0]))
   const outgoing = new Map(unique.map((stage) => [stage.id, new Set<string>()]))
-  for (const stage of unique) {
-    for (const dependency of stage.dependencies ?? []) {
-      if (!ids.has(dependency) || dependency === stage.id) continue
-      if (!outgoing.get(dependency)!.has(stage.id)) {
-        outgoing.get(dependency)!.add(stage.id)
-        indegree.set(stage.id, (indegree.get(stage.id) ?? 0) + 1)
-      }
-    }
-  }
+  connectDependencies(unique, ids, outgoing, indegree)
   const ready = unique
     .filter((stage) => indegree.get(stage.id) === 0)
     .map((stage) => stage.id)
@@ -136,25 +169,12 @@ export const buildPlanExecutionGraph = (
   const order = topologicalOrder(stages, diagnostics)
   const stageById = new Map(stages.map((stage) => [stage.id, stage]))
   const neighbors = new Map(order.map((id) => [id, new Set<string>()]))
-  for (const stage of stageById.values()) {
-    for (const dependency of stage.dependencies ?? []) {
-      if (!neighbors.has(dependency) || dependency === stage.id) continue
-      neighbors.get(stage.id)?.add(dependency)
-      neighbors.get(dependency)?.add(stage.id)
-    }
-  }
+  connectNeighbors(stageById, neighbors)
   const seen = new Set<string>()
   const groups: Array<PlanExecutionGroup> = []
   for (const root of order) {
     if (seen.has(root)) continue
-    const component = new Set<string>()
-    const pending = [root]
-    while (pending.length > 0) {
-      const id = pending.pop()!
-      if (component.has(id)) continue
-      component.add(id)
-      for (const neighbor of neighbors.get(id) ?? []) pending.push(neighbor)
-    }
+    const component = collectComponent(root, neighbors)
     for (const id of component) seen.add(id)
     const stageIds = order.filter((id) => component.has(id))
     const componentStages = stageIds.flatMap((id) => {

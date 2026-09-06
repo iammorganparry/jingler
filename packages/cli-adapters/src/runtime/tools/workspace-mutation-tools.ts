@@ -84,44 +84,7 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       if (path.isAbsolute(requested)) {
         return yield* Effect.fail(failure("Workspace paths must be relative"))
       }
-      const relative = path.normalize(requested)
-      const segments = relative.split(path.sep)
-      if (
-        relative === "." ||
-        segments.includes("..") ||
-        segments.includes(".git")
-      ) {
-        return yield* Effect.fail(failure("Workspace path is outside the editable tree"))
-      }
-
-      const root = yield* fs.realPath(cwd).pipe(
-        Effect.mapError(() => failure("Workspace root is unavailable"))
-      )
-      const absolute = path.resolve(root, relative)
-      if (!isContained(path, root, absolute)) {
-        return yield* Effect.fail(failure("Workspace path escapes the editable tree"))
-      }
-
-      const exists = yield* fs.exists(absolute)
-      if (requireExisting && !exists) {
-        return yield* Effect.fail(failure(`Workspace path does not exist: ${relative}`))
-      }
-
-      let ancestor = exists ? absolute : path.dirname(absolute)
-      while (!(yield* fs.exists(ancestor))) {
-        const parent = path.dirname(ancestor)
-        if (parent === ancestor) {
-          return yield* Effect.fail(failure("Workspace path has no readable ancestor"))
-        }
-        ancestor = parent
-      }
-      const realAncestor = yield* fs.realPath(ancestor).pipe(
-        Effect.mapError(() => failure("Workspace path is unreadable"))
-      )
-      if (!isContained(path, root, realAncestor)) {
-        return yield* Effect.fail(failure("Workspace path crosses an escaping symlink"))
-      }
-      return { absolute, relative }
+      return yield* resolveRelativeWorkspacePath(path, requested, fs, cwd, requireExisting)
     }).pipe(mapFailure("Could not resolve workspace path"))
 
   const write: WorkspaceMutationPort["write"] = (cwd, requested, content) =>
@@ -159,29 +122,12 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       if (oldText.length === 0) {
         return yield* Effect.fail(failure("Edit oldText must not be empty"))
       }
-      const target = yield* workspacePath(cwd, requested, true)
-      const current = yield* assets.read(cwd, target.relative).pipe(
-        Effect.mapError(() => failure(`Could not read workspace file: ${target.relative}`))
-      )
-      if (current.kind === "image" || current.kind === "pdf") {
-        return yield* Effect.fail(failure("Binary workspace files cannot be edited"))
-      }
-      const occurrences = current.text.split(oldText).length - 1
-      if (occurrences === 0) {
-        return yield* Effect.fail(failure("Edit oldText was not found"))
-      }
-      if (!replaceAll && occurrences > 1) {
-        return yield* Effect.fail(
-          failure("Edit oldText is ambiguous; provide more context or set replaceAll")
-        )
-      }
-      const next = replaceAll
-        ? current.text.replaceAll(oldText, newText)
-        : current.text.replace(oldText, newText)
-      yield* assets.write(cwd, target.relative, next, current.revision).pipe(
-        Effect.mapError(() => failure(`Could not edit workspace file: ${target.relative}`))
-      )
-      return { path: target.relative, replacements: replaceAll ? occurrences : 1 }
+      return yield* editWorkspaceText(
+        workspacePath,
+        cwd, requested,
+        assets,
+        oldText,
+        replaceAll, newText)
     })
 
   const remove: WorkspaceMutationPort["remove"] = (cwd, requested) =>
@@ -365,4 +311,85 @@ export const registerWorkspaceMutationTools = (
         { signal: context.signal }
       )
   })
+}
+
+function* editWorkspaceText(
+  workspacePath: (
+    cwd: string,
+    requested: string,
+    requireExisting: boolean
+  ) => Effect.Effect<ResolvedWorkspacePath, ToolError>,
+  cwd: string,
+  requested: string,
+  assets: AssetService,
+  oldText: string,
+  replaceAll: boolean,
+  newText: string
+) {
+  const target = yield* workspacePath(cwd, requested, true)
+  const current = yield* assets
+    .read(cwd, target.relative)
+    .pipe(Effect.mapError(() => failure(`Could not read workspace file: ${target.relative}`)))
+  if (current.kind === "image" || current.kind === "pdf") {
+    return yield* Effect.fail(failure("Binary workspace files cannot be edited"))
+  }
+  const occurrences = current.text.split(oldText).length - 1
+  if (occurrences === 0) {
+    return yield* Effect.fail(failure("Edit oldText was not found"))
+  }
+  if (!replaceAll && occurrences > 1) {
+    return yield* Effect.fail(
+      failure("Edit oldText is ambiguous; provide more context or set replaceAll")
+    )
+  }
+  const next = replaceAll
+    ? current.text.replaceAll(oldText, newText)
+    : current.text.replace(oldText, newText)
+  yield* assets
+    .write(cwd, target.relative, next, current.revision)
+    .pipe(Effect.mapError(() => failure(`Could not edit workspace file: ${target.relative}`)))
+  return { path: target.relative, replacements: replaceAll ? occurrences : 1 }
+}
+
+function* resolveRelativeWorkspacePath(
+  path: Path.Path,
+  requested: string,
+  fs: FileSystem.FileSystem,
+  cwd: string,
+  requireExisting: boolean
+) {
+  const relative = path.normalize(requested)
+  const segments = relative.split(path.sep)
+  if (relative === "." || segments.includes("..") || segments.includes(".git")) {
+    return yield* Effect.fail(failure("Workspace path is outside the editable tree"))
+  }
+
+  const root = yield* fs
+    .realPath(cwd)
+    .pipe(Effect.mapError(() => failure("Workspace root is unavailable")))
+  const absolute = path.resolve(root, relative)
+  if (!isContained(path, root, absolute)) {
+    return yield* Effect.fail(failure("Workspace path escapes the editable tree"))
+  }
+
+  const exists = yield* fs.exists(absolute)
+  if (requireExisting && !exists) {
+    return yield* Effect.fail(failure(`Workspace path does not exist: ${relative}`))
+  }
+
+  let ancestor = exists ? absolute : path.dirname(absolute)
+  while (!(yield* fs.exists(ancestor))) {
+    const parent = path.dirname(ancestor)
+    if (parent === ancestor) {
+      return yield* Effect.fail(failure("Workspace path has no readable ancestor"))
+    }
+    ancestor = parent
+  }
+  const realAncestor = yield* fs
+    .realPath(ancestor)
+    .pipe(Effect.mapError(() => failure("Workspace path is unreadable")))
+  if (!isContained(path, root, realAncestor)) {
+    return yield* Effect.fail(failure("Workspace path crosses an escaping symlink"))
+  }
+  return { absolute, relative }
 }

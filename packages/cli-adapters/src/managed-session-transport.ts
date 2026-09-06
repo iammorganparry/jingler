@@ -294,7 +294,48 @@ export const makeManagedSessionTransport = (
           command.commandId,
           grantActions(managedRuntimeActionForOperation(operation))
         )
-        if (operation === "Agent.stop") {
+        return yield* submitManagedCommand(
+          operation,
+          dependencies,
+          grant,
+          session,
+          command,
+          environmentId
+        )
+      })
+    )
+})
+
+export const managedEnvironmentFromSession = (
+  session: RemoteSessionResource,
+  value: ManagedEnvironment
+): ManagedEnvironment => {
+  if (session.environmentId !== value.id) {
+    throw new RemoteSessionError({ message: "Managed environment scope mismatch." })
+  }
+  return value
+}
+
+function* submitManagedCommand(
+  operation: string,
+  dependencies: ManagedSessionTransportDependencies,
+  grant: {
+    readonly version: 1
+    readonly runtimeUrl: string
+    readonly grant: string
+    readonly expiresAt: number
+  },
+  session: RemoteSessionResource,
+  command: {
+    readonly version: 1
+    readonly commandId: string
+    readonly sessionId: string
+    readonly payload: unknown
+    readonly operation: string
+  },
+  environmentId: string
+) {
+  if (operation === "Agent.stop") {
           const response = yield* Effect.tryPromise({
             try: () => (dependencies.fetch ?? fetch)(cancelUrl(grant, session.id), {
               method: "POST",
@@ -362,18 +403,7 @@ export const makeManagedSessionTransport = (
             })
         })
         if (!response.ok) {
-          return yield* Effect.fail(
-            new RemoteSessionError({
-              message:
-                response.status === 401 || response.status === 403
-                  ? "Managed session authorization expired. Reconnect the environment."
-                  : response.status === 409
-                    ? "Managed session state changed. Retry the operation."
-                    : response.status === 429
-                      ? "Managed session capacity or budget limit was reached."
-                      : "Managed session command was rejected."
-            })
-          )
+          return yield* rejectManagedCommand(response)
         }
 
         return Stream.fromQueue(output).pipe(
@@ -386,16 +416,18 @@ export const makeManagedSessionTransport = (
             item._tag === "event" ? Effect.succeed(item.event) : Effect.fail(item.error)
           )
         )
-      })
-    )
-})
+      }
 
-export const managedEnvironmentFromSession = (
-  session: RemoteSessionResource,
-  value: ManagedEnvironment
-): ManagedEnvironment => {
-  if (session.environmentId !== value.id) {
-    throw new RemoteSessionError({ message: "Managed environment scope mismatch." })
-  }
-  return value
+function* rejectManagedCommand(response: Response) {
+  return yield* Effect.fail(
+    new RemoteSessionError({ message:
+        response.status === 401 || response.status === 403
+          ? "Managed session authorization expired. Reconnect the environment."
+          : response.status === 409
+            ? "Managed session state changed. Retry the operation."
+            : response.status === 429
+              ? "Managed session capacity or budget limit was reached."
+              : "Managed session command was rejected."
+    })
+  )
 }

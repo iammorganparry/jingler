@@ -51,6 +51,26 @@ export function CodeBlock({
   onCopy,
   className,
 }: CodeBlockProps) {
+         function renderCopyButton() {
+           return (copyable || onCopy ? (
+          <motion.button
+            type="button"
+            aria-label={copied ? "Copied" : "Copy code"}
+            title={copied ? "Copied" : "Copy code"}
+            onClick={handleCopy}
+            whileTap={reduce ? undefined : { scale: 0.9 }}
+            transition={SPRING_PRESS}
+            className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-editor/70 hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {copied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Copy className="size-3.5" />
+            )}
+          </motion.button>
+        ) : null)
+         }
+
   const reduce = useReducedMotion() ?? false;
   const viewportRef = useRef<HTMLDivElement>(null);
   const copyTimer = useRef<number | undefined>(undefined);
@@ -136,23 +156,7 @@ export function CodeBlock({
           )}
           {streaming ? "Writing" : "Ready"}
         </span>
-        {copyable || onCopy ? (
-          <motion.button
-            type="button"
-            aria-label={copied ? "Copied" : "Copy code"}
-            title={copied ? "Copied" : "Copy code"}
-            onClick={handleCopy}
-            whileTap={reduce ? undefined : { scale: 0.9 }}
-            transition={SPRING_PRESS}
-            className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-editor/70 hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {copied ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Copy className="size-3.5" />
-            )}
-          </motion.button>
-        ) : null}
+        {renderCopyButton()}
       </div>
 
       <div

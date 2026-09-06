@@ -256,26 +256,29 @@ export class DeterministicCompilerModel implements CompilerModel {
       : [owned]
     const claimsByPage = new Map<string, Array<string>>(selected.map((candidate) => [candidate.page.id, []]))
     const unmatchedClaims: Array<string> = []
-    for (const claim of novelClaims) {
-      if (owned !== undefined) {
-        claimsByPage.get(owned.page.id)!.push(claim)
-        continue
-      }
-      const ranked = [...selected].sort(
-        (left, right) =>
-          scoreClaimForPage(claim, right.page) - scoreClaimForPage(claim, left.page) ||
-          compareText(left.page.id, right.page.id)
-      )
-      const best = ranked[0]
-      if (
-        best === undefined ||
-        scoreClaimForPage(claim, best.page) < MIN_CANDIDATE_SCORE
-      ) {
-        unmatchedClaims.push(claim)
-      } else {
-        claimsByPage.get(best.page.id)!.push(claim)
+    const assignClaims = (): void => {
+      for (const claim of novelClaims) {
+        if (owned !== undefined) {
+          claimsByPage.get(owned.page.id)!.push(claim)
+          continue
+        }
+        const ranked = [...selected].sort(
+          (left, right) =>
+            scoreClaimForPage(claim, right.page) - scoreClaimForPage(claim, left.page) ||
+            compareText(left.page.id, right.page.id)
+        )
+        const best = ranked[0]
+        if (
+          best === undefined ||
+          scoreClaimForPage(claim, best.page) < MIN_CANDIDATE_SCORE
+        ) {
+          unmatchedClaims.push(claim)
+        } else {
+          claimsByPage.get(best.page.id)!.push(claim)
+        }
       }
     }
+    assignClaims()
 
     const citationId = `compiler-${stableContentHash(context.source.id).slice(0, 12)}`
     const existingDrafts = selected.flatMap((candidate): ReadonlyArray<ProposalSetDraft> => {

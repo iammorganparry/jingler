@@ -99,6 +99,64 @@ const parseFeedback = (value: unknown): GitHubRelayEvent["feedback"] | undefined
   }
 }
 
+const validRepository = (
+  value: Record<string, unknown> | null
+): value is GitHubRelayEvent["repository"] =>
+  value !== null &&
+  nonEmptyString(value.id) &&
+  nonEmptyString(value.owner) &&
+  nonEmptyString(value.name) &&
+  nonEmptyString(value.fullName)
+
+const validActor = (value: Record<string, unknown> | null): value is GitHubRelayEvent["actor"] =>
+  value !== null &&
+  nonEmptyString(value.id) &&
+  nonEmptyString(value.login) &&
+  nonEmptyString(value.type)
+
+const validEventMetadata = (
+  value: Record<string, unknown> | null
+): value is Record<string, unknown> &
+  Pick<
+    GitHubRelayEvent,
+    | "version"
+    | "deliveryId"
+    | "semanticKey"
+    | "event"
+    | "action"
+    | "installationId"
+    | "actionable"
+    | "occurredAt"
+  > =>
+  value !== null &&
+  value.version === 1 &&
+  nonEmptyString(value.deliveryId) &&
+  nonEmptyString(value.semanticKey) &&
+  EVENTS.has(value.event as GitHubRelayEventName) &&
+  nonEmptyString(value.action) &&
+  nonEmptyString(value.installationId) &&
+  typeof value.actionable === "boolean" &&
+  nonEmptyString(value.occurredAt) &&
+  Number.isFinite(Date.parse(value.occurredAt))
+
+const validPullRequest = (value: Record<string, unknown>): boolean =>
+  nonEmptyString(value.id) &&
+  finiteInteger(value.number) &&
+  nonEmptyString(value.url) &&
+  // CI events legitimately carry an empty title and empty SHAs.
+  typeof value.title === "string" &&
+  typeof value.headSha === "string" &&
+  typeof value.baseSha === "string"
+
+const decodeServerMessage = (raw: unknown): unknown => {
+  if (typeof raw !== "string") return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
 export const parseGitHubRelayEvent = (value: unknown): GitHubRelayEvent | null => {
   const candidate = object(value)
   const repository = object(candidate?.repository)
@@ -106,42 +164,15 @@ export const parseGitHubRelayEvent = (value: unknown): GitHubRelayEvent | null =
   const pr = candidate?.pullRequest === null ? null : object(candidate?.pullRequest)
   const feedback = parseFeedback(candidate?.feedback)
   if (
-    !candidate ||
-    candidate.version !== 1 ||
-    !nonEmptyString(candidate.deliveryId) ||
-    !nonEmptyString(candidate.semanticKey) ||
-    !EVENTS.has(candidate.event as GitHubRelayEventName) ||
-    !nonEmptyString(candidate.action) ||
-    !nonEmptyString(candidate.installationId) ||
-    !repository ||
-    !nonEmptyString(repository.id) ||
-    !nonEmptyString(repository.owner) ||
-    !nonEmptyString(repository.name) ||
-    !nonEmptyString(repository.fullName) ||
-    !actor ||
-    !nonEmptyString(actor.id) ||
-    !nonEmptyString(actor.login) ||
-    !nonEmptyString(actor.type) ||
-    feedback === undefined ||
-    typeof candidate.actionable !== "boolean" ||
-    !nonEmptyString(candidate.occurredAt) ||
-    !Number.isFinite(Date.parse(candidate.occurredAt))
+    !validEventMetadata(candidate) ||
+    !validRepository(repository) ||
+    !validActor(actor) ||
+    feedback === undefined
   ) {
     return null
   }
   if (
-    pr !== null &&
-    // `title` is `Schema.String` in core, not non-empty: check_run/check_suite
-    // webhooks carry no PR title, so the relay legitimately sends "". Rejecting
-    // it here failed every CI event's frame, and one unparseable frame closes
-    // the socket (1002) without advancing the cursor — an endless replay loop.
-    (!((nonEmptyString(pr.id) && finiteInteger(pr.number) && nonEmptyString(pr.url))) ||
-      typeof pr.title !== "string" ||
-      typeof pr.headSha !== "string" ||
-      typeof pr.baseSha !== "string")
-  ) {
-    return null
-  }
+    pr !== null && !validPullRequest(pr)) return null
   return {
     version: 1,
     deliveryId: candidate.deliveryId,
@@ -174,15 +205,7 @@ export const parseGitHubRelayEvent = (value: unknown): GitHubRelayEvent | null =
 }
 
 export const parseGitHubRelayServerMessage = (raw: unknown): GitHubRelayServerMessage | null => {
-  let value: unknown = raw
-  if (typeof raw === "string") {
-    try {
-      value = JSON.parse(raw)
-    } catch {
-      return null
-    }
-  }
-  const candidate = object(value)
+  const candidate = object(decodeServerMessage(raw))
   if (!(candidate && nonEmptyString(candidate.type))) return null
   if (
     candidate.type === "hello" &&
@@ -279,7 +302,7 @@ export const githubFeedbackInstruction = (event: GitHubRelayEvent): string | nul
     clean(feedback.body, 32_000),
     "</github-feedback>",
     "",
-    "Address this feedback in the current session. Keep the response and any code changes visible in this conversation. Do NOT post any comment, reply, or acknowledgement back to GitHub (no \"Addressed in …\" replies) — a comment posted to the PR loops back in as new feedback. Once the feedback is genuinely addressed you MAY mark its review thread resolved (resolution posts no comment, so nothing loops back); leave it open if the feedback still needs the reviewer's judgement.",
+    'Address this feedback in the current session. Keep the response and any code changes visible in this conversation. Do NOT post any comment, reply, or acknowledgement back to GitHub (no "Addressed in …" replies) — a comment posted to the PR loops back in as new feedback. Once the feedback is genuinely addressed you MAY mark its review thread resolved (resolution posts no comment, so nothing loops back); leave it open if the feedback still needs the reviewer\'s judgement.',
     "",
     // Plan-execution sessions are told to fold NEW WORK into an amended plan.
     // Review feedback on work already produced is not new scope, and amending

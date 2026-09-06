@@ -1636,16 +1636,7 @@ describe("RPC handlers", () => {
         Layer.mergeAll(
           Layer.succeed(AppPaths, appPathsFor(root)),
           NodeContext.layer,
-          fakeCommandExecutor((cmd, args) => {
-            if (cmd === "which" || cmd === "where") {
-              return args[0] === "claude"
-                ? { stdout: "/usr/local/bin/claude" }
-                : { stdout: "" };
-            }
-            if (cmd === "git")
-              return args[2] === "log" ? { stdout: log } : { stdout: "" };
-            return { stdout: "2.1.0" };
-          }),
+          fakeCommandExecutor(reviewReconcileCommand(log)),
           fakeGithubApi({
             prHeadSha: () => Effect.succeed(headSha),
             prDiff: () => Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n"),
@@ -2247,3 +2238,16 @@ describe("memoryExport", () => {
     expect(archive.toString("utf8")).toContain("[[Incident Response]]");
   });
 });
+
+function reviewReconcileCommand(log: string) {
+  return (cmd: string, args: readonly string[]) => {
+    if (cmd === "which" || cmd === "where") {
+      return args[0] === "claude"
+        ? { stdout: "/usr/local/bin/claude" }
+        : { stdout: "" };
+    }
+    if (cmd === "git")
+      return args[2] === "log" ? { stdout: log } : { stdout: "" };
+    return { stdout: "2.1.0" };
+  };
+}

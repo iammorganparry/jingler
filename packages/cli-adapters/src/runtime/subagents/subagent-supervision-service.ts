@@ -270,23 +270,9 @@ export const makeSubagentSupervisionService = (
     state: Ref.get(ref),
     publish: (event) => Ref.update(ref, (state) => {
       const transcriptFiles = new Map(state.transcriptFiles)
-      if (event._tag === "Upsert" && event.node.sessionFile !== null) {
-        transcriptFiles.delete(event.node.runId)
-        transcriptFiles.set(event.node.runId, event.node.sessionFile)
-        while (transcriptFiles.size > MAX_TRANSCRIPT_FILES) {
-          const oldest = transcriptFiles.keys().next().value
-          if (oldest === undefined) break
-          transcriptFiles.delete(oldest)
-        }
-      }
-      return {
-        ...state,
-        tree: reduceSubagentFleetEvent(state.tree, event),
-        eventLog: [...state.eventLog, event].slice(-MAX_REPLAY_EVENTS),
-        registryRevision: Math.max(state.registryRevision, eventRevision(event)),
-        transcriptFiles
-      }
-    }),
+          return updateSupervisionTree(event,
+        transcriptFiles, state)
+        }),
     nextRevision: modify((state) => {
       const revision = state.registryRevision + 1
       return [revision, { ...state, registryRevision: revision }]
@@ -375,9 +361,7 @@ export const makeSubagentSupervisionService = (
         if (cached) {
           const original = state.controlRequests.get(request.requestId)
           return Effect.succeed([
-            !original || !sameControlRequest(original, request)
-              ? conflict(cached.sequence)
-              : { _tag: "Cached" as const, outcome: cached },
+                  cachedControlRegistration(original, request, cached, conflict),
             state
           ] as const)
         }
@@ -385,9 +369,7 @@ export const makeSubagentSupervisionService = (
         if (pending) {
           const original = state.pendingControlRequests.get(request.requestId)
           return Effect.succeed([
-            original && !sameControlRequest(original.request, request)
-              ? conflict(original.sequence)
-              : { _tag: "Pending" as const, deferred: pending },
+                  pendingControlRegistration(original, request, pending, conflict),
             state
           ] as const)
         }
@@ -421,7 +403,91 @@ export const makeSubagentSupervisionService = (
           controlReceipts: [...state.controlReceipts, queued].slice(-MAX_REPLAY_EVENTS)
         }] as const)
       })
-      if (registration._tag === "Cached" || registration._tag === "Conflict") {
+          return yield* persistQueuedControl(
+            registration,
+            persistCurrentControls,
+            request,
+            now,
+            ref,
+            controlGate,
+            execute,
+            parentPiSessionId
+          )
+        }),
+      controlReceipts: Ref.get(ref).pipe(Effect.map(({ controlReceipts }) => controlReceipts)),
+      start: (subscribe) =>
+        SynchronizedRef.modifyEffect(ref, (state) => {
+          if (state.started) return Effect.succeed([false, state] as const)
+          return Effect.sync(
+            () =>
+              [
+                true,
+                {
+                  ...state,
+                  started: true,
+                  unsubscribes: subscribe()
+                }
+              ] as const
+          )
+        }),
+      stop: Ref.modify(
+        ref,
+        (state) =>
+          [
+            state.unsubscribes,
+            {
+              ...state,
+              tree: emptySubagentRunTree(parentPiSessionId),
+              eventLog: [],
+              registryRevision: 0,
+              childSequences: new Map<string, number>(),
+              asyncStarts: new Map<string, SubagentStartRecord>(),
+              durableNodeIds: new Set<string>(),
+              transcriptFiles: state.transcriptFiles,
+              controlsLoaded: journal === undefined,
+              controlSequence: 0,
+              controlOutcomes: new Map<string, SubagentFleetControlOutcome>(),
+              controlRequests: new Map<string, SubagentFleetControlRequest>(),
+              controlReceipts: [],
+              pendingControlRequests: new Map(),
+              pendingControls: new Map<string, Deferred.Deferred<SubagentFleetControlOutcome>>(),
+              started: false,
+              unsubscribes: []
+            }
+          ] as const
+      ).pipe(
+        Effect.flatMap((unsubscribes) =>
+          Effect.forEach(unsubscribes, (unsubscribe) => Effect.sync(unsubscribe), { discard: true })
+        ),
+        Effect.asVoid
+      )
+    }
+  })
+
+export const SubagentSupervisionServiceLive = (
+  parentPiSessionId: string,
+  now: () => number = Date.now,
+  journal?: SubagentControlJournal
+) =>
+  Layer.scoped(
+    SubagentSupervisionService,
+    Effect.acquireRelease(
+      makeSubagentSupervisionService(parentPiSessionId, now, journal),
+      (service) => service.stop
+    )
+  )
+
+function* persistQueuedControl(
+  registration: ControlRegistration,
+  persistCurrentControls: Effect.Effect<void, Error, never>,
+  request: SubagentFleetControlRequest,
+  now: () => number,
+  ref: SynchronizedRef.SynchronizedRef<SupervisionState>,
+  controlGate: Effect.Semaphore,
+  execute: (sequence: number) => Effect.Effect<SubagentFleetControlOutcome>,
+  parentPiSessionId: string
+) {
+  if (registration._tag === "Cached" || registration._tag === "Conflict") {
         return registration.outcome
       }
       if (registration._tag === "Pending") return yield* Deferred.await(registration.deferred)
@@ -457,7 +523,33 @@ export const makeSubagentSupervisionService = (
         yield* Deferred.succeed(registration.deferred, rejected)
         return rejected
       }
-      const outcome = yield* controlGate.withPermits(1)(
+  return yield* executeRegisteredControl(
+    controlGate,
+    execute,
+    registration,
+    request,
+    now,
+    ref,
+    parentPiSessionId,
+    persistCurrentControls
+  )
+}
+
+function* executeRegisteredControl(
+  controlGate: Effect.Semaphore,
+  execute: (sequence: number) => Effect.Effect<SubagentFleetControlOutcome>,
+  registration: {
+    readonly _tag: "Execute"
+    readonly deferred: Deferred.Deferred<SubagentFleetControlOutcome>
+    readonly sequence: number
+  },
+  request: SubagentFleetControlRequest,
+  now: () => number,
+  ref: SynchronizedRef.SynchronizedRef<SupervisionState>,
+  parentPiSessionId: string,
+  persistCurrentControls: Effect.Effect<void, Error, never>
+) {
+  const outcome = yield* controlGate.withPermits(1)(
         execute(registration.sequence).pipe(
           Effect.catchAllCause((cause) => Effect.succeed({
             version: 2 as const,
@@ -517,57 +609,52 @@ export const makeSubagentSupervisionService = (
       }
       yield* Deferred.succeed(registration.deferred, settled)
       return settled
-    }),
-    controlReceipts: Ref.get(ref).pipe(Effect.map(({ controlReceipts }) => controlReceipts)),
-    start: (subscribe) => SynchronizedRef.modifyEffect(ref, (state) => {
-      if (state.started) return Effect.succeed([false, state] as const)
-      return Effect.sync(() => [true, {
-        ...state,
-        started: true,
-        unsubscribes: subscribe()
-      }] as const)
-    }),
-    stop: Ref.modify(ref, (state) => [state.unsubscribes, {
-      ...state,
-      tree: emptySubagentRunTree(parentPiSessionId),
-      eventLog: [],
-      registryRevision: 0,
-      childSequences: new Map<string, number>(),
-      asyncStarts: new Map<string, SubagentStartRecord>(),
-      durableNodeIds: new Set<string>(),
-      transcriptFiles: state.transcriptFiles,
-      controlsLoaded: journal === undefined,
-      controlSequence: 0,
-      controlOutcomes: new Map<string, SubagentFleetControlOutcome>(),
-      controlRequests: new Map<string, SubagentFleetControlRequest>(),
-      controlReceipts: [],
-      pendingControlRequests: new Map(),
-      pendingControls: new Map<
-        string,
-        Deferred.Deferred<SubagentFleetControlOutcome>
-      >(),
-      started: false,
-      unsubscribes: []
-    }] as const).pipe(
-      Effect.flatMap((unsubscribes) => Effect.forEach(
-        unsubscribes,
-        (unsubscribe) => Effect.sync(unsubscribe),
-        { discard: true }
-      )),
-      Effect.asVoid
-    )
-  }
-})
+    }
 
-export const SubagentSupervisionServiceLive = (
-  parentPiSessionId: string,
-  now: () => number = Date.now,
-  journal?: SubagentControlJournal
-) =>
-  Layer.scoped(
-    SubagentSupervisionService,
-    Effect.acquireRelease(
-      makeSubagentSupervisionService(parentPiSessionId, now, journal),
-      (service) => service.stop
-    )
-  )
+function updateSupervisionTree(
+  event: SubagentFleetEvent,
+  transcriptFiles: Map<string, string>,
+  state: SupervisionState
+) {
+      if (event._tag === "Upsert" && event.node.sessionFile !== null) {
+        transcriptFiles.delete(event.node.runId)
+        transcriptFiles.set(event.node.runId, event.node.sessionFile)
+        while (transcriptFiles.size > MAX_TRANSCRIPT_FILES) {
+          const oldest = transcriptFiles.keys().next().value
+          if (oldest === undefined) break
+          transcriptFiles.delete(oldest)
+        }
+      }
+  return {
+      ...state,
+      tree: reduceSubagentFleetEvent(state.tree, event),
+      eventLog: [...state.eventLog, event].slice(-MAX_REPLAY_EVENTS),
+      registryRevision: Math.max(state.registryRevision, eventRevision(event)),
+      transcriptFiles
+  }
+}
+
+const cachedControlRegistration = (
+  original: SubagentFleetControlRequest | undefined,
+  request: SubagentFleetControlRequest,
+  cached: SubagentFleetControlOutcome,
+  conflict: (sequence: number) => ControlRegistration
+): ControlRegistration =>
+  !original || !sameControlRequest(original, request)
+    ? conflict(cached.sequence)
+    : { _tag: "Cached", outcome: cached }
+
+const pendingControlRegistration = (
+  original:
+    | {
+        readonly request: SubagentFleetControlRequest
+        readonly sequence: number
+      }
+    | undefined,
+  request: SubagentFleetControlRequest,
+  pending: Deferred.Deferred<SubagentFleetControlOutcome>,
+  conflict: (sequence: number) => ControlRegistration
+): ControlRegistration =>
+  original && !sameControlRequest(original.request, request)
+    ? conflict(original.sequence)
+    : { _tag: "Pending", deferred: pending }

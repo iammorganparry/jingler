@@ -136,13 +136,7 @@ const repositoryFor = (database: Database) => ({
               )
             )
             .limit(1)
-          const previous = previousRows[0] ? toRoute(previousRows[0]) : null
-          const identityChanged =
-            previous !== null &&
-            (previous.installationId !== input.installationId ||
-              previous.repositoryId !== input.repositoryId ||
-              previous.pullRequestNumber !== input.pullRequestNumber)
-          const generationIncrement = identityChanged && previous.state !== "removed" ? 2 : 1
+          const { identityChanged, previous, generationIncrement } = sessionRouteIdentity()
           const rows = await tx
             .insert(githubSessionRoute)
             .values({
@@ -180,7 +174,7 @@ const repositoryFor = (database: Database) => ({
           const row = rows[0]
           if (!row) throw new Error("GitHub session route upsert returned no row")
           const route = toRoute(row)
-          if (identityChanged && previous?.state !== "removed") {
+          if (identityChanged && previous && previous.state !== "removed") {
             await queueMutation(
               tx,
               { ...previous, generation: route.generation - 1 },
@@ -190,6 +184,16 @@ const repositoryFor = (database: Database) => ({
           }
           await queueMutation(tx, route, "active", input.at)
           return route
+
+          function sessionRouteIdentity() {
+            const previous = previousRows[0] ? toRoute(previousRows[0]) : null
+            const identityChanged = previous !== null &&
+              (previous.installationId !== input.installationId ||
+                previous.repositoryId !== input.repositoryId ||
+                previous.pullRequestNumber !== input.pullRequestNumber)
+            const generationIncrement = identityChanged && previous.state !== "removed" ? 2 : 1
+            return { identityChanged, previous, generationIncrement }
+          }
         })
       ),
 

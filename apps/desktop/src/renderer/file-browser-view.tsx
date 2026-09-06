@@ -192,25 +192,7 @@ export function FileBrowserView({
   }, [browser.open, browser.selectedPath, debugPath, debugStopKey])
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const root = rootRef.current
-      if (root === null || !(event.target instanceof Node) || !root.contains(event.target)) return
-      if (!(event.metaKey || event.ctrlKey) || event.altKey) return
-      if (
-        !event.shiftKey &&
-        (event.code === "KeyJ" || event.key.toLowerCase() === "j") &&
-        canSendSelection
-      ) {
-        event.preventDefault()
-        sendSelectionToChat()
-        return
-      }
-      if (event.shiftKey) return
-      if (event.code !== "KeyS" && event.key.toLowerCase() !== "s") return
-      if (browser.status !== "dirty" && browser.status !== "error") return
-      event.preventDefault()
-      browser.save()
-    }
+    const onKeyDown = fileBrowserShortcut(rootRef, canSendSelection, sendSelectionToChat, browser)
     window.addEventListener("keydown", onKeyDown, true)
     return () => window.removeEventListener("keydown", onKeyDown, true)
   }, [browser.save, browser.status, canSendSelection, sendSelectionToChat])
@@ -294,6 +276,26 @@ export function FileBrowserView({
       />
     </div>
   )
+}
+
+function fileBrowserShortcut(rootRef: import("react").RefObject<HTMLDivElement | null>, canSendSelection: boolean, sendSelectionToChat: () => void, browser: FileBrowserController) {
+  return (event: KeyboardEvent) => {
+    const root = rootRef.current
+    if (!containsFileShortcutTarget(root, event.target)) return
+    if (!isFileShortcutModifier(event)) return
+    if (!event.shiftKey &&
+      isFileShortcutKey(event, "j") &&
+      canSendSelection) {
+      event.preventDefault()
+      sendSelectionToChat()
+      return
+    }
+    if (event.shiftKey) return
+    if (!isFileShortcutKey(event, "s")) return
+    if (browser.status !== "dirty" && browser.status !== "error") return
+    event.preventDefault()
+    browser.save()
+  }
 }
 
 function FileCanvas({
@@ -389,103 +391,24 @@ function FileCanvas({
   }
   if (browser.viewMode === "diff") {
     if (fileDiff !== null) {
-      return (
-        <div
-          key={browser.agentTargetCompleted ? browser.agentTargetEventId : undefined}
-          className={[
-            "flex h-full min-h-0 flex-col bg-canvas",
-            followedSelection === null ? "" : "animate-slide-in"
-          ].join(" ")}
-          data-follow-agent-change={
-            followedSelection === null ? undefined : (browser.agentTargetEventId ?? undefined)
-          }
-        >
-          <FileModeBar path={browser.selectedPath} mode="diff" browser={browser} />
-          <div className="min-h-0 flex-1">
-            <DiffView
-              fileDiff={fileDiff}
-              label={`${browser.selectedPath} changes`}
-              className="h-full min-h-0"
-              selection={selection}
-              onSelectionChange={onSelectionChange}
-              actions={
-                onSendReference === undefined && onSendComment === undefined
-                  ? undefined
-                  : {
-                      onAddToChat: addDiffSelectionToChat,
-                      onComment: commentOnDiffSelection
-                    }
-              }
-              scrollRequest={
-                followedSelection === null || browser.agentTargetEventId === null
-                  ? undefined
-                  : {
-                      path: browser.selectedPath,
-                      range: followedSelection,
-                      revision: [...`${browser.agentTargetEventId}:completed`].reduce(
-                        (value, character) =>
-                          ((value * 31 + character.charCodeAt(0)) >>> 0),
-                        0
-                      ),
-                      behavior: "smooth"
-                    }
-              }
-              options={{
-                diffStyle: "unified",
-                stickyHeader: false,
-                disableFileHeader: true
-              }}
-            />
-          </div>
-        </div>
-      )
+      return renderDiffContainer(browser, followedSelection, renderFileDiff({
+        fileDiff,
+        browser,
+        selection,
+        onSelectionChange,
+        onSendReference,
+        onSendComment,
+        addDiffSelectionToChat,
+        commentOnDiffSelection,
+        followedSelection
+      }))
     }
     if (browser.patch === null && browser.patchError === null) {
       return <AssetCanvas selectedPath={browser.selectedPath} loading />
     }
   }
-  if (browser.status === "loading") {
-    return <AssetCanvas selectedPath={browser.selectedPath} loading />
-  }
-  if (browser.status === "binary") {
-    return (
-      <FileNotice
-        icon={<FileWarning className="size-6 text-dim" aria-hidden />}
-        title="Binary file"
-        detail="This file is not valid UTF-8 text, so Jingler will not edit it."
-        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
-      />
-    )
-  }
-  if (browser.status === "too-large" && browser.failure?.type === "too-large") {
-    return (
-      <AssetTooLarge
-        path={browser.failure.path}
-        size={browser.failure.size}
-        cap={browser.failure.cap}
-        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
-      />
-    )
-  }
-  if (browser.failure?.type === "unsupported") {
-    return (
-      <AssetUnsupported
-        path={browser.failure.path}
-        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
-      />
-    )
-  }
-  if (browser.status === "error" && payload === null) {
-    return (
-      <AssetError
-        message={
-          browser.failure?.type === "error"
-            ? browser.failure.message
-            : `Couldn't open ${browser.selectedPath}.`
-        }
-      />
-    )
-  }
+  const notice = fileStatusNotice(browser, sessionId)
+  if (notice !== null) return notice
   if (payload !== null && !("text" in payload)) {
     return (
       <AssetCanvas
@@ -540,11 +463,7 @@ function FileCanvas({
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 flex-1">
             Discard your unsaved changes and{" "}
-            {browser.pendingDiscard.type === "open"
-              ? `open ${browser.pendingDiscard.path}`
-              : browser.pendingDiscard.type === "close"
-                ? `close ${browser.pendingDiscard.path}`
-                : "reload this file"}
+            {discardActionLabel(browser.pendingDiscard)}
             ?
           </span>
           <Button type="button" variant="secondary" size="sm" onClick={browser.cancelDiscard}>
@@ -558,6 +477,57 @@ function FileCanvas({
       <div className="min-h-0 flex-1">{body}</div>
     </div>
   )
+}
+
+function renderFileDiff({
+  fileDiff,
+  browser,
+  selection,
+  onSelectionChange,
+  onSendReference,
+  onSendComment,
+  addDiffSelectionToChat,
+  commentOnDiffSelection,
+  followedSelection
+}: {
+  fileDiff: ReturnType<typeof parsePierreFileDiffs>[number];
+  browser: FileBrowserController;
+  selection: JinglerLineSelection | null;
+  onSelectionChange: (selection: JinglerLineSelection | null) => void;
+  onSendReference: ((reference: CodeReference) => void) | undefined;
+  onSendComment: ((body: string, reference: CodeReference) => void) | undefined;
+  addDiffSelectionToChat: (next: JinglerLineSelection) => void;
+  commentOnDiffSelection: (next: JinglerLineSelection, body: string) => void;
+  followedSelection: JinglerLineSelection | null;
+}) {
+  return <DiffView
+    fileDiff={fileDiff}
+    label={`${browser.selectedPath} changes`}
+    className="h-full min-h-0"
+    selection={selection}
+    onSelectionChange={onSelectionChange}
+    actions={onSendReference === undefined && onSendComment === undefined
+      ? undefined
+      : {
+        onAddToChat: addDiffSelectionToChat,
+        onComment: commentOnDiffSelection
+      }}
+    scrollRequest={followedSelection === null || browser.agentTargetEventId === null
+      ? undefined
+      : {
+        path: browser.selectedPath!,
+        range: followedSelection,
+        revision: [...`${browser.agentTargetEventId}:completed`].reduce(
+          (value, character) => ((value * 31 + character.charCodeAt(0)) >>> 0),
+          0
+        ),
+        behavior: "smooth"
+      }}
+    options={{
+      diffStyle: "unified",
+      stickyHeader: false,
+      disableFileHeader: true
+    }} />
 }
 
 function SelectionContextMenu({
@@ -900,4 +870,89 @@ function FilePdfBody({
       {children}
     </div>
   )
+}
+
+function fileStatusNotice(browser: FileBrowserController, sessionId: string): ReactNode {
+  const payload = browser.payload
+  if (browser.status === "loading") {
+    return <AssetCanvas selectedPath={browser.selectedPath} loading />
+  }
+  if (browser.status === "binary") {
+    return (
+      <FileNotice
+        icon={<FileWarning className="size-6 text-dim" aria-hidden />}
+        title="Binary file"
+        detail="This file is not valid UTF-8 text, so Jingler will not edit it."
+        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
+      />
+    )
+  }
+  if (browser.status === "too-large" && browser.failure?.type === "too-large") {
+    return (
+      <AssetTooLarge
+        path={browser.failure.path}
+        size={browser.failure.size}
+        cap={browser.failure.cap}
+        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
+      />
+    )
+  }
+  if (browser.failure?.type === "unsupported") {
+    return (
+      <AssetUnsupported
+        path={browser.failure.path}
+        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
+      />
+    )
+  }
+  if (browser.status === "error" && payload === null) {
+    return (
+      <AssetError
+        message={
+          browser.failure?.type === "error"
+            ? browser.failure.message
+            : `Couldn't open ${browser.selectedPath}.`
+        }
+      />
+    )
+  }
+  return null
+}
+
+function renderDiffContainer(browser: FileBrowserController, followedSelection: JinglerLineSelection | null, children: ReactNode) {
+  return (
+    <div
+      key={browser.agentTargetCompleted ? browser.agentTargetEventId : undefined}
+      className={[
+        "flex h-full min-h-0 flex-col bg-canvas",
+        followedSelection === null ? "" : "animate-slide-in"
+      ].join(" ")}
+      data-follow-agent-change={
+        followedSelection === null ? undefined : (browser.agentTargetEventId ?? undefined)
+      }
+    >
+      <FileModeBar path={browser.selectedPath!} mode="diff" browser={browser} />
+      <div className="min-h-0 flex-1">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function isFileShortcutModifier(event: KeyboardEvent): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.altKey
+}
+
+function containsFileShortcutTarget(root: HTMLElement | null, target: EventTarget | null): boolean {
+  return root !== null && target instanceof Node && root.contains(target)
+}
+
+function discardActionLabel(discard: NonNullable<FileBrowserController["pendingDiscard"]>): string {
+  if (discard.type === "open") return `open ${discard.path}`
+  if (discard.type === "close") return `close ${discard.path}`
+  return "reload this file"
+}
+
+function isFileShortcutKey(event: KeyboardEvent, key: "j" | "s"): boolean {
+  return event.code === `Key${key.toUpperCase()}` || event.key.toLowerCase() === key
 }

@@ -211,6 +211,36 @@ describe("GitHub response mappers", () => {
 })
 
 describe("diff and webhook defenses", () => {
+  it("keeps diff headers separate from header-like content and resets hunk bounds", () => {
+    const diff = [
+      "diff --git a/first.ts b/first.ts",
+      "--- a/first.ts",
+      "+++ b/first.ts",
+      "@@ -1 +3,2 @@",
+      "+++ this is added content",
+      "\\ No newline at end of file",
+      " context",
+      "+outside declared hunk",
+      "@@ -8 +10 @@",
+      "-removed",
+      "+replacement",
+      "diff --git a/deleted.ts b/deleted.ts",
+      "--- a/deleted.ts",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-deleted",
+      "diff --git a/next.ts b/next.ts",
+      "--- a/next.ts",
+      "+++ b/next.ts",
+      "@@ -0,0 +1 @@",
+      "+new"
+    ].join("\n")
+    const anchors = postableLines(diff)
+    expect([...anchors.keys()]).toEqual(["first.ts", "next.ts"])
+    expect([...anchors.get("first.ts")!]).toEqual([3, 4, 10])
+    expect([...anchors.get("next.ts")!]).toEqual([1])
+  })
+
   it("reconstructs patches and identifies every valid new-side anchor", () => {
     const diff = unifiedDiffFromApiFiles([
       {

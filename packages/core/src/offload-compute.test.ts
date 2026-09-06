@@ -83,6 +83,22 @@ describe("Offload Compute shell observation", () => {
     expect(parseObservedAgentShellCommand(source).command.usesShellFeatures).toBe(true)
   })
 
+  it.each([
+    { source: `echo "" ''`, args: ["", ""], complete: true, shell: false },
+    { source: `echo 'a\\b'`, args: ["a\\b"], complete: true, shell: false },
+    { source: `echo "a\\"b"`, args: ['a"b'], complete: true, shell: false },
+    { source: `echo "\\$HOME"`, args: ["$HOME"], complete: true, shell: false },
+    { source: `echo "$HOME"`, args: ["$HOME"], complete: true, shell: true },
+    { source: "echo trailing\\", args: ["trailing"], complete: false, shell: true },
+    { source: `echo "unfinished`, args: ["unfinished"], complete: false, shell: true },
+    { source: "echo\rnext", args: ["next"], complete: true, shell: true }
+  ])("preserves quoting and completion for $source", ({ source, args, complete, shell }) => {
+    expect(parseObservedAgentShellCommand(source)).toMatchObject({
+      complete,
+      command: { executable: "echo", args, usesShellFeatures: shell }
+    })
+  })
+
   it("marks stateful commands local without blocking read-only presets", () => {
     expect(parseObservedAgentShellCommand("git checkout main").command.mutatesSource).toBe(true)
     expect(parseObservedAgentShellCommand("pnpm install").command.mutatesSource).toBe(true)

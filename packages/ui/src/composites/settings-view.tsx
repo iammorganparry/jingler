@@ -241,6 +241,14 @@ export interface SettingsViewProps {
  * GitHub are functional; the other nav entries render a "coming soon" stub. It
  * fills the main pane (the sidebar stays), replacing the old modal.
  */
+function renderOptionalSection<Props extends object>(
+  props: Props | null | undefined,
+  render: (props: Props) => React.ReactNode,
+  label: string
+): React.ReactNode {
+  return props ? render(props) : <StubSection label={label} />
+}
+
 export function SettingsView({
   providerConnections,
   agents,
@@ -279,6 +287,95 @@ export function SettingsView({
   onClose,
   initialSection = "providers"
 }: SettingsViewProps) {
+         function getSection() {
+           switch (section) {
+case "devices": {
+return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
+}
+case "general": {
+return (<GeneralSection
+          notifications={notifications}
+          onSaveNotifications={onSaveNotifications}
+          offloadCompute={offloadCompute}
+          onSaveOffloadCompute={onSaveOffloadCompute}
+          offloadStatus={offloadStatus}
+          offloadEnvironments={devices?.environments.filter((environment) =>
+            environment.kind === "owned"
+          ) ?? []}
+          onRefreshOffloadEnvironments={devices?.onRefresh}
+          defaultMode={defaultMode}
+          onSaveDefaultMode={onSaveDefaultMode}
+          planAutoRun={planAutoRun}
+          onSavePlanAutoRun={onSavePlanAutoRun}
+          adhdMode={adhdMode}
+          onSaveAdhdMode={onSaveAdhdMode}
+          fontScale={fontScale}
+          onSaveFontScale={onSaveFontScale}
+          webSearch={webSearch}
+        />)
+}
+case "providers": {
+return (renderOptionalSection(providerConnections, (props) => <ProviderConnectionsSettings {...props} />, "Providers"))
+}
+case "context": {
+return (<ContextSection
+          context={context}
+          sessions={contextSessions}
+          onSaveContext={onSaveContext}
+        />)
+}
+case "plan": {
+return (<div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+          <div className="mx-auto w-full max-w-[760px] rounded-xl border border-line bg-panel p-5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
+              Plannotator
+            </p>
+            <h2 className="mt-1 text-[19px] font-semibold text-text-bright">Plan mode</h2>
+            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
+              Plans are Markdown files reviewed and revised in Plannotator. Jingler&apos;s todo list,
+              Plan drawer, progress dock, composer summary, and transcript card are read-only views
+              of that plan.
+            </p>
+          </div>
+        </div>)
+}
+case "agents": {
+return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
+}
+case "runtime": {
+return (renderOptionalSection(runtimeInspector, (props) => <RuntimeInspector {...props} />, "Runtime"))
+}
+case "connectors": {
+return (<div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
+          {renderOptionalSection(mcp, (props) => <McpSettings {...props} />, "MCP servers")}
+        </div>)
+}
+case "plugins": {
+return (renderOptionalSection(plugins, (props) => <PluginsSettings {...props} />, "Plugins"))
+}
+case "themes": {
+return (renderOptionalSection(themes, (props) => <ThemesSettings {...props} />, "Themes"))
+}
+case "github": {
+return (<GithubSection
+          connection={githubConnection}
+          busy={githubBusy}
+          github={github}
+          git={git}
+          onConnect={onGithubConnect}
+          onManage={onGithubManage}
+          onRefresh={onGithubRefresh}
+          onDisconnect={onGithubDisconnect}
+          onSaveGithub={onSaveGithub}
+          onSaveGit={onSaveGit}
+        />)
+}
+}
+           return (<StubSection
+          label={NAV.find((n) => n.key === section)?.label ?? "Settings"}
+        />)
+         }
+
   const [section, setSection] = React.useState<SectionKey>(initialSection)
   const selectSection = (next: SectionKey) => {
     setSection(next)
@@ -364,97 +461,7 @@ export function SettingsView({
         )}
       </nav>
 
-      {section === "devices" ? (
-        devices ? (
-          <DevicesSection {...devices} />
-        ) : (
-          <StubSection label="Devices" />
-        )
-      ) : section === "general" ? (
-        <GeneralSection
-          notifications={notifications}
-          onSaveNotifications={onSaveNotifications}
-          offloadCompute={offloadCompute}
-          onSaveOffloadCompute={onSaveOffloadCompute}
-          offloadStatus={offloadStatus}
-          offloadEnvironments={devices?.environments.filter((environment) =>
-            environment.kind === "owned"
-          ) ?? []}
-          onRefreshOffloadEnvironments={devices?.onRefresh}
-          defaultMode={defaultMode}
-          onSaveDefaultMode={onSaveDefaultMode}
-          planAutoRun={planAutoRun}
-          onSavePlanAutoRun={onSavePlanAutoRun}
-          adhdMode={adhdMode}
-          onSaveAdhdMode={onSaveAdhdMode}
-          fontScale={fontScale}
-          onSaveFontScale={onSaveFontScale}
-          webSearch={webSearch}
-        />
-      ) : section === "providers" ? (
-        providerConnections ? (
-          <ProviderConnectionsSettings {...providerConnections} />
-        ) : (
-          <StubSection label="Providers" />
-        )
-      ) : section === "context" ? (
-        <ContextSection
-          context={context}
-          sessions={contextSessions}
-          onSaveContext={onSaveContext}
-        />
-      ) : section === "plan" ? (
-        <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-          <div className="mx-auto w-full max-w-[760px] rounded-xl border border-line bg-panel p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
-              Plannotator
-            </p>
-            <h2 className="mt-1 text-[19px] font-semibold text-text-bright">Plan mode</h2>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              Plans are Markdown files reviewed and revised in Plannotator. Jingler&apos;s todo list,
-              Plan drawer, progress dock, composer summary, and transcript card are read-only views
-              of that plan.
-            </p>
-          </div>
-        </div>
-      ) : section === "agents" ? (
-        agents ? <AgentsSettings {...agents} /> : <StubSection label="Agents & skills" />
-      ) : section === "runtime" ? (
-        runtimeInspector ? <RuntimeInspector {...runtimeInspector} /> : <StubSection label="Runtime" />
-      ) : section === "connectors" ? (
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-editor p-6">
-          {mcp ? <McpSettings {...mcp} /> : <StubSection label="MCP servers" />}
-        </div>
-      ) : section === "plugins" ? (
-        plugins ? (
-          <PluginsSettings {...plugins} />
-        ) : (
-          <StubSection label="Plugins" />
-        )
-      ) : section === "themes" ? (
-        themes ? (
-          <ThemesSettings {...themes} />
-        ) : (
-          <StubSection label="Themes" />
-        )
-      ) : section === "github" ? (
-        <GithubSection
-          connection={githubConnection}
-          busy={githubBusy}
-          github={github}
-          git={git}
-          onConnect={onGithubConnect}
-          onManage={onGithubManage}
-          onRefresh={onGithubRefresh}
-          onDisconnect={onGithubDisconnect}
-          onSaveGithub={onSaveGithub}
-          onSaveGit={onSaveGit}
-        />
-      ) : (
-        <StubSection
-          label={NAV.find((n) => n.key === section)?.label ?? "Settings"}
-        />
-      )}
+      {getSection()}
     </div>
   )
 }
@@ -538,7 +545,22 @@ export function DevicesSection({
               {loading ? "Loading devices…" : "No owned machines yet."}
             </div>
           ) : (
-            environments.map((environment) => (
+            environments.map((environment) => {
+                               function getClassName() {
+                                 switch (environment.state) {
+case "online": {
+return ("bg-green/10 text-green")
+}
+case "incompatible": {
+return ("bg-yellow/10 text-yellow")
+}
+case "revoked": {
+return ("bg-red/10 text-red")
+}
+}
+                                 return ("bg-surface text-muted-foreground")
+                               }
+return ((
               <div
                 key={environment.id}
                 className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
@@ -566,13 +588,7 @@ export function DevicesSection({
                 <span
                   className={cn(
                     "rounded-full px-2 py-1 text-[10px] font-medium",
-                    environment.state === "online"
-                      ? "bg-green/10 text-green"
-                      : environment.state === "incompatible"
-                        ? "bg-yellow/10 text-yellow"
-                        : environment.state === "revoked"
-                          ? "bg-red/10 text-red"
-                          : "bg-surface text-muted-foreground"
+                    getClassName()
                   )}
                 >
                   {environment.state}
@@ -603,7 +619,7 @@ export function DevicesSection({
                   </Button>
                 )}
               </div>
-            ))
+            )); })
           )}
         </div>
       </div>
@@ -944,6 +960,29 @@ function GeneralSection({
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
+  function getOffloadStatus() {
+    switch (offloadStatus) {
+case "priming": {
+return (<p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
+              Saving Offload Compute settings…
+            </p>)
+}
+case "ready": {
+return (<p className="px-1 py-2 text-[11px] text-success" role="status">
+              {offloadTarget.kind === "cloud"
+                ? "Cloud compute is enabled; eligible sessions prime in the background."
+                : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
+            </p>)
+}
+case "failed": {
+return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
+              Offload Compute settings could not be saved.
+            </p>)
+}
+}
+    return (null)
+  }
+
   const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
     offloadCompute?.enabled ?? false
   )
@@ -1071,21 +1110,7 @@ function GeneralSection({
                 The selected target is fail-closed; unavailable devices never fall back to cloud or local execution.
               </p>
           </div>
-          {offloadStatus === "priming" ? (
-            <p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
-              Saving Offload Compute settings…
-            </p>
-          ) : offloadStatus === "ready" ? (
-            <p className="px-1 py-2 text-[11px] text-success" role="status">
-              {offloadTarget.kind === "cloud"
-                ? "Cloud compute is enabled; eligible sessions prime in the background."
-                : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
-            </p>
-          ) : offloadStatus === "failed" ? (
-            <p className="px-1 py-2 text-[11px] text-danger" role="alert">
-              Offload Compute settings could not be saved.
-            </p>
-          ) : null}
+          {getOffloadStatus()}
         </div>
 
         <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
@@ -1241,6 +1266,49 @@ function GithubSection({
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
 }) {
+  function renderConnectionStatus() {
+    return (<div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
+          <StatusDot
+            tone={
+              getTone()
+            }
+            size={8}
+            glow={connection.mode === "connected"}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="text-[12.5px] font-medium text-text-body">
+              {connection.mode === "connecting"
+                ? "Waiting for GitHub authorization"
+                : connected
+                  ? `Connected as @${connection.user?.login ?? "user"}`
+                  : connection.mode === "error"
+                    ? "GitHub connection needs attention"
+                    : "GitHub is not connected"}
+            </div>
+            {connection.user?.name && (
+              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                {connection.user.name}
+              </div>
+            )}
+          </div>
+        </div>)
+  }
+
+  function getTone() {
+    switch (connection.mode) {
+case "connected": {
+return ("bg-green")
+}
+case "error": {
+return ("bg-red")
+}
+case "disconnected": {
+return ("bg-line-strong")
+}
+}
+    return ("bg-yellow")
+  }
+
   const [draft, setDraft] = React.useState<GithubConfig>(
     github ?? DEFAULT_GITHUB
   )
@@ -1270,37 +1338,7 @@ function GithubSection({
           </span>
         </div>
 
-        <div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
-          <StatusDot
-            tone={
-              connection.mode === "connected"
-                ? "bg-green"
-                : connection.mode === "error"
-                  ? "bg-red"
-                  : connection.mode === "disconnected"
-                    ? "bg-line-strong"
-                    : "bg-yellow"
-            }
-            size={8}
-            glow={connection.mode === "connected"}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="text-[12.5px] font-medium text-text-body">
-              {connection.mode === "connecting"
-                ? "Waiting for GitHub authorization"
-                : connected
-                  ? `Connected as @${connection.user?.login ?? "user"}`
-                  : connection.mode === "error"
-                    ? "GitHub connection needs attention"
-                    : "GitHub is not connected"}
-            </div>
-            {connection.user?.name && (
-              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
-                {connection.user.name}
-              </div>
-            )}
-          </div>
-        </div>
+        {renderConnectionStatus()}
 
         {connection.error && <Callout tone="red">{connection.error}</Callout>}
         {connection.mode === "partial-access" && (

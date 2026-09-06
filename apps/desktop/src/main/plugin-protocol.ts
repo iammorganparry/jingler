@@ -241,6 +241,36 @@ export const registerPluginScheme = (): void => {
   ])
 }
 
+const resolveAssetUnderRoot = async (
+  rootPath: string,
+  pluginId: string,
+  relative: string
+): Promise<string | null> => {
+  const root = resolve(rootPath)
+  const pluginDir = resolve(root, pluginId)
+  if (pluginDir !== join(root, pluginId)) return null
+
+  const target = resolve(pluginDir, relative)
+  // The lexical check catches `../..`; it does NOT catch a symlink, which is
+  // why the realpath check below is not redundant.
+  if (target !== pluginDir && !target.startsWith(pluginDir + sep)) return null
+
+  try {
+    const real = await realpath(target)
+    // A plugin directory is third-party content. A symlink inside it pointing
+    // at `~/.ssh/id_rsa` would otherwise be served happily by the lexical
+    // check above, because the *link path* is innocent.
+    const realRoot = await realpath(pluginDir)
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null
+    const info = await stat(real)
+    if (!info.isFile()) return null
+    return real
+  } catch {
+    // Not under this root, or not readable. Try the next.
+  }
+  return null
+}
+
 /**
  * Resolve a request path to a real file inside a plugin's directory, or null.
  *
@@ -268,28 +298,8 @@ export const resolvePluginAsset = async (
   // plugin that appears in Settings and then fails to load, with the module
   // plainly present on disk.
   for (const rootPath of [pluginsRoot(), builtinPluginsRoot()]) {
-    const root = resolve(rootPath)
-    const pluginDir = resolve(root, pluginId)
-    if (pluginDir !== join(root, pluginId)) continue
-
-    const target = resolve(pluginDir, relative)
-    // The lexical check catches `../..`; it does NOT catch a symlink, which is
-    // why the realpath check below is not redundant.
-    if (target !== pluginDir && !target.startsWith(pluginDir + sep)) continue
-
-    try {
-      const real = await realpath(target)
-      // A plugin directory is third-party content. A symlink inside it pointing
-      // at `~/.ssh/id_rsa` would otherwise be served happily by the lexical
-      // check above, because the *link path* is innocent.
-      const realRoot = await realpath(pluginDir)
-      if (real !== realRoot && !real.startsWith(realRoot + sep)) continue
-      const info = await stat(real)
-      if (!info.isFile()) continue
-      return real
-    } catch {
-      // Not under this root, or not readable. Try the next.
-    }
+    const asset = await resolveAssetUnderRoot(rootPath, pluginId, relative)
+    if (asset !== null) return asset
   }
   return null
 }

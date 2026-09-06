@@ -949,15 +949,7 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
           ...route,
           issueId: stringInput(input, "issueId", true)!
         }
-        if (input.title !== undefined) {
-          Object.assign(updateInput, { title: stringInput(input, "title") })
-        }
-        if (input.description !== undefined) {
-          Object.assign(updateInput, { body: stringInput(input, "description") })
-        }
-        if (input.teamId !== undefined) {
-          Object.assign(updateInput, { teamId: stringInput(input, "teamId") })
-        }
+        assignUpdateTextFields(updateInput, input)
         if (input.projectId !== undefined) {
           Object.assign(updateInput, { projectId: nullable("projectId") })
         }
@@ -998,6 +990,12 @@ const linearAgentTools = (client: LinearClient): readonly AgentToolDefinition[] 
       }
     }
   ]
+}
+
+const assignUpdateTextFields = (update: LinearUpdateRequest, input: ReturnType<typeof toolInput>): void => {
+  if (input.title !== undefined) Object.assign(update, { title: stringInput(input, "title") })
+  if (input.description !== undefined) Object.assign(update, { body: stringInput(input, "description") })
+  if (input.teamId !== undefined) Object.assign(update, { teamId: stringInput(input, "teamId") })
 }
 
 export const activateWithClient = (ctx: LinearHostContext, client: LinearClient): void => {

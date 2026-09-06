@@ -161,13 +161,9 @@ const MEMORY_TABS: ReadonlyArray<{
   { id: "analytics", label: "Analytics", icon: BarChart3 },
 ];
 
-function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+function MemoryWorkspaceHeader({ memory }: { memory: ReturnType<typeof useMemory> }) {
   const { context } = memory;
   return (
-    <div
-      className="relative flex min-h-0 flex-1 flex-col bg-editor"
-      data-testid="memory-workspace"
-    >
       <header className="flex flex-none flex-wrap items-center gap-2 border-b border-hairline bg-panel px-3 py-2">
         <strong className="mr-2 text-[12px] text-text-bright">Memory</strong>
         <Select
@@ -235,6 +231,51 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               : "Export"}
         </button>
       </header>
+  );
+}
+
+function MemoryRecoveryNotice({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory;
+  return <>
+{(context.error !== null || context.recovery !== null) && (
+            <div
+              role="alert"
+              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
+            >
+              <p className="min-w-0 text-[10.5px] text-text">
+                {context.error !== null
+                  ? context.error
+                  : context.recovery?.retained
+                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
+                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
+              </p>
+              {context.error !== null && (
+                <button
+                  type="button"
+                  disabled={memory.recovering}
+                  onClick={memory.recover}
+                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                >
+                  <RotateCcw
+                    size={12}
+                    className={memory.recovering ? "animate-spin" : undefined}
+                  />
+                  {memory.recovering ? "Recovering…" : "Recover memory"}
+                </button>
+              )}
+            </div>
+          )}
+  </>;
+}
+
+function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
+  const { context } = memory;
+  return (
+    <div
+      className="relative flex min-h-0 flex-1 flex-col bg-editor"
+      data-testid="memory-workspace"
+    >
+      <MemoryWorkspaceHeader memory={memory} />
       {context.organizationId === null ? (
         <main className="grid min-h-0 flex-1 place-items-center p-6">
           <div className="max-w-md rounded-xl border border-line bg-panel p-5 text-center">
@@ -265,34 +306,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               </button>
             ))}
           </nav>
-          {(context.error !== null || context.recovery !== null) && (
-            <div
-              role="alert"
-              className="flex flex-none items-center justify-between gap-3 border-b border-line bg-surface px-3 py-2"
-            >
-              <p className="min-w-0 text-[10.5px] text-text">
-                {context.error !== null
-                  ? context.error
-                  : context.recovery?.retained
-                    ? `${context.recovery.retained} memory capture${context.recovery.retained === 1 ? "" : "s"} remain safely queued.`
-                    : `${context.recovery?.delivered ?? 0} queued memory capture${context.recovery?.delivered === 1 ? "" : "s"} recovered.`}
-              </p>
-              {context.error !== null && (
-                <button
-                  type="button"
-                  disabled={memory.recovering}
-                  onClick={memory.recover}
-                  className="flex flex-none items-center gap-1.5 rounded-md border border-line bg-sunken px-2.5 py-1.5 text-[10.5px] text-text-bright outline-none hover:bg-panel focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-                >
-                  <RotateCcw
-                    size={12}
-                    className={memory.recovering ? "animate-spin" : undefined}
-                  />
-                  {memory.recovering ? "Recovering…" : "Recover memory"}
-                </button>
-              )}
-            </div>
-          )}
+          <MemoryRecoveryNotice memory={memory} />
           {context.view === "dashboard" && (
             <MemoryDashboard
               summary={context.summary}
@@ -409,7 +423,7 @@ function AuthedApp({
   const plugins = usePlugins();
   const pluginCatalog = usePluginCatalog();
   const liveActivity = useSessionActivities();
-  const debugEnabled = pluginCatalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+  const debugEnabled = hasEnabledDebugPlugin(pluginCatalog);
   const [visibleDebugSessionIds, setVisibleDebugSessionIds] = useState<ReadonlySet<string>>(new Set());
   const debugSessionIds = sessions.map((session) => session.id);
   const visibleDebugIds = debugSessionIds.filter((id) => visibleDebugSessionIds.has(id));
@@ -575,10 +589,7 @@ function AuthedApp({
     enabled: false,
   });
 
-  const githubConfig = configQuery.data?.github ?? null;
-  const gitConfig = configQuery.data?.git ?? null;
-  const notificationsConfig = configQuery.data?.notifications ?? null;
-  const persistedOffloadCompute = configQuery.data?.offloadCompute ?? null;
+  const { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
   useEffect(() => {
     if (persistedOffloadCompute !== null) {
       sendOffloadSettings({ type: "SYNC", settings: persistedOffloadCompute });
@@ -586,20 +597,7 @@ function AuthedApp({
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
   // Absent means Auto for configs written before this preference existed.
-  const defaultMode = configQuery.data?.defaultMode ?? "auto";
-  // Absent means on — plan mode's commands are read-only.
-  const planAutoRun = configQuery.data?.planAutoRun ?? true;
-  // Absent means off — ADHD mode shapes completion summaries, so it remains an
-  // opt-in preference rather than a default the operator has to undo.
-  const adhdMode = configQuery.data?.adhdMode ?? false;
-  // Absent or malformed collapses to 1× (FONT_SCALE_DEFAULT). This value only
-  // feeds the Settings control's active preset — the transcript reads the var
-  // set in conversation-pane.tsx, so scaling stays scoped there.
-  const fontScale = clampFontScale(configQuery.data?.fontScale);
-  const contextConfig = configQuery.data?.context ?? null;
-  const starredRepos = configQuery.data?.starredRepos ?? [];
-  const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
-  const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
+  const { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
   const usage = usageQuery.data ?? null;
 
   const contextTargets = sessions.flatMap((session) => {
@@ -678,43 +676,7 @@ function AuthedApp({
     [qc],
   );
   const loadTheme = useCallback((id: string) => rpc.themeGet(id), []);
-  const themeSettings = {
-    themes: themeCatalog?.themes ?? [],
-    skipped: themeCatalog?.skipped ?? [],
-    activeId: activeThemeId,
-    onSelect: (id: string) =>
-      rpc.themeSetActive(id).then((saved) => {
-        qc.setQueryData(["config"], saved);
-      }),
-    onDuplicate: (id: string, name?: string) =>
-      rpc.themeDuplicate(id, name).then(async (copy) => {
-        await refreshThemes();
-        return copy;
-      }),
-    onDelete: async (id: string) => {
-      await rpc.themeDelete(id);
-      if (id === activeThemeId) {
-        const saved = await rpc.themeSetActive(DEFAULT_THEME_ID);
-        qc.setQueryData(["config"], saved);
-      }
-      await refreshThemes();
-    },
-    onImport: (json: string) =>
-      rpc.themeImport(json).then(async (imported) => {
-        await refreshThemes();
-        return imported;
-      }),
-    loadTheme,
-    onSave: (id: string, theme: VsCodeTheme) =>
-      rpc.themeSave(id, theme).then(async (saved) => {
-        // The editor debounces, so this fires per settled drag rather than per
-        // frame. Refetching keeps the swatch preview in step with the picker.
-        await refreshThemes();
-        await qc.invalidateQueries({ queryKey: ["theme-source", id] });
-        return saved;
-      }),
-    onReveal: (path: string) => void rpc.themeReveal(path),
-  };
+  const themeSettings = themeSettingsModel(themeCatalog, activeThemeId, qc, refreshThemes, loadTheme);
   const saveContextConfig = (config: ContextConfig) =>
     rpc.configSetContext(config).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -929,11 +891,9 @@ function AuthedApp({
         .join("|"),
     [github.connection.installations],
   );
-  const autoDetect = connected && (githubConfig?.autoDetectPr ?? true);
+  const autoDetect = shouldAutoDetectPr(connected, githubConfig);
   const autoCreate =
-    connected &&
-    (githubConfig?.enabled ?? false) &&
-    (githubConfig?.autoCreatePr ?? false);
+    shouldAutoCreatePr(connected, githubConfig);
   const autoPublishCancels = useRef(new Map<string, () => void>());
   const startAutoPublish = useCallback(
     (session: Session) => {
@@ -1228,31 +1188,7 @@ function AuthedApp({
         .catch(() => {});
     }
     const completed = completedSessionIds(prev, liveActivity, sessions);
-    for (const id of completed) {
-      const current = sessions.find((session) => session.id === id);
-      if (!current) continue;
-      // Settle the composer's dirty badge: the per-ToolEnd refresh misses an
-      // agent committing via the shell (a Bash ToolEnd carries no file diff),
-      // so re-read the worktree diff once the run is over.
-      void rpc
-        .sessionsDiff(id)
-        .then((patch) => setSessionDiff(id, diffCounts(patch)))
-        .catch(() => {});
-      // Only auto-named sessions retitle; skip pinned/legacy ones (autoTitle not
-      // explicitly true) to avoid a needless RPC. The handler guards too.
-      const ready = needsSessionRetitle(current)
-        ? rpc.sessionsRetitle(id).then((session) => {
-            // SESSION_UPDATED replaces the whole record; it re-reads the store at
-            // the end so it converges with concurrent PR/publish checkpoints.
-            send({ type: "SESSION_UPDATED", session });
-            return session;
-          })
-        : Promise.resolve(current);
-      // Manual and preference-driven publication enter the same main-process
-      // single-flight state machine. Retitling resolves first so a fresh task is
-      // never asked to publish while it is still detached.
-      void ready.then(startAutoPublish).catch(() => {});
-    }
+    refreshCompletedSessions(completed, sessions, send, startAutoPublish);
     if (!autoDetect) return;
     for (const id of completed) {
       const session = sessions.find((candidate) => candidate.id === id);
@@ -1356,9 +1292,7 @@ function AuthedApp({
   // before the master switch was flipped off. A review costs real tokens, so it
   // fails closed.
   const autoReview =
-    connected &&
-    (githubConfig?.enabled ?? false) &&
-    (githubConfig?.autoAdversarialReview ?? false);
+    shouldAutoReviewPr(connected, githubConfig);
   const reviewTargets = useMemo(
     () => (autoReview ? sweepTargets : []),
     [autoReview, sweepTargets],
@@ -1510,92 +1444,7 @@ function AuthedApp({
   }
 
   if (state.matches("setup")) {
-    const setupStep = state.matches({ setup: "github" })
-      ? "github"
-      : state.matches({ setup: "provider" })
-        ? "provider"
-        : state.matches({ setup: "resources" })
-          ? "resources"
-          : "workspace";
-    const providerBusy =
-      state.matches({ setup: { provider: "refreshing" } }) ||
-      state.matches({ setup: { provider: "authenticating" } }) ||
-      state.matches({ setup: { provider: "completing" } });
-    const resourcesBusy =
-      state.matches({ setup: { resources: "detecting" } }) ||
-      state.matches({ setup: { resources: "importing" } });
-    return (
-      <SetupScreen
-        step={setupStep}
-        github={github.connection}
-        providerCatalog={state.context.providerCatalog}
-        providerLoginEvent={state.context.providerLoginEvent}
-        providerPendingAuthKind={state.context.providerPendingAuthKind}
-        resourceDetection={state.context.resourceDetection}
-        error={state.context.error}
-        repos={repos}
-        reposDir={reposDir}
-        busy={
-          state.matches({ setup: { workspace: "choosing" } }) ||
-          github.busy ||
-          providerBusy ||
-          resourcesBusy
-        }
-        onChooseDir={() => send({ type: "CHOOSE" })}
-        onContinue={() => send({ type: "CONTINUE" })}
-        onConnectGithub={
-          github.connection.connected ? github.manage : github.connect
-        }
-        onSkipGithub={() => {
-          github.cancel();
-          send({ type: "SKIP_GITHUB" });
-        }}
-        onConnectClaude={(token) =>
-          send({
-            type: "CONNECT_CLAUDE",
-            kind: "claude-setup-token",
-            id: crypto.randomUUID(),
-            token,
-            targetId: "desktop",
-          })
-        }
-        onStartCodex={(method) =>
-          send({
-            type: "START_CODEX",
-            kind: "openai-codex-oauth",
-            id: crypto.randomUUID(),
-            method,
-            targetId: "desktop",
-          })
-        }
-        onConnectApi={(providerId, apiKey) =>
-          send({
-            type: "CONNECT_API",
-            kind: "api-key",
-            id: crypto.randomUUID(),
-            providerId,
-            apiKey,
-            targetId: "desktop",
-          })
-        }
-        onContinueProvider={() => send({ type: "CONTINUE_PROVIDER" })}
-        onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
-        onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
-        onRetryProvider={() => {
-          if (state.matches({ setup: { provider: "authFailed" } })) {
-            send({ type: "RETRY_AUTH" });
-          } else {
-            send({ type: "RETRY_PROVIDER" });
-          }
-        }}
-        onImportResources={(candidates) =>
-          send({ type: "IMPORT_RESOURCES", candidates })
-        }
-        onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
-        onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
-        onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
-      />
-    );
+    return renderAppSetup(state, github, repos, reposDir, send);
   }
 
   const selectedPullRequest = pullRequestInbox.selected;
@@ -1653,38 +1502,7 @@ function AuthedApp({
         sessions={sessions}
         user={user}
         pullRequestsView={
-          <PullRequestInbox
-            prs={pullRequestInbox.prs}
-            viewerLogin={github.connection.user?.login ?? ""}
-            selected={pullRequestInbox.selected ? {
-              repository: pullRequestInbox.selected.repository,
-              number: pullRequestInbox.selected.number,
-            } : null}
-            detail={pullRequestInbox.detail}
-            onSelect={pullRequestInbox.select}
-            onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
-            onOpenFiles={selectedPullRequestTarget?.session || selectedPullRequestTarget?.project
-              ? openSelectedPullRequestFiles
-              : undefined}
-            onComment={pullRequestInbox.comment}
-            onClosePr={pullRequestInbox.close}
-            onMerge={pullRequestInbox.merge}
-            closing={pullRequestInbox.closing}
-            closeError={pullRequestInbox.closeError}
-            merging={pullRequestInbox.merging}
-            mergeError={pullRequestInbox.mergeError}
-            sessionAction={selectedPullRequestTarget ? {
-              label: selectedPullRequestTarget.session ? "Open session" : "Create session",
-              onSelect: openSelectedPullRequestSession,
-              ...(selectedPullRequestTarget.session || selectedPullRequestTarget.project
-                ? {}
-                : { disabledReason: "Add this repository as a local project to create a session." }),
-            } : undefined}
-            loading={pullRequestInbox.loading}
-            detailLoading={pullRequestInbox.detailLoading}
-            detailError={pullRequestInbox.detailError}
-            error={pullRequestInbox.error}
-          />
+          renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
         memory={{
           eligible: memory.eligible,
@@ -1728,15 +1546,7 @@ function AuthedApp({
         onSaveNotificationsConfig={saveNotificationsConfig}
         offloadCompute={offloadCompute}
         onSaveOffloadCompute={saveOffloadCompute}
-        offloadStatus={
-          offloadSettingsState.matches("saving")
-            ? "priming"
-            : offloadSettingsState.matches("failed")
-              ? "failed"
-              : offloadCompute.enabled
-                ? "ready"
-                : "disabled"
-        }
+        offloadStatus={offloadSettingsStatus(offloadSettingsState, offloadCompute.enabled)}
         webSearch={{
           status: webSearchQuery.data ?? null,
           loading: webSearchQuery.isLoading,
@@ -1745,11 +1555,7 @@ function AuthedApp({
             webSearchClear.isPending ||
             webSearchSkip.isPending,
           error:
-            webSearchQuery.error?.message ??
-            webSearchSet.error?.message ??
-            webSearchClear.error?.message ??
-            webSearchSkip.error?.message ??
-            null,
+            firstSettingsError(webSearchQuery.error, webSearchSet.error, webSearchClear.error, webSearchSkip.error),
           onSave: async (provider, apiKey) => {
             await webSearchSet.mutateAsync({ provider, apiKey });
           },
@@ -1809,8 +1615,8 @@ function AuthedApp({
         }}
         providerConnections={{
           catalog: providerCatalog.catalog,
-          defaultConnectionId: configQuery.data?.defaultConnectionId ?? null,
-          defaultModelId: configQuery.data?.defaultModelId ?? null,
+          defaultConnectionId,
+          defaultModelId,
           busy: providerCatalog.busy,
           pendingAuthKind: providerCatalog.pendingAuthKind,
           error: providerCatalog.error,
@@ -2111,13 +1917,7 @@ function AuthedApp({
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
         title="Delete session?"
-        description={
-          pendingDelete
-            ? workspaceModeOf(pendingDelete) === "direct"
-              ? `“${pendingDelete.title}” session data will be permanently removed. The repository checkout will be left untouched. This can't be undone.`
-              : `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
-            : undefined
-        }
+        description={deleteSessionDescription(pendingDelete)}
         confirmLabel="Delete"
         tone="danger"
         onConfirm={async () => {
@@ -2138,6 +1938,140 @@ function AuthedApp({
       />
     </>
   );
+}
+
+function refreshCompletedSessions(completed: readonly string[], sessions: ReadonlyArray<Session>, send: import("xstate").ActorRefFrom<typeof appMachine>["send"], startAutoPublish: (session: Session) => void) {
+  for (const id of completed) {
+    const current = sessions.find((session) => session.id === id);
+    if (!current) continue;
+    // Settle the composer's dirty badge: the per-ToolEnd refresh misses an
+    // agent committing via the shell (a Bash ToolEnd carries no file diff),
+    // so re-read the worktree diff once the run is over.
+    void rpc
+      .sessionsDiff(id)
+      .then((patch) => setSessionDiff(id, diffCounts(patch)))
+      .catch(() => { });
+    // Only auto-named sessions retitle; skip pinned/legacy ones (autoTitle not
+    // explicitly true) to avoid a needless RPC. The handler guards too.
+    const ready = needsSessionRetitle(current)
+      ? rpc.sessionsRetitle(id).then((session) => {
+        // SESSION_UPDATED replaces the whole record; it re-reads the store at
+        // the end so it converges with concurrent PR/publish checkpoints.
+        send({ type: "SESSION_UPDATED", session });
+        return session;
+      })
+      : Promise.resolve(current);
+    // Manual and preference-driven publication enter the same main-process
+    // single-flight state machine. Retitling resolves first so a fresh task is
+    // never asked to publish while it is still detached.
+    void ready.then(startAutoPublish).catch(() => { });
+  }
+}
+
+function themeSettingsModel(themeCatalog: ReturnType<typeof useThemeCatalog>["catalog"], activeThemeId: string, qc: ReturnType<typeof useQueryClient>, refreshThemes: () => Promise<void>, loadTheme: (id: string) => Promise<{ readonly [x: string]: unknown; readonly name: string; readonly type: "dark" | "light" | "hc" | "hcDark" | "hcLight"; readonly colors?: { readonly [x: string]: string; } | undefined; readonly tokenColors?: readonly { readonly name?: string | undefined; readonly scope?: string | readonly string[] | undefined; readonly settings: { readonly background?: string | undefined; readonly foreground?: string | undefined; readonly fontStyle?: string | undefined; }; }[] | undefined; readonly semanticHighlighting?: boolean | undefined; readonly semanticTokenColors?: { readonly [x: string]: unknown; } | undefined; } | null>) {
+  return {
+    themes: themeCatalog?.themes ?? [],
+    skipped: themeCatalog?.skipped ?? [],
+    activeId: activeThemeId,
+    onSelect: (id: string) => rpc.themeSetActive(id).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    }),
+    onDuplicate: (id: string, name?: string) => rpc.themeDuplicate(id, name).then(async (copy) => {
+      await refreshThemes();
+      return copy;
+    }),
+    onDelete: async (id: string) => {
+      await rpc.themeDelete(id);
+      if (id === activeThemeId) {
+        const saved = await rpc.themeSetActive(DEFAULT_THEME_ID);
+        qc.setQueryData(["config"], saved);
+      }
+      await refreshThemes();
+    },
+    onImport: (json: string) => rpc.themeImport(json).then(async (imported) => {
+      await refreshThemes();
+      return imported;
+    }),
+    loadTheme,
+    onSave: (id: string, theme: VsCodeTheme) => rpc.themeSave(id, theme).then(async (saved) => {
+      // The editor debounces, so this fires per settled drag rather than per
+      // frame. Refetching keeps the swatch preview in step with the picker.
+      await refreshThemes();
+      await qc.invalidateQueries({ queryKey: ["theme-source", id] });
+      return saved;
+    }),
+    onReveal: (path: string) => void rpc.themeReveal(path),
+  };
+}
+
+function shouldAutoReviewPr(connected: boolean, githubConfig: GithubConfig | null) {
+  return connected &&
+    (githubConfig?.enabled ?? false) &&
+    (githubConfig?.autoAdversarialReview ?? false);
+}
+
+function shouldAutoCreatePr(connected: boolean, githubConfig: GithubConfig | null) {
+  return connected &&
+    (githubConfig?.enabled ?? false) &&
+    (githubConfig?.autoCreatePr ?? false);
+}
+
+function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rpc.configGet>> | undefined }) {
+  const defaultMode = configQuery.data?.defaultMode ?? "auto";
+  // Absent means on — plan mode's commands are read-only.
+  const planAutoRun = configQuery.data?.planAutoRun ?? true;
+  // Absent means off — ADHD mode shapes completion summaries, so it remains an
+  // opt-in preference rather than a default the operator has to undo.
+  const adhdMode = configQuery.data?.adhdMode ?? false;
+  // Absent or malformed collapses to 1× (FONT_SCALE_DEFAULT). This value only
+  // feeds the Settings control's active preset — the transcript reads the var
+  // set in conversation-pane.tsx, so scaling stays scoped there.
+  const fontScale = clampFontScale(configQuery.data?.fontScale);
+  const contextConfig = configQuery.data?.context ?? null;
+  const starredRepos = configQuery.data?.starredRepos ?? [];
+  const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
+  const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
+  return { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
+}
+
+function renderPullRequestInbox(
+  pullRequestInbox: ReturnType<typeof usePullRequestInbox>,
+  github: ReturnType<typeof useGitHubConnection>,
+  selectedPullRequestTarget: ReturnType<typeof pullRequestSessionTarget> | null,
+  openSelectedPullRequestFiles: () => void,
+  openSelectedPullRequestSession: () => void
+) {
+  return <PullRequestInbox
+    prs={pullRequestInbox.prs}
+    viewerLogin={github.connection.user?.login ?? ""}
+    selected={pullRequestInbox.selected ? {
+      repository: pullRequestInbox.selected.repository,
+      number: pullRequestInbox.selected.number,
+    } : null}
+    detail={pullRequestInbox.detail}
+    onSelect={pullRequestInbox.select}
+    onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
+    onOpenFiles={selectedPullRequestTarget?.session || selectedPullRequestTarget?.project
+      ? openSelectedPullRequestFiles
+      : undefined}
+    onComment={pullRequestInbox.comment}
+    onClosePr={pullRequestInbox.close}
+    onMerge={pullRequestInbox.merge}
+    closing={pullRequestInbox.closing}
+    closeError={pullRequestInbox.closeError}
+    merging={pullRequestInbox.merging}
+    mergeError={pullRequestInbox.mergeError}
+    sessionAction={selectedPullRequestTarget ? {
+      label: selectedPullRequestTarget.session ? "Open session" : "Create session",
+      onSelect: openSelectedPullRequestSession,
+      ...(selectedPullRequestTarget.session || selectedPullRequestTarget.project
+        ? {}
+        : { disabledReason: "Add this repository as a local project to create a session." }),
+    } : undefined}
+    loading={pullRequestInbox.loading}
+    detailLoading={pullRequestInbox.detailLoading}
+    detailError={pullRequestInbox.detailError}
+    error={pullRequestInbox.error} />;
 }
 
 /** Map the auth machine's signed-out substate to the LoginScreen's visual state. */
@@ -2252,4 +2186,136 @@ function AppContent({
       onSignOut={() => authSend({ type: "SIGN_OUT" })}
     />
   );
+}
+
+function renderAppSetup(
+  state: import("xstate").SnapshotFrom<typeof appMachine>,
+  github: ReturnType<typeof useGitHubConnection>,
+  repos: import("xstate").SnapshotFrom<typeof appMachine>["context"]["repos"],
+  reposDir: string | null,
+  send: import("xstate").ActorRefFrom<typeof appMachine>["send"]
+) {
+  const setupStep = state.matches({ setup: "github" })
+    ? "github"
+    : state.matches({ setup: "provider" })
+      ? "provider"
+      : state.matches({ setup: "resources" })
+        ? "resources"
+        : "workspace";
+  const providerBusy =
+    state.matches({ setup: { provider: "refreshing" } }) ||
+    state.matches({ setup: { provider: "authenticating" } }) ||
+    state.matches({ setup: { provider: "completing" } });
+  const resourcesBusy =
+    state.matches({ setup: { resources: "detecting" } }) ||
+    state.matches({ setup: { resources: "importing" } });
+  return (
+    <SetupScreen
+      step={setupStep}
+      github={github.connection}
+      providerCatalog={state.context.providerCatalog}
+      providerLoginEvent={state.context.providerLoginEvent}
+      providerPendingAuthKind={state.context.providerPendingAuthKind}
+      resourceDetection={state.context.resourceDetection}
+      error={state.context.error}
+      repos={repos}
+      reposDir={reposDir}
+      busy={
+        state.matches({ setup: { workspace: "choosing" } }) ||
+        github.busy ||
+        providerBusy ||
+        resourcesBusy
+      }
+      onChooseDir={() => send({ type: "CHOOSE" })}
+      onContinue={() => send({ type: "CONTINUE" })}
+      onConnectGithub={
+        github.connection.connected ? github.manage : github.connect
+      }
+      onSkipGithub={() => {
+        github.cancel();
+        send({ type: "SKIP_GITHUB" });
+      }}
+      onConnectClaude={(token) =>
+        send({
+          type: "CONNECT_CLAUDE",
+          kind: "claude-setup-token",
+          id: crypto.randomUUID(),
+          token,
+          targetId: "desktop",
+        })
+      }
+      onStartCodex={(method) =>
+        send({
+          type: "START_CODEX",
+          kind: "openai-codex-oauth",
+          id: crypto.randomUUID(),
+          method,
+          targetId: "desktop",
+        })
+      }
+      onConnectApi={(providerId, apiKey) =>
+        send({
+          type: "CONNECT_API",
+          kind: "api-key",
+          id: crypto.randomUUID(),
+          providerId,
+          apiKey,
+          targetId: "desktop",
+        })
+      }
+      onContinueProvider={() => send({ type: "CONTINUE_PROVIDER" })}
+      onSkipProvider={() => send({ type: "SKIP_PROVIDER" })}
+      onCancelAuth={() => send({ type: "CANCEL_AUTH" })}
+      onRetryProvider={() => {
+        if (state.matches({ setup: { provider: "authFailed" } })) {
+          send({ type: "RETRY_AUTH" });
+        } else {
+          send({ type: "RETRY_PROVIDER" });
+        }
+      }}
+      onImportResources={(candidates) =>
+        send({ type: "IMPORT_RESOURCES", candidates })
+      }
+      onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
+      onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
+      onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
+    />
+  );
+}
+
+function firstSettingsError(...errors: ReadonlyArray<{ message?: string } | null>): string | null {
+  for (const error of errors) {
+    if (error?.message != null) return error.message;
+  }
+  return null;
+}
+
+function offloadSettingsStatus(state: import("xstate").SnapshotFrom<ReturnType<typeof createOffloadSettingsMachine>>, enabled: boolean) {
+  if (state.matches("saving")) return "priming";
+  if (state.matches("failed")) return "failed";
+  return enabled ? "ready" : "disabled";
+}
+
+function deleteSessionDescription(pendingDelete: Session | null) {
+  return pendingDelete
+    ? workspaceModeOf(pendingDelete) === "direct"
+      ? `“${pendingDelete.title}” session data will be permanently removed. The repository checkout will be left untouched. This can't be undone.`
+      : `“${pendingDelete.title}” and its isolated worktree will be permanently removed. This can't be undone.`
+    : undefined
+}
+
+function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> | undefined) {
+  const githubConfig = config?.github ?? null;
+  const gitConfig = config?.git ?? null;
+  const notificationsConfig = config?.notifications ?? null;
+  const persistedOffloadCompute = config?.offloadCompute ?? null;
+  return { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
+}
+
+function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {
+  return catalog?.plugins.some((plugin) => plugin.enabled && plugin.manifest.id === "debug") ?? false;
+}
+
+function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): boolean {
+  return connected && (config?.autoDetectPr ?? true);
 }

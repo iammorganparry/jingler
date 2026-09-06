@@ -350,67 +350,74 @@ export const makeDeviceSessionCommandExecutor = (
             input.request
           )
         }
-      case "Sessions.transcriptPage": {
-        const page = await services.transcriptPage(
-          decodePayload(command, TranscriptPagePayload)
-        )
-        return stripTranscriptAttachmentData(
-          decodePayload(command, TranscriptPageResult, page)
-        )
-      }
-      case "Sessions.diff":
-        payloadRecord(command)
-        return services.diff(command.sessionId)
-      case "Workspace.files": {
-        const input = decodePayload(command, RepoPathPayload)
-        return services.files(command.sessionId, input.repoPath)
-      }
-      case "Workspace.branches": {
-        const input = decodePayload(command, RepoPathPayload)
-        return services.branches(command.sessionId, input.repoPath)
-      }
-      case "Workspace.exportHandoff":
-        return services.exportHandoff(
-          command.sessionId,
-          decodePayload(command, ExportHandoffPayload).eventCursor
-        )
-      case "Workspace.importHandoff":
-        return services.importHandoff(
-          command.sessionId,
-          decodePayload(command, ImportHandoffPayload).checkpoint
-        )
-      case "Sessions.importConversation":
-        return services.importConversation(
-          command.sessionId,
-          decodePayload(command, ImportConversationPayload).messages
-        )
-      case "Sessions.archive":
-        return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason)
-      case "Sessions.delete":
-        payloadRecord(command)
-        return services.remove(command.sessionId)
-      case "Github.preparePublish":
-        payloadRecord(command)
-        return services.preparePublish(command.sessionId)
-      case "Github.completePublish":
-        return services.completePublish(
-          command.sessionId,
-          decodePayload(command, RemotePublishCompleteInput).prNumber
-        )
-      case "Offload.begin":
-        return services.beginOffload(decodePayload(command, OwnedOffloadBegin))
-      case "Offload.chunk":
-        return services.appendOffloadChunk(decodePayload(command, OwnedOffloadChunk))
-      case "Offload.execute":
-        return services.executeOffload(decodePayload(command, OwnedOffloadExecute))
-      case "Offload.cancel":
-        return services.cancelOffload(decodePayload(command, OwnedOffloadExecute))
       default:
-        throw new DeviceOperationError({
-          reason: "unsupported",
-          operation: command.operation,
-          message: `Remote operation ${command.operation} is not supported by this device agent.`
-        })
+        return executeWorkspaceOperation()
+    }
+
+    async function executeWorkspaceOperation() {
+      switch (command.operation) {
+        case "Sessions.transcriptPage": {
+          const page = await services.transcriptPage(
+            decodePayload(command, TranscriptPagePayload)
+          )
+          return stripTranscriptAttachmentData(
+            decodePayload(command, TranscriptPageResult, page)
+          )
+        }
+        case "Sessions.diff":
+          payloadRecord(command)
+          return services.diff(command.sessionId)
+        case "Workspace.files": {
+          const input = decodePayload(command, RepoPathPayload)
+          return services.files(command.sessionId, input.repoPath)
+        }
+        case "Workspace.branches": {
+          const input = decodePayload(command, RepoPathPayload)
+          return services.branches(command.sessionId, input.repoPath)
+        }
+        case "Workspace.exportHandoff":
+          return services.exportHandoff(
+            command.sessionId,
+            decodePayload(command, ExportHandoffPayload).eventCursor
+          )
+        case "Workspace.importHandoff":
+          return services.importHandoff(
+            command.sessionId,
+            decodePayload(command, ImportHandoffPayload).checkpoint
+          )
+        case "Sessions.importConversation":
+          return services.importConversation(
+            command.sessionId,
+            decodePayload(command, ImportConversationPayload).messages
+          )
+        case "Sessions.archive":
+          return services.archive(command.sessionId, decodePayload(command, ArchivePayload).reason)
+        case "Sessions.delete":
+          payloadRecord(command)
+          return services.remove(command.sessionId)
+        case "Github.preparePublish":
+          payloadRecord(command)
+          return services.preparePublish(command.sessionId)
+        case "Github.completePublish":
+          return services.completePublish(
+            command.sessionId,
+            decodePayload(command, RemotePublishCompleteInput).prNumber
+          )
+        case "Offload.begin":
+          return services.beginOffload(decodePayload(command, OwnedOffloadBegin))
+        case "Offload.chunk":
+          return services.appendOffloadChunk(decodePayload(command, OwnedOffloadChunk))
+        case "Offload.execute":
+          return services.executeOffload(decodePayload(command, OwnedOffloadExecute))
+        case "Offload.cancel":
+          return services.cancelOffload(decodePayload(command, OwnedOffloadExecute))
+        default:
+          throw new DeviceOperationError({
+            reason: "unsupported",
+            operation: command.operation,
+            message: `Remote operation ${command.operation} is not supported by this device agent.`
+          })
+      }
     }
   }
 })
@@ -726,12 +733,16 @@ export const makeLiveDeviceSessionCommandExecutor = (
         }
         const cwd = session.worktreePath
         const inspection = yield* GitService.publishInspection(cwd, session.baseBranch ?? "main")
-        if (session.semanticBranchPending === true || !inspection.branch) {
-          return yield* Effect.fail(new Error("Finish creating the remote task branch before publishing."))
-        }
-        if (inspection.branch !== session.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
-          return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
-        }
+        const validatePublishBranch = Effect.gen(function* () {
+          if (session.semanticBranchPending === true || !inspection.branch) {
+            return yield* Effect.fail(new Error("Finish creating the remote task branch before publishing."))
+          }
+          if (inspection.branch !== session.branch || !isSessionPublishBranchReady(session, inspection.branch)) {
+            return yield* Effect.fail(new Error("The remote worktree is not on its validated session branch."))
+          }
+          return inspection.branch
+        })
+        const branch = yield* validatePublishBranch
         const messages = yield* TranscriptStore.list(session.activeChatId)
         const agentRuntime = yield* AgentRuntime
         const metadata = yield* makeAgentRuntimePublishMetadataGenerator(agentRuntime).generate({
@@ -743,28 +754,36 @@ export const makeLiveDeviceSessionCommandExecutor = (
         if (!isCommitSubjectSafe(metadata.commitMessage)) {
           return yield* Effect.fail(new Error("The generated commit subject was not safe to publish."))
         }
-        let commitSha = inspection.headSha
-        if (inspection.hasChanges) {
-          yield* GitService.stageAll(cwd)
-          if (!(yield* GitService.hasStagedChanges(cwd))) {
-            return yield* Effect.fail(new Error("Git found no staged remote changes to commit."))
+        const commitPublishChanges = Effect.gen(function* () {
+          let commitSha = inspection.headSha
+          if (inspection.hasChanges) {
+            yield* GitService.stageAll(cwd)
+            if (!(yield* GitService.hasStagedChanges(cwd))) {
+              return yield* Effect.fail(new Error("Git found no staged remote changes to commit."))
+            }
+            commitSha = yield* GitService.commit(cwd, metadata.commitMessage)
           }
-          commitSha = yield* GitService.commit(cwd, metadata.commitMessage)
-        }
-        if (!commitSha) {
-          return yield* Effect.fail(new Error("Git did not return the remote commit SHA."))
-        }
-        const remote = yield* GitService.remoteUrl(cwd)
-        const parsed = remote ? parseGitHubRemote(remote) : null
-        if (!parsed) {
-          return yield* Effect.fail(new Error("The remote origin is not a github.com repository."))
-        }
-        yield* GitService.pushConfigured(cwd, inspection.branch)
+          if (!commitSha) {
+            return yield* Effect.fail(new Error("Git did not return the remote commit SHA."))
+          }
+          return commitSha
+        })
+        const commitSha = yield* commitPublishChanges
+        const resolvePublishRepository = Effect.gen(function* () {
+          const remote = yield* GitService.remoteUrl(cwd)
+          const parsed = remote ? parseGitHubRemote(remote) : null
+          if (!parsed) {
+            return yield* Effect.fail(new Error("The remote origin is not a github.com repository."))
+          }
+          return parsed
+        })
+        const parsed = yield* resolvePublishRepository
+        yield* GitService.pushConfigured(cwd, branch)
         return Schema.decodeUnknownSync(RemotePublishPrepared)({
           version: 1,
           sessionId,
           githubSlug: `${parsed.owner}/${parsed.repo}`,
-          branch: inspection.branch,
+          branch,
           baseBranch: session.baseBranch ?? "main",
           commitSha,
           commitMessage: metadata.commitMessage,
@@ -772,6 +791,7 @@ export const makeLiveDeviceSessionCommandExecutor = (
           prBody: metadata.prBody,
           existingPrNumber: session.prNumber ?? null
         })
+
       })
     ),
     completePublish: (sessionId, prNumber) => run(

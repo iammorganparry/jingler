@@ -312,23 +312,7 @@ export const loadPluginUi = async (
   // `resolveKeybindings` exists and is tested; what is missing is the app-level
   // dispatch to hook it up. `registerProvider` throws for the same reason. Each
   // entry here comes out the moment its half lands.
-  const unsupported = [
-    (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "contributes.keybindings" : null,
-    (manifest.contributes?.authenticationProviders?.length ?? 0) > 0
-      ? "contributes.authenticationProviders"
-      : null,
-    manifest.capabilities?.untrustedRepos !== undefined
-      ? "capabilities.untrustedRepos"
-      : null,
-    // `onStartupFinished`, `onCommand:` and `onTab:` are all dispatched now.
-    // `repoContains:` is not: matching a glob against the active session's repo
-    // needs a scanner nothing implements, so a plugin waiting on it would wait
-    // forever. Named specifically rather than refusing `activationEvents`
-    // wholesale, since the other three work.
-    (manifest.activationEvents ?? []).some((e) => e.startsWith("repoContains:"))
-      ? "activationEvents: repoContains"
-      : null
-  ].filter((x): x is string => x !== null)
+  const unsupported = unsupportedManifestFeatures(manifest)
 
   if (unsupported.length > 0) {
     return {
@@ -360,17 +344,8 @@ export const loadPluginUi = async (
   // a row in the command palette that dispatches into a process that was never
   // started. The author sees their command listed and would reasonably conclude
   // the handler is at fault.
-  const declaredCommands = manifest.contributes?.commands ?? []
-  const declaredIssueProviders = manifest.contributes?.issueProviders ?? []
-  if (!manifest.main && (declaredCommands.length > 0 || declaredIssueProviders.length > 0)) {
-    return {
-      ok: false,
-      error: {
-        id: manifest.id,
-        message: `declares ${declaredCommands.length} command(s) and ${declaredIssueProviders.length} issue provider(s) but no \`main\` entry, so nothing could handle them. Add \`main: "dist/main.js"\` to the manifest.`
-      }
-    }
-  }
+  const missingHost = missingPluginHost(manifest)
+  if (missingHost) return missingHost
 
   // A plugin with no UI entry AND no UI contributions is legal — host-only, or
   // contributing nothing yet.
@@ -381,6 +356,60 @@ export const loadPluginUi = async (
     }
   }
 
+  return importPluginUi(plugin, importer, declaredTabs, declaredPanes)
+}
+
+/**
+ * Load every enabled plugin in a catalog, concurrently.
+ *
+ * Concurrently and independently: one plugin taking two seconds to import must
+ * not delay the other nine, and one failing must not abort the batch. The result
+ * is partitioned rather than thrown so the caller renders what worked and
+ * reports what did not, in the same pass.
+ */
+export const loadPlugins = async (
+  plugins: ReadonlyArray<LoadedPlugin>,
+  importer?: (url: string) => Promise<unknown>
+): Promise<{
+  active: ReadonlyArray<ActivePlugin>
+  errors: ReadonlyArray<PluginLoadError>
+}> => {
+  const results = await Promise.all(
+    plugins.filter((p) => p.enabled).map((p) => loadPluginUi(p, importer))
+  )
+  return {
+    active: results.flatMap((r) => (r.ok ? [r.plugin] : [])),
+    errors: results.flatMap((r) => (r.ok ? [] : [r.error]))
+  }
+}
+
+function unsupportedManifestFeatures(manifest: LoadedPlugin["manifest"]) {
+  return [
+    (manifest.contributes?.keybindings?.length ?? 0) > 0 ? "contributes.keybindings" : null,
+    (manifest.contributes?.authenticationProviders?.length ?? 0) > 0
+      ? "contributes.authenticationProviders"
+      : null,
+    manifest.capabilities?.untrustedRepos !== undefined
+      ? "capabilities.untrustedRepos"
+      : null,
+    // `onStartupFinished`, `onCommand:` and `onTab:` are all dispatched now.
+    // `repoContains:` is not: matching a glob against the active session's repo
+    // needs a scanner nothing implements, so a plugin waiting on it would wait
+    // forever. Named specifically rather than refusing `activationEvents`
+    // wholesale, since the other three work.
+    (manifest.activationEvents ?? []).some((e) => e.startsWith("repoContains:"))
+      ? "activationEvents: repoContains"
+      : null
+  ].filter((x): x is string => x !== null)
+}
+
+async function importPluginUi(
+  plugin: LoadedPlugin,
+  importer: (url: string) => Promise<unknown>,
+  declaredTabs: NonNullable<NonNullable<LoadedPlugin["manifest"]["contributes"]>["tabs"]>,
+  declaredPanes: NonNullable<NonNullable<LoadedPlugin["manifest"]["contributes"]>["panes"]>
+): Promise<PluginLoadResult> {
+  const { manifest } = plugin
   let module: unknown
   try {
     module = await importer(pluginModuleUrl(plugin))
@@ -405,6 +434,16 @@ export const loadPluginUi = async (
     }
   }
 
+  return pluginContributions(plugin, exported, declaredTabs, declaredPanes)
+}
+
+function pluginContributions(
+  plugin: LoadedPlugin,
+  exported: PluginModule,
+  declaredTabs: NonNullable<NonNullable<LoadedPlugin["manifest"]["contributes"]>["tabs"]>,
+  declaredPanes: NonNullable<NonNullable<LoadedPlugin["manifest"]["contributes"]>["panes"]>
+): PluginLoadResult {
+  const { manifest } = plugin
   const views = exported.views ?? {}
   const tabs: Array<TabContribution> = []
 
@@ -477,26 +516,17 @@ export const loadPluginUi = async (
   return { ok: true, plugin: { id: manifest.id, version: manifest.version, tabs, panes } }
 }
 
-/**
- * Load every enabled plugin in a catalog, concurrently.
- *
- * Concurrently and independently: one plugin taking two seconds to import must
- * not delay the other nine, and one failing must not abort the batch. The result
- * is partitioned rather than thrown so the caller renders what worked and
- * reports what did not, in the same pass.
- */
-export const loadPlugins = async (
-  plugins: ReadonlyArray<LoadedPlugin>,
-  importer?: (url: string) => Promise<unknown>
-): Promise<{
-  active: ReadonlyArray<ActivePlugin>
-  errors: ReadonlyArray<PluginLoadError>
-}> => {
-  const results = await Promise.all(
-    plugins.filter((p) => p.enabled).map((p) => loadPluginUi(p, importer))
-  )
-  return {
-    active: results.flatMap((r) => (r.ok ? [r.plugin] : [])),
-    errors: results.flatMap((r) => (r.ok ? [] : [r.error]))
+function missingPluginHost(manifest: LoadedPlugin["manifest"]): PluginLoadResult | null {
+  const declaredCommands = manifest.contributes?.commands ?? []
+  const declaredIssueProviders = manifest.contributes?.issueProviders ?? []
+  if (!manifest.main && (declaredCommands.length > 0 || declaredIssueProviders.length > 0)) {
+    return {
+      ok: false,
+      error: {
+        id: manifest.id,
+        message: `declares ${declaredCommands.length} command(s) and ${declaredIssueProviders.length} issue provider(s) but no \`main\` entry, so nothing could handle them. Add \`main: "dist/main.js"\` to the manifest.`
+      }
+    }
   }
+  return null
 }

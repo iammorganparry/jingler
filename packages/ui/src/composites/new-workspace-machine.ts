@@ -94,6 +94,57 @@ type NewWorkspaceEvent =
   | { type: "PROVISION_DONE" }
   | { type: "PROVISION_FAILED"; error: unknown }
 
+const canonicalWorkspaceModel = (context: NewWorkspaceContext) => (
+              context.connectionId !== null &&
+              context.providerId !== null &&
+              context.modelId !== null
+                ? {
+                    connectionId: context.connectionId,
+                    providerId: context.providerId,
+                    modelId: context.modelId
+                }
+                : null
+)
+
+const submitWorkspace = (
+  context: NewWorkspaceContext,
+  onProgress: (phase: SessionCreationPhase) => void
+): Promise<void> => {
+            const project = context.resolvedProject
+            if (project === null) return Promise.reject(new Error("Select a project."))
+            const canonical = canonicalWorkspaceModel(context)
+            if (canonical === null) {
+              return Promise.reject(new Error("Select a certified provider model."))
+            }
+            const common = {
+              projectId: project.id,
+              ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
+              repoPath: project.path,
+              repoName: project.name,
+              ...canonical,
+              mode: context.mode,
+              reasoning: context.reasoning ?? null
+            }
+            const initialPrompt = context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}
+            if (context.source === "pr") {
+              const createFromPr = context.getDeps().onCreateFromPr
+              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
+              return createFromPr({ ...common, ...initialPrompt, pr: context.selectedPr }, context.attachments, onProgress)
+            }
+            if (context.source === "github" || context.source.startsWith("provider:")) {
+              const createFromIssue = context.getDeps().onCreateFromIssue
+              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
+              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
+            }
+            return context.getDeps().onCreate({
+              ...common,
+              ...initialPrompt,
+              baseBranch: context.baseBranch,
+              useWorktree: context.isolation === "worktree",
+              ...(context.source === "branch" ? { continueBranch: true } : {})
+            }, context.attachments, onProgress)
+}
+
 const projectFor = (context: NewWorkspaceContext): Project | undefined =>
   context.getDeps().projects.find((project) => project.id === context.projectId)
 
@@ -414,49 +465,7 @@ export const newWorkspaceMachine = setup({
       invoke: {
         src: "submit",
         input: ({ context }) => ({
-          run: (onProgress) => {
-            const project = context.resolvedProject
-            if (project === null) return Promise.reject(new Error("Select a project."))
-            const canonical =
-              context.connectionId !== null &&
-              context.providerId !== null &&
-              context.modelId !== null
-                ? {
-                    connectionId: context.connectionId,
-                    providerId: context.providerId,
-                    modelId: context.modelId
-                }
-                : null
-            if (canonical === null) {
-              return Promise.reject(new Error("Select a certified provider model."))
-            }
-            const common = {
-              projectId: project.id,
-              ...(project.environmentId === undefined ? {} : { environmentId: project.environmentId }),
-              repoPath: project.path,
-              repoName: project.name,
-              ...canonical,
-              mode: context.mode,
-              reasoning: context.reasoning ?? null
-            }
-            if (context.source === "pr") {
-              const createFromPr = context.getDeps().onCreateFromPr
-              if (!(context.selectedPr && createFromPr)) return Promise.reject(new Error("Select a pull request."))
-              return createFromPr({ ...common, ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}), pr: context.selectedPr }, context.attachments, onProgress)
-            }
-            if (context.source === "github" || context.source.startsWith("provider:")) {
-              const createFromIssue = context.getDeps().onCreateFromIssue
-              if (!(context.selectedIssue && createFromIssue)) return Promise.reject(new Error("Select an issue."))
-              return createFromIssue({ ...common, baseBranch: context.baseBranch, issue: context.selectedIssue, task: context.draft.trim() }, context.attachments, onProgress)
-            }
-            return context.getDeps().onCreate({
-              ...common,
-              ...(context.draft.trim() ? { initialPrompt: context.draft.trim() } : {}),
-              baseBranch: context.baseBranch,
-              useWorktree: context.isolation === "worktree",
-              ...(context.source === "branch" ? { continueBranch: true } : {})
-            }, context.attachments, onProgress)
-          }
+          run: (onProgress) => submitWorkspace(context, onProgress)
         })
       },
       on: {

@@ -96,6 +96,111 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   onResize,
   emptyState
 }: SplitViewProps<TPane>) {
+  const renderSplitPaneContainer = (pane: TPane, index: number) => {
+  function getPaneTransition() {
+    return (draggingDivider !== null ? INSTANT : switched ? FAST : SPRING)
+  }
+
+                                     function renderInsertIndicator() {
+                                       return ((drop === "before" || drop === "after") && (
+                <motion.span
+                  layoutId={`${layoutScope}-insert-indicator`}
+                  transition={SPRING}
+                  data-testid={`${testIdPrefix}-insert-${drop}-${index}`}
+                  className={cn(
+                    "pointer-events-none absolute inset-y-0 w-1 bg-blue",
+                    drop === "before" ? "left-0" : "right-0",
+                    // At the cap there is nowhere to insert, so the indicator
+                    // says so rather than promising a pane that won't appear.
+                    full && "bg-red/70"
+                  )}
+                />
+              ))
+                                     }
+
+    if (!group) return null
+          const isFocused = index === group.focused
+          const drop = dropAt?.index === index ? dropAt.zone : null
+          return (
+            <motion.div
+              key={paneId(pane)}
+              // `layout` moves a pane when its NEIGHBOURS change size or count.
+              // Suspended mid-divider-drag: there, the width already tracks the
+              // pointer exactly, and a spring on top of it only adds lag.
+              layout={draggingDivider === null}
+              custom={pane.ratio}
+              variants={paneVariants}
+              // A pane inserted into the split you're looking at grows out of a
+              // sliver and pushes its neighbours aside, because that IS what
+              // happened. A pane that arrives by a switch starts at its final
+              // width and only fades — nothing was inserted.
+              initial={switched ? "swap" : "hidden"}
+              animate="visible"
+              exit="exit"
+              // The other half of suspending `layout` below. `visible` is a
+              // function of the ratio, so a divider drag re-resolves it on every
+              // pointer-move — with a spring, each of those starts a new ~260ms
+              // animation toward the new width, and the pane trails the cursor
+              // exactly as if `layout` had never been suspended. Mid-drag the
+              // pointer IS the animation, so the width is written on the frame
+              // it changes.
+              // Mid-drag the pointer is the animation (INSTANT). A switch is a
+              // 140ms fade at full width (FAST) — the width is already right, so
+              // a spring would have nothing to travel but the opacity. Everything
+              // else springs.
+              transition={getPaneTransition()}
+              // `order` interleaves the panes with the dividers, which are
+              // rendered as a separate run below (see the note there).
+              style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2 }}
+              data-testid={`${testIdPrefix}-pane-${index}`}
+              {...{ [`data-${testIdPrefix}-pane-index`]: index }}
+              data-session={testIdPrefix === "split" ? paneId(pane) : undefined}
+              data-surface={testIdPrefix === "surface" ? paneId(pane) : undefined}
+              data-focused={isFocused || undefined}
+              // Focus follows a mousedown anywhere in the pane, captured so a
+              // click on a control inside still registers the pane as focused
+              // first.
+              onMouseDownCapture={() => onFocusPane?.(index)}
+              onFocusCapture={() => onFocusPane?.(index)}
+              onDragOver={(e) => {
+                if (!(onSplitWith || onReplacePane)) return
+                if (!carriesPayload(e, dragMime)) return
+                // Calling preventDefault is what MARKS this element as a valid
+                // drop target — without it the browser refuses the drop entirely.
+                e.preventDefault()
+                e.dataTransfer.dropEffect = "move"
+                const zone = zoneAt(e)
+                setDropAt((current) =>
+                  current?.index === index && current.zone === zone ? current : { index, zone }
+                )
+              }}
+              onDragLeave={(e) => {
+                // Ignore leaves into a descendant — only a real exit clears the
+                // indicator, or it would strobe as the cursor crosses the pane.
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
+                setDropAt((current) => (current?.index === index ? null : current))
+              }}
+              onDrop={handleDrop(index)}
+              className={cn(
+                "relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-editor",
+                testIdPrefix === "surface" && "rounded-xl border border-hairline",
+                // The focus ring is noise when there's only one pane — with
+                // nothing to disambiguate it would just be a permanent border.
+                !single && isFocused && "ring-1 ring-inset ring-blue/40",
+                // A replace-drop outranks the focus ring: mid-drag, what will
+                // happen matters more than where focus happens to be.
+                drop === "replace" && "ring-2 ring-inset ring-blue"
+              )}
+            >
+              {renderPane(pane, index)}
+              {/* The insert indicator is a bar on the edge the pane would appear
+                  on — a whole-pane ring would say "replace", which is the other
+                  gesture entirely. */}
+              {renderInsertIndicator()}
+            </motion.div>
+          )
+        }
+
   // Which pane is under the pointer mid-drag, and where it would land. Tracked
   // as one value rather than a per-pane boolean so exactly one indicator shows:
   // `dragleave` fires when crossing into a CHILD element too, so a per-pane flag
@@ -245,8 +350,12 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
     // can't make the row narrower than it already is. Only an INSERT is refused,
     // and it's refused here rather than in the reducer so the same drop still
     // works the moment the window is widened.
-    if (zone === "replace") onReplacePane?.(index, payload)
-    else if (!full) onSplitWith?.(payload, zone === "before" ? index : index + 1)
+    if (zone === "replace") {
+      onReplacePane?.(index, payload)
+      return
+    }
+    if (full) return
+    onSplitWith?.(payload, zone === "before" ? index : index + 1)
   }
 
   return (
@@ -269,101 +378,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
         lets the arriving panes fade.
       */}
       <AnimatePresence key={presenceKey} initial={switched} mode="popLayout">
-        {group.panes.map((pane, index) => {
-          const isFocused = index === group.focused
-          const drop = dropAt?.index === index ? dropAt.zone : null
-          return (
-            <motion.div
-              key={paneId(pane)}
-              // `layout` moves a pane when its NEIGHBOURS change size or count.
-              // Suspended mid-divider-drag: there, the width already tracks the
-              // pointer exactly, and a spring on top of it only adds lag.
-              layout={draggingDivider === null}
-              custom={pane.ratio}
-              variants={paneVariants}
-              // A pane inserted into the split you're looking at grows out of a
-              // sliver and pushes its neighbours aside, because that IS what
-              // happened. A pane that arrives by a switch starts at its final
-              // width and only fades — nothing was inserted.
-              initial={switched ? "swap" : "hidden"}
-              animate="visible"
-              exit="exit"
-              // The other half of suspending `layout` below. `visible` is a
-              // function of the ratio, so a divider drag re-resolves it on every
-              // pointer-move — with a spring, each of those starts a new ~260ms
-              // animation toward the new width, and the pane trails the cursor
-              // exactly as if `layout` had never been suspended. Mid-drag the
-              // pointer IS the animation, so the width is written on the frame
-              // it changes.
-              // Mid-drag the pointer is the animation (INSTANT). A switch is a
-              // 140ms fade at full width (FAST) — the width is already right, so
-              // a spring would have nothing to travel but the opacity. Everything
-              // else springs.
-              transition={draggingDivider !== null ? INSTANT : switched ? FAST : SPRING}
-              // `order` interleaves the panes with the dividers, which are
-              // rendered as a separate run below (see the note there).
-              style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2 }}
-              data-testid={`${testIdPrefix}-pane-${index}`}
-              {...{ [`data-${testIdPrefix}-pane-index`]: index }}
-              data-session={testIdPrefix === "split" ? paneId(pane) : undefined}
-              data-surface={testIdPrefix === "surface" ? paneId(pane) : undefined}
-              data-focused={isFocused || undefined}
-              // Focus follows a mousedown anywhere in the pane, captured so a
-              // click on a control inside still registers the pane as focused
-              // first.
-              onMouseDownCapture={() => onFocusPane?.(index)}
-              onFocusCapture={() => onFocusPane?.(index)}
-              onDragOver={(e) => {
-                if (!(onSplitWith || onReplacePane)) return
-                if (!carriesPayload(e, dragMime)) return
-                // Calling preventDefault is what MARKS this element as a valid
-                // drop target — without it the browser refuses the drop entirely.
-                e.preventDefault()
-                e.dataTransfer.dropEffect = "move"
-                const zone = zoneAt(e)
-                setDropAt((current) =>
-                  current?.index === index && current.zone === zone ? current : { index, zone }
-                )
-              }}
-              onDragLeave={(e) => {
-                // Ignore leaves into a descendant — only a real exit clears the
-                // indicator, or it would strobe as the cursor crosses the pane.
-                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return
-                setDropAt((current) => (current?.index === index ? null : current))
-              }}
-              onDrop={handleDrop(index)}
-              className={cn(
-                "relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-editor",
-                testIdPrefix === "surface" && "rounded-xl border border-hairline",
-                // The focus ring is noise when there's only one pane — with
-                // nothing to disambiguate it would just be a permanent border.
-                !single && isFocused && "ring-1 ring-inset ring-blue/40",
-                // A replace-drop outranks the focus ring: mid-drag, what will
-                // happen matters more than where focus happens to be.
-                drop === "replace" && "ring-2 ring-inset ring-blue"
-              )}
-            >
-              {renderPane(pane, index)}
-              {/* The insert indicator is a bar on the edge the pane would appear
-                  on — a whole-pane ring would say "replace", which is the other
-                  gesture entirely. */}
-              {(drop === "before" || drop === "after") && (
-                <motion.span
-                  layoutId={`${layoutScope}-insert-indicator`}
-                  transition={SPRING}
-                  data-testid={`${testIdPrefix}-insert-${drop}-${index}`}
-                  className={cn(
-                    "pointer-events-none absolute inset-y-0 w-1 bg-blue",
-                    drop === "before" ? "left-0" : "right-0",
-                    // At the cap there is nowhere to insert, so the indicator
-                    // says so rather than promising a pane that won't appear.
-                    full && "bg-red/70"
-                  )}
-                />
-              )}
-            </motion.div>
-          )
-        })}
+        {group.panes.map(renderSplitPaneContainer)}
       </AnimatePresence>
 
       {/* Dividers are siblings of the panes, not children, so a drag on one is

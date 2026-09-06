@@ -296,12 +296,13 @@ const heldSubagentsResponse = (
   const prompt = latestOperatorText(context)
   const steered = !prompt.includes(marker)
   const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
+  const startPhase = direct ? "direct-start" : "start"
   if (!steered) {
     const toolCall = fauxToolCall(
       E2E_HELD_SUBAGENTS_TOOL,
       {
         phase: resultsAfterLatestPrompt === 0
-          ? direct ? "direct-start" : "start"
+          ? startPhase
           : "wait"
       },
       { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
@@ -313,23 +314,7 @@ const heldSubagentsResponse = (
       { stopReason: "toolUse" }
     )
   }
-  if (resultsAfterLatestPrompt === 0) {
-    return fauxAssistantMessage(
-      [
-        fauxText(`Noted: ${prompt}`),
-        fauxToolCall(E2E_HELD_SUBAGENTS_TOOL, { phase: "wait" }, { id: "held-steer-1" })
-      ],
-      { stopReason: "toolUse" }
-    )
-  }
-  if (resultsAfterLatestPrompt === 1) {
-    return callTool(
-      E2E_HELD_SUBAGENTS_TOOL,
-      { phase: direct ? "direct-settle" : "settle" },
-      "held-steer-settle"
-    )
-  }
-  return fauxAssistantMessage(direct ? "Direct child reported back." : "Both agents reported back.")
+  return steeredSubagentResponse(context, resultsAfterLatestPrompt, direct)
 }
 
 const supervisorSubagentResponse = (
@@ -501,38 +486,7 @@ const fileBrowserResponse = (
     }
     return fauxAssistantMessage("Updated and created the configuration files.")
   }
-  if (prompt.includes("[[subagent-edit-preview]]")) {
-    return writes === 0
-      ? callTool(
-          WRITE_TOOL,
-          { path: "src/delegated.ts", content: "export const delegated = true\n" },
-          "subagent-edit-1"
-        )
-      : fauxAssistantMessage("Delegated file update completed.")
-  }
-  if (prompt.includes("[[follow-file-move]]")) {
-    const renames = recentToolResultCount(context, RENAME_TOOL)
-    if (renames === 0) {
-      return callTool(
-        RENAME_TOOL,
-        { from: "src/config.ts", to: "src/settings/config.ts" },
-        "follow-move-1"
-      )
-    }
-    return writes === 0
-      ? callTool(
-          WRITE_TOOL,
-          { path: "src/settings/config.ts", content: MODERN_CONFIG },
-          "follow-move-write-1"
-        )
-      : fauxAssistantMessage("Moved and updated the configuration file.")
-  }
-  if (prompt.includes("[[follow-diff-preview]]")) {
-    return writes === 0
-      ? callTool(WRITE_TOOL, { path: "src/config.ts", content: MODERN_CONFIG }, "follow-diff-1")
-      : fauxAssistantMessage("Updated the configuration mode.")
-  }
-  return null
+  return followedFileResponse(context, prompt, writes)
 }
 
 const mutationResponse = (
@@ -815,71 +769,7 @@ const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMes
         : "Selected diff context was missing."
     )
   }
-  const fileBrowser = fileBrowserResponse(context)
-  if (fileBrowser !== null) return fileBrowser
-  const supervisorSubagent = supervisorSubagentResponse(context)
-  if (supervisorSubagent !== null) return supervisorSubagent
-  const heldSubagents = heldSubagentsResponse(context)
-  if (heldSubagents !== null) return heldSubagents
-  const memory = memoryResponse(context)
-  if (memory !== null) return memory
-  if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {
-    return reviewResponse(context)
-  }
-  if (operatorText(context).some((text) => text.includes("[[plan]]"))) {
-    return planModeResponse(context)
-  }
-  const backgroundKind = backgroundKindFrom(context)
-  if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)
-  if (latestOperatorText(context).includes("[[ask]]")) return questionResponse(context)
-  if (latestOperatorText(context).includes("[[storm]]")) return stormResponse(context)
-  if (latestOperatorText(context).includes("GitHub feedback from")) {
-    return recentToolResultCount(context, COMMAND_TOOL) === 0
-      ? callTool(
-          COMMAND_TOOL,
-          { command: "printf 'feedback inspected\\n'" },
-          `github-feedback-${operatorText(context).length}`
-        )
-      : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
-  }
-  if (latestOperatorText(context).includes("[[offload-local-retry]]")) {
-    return recentToolResultCount(context, COMMAND_TOOL) === 0
-      ? callTool(
-          COMMAND_TOOL,
-          { command: "pnpm typecheck" },
-          "offload-local-retry-1"
-        )
-      : fauxAssistantMessage("Explicit local retry completed.")
-  }
-  if (latestOperatorText(context).includes("[[offload-owned-device-offline]]")) {
-    return recentToolResultCount(context, COMMAND_TOOL) === 0
-      ? callTool(
-          COMMAND_TOOL,
-          { command: "node -e \"process.stdout.write('offline command must not run\\\\n')\"" },
-          "offload-owned-device-offline-1"
-        )
-      : fauxAssistantMessage("Offline owned-device attempt completed.")
-  }
-  if (latestOperatorText(context).includes("[[offload-owned-device]]")) {
-    return recentToolResultCount(context, COMMAND_TOOL) === 0
-      ? callTool(
-          COMMAND_TOOL,
-          { command: "node -e \"process.stdout.write('owned device test clean\\\\n')\"" },
-          "offload-owned-device-1"
-        )
-      : fauxAssistantMessage("Tests completed on the selected owned device.")
-  }
-  if (latestOperatorText(context).includes("[[offload-typecheck]]")) {
-    return recentToolResultCount(context, COMMAND_TOOL) === 0
-      ? callTool(COMMAND_TOOL, { command: "pnpm typecheck" }, "offload-typecheck-1")
-      : fauxAssistantMessage("Typecheck completed on Offload Compute.")
-  }
-  if (latestOperatorText(context).includes("Add rate limiting")) {
-    return mutationResponse(context)
-  }
-  return fauxAssistantMessage(
-    "Completed through deterministic pi. Repository summary: src/routes/billing.ts."
-  )
+  return scenarioFixtureResponse(context)
 }
 
 const liveWebSearchResponse = (
@@ -1024,4 +914,131 @@ export const configureE2eVerificationProvider = (
   return (runtime: ModelRuntime): void => {
     runtime.registerNativeProvider(runtimeProvider)
   }
+}
+
+function offloadFixtureResponse(context: PiContext) {
+  if (latestOperatorText(context).includes("[[offload-local-retry]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+        COMMAND_TOOL,
+        { command: "pnpm typecheck" },
+        "offload-local-retry-1"
+      )
+      : fauxAssistantMessage("Explicit local retry completed.")
+  }
+  if (latestOperatorText(context).includes("[[offload-owned-device-offline]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+        COMMAND_TOOL,
+        { command: "node -e \"process.stdout.write('offline command must not run\\\\n')\"" },
+        "offload-owned-device-offline-1"
+      )
+      : fauxAssistantMessage("Offline owned-device attempt completed.")
+  }
+  if (latestOperatorText(context).includes("[[offload-owned-device]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+        COMMAND_TOOL,
+        { command: "node -e \"process.stdout.write('owned device test clean\\\\n')\"" },
+        "offload-owned-device-1"
+      )
+      : fauxAssistantMessage("Tests completed on the selected owned device.")
+  }
+  if (latestOperatorText(context).includes("[[offload-typecheck]]")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(COMMAND_TOOL, { command: "pnpm typecheck" }, "offload-typecheck-1")
+      : fauxAssistantMessage("Typecheck completed on Offload Compute.")
+  }
+  if (latestOperatorText(context).includes("Add rate limiting")) {
+    return mutationResponse(context)
+  }
+  return fauxAssistantMessage(
+    "Completed through deterministic pi. Repository summary: src/routes/billing.ts."
+  )
+}
+
+function scenarioFixtureResponse(context: PiContext) {
+  const fileBrowser = fileBrowserResponse(context)
+  if (fileBrowser !== null) return fileBrowser
+  const supervisorSubagent = supervisorSubagentResponse(context)
+  if (supervisorSubagent !== null) return supervisorSubagent
+  const heldSubagents = heldSubagentsResponse(context)
+  if (heldSubagents !== null) return heldSubagents
+  const memory = memoryResponse(context)
+  if (memory !== null) return memory
+  if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {
+    return reviewResponse(context)
+  }
+  if (operatorText(context).some((text) => text.includes("[[plan]]"))) {
+    return planModeResponse(context)
+  }
+  const backgroundKind = backgroundKindFrom(context)
+  if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)
+  if (latestOperatorText(context).includes("[[ask]]")) return questionResponse(context)
+  if (latestOperatorText(context).includes("[[storm]]")) return stormResponse(context)
+  if (latestOperatorText(context).includes("GitHub feedback from")) {
+    return recentToolResultCount(context, COMMAND_TOOL) === 0
+      ? callTool(
+        COMMAND_TOOL,
+        { command: "printf 'feedback inspected\\n'" },
+        `github-feedback-${operatorText(context).length}`
+      )
+      : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
+  }
+  return offloadFixtureResponse(context)
+}
+
+function followedFileResponse(context: PiContext, prompt: string, writes: number) {
+  if (prompt.includes("[[subagent-edit-preview]]")) {
+    return writes === 0
+      ? callTool(
+        WRITE_TOOL,
+        { path: "src/delegated.ts", content: "export const delegated = true\n" },
+        "subagent-edit-1"
+      )
+      : fauxAssistantMessage("Delegated file update completed.")
+  }
+  if (prompt.includes("[[follow-file-move]]")) {
+    const renames = recentToolResultCount(context, RENAME_TOOL)
+    if (renames === 0) {
+      return callTool(
+        RENAME_TOOL,
+        { from: "src/config.ts", to: "src/settings/config.ts" },
+        "follow-move-1"
+      )
+    }
+    return writes === 0
+      ? callTool(
+        WRITE_TOOL,
+        { path: "src/settings/config.ts", content: MODERN_CONFIG },
+        "follow-move-write-1"
+      )
+      : fauxAssistantMessage("Moved and updated the configuration file.")
+  }
+  if (prompt.includes("[[follow-diff-preview]]")) {
+    return writes === 0
+      ? callTool(WRITE_TOOL, { path: "src/config.ts", content: MODERN_CONFIG }, "follow-diff-1")
+      : fauxAssistantMessage("Updated the configuration mode.")
+  }
+  return null
+}
+
+function steeredSubagentResponse(context: PiContext, resultsAfterLatestPrompt: number, direct: boolean) {
+  if (resultsAfterLatestPrompt === 0) {
+    return fauxAssistantMessage(
+      [
+        fauxText(`Noted: ${prompt}`),
+        fauxToolCall(E2E_HELD_SUBAGENTS_TOOL, { phase: "wait" }, { id: "held-steer-1" })
+      ],
+      { stopReason: "toolUse" }
+    )
+  }
+  if (resultsAfterLatestPrompt === 1) {
+    return callTool(
+      E2E_HELD_SUBAGENTS_TOOL,
+      { phase: direct ? "direct-settle" : "settle" },
+      "held-steer-settle"
+    )
+  }
+  return fauxAssistantMessage(direct ? "Direct child reported back." : "Both agents reported back.")
 }

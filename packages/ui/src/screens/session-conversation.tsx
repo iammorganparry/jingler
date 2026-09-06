@@ -225,6 +225,58 @@ export interface SessionConversationProps {
  * tab body and docks) lives in `SessionPane`, which is what the grid multiplies.
  */
 export function SessionConversation(props: SessionConversationProps) {
+         function getProps() {
+           if (props.pullRequestsView) return (props.pullRequestsView)
+           if (props.memoryView) return (props.memoryView)
+           if (props.settingsView) return (props.settingsView)
+           if (props.showEmpty) return (<EmptyConversation
+            version={props.version}
+            onNewSession={props.onNewSession}
+          />)
+           return (<SessionSplit
+            group={group}
+            sessions={props.sessions}
+            onFocusPane={props.onFocusPane}
+            onSplitWith={props.onSplitWith}
+            onReplacePane={props.onReplacePane}
+            onResize={props.onResizePane}
+            onClosePane={props.onClosePane}
+            onMovePane={props.onMovePane}
+            emptyState={
+              <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
+            }
+            renderConversation={props.renderConversation}
+            renderExplanation={props.renderExplanation}
+            renderFiles={props.renderFiles}
+            renderBrowser={props.renderBrowser}
+            onOpenFile={props.onOpenFile}
+            onRequestCloseFile={props.onRequestCloseFile}
+            conversationPane={props.conversationPane}
+            renderChatTabs={props.renderChatTabs}
+            renderSubagentTabs={props.renderSubagentTabs}
+            onRenameSession={props.onRenameSession}
+            onFocusChat={props.onFocusChat}
+            onToggleBrowser={props.onToggleBrowser}
+            isBrowserActive={props.isBrowserActive}
+            planSessions={props.planSessions}
+            explanationSessions={props.explanationSessions}
+            liveActivity={props.liveActivity}
+            liveDiff={props.liveDiff}
+            debugStopSequences={props.debugStopSequences}
+            onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
+            onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
+            renderPullRequest={props.renderPullRequest}
+            tabContributions={props.tabContributions}
+            onSelectIssue={props.onSelectIssue}
+            paneContributions={props.paneContributions}
+            renderReview={props.renderReview}
+            renderCode={props.renderCode}
+            renderTerminalDock={props.renderTerminalDock}
+            selectTabRequest={props.selectTabRequest}
+            onTabRequestHandled={props.onTabRequestHandled}
+          />)
+         }
+
   // Stories and standalone use pass no split — synthesise the one-pane group
   // holding whatever `activeSessionId` says, so this screen renders identically
   // either way. A one-pane group is not a special case; it is what a single
@@ -284,72 +336,14 @@ export function SessionConversation(props: SessionConversationProps) {
       />
 
       <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {props.newSessionView && (
           <div className={props.newSessionViewActive ? "flex min-h-0 flex-1" : "hidden"}>
             {props.newSessionView}
           </div>
         )}
-        {!props.newSessionViewActive && (props.pullRequestsView ? (
-          props.pullRequestsView
-        ) : props.memoryView ? (
-          props.memoryView
-        ) : props.settingsView ? (
-          props.settingsView
-        ) : props.showEmpty ? (
-          <EmptyConversation
-            version={props.version}
-            onNewSession={props.onNewSession}
-          />
-        ) : (
-          <SessionSplit
-            group={group}
-            sessions={props.sessions}
-            onFocusPane={props.onFocusPane}
-            onSplitWith={props.onSplitWith}
-            onReplacePane={props.onReplacePane}
-            onResize={props.onResizePane}
-            onClosePane={props.onClosePane}
-            onMovePane={props.onMovePane}
-            emptyState={
-              <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
-            }
-            renderConversation={props.renderConversation}
-            renderExplanation={props.renderExplanation}
-            renderFiles={props.renderFiles}
-            renderBrowser={props.renderBrowser}
-            onOpenFile={props.onOpenFile}
-            onRequestCloseFile={props.onRequestCloseFile}
-            conversationPane={props.conversationPane}
-            renderChatTabs={props.renderChatTabs}
-            renderSubagentTabs={props.renderSubagentTabs}
-            onRenameSession={props.onRenameSession}
-            onFocusChat={props.onFocusChat}
-            onToggleBrowser={props.onToggleBrowser}
-            isBrowserActive={props.isBrowserActive}
-            planSessions={props.planSessions}
-            explanationSessions={props.explanationSessions}
-            liveActivity={props.liveActivity}
-            liveDiff={props.liveDiff}
-            debugStopSequences={props.debugStopSequences}
-            onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
-            onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
-            renderPullRequest={props.renderPullRequest}
-            tabContributions={props.tabContributions}
-            onSelectIssue={props.onSelectIssue}
-            paneContributions={props.paneContributions}
-            renderReview={props.renderReview}
-            renderCode={props.renderCode}
-            renderTerminalDock={props.renderTerminalDock}
-            selectTabRequest={props.selectTabRequest}
-            onTabRequestHandled={props.onTabRequestHandled}
-          />
-        ))}
-          </div>
-          <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
-        </div>
+        {!props.newSessionViewActive && (getProps())}
       </div>
+      <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
     </div>
   )
 }

@@ -76,6 +76,10 @@ export const matchSplitShortcut = (e: Chord): SplitShortcut | null => {
   const paneIndex = PANE_CODES.indexOf(e.code)
   if (paneIndex !== -1) return { type: "focus-pane", index: paneIndex }
 
+  return matchNeighbourOrClose(e)
+}
+
+const matchNeighbourOrClose = (e: Chord): SplitShortcut | null => {
   // ⌃⇧[ / ⌃⇧] — the pane to the left / right.
   if (e.code === "BracketLeft" || e.key === "[" || e.key === "{") {
     return { type: "focus-neighbour", direction: -1 }

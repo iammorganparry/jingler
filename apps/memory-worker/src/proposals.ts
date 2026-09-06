@@ -74,6 +74,46 @@ interface DraftContext {
   readonly seenPages: Set<string>
 }
 
+const prepareNewDraft = (
+  set: Pick<CreateProposalSetInput, "id" | "proposedBy" | "createdAt">,
+  draft: ProposalSetDraft,
+  context: DraftContext,
+  accepted: MemoryPage | undefined,
+  head: ProposalSetHead | undefined
+): { readonly proposal: MemoryProposal; readonly candidate: MemoryPage } => {
+  if (accepted !== undefined || head !== undefined) {
+    throw new ProposalSetError(`proposal page ${draft.pageId} has inconsistent accepted state`)
+  }
+  if (draft.baseRevisionId !== NEW_PAGE_BASE_REVISION_ID) {
+    throw new ProposalSetError(
+      `new proposal page ${draft.pageId} must use the ${NEW_PAGE_BASE_REVISION_ID} base`
+    )
+  }
+  const candidate = parseMemoryMarkdown(draft.markdown, draft.path)
+  if (candidate.id !== draft.pageId || candidate.revision !== 1) {
+    throw new ProposalSetError(`new proposal page ${draft.pageId} must have matching identity and revision 1`)
+  }
+  if (!pageCitesSource(candidate, context.sourceId)) {
+    throw new ProposalSetError(
+      `proposal page ${draft.pageId} does not cite compiler source ${context.sourceId}`
+    )
+  }
+  return {
+    candidate,
+    proposal: {
+      id: proposalIdFor(set.id, draft.pageId),
+      pageId: draft.pageId,
+      baseRevisionId: draft.baseRevisionId,
+      path: candidate.path,
+      markdown: draft.markdown,
+      proposedBy: set.proposedBy,
+      createdAt: set.createdAt,
+      status: "open",
+      ...(draft.summary === undefined ? {} : { summary: draft.summary })
+    }
+  }
+}
+
 const prepareDraft = (
   set: Pick<CreateProposalSetInput, "id" | "proposedBy" | "createdAt">,
   draft: ProposalSetDraft,
@@ -86,37 +126,7 @@ const prepareDraft = (
   const accepted = context.acceptedById.get(draft.pageId)
   const head = context.headsById.get(draft.pageId)
   if (accepted === undefined || head === undefined) {
-    if (accepted !== undefined || head !== undefined) {
-      throw new ProposalSetError(`proposal page ${draft.pageId} has inconsistent accepted state`)
-    }
-    if (draft.baseRevisionId !== NEW_PAGE_BASE_REVISION_ID) {
-      throw new ProposalSetError(
-        `new proposal page ${draft.pageId} must use the ${NEW_PAGE_BASE_REVISION_ID} base`
-      )
-    }
-    const candidate = parseMemoryMarkdown(draft.markdown, draft.path)
-    if (candidate.id !== draft.pageId || candidate.revision !== 1) {
-      throw new ProposalSetError(`new proposal page ${draft.pageId} must have matching identity and revision 1`)
-    }
-    if (!pageCitesSource(candidate, context.sourceId)) {
-      throw new ProposalSetError(
-        `proposal page ${draft.pageId} does not cite compiler source ${context.sourceId}`
-      )
-    }
-    return {
-      candidate,
-      proposal: {
-        id: proposalIdFor(set.id, draft.pageId),
-        pageId: draft.pageId,
-        baseRevisionId: draft.baseRevisionId,
-        path: candidate.path,
-        markdown: draft.markdown,
-        proposedBy: set.proposedBy,
-        createdAt: set.createdAt,
-        status: "open",
-        ...(draft.summary === undefined ? {} : { summary: draft.summary })
-      }
-    }
+    return prepareNewDraft(set, draft, context, accepted, head)
   }
   if (draft.baseRevisionId !== head.revisionId) {
     throw new ProposalSetError(

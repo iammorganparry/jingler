@@ -38,44 +38,58 @@ const configurationDone = (request) => {
   response(pending.request)
   setTimeout(() => event("stopped", { reason: pending.reason, threadId: 1 }), 5)
 }
-const handle = (request) => {
-  switch (request.command) {
-    case "initialize": initialize(request); break
-    case "launch": start(request, "entry"); break
-    case "attach": start(request, "attach"); break
-    case "threads": response(request, { threads: [{ id: 1, name: "main" }] }); break
-    case "stackTrace": {
-      const requestedLine = line
-      const reply = () => response(request, { stackFrames: [{ id: 10, name: "main", source: { path: process.env.FAKE_DAP_SOURCE }, line: requestedLine, column: 1, instructionPointerReference: "0x1" }] })
-      if (process.env.FAKE_DAP_RACE_STACK === "1" && requestedLine === 4) setTimeout(reply, 30)
-      else reply()
-      break
-    }
-    case "scopes": response(request, { scopes: [{ name: "Locals", variablesReference: 20, expensive: false }] }); break
-    case "variables": process.env.FAKE_DAP_VARIABLES_FAIL_AT === String(line)
-      ? failure(request, "variables unavailable")
-      : response(request, { variables: [{ name: "count", value: String(line), type: "number", variablesReference: 0 }] }); break
-    case "evaluate": response(request, { result: request.arguments?.expression === "count" ? String(line) : "unknown", type: "number", variablesReference: 0 }); break
-    case "setBreakpoints": response(request, { breakpoints: (request.arguments?.breakpoints ?? []).map((point, index) => ({ id: index + 1, verified: true, line: point.line })) }); break
-    case "setFunctionBreakpoints": case "setInstructionBreakpoints": case "setDataBreakpoints": response(request, { breakpoints: [] }); break
-    case "dataBreakpointInfo": response(request, { dataId: "count", description: "count", accessTypes: ["write"], canPersist: false }); break
-    case "continue": case "next": case "stepIn": case "stepOut":
-      if (process.env.FAKE_DAP_REJECT_STEP === "1") failure(request, "step rejected")
-      else { response(request, { allThreadsContinued: true }); event("continued", { threadId: 1 }); line += 1; setTimeout(() => event("stopped", { reason: "step", threadId: 1 }), 5) }
-      break
-    case "pause": response(request); setTimeout(() => event("stopped", { reason: "pause", threadId: 1 }), 5); break
-    case "disassemble": response(request, { instructions: [{ address: "0x1", instruction: "nop" }] }); break
-    case "readMemory": response(request, { address: "0x1", data: "AA==" }); break
-    case "writeMemory": response(request, { bytesWritten: 1 }); break
-    case "modules": response(request, { modules: [{ id: 1, name: "fake" }] }); break
-    case "loadedSources": response(request, { sources: [{ path: process.env.FAKE_DAP_SOURCE }] }); break
-    case "raceStops": response(request); line = 4; event("stopped", { reason: "race", threadId: 1 }); line = 5; event("stopped", { reason: "race", threadId: 1 }); break
-    case "crashAdapter": process.exit(7); break
-    case "configurationDone": configurationDone(request); break
-    case "terminate": response(request); event("terminated"); break
-    case "disconnect": response(request); setTimeout(() => process.exit(0), 5); break
-    default: response(request, { echoed: request.command })
+const step = (request) => {
+  if (process.env.FAKE_DAP_REJECT_STEP === "1") {
+    failure(request, "step rejected")
+    return
   }
+  response(request, { allThreadsContinued: true })
+  event("continued", { threadId: 1 })
+  line += 1
+  setTimeout(() => event("stopped", { reason: "step", threadId: 1 }), 5)
+}
+const handlers = {
+  initialize,
+  launch: (request) => { start(request, "entry"); },
+  attach: (request) => { start(request, "attach"); },
+  threads: (request) => { response(request, { threads: [{ id: 1, name: "main" }] }); },
+  stackTrace: (request) => {
+    const requestedLine = line
+    const reply = () => response(request, { stackFrames: [{ id: 10, name: "main", source: { path: process.env.FAKE_DAP_SOURCE }, line: requestedLine, column: 1, instructionPointerReference: "0x1" }] })
+    if (process.env.FAKE_DAP_RACE_STACK === "1" && requestedLine === 4) setTimeout(reply, 30)
+    else reply()
+  },
+  scopes: (request) => { response(request, { scopes: [{ name: "Locals", variablesReference: 20, expensive: false }] }); },
+  variables: (request) => {
+    if (process.env.FAKE_DAP_VARIABLES_FAIL_AT === String(line)) failure(request, "variables unavailable")
+    else response(request, { variables: [{ name: "count", value: String(line), type: "number", variablesReference: 0 }] })
+  },
+  evaluate: (request) => { response(request, { result: request.arguments?.expression === "count" ? String(line) : "unknown", type: "number", variablesReference: 0 }); },
+  setBreakpoints: (request) => { response(request, { breakpoints: (request.arguments?.breakpoints ?? []).map((point, index) => ({ id: index + 1, verified: true, line: point.line })) }); },
+  setFunctionBreakpoints: (request) => { response(request, { breakpoints: [] }); },
+  setInstructionBreakpoints: (request) => { response(request, { breakpoints: [] }); },
+  setDataBreakpoints: (request) => { response(request, { breakpoints: [] }); },
+  dataBreakpointInfo: (request) => { response(request, { dataId: "count", description: "count", accessTypes: ["write"], canPersist: false }); },
+  continue: step,
+  next: step,
+  stepIn: step,
+  stepOut: step,
+  pause: (request) => { response(request); setTimeout(() => event("stopped", { reason: "pause", threadId: 1 }), 5); },
+  disassemble: (request) => { response(request, { instructions: [{ address: "0x1", instruction: "nop" }] }); },
+  readMemory: (request) => { response(request, { address: "0x1", data: "AA==" }); },
+  writeMemory: (request) => { response(request, { bytesWritten: 1 }); },
+  modules: (request) => { response(request, { modules: [{ id: 1, name: "fake" }] }); },
+  loadedSources: (request) => { response(request, { sources: [{ path: process.env.FAKE_DAP_SOURCE }] }); },
+  raceStops: (request) => { response(request); line = 4; event("stopped", { reason: "race", threadId: 1 }); line = 5; event("stopped", { reason: "race", threadId: 1 }); },
+  crashAdapter: () => { process.exit(7); },
+  configurationDone,
+  terminate: (request) => { response(request); event("terminated"); },
+  disconnect: (request) => { response(request); setTimeout(() => process.exit(0), 5); },
+}
+const handle = (request) => {
+  const handler = Object.hasOwn(handlers, request.command) ? handlers[request.command] : null
+  if (handler) handler(request)
+  else response(request, { echoed: request.command })
 }
 const CONTENT_LENGTH = /Content-Length:\s*(\d+)/iu
 const receive = (chunk) => {

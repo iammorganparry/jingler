@@ -56,6 +56,26 @@ const IMPORT_SOURCES: ReadonlyArray<{ id: McpImportSourceId; label: string }> = 
   { id: "opencode", label: "opencode" }
 ]
 
+function renderMcpStatus(status: McpServerStatus | null) {
+  return (status ? (
+                    <span
+                      className={`text-[10px] ${
+                        status.state === "connected"
+                          ? "text-green"
+                          : status.state === "failed"
+                            ? "text-red"
+                            : "text-dim"
+                      }`}
+                    >
+                      {status.state === "connected"
+                        ? `connected — ${status.toolCount ?? 0} tools`
+                        : status.state === "failed"
+                          ? status.error ?? "failed"
+                          : status.state}
+                    </span>
+                  ) : null)
+}
+
 const statusFor = (
   statuses: ReadonlyArray<McpServerStatus> | null,
   name: string
@@ -333,6 +353,37 @@ export function McpSettings({
   importCandidates,
   applyImport
 }: McpSettingsProps) {
+  const renderMcpServer = ((server) => {
+          const status = statusFor(statuses, server.name)
+          return (
+            <div
+              key={server.name}
+              className="flex max-w-xl items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[12.5px] font-medium text-text-body">{server.name}</span>
+                  <span className="text-[10px] uppercase text-dim">{server.transport}</span>
+                  {renderMcpStatus(status)}
+                </div>
+                <div className="truncate font-mono text-[10px] text-dim">{server.target}</div>
+              </div>
+              <Toggle
+                checked={server.enabled}
+                onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
+                aria-label={`Enable ${server.name}`}
+              />
+              <button
+                type="button"
+                onClick={() => run(() => remove(server.name))}
+                className="text-[11px] text-red hover:underline"
+              >
+                Remove
+              </button>
+            </div>
+          )
+        }) satisfies  Parameters<typeof servers.map>[0]
+
   const [actionError, setActionError] = React.useState<string | null>(null)
   const run = (action: () => Promise<void>) => {
     setActionError(null)
@@ -363,52 +414,7 @@ export function McpSettings({
         {servers.length === 0 && !loading && parseError === null ? (
           <p className="text-[12px] text-dim">No servers configured yet.</p>
         ) : null}
-        {servers.map((server) => {
-          const status = statusFor(statuses, server.name)
-          return (
-            <div
-              key={server.name}
-              className="flex max-w-xl items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-medium text-text-body">{server.name}</span>
-                  <span className="text-[10px] uppercase text-dim">{server.transport}</span>
-                  {status ? (
-                    <span
-                      className={`text-[10px] ${
-                        status.state === "connected"
-                          ? "text-green"
-                          : status.state === "failed"
-                            ? "text-red"
-                            : "text-dim"
-                      }`}
-                    >
-                      {status.state === "connected"
-                        ? `connected — ${status.toolCount ?? 0} tools`
-                        : status.state === "failed"
-                          ? status.error ?? "failed"
-                          : status.state}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="truncate font-mono text-[10px] text-dim">{server.target}</div>
-              </div>
-              <Toggle
-                checked={server.enabled}
-                onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
-                aria-label={`Enable ${server.name}`}
-              />
-              <button
-                type="button"
-                onClick={() => run(() => remove(server.name))}
-                className="text-[11px] text-red hover:underline"
-              >
-                Remove
-              </button>
-            </div>
-          )
-        })}
+        {servers.map(renderMcpServer)}
       </div>
 
       <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+import { selectEdgeValues, selectOptionIndex } from "./select-layout.js"
 "use client";
 
 import { Check, ChevronDown, Search } from "lucide-react";
@@ -390,6 +391,33 @@ export function SelectContent({
   search,
   inline = false,
 }: SelectContentProps) {
+         function getMotionState() {
+           return (ctx.reduce
+          ? { opacity: open ? 1 : 0, height: open ? height : 0 }
+          : getContentAnimation())
+         }
+
+         function getContentTransition() {
+           if (ctx.reduce) return ({ duration: 0.12 })
+return ({
+              opacity: open
+                ? { duration: 0.18 }
+                : { duration: 0.16, delay: 0.12 },
+              height: open
+                ? { type: "spring", duration: 0.42, bounce: 0.14 }
+                : { duration: 0.26, ease: EASE_OUT, delay: 0.14 },
+              ...selectEdgeValues(isTop, gapT, INSTANT_TRANSITION, radiusT, INSTANT_TRANSITION),
+            })
+         }
+
+         function getContentAnimation() {
+           return ({
+              opacity: open ? 1 : 0,
+              height: open ? height : 0,
+              ...selectEdgeValues(isTop, nearGap, 0, nearRadius, 12),
+            })
+         }
+
   const ctx = useSelectContext("SelectContent");
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
@@ -461,38 +489,10 @@ export function SelectContent({
       inert={!open}
       initial={false}
       animate={
-        ctx.reduce
-          ? { opacity: open ? 1 : 0, height: open ? height : 0 }
-          : {
-              opacity: open ? 1 : 0,
-              height: open ? height : 0,
-              // gap opens on the side facing the trigger
-              marginTop: isTop ? 0 : nearGap,
-              marginBottom: isTop ? nearGap : 0,
-              // near corners go flat->round; far corners stay rounded
-              borderTopLeftRadius: isTop ? 12 : nearRadius,
-              borderTopRightRadius: isTop ? 12 : nearRadius,
-              borderBottomLeftRadius: isTop ? nearRadius : 12,
-              borderBottomRightRadius: isTop ? nearRadius : 12,
-            }
+        getMotionState()
       }
       transition={
-        ctx.reduce
-          ? { duration: 0.12 }
-          : {
-              opacity: open
-                ? { duration: 0.18 }
-                : { duration: 0.16, delay: 0.12 },
-              height: open
-                ? { type: "spring", duration: 0.42, bounce: 0.14 }
-                : { duration: 0.26, ease: EASE_OUT, delay: 0.14 },
-              marginTop: isTop ? INSTANT_TRANSITION : gapT,
-              marginBottom: isTop ? gapT : INSTANT_TRANSITION,
-              borderTopLeftRadius: isTop ? INSTANT_TRANSITION : radiusT,
-              borderTopRightRadius: isTop ? INSTANT_TRANSITION : radiusT,
-              borderBottomLeftRadius: isTop ? radiusT : INSTANT_TRANSITION,
-              borderBottomRightRadius: isTop ? radiusT : INSTANT_TRANSITION,
-            }
+        getContentTransition()
       }
       style={{
         display: open || present ? undefined : "none",
@@ -572,11 +572,7 @@ export function SelectItem({
             document.getElementById(ctx.triggerId)?.focus();
           } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
             event.preventDefault();
-            const next = event.key === "Home"
-              ? 0
-              : event.key === "End"
-                ? options.length - 1
-                : (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+            const next = selectOptionIndex(event.key, current, options.length);
             options[next]?.focus();
           }
         }}

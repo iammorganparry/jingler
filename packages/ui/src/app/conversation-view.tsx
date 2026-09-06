@@ -1,3 +1,5 @@
+import { updateTranscriptRowKeys } from "./transcript-row-keys.js"
+import { defaultProps } from "../lib/default-props.js"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { planDocumentToPlan } from "@jingler/core"
 import type {
@@ -241,75 +243,215 @@ export interface ConversationViewProps {
  * New turns autoscroll to the top of the viewport so a streaming response has
  * room to fill downward (the design's "room to follow").
  */
-export function ConversationView({
-  messages,
-  hasMoreHistory = false,
-  loadingHistory = false,
-  onLoadEarlier,
-  mode,
-  skills = [],
-  files = [],
-  paused = false,
-  branch,
-  branchPending = false,
-  repo,
-  diff = null,
-  environments,
-  environmentId,
-  environmentPending,
-  onSetEnvironment,
-  providerCatalog,
-  connectionId = null,
-  providerId = null,
-  modelId = null,
-  onSetModel,
-  onSend,
-  onStop,
-  busy = false,
-  tokens = 0,
-  contextTriggerAt = null,
-  contextPhase = "unknown",
-  contextPreparing = false,
-  contextDigestReady = false,
-  contextStalled = false,
-  contextHeld = false,
-  contextHeldReason = null,
-  onCompactNow,
-  runStartedAt = null,
-  queued = [],
-  onUnqueue,
-  onSendNow,
-  onHandoffQueued,
-  onEditQueued,
-  handoffHint,
-  steeringId = null,
-  onDecideGate,
-  onSetMode,
-  onAddMcp,
-  reasoningEffort,
-  thinkingEnabled,
-  onSetReasoning,
-  question,
-  onAnswerQuestion,
-  onOpenPlanReview,
-  onForkOntoBranch,
-  onAdoptBranch,
-  planDocument = null,
-  draft,
-  onDraftChange,
-  draftAttachments,
-  onDraftAttachmentsChange,
-  draftCodeReferences,
-  onDraftCodeReferenceRemove,
-  onDraftCodeReferencesClear,
-  autoFocusComposer,
-  focusKey,
-  composerDisabledReason,
-  followAgent = false,
-  onToggleFollowAgent,
-  archived,
-  initialDraft
-}: ConversationViewProps) {
+export function ConversationView(props:  ConversationViewProps) {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+    hasMoreHistory: false,
+    loadingHistory: false,
+    skills: [],
+    files: [],
+    paused: false,
+    branchPending: false,
+    diff: null,
+    connectionId: null,
+    providerId: null,
+    modelId: null,
+    busy: false,
+    tokens: 0,
+    contextTriggerAt: null,
+    contextPhase: "unknown",
+    contextPreparing: false,
+    contextDigestReady: false,
+    contextStalled: false,
+    contextHeld: false,
+    contextHeldReason: null,
+    runStartedAt: null,
+    queued: [],
+    steeringId: null,
+    planDocument: null,
+    followAgent: false
+  })
+
+function renderSessionAnalytics() {
+             return (!archived && (busy || runStartedAt !== null || tokens > 0) && (
+            <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
+              <ContextMeter
+                tokens={tokens}
+                triggerAt={contextTriggerAt}
+                phase={contextPhase}
+                preparing={contextPreparing}
+                digestReady={contextDigestReady}
+                stalled={contextStalled}
+                held={contextHeld}
+                heldReason={contextHeldReason}
+                onCompactNow={onCompactNow}
+              />
+              <RunStats startedAt={runStartedAt} busy={busy} />
+            </div>
+          ))
+           }
+
+         function getActiveVirtualItem() {
+           if (viewport && virtualItems.length > 0) return (viewport.scrollTop <= 56
+      ? virtualItems[0]
+      : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 56
+        ? virtualItems.at(-1)
+        : virtualItems.reduce((nearest, item) =>
+            Math.abs(item.start + item.size / 2 - viewport.scrollTop - viewport.clientHeight / 2) <
+            Math.abs(nearest.start + nearest.size / 2 - viewport.scrollTop - viewport.clientHeight / 2)
+              ? item
+              : nearest
+          ))
+return (virtualItems[0])
+         }
+
+         function renderComposerArea() {
+
+
+  function queuedMessageActions(item: NonNullable<ConversationViewProps["queued"]>[number]) {
+    return {
+      ...(onSendNow && busy ? { onSendNow: () => onSendNow(item.id) } : {}),
+      ...(onHandoffQueued ? { onHandoff: () => onHandoffQueued(item.id) } : {}),
+      ...(onEditQueued ? { onEdit: (text: string) => onEditQueued(item.id, text) } : {}),
+      ...(onUnqueue ? { onRemove: () => onUnqueue(item.id) } : {})
+    }
+  }
+  const renderQueuedMessage = ((item: NonNullable<ConversationViewProps["queued"]>[number]) => {
+                    // In flight: the row still shows (nothing is confirmed yet) but
+                    // every action is withheld, because the agent already has this
+                    // text and acting on it would run the prompt a second time.
+                    const sending = item.id === steeringId
+                    const actions = sending ? {} : queuedMessageActions(item)
+                    return (
+                      <QueuedMessageRow
+                        key={item.id}
+                        text={item.text}
+                        images={item.images.length}
+                        handoffHint={handoffHint}
+                        sending={sending}
+                        {...actions}
+                      />
+                    )
+                  }) satisfies Parameters<typeof queued.map>[0]
+
+           return (<div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
+          <div className="mx-auto w-full max-w-[760px]">
+            {/* Live session analytics — elapsed time + current context size, right
+              above the composer so it stays visible while the user works. */}
+          {renderSessionAnalytics()}
+          {archived ? (
+            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-sunken px-[14px] py-3 text-[12.5px] text-muted-foreground">
+              <Lock size={14} className="flex-none text-dim" />
+              <span className="min-w-0 flex-1">
+                Composer disabled — this session is archived.{" "}
+                <button
+                  type="button"
+                  onClick={archived.onRestore}
+                  className="text-blue outline-none hover:underline"
+                >
+                  Restore it
+                </button>{" "}
+                to send messages.
+              </span>
+              {archived.onRestore && (
+                <Button variant="secondary" size="sm" className="gap-1.5" onClick={archived.onRestore}>
+                  <RotateCcw size={12} />
+                  Restore
+                </Button>
+              )}
+            </div>
+          ) : question ? (
+            <QuestionCard
+              request={question}
+              onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
+            />
+          ) : (
+            <>
+              {queued.length > 0 && (
+                <div
+                  className={cn(
+                    "mb-2 flex flex-col gap-1.5",
+                    // Expanding must not reintroduce the bug it fixes: a 20-item
+                    // queue scrolls within its own box rather than growing the
+                    // composer off the screen again.
+                    queueExpanded && "max-h-[240px] overflow-y-auto"
+                  )}
+                >
+                  {/*
+                    Capped, because this list sits between the transcript and the
+                    composer and grows without limit — routing a review's findings
+                    queues one turn per finding, and twenty of them pushed the
+                    composer clean off the screen. `slice(0, n)` keeps each item's
+                    index intact, which matters: `onSendNow`/`onUnqueue` address
+                    the queue positionally.
+                  */}
+                  {/*
+                    Keyed by id, not by position. A positional key remounts every
+                    row below the head each time the queue flushes one into the
+                    running turn — which throws away the text of a row the operator
+                    is part-way through editing, at a moment they did not cause.
+                  */}
+                  {queued.slice(0, queueLimit).map(renderQueuedMessage)}
+                  {queued.length > QUEUE_PREVIEW && (
+                    <button
+                      type="button"
+                      onClick={() => setQueueExpanded((v) => !v)}
+                      className="self-start rounded px-1.5 py-0.5 text-[11.5px] text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {queueExpanded
+                        ? "Show fewer"
+                        : `+${queued.length - QUEUE_PREVIEW} more queued`}
+                    </button>
+                  )}
+                </div>
+              )}
+              <Composer
+                skills={skills}
+                files={files}
+                onAddMcp={onAddMcp}
+                paused={paused}
+                branch={branch}
+                branchPending={branchPending}
+                repo={repo}
+                diff={diff}
+                environments={environments}
+                environmentId={environmentId}
+                environmentPending={environmentPending}
+                onSetEnvironment={onSetEnvironment}
+                busy={busy}
+                disabledReason={composerDisabledReason}
+                providerCatalog={providerCatalog}
+                connectionId={connectionId}
+                modelId={modelId}
+                onSetModel={onSetModel}
+                mode={mode}
+                onSetMode={onSetMode}
+                followAgent={followAgent}
+                onToggleFollowAgent={onToggleFollowAgent}
+                reasoningEffort={reasoningEffort}
+                thinkingEnabled={thinkingEnabled}
+                onSetReasoning={onSetReasoning}
+                allowPlan
+                onSend={onSend}
+                onStop={onStop}
+                initialValue={initialDraft}
+                value={draft}
+                onValueChange={onDraftChange}
+                attachments={draftAttachments}
+                onAttachmentsChange={onDraftAttachmentsChange}
+                codeReferences={draftCodeReferences}
+                onCodeReferenceRemove={onDraftCodeReferenceRemove}
+                onCodeReferencesClear={onDraftCodeReferencesClear}
+                planDocument={planDocument ?? undefined}
+                onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
+                autoFocus={autoFocusComposer}
+                focusKey={focusKey}
+              />
+            </>
+          )}
+          </div>
+        </div>)
+         }
+
   // 30px each side is a comfortable reading gutter at 760px and a tenth of the
   // pane at 350px. The transcript and the composer share the value so their
   // left edges stay aligned — that alignment is what makes the composer read as
@@ -370,32 +512,7 @@ export function ConversationView({
     keys: ReadonlyArray<string>
     next: number
   }>({ messages: [], keys: [], next: 0 })
-  const previousKeys = itemKeyState.current
-  if (previousKeys.messages !== messages) {
-    const allocate = (count: number): ReadonlyArray<string> =>
-      Array.from(
-        { length: count },
-        () => `transcript-row-${previousKeys.next++}`
-      )
-    let keys = previousKeys.keys
-    if (messages.length !== previousKeys.messages.length) {
-      const added = messages.length - previousKeys.messages.length
-      if (
-        added > 0 &&
-        messages[added] === previousKeys.messages[0]
-      ) {
-        keys = [...allocate(added), ...previousKeys.keys]
-      } else if (
-        added > 0 &&
-        messages[0] === previousKeys.messages[0]
-      ) {
-        keys = [...previousKeys.keys, ...allocate(added)]
-      } else {
-        keys = allocate(messages.length)
-      }
-    }
-    itemKeyState.current = { messages, keys, next: previousKeys.next }
-  }
+  itemKeyState.current = updateTranscriptRowKeys(itemKeyState.current, messages)
   const itemKeys = itemKeyState.current.keys
   // Per-item identity reuse: `messages` gets a new identity on every streamed
   // token, so this memo re-runs per token — but only the LIVE turn's preview
@@ -444,18 +561,7 @@ export function ConversationView({
   })
   const virtualItems = virtualizer.getVirtualItems()
   const viewport = scrollRef.current
-  const activeVirtualItem = viewport && virtualItems.length > 0
-    ? viewport.scrollTop <= 56
-      ? virtualItems[0]
-      : viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 56
-        ? virtualItems.at(-1)
-        : virtualItems.reduce((nearest, item) =>
-            Math.abs(item.start + item.size / 2 - viewport.scrollTop - viewport.clientHeight / 2) <
-            Math.abs(nearest.start + nearest.size / 2 - viewport.scrollTop - viewport.clientHeight / 2)
-              ? item
-              : nearest
-          )
-    : virtualItems[0]
+  const activeVirtualItem = getActiveVirtualItem()
   const activeRailId = activeVirtualItem ? itemKeys[activeVirtualItem.index] : itemKeys[0]
 
   // Referentially stable so the memoised PreviewRail isn't defeated by a fresh
@@ -597,162 +703,7 @@ export function ConversationView({
         </MessageScroller>
 
         {/* Same gutter + centered max-width as the transcript column above. */}
-        <div className={cn("flex-none pb-[18px] pt-[11px]", gutter)}>
-          <div className="mx-auto w-full max-w-[760px]">
-            {/* Live session analytics — elapsed time + current context size, right
-              above the composer so it stays visible while the user works. */}
-          {!archived && (busy || runStartedAt !== null || tokens > 0) && (
-            <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
-              <ContextMeter
-                tokens={tokens}
-                triggerAt={contextTriggerAt}
-                phase={contextPhase}
-                preparing={contextPreparing}
-                digestReady={contextDigestReady}
-                stalled={contextStalled}
-                held={contextHeld}
-                heldReason={contextHeldReason}
-                onCompactNow={onCompactNow}
-              />
-              <RunStats startedAt={runStartedAt} busy={busy} />
-            </div>
-          )}
-          {archived ? (
-            <div className="flex items-center gap-2.5 rounded-xl border border-line bg-sunken px-[14px] py-3 text-[12.5px] text-muted-foreground">
-              <Lock size={14} className="flex-none text-dim" />
-              <span className="min-w-0 flex-1">
-                Composer disabled — this session is archived.{" "}
-                <button
-                  type="button"
-                  onClick={archived.onRestore}
-                  className="text-blue outline-none hover:underline"
-                >
-                  Restore it
-                </button>{" "}
-                to send messages.
-              </span>
-              {archived.onRestore && (
-                <Button variant="secondary" size="sm" className="gap-1.5" onClick={archived.onRestore}>
-                  <RotateCcw size={12} />
-                  Restore
-                </Button>
-              )}
-            </div>
-          ) : question ? (
-            <QuestionCard
-              request={question}
-              onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
-            />
-          ) : (
-            <>
-              {queued.length > 0 && (
-                <div
-                  className={cn(
-                    "mb-2 flex flex-col gap-1.5",
-                    // Expanding must not reintroduce the bug it fixes: a 20-item
-                    // queue scrolls within its own box rather than growing the
-                    // composer off the screen again.
-                    queueExpanded && "max-h-[240px] overflow-y-auto"
-                  )}
-                >
-                  {/*
-                    Capped, because this list sits between the transcript and the
-                    composer and grows without limit — routing a review's findings
-                    queues one turn per finding, and twenty of them pushed the
-                    composer clean off the screen. `slice(0, n)` keeps each item's
-                    index intact, which matters: `onSendNow`/`onUnqueue` address
-                    the queue positionally.
-                  */}
-                  {/*
-                    Keyed by id, not by position. A positional key remounts every
-                    row below the head each time the queue flushes one into the
-                    running turn — which throws away the text of a row the operator
-                    is part-way through editing, at a moment they did not cause.
-                  */}
-                  {queued.slice(0, queueLimit).map((item) => {
-                    // In flight: the row still shows (nothing is confirmed yet) but
-                    // every action is withheld, because the agent already has this
-                    // text and acting on it would run the prompt a second time.
-                    const sending = item.id === steeringId
-                    return (
-                      <QueuedMessageRow
-                        key={item.id}
-                        text={item.text}
-                        images={item.images.length}
-                        handoffHint={handoffHint}
-                        sending={sending}
-                        {...(onSendNow && busy && !sending
-                          ? { onSendNow: () => onSendNow(item.id) }
-                          : {})}
-                        {...(onHandoffQueued && !sending
-                          ? { onHandoff: () => onHandoffQueued(item.id) }
-                          : {})}
-                        {...(onEditQueued && !sending
-                          ? { onEdit: (text: string) => onEditQueued(item.id, text) }
-                          : {})}
-                        {...(onUnqueue && !sending ? { onRemove: () => onUnqueue(item.id) } : {})}
-                      />
-                    )
-                  })}
-                  {queued.length > QUEUE_PREVIEW && (
-                    <button
-                      type="button"
-                      onClick={() => setQueueExpanded((v) => !v)}
-                      className="self-start rounded px-1.5 py-0.5 text-[11.5px] text-dim outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {queueExpanded
-                        ? "Show fewer"
-                        : `+${queued.length - QUEUE_PREVIEW} more queued`}
-                    </button>
-                  )}
-                </div>
-              )}
-              <Composer
-                skills={skills}
-                files={files}
-                onAddMcp={onAddMcp}
-                paused={paused}
-                branch={branch}
-                branchPending={branchPending}
-                repo={repo}
-                diff={diff}
-                environments={environments}
-                environmentId={environmentId}
-                environmentPending={environmentPending}
-                onSetEnvironment={onSetEnvironment}
-                busy={busy}
-                disabledReason={composerDisabledReason}
-                providerCatalog={providerCatalog}
-                connectionId={connectionId}
-                modelId={modelId}
-                onSetModel={onSetModel}
-                mode={mode}
-                onSetMode={onSetMode}
-                followAgent={followAgent}
-                onToggleFollowAgent={onToggleFollowAgent}
-                reasoningEffort={reasoningEffort}
-                thinkingEnabled={thinkingEnabled}
-                onSetReasoning={onSetReasoning}
-                allowPlan
-                onSend={onSend}
-                onStop={onStop}
-                initialValue={initialDraft}
-                value={draft}
-                onValueChange={onDraftChange}
-                attachments={draftAttachments}
-                onAttachmentsChange={onDraftAttachmentsChange}
-                codeReferences={draftCodeReferences}
-                onCodeReferenceRemove={onDraftCodeReferenceRemove}
-                onCodeReferencesClear={onDraftCodeReferencesClear}
-                planDocument={planDocument ?? undefined}
-                onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
-                autoFocus={autoFocusComposer}
-                focusKey={focusKey}
-              />
-            </>
-          )}
-          </div>
-        </div>
+        {renderComposerArea()}
       </div>
     </div>
   )

@@ -255,6 +255,36 @@ const scheduleFleetReconciliation = (
   }, delay)
 }
 
+const recoverInactiveFleet = (
+  key: string,
+  state: FleetReconciler,
+  actor: ConversationActor
+): void => {
+  const latest = snapshots.get(key)
+  const current = latest === undefined ? null : fleetProjection(latest)
+  state.dormant = current?.mainRunning !== true
+  if (
+    !current?.mainRunning &&
+    current?.parentPiSessionId === state.parentPiSessionId &&
+    current.active.length > 0
+  ) {
+    actor.send({
+      type: "RECOVER_SUBAGENT_FLEET",
+      events: current.active.map((node) => unknownFleetEvent(node, Date.now()))
+    })
+  }
+}
+
+const rescheduleFleetReconciliation = (key: string, state: FleetReconciler, nextDelay: number): void => {
+  if (registry.has(key) && fleetReconcilers.get(key) === state) {
+    scheduleFleetReconciliation(
+      key,
+      state,
+      state.dormant ? FLEET_DORMANT_POLL_MS : nextDelay
+    )
+  }
+}
+
 const reconcileFleet = async (key: string, state: FleetReconciler): Promise<void> => {
   const actor = registry.get(key)
   const projection = snapshots.get(key)
@@ -289,29 +319,34 @@ const reconcileFleet = async (key: string, state: FleetReconciler): Promise<void
     state.inactiveAttempts = retry.inactiveAttempts
     nextDelay = retry.delay
     if (retry.exhaustedInactive) {
-      const latest = snapshots.get(key)
-      const current = latest === undefined ? null : fleetProjection(latest)
-      state.dormant = current?.mainRunning !== true
-      if (
-        !current?.mainRunning &&
-        current?.parentPiSessionId === state.parentPiSessionId &&
-        current.active.length > 0
-      ) {
-        actor.send({
-          type: "RECOVER_SUBAGENT_FLEET",
-          events: current.active.map((node) => unknownFleetEvent(node, Date.now()))
-        })
-      }
+      recoverInactiveFleet(key, state, actor)
     }
   } finally {
     state.inFlight = false
-    if (registry.has(key) && fleetReconcilers.get(key) === state) {
-      scheduleFleetReconciliation(
-        key,
-        state,
-        state.dormant ? FLEET_DORMANT_POLL_MS : nextDelay
-      )
-    }
+    rescheduleFleetReconciliation(key, state, nextDelay)
+  }
+}
+
+const refreshFleetReconciliation = (
+  key: string,
+  current: FleetReconciler,
+  projection: NonNullable<ReturnType<typeof fleetProjection>>
+): void => {
+  const mainStarted = !current.mainRunning && projection.mainRunning
+  current.mainRunning = projection.mainRunning
+  if (current.dormant && (mainStarted || projection.active.length > 0)) {
+    if (current.timer !== null) clearTimeout(current.timer)
+    current.timer = null
+    current.dormant = false
+    current.retryAttempt = 0
+    current.inactiveAttempts = 0
+    scheduleFleetReconciliation(key, current, 0)
+  } else {
+    scheduleFleetReconciliation(
+      key,
+      current,
+      current.dormant ? FLEET_DORMANT_POLL_MS : FLEET_POLL_MS
+    )
   }
 }
 
@@ -327,22 +362,7 @@ const ensureFleetReconciliation = (
     return
   }
   if (current?.parentPiSessionId === projection.parentPiSessionId) {
-    const mainStarted = !current.mainRunning && projection.mainRunning
-    current.mainRunning = projection.mainRunning
-    if (current.dormant && (mainStarted || projection.active.length > 0)) {
-      if (current.timer !== null) clearTimeout(current.timer)
-      current.timer = null
-      current.dormant = false
-      current.retryAttempt = 0
-      current.inactiveAttempts = 0
-      scheduleFleetReconciliation(key, current, 0)
-    } else {
-      scheduleFleetReconciliation(
-        key,
-        current,
-        current.dormant ? FLEET_DORMANT_POLL_MS : FLEET_POLL_MS
-      )
-    }
+    refreshFleetReconciliation(key, current, projection)
     return
   }
   if (current?.timer !== null && current?.timer !== undefined) clearTimeout(current.timer)

@@ -1087,42 +1087,9 @@ export const makeMemoryService = (
               runtime.lifecycle.attachmentStatus = "failed"
               return Effect.succeed(null)
             }
-            runtime.lifecycle.attachmentStatus = "available"
-            const trimmedQuery = redactMemoryText(query ?? "")
-              .trim()
-              .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
-            if (trimmedQuery.length === 0) return Effect.succeed(cached.attachment)
-            const cacheScope = recallScope === undefined
-              ? undefined
-              : `${selection.organizationId}:${recallScope}`
-            const previous = cacheScope === undefined
-              ? undefined
-              : runtime.recallCache.get(cacheScope)
-            if (
-              previous?.queryFingerprint === sha256(trimmedQuery) &&
-              runtime.nowSeconds() - previous.searchedAtSeconds <
-                AUTOMATIC_RECALL_CACHE_TTL_SECONDS
-            ) {
-              return Effect.succeed(cached.attachment)
-            }
-            return automaticRecall(
-              runtime,
-              cached.issued,
-              selection.organizationId,
-              trimmedQuery,
-              previous
-            ).pipe(
-              Effect.map((recalled) => {
-                if (cacheScope !== undefined) rememberRecall(runtime, cacheScope, recalled)
-                return {
-                  ...cached.attachment,
-                  instructions: recalled.instructions.length === 0
-                    ? cached.attachment.instructions
-                    : `${cached.attachment.instructions}\n${recalled.instructions}`
-                }
-              }),
-              Effect.orElseSucceed(() => cached.attachment)
-            )
+            return recallAttachedMemory(
+              runtime, query, cached, recallScope,
+              selection)
           })
         )
       })
@@ -1171,47 +1138,7 @@ export const makeMemoryService = (
         if (token === null) return Effect.succeed(null)
         return Effect.gen(function* () {
           yield* drainCaptureOutbox(runtime, token).pipe(Effect.forkDaemon)
-          const organizations = yield* Effect.tryPromise({
-            try: async () => {
-              const response = await runtime.fetchImplementation(
-                endpoint(runtime.baseUrl(), "/api/memory/organizations"),
-                {
-                  headers: { authorization: `Bearer ${token}` },
-                  signal: AbortSignal.timeout(runtime.uiTimeoutMs)
-                }
-              )
-              if (!response.ok) throw new MemoryRequestError({ status: response.status })
-              return Schema.decodeUnknownSync(MemoryOrganizationsResponse)(await response.json())
-                .organizations
-            },
-            catch: () => new MemoryRequestError({ status: 0 })
-          }).pipe(Effect.orElseSucceed(() => null))
-          if (organizations === null) return null
-
-          // Engage team memory by DEFAULT. Every downstream hook — MCP attach,
-          // <team-memory> prompt and MCP attachment are unconditional per-turn
-          // boundaries gated only on `memory.enabled` + a selected org. So the
-          // first time an eligible user is seen with exactly ONE org and no
-          // explicit choice yet, enable it and select that org; the agents then
-          // pick it up automatically. An explicit config (even `enabled: false`)
-          // is always respected — this only fills the unset default.
-          let selected = config?.memory?.enabled === true
-            ? (config.memory.organizationId ?? null)
-            : null
-          const soleOrganization = organizations.length === 1 ? organizations[0] : null
-          if (config?.memory === undefined && soleOrganization !== null && soleOrganization !== undefined) {
-            selected = soleOrganization.id
-            yield* ConfigService.setMemory({ enabled: true, organizationId: selected }).pipe(
-              Effect.ignore
-            )
-          }
-
-          return {
-            selectedOrganizationId: organizations.some((item) => item.id === selected)
-              ? selected
-              : null,
-            organizations
-          }
+          return yield* selectMemoryOrganization(runtime, token, config)
         })
       })
     )
@@ -1286,3 +1213,95 @@ export const MemoryServiceLive = Layer.scoped(
     Effect.map((proxy) => MemoryService.make(makeMemoryService({ proxy })))
   )
 )
+
+function* selectMemoryOrganization(
+  runtime: MemoryRuntime,
+  token: string,
+  config: {
+    readonly memory?: {
+      readonly enabled: boolean
+      readonly organizationId: string | null
+    }
+  } | null
+) {
+  const organizations = yield* Effect.tryPromise({
+    try: async () => {
+      const response = await runtime.fetchImplementation(
+        endpoint(runtime.baseUrl(), "/api/memory/organizations"),
+        {
+          headers: { authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(runtime.uiTimeoutMs)
+        }
+      )
+      if (!response.ok) throw new MemoryRequestError({ status: response.status })
+      return Schema.decodeUnknownSync(MemoryOrganizationsResponse)(await response.json())
+        .organizations
+    },
+    catch: () => new MemoryRequestError({ status: 0 })
+  }).pipe(Effect.orElseSucceed(() => null))
+  if (organizations === null) return null
+
+  // Engage team memory by DEFAULT. Every downstream hook — MCP attach,
+  // <team-memory> prompt and MCP attachment are unconditional per-turn
+  // boundaries gated only on `memory.enabled` + a selected org. So the
+  // first time an eligible user is seen with exactly ONE org and no
+  // explicit choice yet, enable it and select that org; the agents then
+  // pick it up automatically. An explicit config (even `enabled: false`)
+  // is always respected — this only fills the unset default.
+  let selected = config?.memory?.enabled === true ? (config.memory.organizationId ?? null) : null
+  const soleOrganization = organizations.length === 1 ? organizations[0] : null
+  if (config?.memory === undefined && soleOrganization !== null && soleOrganization !== undefined) {
+    selected = soleOrganization.id
+    yield* ConfigService.setMemory({
+      enabled: true,
+      organizationId: selected
+    }).pipe(Effect.ignore)
+  }
+
+  return {
+    selectedOrganizationId: organizations.some((item) => item.id === selected) ? selected : null,
+    organizations
+  }
+}
+
+function recallAttachedMemory(
+  runtime: MemoryRuntime,
+  query: string | undefined,
+  cached: CachedMemoryAttachment,
+  recallScope: string | undefined,
+  selection: { organizationId: string; token: string }
+) {
+  runtime.lifecycle.attachmentStatus = "available"
+  const trimmedQuery = redactMemoryText(query ?? "")
+    .trim()
+    .slice(0, MAX_AUTOMATIC_RECALL_QUERY_CHARACTERS)
+  if (trimmedQuery.length === 0) return Effect.succeed(cached.attachment)
+  const cacheScope =
+    recallScope === undefined ? undefined : `${selection.organizationId}:${recallScope}`
+  const previous = cacheScope === undefined ? undefined : runtime.recallCache.get(cacheScope)
+  if (
+    previous?.queryFingerprint === sha256(trimmedQuery) &&
+    runtime.nowSeconds() - previous.searchedAtSeconds < AUTOMATIC_RECALL_CACHE_TTL_SECONDS
+  ) {
+    return Effect.succeed(cached.attachment)
+  }
+  return automaticRecall(
+    runtime,
+    cached.issued,
+    selection.organizationId,
+    trimmedQuery,
+    previous
+  ).pipe(
+    Effect.map((recalled) => {
+      if (cacheScope !== undefined) rememberRecall(runtime, cacheScope, recalled)
+      return {
+        ...cached.attachment,
+        instructions:
+          recalled.instructions.length === 0
+            ? cached.attachment.instructions
+            : `${cached.attachment.instructions}\n${recalled.instructions}`
+      }
+    }),
+    Effect.orElseSucceed(() => cached.attachment)
+  )
+}

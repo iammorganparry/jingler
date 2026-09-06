@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import type { AgentToolExecutionContext } from "@jingler/plugin-sdk/host"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { DEBUG_ACTIONS, decodeDebugHover, decodeDebugInput, type DebugInput } from "./contracts.js"
 import { DebugController } from "./controller.js"
 import { adapterConfigs, selectLaunchAdapter } from "./dap/config.js"
@@ -161,7 +161,8 @@ describe("Debug controller", () => {
       session: { id, repository: { name: "repo", path: root } }
     })
     await controller.execute({ action: "launch", program, adapter: "fake" }, context("one"))
-    await waitFor(async () => (await controller.snapshot("one")).session?.status === "stopped")
+    // The stopped event arrives before the frame and its variables finish loading.
+    await waitFor(async () => (await controller.snapshot("one")).variables[20]?.[0]?.value === "3")
     const first = await controller.snapshot("one")
     expect(first.session).not.toBeNull()
     expect(first.variables[20]?.[0]?.value).toBe("3")
@@ -174,6 +175,40 @@ describe("Debug controller", () => {
     await expect(controller.control({ sessionId: "two", action: "continue" })).rejects.toThrow("No debugger")
     await expect(controller.execute({ action: "attach", pid: 42 }, context("two"))).rejects.toThrow("adapter is required")
     await controller.dispose()
+  })
+
+  it("dispatches memory options without dropping zero or false values", async () => {
+    const { root, session } = await launchFake()
+    await mkdir(join(root, ".jingler"))
+    await writeFile(join(root, ".jingler", "dap.json"), JSON.stringify({ adapters: { fake: {
+      command: process.execPath, args: [adapterPath], fileTypes: [".js"], launchDefaults: {}
+    } } }))
+    const launch = vi.spyOn(DapSession, "launch").mockResolvedValue(session)
+    const raw = vi.spyOn(session, "raw").mockResolvedValue({})
+    const controller = new DebugController()
+    const context: AgentToolExecutionContext = {
+      signal: new AbortController().signal,
+      session: { id: "options", repository: { name: "repo", path: root } }
+    }
+    try {
+      await controller.execute({ action: "launch", program: "program.js", adapter: "fake" }, context)
+      await controller.execute({ action: "write_memory", memory_reference: "0x1", data: "AA==", offset: 0, allow_partial: false }, context)
+      expect(raw).toHaveBeenLastCalledWith("writeMemory", {
+        memoryReference: "0x1", data: "AA==", offset: 0, allowPartial: false
+      }, "supportsWriteMemoryRequest", context.signal)
+      await controller.execute({ action: "read_memory", memory_reference: "0x1", count: 1 }, context)
+      expect(raw).toHaveBeenLastCalledWith("readMemory", {
+        memoryReference: "0x1", count: 1
+      }, "supportsReadMemoryRequest", context.signal)
+      await controller.execute({ action: "disassemble", instruction_count: 1, instruction_offset: 0, resolve_symbols: false }, context)
+      expect(raw).toHaveBeenLastCalledWith("disassemble", {
+        memoryReference: "0x1", instructionCount: 1, instructionOffset: 0, resolveSymbols: false
+      }, "supportsDisassembleRequest", context.signal)
+    } finally {
+      raw.mockRestore()
+      launch.mockRestore()
+      await controller.dispose()
+    }
   })
 
   it("declares the complete upstream action set", () => {

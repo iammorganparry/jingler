@@ -1,3 +1,4 @@
+import { matchNewTabChord } from "./app-shortcuts.js"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Bot, ChevronRight, FileStack, History, Layers3, MessagesSquare, Plus, RotateCcw, type LucideIcon, X } from "lucide-react"
@@ -133,6 +134,81 @@ export function ChatTabBar({
   launcherItems,
   paneFocused = true
 }: ChatTabBarProps) {
+         function getFileCount() {
+           return (Array.isArray(fileSlot) ? fileSlot.length : fileSlot == null ? 0 : 1)
+         }
+
+  function renderChatButton(chat: ChatTabBarProps["chats"][number], index: number, active: boolean, showTitle: boolean) {
+    function renderChatStatus() {
+      return (<StatusDot
+                tone={chat.running ? "bg-yellow" : active ? "bg-blue" : "bg-dim"}
+                pulse={chat.running ?? false}
+                size={7}
+              />)
+    }
+
+                                      return (<button
+              type="button"
+              data-testid={active ? "active-chat-tab" : undefined}
+              aria-current={active ? "page" : undefined}
+              onClick={() => onSelectChat(chat.id)}
+              onDoubleClick={() => {
+                setDraft(chat.title)
+                setEditing(chat.id)
+              }}
+              // The name has to survive the title being dropped at `tiny` — this
+              // is what a screen reader and `getByRole` read once the text is gone.
+              aria-label={chat.title}
+              className={cn(
+                "flex min-w-0 items-center gap-2 py-1 text-left text-xs outline-none",
+                // Room for the close × only while the pill is showing words; a
+                // dot-only pill would be mostly padding.
+                showTitle ? "pl-2.5 pr-1" : "px-2"
+              )}
+              title={`${index + 1}. ${chat.title}`}
+            >
+              {renderChatStatus()}
+              {editing === chat.id ? (
+                <input
+                  value={draft}
+                  autoFocus
+                  onChange={(event) => setDraft(event.target.value)}
+                  onBlur={() => commit(chat.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") commit(chat.id)
+                    if (event.key === "Escape") setEditing(null)
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  className="min-w-0 flex-1 bg-transparent outline-none"
+                  aria-label="Chat title"
+                />
+              ) : (
+                showTitle && (
+                  <span className={cn("truncate", width ?? "max-w-[140px]")}>{chat.title}</span>
+                )
+              )}
+            </button>)
+                                    }
+
+         function renderChatsGroupLabel() {
+           return (<button
+      type="button"
+      aria-label={`${chatsExpanded ? "Collapse" : "Expand"} chats group`}
+      aria-expanded={chatsExpanded}
+      title={`${chats.length} open ${chats.length === 1 ? "chat" : "chats"}`}
+      onClick={() => setChatsExpanded((expanded) => !expanded)}
+      className={cn(
+        "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
+        !(filesActive || viewsActive ) ? "bg-panel text-text-bright" : "text-muted-foreground"
+      )}
+    >
+      <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />
+      <MessagesSquare className="size-3 text-blue" />
+      <span>Chats</span>
+      <span className="text-dim">{chats.length}</span>
+    </button>)
+         }
+
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
   const [chatsExpanded, setChatsExpanded] = useState(true)
@@ -142,7 +218,7 @@ export function ChatTabBar({
   const [commandOpen, setCommandOpen] = useState(false)
   const tier = useWidthTier()
   const width = CHAT_WIDTH[tier]
-  const fileCount = Array.isArray(fileSlot) ? fileSlot.length : fileSlot == null ? 0 : 1
+  const fileCount = getFileCount()
   const launchers = launcherItems ?? []
   const commandItems = useMemo<ReadonlyArray<PaletteItem>>(
     () =>
@@ -163,10 +239,7 @@ export function ChatTabBar({
     if (!paneFocused) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        !event.shiftKey &&
-        (event.code === "KeyT" || event.key.toLowerCase() === "t")
+        matchNewTabChord(event)
       ) {
         event.preventDefault()
         setLauncherOpen(false)
@@ -192,22 +265,7 @@ export function ChatTabBar({
   }
 
   const chatsGroupLabel = (
-    <button
-      type="button"
-      aria-label={`${chatsExpanded ? "Collapse" : "Expand"} chats group`}
-      aria-expanded={chatsExpanded}
-      title={`${chats.length} open ${chats.length === 1 ? "chat" : "chats"}`}
-      onClick={() => setChatsExpanded((expanded) => !expanded)}
-      className={cn(
-        "flex flex-none items-center gap-1 rounded-md px-2 py-1 text-xs font-medium outline-none transition-colors hover:bg-panel hover:text-text-bright",
-        !(filesActive || viewsActive ) ? "bg-panel text-text-bright" : "text-muted-foreground"
-      )}
-    >
-      <ChevronRight className={cn("size-3 transition-transform", chatsExpanded && "rotate-90")} />
-      <MessagesSquare className="size-3 text-blue" />
-      <span>Chats</span>
-      <span className="text-dim">{chats.length}</span>
-    </button>
+    renderChatsGroupLabel()
   )
 
   return (
@@ -220,6 +278,8 @@ export function ChatTabBar({
         chatsGroupLabel
       )}
       {chatsExpanded && chats.map((chat, index) => {
+
+
         const active = chat.id === activeChatId
         // The active chat keeps its name at every width. Losing it would leave a
         // row of identical dots and no answer to "which one am I typing into".
@@ -239,51 +299,7 @@ export function ChatTabBar({
               active ? "bg-panel text-text-bright" : "text-muted-foreground hover:bg-panel/60"
             )}
           >
-            <button
-              type="button"
-              data-testid={active ? "active-chat-tab" : undefined}
-              aria-current={active ? "page" : undefined}
-              onClick={() => onSelectChat(chat.id)}
-              onDoubleClick={() => {
-                setDraft(chat.title)
-                setEditing(chat.id)
-              }}
-              // The name has to survive the title being dropped at `tiny` — this
-              // is what a screen reader and `getByRole` read once the text is gone.
-              aria-label={chat.title}
-              className={cn(
-                "flex min-w-0 items-center gap-2 py-1 text-left text-xs outline-none",
-                // Room for the close × only while the pill is showing words; a
-                // dot-only pill would be mostly padding.
-                showTitle ? "pl-2.5 pr-1" : "px-2"
-              )}
-              title={`${index + 1}. ${chat.title}`}
-            >
-              <StatusDot
-                tone={chat.running ? "bg-yellow" : active ? "bg-blue" : "bg-dim"}
-                pulse={chat.running ?? false}
-                size={7}
-              />
-              {editing === chat.id ? (
-                <input
-                  value={draft}
-                  autoFocus
-                  onChange={(event) => setDraft(event.target.value)}
-                  onBlur={() => commit(chat.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") commit(chat.id)
-                    if (event.key === "Escape") setEditing(null)
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  className="min-w-0 flex-1 bg-transparent outline-none"
-                  aria-label="Chat title"
-                />
-              ) : (
-                showTitle && (
-                  <span className={cn("truncate", width ?? "max-w-[140px]")}>{chat.title}</span>
-                )
-              )}
-            </button>
+            {renderChatButton(chat, index, active, showTitle)}
             {showTitle && (
               <button
                 type="button"

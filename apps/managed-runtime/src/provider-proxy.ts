@@ -197,11 +197,7 @@ export const proxyProviderRequest = async (
   dependencies: ProviderProxyDependencies
 ): Promise<Response> => {
   let upstream = new URL(input.upstreamUrl)
-  const configuredLimit = dependencies.maxEgressBytes
-  const maxEgressBytes =
-    configuredLimit !== undefined && Number.isSafeInteger(configuredLimit) && configuredLimit > 0
-      ? configuredLimit
-      : DEFAULT_MAX_EGRESS_BYTES
+  const maxEgressBytes = providerEgressLimit(dependencies.maxEgressBytes)
   if (upstream.protocol !== "https:" || !ALLOWED_PROVIDER_HOSTS.has(upstream.hostname)) {
     return Response.json({ error: "Provider destination is not allowed" }, { status: 400 })
   }
@@ -220,27 +216,59 @@ export const proxyProviderRequest = async (
     const path = codexSubscriptionPath(upstream.pathname)
     upstream = new URL(`https://chatgpt.com/backend-api/codex${path}${upstream.search}`)
   }
-  const expectedUpstream =
-    input.provider === "claude"
-      ? "anthropic-api"
-      : input.provider === "codex"
-        ? (credential.upstream ?? "openai-api")
-        : input.provider === "exa"
-          ? "exa-api"
-          : input.provider === "firecrawl"
-            ? "firecrawl-api"
-            : "github-api"
-  const validDestination =
-    (expectedUpstream === "github-api" &&
-      (upstream.hostname === "github.com" || upstream.hostname === "api.github.com")) ||
-    (expectedUpstream === "openai-api" && upstream.hostname === "api.openai.com") ||
-    (expectedUpstream === "chatgpt-codex" && upstream.hostname === "chatgpt.com") ||
-    (expectedUpstream === "anthropic-api" && upstream.hostname === "api.anthropic.com") ||
-    (expectedUpstream === "exa-api" && upstream.hostname === "api.exa.ai") ||
-    (expectedUpstream === "firecrawl-api" && upstream.hostname === "api.firecrawl.dev")
+  const expectedUpstream = providerUpstream(input, credential)
+  const validDestination = providerDestinationMatches(expectedUpstream, upstream.hostname)
   if (!validDestination) {
     return Response.json({ error: "Provider capability destination mismatch" }, { status: 403 })
   }
+  const headers = providerHeaders(input, credential, expectedUpstream)
+  const requestInit: RequestInit & { duplex?: "half" } = {
+    method: input.method,
+    headers,
+    body: boundedStream(input.body ?? null, maxEgressBytes),
+    redirect: "manual"
+  }
+  if (input.body !== null && input.body !== undefined) requestInit.duplex = "half"
+  const upstreamResponse = await Reflect.apply(dependencies.fetch, globalThis, [
+    new Request(upstream, requestInit)
+  ])
+  const responseLength = Number(upstreamResponse.headers.get("content-length") ?? 0)
+  if (Number.isFinite(responseLength) && responseLength > maxEgressBytes) {
+    return Response.json({ error: "Provider response exceeds its egress limit" }, { status: 502 })
+  }
+  const responseHeaders = new Headers(upstreamResponse.headers)
+  responseHeaders.delete("set-cookie")
+  responseHeaders.delete("location")
+  return new Response(boundedStream(upstreamResponse.body, maxEgressBytes), {
+    status: upstreamResponse.status,
+    headers: responseHeaders
+  })
+}
+
+type ProxyInput = Parameters<typeof proxyProviderRequest>[0]
+const providerUpstream = (input: ProxyInput, credential: ProviderCredential): string => {
+  if (input.provider === "codex") return credential.upstream ?? "openai-api"
+  if (input.provider === "claude") return "anthropic-api"
+  if (input.provider === "exa") return "exa-api"
+  if (input.provider === "firecrawl") return "firecrawl-api"
+  return "github-api"
+}
+const providerDestinationMatches = (upstream: string, hostname: string): boolean => {
+  const destinations: Record<string, readonly string[]> = {
+    "github-api": ["github.com", "api.github.com"],
+    "openai-api": ["api.openai.com"],
+    "chatgpt-codex": ["chatgpt.com"],
+    "anthropic-api": ["api.anthropic.com"],
+    "exa-api": ["api.exa.ai"],
+    "firecrawl-api": ["api.firecrawl.dev"]
+  }
+  return destinations[upstream]?.includes(hostname) ?? false
+}
+const providerHeaders = (
+  input: ProxyInput,
+  credential: ProviderCredential,
+  expectedUpstream: string
+): Headers => {
   const headers = new Headers({
     accept:
       input.accept ??
@@ -264,6 +292,11 @@ export const proxyProviderRequest = async (
   if (expectedUpstream === "chatgpt-codex" && credential.accountId) {
     headers.set("chatgpt-account-id", credential.accountId)
   }
+  forwardProviderHeaders(input, headers)
+  return headers
+}
+
+const forwardProviderHeaders = (input: ProxyInput, headers: Headers): void => {
   if (input.provider === "codex") {
     if (input.originator) headers.set("originator", input.originator)
     if (input.openAiBeta) headers.set("openai-beta", input.openAiBeta)
@@ -276,25 +309,7 @@ export const proxyProviderRequest = async (
   if (input.contentEncoding) headers.set("content-encoding", input.contentEncoding)
   if (input.sessionId) headers.set("session-id", input.sessionId)
   if (input.clientRequestId) headers.set("x-client-request-id", input.clientRequestId)
-  const requestInit: RequestInit & { duplex?: "half" } = {
-    method: input.method,
-    headers,
-    body: boundedStream(input.body ?? null, maxEgressBytes),
-    redirect: "manual"
-  }
-  if (input.body !== null && input.body !== undefined) requestInit.duplex = "half"
-  const upstreamResponse = await Reflect.apply(dependencies.fetch, globalThis, [
-    new Request(upstream, requestInit)
-  ])
-  const responseLength = Number(upstreamResponse.headers.get("content-length") ?? 0)
-  if (Number.isFinite(responseLength) && responseLength > maxEgressBytes) {
-    return Response.json({ error: "Provider response exceeds its egress limit" }, { status: 502 })
-  }
-  const responseHeaders = new Headers(upstreamResponse.headers)
-  responseHeaders.delete("set-cookie")
-  responseHeaders.delete("location")
-  return new Response(boundedStream(upstreamResponse.body, maxEgressBytes), {
-    status: upstreamResponse.status,
-    headers: responseHeaders
-  })
 }
+
+const providerEgressLimit = (limit: number | undefined): number =>
+  limit !== undefined && Number.isSafeInteger(limit) && limit > 0 ? limit : DEFAULT_MAX_EGRESS_BYTES

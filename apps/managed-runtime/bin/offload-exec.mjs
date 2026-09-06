@@ -80,7 +80,7 @@ const spawnResult = (executable, args, options = {}) =>
       ? setTimeout(() => {
           timedOut = true
           killGroup("SIGTERM")
-          const forceTimer = setTimeout(() => {
+          setTimeout(() => {
             graceElapsed = true
             killGroup("SIGKILL")
             if (closeCode !== null) finish()
@@ -105,14 +105,39 @@ const gitStatusDigest = async () => {
   return sha256(status.stdout)
 }
 
-const restore = async (snapshotPath, admittedBytes) => {
-  if (!Number.isSafeInteger(admittedBytes) || admittedBytes < 1 || admittedBytes > 64 * 1024 * 1024) {
-    throw new Error("Snapshot size admission is invalid")
+const restorePatches = async (payload) => {
+  for (const [patch, staged] of [
+    [payload.stagedPatch, true],
+    [payload.unstagedPatch, false]
+  ]) {
+    if (!patch) continue
+    // biome-ignore lint/performance/noAwaitInLoops: staged patch must precede unstaged patch.
+    const applied = await spawnResult(
+      "git",
+      ["apply", "--binary", ...(staged ? ["--index"] : [])],
+      { cwd: WORKSPACE, input: patch }
+    )
+    if (applied.exitCode !== 0) throw new Error("Snapshot patch could not be restored")
   }
-  const compressed = await readFile(snapshotPath)
-  const decoded = gunzipSync(compressed, { maxOutputLength: admittedBytes })
-  if (decoded.byteLength !== admittedBytes) throw new Error("Snapshot size does not match admission")
-  const payload = JSON.parse(decoded.toString("utf8"))
+}
+
+const validateCommandInput = (input) => {
+  if (
+    typeof input.executable !== "string" ||
+    !EXECUTABLE.test(input.executable) ||
+    !Array.isArray(input.args) ||
+    input.args.length > 128 ||
+    input.args.some((arg) => typeof arg !== "string" || arg.length > 4096 || hasControl(arg)) ||
+    !safePath(input.cwd === "." ? "workspace" : input.cwd) ||
+    !Number.isSafeInteger(input.timeoutMs) ||
+    input.timeoutMs < 1 ||
+    !Number.isSafeInteger(input.outputBytes) ||
+    input.outputBytes < 1 ||
+    typeof input.startAllowed !== "boolean"
+  ) throw new Error("Invalid offload command")
+}
+
+const validateSnapshotPayload = (payload) => {
   if (
     payload.version !== 1 ||
     typeof payload.headSha !== "string" ||
@@ -122,6 +147,17 @@ const restore = async (snapshotPath, admittedBytes) => {
     typeof payload.stagedPatch !== "string" ||
     typeof payload.unstagedPatch !== "string"
   ) throw new Error("Snapshot payload is invalid")
+}
+
+const restore = async (snapshotPath, admittedBytes) => {
+  if (!Number.isSafeInteger(admittedBytes) || admittedBytes < 1 || admittedBytes > 64 * 1024 * 1024) {
+    throw new Error("Snapshot size admission is invalid")
+  }
+  const compressed = await readFile(snapshotPath)
+  const decoded = gunzipSync(compressed, { maxOutputLength: admittedBytes })
+  if (decoded.byteLength !== admittedBytes) throw new Error("Snapshot size does not match admission")
+  const payload = JSON.parse(decoded.toString("utf8"))
+  validateSnapshotPayload(payload)
   const archive = Buffer.from(payload.headArchiveBase64, "base64")
   if (archive.byteLength !== payload.headArchiveBytes || sha256(archive) !== payload.headArchiveDigest) {
     throw new Error("Snapshot HEAD archive digest mismatch")
@@ -148,19 +184,7 @@ const restore = async (snapshotPath, admittedBytes) => {
     ? await spawnResult("git", ["commit", "--quiet", "--allow-empty", "-m", `snapshot ${payload.headSha}`], { cwd: WORKSPACE })
     : added
   if (committed.exitCode !== 0) throw new Error("Snapshot Git baseline could not be created")
-  for (const [patch, staged] of [
-    [payload.stagedPatch, true],
-    [payload.unstagedPatch, false]
-  ]) {
-    if (!patch) continue
-    // biome-ignore lint/performance/noAwaitInLoops: staged patch must precede unstaged patch.
-    const applied = await spawnResult(
-      "git",
-      ["apply", "--binary", ...(staged ? ["--index"] : [])],
-      { cwd: WORKSPACE, input: patch }
-    )
-    if (applied.exitCode !== 0) throw new Error("Snapshot patch could not be restored")
-  }
+  await restorePatches(payload)
   await writeFile(resolve(WORKSPACE, ".git/info/exclude"), [
     "**/.cache/", "**/.turbo/", "**/build/", "**/coverage/", "**/dist/", "**/node_modules/", "**/out/"
   ].join("\n"))
@@ -239,19 +263,7 @@ const run = async (commandPath, resultPath) => {
     // The durable result marker is absent; this execution owns the command.
   }
   const input = JSON.parse(await readFile(commandPath, "utf8"))
-  if (
-    typeof input.executable !== "string" ||
-    !EXECUTABLE.test(input.executable) ||
-    !Array.isArray(input.args) ||
-    input.args.length > 128 ||
-    input.args.some((arg) => typeof arg !== "string" || arg.length > 4096 || hasControl(arg)) ||
-    !safePath(input.cwd === "." ? "workspace" : input.cwd) ||
-    !Number.isSafeInteger(input.timeoutMs) ||
-    input.timeoutMs < 1 ||
-    !Number.isSafeInteger(input.outputBytes) ||
-    input.outputBytes < 1 ||
-    typeof input.startAllowed !== "boolean"
-  ) throw new Error("Invalid offload command")
+  validateCommandInput(input)
   const lockPath = `${resultPath}.lock`
   try {
     await writeFile(lockPath, String(Date.now()), { flag: "wx", mode: 0o400 })

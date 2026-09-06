@@ -29,6 +29,14 @@ const listeners = new Set<() => void>()
 let lastPatch: string | null = null
 let lastCounts: LiveDiffStat = { added: 0, removed: 0, files: 0 }
 
+const diffLineKind = (patch: string, offset: number): "added" | "removed" | "file" | null => {
+  const first = patch.charCodeAt(offset)
+  if (first === 43 && !patch.startsWith("+++", offset)) return "added"
+  if (first === 45 && !patch.startsWith("---", offset)) return "removed"
+  if (first === 100 && patch.startsWith("diff --git", offset)) return "file"
+  return null
+}
+
 /**
  * Count added/removed lines and changed files in a unified diff, ignoring the
  * `+++`/`---` headers. A file is a `diff --git` header — one per changed file
@@ -50,14 +58,10 @@ export const diffCounts = (patch: string): LiveDiffStat => {
     const newline = patch.indexOf("\n", i)
     // `charCodeAt` over `startsWith` for the common case: every line is tested,
     // and only the three that matter pay for a prefix comparison.
-    const first = patch.charCodeAt(i)
-    if (first === 43 /* + */) {
-      if (!patch.startsWith("+++", i)) added++
-    } else if (first === 45 /* - */) {
-      if (!patch.startsWith("---", i)) removed++
-    } else if (first === 100 /* d */) {
-      if (patch.startsWith("diff --git", i)) files++
-    }
+    const kind = diffLineKind(patch, i)
+    if (kind === "added") added++
+    else if (kind === "removed") removed++
+    else if (kind === "file") files++
     if (newline === -1) break
     i = newline + 1
   }

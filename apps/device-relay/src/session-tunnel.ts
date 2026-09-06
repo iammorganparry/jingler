@@ -502,53 +502,57 @@ export class SessionTunnelObject extends DurableObject<Env> {
     let result: TunnelConnectionPreparation
     const initialized = await this.initialize(input.initialization, nowSeconds, false)
     if (!initialized) {
-      result = { status: "resource-mismatch" }
-    } else {
-      // A desktop takeover can advance the controller generation after the
-      // signed grant was minted. The device half of the same tunnel does not
-      // publish controller commands, so admit it against the current lease
-      // while retaining the attachment and scope fences from the grant.
-      const effectiveDeviceGeneration = input.endpoint === "device"
-        ? this.normalizedLease(nowSeconds).generation
-        : input.admission.controllerLeaseGeneration
-      const attachment = input.endpoint === "desktop"
-        ? await this.attachClient(input.admission, nowSeconds, false)
-        : await this.assertAttachment({
-            ...input.admission,
-            controllerLeaseGeneration: effectiveDeviceGeneration
-          }, nowSeconds)
-      if (
-        ("status" in attachment && attachment.status !== "attached") ||
-        ("active" in attachment && !attachment.active)
-      ) {
-        result = {
-          status: "status" in attachment ? attachment.status : attachment.reason
-        }
-      } else if (input.endpoint === "desktop") {
-        const lease = await this.acquireController({
+      await this.scheduleAlarm()
+      return { status: "resource-mismatch" }
+    }
+    // A desktop takeover can advance the controller generation after the
+    // signed grant was minted. The device half of the same tunnel does not
+    // publish controller commands, so admit it against the current lease
+    // while retaining the attachment and scope fences from the grant.
+    const effectiveDeviceGeneration = input.endpoint === "device"
+      ? this.normalizedLease(nowSeconds).generation
+      : input.admission.controllerLeaseGeneration
+    const attachment = input.endpoint === "desktop"
+      ? await this.attachClient(input.admission, nowSeconds, false)
+      : await this.assertAttachment({
           ...input.admission,
-          expectedGeneration: input.admission.controllerLeaseGeneration,
-          takeover: true
-        }, nowSeconds, false)
-        result = lease.status === "acquired"
-          ? {
-              status: "prepared",
-              controllerLeaseGeneration: lease.lease.generation
-            }
-          : {
-              status: lease.status === "released"
-                ? "stale-controller"
-                : lease.status
-            }
-      } else {
-        result = {
-          status: "prepared",
           controllerLeaseGeneration: effectiveDeviceGeneration
-        }
+        }, nowSeconds)
+    if (
+      ("status" in attachment && attachment.status !== "attached") ||
+      ("active" in attachment && !attachment.active)
+    ) {
+      result = {
+        status: "status" in attachment ? attachment.status : attachment.reason
+      }
+    } else if (input.endpoint === "desktop") {
+      result = await this.prepareDesktopController(input.admission, nowSeconds)
+    } else {
+      result = {
+        status: "prepared",
+        controllerLeaseGeneration: effectiveDeviceGeneration
       }
     }
     await this.scheduleAlarm()
     return result
+  }
+
+  private async prepareDesktopController(admission: AttachmentAdmission, nowSeconds: number): Promise<TunnelConnectionPreparation> {
+    const lease = await this.acquireController({
+      ...admission,
+      expectedGeneration: admission.controllerLeaseGeneration,
+      takeover: true
+    }, nowSeconds, false)
+    return lease.status === "acquired"
+      ? {
+        status: "prepared",
+        controllerLeaseGeneration: lease.lease.generation
+      }
+      : {
+        status: lease.status === "released"
+          ? "stale-controller"
+          : lease.status
+      }
   }
 
   async releaseController(
@@ -641,24 +645,7 @@ export class SessionTunnelObject extends DurableObject<Env> {
     if (request.headers.get("upgrade")?.toLocaleLowerCase("en-US") !== "websocket") {
       return Response.json({ error: "Expected websocket upgrade" }, { status: 426 })
     }
-    const endpoint = parseEndpoint(request.headers.get("x-jingler-endpoint"))
-    const sessionId = request.headers.get("x-jingler-session-id")
-    const subject = request.headers.get("x-jingler-subject")
-    const deviceId = request.headers.get("x-jingler-device-id")
-    const generation = parseInteger(request.headers.get("x-jingler-device-generation"))
-    const clientInstanceId = request.headers.get("x-jingler-client-instance-id")
-    const attachmentGeneration = parseInteger(
-      request.headers.get("x-jingler-attachment-generation")
-    )
-    const controllerLeaseGeneration = parseInteger(
-      request.headers.get("x-jingler-controller-lease-generation")
-    )
-    const expiresAt = parseInteger(request.headers.get("x-jingler-expires-at"))
-    const usageAttachmentId =
-      request.headers.get("x-jingler-usage-attachment-id") ??
-      `legacy:${sessionId ?? "unknown"}:${endpoint ?? "unknown"}:${clientInstanceId ?? "unknown"}`
-    const requestedAcknowledgement =
-      parseInteger(request.headers.get("x-jingler-acknowledged-sequence")) ?? 0
+    const { endpoint, sessionId, subject, deviceId, clientInstanceId, generation, attachmentGeneration, controllerLeaseGeneration, expiresAt, usageAttachmentId, requestedAcknowledgement } = connectionHeaders()
     const metadata = this.metadata()
     const nowSeconds = Math.floor(Date.now() / 1_000)
     if (
@@ -672,11 +659,7 @@ export class SessionTunnelObject extends DurableObject<Env> {
       controllerLeaseGeneration === null ||
       expiresAt === null ||
       expiresAt <= nowSeconds ||
-      !metadata ||
-      metadata.session_id !== sessionId ||
-      metadata.subject !== subject ||
-      metadata.device_id !== deviceId ||
-      generation !== metadata.device_generation ||
+      !matchesTunnelIdentity(metadata, sessionId, subject, deviceId, generation) ||
       (this.revokedGeneration(deviceId) ?? 0) > generation
     ) {
       return Response.json({ error: "Tunnel admission rejected" }, { status: 403 })
@@ -734,6 +717,26 @@ export class SessionTunnelObject extends DurableObject<Env> {
     })
     this.replay(server, endpoint, acknowledgedSequence)
     return new Response(null, { status: 101, webSocket: client })
+
+    function connectionHeaders() {
+      const endpoint = parseEndpoint(request.headers.get("x-jingler-endpoint"))
+      const sessionId = request.headers.get("x-jingler-session-id")
+      const subject = request.headers.get("x-jingler-subject")
+      const deviceId = request.headers.get("x-jingler-device-id")
+      const generation = parseInteger(request.headers.get("x-jingler-device-generation"))
+      const clientInstanceId = request.headers.get("x-jingler-client-instance-id")
+      const attachmentGeneration = parseInteger(
+        request.headers.get("x-jingler-attachment-generation")
+      )
+      const controllerLeaseGeneration = parseInteger(
+        request.headers.get("x-jingler-controller-lease-generation")
+      )
+      const expiresAt = parseInteger(request.headers.get("x-jingler-expires-at"))
+      const usageAttachmentId = request.headers.get("x-jingler-usage-attachment-id") ??
+        `legacy:${sessionId ?? "unknown"}:${endpoint ?? "unknown"}:${clientInstanceId ?? "unknown"}`
+      const requestedAcknowledgement = parseInteger(request.headers.get("x-jingler-acknowledged-sequence")) ?? 0
+      return { endpoint, sessionId, subject, deviceId, clientInstanceId, generation, attachmentGeneration, controllerLeaseGeneration, expiresAt, usageAttachmentId, requestedAcknowledgement }
+    }
   }
 
   override async webSocketMessage(
@@ -1247,12 +1250,7 @@ export class SessionTunnelObject extends DurableObject<Env> {
       typeof candidate.attachmentGeneration === "number" &&
       typeof candidate.controllerLeaseGeneration === "number" &&
       typeof candidate.expiresAt === "number" &&
-      (candidate.usageAttachmentId === undefined ||
-        typeof candidate.usageAttachmentId === "string") &&
-      (candidate.remainingTransferBytes === undefined ||
-        (typeof candidate.remainingTransferBytes === "number" &&
-          Number.isSafeInteger(candidate.remainingTransferBytes) &&
-          candidate.remainingTransferBytes >= 0))
+      validAttachmentUsage(candidate)
       ? {
           endpoint,
           sessionId: candidate.sessionId,
@@ -1412,3 +1410,21 @@ export class SessionTunnelObject extends DurableObject<Env> {
     this.scheduledAlarmAt = next
   }
 }
+
+const validAttachmentUsage = (candidate: Record<string, unknown>): boolean =>
+  (candidate.usageAttachmentId === undefined ||
+        typeof candidate.usageAttachmentId === "string") &&
+      (candidate.remainingTransferBytes === undefined ||
+        (typeof candidate.remainingTransferBytes === "number" &&
+          Number.isSafeInteger(candidate.remainingTransferBytes) &&
+          candidate.remainingTransferBytes >= 0))
+
+const matchesTunnelIdentity = (
+  metadata: TunnelMetadataRow | null,
+  sessionId: string,
+  subject: string,
+  deviceId: string,
+  generation: number
+): boolean =>
+  metadata !== null && metadata.session_id === sessionId && metadata.subject === subject &&
+  metadata.device_id === deviceId && generation === metadata.device_generation

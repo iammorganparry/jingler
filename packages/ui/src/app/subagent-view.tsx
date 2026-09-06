@@ -116,26 +116,8 @@ export function FleetAgentView({
   controlOutcome = null,
   onOpenArtifact
 }: FleetAgentViewProps) {
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const nodeId = node?.id ?? null
-  // A child transcript is context for the LATEST activity: opening one at the
-  // top showed the agent's greeting instead of what it is doing right now.
-  // Jump to the end on selection (and once the transcript first loads)…
-  const loadedKey = `${nodeId}:${messages.length > 0}`
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [loadedKey])
-  // …and stay pinned while it grows, unless the operator scrolled away.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el === null) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [messages])
-  return (
-    <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
-      <div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
+         function renderAgentHeader() {
+           return (<div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
         <div className="min-w-0 flex-1 truncate">
           <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
           {node && <span> · {node.task}</span>}
@@ -150,28 +132,11 @@ export function FleetAgentView({
             {artifact.label ?? artifact.path.split("/").at(-1)}
           </button>
         ))}
-      </div>
-      {controlOutcome && (
-        <div
-          data-testid="subagent-control-outcome"
-          role={controlOutcome.acknowledged ? "status" : "alert"}
-          className={controlOutcome.acknowledged
-            ? "border-b border-blue/30 bg-blue/[0.06] px-[30px] py-2 text-[11px] text-blue"
-            : "border-b border-red/30 bg-red/[0.06] px-[30px] py-2 text-[11px] text-red"}
-        >
-          {controlOutcome.message}
-        </div>
-      )}
-      <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
-        <div className="mx-auto w-full max-w-[760px] space-y-6">
-          {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
-          {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
-          {node?.attention && (
-            <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
-              {node.attention.message}
-            </div>
-          )}
-          {!loading && messages.length === 0 && (
+      </div>)
+         }
+
+         function renderEmptyTranscript() {
+           return (!loading && messages.length === 0 && (
             // A workflow node is an orchestrator with no pi session of its
             // own — its output lives in the step agents it spawns. Saying
             // "not available yet" for one promised a transcript that could
@@ -196,7 +161,50 @@ export function FleetAgentView({
                 The child session transcript is not available yet.
               </p>
             )
+          ))
+         }
+
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const nodeId = node?.id ?? null
+  // A child transcript is context for the LATEST activity: opening one at the
+  // top showed the agent's greeting instead of what it is doing right now.
+  // Jump to the end on selection (and once the transcript first loads)…
+  const loadedKey = `${nodeId}:${messages.length > 0}`
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [loadedKey])
+  // …and stay pinned while it grows, unless the operator scrolled away.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el === null) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
+    if (nearBottom) el.scrollTop = el.scrollHeight
+  }, [messages])
+  return (
+    <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
+      {renderAgentHeader()}
+      {controlOutcome && (
+        <div
+          data-testid="subagent-control-outcome"
+          role={controlOutcome.acknowledged ? "status" : "alert"}
+          className={controlOutcome.acknowledged
+            ? "border-b border-blue/30 bg-blue/[0.06] px-[30px] py-2 text-[11px] text-blue"
+            : "border-b border-red/30 bg-red/[0.06] px-[30px] py-2 text-[11px] text-red"}
+        >
+          {controlOutcome.message}
+        </div>
+      )}
+      <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
+        <div className="mx-auto w-full max-w-[760px] space-y-6">
+          {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
+          {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
+          {node?.attention && (
+            <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
+              {node.attention.message}
+            </div>
           )}
+          {renderEmptyTranscript()}
           {messages.map((message) => (
             <MessageTurn key={message.id} message={message} providerId={providerId} />
           ))}

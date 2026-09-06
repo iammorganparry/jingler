@@ -86,6 +86,44 @@ export function FileDiff({
   onCopy,
   className,
 }: FileDiffProps) {
+         function renderDiffTrigger() {
+           return (<button
+        id={triggerId}
+        type="button"
+        aria-expanded={currentOpen}
+        aria-controls={contentId}
+        onClick={() => setOpen(!currentOpen)}
+        className="group flex min-h-9 w-full items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
+      >
+        {fileIcon ?? <FileCode2 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-bright/80">
+          {file}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <ChangeCount value={additions} type="added" />
+          <ChangeCount value={deletions} type="removed" />
+        </span>
+        <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
+          {streaming ? (
+            <LoaderCircle
+              aria-label="Applying changes"
+              className={cn("size-3.5", !reduce && "animate-spin")}
+            />
+          ) : (
+            <Check aria-label="Changes applied" className="size-3.5" />
+          )}
+        </span>
+        <motion.span
+          aria-hidden="true"
+          animate={{ rotate: currentOpen ? 180 : 0 }}
+          transition={reduce ? { duration: 0 } : SPRING_SWAP}
+          className="shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
+        >
+          <ChevronDown className="size-3.5" />
+        </motion.span>
+      </button>)
+         }
+
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const triggerId = `${baseId}-trigger`;
@@ -165,41 +203,7 @@ export function FileDiff({
       aria-busy={streaming}
       className={cn("w-full text-sm", className)}
     >
-      <button
-        id={triggerId}
-        type="button"
-        aria-expanded={currentOpen}
-        aria-controls={contentId}
-        onClick={() => setOpen(!currentOpen)}
-        className="group flex min-h-9 w-full items-center gap-2 rounded-md py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
-      >
-        {fileIcon ?? <FileCode2 aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
-        <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-bright/80">
-          {file}
-        </span>
-        <span className="flex shrink-0 items-center gap-2">
-          <ChangeCount value={additions} type="added" />
-          <ChangeCount value={deletions} type="removed" />
-        </span>
-        <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
-          {streaming ? (
-            <LoaderCircle
-              aria-label="Applying changes"
-              className={cn("size-3.5", !reduce && "animate-spin")}
-            />
-          ) : (
-            <Check aria-label="Changes applied" className="size-3.5" />
-          )}
-        </span>
-        <motion.span
-          aria-hidden="true"
-          animate={{ rotate: currentOpen ? 180 : 0 }}
-          transition={reduce ? { duration: 0 } : SPRING_SWAP}
-          className="shrink-0 text-muted-foreground/45 transition-colors group-hover:text-muted-foreground"
-        >
-          <ChevronDown className="size-3.5" />
-        </motion.span>
-      </button>
+      {renderDiffTrigger()}
 
       <AgentDisclosure
         id={contentId}

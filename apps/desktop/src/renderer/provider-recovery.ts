@@ -5,6 +5,20 @@ export interface ProviderRecovery {
   readonly message: string
 }
 
+const connectionStatusRecovery = (
+  status: ProviderCatalog["connections"][number]["connection"]["status"]
+): ProviderRecovery => {
+  const reauthenticate = ["expired", "revoked", "reauthentication-required"].includes(
+    status
+  )
+  return {
+    title: reauthenticate ? "Provider authentication expired" : "Provider entitlement unavailable",
+    message: reauthenticate
+      ? "Reconnect the pinned billing route before continuing. Jingler will not fall back to another credential."
+      : "Refresh this connection and confirm its subscription or API entitlement before continuing."
+  }
+}
+
 export const providerRecoveryOf = (
   catalog: ProviderCatalog,
   selection: {
@@ -51,15 +65,7 @@ export const providerRecoveryOf = (
     }
   }
   if (connection.connection.status !== "authenticated") {
-    const reauthenticate = ["expired", "revoked", "reauthentication-required"].includes(
-      connection.connection.status
-    )
-    return {
-      title: reauthenticate ? "Provider authentication expired" : "Provider entitlement unavailable",
-      message: reauthenticate
-        ? "Reconnect the pinned billing route before continuing. Jingler will not fall back to another credential."
-        : "Refresh this connection and confirm its subscription or API entitlement before continuing."
-    }
+    return connectionStatusRecovery(connection.connection.status)
   }
   const model = connection.models.find((candidate) => candidate.id === selection.modelId)
   if (model?.selectable === true) return undefined

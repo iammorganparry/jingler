@@ -73,6 +73,37 @@ export function ChipMenu<T extends string>({
   ariaLabel?: string
   className?: string
 }) {
+function getTriggerTitle() {
+             return (typeof (current?.label ?? value) === "string" ? String(current?.label ?? value) : undefined)
+           }
+
+         function renderTrigger() {
+
+
+           return (trigger ? (
+    trigger({ current, open })
+  ) : (
+    <span
+      title={getTriggerTitle()}
+      className={cn(
+        "inline-flex min-w-0 items-center gap-1.5 rounded-md font-mono text-[11px] text-text-bright",
+        appearance === "chip"
+          ? "border border-line bg-surface px-2 py-[3px]"
+          : "px-1.5 py-1 text-muted-foreground transition-colors",
+        !disabled &&
+          (appearance === "chip"
+            ? "cursor-pointer hover:border-line-strong"
+            : "cursor-pointer hover:bg-surface hover:text-text-bright"),
+        className
+      )}
+    >
+      {icon}
+      <span className="min-w-0 truncate">{current?.label ?? value}</span>
+      {!disabled && <ChevronDown size={11} className="flex-none text-dim" />}
+    </span>
+  ))
+         }
+
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -94,28 +125,7 @@ export function ChipMenu<T extends string>({
     setOpen(false)
   }
 
-  const chip = trigger ? (
-    trigger({ current, open })
-  ) : (
-    <span
-      title={typeof (current?.label ?? value) === "string" ? String(current?.label ?? value) : undefined}
-      className={cn(
-        "inline-flex min-w-0 items-center gap-1.5 rounded-md font-mono text-[11px] text-text-bright",
-        appearance === "chip"
-          ? "border border-line bg-surface px-2 py-[3px]"
-          : "px-1.5 py-1 text-muted-foreground transition-colors",
-        !disabled &&
-          (appearance === "chip"
-            ? "cursor-pointer hover:border-line-strong"
-            : "cursor-pointer hover:bg-surface hover:text-text-bright"),
-        className
-      )}
-    >
-      {icon}
-      <span className="min-w-0 truncate">{current?.label ?? value}</span>
-      {!disabled && <ChevronDown size={11} className="flex-none text-dim" />}
-    </span>
-  )
+  const chip = renderTrigger()
 
   if (disabled) return chip
 

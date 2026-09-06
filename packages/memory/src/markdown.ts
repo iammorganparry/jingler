@@ -374,6 +374,19 @@ export const pageFrontmatter = (page: MemoryPage): Readonly<Record<string, unkno
 export const serializeMemoryMarkdown = (page: MemoryPage): string =>
   serializeFrontmatter(pageFrontmatter(page), page.body)
 
+const findClosingTicks = (characters: ReadonlyArray<string>, start: number, ticks: number): number => {
+  let closing = start
+  while (closing < characters.length) {
+    let matched = true
+    for (let offset = 0; offset < ticks; offset += 1) {
+      if (characters[closing + offset] !== "`") matched = false
+    }
+    if (matched) break
+    closing += 1
+  }
+  return closing
+}
+
 const maskInlineCode = (line: string): string => {
   const characters = [...line]
   let index = 0
@@ -384,15 +397,7 @@ const maskInlineCode = (line: string): string => {
     }
     let ticks = 1
     while (characters[index + ticks] === "`") ticks += 1
-    let closing = index + ticks
-    while (closing < characters.length) {
-      let matched = true
-      for (let offset = 0; offset < ticks; offset += 1) {
-        if (characters[closing + offset] !== "`") matched = false
-      }
-      if (matched) break
-      closing += 1
-    }
+    const closing = findClosingTicks(characters, index + ticks, ticks)
     const end = closing < characters.length ? closing + ticks : characters.length
     for (let masked = index; masked < end; masked += 1) characters[masked] = " "
     index = end
@@ -433,34 +438,35 @@ const parseWikiLinkContents = (
   return { target, ...(anchor === undefined ? {} : { anchor }), ...(label === undefined ? {} : { label }) }
 }
 
-/** Extract unescaped wikilinks, excluding fenced and inline code. */
-export const extractWikiLinks = (markdown: string): Array<WikiLink> => {
+const extractLineWikiLinks = (line: string, lineNumber: number): Array<WikiLink> => {
   const links: Array<WikiLink> = []
-  for (const { text: line, line: lineNumber } of markdownLinesOutsideCode(markdown)) {
-    let cursor = 0
-    while (cursor < line.length - 1) {
-      const start = line.indexOf("[[", cursor)
-      if (start < 0) break
-      if (start > 0 && line[start - 1] === "\\") {
-        cursor = start + 2
-        continue
-      }
-      const end = line.indexOf("]]", start + 2)
-      if (end < 0) break
-      const parsed = parseWikiLinkContents(line.slice(start + 2, end))
-      if (parsed !== undefined) {
-        links.push({
-          raw: line.slice(start, end + 2),
-          ...parsed,
-          line: lineNumber,
-          column: start + 1
-        })
-      }
-      cursor = end + 2
+  let cursor = 0
+  while (cursor < line.length - 1) {
+    const start = line.indexOf("[[", cursor)
+    if (start < 0) break
+    if (start > 0 && line[start - 1] === "\\") {
+      cursor = start + 2
+      continue
     }
+    const end = line.indexOf("]]", start + 2)
+    if (end < 0) break
+    const parsed = parseWikiLinkContents(line.slice(start + 2, end))
+    if (parsed !== undefined) {
+      links.push({
+        raw: line.slice(start, end + 2),
+        ...parsed,
+        line: lineNumber,
+        column: start + 1
+      })
+    }
+    cursor = end + 2
   }
   return links
 }
+
+/** Extract unescaped wikilinks, excluding fenced and inline code. */
+export const extractWikiLinks = (markdown: string): Array<WikiLink> =>
+  markdownLinesOutsideCode(markdown).flatMap((line) => extractLineWikiLinks(line.text, line.line))
 
 export const parseWikilinks = extractWikiLinks
 export const parseWikiLinks = extractWikiLinks
@@ -473,40 +479,41 @@ const CITATION_PATTERNS = [
 const PANDOC_CITATION_BLOCK = /\[([^\]]*@[A-Za-z0-9_.:/-]+[^\]]*)\]/g
 const PANDOC_CITATION_ID = /@([A-Za-z0-9_.:/-]+)/g
 
-export const extractCitationReferences = (markdown: string): Array<CitationReference> => {
+const extractLineCitations = (line: string, lineNumber: number): Array<CitationReference> => {
   const references: Array<CitationReference> = []
-  for (const { text: line, line: lineNumber } of markdownLinesOutsideCode(markdown)) {
-    for (const pattern of CITATION_PATTERNS) {
-      pattern.lastIndex = 0
-      let match = pattern.exec(line)
-      while (match !== null) {
-        if (match[1]) {
-          references.push({ id: match[1], raw: match[0], line: lineNumber, column: match.index + 1 })
-        }
-        match = pattern.exec(line)
+  for (const pattern of CITATION_PATTERNS) {
+    pattern.lastIndex = 0
+    let match = pattern.exec(line)
+    while (match !== null) {
+      if (match[1]) {
+        references.push({ id: match[1], raw: match[0], line: lineNumber, column: match.index + 1 })
       }
+      match = pattern.exec(line)
     }
-    PANDOC_CITATION_BLOCK.lastIndex = 0
-    let block = PANDOC_CITATION_BLOCK.exec(line)
-    while (block !== null) {
-      PANDOC_CITATION_ID.lastIndex = 0
-      let citation = PANDOC_CITATION_ID.exec(block[1] ?? "")
-      while (citation !== null) {
-        if (citation[1]) {
-          references.push({
-            id: citation[1],
-            raw: citation[0],
-            line: lineNumber,
-            column: block.index + citation.index + 2
-          })
-        }
-        citation = PANDOC_CITATION_ID.exec(block[1] ?? "")
+  }
+  PANDOC_CITATION_BLOCK.lastIndex = 0
+  let block = PANDOC_CITATION_BLOCK.exec(line)
+  while (block !== null) {
+    PANDOC_CITATION_ID.lastIndex = 0
+    let citation = PANDOC_CITATION_ID.exec(block[1] ?? "")
+    while (citation !== null) {
+      if (citation[1]) {
+        references.push({
+          id: citation[1],
+          raw: citation[0],
+          line: lineNumber,
+          column: block.index + citation.index + 2
+        })
       }
-      block = PANDOC_CITATION_BLOCK.exec(line)
+      citation = PANDOC_CITATION_ID.exec(block[1] ?? "")
     }
+    block = PANDOC_CITATION_BLOCK.exec(line)
   }
   return references.sort((left, right) => left.line - right.line || left.column - right.column)
 }
+
+export const extractCitationReferences = (markdown: string): Array<CitationReference> =>
+  markdownLinesOutsideCode(markdown).flatMap((line) => extractLineCitations(line.text, line.line))
 
 export const extractCitationDefinitions = (markdown: string): ReadonlySet<string> => {
   const definitions = new Set<string>()
@@ -533,6 +540,13 @@ const isClaimLine = (line: string): boolean => {
   return /[\p{L}\p{N}]/u.test(claimText(trimmed))
 }
 
+const claimBlockKind = (line: string): "list" | "quote" | "table" | "prose" => {
+  if (/^\s*(?:[-*+] |\d+[.)] )/.test(line)) return "list"
+  if (/^\s*>/.test(line)) return "quote"
+  if (/^\s*\|/.test(line)) return "table"
+  return "prose"
+}
+
 /**
  * A claim is a contiguous prose/list/quote paragraph outside code. Headings,
  * link definitions, thematic breaks and standalone media are not claims.
@@ -554,13 +568,7 @@ export const extractMarkdownClaims = (markdown: string): Array<MarkdownClaim> =>
       flush()
       continue
     }
-    const nextBlockKind = /^\s*(?:[-*+] |\d+[.)] )/.test(line.text)
-      ? "list"
-      : /^\s*>/.test(line.text)
-        ? "quote"
-        : /^\s*\|/.test(line.text)
-          ? "table"
-          : "prose"
+    const nextBlockKind = claimBlockKind(line.text)
     if (blockKind !== undefined && blockKind !== nextBlockKind) flush()
     if (nextBlockKind === "list" || nextBlockKind === "table") flush()
     blockKind = nextBlockKind

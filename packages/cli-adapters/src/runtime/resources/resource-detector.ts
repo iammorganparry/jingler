@@ -1,3 +1,4 @@
+import type { Dirent } from "node:fs"
 import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import { basename, isAbsolute, join, relative } from "node:path"
 import type {
@@ -77,32 +78,56 @@ const detectRoot = async (
   const skipped: ResourceImportDiagnostic[] = []
   const entries = await readdir(canonicalRoot, { withFileTypes: true })
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (entry.name.startsWith(".")) continue
-    const source = join(canonicalRoot, entry.name)
+    await detectResourceEntry(root, canonicalRoot, entry, candidates, skipped)
+  }
+  return { candidates, skipped }
+}
+
+/** Detect metadata only. Nothing is copied, enabled, parsed for secrets, or executed. */
+export const detectAgentResources = (
+  input: ResourceDetectionInput
+): Effect.Effect<ResourceDetectionResult> =>
+  Effect.tryPromise(async () => {
+    const detected = await Promise.all(rootsFor(input).map(detectRoot))
+    return {
+      candidates: detected.flatMap((result) => result.candidates),
+      skipped: detected.flatMap((result) => result.skipped)
+    }
+  }).pipe(Effect.orElseSucceed(() => ({ candidates: [], skipped: [] })))
+
+const detectResourceEntry = async (
+  root: DetectionRoot,
+  canonicalRoot: string,
+  entry: Dirent,
+  candidates: DetectedResourceCandidate[],
+  skipped: ResourceImportDiagnostic[]
+): Promise<void> => {
+  if (entry.name.startsWith(".")) return
+  const source = join(canonicalRoot, entry.name)
     try {
       const resolvedEntry = await realpath(source)
       if (!inside(canonicalRoot, resolvedEntry)) {
         skipped.push(diagnostic(source, root.kind, "escaping-path", "Resource symlink escapes its detected root"))
-        continue
-      }
+      return
+    }
       const entryInfo = await stat(resolvedEntry)
       const isDirectory = entryInfo.isDirectory()
       const document = root.kind === "skill" && isDirectory
         ? join(resolvedEntry, "SKILL.md")
         : resolvedEntry
-      if (root.kind === "prompt" && (isDirectory || !/\.md$/iu.test(entry.name))) continue
-      if (root.kind === "skill" && !isDirectory && !/\.(md|skill)$/iu.test(entry.name)) continue
-      const resolvedDocument = await realpath(document)
+      if (root.kind === "prompt" && (isDirectory || !/\.md$/iu.test(entry.name))) return
+    if (root.kind === "skill" && !isDirectory && !/\.(md|skill)$/iu.test(entry.name)) return
+    const resolvedDocument = await realpath(document)
       if (!inside(canonicalRoot, resolvedDocument)) {
         skipped.push(diagnostic(document, root.kind, "escaping-path", "Resource document escapes its detected root"))
-        continue
-      }
+      return
+    }
       const info = await stat(resolvedDocument)
-      if (!info.isFile()) continue
-      if (info.size > MAX_RESOURCE_BYTES) {
+      if (!info.isFile()) return
+    if (info.size > MAX_RESOURCE_BYTES) {
         skipped.push(diagnostic(document, root.kind, "oversized", "Resource exceeds the 256 KiB import limit"))
-        continue
-      }
+      return
+    }
       const content = await readFile(resolvedDocument, "utf8")
       const metadata = root.kind === "skill"
         ? skillMetadataFromContent(content, entry.name)
@@ -124,17 +149,3 @@ const detectRoot = async (
       skipped.push(diagnostic(source, root.kind, "malformed", "Resource could not be read"))
     }
   }
-  return { candidates, skipped }
-}
-
-/** Detect metadata only. Nothing is copied, enabled, parsed for secrets, or executed. */
-export const detectAgentResources = (
-  input: ResourceDetectionInput
-): Effect.Effect<ResourceDetectionResult> =>
-  Effect.tryPromise(async () => {
-    const detected = await Promise.all(rootsFor(input).map(detectRoot))
-    return {
-      candidates: detected.flatMap((result) => result.candidates),
-      skipped: detected.flatMap((result) => result.skipped)
-    }
-  }).pipe(Effect.orElseSucceed(() => ({ candidates: [], skipped: [] })))

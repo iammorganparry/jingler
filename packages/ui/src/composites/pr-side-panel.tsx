@@ -130,6 +130,158 @@ export function PrSidePanel({
   readOnly = false,
   className
 }: PrSidePanelProps) {
+         function renderAdversarialReview() {
+           return (review && (
+        <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
+          <div className="flex items-center gap-2">
+            <Eyebrow className="flex-1">Adversarial review</Eyebrow>
+            {review.review && review.review.findings.length > 0 && (
+              <span className="font-mono text-[10.5px] text-dim">
+                {review.review.findings.length}{" "}
+                {review.review.findings.length === 1 ? "finding" : "findings"}
+              </span>
+            )}
+          </div>
+          {/* A review needs a live PR to argue against — merged/closed PRs are
+              history, and re-reviewing them just burns tokens. */}
+          <ReviewFindings {...review} canRun={connected && !merged && !closed} />
+        </div>
+      ))
+         }
+
+function renderDraftActions() {
+             return (<div className="flex flex-col gap-3">
+            <Callout tone="blue">This pull request is a draft.</Callout>
+            {onMarkReady && (
+              <Button
+                className="w-full justify-center gap-2"
+                disabled={!connected || markingReady}
+                onClick={onMarkReady}
+              >
+                {markingReady && <Spinner size={13} />}
+                {markingReady ? "Marking ready…" : "Ready for review"}
+              </Button>
+            )}
+            {markReadyError && (
+              <Callout tone="red" className="items-start">
+                {markReadyError}
+              </Callout>
+            )}
+          </div>)
+           }
+
+function renderConflictActions() {
+             return (<div className="overflow-hidden rounded-lg border border-red/30">
+            <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
+              <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
+                !
+              </span>
+              <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
+            </div>
+            <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
+              {pr.mergeBlockers.map((blocker) => (
+                <span key={blocker} className="flex items-center gap-2 text-[12px] text-text">
+                  <span className="text-red">✗</span>
+                  {blocker}
+                </span>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2 px-[13px] pb-[13px]">
+              {/*
+                "Out of date" is the ONE blocker the operator can clear from here
+                — conflicts need the code, branch protection needs a reviewer,
+                failing checks need a fix. `mergeStateStatus` was fetched all
+                along and only ever collapsed into a blocker STRING, so the box
+                stated the problem and offered nothing. This updates the remote
+                head only; the worktree is left alone, since the agent may be
+                mid-turn with uncommitted work.
+              */}
+              {behind && onUpdateBranch && (
+                <Button
+                  variant="secondary"
+                  className="w-full justify-center gap-2"
+                  disabled={!connected || updatingBranch}
+                  onClick={onUpdateBranch}
+                >
+                  {updatingBranch && <Spinner size={13} />}
+                  {updatingBranch ? "Updating…" : "Update branch"}
+                </Button>
+              )}
+              {updateBranchError && (
+                <Callout tone="red" className="items-start">
+                  {updateBranchError}
+                </Callout>
+              )}
+              <Button variant="secondary" className="w-full justify-center" disabled>
+                Merge pull request
+              </Button>
+            </div>
+          </div>)
+           }
+
+         function getMerged() {
+
+
+
+
+           if (merged) return (<Callout tone="purple">This pull request has been merged.</Callout>)
+           if (closed) return (<Callout tone="red">This pull request is closed.</Callout>)
+           if (draft) return (renderDraftActions())
+           if (blocked) return (renderConflictActions())
+           return (<div className="flex flex-col gap-3">
+            <Callout tone="green">This branch has no conflicts and can be merged.</Callout>
+            {/*
+              The strategy picker. `PrMergeMethod` and the GitHub API value
+              supported all three from the start; only the UI didn't, so every
+              merge from here was a merge commit. Squash is most teams' default,
+              which made this the likeliest reason to give up and open the
+              browser. Segmented rather than a dropdown: three options, and which
+              one is armed must be readable without opening anything.
+            */}
+            <div
+              role="radiogroup"
+              aria-label="Merge method"
+              className="flex overflow-hidden rounded-md border border-line"
+            >
+              {MERGE_METHODS.map((m, index) => (
+                <button
+                  key={m.method}
+                  type="button"
+                  role="radio"
+                  aria-checked={method === m.method}
+                  tabIndex={method === m.method ? 0 : -1}
+                  data-merge-method={m.method}
+                  title={m.hint}
+                  disabled={merging}
+                  onClick={() => setMethod(m.method)}
+                  onKeyDown={(event) => moveMethod(event, index)}
+                  className={cn(
+                    "flex-1 px-2 py-[5px] text-[11.5px] transition-colors disabled:pointer-events-none",
+                    method === m.method
+                      ? "bg-surface text-text-bright"
+                      : "text-dim hover:bg-surface/50 hover:text-text"
+                  )}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            <Button
+              className="w-full justify-center gap-2"
+              disabled={!connected || merging || !onMerge}
+              onClick={() => void Promise.resolve(onMerge?.(method)).catch(() => {})}
+            >
+              {merging && <Spinner size={13} />}
+              {merging ? "Merging…" : MERGE_METHODS.find((m) => m.method === method)!.action}
+            </Button>
+            {mergeError && (
+              <Callout tone="red" className="items-start">
+                {mergeError}
+              </Callout>
+            )}
+          </div>)
+         }
+
   // Merge-commit default, matching GitHub and the previous hardcoded
   // behaviour — a picker that silently changed what the button did would be a
   // worse regression than not having one.
@@ -189,151 +341,13 @@ export function PrSidePanel({
       </div>
 
       {/* Adversarial review */}
-      {review && (
-        <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
-          <div className="flex items-center gap-2">
-            <Eyebrow className="flex-1">Adversarial review</Eyebrow>
-            {review.review && review.review.findings.length > 0 && (
-              <span className="font-mono text-[10.5px] text-dim">
-                {review.review.findings.length}{" "}
-                {review.review.findings.length === 1 ? "finding" : "findings"}
-              </span>
-            )}
-          </div>
-          {/* A review needs a live PR to argue against — merged/closed PRs are
-              history, and re-reviewing them just burns tokens. */}
-          <ReviewFindings {...review} canRun={connected && !merged && !closed} />
-        </div>
-      )}
+      {renderAdversarialReview()}
 
       </div>
 
       {/* Merge box — outside the scroll container, so it's always in reach. */}
       {!readOnly && <div className="flex-none border-t border-hairline bg-panel p-4">
-        {merged ? (
-          <Callout tone="purple">This pull request has been merged.</Callout>
-        ) : closed ? (
-          <Callout tone="red">This pull request is closed.</Callout>
-        ) : draft ? (
-          <div className="flex flex-col gap-3">
-            <Callout tone="blue">This pull request is a draft.</Callout>
-            {onMarkReady && (
-              <Button
-                className="w-full justify-center gap-2"
-                disabled={!connected || markingReady}
-                onClick={onMarkReady}
-              >
-                {markingReady && <Spinner size={13} />}
-                {markingReady ? "Marking ready…" : "Ready for review"}
-              </Button>
-            )}
-            {markReadyError && (
-              <Callout tone="red" className="items-start">
-                {markReadyError}
-              </Callout>
-            )}
-          </div>
-        ) : blocked ? (
-          <div className="overflow-hidden rounded-lg border border-red/30">
-            <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
-              <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
-                !
-              </span>
-              <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
-            </div>
-            <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
-              {pr.mergeBlockers.map((blocker) => (
-                <span key={blocker} className="flex items-center gap-2 text-[12px] text-text">
-                  <span className="text-red">✗</span>
-                  {blocker}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 px-[13px] pb-[13px]">
-              {/*
-                "Out of date" is the ONE blocker the operator can clear from here
-                — conflicts need the code, branch protection needs a reviewer,
-                failing checks need a fix. `mergeStateStatus` was fetched all
-                along and only ever collapsed into a blocker STRING, so the box
-                stated the problem and offered nothing. This updates the remote
-                head only; the worktree is left alone, since the agent may be
-                mid-turn with uncommitted work.
-              */}
-              {behind && onUpdateBranch && (
-                <Button
-                  variant="secondary"
-                  className="w-full justify-center gap-2"
-                  disabled={!connected || updatingBranch}
-                  onClick={onUpdateBranch}
-                >
-                  {updatingBranch && <Spinner size={13} />}
-                  {updatingBranch ? "Updating…" : "Update branch"}
-                </Button>
-              )}
-              {updateBranchError && (
-                <Callout tone="red" className="items-start">
-                  {updateBranchError}
-                </Callout>
-              )}
-              <Button variant="secondary" className="w-full justify-center" disabled>
-                Merge pull request
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <Callout tone="green">This branch has no conflicts and can be merged.</Callout>
-            {/*
-              The strategy picker. `PrMergeMethod` and the GitHub API value
-              supported all three from the start; only the UI didn't, so every
-              merge from here was a merge commit. Squash is most teams' default,
-              which made this the likeliest reason to give up and open the
-              browser. Segmented rather than a dropdown: three options, and which
-              one is armed must be readable without opening anything.
-            */}
-            <div
-              role="radiogroup"
-              aria-label="Merge method"
-              className="flex overflow-hidden rounded-md border border-line"
-            >
-              {MERGE_METHODS.map((m, index) => (
-                <button
-                  key={m.method}
-                  type="button"
-                  role="radio"
-                  aria-checked={method === m.method}
-                  tabIndex={method === m.method ? 0 : -1}
-                  data-merge-method={m.method}
-                  title={m.hint}
-                  disabled={merging}
-                  onClick={() => setMethod(m.method)}
-                  onKeyDown={(event) => moveMethod(event, index)}
-                  className={cn(
-                    "flex-1 px-2 py-[5px] text-[11.5px] transition-colors disabled:pointer-events-none",
-                    method === m.method
-                      ? "bg-surface text-text-bright"
-                      : "text-dim hover:bg-surface/50 hover:text-text"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <Button
-              className="w-full justify-center gap-2"
-              disabled={!connected || merging || !onMerge}
-              onClick={() => void Promise.resolve(onMerge?.(method)).catch(() => {})}
-            >
-              {merging && <Spinner size={13} />}
-              {merging ? "Merging…" : MERGE_METHODS.find((m) => m.method === method)!.action}
-            </Button>
-            {mergeError && (
-              <Callout tone="red" className="items-start">
-                {mergeError}
-              </Callout>
-            )}
-          </div>
-        )}
+        {getMerged()}
         {!merged && !closed && onClosePr && (
           <div className="mt-3 flex flex-col gap-2 border-t border-hairline pt-3">
             <Button

@@ -127,6 +127,19 @@ const providerResponse = async (
   const endpoint = request.provider === "exa"
     ? (process.env.JINGLER_EXA_URL ?? EXA_URL)
     : (process.env.JINGLER_FIRECRAWL_URL ?? FIRECRAWL_URL)
+  return await requestSearchProvider(dependencies, endpoint, request)
+}
+
+export const searchWithProvider = (
+  request: WebSearchProviderRequest,
+  dependencies: WebSearchProviderDependencies = {}
+): Promise<WebSearchResponse> => providerResponse(request, dependencies)
+
+async function requestSearchProvider(
+  dependencies: WebSearchProviderDependencies,
+  endpoint: string,
+  request: WebSearchProviderRequest
+) {
   let response: Response
   try {
     response = await (dependencies.fetch ?? fetch)(endpoint, {
@@ -143,7 +156,7 @@ const providerResponse = async (
           ? {
               query: request.input.query,
               numResults: request.input.maxResults,
-              contents: { text: { maxCharacters: 8_000 } }
+              contents: { text: { maxCharacters: 8000 } }
             }
           : { query: request.input.query, limit: request.input.maxResults }
       )
@@ -181,8 +194,3 @@ const providerResponse = async (
         published: ["publishedDate"]
       })
 }
-
-export const searchWithProvider = (
-  request: WebSearchProviderRequest,
-  dependencies: WebSearchProviderDependencies = {}
-): Promise<WebSearchResponse> => providerResponse(request, dependencies)

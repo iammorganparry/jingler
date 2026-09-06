@@ -61,12 +61,7 @@ const configHosts = (source: string): ReadonlyArray<SshHostSuggestion> => {
       continue
     }
     if (!current) continue
-    if (key === "hostname") current.hostname = value
-    if (key === "user") current.username = SSH_USER.test(value) ? value : null
-    if (key === "port" && /^\d{1,5}$/u.test(value)) {
-      const port = Number(value)
-      if (port >= 1 && port <= 65_535) current.port = port
-    }
+    applySshHostSetting(key, current, value)
   }
   return blocks.flatMap((block) =>
     block.aliases
@@ -398,29 +393,7 @@ const executeBootstrap = (
 ): Effect.Effect<PendingDeviceRegistrationResponse, SshBootstrapError> =>
   Effect.gen(function* () {
     const target = yield* checkedSshTarget(input)
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        runner.run(input.sshBinary ?? "ssh", sshArguments(target, remoteAgentCommand), {
-          shell: false
-        }),
-      catch: (cause) =>
-        new SshBootstrapError({ kind: "connection", message: "SSH bootstrap failed", cause })
-    })
-    if (result.exitCode !== 0) {
-      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
-      const incompatible = /not found|protocol|unsupported|incompatible/iu.test(result.stderr)
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: authentication ? "authentication" : incompatible ? "incompatible" : "connection",
-          message: authentication
-            ? sshAuthenticationMessage(input.host)
-            : incompatible
-              ? "The remote Jingler device agent is missing or incompatible"
-              : "Could not start the remote Jingler device agent"
-        })
-      )
-    }
-    return pairingResponse(result.stdout)
+    return yield* registerRemoteDevice(runner, input, target, remoteAgentCommand)
   })
 
 export const bootstrapRemoteDevice = (
@@ -445,7 +418,7 @@ const INSTALL_AGENT = [
   'ln -s "$release" "$managed_root/current.next"',
   'if [ "$(uname -s)" = Darwin ]; then mv -fh "$managed_root/current.next" "$managed_root/current"; else mv -Tf "$managed_root/current.next" "$managed_root/current"; fi',
   'for old_release in "$managed_root/releases"/*; do if [ "$old_release" != "$release" ]; then rm -rf "$old_release"; fi; done',
-  'rm -f .jingler-device-runtime-upload.tgz'
+  "rm -f .jingler-device-runtime-upload.tgz"
 ].join(" && ")
 const INSTALL_RUNTIME = [
   'runtime_root="$HOME/.local/share/jingler/runtime"',
@@ -528,67 +501,7 @@ export const installAndEnrollOwnedDevice = (
 ): Effect.Effect<EnrolledOwnedDevice, SshBootstrapError> =>
   Effect.gen(function* () {
     const target = yield* checkedSshTarget(input)
-    const server = checkedRelayUrl(input.serverUrl)
-    if (!server) {
-      return yield* Effect.fail(
-        new SshBootstrapError({ kind: "invalid-host", message: "Jingler server URL is invalid" })
-      )
-    }
-    let credential: DeviceEnrollmentCredentialResponse
-    try {
-      credential = Schema.decodeUnknownSync(DeviceEnrollmentCredentialResponseSchema)(input.credential, {
-        onExcessProperty: "error"
-      })
-    } catch (cause) {
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: "enrollment",
-          message: "Device enrollment credential is invalid",
-          cause
-        })
-      )
-    }
-    yield* uploadDeviceAgent(input, target, runner, "upload")
-    const name = input.displayName?.trim()
-    const enrollArguments = [
-      "enroll",
-      "--server",
-      quoteRemoteArgument(server),
-      "--install-service",
-      ...(name ? ["--name", quoteRemoteArgument(name)] : [])
-    ].join(" ")
-    const remoteCommand = `${INSTALL_AGENT} && ${loginShellCommand(
-      `${INSTALL_RUNTIME} && ${installedAgentCommand(enrollArguments)}`
-    )}`
-    const result = yield* Effect.tryPromise({
-      try: () =>
-        runner.run(
-          input.sshBinary ?? "ssh",
-          sshArguments(target, remoteCommand),
-          { shell: false, stdin: `${JSON.stringify(credential)}\n` }
-        ),
-      catch: (cause) =>
-        new SshBootstrapError({
-          kind: "enrollment",
-          message: "Device enrollment exchange failed",
-          cause
-        })
-    })
-    if (result.exitCode !== 0) {
-      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
-      const service = /launchd|launchctl|systemd|systemctl|persistent device service/iu.test(result.stderr)
-      return yield* Effect.fail(
-        new SshBootstrapError({
-          kind: authentication ? "authentication" : service ? "service" : "enrollment",
-          message: authentication
-            ? sshAuthenticationMessage(input.host)
-            : service
-              ? "Device service start failed"
-              : "Device enrollment exchange failed"
-        })
-      )
-    }
-    return enrolledDeviceResponse(result.stdout)
+    return yield* installAndEnrollRemoteDevice(input, target, runner)
   })
 
 /** Activate a claimed device and leave its outbound daemon running after SSH exits. */
@@ -660,3 +573,111 @@ export class RemoteBootstrapService extends Effect.Service<RemoteBootstrapServic
     })
   }
 ) {}
+
+function* installAndEnrollRemoteDevice(
+  input: InstallAndEnrollOwnedDeviceInput,
+  target: CheckedSshTarget,
+  runner: SshProcessRunner
+) {
+  const server = checkedRelayUrl(input.serverUrl)
+    if (!server) {
+      return yield* Effect.fail(
+        new SshBootstrapError({ kind: "invalid-host", message: "Jingler server URL is invalid" })
+      )
+    }
+    let credential: DeviceEnrollmentCredentialResponse
+    try {
+      credential = Schema.decodeUnknownSync(DeviceEnrollmentCredentialResponseSchema)(input.credential, {
+        onExcessProperty: "error"
+      })
+    } catch (cause) {
+      return yield* Effect.fail(
+        new SshBootstrapError({
+          kind: "enrollment",
+          message: "Device enrollment credential is invalid",
+          cause
+        })
+      )
+    }
+    yield* uploadDeviceAgent(input, target, runner, "upload")
+    const name = input.displayName?.trim()
+    const enrollArguments = [
+      "enroll",
+      "--server",
+      quoteRemoteArgument(server),
+      "--install-service",
+      ...(name ? ["--name", quoteRemoteArgument(name)] : [])
+    ].join(" ")
+    const remoteCommand = `${INSTALL_AGENT} && ${loginShellCommand(
+      `${INSTALL_RUNTIME} && ${installedAgentCommand(enrollArguments)}`
+    )}`
+    const result = yield* Effect.tryPromise({
+      try: () =>
+        runner.run(
+          input.sshBinary ?? "ssh",
+          sshArguments(target, remoteCommand),
+          { shell: false, stdin: `${JSON.stringify(credential)}\n` }
+        ),
+      catch: (cause) =>
+        new SshBootstrapError({
+          kind: "enrollment",
+          message: "Device enrollment exchange failed",
+          cause
+        })
+    })
+    if (result.exitCode !== 0) {
+      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
+      const service = /launchd|launchctl|systemd|systemctl|persistent device service/iu.test(result.stderr)
+      return yield* Effect.fail(
+        new SshBootstrapError({
+          kind: authentication ? "authentication" : service ? "service" : "enrollment",
+          message: authentication
+            ? sshAuthenticationMessage(input.host)
+            : service
+              ? "Device service start failed"
+              : "Device enrollment exchange failed"
+        })
+      )
+    }
+    return enrolledDeviceResponse(result.stdout)
+  }
+
+function* registerRemoteDevice(
+  runner: SshProcessRunner,
+  input: BootstrapSshInput,
+  target: CheckedSshTarget,
+  remoteAgentCommand: string
+) {
+  const result = yield* Effect.tryPromise({
+      try: () =>
+        runner.run(input.sshBinary ?? "ssh", sshArguments(target, remoteAgentCommand), {
+          shell: false
+        }),
+      catch: (cause) =>
+        new SshBootstrapError({ kind: "connection", message: "SSH bootstrap failed", cause })
+    })
+    if (result.exitCode !== 0) {
+      const authentication = SSH_AUTHENTICATION_FAILURE.test(result.stderr)
+      const incompatible = /not found|protocol|unsupported|incompatible/iu.test(result.stderr)
+      return yield* Effect.fail(
+        new SshBootstrapError({
+          kind: authentication ? "authentication" : incompatible ? "incompatible" : "connection",
+          message: authentication
+            ? sshAuthenticationMessage(input.host)
+            : incompatible
+              ? "The remote Jingler device agent is missing or incompatible"
+              : "Could not start the remote Jingler device agent"
+        })
+      )
+    }
+  return pairingResponse(result.stdout)
+  }
+
+function applySshHostSetting(key: string, current: ConfigHost, value: string) {
+  if (key === "hostname") current.hostname = value
+  if (key === "user") current.username = SSH_USER.test(value) ? value : null
+  if (key === "port" && /^\d{1,5}$/u.test(value)) {
+    const port = Number(value)
+    if (port >= 1 && port <= 65535) current.port = port
+  }
+}

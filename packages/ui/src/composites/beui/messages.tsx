@@ -78,6 +78,22 @@ export interface MessageScrollerProps extends ComponentPropsWithoutRef<"div"> {
   contentProps?: Omit<ComponentPropsWithoutRef<"div">, "children" | "className" | "ref">
 }
 
+function nearestRailTarget(targets: ReadonlyArray<readonly [string, HTMLElement]>, viewportCenter: number): string {
+    let nearestId = targets[0]?.[0] ?? ""
+    let nearestDistance = Number.POSITIVE_INFINITY
+    for (const [id, element] of targets) {
+      const rect = element.getBoundingClientRect()
+      const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter)
+      if (distance < nearestDistance) { nearestDistance = distance; nearestId = id }
+    }
+  return nearestId
+}
+
+function scrollRailViewport(viewport: HTMLElement, top: number, behavior: ScrollBehavior): void {
+  if (typeof viewport.scrollTo === "function") viewport.scrollTo({ top, behavior })
+  else viewport.scrollTop = top
+}
+
 export function MessageScroller({ followOutput = true, followThreshold = 56, smooth = true, onFollowChange, label = "Conversation", busy, navigation, navigationLabel = "Message navigation", navigationItems, navigationActiveId, onNavigationSelect, viewportClassName, contentClassName, railClassName, viewportTestId, viewportRef: externalViewportRef, viewportProps, contentProps, className, children, ...props }: MessageScrollerProps) {
   const reduce = useReducedMotion() ?? false
   const viewportRef = useRef<HTMLElement>(null)
@@ -120,13 +136,7 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     const distanceFromEnd = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
     if (distanceFromEnd <= followThreshold) { setActiveRailId(targets.at(-1)?.[0] ?? ""); return }
     const viewportCenter = viewportRect.top + viewportRect.height / 2
-    let nearestId = targets[0]?.[0] ?? ""
-    let nearestDistance = Number.POSITIVE_INFINITY
-    for (const [id, element] of targets) {
-      const rect = element.getBoundingClientRect()
-      const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter)
-      if (distance < nearestDistance) { nearestDistance = distance; nearestId = id }
-    }
+    const nearestId = nearestRailTarget(targets, viewportCenter)
     setActiveRailId(nearestId)
   }, [controlledRail, followThreshold, navigation])
 
@@ -245,15 +255,14 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     if (!viewport || !target) return
     const lastItem = railItems.at(-1)?.id === item.id
     setActiveRailId(item.id)
-    if (lastItem) { setFollowing(true); scrollToEnd(reduce || !smooth ? "auto" : "smooth"); return }
+    const behavior = reduce || !smooth ? "auto" : "smooth"
+    if (lastItem) { setFollowing(true); scrollToEnd(behavior); return }
     setFollowing(false)
     programmaticScrollRef.current = true
     const viewportRect = viewport.getBoundingClientRect()
     const targetRect = target.getBoundingClientRect()
     const top = viewport.scrollTop + targetRect.top - viewportRect.top - (viewport.clientHeight - targetRect.height) / 2
-    const behavior = reduce || !smooth ? "auto" : "smooth"
-    if (typeof viewport.scrollTo === "function") viewport.scrollTo({ top, behavior })
-    else viewport.scrollTop = top
+    scrollRailViewport(viewport, top, behavior)
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current)
     scrollTimerRef.current = window.setTimeout(() => { programmaticScrollRef.current = false }, behavior === "smooth" ? 320 : 0)
   }, [railItems, reduce, scrollToEnd, setFollowing, smooth])

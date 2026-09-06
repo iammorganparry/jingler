@@ -194,91 +194,7 @@ export const piSubagentProgress = (
     event.toolName !== "subagent"
   ) return null
   const result = event.type === "tool_execution_update" ? event.partialResult : event.result
-  const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
-  if (!decoded) return null
-  const results = new Map(decoded.results.map((child) => [child.index, child]))
-  // The tool result ENDING settles the run unless execution continues behind
-  // an async acknowledgment or a foreground supervisor-detach receipt.
-  const detachedForeground = decoded.mode === "single" &&
-    decoded.results.some((child) => child.detached === true)
-  const settled = event.type === "tool_execution_end" &&
-    decoded.asyncId === undefined &&
-    !detachedForeground
-  if (decoded.progress.length > 0) {
-    return {
-      runId: decoded.runId,
-      mode: decoded.mode,
-      settled,
-      children: decoded.progress.map((child) => ({
-        ...child,
-        task: displayTask(child.task, directTask),
-        runId: results.get(child.index)?.runId ?? null,
-        sessionFile: results.get(child.index)?.sessionFile ?? null
-      }))
-    }
-  }
-  // No progress array: a scripted workflow. Its live updates describe children
-  // only through the call trace, and its final result only through `results`.
-  const trace = decoded.workflow?.trace ?? []
-  if (trace.length > 0) {
-    // The trace is append-only and a child appears once per state change, so
-    // keep first-appearance order and each key's latest entry.
-    const order: Array<string> = []
-    const latest = new Map<string, typeof trace[number]>()
-    for (const entry of trace) {
-      if (!latest.has(entry.key)) order.push(entry.key)
-      latest.set(entry.key, entry)
-    }
-    return {
-      runId: decoded.runId,
-      mode: decoded.mode,
-      settled,
-      children: order.map((key, position) => {
-        const entry = latest.get(key)!
-        const finished = decoded.results.find(
-          (candidate) => candidate.runId !== undefined && candidate.runId === entry.runId
-        ) ?? results.get(position)
-        return {
-          index: position,
-          runId: entry.runId ?? finished?.runId ?? null,
-          agent: finished?.agent ?? key,
-          status: traceStatus(entry.state),
-          task: finished?.task ?? `${entry.operation} ${key}`,
-          tokens: 0,
-          toolCount: 0,
-          durationMs: entry.durationMs ?? 0,
-          ...(entry.error !== undefined ? { error: entry.error } : {}),
-          sessionFile: finished?.sessionFile ?? null
-        }
-      })
-    }
-  }
-  if (event.type === "tool_execution_end" && decoded.results.length > 0) {
-    return {
-      runId: decoded.runId,
-      mode: decoded.mode,
-      settled,
-      children: decoded.results.map((child, position) => ({
-        index: child.index ?? position,
-        runId: child.runId ?? null,
-        agent: child.agent ?? `step-${(child.index ?? position) + 1}`,
-        status: child.detached
-          ? "detached" as const
-          : child.error !== undefined || child.timedOut || child.stopped || child.interrupted
-            ? "failed" as const
-            : "completed" as const,
-        task: child.task === undefined
-          ? (directTask ?? "Delegated work")
-          : displayTask(child.task, directTask),
-        tokens: 0,
-        toolCount: 0,
-        durationMs: 0,
-        ...(child.error !== undefined ? { error: child.error } : {}),
-        sessionFile: child.sessionFile ?? null
-      }))
-    }
-  }
-  return { runId: decoded.runId, mode: decoded.mode, settled, children: [] }
+  return decodeSubagentProgressResult(result, event, directTask)
 }
 
 export const piSupervisorAttention = (
@@ -449,4 +365,105 @@ export const normalizePiEvent = (
     default:
       return null
   }
+}
+
+function decodeSubagentProgressResult(
+  result: { readonly details?: unknown } | null | undefined,
+  event: Extract<AgentSessionEvent, { type: "tool_execution_update" | "tool_execution_end" }>,
+  directTask: string | undefined
+) {
+  const decoded = Option.getOrUndefined(decodeSubagentProgress(result?.details))
+  if (!decoded) return null
+  const results = new Map(decoded.results.map((child) => [child.index, child]))
+  // The tool result ENDING settles the run unless execution continues behind
+  // an async acknowledgment or a foreground supervisor-detach receipt.
+  const detachedForeground = decoded.mode === "single" &&
+    decoded.results.some((child) => child.detached === true)
+  const settled = event.type === "tool_execution_end" &&
+    decoded.asyncId === undefined &&
+    !detachedForeground
+  if (decoded.progress.length > 0) {
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      settled,
+      children: decoded.progress.map((child) => ({
+        ...child,
+        task: displayTask(child.task, directTask),
+        runId: results.get(child.index)?.runId ?? null,
+        sessionFile: results.get(child.index)?.sessionFile ?? null
+      }))
+    }
+  }
+  // No progress array: a scripted workflow. Its live updates describe children
+  // only through the call trace, and its final result only through `results`.
+  const trace = decoded.workflow?.trace ?? []
+  if (trace.length > 0) {
+    // The trace is append-only and a child appears once per state change, so
+    // keep first-appearance order and each key's latest entry.
+    const order: Array<string> = []
+    const latest = new Map<string, (typeof trace)[number]>()
+    for (const entry of trace) {
+      if (!latest.has(entry.key)) order.push(entry.key)
+      latest.set(entry.key, entry)
+    }
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      settled,
+      children: order.map((key, position) => {
+        const entry = latest.get(key)!
+        const finished = decoded.results.find(
+          (candidate) => candidate.runId !== undefined && candidate.runId === entry.runId
+        ) ?? results.get(position)
+        return {
+          index: position,
+          runId: entry.runId ?? finished?.runId ?? null,
+          agent: finished?.agent ?? key,
+          status: traceStatus(entry.state),
+          task: finished?.task ?? `${entry.operation} ${key}`,
+          tokens: 0,
+          toolCount: 0,
+          durationMs: entry.durationMs ?? 0,
+          ...(entry.error !== undefined ? { error: entry.error } : {}),
+          sessionFile: finished?.sessionFile ?? null
+        }
+      })
+    }
+  }
+  if (event.type === "tool_execution_end" && decoded.results.length > 0) {
+    return {
+      runId: decoded.runId,
+      mode: decoded.mode,
+      settled,
+      children: decoded.results.map((child, position) => ({
+        index: child.index ?? position,
+        runId: child.runId ?? null,
+        agent: child.agent ?? `step-${(child.index ?? position) + 1}`,
+        status: completedChildStatus(child),
+        task: child.task === undefined
+          ? (directTask ?? "Delegated work")
+          : displayTask(child.task, directTask),
+        tokens: 0,
+        toolCount: 0,
+        durationMs: 0,
+        ...(child.error !== undefined ? { error: child.error } : {}),
+        sessionFile: child.sessionFile ?? null
+      }))
+    }
+  }
+  return { runId: decoded.runId, mode: decoded.mode, settled, children: [] }
+}
+
+const completedChildStatus = (child: {
+  readonly detached?: boolean
+  readonly error?: string
+  readonly timedOut?: boolean
+  readonly stopped?: boolean
+  readonly interrupted?: boolean
+}): "detached" | "failed" | "completed" => {
+  if (child.detached) return "detached"
+  return child.error !== undefined || child.timedOut || child.stopped || child.interrupted
+    ? "failed"
+    : "completed"
 }

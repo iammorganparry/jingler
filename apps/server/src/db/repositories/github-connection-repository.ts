@@ -320,55 +320,7 @@ const repositoryFor = (database: Database) => {
             const authorization = rows[0]
             if (!authorization) throw new Error("GitHub authorization upsert returned no row")
 
-            if (input.installations.length > 0) {
-              for (const installation of input.installations) {
-                await tx
-                  .insert(githubInstallation)
-                  .values({
-                    id: randomUUID(),
-                    authorizationId: authorization.id,
-                    installationId: installation.installationId,
-                    accountId: installation.accountId,
-                    accountLogin: installation.accountLogin,
-                    accountType: installation.accountType,
-                    accountAvatarUrl: installation.accountAvatarUrl,
-                    repositorySelection: installation.repositorySelection,
-                    permissions: JSON.stringify(installation.permissions),
-                    suspendedAt: installation.suspendedAt,
-                    createdAt: input.refreshedAt,
-                    updatedAt: input.refreshedAt
-                  })
-                  .onConflictDoUpdate({
-                    target: [
-                      githubInstallation.authorizationId,
-                      githubInstallation.installationId
-                    ],
-                    set: {
-                      accountId: installation.accountId,
-                      accountLogin: installation.accountLogin,
-                      accountType: installation.accountType,
-                      accountAvatarUrl: installation.accountAvatarUrl,
-                      repositorySelection: installation.repositorySelection,
-                      permissions: JSON.stringify(installation.permissions),
-                      suspendedAt: installation.suspendedAt,
-                      updatedAt: input.refreshedAt
-                    }
-                  })
-              }
-              await tx.delete(githubInstallation).where(
-                and(
-                  eq(githubInstallation.authorizationId, authorization.id),
-                  notInArray(
-                    githubInstallation.installationId,
-                    input.installations.map((installation) => installation.installationId)
-                  )
-                )
-              )
-            } else {
-              await tx
-                .delete(githubInstallation)
-                .where(eq(githubInstallation.authorizationId, authorization.id))
-            }
+            await replaceAuthorizedInstallations(authorization.id)
             const previousStates = new Map(
               previous.map(({ installation }) => [
                 installation.installationId,
@@ -398,6 +350,58 @@ const repositoryFor = (database: Database) => {
               })
             }
             return authorization
+
+            async function replaceAuthorizedInstallations(authorizationId: string) {
+              if (input.installations.length > 0) {
+                for (const installation of input.installations) {
+                  await tx
+                    .insert(githubInstallation)
+                    .values({
+                      id: randomUUID(),
+                      authorizationId: authorizationId,
+                      installationId: installation.installationId,
+                      accountId: installation.accountId,
+                      accountLogin: installation.accountLogin,
+                      accountType: installation.accountType,
+                      accountAvatarUrl: installation.accountAvatarUrl,
+                      repositorySelection: installation.repositorySelection,
+                      permissions: JSON.stringify(installation.permissions),
+                      suspendedAt: installation.suspendedAt,
+                      createdAt: input.refreshedAt,
+                      updatedAt: input.refreshedAt
+                    })
+                    .onConflictDoUpdate({
+                      target: [
+                        githubInstallation.authorizationId,
+                        githubInstallation.installationId
+                      ],
+                      set: {
+                        accountId: installation.accountId,
+                        accountLogin: installation.accountLogin,
+                        accountType: installation.accountType,
+                        accountAvatarUrl: installation.accountAvatarUrl,
+                        repositorySelection: installation.repositorySelection,
+                        permissions: JSON.stringify(installation.permissions),
+                        suspendedAt: installation.suspendedAt,
+                        updatedAt: input.refreshedAt
+                      }
+                    })
+                }
+                await tx.delete(githubInstallation).where(
+                  and(
+                    eq(githubInstallation.authorizationId, authorizationId),
+                    notInArray(
+                      githubInstallation.installationId,
+                      input.installations.map((installation) => installation.installationId)
+                    )
+                  )
+                )
+              } else {
+                await tx
+                  .delete(githubInstallation)
+                  .where(eq(githubInstallation.authorizationId, authorizationId))
+              }
+            }
           })
         )
         .pipe(Effect.map(toAuthorization)),
@@ -420,30 +424,15 @@ const repositoryFor = (database: Database) => {
               .select()
               .from(githubInstallation)
               .where(eq(githubInstallation.authorizationId, input.authorizationId))
-            if (input.installations.length > 0) {
-              for (const installation of input.installations) {
-                await tx
-                  .insert(githubInstallation)
-                  .values({
-                    id: randomUUID(),
-                    authorizationId: input.authorizationId,
-                    installationId: installation.installationId,
-                    accountId: installation.accountId,
-                    accountLogin: installation.accountLogin,
-                    accountType: installation.accountType,
-                    accountAvatarUrl: installation.accountAvatarUrl,
-                    repositorySelection: installation.repositorySelection,
-                    permissions: JSON.stringify(installation.permissions),
-                    suspendedAt: installation.suspendedAt,
-                    createdAt: input.refreshedAt,
-                    updatedAt: input.refreshedAt
-                  })
-                  .onConflictDoUpdate({
-                    target: [
-                      githubInstallation.authorizationId,
-                      githubInstallation.installationId
-                    ],
-                    set: {
+            const replaceInstallationRows = async () => {
+              if (input.installations.length > 0) {
+                for (const installation of input.installations) {
+                  await tx
+                    .insert(githubInstallation)
+                    .values({
+                      id: randomUUID(),
+                      authorizationId: input.authorizationId,
+                      installationId: installation.installationId,
                       accountId: installation.accountId,
                       accountLogin: installation.accountLogin,
                       accountType: installation.accountType,
@@ -451,24 +440,42 @@ const repositoryFor = (database: Database) => {
                       repositorySelection: installation.repositorySelection,
                       permissions: JSON.stringify(installation.permissions),
                       suspendedAt: installation.suspendedAt,
+                      createdAt: input.refreshedAt,
                       updatedAt: input.refreshedAt
-                    }
-                  })
-              }
-              await tx.delete(githubInstallation).where(
-                and(
-                  eq(githubInstallation.authorizationId, input.authorizationId),
-                  notInArray(
-                    githubInstallation.installationId,
-                    input.installations.map((installation) => installation.installationId)
+                    })
+                    .onConflictDoUpdate({
+                      target: [
+                        githubInstallation.authorizationId,
+                        githubInstallation.installationId
+                      ],
+                      set: {
+                        accountId: installation.accountId,
+                        accountLogin: installation.accountLogin,
+                        accountType: installation.accountType,
+                        accountAvatarUrl: installation.accountAvatarUrl,
+                        repositorySelection: installation.repositorySelection,
+                        permissions: JSON.stringify(installation.permissions),
+                        suspendedAt: installation.suspendedAt,
+                        updatedAt: input.refreshedAt
+                      }
+                    })
+                }
+                await tx.delete(githubInstallation).where(
+                  and(
+                    eq(githubInstallation.authorizationId, input.authorizationId),
+                    notInArray(
+                      githubInstallation.installationId,
+                      input.installations.map((installation) => installation.installationId)
+                    )
                   )
                 )
-              )
-            } else {
-              await tx
-                .delete(githubInstallation)
-                .where(eq(githubInstallation.authorizationId, input.authorizationId))
+              } else {
+                await tx
+                  .delete(githubInstallation)
+                  .where(eq(githubInstallation.authorizationId, input.authorizationId))
+              }
             }
+            await replaceInstallationRows()
             await tx
               .update(githubUserAuthorization)
               .set({

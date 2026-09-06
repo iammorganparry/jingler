@@ -135,8 +135,8 @@ export const decodeManagedCommandFrame = (
 
 export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   #journalTail: Promise<void> = Promise.resolve();
-  readonly #execution = new ManagedExecutionScheduler<RemoteSessionCommand>(
-    (command) => this.#execute(command),
+  readonly #execution = new ManagedExecutionScheduler<RemoteSessionCommand>((command) =>
+    this.#execute(command),
   );
 
   async #metadata(): Promise<RuntimeMetadata | null> {
@@ -154,9 +154,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     await this.ctx.storage.put(JOURNAL_KEY, journal.snapshot());
   }
 
-  #mutateJournal<Value>(
-    mutation: (journal: ManagedSessionJournal) => Value,
-  ): Promise<Value> {
+  #mutateJournal<Value>(mutation: (journal: ManagedSessionJournal) => Value): Promise<Value> {
     const result = this.#journalTail.then(async () => {
       const journal = await this.#journal();
       const value = mutation(journal);
@@ -204,14 +202,9 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
 
   async #append(
     commandId: string,
-    event: Omit<
-      RemoteSessionEvent,
-      "version" | "commandId" | "sessionId" | "eventSequence"
-    >,
+    event: Omit<RemoteSessionEvent, "version" | "commandId" | "sessionId" | "eventSequence">,
   ): Promise<void> {
-    const value = await this.#mutateJournal((journal) =>
-      journal.append(commandId, event),
-    );
+    const value = await this.#mutateJournal((journal) => journal.append(commandId, event));
     this.#broadcast(commandId, value);
   }
 
@@ -251,24 +244,18 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     status: "complete" | "failed" | "cancelled",
     payload: unknown,
   ): Promise<RemoteSessionEvent> {
-    return this.#mutateJournal((journal) =>
-      journal.settle(commandId, status, payload),
-    );
+    return this.#mutateJournal((journal) => journal.settle(commandId, status, payload));
   }
 
   async #checkpoint(eventCursor: number): Promise<void> {
     const metadata = await this.#metadata();
     if (metadata === null) return;
-    const sandbox = getSandbox(
-      this.env.Sandbox,
-      await sandboxIdForSession(metadata.sessionId),
-      {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-      },
-    );
+    const sandbox = getSandbox(this.env.Sandbox, await sandboxIdForSession(metadata.sessionId), {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+    });
     try {
       const result = await createWorkspaceCheckpoint(
         sandbox,
@@ -281,9 +268,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           previousCheckpoint: metadata.checkpoint,
           eventCursor,
           nowSeconds: Math.floor(Date.now() / 1_000),
-          retentionSeconds: Number(
-            this.env.MANAGED_RUNTIME_CHECKPOINT_RETENTION_SECONDS,
-          ),
+          retentionSeconds: Number(this.env.MANAGED_RUNTIME_CHECKPOINT_RETENTION_SECONDS),
           maxBytes: Number(this.env.MANAGED_RUNTIME_MAX_CHECKPOINT_BYTES),
         },
       );
@@ -302,19 +287,11 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     if (metadata === null || metadata.usageReservationId === null) return;
     const activeSeconds = Math.min(
       Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS),
-      Math.max(
-        0,
-        Math.ceil(
-          (Date.now() - (metadata.usageStartedAt ?? Date.now())) / 1_000,
-        ),
-      ),
+      Math.max(0, Math.ceil((Date.now() - (metadata.usageStartedAt ?? Date.now())) / 1_000)),
     );
     try {
       const response = await fetch(
-        new URL(
-          "/api/internal/managed-usage/settle",
-          this.env.MANAGED_CONTROL_PLANE_URL,
-        ),
+        new URL("/api/internal/managed-usage/settle", this.env.MANAGED_CONTROL_PLANE_URL),
         {
           method: "POST",
           headers: {
@@ -328,8 +305,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           }),
         },
       );
-      if (!response.ok)
-        throw new Error(`usage settlement returned ${response.status}`);
+      if (!response.ok) throw new Error(`usage settlement returned ${response.status}`);
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
         usageReservationId: null,
@@ -368,59 +344,53 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
   }
 
   async #execute(command: RemoteSessionCommand): Promise<void> {
-    const sandbox = getSandbox(
-      this.env.Sandbox,
-      await sandboxIdForSession(command.sessionId),
-      {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-      },
-    );
+    const sandbox = getSandbox(this.env.Sandbox, await sandboxIdForSession(command.sessionId), {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+    });
     const inputDirectory = "/tmp/jingler-commands";
     const inputFile = `${inputDirectory}/${await sha256Hex(command.commandId)}.json`;
     let phase = "preparing command input";
-    const checkpoint =
-      managedRuntimeActionForOperation(command.operation) !== "session.observe";
+    const checkpoint = managedRuntimeActionForOperation(command.operation) !== "session.observe";
     let disposeProcess: (() => void) | null = null;
     try {
       await sandbox.mkdir(inputDirectory, { recursive: true });
       await sandbox.writeFile(inputFile, JSON.stringify(command));
-      const certifications = managedCertificationDocument(
-        this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64,
-      );
-      if (this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64 && !certifications) {
-        throw new Error("Managed runtime certifications are invalid");
-      }
-      if (certifications) {
-        const runtimeDirectory = "/workspace/.jingler-runtime/runtime";
-        await sandbox.mkdir(runtimeDirectory, { recursive: true });
-        await sandbox.writeFile(
-          `${runtimeDirectory}/certifications.json`,
-          certifications,
+      const writeCertifications = async (): Promise<void> => {
+        const certifications = managedCertificationDocument(
+          this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64,
         );
-      }
+        if (this.env.MANAGED_RUNTIME_CERTIFICATIONS_BASE64 && !certifications) {
+          throw new Error("Managed runtime certifications are invalid");
+        }
+        if (certifications) {
+          const runtimeDirectory = "/workspace/.jingler-runtime/runtime";
+          await sandbox.mkdir(runtimeDirectory, { recursive: true });
+          await sandbox.writeFile(`${runtimeDirectory}/certifications.json`, certifications);
+        }
+      };
+      await writeCertifications();
       const metadata = await this.#metadata();
-      if (metadata === null)
-        throw new Error("Managed runtime metadata disappeared");
-      const selection = commandProviderSelection(command);
-      if (
-        selection !== null &&
-        (selection.connectionId !== metadata.providerConnection.connectionId ||
-          selection.providerId !== metadata.providerConnection.providerId ||
-          selection.modelId !== metadata.modelId)
-      ) {
-        throw new Error(
-          "Managed command provider selection does not match the configured session",
-        );
-      }
-      if (
-        !metadata.authorized ||
-        metadata.providerConnection.expiresAt <= Date.now() / 1_000
-      ) {
-        throw new Error("Managed provider connection is unavailable");
-      }
+      if (metadata === null) throw new Error("Managed runtime metadata disappeared");
+      const validateProviderSelection = (): void => {
+        const selection = commandProviderSelection(command);
+        if (
+          selection !== null &&
+          (selection.connectionId !== metadata.providerConnection.connectionId ||
+            selection.providerId !== metadata.providerConnection.providerId ||
+            selection.modelId !== metadata.modelId)
+        ) {
+          throw new Error(
+            "Managed command provider selection does not match the configured session",
+          );
+        }
+        if (!metadata.authorized || metadata.providerConnection.expiresAt <= Date.now() / 1_000) {
+          throw new Error("Managed provider connection is unavailable");
+        }
+      };
+      validateProviderSelection();
       const processEnv = managedProviderEnvironment({
         capability: metadata.providerConnection,
         origin: managedRuntimeSandboxOrigin(this.env),
@@ -447,6 +417,24 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       ].join(" ");
       let settled = false;
       let buffered = "";
+      const admitLine = async (line: string): Promise<void> => {
+        let frame: ReturnType<typeof decodeManagedCommandFrame> = null;
+        try {
+          frame = decodeManagedCommandFrame(JSON.parse(line));
+        } catch {
+          // The command runner emits protocol frames on stdout only. Ignore
+          // non-protocol dependency noise rather than relaying secrets/logs.
+        }
+        if (frame?.type === "managed-event") {
+          await this.#append(command.commandId, frame.event);
+        } else if (frame?.type === "managed-complete") {
+          await this.#settle(command.commandId, "complete", frame.payload, checkpoint);
+          settled = true;
+        } else if (frame?.type === "managed-failed") {
+          await this.#settle(command.commandId, "failed", frame.payload, checkpoint);
+          settled = true;
+        }
+      };
       const admitOutput = async (chunk: string): Promise<void> => {
         buffered += chunk;
         while (true) {
@@ -455,32 +443,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           const line = buffered.slice(0, newline);
           buffered = buffered.slice(newline + 1);
           if (!line) continue;
-          let frame: ReturnType<typeof decodeManagedCommandFrame> = null;
-          try {
-            frame = decodeManagedCommandFrame(JSON.parse(line));
-          } catch {
-            // The command runner emits protocol frames on stdout only. Ignore
-            // non-protocol dependency noise rather than relaying secrets/logs.
-          }
-          if (frame?.type === "managed-event") {
-            await this.#append(command.commandId, frame.event);
-          } else if (frame?.type === "managed-complete") {
-            await this.#settle(
-              command.commandId,
-              "complete",
-              frame.payload,
-              checkpoint,
-            );
-            settled = true;
-          } else if (frame?.type === "managed-failed") {
-            await this.#settle(
-              command.commandId,
-              "failed",
-              frame.payload,
-              checkpoint,
-            );
-            settled = true;
-          }
+          await admitLine(line);
         }
       };
 
@@ -495,9 +458,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           env: processEnv,
           timeout: Number(this.env.MANAGED_RUNTIME_MAX_ACTIVE_SECONDS) * 1_000,
         });
-        await admitOutput(
-          result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`,
-        );
+        await admitOutput(terminatedOutputLine(result.stdout));
         if (!settled) {
           await this.#settle(
             command.commandId,
@@ -539,9 +500,7 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       const retained = await process.getLogs();
       acceptStreamOutput = false;
       await outputTail;
-      await admitOutput(
-        unstreamedProcessOutput(streamedStdout, retained.stdout),
-      );
+      await admitOutput(unstreamedProcessOutput(streamedStdout, retained.stdout));
       if (buffered.trim().length > 0) await admitOutput("\n");
       if (!settled) {
         await this.#settle(
@@ -587,30 +546,19 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
     await this.#unregisterSession(metadata);
   }
 
-  async #terminateProcess(
-    metadata: RuntimeMetadata,
-    reason: string,
-  ): Promise<void> {
+  async #terminateProcess(metadata: RuntimeMetadata, reason: string): Promise<void> {
     if (metadata.processId === null) return;
-    const sandbox = getSandbox(
-      this.env.Sandbox,
-      await sandboxIdForSession(metadata.sessionId),
-      {
-        transport: "rpc",
-        normalizeId: true,
-        enableDefaultSession: false,
-        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-      },
-    );
+    const sandbox = getSandbox(this.env.Sandbox, await sandboxIdForSession(metadata.sessionId), {
+      transport: "rpc",
+      normalizeId: true,
+      enableDefaultSession: false,
+      sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+    });
     await sandbox.killProcess(metadata.processId).catch(() => undefined);
     try {
-      const terminal = await this.#settleJournal(
-        metadata.processId,
-        "cancelled",
-        {
-          reason,
-        },
-      );
+      const terminal = await this.#settleJournal(metadata.processId, "cancelled", {
+        reason,
+      });
       this.#broadcast(metadata.processId, terminal);
       await this.#checkpoint(terminal.eventSequence);
     } catch {
@@ -620,7 +568,9 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
 
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname === "/v1/configure" && request.method === "POST") {
+    const handleV1Configure = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/configure" && request.method === "POST")) return null;
+
       const decoded = Schema.decodeUnknownEither(ManagedRuntimeConfiguration)(
         await request.json(),
         { onExcessProperty: "error" },
@@ -636,63 +586,76 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         return json({ error: "Provider connection selection mismatch" }, 400);
       }
       const previous = await this.#metadata();
-      if (
-        previous !== null &&
-        (previous.subject !== body.subject ||
-          previous.environmentId !== body.environmentId ||
-          previous.sessionId !== body.sessionId)
-      ) {
-        return json({ error: "Runtime identity conflict" }, 409);
-      }
-      if (
-        previous !== null &&
-        previous.processId !== null &&
-        (previous.providerConnection.connectionId !== body.connectionId ||
-          previous.providerConnection.providerId !== body.providerId ||
-          previous.modelId !== body.modelId)
-      ) {
-        return json(
-          {
-            error: "Cannot switch provider selection during an active command",
-          },
-          409,
-        );
-      }
-      const metadata: RuntimeMetadata = {
-        subject: body.subject,
-        environmentId: body.environmentId,
-        sessionId: body.sessionId,
-        environmentGeneration: body.environmentGeneration,
-        authStateVersion: body.authStateVersion,
-        sessionGeneration: previous?.sessionGeneration ?? 1,
-        processId: previous?.processId ?? null,
-        authorized: true,
-        providerConnection: body.providerConnection,
-        modelId: body.modelId,
-        webSearchCapabilities: body.webSearchCapabilities,
-        githubCapabilityHandle: body.githubCapabilityHandle,
-        repositorySlug: body.repositorySlug ?? previous?.repositorySlug ?? null,
-        providerTokenHash: previous?.providerTokenHash ?? null,
-        gitTokenHash: previous?.gitTokenHash ?? null,
-        usageReservationId:
-          body.reservationId ?? previous?.usageReservationId ?? null,
+      const configurationConflict = (): Response | null => {
+        if (
+          previous !== null &&
+          (previous.subject !== body.subject ||
+            previous.environmentId !== body.environmentId ||
+            previous.sessionId !== body.sessionId)
+        ) {
+          return json({ error: "Runtime identity conflict" }, 409);
+        }
+        if (
+          previous !== null &&
+          previous.processId !== null &&
+          (previous.providerConnection.connectionId !== body.connectionId ||
+            previous.providerConnection.providerId !== body.providerId ||
+            previous.modelId !== body.modelId)
+        ) {
+          return json(
+            {
+              error: "Cannot switch provider selection during an active command",
+            },
+            409,
+          );
+        }
+        return null;
+      };
+      const conflict = configurationConflict();
+      if (conflict !== null) return conflict;
+      const configuredUsage = () => ({
+        usageReservationId: body.reservationId ?? previous?.usageReservationId ?? null,
         usageStartedAt:
-          body.reservationId !== null &&
-          body.reservationId !== previous?.usageReservationId
+          body.reservationId !== null && body.reservationId !== previous?.usageReservationId
             ? null
             : (previous?.usageStartedAt ?? null),
-        checkpoint: previous?.checkpoint ?? null,
+      });
+      const configuredMetadata = (): RuntimeMetadata => {
+        const metadata: RuntimeMetadata = {
+          subject: body.subject,
+          environmentId: body.environmentId,
+          sessionId: body.sessionId,
+          environmentGeneration: body.environmentGeneration,
+          authStateVersion: body.authStateVersion,
+          sessionGeneration: previous?.sessionGeneration ?? 1,
+          processId: previous?.processId ?? null,
+          authorized: true,
+          providerConnection: body.providerConnection,
+          modelId: body.modelId,
+          webSearchCapabilities: body.webSearchCapabilities,
+          githubCapabilityHandle: body.githubCapabilityHandle,
+          repositorySlug: body.repositorySlug ?? previous?.repositorySlug ?? null,
+          providerTokenHash: previous?.providerTokenHash ?? null,
+          gitTokenHash: previous?.gitTokenHash ?? null,
+          ...configuredUsage(),
+          checkpoint: previous?.checkpoint ?? null,
+        };
+        return metadata;
       };
+      const metadata = configuredMetadata();
       await this.ctx.storage.put(METADATA_KEY, metadata);
       return json({ sessionGeneration: metadata.sessionGeneration });
-    }
+    };
 
-    if (url.pathname === "/v1/auth-state" && request.method === "POST") {
+    const handleV1AuthState = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/auth-state" && request.method === "POST")) return null;
+
       const body = fields(await request.json());
       const snapshot = decodeManagedAuthSnapshot(body?.snapshot);
       const metadata = await this.#metadata();
-      if (metadata !== null) {
-        const now = Math.floor(Date.now() / 1_000);
+      if (metadata === null) return json({ ok: true });
+      const now = Math.floor(Date.now() / 1_000);
+      const currentProviderAuthorization = () => {
         const providerConnection = snapshot?.providerConnections.find(
           (capability) =>
             hasSameProviderRoute(metadata.providerConnection, capability) &&
@@ -702,26 +665,40 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           snapshot?.capabilities.includes("managed.session.execute") === true &&
           providerConnection !== undefined &&
           (snapshot?.expiresAt ?? 0) > now;
-        const next = await applyManagedAuthorizationSnapshot(
-          metadata,
-          authorized ? (snapshot?.version ?? null) : null,
-          async () => this.#terminateProcess(metadata, "authorization-revoked"),
-        );
+        return { providerConnection, authorized };
+      };
+      const { providerConnection, authorized } = currentProviderAuthorization();
+      const next = await applyManagedAuthorizationSnapshot(
+        metadata,
+        authorized ? (snapshot?.version ?? null) : null,
+        async () => this.#terminateProcess(metadata, "authorization-revoked"),
+      );
+      const currentSearchCapabilities = () => {
         const webSearchCapabilities =
           snapshot?.credentialCapabilities.flatMap((capability) =>
             (capability.provider === "exa" || capability.provider === "firecrawl") &&
             capability.expiresAt > now
-              ? [{
-                  provider: capability.provider,
-                  handle: capability.handle,
-                  expiresAt: capability.expiresAt
-                }]
-              : []
+              ? [
+                  {
+                    provider: capability.provider,
+                    handle: capability.handle,
+                    expiresAt: capability.expiresAt,
+                  },
+                ]
+              : [],
           ) ?? [];
-        const searchRouteChanged = managedWebSearchRouteChanged(
-          metadata.webSearchCapabilities,
-          webSearchCapabilities,
-        );
+        return webSearchCapabilities;
+      };
+      const webSearchCapabilities = currentSearchCapabilities();
+      const currentGithubHandle = () =>
+        snapshot?.credentialCapabilities.find(
+          (capability) => capability.provider === "github" && capability.expiresAt > now,
+        )?.handle ?? null;
+      const searchRouteChanged = managedWebSearchRouteChanged(
+        metadata.webSearchCapabilities,
+        webSearchCapabilities,
+      );
+      const persistAuthorization = async (): Promise<void> => {
         if (searchRouteChanged && next.processId !== null) {
           await this.#terminateProcess(metadata, "web-search-route-changed");
         }
@@ -731,57 +708,52 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
           processId,
           providerConnection: providerConnection ?? metadata.providerConnection,
           webSearchCapabilities,
-          githubCapabilityHandle:
-            snapshot?.credentialCapabilities.find(
-              (capability) =>
-                capability.provider === "github" && capability.expiresAt > now,
-            )?.handle ?? null,
+          githubCapabilityHandle: currentGithubHandle(),
         });
         if (metadata.processId !== null && processId === null) {
           await this.#settleUsage();
           await this.#unregisterSession(metadata);
         }
-      }
+      };
+      await persistAuthorization();
       return json({ ok: true });
+    };
+
+    for (const handle of [handleV1Configure, handleV1AuthState]) {
+      const response = await handle();
+      if (response !== null) return response;
     }
 
     const metadata = await this.#metadata();
-    if (metadata === null)
-      return json({ error: "Runtime is not configured" }, 409);
+    if (metadata === null) return json({ error: "Runtime is not configured" }, 409);
+    const handleV1Destroy = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/destroy" && request.method === "POST")) return null;
 
-    if (url.pathname === "/v1/destroy" && request.method === "POST") {
       const body = fields(await request.json());
-      if (
-        body?.subject !== metadata.subject ||
-        body.environmentId !== metadata.environmentId
-      ) {
+      if (body?.subject !== metadata.subject || body.environmentId !== metadata.environmentId) {
         return json({ error: "Runtime identity conflict" }, 403);
       }
       await this.#terminateProcess(metadata, "environment-destroyed");
       await this.#settleUsage();
-      const sandbox = getSandbox(
-        this.env.Sandbox,
-        await sandboxIdForSession(metadata.sessionId),
-        {
-          transport: "rpc",
-          normalizeId: true,
-          enableDefaultSession: false,
-          sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
-        },
-      );
+      const sandbox = getSandbox(this.env.Sandbox, await sandboxIdForSession(metadata.sessionId), {
+        transport: "rpc",
+        normalizeId: true,
+        enableDefaultSession: false,
+        sleepAfter: `${this.env.MANAGED_RUNTIME_IDLE_SECONDS}s`,
+      });
       await sandbox.destroy().catch(() => undefined);
       await this.#unregisterSession(metadata);
       await this.ctx.storage.deleteAll();
       return json({ destroyed: true });
-    }
+    };
 
-    if (url.pathname === "/v1/commands" && request.method === "POST") {
-      const decoded = Schema.decodeUnknownEither(RemoteSessionCommandSchema)(
-        await request.json(),
-        { onExcessProperty: "error" },
-      );
-      if (Either.isLeft(decoded))
-        return json({ error: "Invalid command" }, 400);
+    const handleV1Commands = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/commands" && request.method === "POST")) return null;
+
+      const decoded = Schema.decodeUnknownEither(RemoteSessionCommandSchema)(await request.json(), {
+        onExcessProperty: "error",
+      });
+      if (Either.isLeft(decoded)) return json({ error: "Invalid command" }, 400);
       const command = decoded.right;
       const verification = await this.#authorize(
         request,
@@ -789,81 +761,83 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         managedRuntimeActionForOperation(command.operation),
       );
       if (!verification.ok) return json({ error: verification.reason }, 403);
-      if (command.sessionId !== metadata.sessionId)
-        return json({ error: "wrong-scope" }, 403);
-      const admission = await this.#mutateJournal((journal) =>
-        journal.admit(command),
-      );
+      if (command.sessionId !== metadata.sessionId) return json({ error: "wrong-scope" }, 403);
+      const admission = await this.#mutateJournal((journal) => journal.admit(command));
       if (admission === "started") {
         this.ctx.waitUntil(this.#scheduleExecution(command));
       }
       return json({ accepted: true, replay: admission === "replay" }, 202);
-    }
+    };
 
-    const providerAuthorization = url.pathname.match(
-      PROVIDER_AUTHORIZATION_PATH,
-    );
-    if (providerAuthorization !== null && request.method === "POST") {
-      const token = bearerManagedGrant(request);
-      const tokenMatches =
-        token !== null &&
-        metadata.providerTokenHash !== null &&
-        (await sha256Hex(token)) === metadata.providerTokenHash;
-      if (
-        !metadata.authorized ||
-        metadata.providerConnection.proxy !== providerAuthorization[1] ||
-        metadata.processId === null ||
-        !tokenMatches
-      ) {
-        console.warn(
-          JSON.stringify({
-            component: "managed-session-runtime",
-            event: "provider_authorization_denied",
-            provider: providerAuthorization[1],
-            authorized: metadata.authorized,
-            providerMatches:
-              metadata.providerConnection.proxy === providerAuthorization[1],
-            processActive: metadata.processId !== null,
-            tokenPresent: token !== null,
-            tokenMatches,
-          }),
-        );
-        return json({ error: "Provider authorization unavailable" }, 403);
-      }
-      return json({
-        subject: metadata.subject,
-        capabilityHandle: metadata.providerConnection.handle,
-      });
-    }
+    const handleV1GitToken = async (): Promise<Response | null> => {
+      const authorizeProvider = async (): Promise<Response | null> => {
+        const providerAuthorization = url.pathname.match(PROVIDER_AUTHORIZATION_PATH);
+        if (providerAuthorization !== null && request.method === "POST") {
+          const token = bearerManagedGrant(request);
+          const tokenMatches =
+            token !== null &&
+            metadata.providerTokenHash !== null &&
+            (await sha256Hex(token)) === metadata.providerTokenHash;
+          if (
+            !metadata.authorized ||
+            metadata.providerConnection.proxy !== providerAuthorization[1] ||
+            metadata.processId === null ||
+            !tokenMatches
+          ) {
+            console.warn(
+              JSON.stringify({
+                component: "managed-session-runtime",
+                event: "provider_authorization_denied",
+                provider: providerAuthorization[1],
+                authorized: metadata.authorized,
+                providerMatches: metadata.providerConnection.proxy === providerAuthorization[1],
+                processActive: metadata.processId !== null,
+                tokenPresent: token !== null,
+                tokenMatches,
+              }),
+            );
+            return json({ error: "Provider authorization unavailable" }, 403);
+          }
+          return json({
+            subject: metadata.subject,
+            capabilityHandle: metadata.providerConnection.handle,
+          });
+        }
+        return null;
+      };
+      const authorizeSearch = async (): Promise<Response | null> => {
+        const webSearchAuthorization = url.pathname.match(WEB_SEARCH_AUTHORIZATION_PATH);
+        if (webSearchAuthorization !== null && request.method === "POST") {
+          const token = bearerManagedGrant(request);
+          const tokenMatches =
+            token !== null &&
+            metadata.providerTokenHash !== null &&
+            (await sha256Hex(token)) === metadata.providerTokenHash;
+          const capability = (metadata.webSearchCapabilities ?? []).find(
+            (candidate) => candidate.provider === webSearchAuthorization[1],
+          );
+          if (
+            !metadata.authorized ||
+            metadata.processId === null ||
+            !tokenMatches ||
+            capability === undefined ||
+            capability.expiresAt <= Math.floor(Date.now() / 1_000)
+          ) {
+            return json({ error: "WebSearch authorization unavailable" }, 403);
+          }
+          return json({
+            subject: metadata.subject,
+            capabilityHandle: capability.handle,
+          });
+        }
+        return null;
+      };
+      const providerResponse = await authorizeProvider();
+      if (providerResponse !== null) return providerResponse;
+      const searchResponse = await authorizeSearch();
+      if (searchResponse !== null) return searchResponse;
+      if (!(url.pathname === "/v1/git-token" && request.method === "POST")) return null;
 
-    const webSearchAuthorization = url.pathname.match(
-      WEB_SEARCH_AUTHORIZATION_PATH,
-    );
-    if (webSearchAuthorization !== null && request.method === "POST") {
-      const token = bearerManagedGrant(request);
-      const tokenMatches =
-        token !== null &&
-        metadata.providerTokenHash !== null &&
-        (await sha256Hex(token)) === metadata.providerTokenHash;
-      const capability = (metadata.webSearchCapabilities ?? []).find(
-        (candidate) => candidate.provider === webSearchAuthorization[1],
-      );
-      if (
-        !metadata.authorized ||
-        metadata.processId === null ||
-        !tokenMatches ||
-        capability === undefined ||
-        capability.expiresAt <= Math.floor(Date.now() / 1_000)
-      ) {
-        return json({ error: "WebSearch authorization unavailable" }, 403);
-      }
-      return json({
-        subject: metadata.subject,
-        capabilityHandle: capability.handle,
-      });
-    }
-
-    if (url.pathname === "/v1/git-token" && request.method === "POST") {
       if (
         !metadata.authorized ||
         metadata.githubCapabilityHandle === null ||
@@ -877,17 +851,21 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         gitTokenHash: await sha256Hex(token),
       });
       return json({ token });
-    }
+    };
 
-    if (url.pathname === "/v1/git-token/revoke" && request.method === "POST") {
+    const handleV1GitTokenRevoke = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/git-token/revoke" && request.method === "POST")) return null;
+
       await this.ctx.storage.put(METADATA_KEY, {
         ...metadata,
         gitTokenHash: null,
       });
       return json({ ok: true });
-    }
+    };
 
-    if (url.pathname === "/v1/git-authorization" && request.method === "POST") {
+    const handleV1GitAuthorization = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/git-authorization" && request.method === "POST")) return null;
+
       const token = bearerManagedGrant(request);
       if (
         !metadata.authorized ||
@@ -903,14 +881,12 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
         capabilityHandle: metadata.githubCapabilityHandle,
         repositorySlug: metadata.repositorySlug,
       });
-    }
+    };
 
-    if (url.pathname === "/v1/events" && request.method === "GET") {
-      const verification = await this.#authorize(
-        request,
-        metadata,
-        "session.observe",
-      );
+    const handleV1Events = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/events" && request.method === "GET")) return null;
+
+      const verification = await this.#authorize(request, metadata, "session.observe");
       if (!verification.ok) return json({ error: verification.reason }, 403);
       const commandId = url.searchParams.get("commandId");
       const after = Number(url.searchParams.get("after") ?? -1);
@@ -922,35 +898,52 @@ export class ManagedSessionObject extends DurableObject<ManagedRuntimeEnv> {
       if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
         return json({ events });
       }
-      const pair = new WebSocketPair();
-      const sockets = Object.values(pair);
-      const client = sockets[0];
-      const server = sockets[1];
-      if (client === undefined || server === undefined) {
-        return json({ error: "WebSocket unavailable" }, 503);
-      }
-      this.ctx.acceptWebSocket(server, [commandId]);
-      for (const event of events) server.send(JSON.stringify(event));
-      // Do not close in the same task that sends a terminal frame. Cloudflare's
-      // WebSocket implementation may flush the close before the queued message,
-      // leaving the observer with a clean 1000 close but no terminal event. The
-      // client owns the stream lifetime and closes as soon as it consumes the
-      // durable terminal frame; hibernation keeps an idle replay socket cheap in
-      // the narrow interval before that happens.
-      return new Response(null, { status: 101, webSocket: client });
-    }
+      const openReplaySocket = (): Response => {
+        const pair = new WebSocketPair();
+        const sockets = Object.values(pair);
+        const client = sockets[0];
+        const server = sockets[1];
+        if (client === undefined || server === undefined) {
+          return json({ error: "WebSocket unavailable" }, 503);
+        }
+        this.ctx.acceptWebSocket(server, [commandId]);
+        for (const event of events) server.send(JSON.stringify(event));
+        // Do not close in the same task that sends a terminal frame. Cloudflare's
+        // WebSocket implementation may flush the close before the queued message,
+        // leaving the observer with a clean 1000 close but no terminal event. The
+        // client owns the stream lifetime and closes as soon as it consumes the
+        // durable terminal frame; hibernation keeps an idle replay socket cheap in
+        // the narrow interval before that happens.
+        return new Response(null, { status: 101, webSocket: client });
+      };
+      return openReplaySocket();
+    };
 
-    if (url.pathname === "/v1/cancel" && request.method === "POST") {
-      const verification = await this.#authorize(
-        request,
-        metadata,
-        "session.cancel",
-      );
+    const handleV1Cancel = async (): Promise<Response | null> => {
+      if (!(url.pathname === "/v1/cancel" && request.method === "POST")) return null;
+
+      const verification = await this.#authorize(request, metadata, "session.cancel");
       if (!verification.ok) return json({ error: verification.reason }, 403);
       await this.#stopActive("cancelled");
       return json({ ok: true });
+    };
+
+    for (const handle of [
+      handleV1Destroy,
+      handleV1Commands,
+      handleV1GitToken,
+      handleV1GitTokenRevoke,
+      handleV1GitAuthorization,
+      handleV1Events,
+      handleV1Cancel,
+    ]) {
+      const response = await handle();
+      if (response !== null) return response;
     }
 
     return json({ error: "Not found" }, 404);
   }
 }
+
+const terminatedOutputLine = (output: string): string =>
+  output.endsWith("\n") ? output : `${output}\n`;

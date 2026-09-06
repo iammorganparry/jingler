@@ -231,71 +231,7 @@ export class PluginRegistry extends Effect.Service<PluginRegistry>()("@jingler/P
     > =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const dir = root
-
-        if (!dir) return { decoded: [], failed: [] }
-        const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
-        if (!exists) return { decoded: [], failed: [] }
-
-        const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as Array<string>))
-        const decoded: Array<DecodedPlugin> = []
-        const failed: Array<PluginLoadFailure> = []
-
-        for (const entry of entries) {
-          const pluginDir = path.join(dir, entry)
-
-          // Stray files (a `.DS_Store`, a README) are not failed plugins — they
-          // are simply not plugins, so a non-directory is skipped, not reported.
-          const info = yield* fs.stat(pluginDir).pipe(Effect.either)
-          if (info._tag === "Left" || info.right.type !== "Directory") continue
-
-          const manifestFile = path.join(pluginDir, MANIFEST_FILE)
-          const raw = yield* fs.readFileString(manifestFile).pipe(Effect.orElseSucceed(() => null))
-          if (raw === null) {
-            // In the INSTALLED root the operator put this directory there, so a
-            // missing manifest is worth reporting. In the BUNDLED root we put it
-            // there — `plugins/examples/` is a container, not a plugin — and
-            // reporting it made every dev launch show a permanent "broken
-            // plugin" in Settings that the operator can do nothing about.
-            //
-            // A manifest that EXISTS and fails to decode is still reported from
-            // either root: that is a real broken plugin whoever shipped it.
-            if (!builtin) {
-              failed.push({
-                dir: entry,
-                kind: "manifest-missing",
-                message: `No ${MANIFEST_FILE} in this directory.`
-              })
-            }
-            continue
-          }
-
-          const result = yield* Schema.decodeUnknown(Schema.parseJson(PluginManifestSchema))(raw).pipe(Effect.either)
-          if (result._tag === "Left") {
-            failed.push({ dir: entry, kind: "manifest-invalid", message: describeDecodeFailure(result.left) })
-            continue
-          }
-          const manifest = result.right
-
-          // The manifest can PROMISE an entry file the directory does not hold —
-          // a typo in `main`, a `ui` bundle that was never built. That is a
-          // load-time failure the operator should see when they install, not a
-          // silent no-op the first time they open the plugin's tab.
-          const missingEntry = yield* firstMissingEntry(fs, path, pluginDir, manifest)
-          if (missingEntry !== null) {
-            failed.push({
-              dir: entry,
-              kind: "entry-missing",
-              message: `Declared entry "${missingEntry}" does not exist in the plugin directory.`
-            })
-            continue
-          }
-
-          decoded.push({ dir: pluginDir, manifest, builtin })
-        }
-
-        return { decoded, failed }
+        return yield* scanPluginDirectory(root, fs, builtin)
       })
 
     /**
@@ -568,7 +504,8 @@ const firstMissingEntry = (
  */
 const resolveLoadOrder = (
   entries: ReadonlyArray<DecodedPlugin>
-): { ordered: ReadonlyArray<DecodedPlugin>; failed: ReadonlyArray<PluginLoadFailure> } => {
+): { ordered: ReadonlyArray<DecodedPlugin>
+  failed: ReadonlyArray<PluginLoadFailure> } => {
   const byId = new Map(entries.map((e) => [e.manifest.id, e] as const))
   const ordered: Array<DecodedPlugin> = []
   const failed: Array<PluginLoadFailure> = []
@@ -591,30 +528,16 @@ const resolveLoadOrder = (
 
     onStack.add(id)
     let outcome: Outcome = "ok"
-    for (const depId of entry.manifest.extensionDependencies ?? []) {
-      const dep = byId.get(depId)
-      if (!dep) {
-        outcome = "missing"
-        recordFailure(entry, "dependency-missing", `requires "${depId}", which is not installed.`)
-        break
-      }
-      const depOutcome = visit(dep)
-      if (depOutcome === "cycle") {
-        outcome = "cycle"
-        recordFailure(entry, "dependency-cycle", `is part of a dependency cycle through "${depId}".`)
-        break
-      }
-      if (depOutcome === "missing") {
-        outcome = "missing"
-        recordFailure(entry, "dependency-missing", `depends on "${depId}", which failed to load.`)
-        break
-      }
-    }
-    onStack.delete(id)
-    settled.set(id, outcome)
-    // Pushed only on success, and only after every dependency — so `ordered` is
-    // a valid load order by construction.
-    if (outcome === "ok") ordered.push(entry)
+    outcome = resolvePluginDependencies(entry,
+      byId,
+      outcome,
+      recordFailure,
+      visit,
+      onStack,
+      id,
+      settled,
+      ordered
+    )
     return outcome
   }
 
@@ -649,4 +572,120 @@ const describeDecodeFailure = (cause: unknown): string => {
   }
   const text = cause instanceof Error ? cause.message : String(cause)
   return (text.split("\n").find((line) => line.trim().length > 0) ?? "unrecognised shape").trim().slice(0, 240)
+}
+
+function* scanPluginDirectory(
+  root: string | undefined,
+  fs: FileSystem.FileSystem,
+  builtin: boolean
+) {
+  const path = yield* Path.Path
+  const dir = root
+
+  if (!dir) return { decoded: [], failed: [] }
+  const exists = yield* fs.exists(dir).pipe(Effect.orElseSucceed(() => false))
+  if (!exists) return { decoded: [], failed: [] }
+
+  const entries = yield* fs.readDirectory(dir).pipe(Effect.orElseSucceed(() => [] as Array<string>))
+  const decoded: Array<DecodedPlugin> = []
+  const failed: Array<PluginLoadFailure> = []
+
+  for (const entry of entries) {
+    const pluginDir = path.join(dir, entry)
+
+    // Stray files (a `.DS_Store`, a README) are not failed plugins — they
+    // are simply not plugins, so a non-directory is skipped, not reported.
+    const info = yield* fs.stat(pluginDir).pipe(Effect.either)
+    if (info._tag === "Left" || info.right.type !== "Directory") continue
+
+    const manifestFile = path.join(pluginDir, MANIFEST_FILE)
+    const raw = yield* fs.readFileString(manifestFile).pipe(Effect.orElseSucceed(() => null))
+    if (raw === null) {
+      // In the INSTALLED root the operator put this directory there, so a
+      // missing manifest is worth reporting. In the BUNDLED root we put it
+      // there — `plugins/examples/` is a container, not a plugin — and
+      // reporting it made every dev launch show a permanent "broken
+      // plugin" in Settings that the operator can do nothing about.
+      //
+      // A manifest that EXISTS and fails to decode is still reported from
+      // either root: that is a real broken plugin whoever shipped it.
+      if (!builtin) {
+        failed.push({
+          dir: entry,
+          kind: "manifest-missing",
+          message: `No ${MANIFEST_FILE} in this directory.`
+        })
+      }
+      continue
+    }
+
+    const result = yield* Schema.decodeUnknown(Schema.parseJson(PluginManifestSchema))(raw).pipe(
+      Effect.either
+    )
+    if (result._tag === "Left") {
+      failed.push({
+        dir: entry,
+        kind: "manifest-invalid",
+        message: describeDecodeFailure(result.left)
+      })
+      continue
+    }
+    const manifest = result.right
+
+    // The manifest can PROMISE an entry file the directory does not hold —
+    // a typo in `main`, a `ui` bundle that was never built. That is a
+    // load-time failure the operator should see when they install, not a
+    // silent no-op the first time they open the plugin's tab.
+    const missingEntry = yield* firstMissingEntry(fs, path, pluginDir, manifest)
+    if (missingEntry !== null) {
+      failed.push({
+        dir: entry,
+        kind: "entry-missing",
+        message: `Declared entry "${missingEntry}" does not exist in the plugin directory.`
+      })
+      continue
+    }
+
+    decoded.push({ dir: pluginDir, manifest, builtin })
+  }
+
+  return { decoded, failed }
+}
+
+function resolvePluginDependencies(
+  entry: DecodedPlugin,
+  byId: Map<string, DecodedPlugin>,
+  outcome: "ok" | "missing" | "cycle",
+  recordFailure: (entry: DecodedPlugin, kind: PluginFailureKind, message: string) => void,
+  visit: (entry: DecodedPlugin) => "ok" | "missing" | "cycle",
+  onStack: Set<string>,
+  id: string,
+  settled: Map<string, "ok" | "missing" | "cycle">,
+  ordered: DecodedPlugin[]
+) {
+  for (const depId of entry.manifest.extensionDependencies ?? []) {
+    const dep = byId.get(depId)
+    if (!dep) {
+      outcome = "missing"
+      recordFailure(entry, "dependency-missing", `requires "${depId}", which is not installed.`)
+      break
+    }
+    const depOutcome = visit(dep)
+    if (depOutcome === "cycle") {
+      outcome = "cycle"
+      recordFailure(entry, "dependency-cycle", `is part of a dependency cycle through "${depId}".`)
+      break
+    }
+    if (depOutcome === "missing") {
+      outcome = "missing"
+      recordFailure(entry, "dependency-missing", `depends on "${depId}", which failed to load.`)
+      break
+    }
+  }
+  onStack.delete(id)
+  settled.set(id, outcome)
+  // Pushed only on success, and only after every dependency — so `ordered` is
+  // a valid load order by construction.
+  if (outcome === "ok") ordered.push(entry)
+  return outcome
 }

@@ -176,7 +176,9 @@ describe("pi session creation", () => {
       },
       checklist: [{ step: 1, text: "Implement", completed: false }]
     }
+    const planEvents: EventBus[] = []
     const enterPlanMode = vi.fn(async (events: EventBus) => {
+      planEvents.push(events)
       events.emit("plannotator:host-state", projection)
       events.emit("plannotator:host-notice", { message: "Plan review failed closed." })
       return { phase: "executing" as const }
@@ -213,6 +215,15 @@ describe("pi session creation", () => {
     const projected = vi.fn()
     handle.subscribePlannotator?.(projected)
     expect(projected).toHaveBeenCalledWith(projection)
+    const updatedProjection = {
+      ...projection,
+      checklist: [{ step: 1, text: "Implement", completed: true }]
+    }
+    planEvents[0]?.emit("plannotator:host-state", updatedProjection)
+    expect(projected).toHaveBeenLastCalledWith(updatedProjection)
+    const replayed = vi.fn()
+    handle.subscribePlannotator?.(replayed)
+    expect(replayed).toHaveBeenCalledWith(updatedProjection)
     const notified = vi.fn()
     handle.subscribePlannotatorNotice?.(notified)
     expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
@@ -278,29 +289,7 @@ describe("pi session creation", () => {
       expect.objectContaining({ mode: "rpc", uiContext: expect.any(Object) })
     )
     expect(received?.resourceLoader?.getSkills().skills.map(({ name }) => name)).toContain("ponytail")
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Jingler's embedded engineering agent"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain("jingler_ask_question")
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain("subagent")
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Never launch coding CLIs through command_execute"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Self-implementation stays in Main"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "never use a child named main as its proxy"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "Select a catalog agent and name every child"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).toContain(
-      "reserve workflowScript for two or more children"
-    )
-    expect(received?.resourceLoader?.getSystemPrompt()).not.toContain(
-      "scout (fast codebase recon)"
-    )
+    expectLockedSystemPrompt(received?.resourceLoader?.getSystemPrompt())
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({
         type: "custom_message",
@@ -445,3 +434,15 @@ describe("pi session connection validation", () => {
     expect(createSession).not.toHaveBeenCalled()
   })
 })
+
+const expectLockedSystemPrompt = (prompt: string | undefined): void => {
+  expect(prompt).toContain("Jingler's embedded engineering agent")
+  expect(prompt).toContain("jingler_ask_question")
+  expect(prompt).toContain("subagent")
+  expect(prompt).toContain("Never launch coding CLIs through command_execute")
+  expect(prompt).toContain("Self-implementation stays in Main")
+  expect(prompt).toContain("never use a child named main as its proxy")
+  expect(prompt).toContain("Select a catalog agent and name every child")
+  expect(prompt).toContain("reserve workflowScript for two or more children")
+  expect(prompt).not.toContain("scout (fast codebase recon)")
+}

@@ -147,18 +147,7 @@ const progressTarget = (
   return null
 }
 
-function MessageText({
-  text,
-  markdown,
-  streaming = false
-}: {
-  text: string
-  markdown: boolean
-  streaming?: boolean
-}) {
-  const planDocument = useContext(PlanProgressContext)
-  if (text.length === 0) return null
-  if (markdown && !streaming) {
+function renderProgressMarkers(text: string, planDocument: PlanDocument | null): ReactNode {
     const rendered: ReactNode[] = []
     const seen = new Set<string>()
     let cursor = 0
@@ -191,6 +180,23 @@ function MessageText({
       if (prose.length > 0) rendered.push(<StreamingText key="text-tail" text={prose} className={WIDTH} />)
       return <div className={cn("flex flex-col items-start gap-2", WIDTH)}>{rendered}</div>
     }
+  return null
+}
+
+function MessageText({
+  text,
+  markdown,
+  streaming = false
+}: {
+  text: string
+  markdown: boolean
+  streaming?: boolean
+}) {
+  const planDocument = useContext(PlanProgressContext)
+  if (text.length === 0) return null
+  if (markdown && !streaming) {
+    const progress = renderProgressMarkers(text, planDocument)
+    if (progress !== null) return progress
   }
   return markdown ? (
     <StreamingText text={text} streaming={streaming} className={WIDTH} />
@@ -236,6 +242,61 @@ const emptyBodyNote = (tool: ToolCallModel): string => {
  * which this depends on.
  */
 const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel }) {
+                            function renderToolResult() {
+                              return (<ToolCall
+      status={tool.status}
+      name={displayName}
+      target={tool.target ?? undefined}
+      filePath={path}
+      meta={toolMeta(tool)}
+      expanded={expanded}
+      onToggle={openable ? () => setExpanded((v) => !v) : undefined}
+      onStop={onStop}
+      className={WIDTH}
+    >
+      {canonicalChanges.length > 0 && <FileChangeList changes={canonicalChanges} />}
+      {openable && expanded && (
+        <div className="border-t border-line bg-editor">
+          {/* The header truncates a long command to one line; this is where you
+              read the whole thing. */}
+          {tool.target && (
+            <pre className="overflow-x-auto px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-text-bright">
+              {tool.target}
+            </pre>
+          )}
+          {tool.output === undefined ? (
+            <div className="px-3 pb-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] text-dim">
+              {emptyBodyNote(tool)}
+            </div>
+          ) : (
+            <pre className="max-h-[320px] overflow-auto border-t border-line/60 px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-muted-foreground">
+              {tool.output}
+            </pre>
+          )}
+        </div>
+      )}
+      {renderLegacyPreview()}
+    </ToolCall>)
+                            }
+
+                            function renderLegacyPreview() {
+                              return (legacyPreview && shown && (
+        <div>
+          <DiffPeek preview={shown} />
+          {lines.length > HUNK_PREVIEW_LINES && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="flex w-full items-center gap-1 bg-editor px-3 py-1 text-[11px] text-line-strong transition-colors hover:text-muted-foreground active:scale-[0.99]"
+            >
+              {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              {expanded ? "Hide" : `Show all ${lines.length} lines`}
+            </button>
+          )}
+        </div>
+      ))
+                            }
+
   const stopTool = useContext(ToolStopContext)
   const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
@@ -276,54 +337,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
     )
   }
   return (
-    <ToolCall
-      status={tool.status}
-      name={displayName}
-      target={tool.target ?? undefined}
-      filePath={path}
-      meta={toolMeta(tool)}
-      expanded={expanded}
-      onToggle={openable ? () => setExpanded((v) => !v) : undefined}
-      onStop={onStop}
-      className={WIDTH}
-    >
-      {canonicalChanges.length > 0 && <FileChangeList changes={canonicalChanges} />}
-      {openable && expanded && (
-        <div className="border-t border-line bg-editor">
-          {/* The header truncates a long command to one line; this is where you
-              read the whole thing. */}
-          {tool.target && (
-            <pre className="overflow-x-auto px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-text-bright">
-              {tool.target}
-            </pre>
-          )}
-          {tool.output === undefined ? (
-            <div className="px-3 pb-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] text-dim">
-              {emptyBodyNote(tool)}
-            </div>
-          ) : (
-            <pre className="max-h-[320px] overflow-auto border-t border-line/60 px-3 py-2 font-mono text-[calc(11px*var(--sb-font-scale,1))] leading-[1.5] text-muted-foreground">
-              {tool.output}
-            </pre>
-          )}
-        </div>
-      )}
-      {legacyPreview && shown && (
-        <div>
-          <DiffPeek preview={shown} />
-          {lines.length > HUNK_PREVIEW_LINES && (
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              className="flex w-full items-center gap-1 bg-editor px-3 py-1 text-[11px] text-line-strong transition-colors hover:text-muted-foreground active:scale-[0.99]"
-            >
-              {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-              {expanded ? "Hide" : `Show all ${lines.length} lines`}
-            </button>
-          )}
-        </div>
-      )}
-    </ToolCall>
+    renderToolResult()
   )
 })
 

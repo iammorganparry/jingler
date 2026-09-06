@@ -569,6 +569,32 @@ export class GitHubRelaySupervisor {
     }
   }
 
+  private stopObsoleteConnections(desired: ReadonlyMap<string, GitHubRelaySessionTarget>): void {
+    for (const [relaySessionId, existing] of this.connections) {
+      const next = desired.get(relaySessionId);
+      if (
+        next &&
+        next.sessionId === existing.target.sessionId &&
+        next.installationId === existing.target.installationId
+      ) {
+        continue;
+      }
+      const { target, connection } = existing;
+      connection.stop();
+      this.connections.delete(relaySessionId);
+      this.options.onStatus?.({ ...target, mode: "stopped" });
+    }
+  }
+
+  private scheduleReconciliation(generation: number): void {
+    if (this.running && generation === this.generation) {
+      this.timer = this.setTimer(() => {
+        this.timer = null;
+        void this.refresh();
+      }, this.options.refreshMs ?? 5 * 60_000);
+    }
+  }
+
   private async reconcile(): Promise<void> {
     if (!this.running) return;
     const generation = ++this.generation;
@@ -578,20 +604,7 @@ export class GitHubRelaySupervisor {
       const desired = new Map(
         sessions.map((target) => [target.relaySessionId, target]),
       );
-      for (const [relaySessionId, existing] of this.connections) {
-        const next = desired.get(relaySessionId);
-        if (
-          next &&
-          next.sessionId === existing.target.sessionId &&
-          next.installationId === existing.target.installationId
-        ) {
-          continue;
-        }
-        const { target, connection } = existing;
-        connection.stop();
-        this.connections.delete(relaySessionId);
-        this.options.onStatus?.({ ...target, mode: "stopped" });
-      }
+      this.stopObsoleteConnections(desired);
       for (const target of desired.values()) {
         if (this.connections.has(target.relaySessionId)) continue;
         const connection = await this.options.createConnection(
@@ -627,12 +640,7 @@ export class GitHubRelaySupervisor {
         });
       }
     } finally {
-      if (this.running && generation === this.generation) {
-        this.timer = this.setTimer(() => {
-          this.timer = null;
-          void this.refresh();
-        }, this.options.refreshMs ?? 5 * 60_000);
-      }
+      this.scheduleReconciliation(generation);
     }
   }
 }

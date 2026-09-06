@@ -162,11 +162,7 @@ export const startFakeDeviceRelay = async (
 
   const device = () => {
     const effectiveState = forcedState ?? state
-    const announcedCapabilities =
-      discovery?.capabilities !== null &&
-      typeof discovery?.capabilities === "object"
-        ? discovery.capabilities
-        : undefined
+    const announcedCapabilities = deviceCapabilities(discovery)
     return {
       version: 1,
       deviceId: DEVICE_ID,
@@ -209,169 +205,199 @@ export const startFakeDeviceRelay = async (
 
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1")
-    if (url.pathname === "/api/auth/get-session") {
-      return request.headers.authorization === `Bearer ${TOKEN}`
-        ? json(response, 200, {
-            session: { expiresAt: "2099-01-01T00:00:00Z", token: TOKEN },
-            user: {
-              id: SUBJECT,
-              email: "e2e@jingler.dev",
-              name: "E2E User",
-              image: null
-            }
+
+const routes = [
+      {
+        matches: () => (url.pathname === "/api/auth/get-session"),
+        handle: function authSession() {
+          return request.headers.authorization === `Bearer ${TOKEN}`
+            ? json(response, 200, {
+              session: { expiresAt: "2099-01-01T00:00:00Z", token: TOKEN },
+              user: {
+                id: SUBJECT,
+                email: "e2e@jingler.dev",
+                name: "E2E User",
+                image: null
+              }
+            })
+            : json(response, 401, {})
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/auth/sign-out" && request.method === "POST"),
+        handle: function signOut() {
+          return json(response, 200, {})
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/enrollment-credentials" &&
+          request.method === "POST"),
+        handle: async function enrollmentCredential() {
+          bearerForwarded ||= request.headers.authorization !== `Bearer ${TOKEN}`
+          const body = await readBody(request)
+          return json(response, 201, {
+            version: 1,
+            claim: {
+              version: 1,
+              claimId: "claim_enrollment_abcdefgh",
+              subject: SUBJECT,
+              deviceId: DEVICE_ID,
+              clientInstanceId:
+                typeof body.clientInstanceId === "string"
+                  ? body.clientInstanceId
+                  : "client_e2e_abcdefghijkl",
+              audience: "device-claim",
+              issuedAt: now(),
+              expiresAt: now() + 300
+            },
+            token: "e2e-enrollment-token"
           })
-        : json(response, 401, {})
-    }
-    if (url.pathname === "/api/auth/sign-out" && request.method === "POST")
-      return json(response, 200, {})
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/enrollments/exchange" &&
+          request.method === "POST"),
+        handle: async function exchangeEnrollment() {
+          if (request.headers.authorization !== "Bearer e2e-enrollment-token") {
+            return json(response, 401, { error: "invalid enrollment" })
+          }
+          const body = await readBody(request)
+          if (!body.registration || typeof body.registration !== "object") {
+            return json(response, 400, { error: "invalid registration" })
+          }
+          registration = body.registration as unknown as Registration
+          paired = true
+          forcedState = null
+          state = "offline"
+          claimCount += 1
+          startAgent()
+          const { presence: _presence, ...record } = device()
+          return json(response, 201, { version: 1, device: record })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/v1/pending-devices" && request.method === "POST"),
+        handle: async function pendingDevice() {
+          registration = (await readBody(request)) as unknown as Registration
+          return json(response, 201, {
+            version: 1,
+            pendingDeviceId: PENDING_ID,
+            deviceId: DEVICE_ID,
+            pairingCode: PAIRING_CODE,
+            expiresAt: now() + 300
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/pairing/claim" && request.method === "POST"),
+        handle: async function claimDevice() {
+          bearerForwarded ||= request.headers.authorization !== `Bearer ${TOKEN}`
+          const body = await readBody(request)
+          if (body.pendingDeviceId !== PENDING_ID || body.pairingCode !== PAIRING_CODE || paired)
+            return json(response, 409, { error: "invalid claim" })
+          paired = true
+          forcedState = null
+          // Pairing only starts the daemon. Do not advertise it as online until its
+          // control WebSocket is actually established: otherwise a desktop can open
+          // a session tunnel in this window, the relay drops the session-request,
+          // and session creation waits forever.
+          state = "offline"
+          claimCount += 1
+          startAgent()
+          return json(response, 200, {
+            version: 1,
+            subject: SUBJECT,
+            device: device()
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices" && request.method === "GET"),
+        handle: function listDevices() {
+          return json(response, 200, {
+            version: 1,
+            devices: paired ? [device()] : []
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === `/api/devices/${DEVICE_ID}/discovery` && request.method === "GET"),
+        handle: function discoverDevice() {
+          return json(response, 200, {
+            version: 1,
+            deviceId: DEVICE_ID,
+            discovery,
+            updatedAt: discovery ? now() : null
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/grants" && request.method === "POST"),
+        handle: async function grantDevice() {
+          const body = await readBody(request)
+          const sessionId = typeof body.sessionId === "string" ? body.sessionId : null
+          const clientInstanceId =
+            typeof body.clientInstanceId === "string" ? body.clientInstanceId : null
+          recordTunnelGrant(sessionId, clientInstanceId, body, tunnels)
+          return json(response, 200, {
+            version: 1,
+            relayUrl: baseUrl,
+            grant: `session-${sessionId}`,
+            claims: claims("session-tunnel", sessionId, clientInstanceId)
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/challenges" && request.method === "POST"),
+        handle: function challengeDevice() {
+          return json(response, 200, {
+            version: 1,
+            challengeId: "challenge_abcdefgh",
+            subject: SUBJECT,
+            deviceId: DEVICE_ID,
+            nonce: "abcdefghijklmnopqrstuv",
+            issuedAt: now(),
+            expiresAt: now() + 60
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === "/api/devices/challenges/exchange" && request.method === "POST"),
+        handle: function exchangeChallenge() {
+          return json(response, 200, {
+            version: 1,
+            relayUrl: baseUrl,
+            grant: "device-connect-grant",
+            claims: claims("device-connect")
+          })
+        }
+      },
+      {
+        matches: () => (url.pathname === `/api/devices/${DEVICE_ID}/revoke` && request.method === "POST"),
+        handle: function revokeDevice() {
+          paired = false
+          state = "offline"
+          control?.close(4003, "revoked")
+          for (const tunnel of tunnels.values()) {
+            tunnel.desktop?.close(4003, "revoked")
+            tunnel.device?.close(4003, "revoked")
+          }
+          return json(response, 200, { version: 1, revoked: true })
+        }
+      },
+      {
+        matches: () => (url.pathname === `/api/devices/${DEVICE_ID}/rename` && request.method === "POST"),
+        handle: async function renameDevice() {
+          const body = await readBody(request)
+          if (registration && typeof body.displayName === "string")
+            registration = { ...registration, displayName: body.displayName }
+          return json(response, 200, { version: 1, device: device() })
+        }
+      }
+    ];
+const route = routes.find((candidate) => candidate.matches());
+if (route) return route.handle();
 
-    if (
-      url.pathname === "/api/devices/enrollment-credentials" &&
-      request.method === "POST"
-    ) {
-      bearerForwarded ||= request.headers.authorization !== `Bearer ${TOKEN}`
-      const body = await readBody(request)
-      return json(response, 201, {
-        version: 1,
-        claim: {
-          version: 1,
-          claimId: "claim_enrollment_abcdefgh",
-          subject: SUBJECT,
-          deviceId: DEVICE_ID,
-          clientInstanceId:
-            typeof body.clientInstanceId === "string"
-              ? body.clientInstanceId
-              : "client_e2e_abcdefghijkl",
-          audience: "device-claim",
-          issuedAt: now(),
-          expiresAt: now() + 300
-        },
-        token: "e2e-enrollment-token"
-      })
-    }
-    if (
-      url.pathname === "/api/devices/enrollments/exchange" &&
-      request.method === "POST"
-    ) {
-      if (request.headers.authorization !== "Bearer e2e-enrollment-token") {
-        return json(response, 401, { error: "invalid enrollment" })
-      }
-      const body = await readBody(request)
-      if (!body.registration || typeof body.registration !== "object") {
-        return json(response, 400, { error: "invalid registration" })
-      }
-      registration = body.registration as unknown as Registration
-      paired = true
-      forcedState = null
-      state = "offline"
-      claimCount += 1
-      startAgent()
-      const { presence: _presence, ...record } = device()
-      return json(response, 201, { version: 1, device: record })
-    }
-
-    if (url.pathname === "/v1/pending-devices" && request.method === "POST") {
-      registration = (await readBody(request)) as unknown as Registration
-      return json(response, 201, {
-        version: 1,
-        pendingDeviceId: PENDING_ID,
-        deviceId: DEVICE_ID,
-        pairingCode: PAIRING_CODE,
-        expiresAt: now() + 300
-      })
-    }
-    if (url.pathname === "/api/devices/pairing/claim" && request.method === "POST") {
-      bearerForwarded ||= request.headers.authorization !== `Bearer ${TOKEN}`
-      const body = await readBody(request)
-      if (body.pendingDeviceId !== PENDING_ID || body.pairingCode !== PAIRING_CODE || paired)
-        return json(response, 409, { error: "invalid claim" })
-      paired = true
-      forcedState = null
-      // Pairing only starts the daemon. Do not advertise it as online until its
-      // control WebSocket is actually established: otherwise a desktop can open
-      // a session tunnel in this window, the relay drops the session-request,
-      // and session creation waits forever.
-      state = "offline"
-      claimCount += 1
-      startAgent()
-      return json(response, 200, {
-        version: 1,
-        subject: SUBJECT,
-        device: device()
-      })
-    }
-    if (url.pathname === "/api/devices" && request.method === "GET") {
-      return json(response, 200, {
-        version: 1,
-        devices: paired ? [device()] : []
-      })
-    }
-    if (url.pathname === `/api/devices/${DEVICE_ID}/discovery` && request.method === "GET") {
-      return json(response, 200, {
-        version: 1,
-        deviceId: DEVICE_ID,
-        discovery,
-        updatedAt: discovery ? now() : null
-      })
-    }
-    if (url.pathname === "/api/devices/grants" && request.method === "POST") {
-      const body = await readBody(request)
-      const sessionId = typeof body.sessionId === "string" ? body.sessionId : null
-      const clientInstanceId =
-        typeof body.clientInstanceId === "string" ? body.clientInstanceId : null
-      if (sessionId) {
-        const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
-        tunnel.clientInstanceId = clientInstanceId ?? "client_e2e_abcdefghijkl"
-        tunnel.attachmentGeneration =
-          typeof body.attachmentGeneration === "number" ? body.attachmentGeneration : 1
-        tunnel.controllerLeaseGeneration =
-          typeof body.controllerLeaseGeneration === "number"
-            ? body.controllerLeaseGeneration
-            : 1
-        tunnels.set(sessionId, tunnel)
-      }
-      return json(response, 200, {
-        version: 1,
-        relayUrl: baseUrl,
-        grant: `session-${sessionId}`,
-        claims: claims("session-tunnel", sessionId, clientInstanceId)
-      })
-    }
-    if (url.pathname === "/api/devices/challenges" && request.method === "POST") {
-      return json(response, 200, {
-        version: 1,
-        challengeId: "challenge_abcdefgh",
-        subject: SUBJECT,
-        deviceId: DEVICE_ID,
-        nonce: "abcdefghijklmnopqrstuv",
-        issuedAt: now(),
-        expiresAt: now() + 60
-      })
-    }
-    if (url.pathname === "/api/devices/challenges/exchange" && request.method === "POST") {
-      return json(response, 200, {
-        version: 1,
-        relayUrl: baseUrl,
-        grant: "device-connect-grant",
-        claims: claims("device-connect")
-      })
-    }
-    if (url.pathname === `/api/devices/${DEVICE_ID}/revoke` && request.method === "POST") {
-      paired = false
-      state = "offline"
-      control?.close(4003, "revoked")
-      for (const tunnel of tunnels.values()) {
-        tunnel.desktop?.close(4003, "revoked")
-        tunnel.device?.close(4003, "revoked")
-      }
-      return json(response, 200, { version: 1, revoked: true })
-    }
-    if (url.pathname === `/api/devices/${DEVICE_ID}/rename` && request.method === "POST") {
-      const body = await readBody(request)
-      if (registration && typeof body.displayName === "string")
-        registration = { ...registration, displayName: body.displayName }
-      return json(response, 200, { version: 1, device: device() })
-    }
     json(response, 404, { error: "not found" })
   })
 
@@ -402,93 +428,8 @@ export const startFakeDeviceRelay = async (
         })
         return
       }
-      const match = /^\/v1\/session-tunnels\/([^/]+)$/u.exec(url.pathname)
-      if (!match) return websocket.close(1008, "unknown endpoint")
-      const sessionId = decodeURIComponent(match[1]!)
-      const endpoint = url.searchParams.get("endpoint") === "device" ? "device" : "desktop"
-      if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
-        process.stderr.write(`[session-tunnel] open ${sessionId} ${endpoint}\n`)
-      }
-      const acknowledged = Number(url.searchParams.get("acknowledgedSequence") ?? "0")
-      const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
-      tunnels.set(sessionId, tunnel)
-      const replaced = tunnel[endpoint]
-      if (replaced?.readyState === WebSocket.OPEN) {
-        replaced.close(4002, "Connection replaced")
-      }
-      tunnel[endpoint] = websocket
-      const newestOutgoingSequence = tunnel.envelopes
-        .filter((envelope) => envelope.sender === endpoint)
-        .reduce((latest, envelope) => Math.max(latest, Number(envelope.sequence) || 0), 0)
-      websocket.send(
-        JSON.stringify({
-          type: "hello",
-          version: 1,
-          endpoint,
-          sessionId,
-          acknowledgedSequence: acknowledged,
-          nextSequence: newestOutgoingSequence + 1
-        })
-      )
-      if (endpoint === "desktop") {
-        const encodedOffer = url.searchParams.get("keyOffer")
-        tunnel.keyOffer = encodedOffer
-          ? JSON.parse(Buffer.from(encodedOffer, "base64url").toString("utf8"))
-          : tunnel.keyOffer
-        queueMicrotask(() => {
-          if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
-            process.stderr.write(`[device-control] send session-request ${sessionId}\n`)
-          }
-          control?.send(
-            JSON.stringify({
-              type: "session-request",
-              relayUrl: baseUrl,
-              sessionId,
-              grant: `device-${sessionId}`,
-              keyOffer: tunnel.keyOffer,
-              clientInstanceId:
-                tunnel.clientInstanceId ?? "client_e2e_abcdefghijkl",
-              attachmentGeneration: tunnel.attachmentGeneration ?? 1,
-              controllerLeaseGeneration: tunnel.controllerLeaseGeneration ?? 1
-            })
-          )
-        })
-      }
-      for (const envelope of tunnel.envelopes) {
-        if (envelope.sender !== endpoint && Number(envelope.sequence) > acknowledged)
-          websocket.send(JSON.stringify({ type: "envelope", envelope }))
-      }
-      websocket.on("message", (raw) => {
-        const message = JSON.parse(raw.toString()) as Record<string, unknown>
-        if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
-          process.stderr.write(
-            `[session-tunnel] ${sessionId} ${endpoint} ${String(message.type)}\n`
-          )
-        }
-        if (
-          message.type !== "envelope" ||
-          !message.envelope ||
-          typeof message.envelope !== "object"
-        )
-          return
-        const envelope = message.envelope as Record<string, unknown>
-        const duplicate = tunnel.envelopes.some(
-          (candidate) =>
-            candidate.sender === envelope.sender && candidate.sequence === envelope.sequence
-        )
-        if (!duplicate) tunnel.envelopes.push(envelope)
-        websocket.send(
-          JSON.stringify({
-            type: "envelope-result",
-            sequence: envelope.sequence,
-            status: duplicate ? "duplicate" : "inserted"
-          })
-        )
-        const peer = endpoint === "desktop" ? tunnel.device : tunnel.desktop
-        if (!duplicate && peer?.readyState === WebSocket.OPEN)
-          peer.send(JSON.stringify({ type: "envelope", envelope }))
-      })
-    })
+      return connectSessionTunnel(url, websocket, tunnels, baseUrl, () => control)
+})
   })
 
   await new Promise<void>((resolve) =>
@@ -544,5 +485,116 @@ export const startFakeDeviceRelay = async (
         })
       }
     }
+  }
+}
+
+function receiveTunnelEnvelope(sessionId: string, endpoint: string, tunnel: Tunnel, websocket: WebSocket): (this: WebSocket, data: WebSocket.RawData, isBinary: boolean) => void {
+  return (raw) => {
+    const message = JSON.parse(raw.toString()) as Record<string, unknown>
+    if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
+      process.stderr.write(
+        `[session-tunnel] ${sessionId} ${endpoint} ${String(message.type)}\n`
+      )
+    }
+    if (message.type !== "envelope" ||
+      !message.envelope ||
+      typeof message.envelope !== "object")
+      return
+    const envelope = message.envelope as Record<string, unknown>
+    const duplicate = tunnel.envelopes.some(
+      (candidate) => candidate.sender === envelope.sender && candidate.sequence === envelope.sequence
+    )
+    if (!duplicate) tunnel.envelopes.push(envelope)
+    websocket.send(
+      JSON.stringify({
+        type: "envelope-result",
+        sequence: envelope.sequence,
+        status: duplicate ? "duplicate" : "inserted"
+      })
+    )
+    const peer = endpoint === "desktop" ? tunnel.device : tunnel.desktop
+    if (!duplicate && peer?.readyState === WebSocket.OPEN)
+      peer.send(JSON.stringify({ type: "envelope", envelope }))
+  }
+}
+
+function connectSessionTunnel(url: URL, websocket: WebSocket, tunnels: Map<string, Tunnel>, baseUrl: string, getControl: () => WebSocket | null) {
+  const match = /^\/v1\/session-tunnels\/([^/]+)$/u.exec(url.pathname)
+  if (!match) return websocket.close(1008, "unknown endpoint")
+  const sessionId = decodeURIComponent(match[1]!)
+  const endpoint = url.searchParams.get("endpoint") === "device" ? "device" : "desktop"
+  if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
+    process.stderr.write(`[session-tunnel] open ${sessionId} ${endpoint}\n`)
+  }
+  const acknowledged = Number(url.searchParams.get("acknowledgedSequence") ?? "0")
+  const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
+  tunnels.set(sessionId, tunnel)
+  const replaced = tunnel[endpoint]
+  if (replaced?.readyState === WebSocket.OPEN) {
+    replaced.close(4002, "Connection replaced")
+  }
+  tunnel[endpoint] = websocket
+  const newestOutgoingSequence = tunnel.envelopes
+    .filter((envelope) => envelope.sender === endpoint)
+    .reduce((latest, envelope) => Math.max(latest, Number(envelope.sequence) || 0), 0)
+  websocket.send(
+    JSON.stringify({
+      type: "hello",
+      version: 1,
+      endpoint,
+      sessionId,
+      acknowledgedSequence: acknowledged,
+      nextSequence: newestOutgoingSequence + 1
+    })
+  )
+  if (endpoint === "desktop") {
+    const encodedOffer = url.searchParams.get("keyOffer")
+    tunnel.keyOffer = encodedOffer
+      ? JSON.parse(Buffer.from(encodedOffer, "base64url").toString("utf8"))
+      : tunnel.keyOffer
+    queueMicrotask(() => {
+      if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
+        process.stderr.write(`[device-control] send session-request ${sessionId}\n`)
+      }
+      getControl()?.send(
+        JSON.stringify({
+          type: "session-request",
+          relayUrl: baseUrl,
+          sessionId,
+          grant: `device-${sessionId}`,
+          keyOffer: tunnel.keyOffer,
+          clientInstanceId:
+            tunnel.clientInstanceId ?? "client_e2e_abcdefghijkl",
+          attachmentGeneration: tunnel.attachmentGeneration ?? 1,
+          controllerLeaseGeneration: tunnel.controllerLeaseGeneration ?? 1
+        })
+      )
+    })
+  }
+  for (const envelope of tunnel.envelopes) {
+    if (envelope.sender !== endpoint && Number(envelope.sequence) > acknowledged)
+      websocket.send(JSON.stringify({ type: "envelope", envelope }))
+  }
+  websocket.on("message", receiveTunnelEnvelope(sessionId, endpoint, tunnel, websocket))
+}
+
+function deviceCapabilities(discovery: Record<string, unknown> | null) {
+  return discovery?.capabilities !== null &&
+    typeof discovery?.capabilities === "object"
+    ? discovery.capabilities
+    : undefined
+}
+
+function recordTunnelGrant(sessionId: string | null, clientInstanceId: string | null, body: Record<string, unknown>, tunnels: Map<string, Tunnel>) {
+  if (sessionId) {
+    const tunnel = tunnels.get(sessionId) ?? { envelopes: [] }
+    tunnel.clientInstanceId = clientInstanceId ?? "client_e2e_abcdefghijkl"
+    tunnel.attachmentGeneration =
+      typeof body.attachmentGeneration === "number" ? body.attachmentGeneration : 1
+    tunnel.controllerLeaseGeneration =
+      typeof body.controllerLeaseGeneration === "number"
+        ? body.controllerLeaseGeneration
+        : 1
+    tunnels.set(sessionId, tunnel)
   }
 }

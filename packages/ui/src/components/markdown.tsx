@@ -87,8 +87,8 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
   const streaming = useContext(MarkdownStreaming)
   const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : null
   const lang = /language-(\w+)/.exec(code?.props.className ?? "")?.[1]
+  const text = String(code?.props.children ?? "").replace(/\n$/, "")
   if (lang === "diff") {
-    const text = String(code?.props.children ?? "").replace(/\n$/, "")
     return (
       <div className="my-3 overflow-hidden rounded-md border border-line">
         <DiffPeek preview={text} />
@@ -98,15 +98,12 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
   if (lang === "html") {
     // Opt-in per-block: defaults to the raw Code view (plain text); the operator
     // can switch to a sandboxed Preview. See HtmlPreview.
-    const text = String(code?.props.children ?? "").replace(/\n$/, "")
     return <HtmlPreview code={text} />
   }
   if (lang === "mermaid") {
     // A ```mermaid fence renders as an actual (themed, sandboxed) diagram.
-    const text = String(code?.props.children ?? "").replace(/\n$/, "")
     return <MermaidDiagram source={text} />
   }
-  const text = String(code?.props.children ?? "").replace(/\n$/, "")
   const language = CODE_LANGUAGES.has(lang as AgentCodeLanguage) ? lang as AgentCodeLanguage : "text"
   if (text.split("\n").length > 200) return <InsideFence.Provider value={true}><pre>{children}</pre></InsideFence.Provider>
   const iconPath = `code.${language === "typescript" ? "ts" : language === "bash" ? "sh" : language}`

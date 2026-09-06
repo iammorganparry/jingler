@@ -27,6 +27,16 @@ const page = (message: string): string =>
   `<body style="font:14px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;height:100vh">` +
   `<p>${message}</p></body></html>`
 
+const githubCallbackError = (github: string, params: URLSearchParams): string | null =>
+  github === "connected" ? null : (params.get("error") ?? "callback")
+
+const callbackMessage = (github: string | null, token: string | null): string => {
+  if (github === "connected") return "GitHub connected. You can close this tab and return to Jingler."
+  if (token) return "Signed in. You can close this tab and return to Jingler."
+  if (github !== null) return "GitHub connection failed. You can close this tab and try again in Jingler."
+  return "Sign-in failed. You can close this tab and try again in Jingler."
+}
+
 /**
  * Start the loopback listener. `deliver` receives the same `AuthCallback` a
  * deep link would — the caller wires it to the token-storing path.
@@ -54,21 +64,13 @@ export const startAuthLoopback = (
       if (github !== null) {
         deliverGitHub({
           connected: github === "connected",
-          error: github === "connected" ? null : (requestUrl.searchParams.get("error") ?? "callback")
+          error: githubCallbackError(github, requestUrl.searchParams)
         })
       } else {
         deliver({ token, error: requestUrl.searchParams.get("error") })
       }
       res.writeHead(200, { "content-type": "text/html" }).end(
-        page(
-          github === "connected"
-            ? "GitHub connected. You can close this tab and return to Jingler."
-            : token
-            ? "Signed in. You can close this tab and return to Jingler."
-            : github !== null
-              ? "GitHub connection failed. You can close this tab and try again in Jingler."
-              : "Sign-in failed. You can close this tab and try again in Jingler."
-        )
+        page(callbackMessage(github, token))
       )
     })
     server.on("error", reject)

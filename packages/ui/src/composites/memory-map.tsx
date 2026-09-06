@@ -100,6 +100,15 @@ const freshnessFrom = (
   }
 }
 
+const matchesMemoryFilters = (node: MemoryGraphNode, filters: MemoryMapFilters, query: string): boolean => {
+      if (query && !`${node.title} ${node.id}`.toLocaleLowerCase().includes(query)) return false
+      if (filters.topic && node.topicId !== filters.topic) return false
+      if (filters.freshness && node.freshness !== filters.freshness) return false
+      if (filters.healthOnly && !unhealthy(node)) return false
+      if (!filters.showIsolated && node.health.orphan) return false
+      return true
+}
+
 export function MemoryMap({
   graph,
   positions,
@@ -122,14 +131,7 @@ export function MemoryMap({
   const nodes = useMemo(() => {
     if (graph === null) return []
     const query = filters.query.trim().toLocaleLowerCase()
-    return graph.nodes.filter((node) => {
-      if (query && !`${node.title} ${node.id}`.toLocaleLowerCase().includes(query)) return false
-      if (filters.topic && node.topicId !== filters.topic) return false
-      if (filters.freshness && node.freshness !== filters.freshness) return false
-      if (filters.healthOnly && !unhealthy(node)) return false
-      if (!filters.showIsolated && node.health.orphan) return false
-      return true
-    })
+    return graph.nodes.filter((node) => matchesMemoryFilters(node, filters, query))
   }, [filters, graph])
   const visibleIds = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes])
   const edges = useMemo(

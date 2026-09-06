@@ -134,13 +134,17 @@ const runProcess = (
     })
     options.signal?.addEventListener("abort", onAbort, { once: true })
     if (options.signal?.aborted) onAbort()
-    if (options.input !== undefined) {
-      if (child.stdin === null) {
-        fail(new Error("Owned-device command input pipe was unavailable"))
-        return
+    const writeCommandInput = () => {
+      if (options.input !== undefined) {
+        if (child.stdin === null) {
+          fail(new Error("Owned-device command input pipe was unavailable"))
+          return
+        }
+        child.stdin.end(options.input)
       }
-      child.stdin.end(options.input)
     }
+    writeCommandInput()
+
   })
 
 interface ProcessControl {
@@ -357,12 +361,16 @@ export const makeOwnedDeviceOffloadExecutor = (
         if (existingBytes + content.byteLength > metadata.compressedBytes) {
           throw new Error("Owned-device chunks exceed admitted snapshot size")
         }
-        const chunkPath = join(chunksDirectory, chunkName)
-        try {
-          await writeFile(chunkPath, content, { flag: "wx", mode: 0o600 })
-        } catch (cause) {
-          if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause
-          if (!content.equals(await readFile(chunkPath))) throw new Error("Owned-device chunk replay changed")
+        await writeReplaySafeChunk()
+
+        async function writeReplaySafeChunk() {
+          const chunkPath = join(chunksDirectory, chunkName)
+          try {
+            await writeFile(chunkPath, content, { flag: "wx", mode: 0o600 })
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause
+            if (!content.equals(await readFile(chunkPath))) throw new Error("Owned-device chunk replay changed")
+          }
         }
       }),
     execute: async ({ jobId }: OwnedOffloadExecute): Promise<OwnedOffloadResult> => {

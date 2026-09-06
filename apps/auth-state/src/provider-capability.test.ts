@@ -75,3 +75,22 @@ describe("provider capability validation", () => {
     ).toEqual({ ok: false, error: "Invalid capability" });
   });
 });
+
+describe("Codex upstream defaults", () => {
+  it.each([undefined, "openai-api"])("defaults %s to the API upstream", (upstream) => {
+    expect(validateCapability({
+      subject: "user_1", provider: "codex", upstream,
+      authorizationHeader: "Bearer api-secret", expiresAt: 2_000,
+      proxy: "codex", connectionId: "connection_api", providerId: "openai",
+      authKind: "api-key", billingRoute: "api"
+    }, 1_000)).toMatchObject({ ok: true, value: { upstream: "openai-api" } })
+  })
+
+  it.each(["github-api", "anthropic-api", "exa-api", "firecrawl-api"])(
+    "rejects the unrelated %s upstream for a Codex subscription",
+    (upstream) => {
+      expect(validateCapability({ ...codexCapability("account-1"), upstream }, 1_000))
+        .toEqual({ ok: false, error: "Invalid capability" })
+    }
+  )
+})

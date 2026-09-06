@@ -364,25 +364,26 @@ const dispatchProposalSetRequest = (
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
+    const resourceId = route[1] ?? ""
     if (isRoute(request, route, "POST", "proposal-sets")) {
       return jsonResponse(yield* vault.createProposalSet(yield* decodeBody(request, ProposalSetRequest)), 201)
     }
-    if (isRoute(request, route, "GET", "proposal-sets", route[1] ?? "")) {
-      return jsonResponse(yield* vault.getProposalSet(route[1] ?? ""))
+    if (isRoute(request, route, "GET", "proposal-sets", resourceId)) {
+      return jsonResponse(yield* vault.getProposalSet(resourceId))
     }
-    if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "approve")) {
+    if (isRoute(request, route, "POST", "proposal-sets", resourceId, "approve")) {
       const body = yield* decodeBody(request, ApprovalRequest)
       const result = yield* vault.approveProposalSet(
-        route[1] ?? "",
+        resourceId,
         body.reviewerId,
         body.acceptedAt
       )
       return jsonResponse(result, result.status === "accepted" ? 200 : 409)
     }
-    if (isRoute(request, route, "POST", "proposal-sets", route[1] ?? "", "reject")) {
+    if (isRoute(request, route, "POST", "proposal-sets", resourceId, "reject")) {
       const body = yield* decodeBody(request, RejectionRequest)
       return jsonResponse(
-        yield* vault.rejectProposalSet(route[1] ?? "", body.reviewerId, body.rejectedAt)
+        yield* vault.rejectProposalSet(resourceId, body.reviewerId, body.rejectedAt)
       )
     }
     return notFoundResponse()
@@ -434,6 +435,7 @@ const dispatchProposalRequest = (
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
+    const resourceId = route[1] ?? ""
     if (isRoute(request, route, "POST", "proposals", "auto-publish")) {
       const body = yield* decodeBody(request, AutoPublishProposalRequest)
       const result = yield* autoPublishProposal(vault, body)
@@ -442,21 +444,31 @@ const dispatchProposalRequest = (
     if (isRoute(request, route, "POST", "proposals")) {
       return jsonResponse(yield* vault.createProposal(yield* decodeBody(request, ProposalRequest)), 201)
     }
-    if (isRoute(request, route, "GET", "proposals", route[1] ?? "")) {
-      return jsonResponse(yield* vault.getProposal(route[1] ?? ""))
+    if (isRoute(request, route, "GET", "proposals", resourceId)) {
+      return jsonResponse(yield* vault.getProposal(resourceId))
     }
-    if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "approve")) {
+    return yield* dispatchProposalDecision(request, route, vault)
+  })
+
+const dispatchProposalDecision = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
+    const resourceId = route[1] ?? ""
+    if (isRoute(request, route, "POST", "proposals", resourceId, "approve")) {
       const body = yield* decodeBody(request, ApprovalRequest)
-      const proposalId = route[1] ?? ""
+      const proposalId = resourceId
       const result: ApprovalResult | ProposalSetApprovalResult = yield* fallbackOnMissing(
         vault.approveProposal(proposalId, body.reviewerId, body.acceptedAt),
         vault.approveProposalSet(proposalId, body.reviewerId, body.acceptedAt)
       )
       return jsonResponse(result, result.status === "accepted" ? 200 : 409)
     }
-    if (isRoute(request, route, "POST", "proposals", route[1] ?? "", "reject")) {
+    if (isRoute(request, route, "POST", "proposals", resourceId, "reject")) {
       const body = yield* decodeBody(request, RejectionRequest)
-      const proposalId = route[1] ?? ""
+      const proposalId = resourceId
       return jsonResponse(
         yield* fallbackOnMissing(
           vault.rejectProposal(proposalId, body.reviewerId, body.rejectedAt),
@@ -474,8 +486,9 @@ const dispatchVaultQuery = (
   vault: TeamVault
 ): Effect.Effect<Response, MemoryVaultError> =>
   Effect.gen(function* () {
-    if (isRoute(request, route, "GET", "workflows", route[1] ?? "")) {
-      return jsonResponse(yield* vault.getProposal(route[1] ?? ""))
+    const resourceId = route[1] ?? ""
+    if (isRoute(request, route, "GET", "workflows", resourceId)) {
+      return jsonResponse(yield* vault.getProposal(resourceId))
     }
     if (isRoute(request, route, "GET", "search")) {
       const query = url.searchParams.get("q") ?? ""
@@ -502,6 +515,16 @@ const dispatchVaultQuery = (
       }))
       return jsonResponse(yield* vault.compilerContext(body.claims, body.preferredPageId))
     }
+    return yield* dispatchVaultMaintenanceQuery(request, route, url, vault)
+  })
+
+const dispatchVaultMaintenanceQuery = (
+  request: Request,
+  route: ReadonlyArray<string>,
+  url: URL,
+  vault: TeamVault
+): Effect.Effect<Response, MemoryVaultError> =>
+  Effect.gen(function* () {
     if (isRoute(request, route, "GET", "export")) {
       return jsonResponse(yield* vault.exportVault())
     }

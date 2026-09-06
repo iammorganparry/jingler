@@ -157,23 +157,7 @@ export const loadEnv = (environment: Environment = process.env) => {
     "GITHUB_APP_RELAY_SIGNING_SECRET",
     "GITHUB_APP_TOKEN_ENCRYPTION_KEY"
   ])
-  const githubAppId = optional(environment, "GITHUB_APP_ID")
-  const numericGithubAppId = Number(githubAppId)
-  if (
-    githubAppConfigured &&
-    (!/^\d+$/.test(githubAppId) ||
-      !Number.isSafeInteger(numericGithubAppId) ||
-      numericGithubAppId <= 0)
-  ) {
-    throw new Error("GITHUB_APP_ID must be a positive integer")
-  }
-  const githubAppRelayUrl = prodUrl(environment, "GITHUB_APP_RELAY_URL", "http://localhost:9200", {
-    require: githubAppEnabled
-  })
-  if (githubAppConfigured) {
-    httpUrl(githubAppRelayUrl, "GITHUB_APP_RELAY_URL", nodeEnv === "production")
-    validateGitHubSecrets(environment)
-  }
+  const { githubAppId, githubAppRelayUrl } = githubRelayConfiguration()
   const deviceRelayConfigured = featureConfiguration(
     environment,
     "DEVICE_RELAY",
@@ -186,16 +170,7 @@ export const loadEnv = (environment: Environment = process.env) => {
     "http://localhost:9300",
     { require: deviceRelayEnabled }
   )
-  if (deviceRelayConfigured) {
-    httpUrl(deviceRelayUrl, "DEVICE_RELAY_URL", nodeEnv === "production")
-    const signingSecret = optional(environment, "DEVICE_RELAY_SIGNING_SECRET")
-    if (nodeEnv === "production" && Buffer.byteLength(signingSecret, "utf8") < 32) {
-      throw new Error("DEVICE_RELAY_SIGNING_SECRET must contain at least 32 bytes in production")
-    }
-    if (signingSecret === authSecret) {
-      throw new Error("DEVICE_RELAY_SIGNING_SECRET and BETTER_AUTH_SECRET must be distinct")
-    }
-  }
+  validateDeviceRelayConfiguration()
   const deviceRelayGrantTtlSeconds = positiveNumber(
     environment,
     "DEVICE_RELAY_GRANT_TTL_SECONDS",
@@ -384,6 +359,38 @@ export const loadEnv = (environment: Environment = process.env) => {
     /** Vercel Cron bearer used only by autonomous maintenance endpoints. */
     cronSecret
 } as const
+
+  function validateDeviceRelayConfiguration() {
+    if (deviceRelayConfigured) {
+      httpUrl(deviceRelayUrl, "DEVICE_RELAY_URL", nodeEnv === "production")
+      const signingSecret = optional(environment, "DEVICE_RELAY_SIGNING_SECRET")
+      if (nodeEnv === "production" && Buffer.byteLength(signingSecret, "utf8") < 32) {
+        throw new Error("DEVICE_RELAY_SIGNING_SECRET must contain at least 32 bytes in production")
+      }
+      if (signingSecret === authSecret) {
+        throw new Error("DEVICE_RELAY_SIGNING_SECRET and BETTER_AUTH_SECRET must be distinct")
+      }
+    }
+  }
+
+  function githubRelayConfiguration() {
+    const githubAppId = optional(environment, "GITHUB_APP_ID")
+    const numericGithubAppId = Number(githubAppId)
+    if (githubAppConfigured &&
+      (!/^\d+$/.test(githubAppId) ||
+        !Number.isSafeInteger(numericGithubAppId) ||
+        numericGithubAppId <= 0)) {
+      throw new Error("GITHUB_APP_ID must be a positive integer")
+    }
+    const githubAppRelayUrl = prodUrl(environment, "GITHUB_APP_RELAY_URL", "http://localhost:9200", {
+      require: githubAppEnabled
+    })
+    if (githubAppConfigured) {
+      httpUrl(githubAppRelayUrl, "GITHUB_APP_RELAY_URL", nodeEnv === "production")
+      validateGitHubSecrets(environment)
+    }
+    return { githubAppId, githubAppRelayUrl }
+  }
 }
 
 export type Env = ReturnType<typeof loadEnv>

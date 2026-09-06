@@ -67,7 +67,10 @@ describe("ChatTabBar closed chats", () => {
     </>)
 
     const subagent = screen.getByTestId("subagent-tab-worker-1")
-    expect(subagent.closest('[data-testid="subagent-tab-bar"]')).not.toBeNull()
+    const subagentBar = subagent.closest('[data-testid="subagent-tab-bar"]')
+    expect(subagentBar?.classList.contains("min-w-0")).toBe(true)
+    expect(subagentBar?.classList.contains("overflow-x-auto")).toBe(true)
+    expect(subagentBar?.classList.contains("sb-no-scrollbar")).toBe(true)
     expect(subagent.getAttribute("aria-current")).toBe("page")
     fireEvent.click(subagent)
     expect(onSelectSubagent).toHaveBeenCalledWith("worker-1")
