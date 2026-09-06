@@ -68,7 +68,7 @@ import {
   type SessionSurfacePane
 } from "../app/session-surface-layout.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
-import { X } from "lucide-react"
+import { ChevronLeft, ChevronRight, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 
 const issueMenuValue = (issue: IssueReference): string =>
@@ -311,12 +311,11 @@ export function SessionPane(props: SessionPaneProps) {
 function SessionPaneBody(props: SessionPaneProps) {
   const paneWidth = usePaneWidth().width
   const [titleBarTarget, setTitleBarTarget] = useState<HTMLElement | null>(null)
+  const [viewRailTarget, setViewRailTarget] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
-    setTitleBarTarget(
-      typeof document === "undefined"
-        ? null
-        : document.getElementById("session-tab-bar-portal")
-    )
+    if (typeof document === "undefined") return
+    setTitleBarTarget(document.getElementById("session-tab-bar-portal"))
+    setViewRailTarget(document.getElementById("session-view-rail-portal"))
   }, [])
   const fallbackSurface: SessionSurface = { kind: "chat", id: props.session.activeChatId }
   const [surfaceLayout, setSurfaceLayout] = useState<SessionSurfaceLayout>(() => {
@@ -907,7 +906,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const surfacePaneKey = (pane: SessionSurfacePane): string =>
     sessionSurfaceKey(pane.surface)
 
-  const renderSurfacePane = (pane: SessionSurfacePane, index: number) => {
+  const renderSurfaceContent = (pane: SessionSurfacePane, index: number) => {
     const surface = pane.surface
     const chatId =
       surface.kind === "chat"
@@ -980,6 +979,55 @@ function SessionPaneBody(props: SessionPaneProps) {
       moveSessionPane(current, current.focused, current.focused + direction)
     )
   }, [])
+  const renderSurfacePane = (pane: SessionSurfacePane, index: number) => (
+    <>
+      <div
+        data-testid={`surface-pane-toolbar-${index}`}
+        className="flex h-8 flex-none items-center justify-end border-b border-hairline bg-sunken/70 px-1.5"
+      >
+        {index > 0 && (
+          <button
+            type="button"
+            aria-label={`Move pane ${index + 1} left`}
+            title="Move pane left (⌃⇧⌥←)"
+            onClick={() =>
+              setSurfaceLayout((current) => moveSessionPane(current, index, index - 1))
+            }
+            className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+          >
+            <ChevronLeft className="size-4" />
+          </button>
+        )}
+        {index < surfaceLayout.panes.length - 1 && (
+          <button
+            type="button"
+            aria-label={`Move pane ${index + 1} right`}
+            title="Move pane right (⌃⇧⌥→)"
+            onClick={() =>
+              setSurfaceLayout((current) => moveSessionPane(current, index, index + 1))
+            }
+            className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+          >
+            <ChevronRight className="size-4" />
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label={`Close pane ${index + 1}`}
+          title="Close pane (the tab stays open)"
+          onClick={() =>
+            setSurfaceLayout((current) => closeSessionPane(current, index, fallbackChatSurface))
+          }
+          className="flex size-6 items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {renderSurfaceContent(pane, index)}
+      </div>
+    </>
+  )
   const paneFocused = props.pane === undefined || props.pane.focused
   useEffect(() => {
     if (!paneFocused) return
@@ -1080,14 +1128,15 @@ function SessionPaneBody(props: SessionPaneProps) {
             // The title comes from the session rather than from the caller, so the
             // chip follows a rename the moment it lands.
             pane={props.pane ? { ...props.pane, title: active.title || UNTITLED_SESSION } : undefined}
-            onClosePane={closeFocusedSurface}
-            onMovePaneLeft={surfaceLayout.focused > 0 ? () => moveFocusedSurface(-1) : undefined}
-            onMovePaneRight={
-              surfaceLayout.focused < surfaceLayout.panes.length - 1
-                ? () => moveFocusedSurface(1)
-                : undefined
-            }
           />
+  )
+  const viewRail = (
+    <ViewRail
+      tabs={railTabs}
+      active={activeTab}
+      onChange={selectTab}
+      menus={viewRailMenus}
+    />
   )
 
   return (
@@ -1097,6 +1146,9 @@ function SessionPaneBody(props: SessionPaneProps) {
         : (props.pane === undefined || props.pane.focused)
           ? createPortal(tabBar, titleBarTarget)
           : null}
+      {viewRailTarget !== null && paneFocused
+        ? createPortal(viewRail, viewRailTarget)
+        : null}
       {props.renderSubagentTabs?.(active, {
         activeTabId: activeTab,
         onSelectConversation: () => selectTab(BUILTIN_TAB.conversation)
@@ -1132,12 +1184,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
           }
         />
-        <ViewRail
-          tabs={railTabs}
-          active={activeTab}
-          onChange={selectTab}
-          menus={viewRailMenus}
-        />
+        {viewRailTarget === null ? viewRail : null}
       </div>
     </>
   )

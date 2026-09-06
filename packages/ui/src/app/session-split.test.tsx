@@ -152,9 +152,13 @@ describe("pane identity chips", () => {
 })
 
 describe("focused surface controls", () => {
-  it("keeps a one-click close control for the focused inner pane", () => {
+  it("keeps a one-click close control on every inner pane", () => {
     renderSplit({ group: groupOf(["a"]) })
-    expect(screen.getByTestId("close-pane")).toBeTruthy()
+    expect(
+      within(screen.getByTestId("surface-pane-0")).getByRole("button", {
+        name: "Close pane 1"
+      })
+    ).toBeTruthy()
   })
 
   it("does not route inner pane controls into the outer session split", () => {
@@ -168,8 +172,16 @@ describe("focused surface controls", () => {
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    fireEvent.click(screen.getByTestId("move-pane-left"))
-    fireEvent.click(screen.getByTestId("close-pane"))
+    fireEvent.click(
+      within(screen.getByTestId("surface-pane-1")).getByRole("button", {
+        name: "Move pane 2 left"
+      })
+    )
+    fireEvent.click(
+      within(screen.getByTestId("surface-pane-0")).getByRole("button", {
+        name: "Close pane 1"
+      })
+    )
 
     expect(onClosePane).not.toHaveBeenCalled()
     expect(onMovePane).not.toHaveBeenCalled()

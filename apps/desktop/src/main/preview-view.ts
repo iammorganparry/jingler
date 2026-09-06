@@ -27,8 +27,9 @@
  *
  * Both views run with `sandbox: true` + `contextIsolation: true` and NO preload,
  * so neither the previewed page nor the PDF has a bridge to the app.
- *  - the BROWSER view accepts only http/https, denies `window.open`, and blocks
- *    in-page navigation to non-http(s) schemes;
+ *  - the BROWSER view accepts only http/https and permits sandboxed,
+ *    opener-connected web popups for sign-in flows; popup descendants and
+ *    non-web navigation remain blocked;
  *  - the ASSET view accepts only `file://`, and blocks EVERY in-page navigation.
  *    A PDF can carry links, and a `file://` document that is allowed to follow
  *    them can walk the disk. Nothing legitimate needs it: the file is delivered
@@ -161,6 +162,10 @@ export const isHttpUrl = (url: string): boolean => {
   }
 }
 
+/** OAuth commonly opens about:blank first, then assigns its real web URL. */
+export const isBrowserPopupUrl = (url: string): boolean =>
+  url === "about:blank" || isHttpUrl(url)
+
 /**
  * An absolute path as a `file:` URL.
  *
@@ -270,7 +275,44 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     // that owner is focused, so attach every native overlay hidden and let the
     // explicit owner-visibility path be the only way it can paint.
     view.setVisible(false)
-    view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+    if (owner === "browser" && sessionId !== null) {
+      const partition = browserPartitionForAgent(sessionId, chatId ?? "")
+      view.webContents.setWindowOpenHandler(({ url }) =>
+        isBrowserPopupUrl(url)
+          ? {
+              action: "allow",
+              overrideBrowserWindowOptions: {
+                parent: win,
+                width: 520,
+                height: 720,
+                minWidth: 360,
+                minHeight: 480,
+                autoHideMenuBar: true,
+                webPreferences: {
+                  partition,
+                  sandbox: true,
+                  contextIsolation: true,
+                  nodeIntegration: false,
+                  webSecurity: true,
+                  allowRunningInsecureContent: false
+                }
+              }
+            }
+          : { action: "deny" }
+      )
+      view.webContents.on("did-create-window", (popup) => {
+        // The opener needs a real child window for OAuth postMessage/close.
+        // The child never needs to create grandchildren or leave web schemes.
+        popup.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+        const blockUnsafeScheme = (event: { preventDefault: () => void }, url: string) => {
+          if (!isBrowserPopupUrl(url)) event.preventDefault()
+        }
+        popup.webContents.on("will-navigate", blockUnsafeScheme)
+        popup.webContents.on("will-redirect", blockUnsafeScheme)
+      })
+    } else {
+      view.webContents.setWindowOpenHandler(() => ({ action: "deny" }))
+    }
     view.webContents.on("will-navigate", (event, url) => {
       // The asset view holds a `file://` document. A PDF's links must not be
       // followable — a file-origin page that can navigate can walk the disk.

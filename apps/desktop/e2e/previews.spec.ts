@@ -127,6 +127,106 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
 
 })
 
+test("browser sign-in popups keep their opener without app privileges", async ({ launchApp }) => {
+  let unsafeRedirectRequested = false
+  const server = createServer((request, response) => {
+    if (request.url === "/redirect") {
+      unsafeRedirectRequested = true
+      response.writeHead(302, { Location: "file:///etc/passwd" })
+      response.end()
+      return
+    }
+    response.writeHead(200, { "Content-Type": "text/html" })
+    if (request.url === "/popup") {
+      response.end(
+        `<script>` +
+          `const nested = window.open('/nested');` +
+          `window.opener.postMessage({` +
+          `cookie: document.cookie,` +
+          `requireType: typeof require,` +
+          `jinglerType: typeof window.jingler,` +
+          `nestedBlocked: nested === null` +
+          `}, location.origin);` +
+          `setTimeout(() => window.close(), 100);` +
+          `</script>`
+      )
+      return
+    }
+    response.end(
+      `<body><button id="sign-in">Sign in</button><button id="unsafe">Unsafe redirect</button>` +
+        `<script>` +
+        `document.cookie='owner=browser; path=/';` +
+        `addEventListener('message', event => { document.body.dataset.result = JSON.stringify(event.data); });` +
+        `document.querySelector('#sign-in').onclick = () => {` +
+        `const popup = window.open('about:blank', 'oauth', 'width=480,height=640');` +
+        `popup.location.href = '/popup';` +
+        `};` +
+        `document.querySelector('#unsafe').onclick = () => window.open('/redirect', 'unsafe');` +
+        `</script></body>`
+    )
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = server.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(server)
+    throw new Error("Preview popup server has no TCP address")
+  }
+  const origin = `http://127.0.0.1:${address.port}`
+
+  try {
+    const { app, window } = await launchApp({
+      configured: true,
+      isolateSystemHome: true,
+      withRepo: true,
+      sessions: seededSessions
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("view-tab-browser").click()
+    const url = window.getByLabel("Preview URL")
+    await url.fill(`${origin}/opener`)
+    await url.press("Enter")
+    await expect.poll(() => app.evaluate(
+      ({ webContents }, expectedUrl) =>
+        webContents.getAllWebContents().some((contents) => contents.getURL() === expectedUrl),
+      `${origin}/opener`
+    )).toBe(true)
+
+    await app.evaluate(async ({ webContents }, expectedUrl) => {
+      const opener = webContents.getAllWebContents().find((contents) => contents.getURL() === expectedUrl)
+      await opener?.executeJavaScript(`document.querySelector('#sign-in').click()`)
+    }, `${origin}/opener`)
+
+    await expect.poll(() => app.evaluate(async ({ webContents }, expectedUrl) => {
+      const opener = webContents.getAllWebContents().find((contents) => contents.getURL() === expectedUrl)
+      return opener?.executeJavaScript("document.body.dataset.result ?? ''")
+    }, `${origin}/opener`)).toBe(
+      JSON.stringify({
+        cookie: "owner=browser",
+        requireType: "undefined",
+        jinglerType: "undefined",
+        nestedBlocked: true
+      })
+    )
+
+    await app.evaluate(async ({ webContents }, expectedUrl) => {
+      const opener = webContents.getAllWebContents().find((contents) => contents.getURL() === expectedUrl)
+      await opener?.executeJavaScript(`document.querySelector('#unsafe').click()`)
+    }, `${origin}/opener`)
+    await expect.poll(() => unsafeRedirectRequested).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(
+      await app.evaluate(({ webContents }) =>
+        webContents.getAllWebContents().some((contents) => contents.getURL() === "file:///etc/passwd")
+      )
+    ).toBe(false)
+  } finally {
+    await closeServer(server)
+  }
+})
+
 test("restores each session's URL, history, scroll, visibility, and cookies", async ({
   launchApp
 }) => {
@@ -404,12 +504,12 @@ test("retains each session browser while Files owns two split panes", async ({ l
     // before opening its PDF so the final visible browser is Beta's retained
     // view, not Alpha's deliberately hidden one.
     await expect(betaPane).toHaveAttribute("data-focused", "true")
-    await betaPane.getByTestId("view-tab-browser").click()
+    await window.getByTestId("view-tab-browser").click()
     const betaUrl = betaPane.getByLabel("Preview URL")
     await betaUrl.fill(origin)
     await betaUrl.press("Enter")
 
-    await window.keyboard.press("Control+Shift+Digit1")
+    await alphaPane.getByTestId("surface-pane-toolbar-1").dispatchEvent("mousedown")
     await expect(alphaPane).toHaveAttribute("data-focused", "true")
     await window.keyboard.press("Meta+Shift+p")
     const picker = window.getByTestId("file-quick-open")
@@ -417,22 +517,20 @@ test("retains each session browser while Files owns two split panes", async ({ l
     await window.getByPlaceholder("Open a file in Preview Alpha…").fill("alpha.pdf")
     await window.getByTestId("palette-item-file:alpha.pdf").click()
     await expect(picker).toBeHidden()
-    await expect(alphaPane.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page"
-    )
+    await expect(
+      window.getByTestId("file-tab-alpha.pdf").getByRole("button", { name: "alpha.pdf", exact: true })
+    ).toHaveAttribute("aria-current", "page")
 
-    await window.keyboard.press("Control+Shift+Digit2")
+    await betaPane.getByTestId("surface-pane-toolbar-1").dispatchEvent("mousedown")
     await expect(betaPane).toHaveAttribute("data-focused", "true")
     await window.keyboard.press("Meta+Shift+p")
     await expect(picker).toBeVisible()
     await window.getByPlaceholder("Open a file in Preview Beta…").fill("beta.pdf")
     await window.getByTestId("palette-item-file:beta.pdf").click()
     await expect(picker).toBeHidden()
-    await expect(betaPane.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page"
-    )
+    await expect(
+      window.getByTestId("file-tab-beta.pdf").getByRole("button", { name: "beta.pdf", exact: true })
+    ).toHaveAttribute("aria-current", "page")
 
     const visibleNativeUrls = () =>
       app.evaluate(({ BrowserWindow }, expectedOrigin) => {
@@ -462,12 +560,12 @@ test("retains each session browser while Files owns two split panes", async ({ l
       )
     expect((await visibleNativeUrls()).some((loadedUrl) => loadedUrl.startsWith(origin))).toBe(false)
 
-    await window.keyboard.press("Control+Shift+Digit1")
-    await alphaPane.getByTestId("view-tab-browser").click()
+    await alphaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
+    await window.getByTestId("view-tab-browser").click()
     await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(origin)
 
-    await window.keyboard.press("Control+Shift+Digit2")
-    await betaPane.getByTestId("view-tab-browser").click()
+    await betaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
+    await window.getByTestId("view-tab-browser").click()
     await expect(betaPane.getByLabel("Preview URL")).toHaveValue(origin)
   } finally {
     await closeServer(server)

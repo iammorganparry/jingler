@@ -137,10 +137,6 @@ test("⌘⇧P searches only the focused split pane and opens its file in Files",
   await window.keyboard.press("Enter")
 
   await expect(picker).toBeHidden()
-  await expect(betaPane.getByRole("button", { name: "Files", exact: true })).toHaveAttribute(
-    "aria-current",
-    "page"
-  )
   await expect(betaPane.getByRole("textbox", { name: "beta-only.custom" })).toContainText(
     "beta worktree",
     { timeout: 15_000 }
@@ -149,7 +145,7 @@ test("⌘⇧P searches only the focused split pane and opens its file in Files",
 
   // Focus Alpha without altering the split, then prove Beta's unique path is
   // not merely ranked lower — it is absent from this picker altogether.
-  await window.keyboard.press("Control+Shift+Digit1")
+  await alphaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
   await expect(alphaPane).toHaveAttribute("data-focused", "true")
   await window.keyboard.press("Meta+Shift+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("beta-only")
