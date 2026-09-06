@@ -36,7 +36,7 @@ const RATIO_SAVE_DELAY_MS = 200
  * operator is dragging a divider". Deliberately a string rather than a deep
  * compare: it is computed on every state change, including every pointer-move,
  * so it has to be cheap — and a workspace is at most a handful of groups of at
- * most four panes, which makes this a few dozen characters.
+ * most three panes, which makes this a few dozen characters.
  */
 const structureOf = (ws: Workspace): string =>
   `${ws.activeGroupId ?? ""}|${ws.groups

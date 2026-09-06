@@ -506,7 +506,7 @@ describe("migrateLegacyLayout", () => {
     expect(ws.groups[0]!.panes.every((p) => Math.abs(p.ratio - 1 / 3) < 1e-6)).toBe(true)
   })
 
-  it("re-orders a legacy row-major 2x2 so panes keep their left-to-right reading", () => {
+  it("keeps a legacy row-major 2x2 in reading order while applying the cap", () => {
     const ws = migrateLegacyLayout({ mode: "2x2", slots: ["tl", "tr", "bl", "br"], focused: 0 })!
     expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["tl", "bl", "tr"])
   })

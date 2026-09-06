@@ -201,18 +201,18 @@ export const DockFlip: Story = {
 }
 
 /**
- * Four panes, which only the widest windows can now seat.
+ * A stale four-pane layout after the static cap dropped to three.
  *
- * At the bottom width the split would previously have allowed all four at ~176px
- * each; the readout shows the cap that now applies instead.
+ * Existing panes are never evicted; the readout shows that no new pane can be
+ * added even at the widest size.
  */
 export const PaneCap: Story = {
   render: () => (
     <div className="min-h-screen bg-canvas">
       <LookFor>
         <strong className="text-text-bright">Look for:</strong> the &quot;seats&quot; readout
-        falling as the window narrows. Existing panes are never evicted — the cap only refuses a new
-        drop, so a 4-pane layout carried over from a wider window still renders.
+        staying at three on wide windows and falling as the window narrows. Existing panes are never
+        evicted — the cap only refuses a new drop, so a stale 4-pane layout still renders.
       </LookFor>
       <div className="flex items-start gap-5 overflow-auto p-6">
         <Shell width={1920} paneIds={["s1", "s2", "s3", "s4"]} />

@@ -195,7 +195,7 @@ export const TwoPaneSplit: Story = {
   args: { initial: workspaceOf(["s1", "s2"], ["s3"]) }
 }
 
-/** The cap. At four panes the "Add right split" placeholder hides itself. */
+/** The cap. At three panes the "Add right split" placeholder hides itself. */
 export const FourPaneSplit: Story = {
   args: { initial: workspaceOf(["s1", "s2", "s3", "s4"]) },
   parameters: {

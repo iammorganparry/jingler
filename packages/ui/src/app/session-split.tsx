@@ -90,7 +90,7 @@ export interface SessionSplitProps {
    *
    * Mounted once beside the terminal and browser docks — NOT inside the pane
    * loop. A dock belongs to the window; putting one in the loop would render
-   * four copies in a four-way split, all fighting over the same state.
+   * three copies in a three-way split, all fighting over the same state.
    */
   paneContributions?: ReadonlyArray<PaneContribution>
   renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
@@ -99,7 +99,7 @@ export interface SessionSplitProps {
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *
-   * Broadcasting it would switch all four tabs in a four-way split, which is not
+   * Broadcasting it would switch all three tabs in a three-way split, which is not
    * what "go to Changes" means — the operator is looking at one pane.
    */
   selectTabRequest?: { readonly tabId: TabKey; readonly nonce: number } | null

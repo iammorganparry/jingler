@@ -23,7 +23,7 @@ describe("shifted chords match the physical key, not the character", () => {
   /**
    * The regression, stated as data: with Shift held, a US layout reports these
    * characters for the digit row and the brackets. Matching `e.key` against
-   * "1".."4", "[" and "]" — as the first version did — can never fire.
+   * "1".."3", "[" and "]" — as the first version did — can never fire.
    */
   const SHIFTED: ReadonlyArray<readonly [code: string, shiftedKey: string]> = [
     ["Digit1", "!"],
@@ -48,12 +48,12 @@ describe("shifted chords match the physical key, not the character", () => {
   })
 
   it("offers a digit per pane, and no more", () => {
-    expect(match(ctrlShift(`Digit${MAX_PANES}`, "$"))).toEqual({
+    expect(match(ctrlShift("Digit3", "#"))).toEqual({
       type: "focus-pane",
       index: MAX_PANES - 1
     })
     // One past the cap is not a pane shortcut at all — not a clamped one.
-    expect(match(ctrlShift(`Digit${MAX_PANES + 1}`, "%"))).toBeNull()
+    expect(match(ctrlShift("Digit4", "$"))).toBeNull()
   })
 
   it("moves focus left and right on the brackets", () => {

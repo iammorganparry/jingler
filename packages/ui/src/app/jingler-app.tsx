@@ -263,7 +263,7 @@ export interface JinglerAppProps {
    *
    * Threaded beside `tabContributions` rather than inferred: a dock belongs to
    * the window, so it is mounted once by `SessionSplit` outside the pane loop —
-   * putting one inside would render four copies in a four-way split.
+   * putting one inside would render three copies in a three-way split.
    */
   paneContributions?: ReadonlyArray<PaneContribution>
   /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */

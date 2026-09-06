@@ -325,7 +325,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   }
 
   const single = group.panes.length === 1
-  // The cap is the row's, not the model's: four panes are legible at 1400px and
+  // The cap is the row's, not the model's: three panes are legible at 1400px and
   // illegible at 900px, and the operator gets told which by the indicator
   // turning red rather than by dropping a session into a pane they can't read.
   const full = group.panes.length >= paneCapacity(rowWidth)

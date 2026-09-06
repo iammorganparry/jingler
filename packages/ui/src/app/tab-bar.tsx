@@ -383,7 +383,7 @@ function renderEditableTitle() {
         </div>)
          }
 
-  // The PANE's width, not the window's. A four-way split on a 4K display gives
+  // The PANE's width, not the window's. A three-way split on a 4K display gives
   // every pane a `narrow` tier; a maximised single pane on a laptop gives
   // `wide`. Keying off the window would get both backwards.
   const measuredTier = useWidthTier()

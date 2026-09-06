@@ -292,7 +292,7 @@ export interface SessionPaneProps {
  * THE responsive boundary.
  *
  * Everything below here — the tab bar, the composer, a pane's side rails —
- * collapses against THIS pane's width, so a four-way split degrades each pane
+ * collapses against THIS pane's width, so a three-way split degrades each pane
  * independently and a single maximised pane keeps the full layout.
  *
  * Split into a provider and a body deliberately: a component cannot read the

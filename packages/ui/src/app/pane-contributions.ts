@@ -4,10 +4,10 @@
  *
  * ## Why a pane is not a tab with a different flag
  *
- * A tab belongs to a SESSION, and there can be four on screen at once in a
+ * A tab belongs to a SESSION, and there can be three on screen at once in a
  * split. A dock belongs to the WINDOW: it is mounted once, outside the pane
  * loop, and takes whichever session currently has focus as a prop. Modelling a
- * dock as a tab would put four copies of a process-wide panel on screen,
+ * dock as a tab would put three copies of a process-wide panel on screen,
  * fighting over the same state — which is exactly the bug `session-split.tsx`
  * hoists the terminal and browser docks out of the pane loop to avoid.
  *

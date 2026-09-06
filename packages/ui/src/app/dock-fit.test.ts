@@ -46,7 +46,7 @@ describe("maxPanesForWidth", () => {
     expect(maxPanesForWidth(MIN_PANE_PX * MAX_PANES)).toBe(MAX_PANES)
   })
 
-  it("refuses a fourth pane the row cannot make readable", () => {
+  it("applies the readable-width floor before the static cap", () => {
     // `MIN_RATIO` is a proportion, not a floor: 0.15 of a 1174px row is ~176px,
     // narrower than a diff row's fixed gutters. This is the floor.
     expect(maxPanesForWidth(1000)).toBe(2)
