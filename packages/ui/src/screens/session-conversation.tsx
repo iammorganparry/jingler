@@ -336,18 +336,14 @@ export function SessionConversation(props: SessionConversationProps) {
       />
 
       <div className="m-2 ml-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-editor shadow-[0_0_0_1px_var(--sb-line),0_18px_50px_var(--sb-border)]">
-        <div className="flex min-h-0 min-w-0 flex-1">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {props.newSessionView && (
           <div className={props.newSessionViewActive ? "flex min-h-0 flex-1" : "hidden"}>
             {props.newSessionView}
           </div>
         )}
         {!props.newSessionViewActive && (getProps())}
-          </div>
-          <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
-        </div>
       </div>
+      <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
     </div>
   )
 }

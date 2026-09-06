@@ -16,7 +16,7 @@ export function SubagentTabBar({
   return (
     <div
       data-testid="subagent-tab-bar"
-      className="sb-no-scrollbar flex h-8 flex-none items-center gap-1 overflow-x-auto border-b border-hairline bg-sunken/70 px-3"
+      className="sb-no-scrollbar flex h-8 min-w-0 flex-none items-center gap-1 overflow-x-auto border-b border-hairline bg-sunken/70 px-3"
     >
       <span className="flex-none text-[10px] font-medium uppercase tracking-wide text-dim">Subagents</span>
       {subagents.map((subagent) => {

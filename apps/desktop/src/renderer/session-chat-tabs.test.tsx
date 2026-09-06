@@ -35,8 +35,7 @@ vi.mock("./rpc-client.js", () => ({
     sessionsSelectChat: vi.fn(),
     sessionsRenameChat: vi.fn(),
     sessionsCloseChat: vi.fn(),
-    sessionsReopenChat: vi.fn(),
-    agentMessagePeer: vi.fn()
+    sessionsReopenChat: vi.fn()
   }
 }))
 
@@ -320,33 +319,6 @@ describe("SessionChatTabs subagent tabs", () => {
 
     expect(selection.result.current).toMatchObject({ chatId: "chat-2", nodeId: "shared-worker" })
     expect(rpc.sessionsSelectChat).toHaveBeenCalledWith(session.id, "chat-2")
-  })
-
-  it("drops a drafted peer message when the sending agent changes", () => {
-    const secondChat = {
-      id: "chat-2",
-      title: "Second",
-      createdAt: "2026-07-16T00:00:00.000Z",
-      updatedAt: "2026-07-16T00:00:00.000Z"
-    }
-    const twoChats = { ...session, chats: [...session.chats, secondChat] }
-    const view = render(
-      <SessionSubagentTabs session={twoChats} onSelectConversation={vi.fn()} />
-    )
-    fireEvent.click(screen.getByText("Peer agents"))
-    fireEvent.click(screen.getByRole("button", { name: "Message Second" }))
-    fireEvent.change(screen.getByRole("textbox", { name: "Message to Second" }), {
-      target: { value: "draft from chat one" }
-    })
-
-    view.rerender(
-      <SessionSubagentTabs
-        session={{ ...twoChats, activeChatId: "chat-2" }}
-        onSelectConversation={vi.fn()}
-      />
-    )
-
-    expect(screen.queryByDisplayValue("draft from chat one")).toBeNull()
   })
 
   it("shows only children of the selected top-level agent", () => {

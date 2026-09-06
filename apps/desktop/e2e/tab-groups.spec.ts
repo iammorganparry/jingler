@@ -148,6 +148,9 @@ test("tabs split inside one pane of an outer session split", async ({ launchApp 
   expect(
     await window.getByTestId("view-rail").evaluate((rail) => rail.parentElement?.id)
   ).toBe("session-view-rail-portal")
+  expect(
+    await window.getByTestId("view-rail").evaluate((rail) => rail.closest(".rounded-2xl"))
+  ).toBeNull()
   await expect(
     window.getByTestId("open-view-tab-terminal").getByRole("button", { name: "Terminal", exact: true })
   ).toHaveAttribute("aria-current", "page")

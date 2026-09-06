@@ -1132,7 +1132,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     <>
       <div
         data-testid={`surface-pane-toolbar-${index}`}
-        className="flex h-8 flex-none items-center justify-end border-b border-hairline bg-sunken/70 px-1.5"
+        className="flex h-8 flex-none items-center justify-end border-b border-hairline px-1.5"
       >
         {index > 0 && (
           <button

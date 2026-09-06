@@ -10,7 +10,6 @@
  */
 import type { Session } from "@jingler/core"
 import {
-  AgentRoster,
   ChatTabBar,
   FileIcon,
   FileQuickOpen,
@@ -27,7 +26,6 @@ import { publishSessionUpdate } from "./session-updates.js"
 import { queueSessionChatMutation } from "./session-chat-mutations.js"
 import { disposeChatActor, useChatActivities } from "./conversation-registry.js"
 import { clearDraft } from "./draft-store.js"
-import { useAgentRoster } from "./agent-roster.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import {
   selectSubagentTab,
@@ -46,9 +44,7 @@ export function SessionSubagentTabs({
   const snapshots = useSessionSubagentTabs(session.id)
   const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
   const subagents = active?.active ?? []
-  const roster = useAgentRoster(session)
   return (
-    <>
     <SubagentTabBar
       subagents={subagents.map((node) => ({
         id: node.id,
@@ -61,15 +57,6 @@ export function SessionSubagentTabs({
         selectSubagentTab(session.id, session.activeChatId, nodeId)
       }}
     />
-    <AgentRoster
-      key={session.activeChatId}
-      agents={roster}
-      currentChatId={session.activeChatId}
-      onMessage={(toChatId, text) =>
-        rpc.agentMessagePeer(session.id, session.activeChatId, toChatId, text)
-      }
-    />
-    </>
   )
 }
 
