@@ -3,6 +3,7 @@ import {
   acceptsPreviewNavigationCommit,
   browserPartitionForAgent,
   fileUrlFor,
+  isBrowserPopupUrl,
   isHttpUrl,
   toRect
 } from "./preview-view.js"
@@ -29,6 +30,20 @@ describe("isHttpUrl", () => {
     expect(isHttpUrl("localhost:3000")).toBe(false) // no scheme → not a valid URL
     expect(isHttpUrl("")).toBe(false)
     expect(isHttpUrl("not a url")).toBe(false)
+  })
+})
+
+describe("isBrowserPopupUrl", () => {
+  it("allows web popups and OAuth's initial blank window", () => {
+    expect(isBrowserPopupUrl("about:blank")).toBe(true)
+    expect(isBrowserPopupUrl("https://accounts.example/sign-in")).toBe(true)
+    expect(isBrowserPopupUrl("http://127.0.0.1/callback")).toBe(true)
+  })
+
+  it("rejects privileged and executable schemes", () => {
+    expect(isBrowserPopupUrl("file:///etc/passwd")).toBe(false)
+    expect(isBrowserPopupUrl("javascript:alert(1)")).toBe(false)
+    expect(isBrowserPopupUrl("data:text/html,hello")).toBe(false)
   })
 })
 

@@ -704,11 +704,71 @@ describe("SessionPane", () => {
       </>
     )
 
-    expect(within(document.getElementById("session-tab-bar-portal")!).getByTestId("session-tab-bar"))
-      .toBeTruthy()
+    const titleBar = within(document.getElementById("session-tab-bar-portal")!)
+    expect(titleBar.getByTestId("session-tab-bar")).toBeTruthy()
+    expect(titleBar.queryByRole("button", { name: /Close pane/ })).toBeNull()
   })
 
-  it("moves and closes the focused surface from the top-right controls", () => {
+  it("moves the focused session view rail into the main frame", () => {
+    render(
+      <>
+        <div id="session-view-rail-portal" />
+        <SessionPane
+          session={session({ id: "a" })}
+          renderConversation={() => <div>transcript</div>}
+        />
+      </>
+    )
+
+    expect(
+      within(document.getElementById("session-view-rail-portal")!).getByTestId("view-rail")
+    ).toBeTruthy()
+    expect(within(screen.getByTestId("surface-view")).queryByTestId("view-rail")).toBeNull()
+  })
+
+  it("highlights the tab belonging to the focused pane", () => {
+    render(
+      <>
+        <div id="session-tab-bar-portal" />
+        <div id="session-view-rail-portal" />
+        <SessionPane
+          session={session({ id: "a" })}
+          explanationSessions={new Set(["a"])}
+          renderConversation={() => <div>transcript</div>}
+          renderExplanation={() => <div>explanation</div>}
+          renderChatTabs={(_session, ctx) => (
+            <>
+              <button
+                type="button"
+                aria-current={ctx.activeSurface?.kind === "chat" ? "page" : undefined}
+              >
+                Chat tab
+              </button>
+              {ctx.viewSlot}
+            </>
+          )}
+        />
+      </>
+    )
+
+    fireEvent.click(
+      within(document.getElementById("session-view-rail-portal")!).getByRole("button", {
+        name: "Explanation"
+      })
+    )
+    const explanationTab = within(
+      screen.getByTestId("open-view-tab-explanation")
+    ).getByRole("button", { name: "Explanation" })
+    expect(explanationTab.getAttribute("aria-current")).toBe("page")
+
+    fireEvent.mouseDown(screen.getByTestId("surface-pane-0"))
+    expect(screen.getByRole("button", { name: "Chat tab" }).getAttribute("aria-current")).toBe(
+      "page"
+    )
+    expect(explanationTab.getAttribute("aria-current")).toBeNull()
+  })
+
+  it("moves and closes the focused surface from controls on that pane", () => {
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -718,10 +778,19 @@ describe("SessionPane", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
-    fireEvent.click(screen.getByRole("button", { name: "Move pane left" }))
+    expect(screen.getAllByRole("button", { name: /Close pane \d/ })).toHaveLength(2)
+    fireEvent.click(
+      within(screen.getByTestId("surface-pane-1")).getByRole("button", {
+        name: "Move pane 2 left"
+      })
+    )
     expect(screen.getByTestId("surface-pane-0").dataset.surface).toContain("explanation")
 
-    fireEvent.click(screen.getByRole("button", { name: "Close pane" }))
+    fireEvent.click(
+      within(screen.getByTestId("surface-pane-0")).getByRole("button", {
+        name: "Close pane 1"
+      })
+    )
     expect(screen.getByTestId("surface-view").dataset.panes).toBe("1")
   })
 

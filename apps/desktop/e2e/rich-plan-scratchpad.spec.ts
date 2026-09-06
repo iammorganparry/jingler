@@ -85,7 +85,10 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await expect(
     launched.window.getByText("Implement TokenStore").first()
   ).toBeVisible()
-  await launched.window.getByRole("button", { name: "Move pane left" }).click()
+  await launched.window
+    .getByTestId("surface-pane-1")
+    .getByRole("button", { name: "Move pane 2 left" })
+    .click()
   await expect(launched.window.getByText("Token store rollout").first()).toBeVisible()
 
   // [DONE:1] ticked the first task, so the first stage is running (not done):
