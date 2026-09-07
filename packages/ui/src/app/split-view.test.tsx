@@ -82,6 +82,18 @@ describe("SplitView — switching vs editing", () => {
     expect(screen.getByTestId("split-pane-1").dataset.session).toBe("d")
   })
 
+  it("does not publish chat focus before a toolbar close or move", () => {
+    const onFocusPane = vi.fn()
+    render(<SplitView group={groupOf(["a", "b"])} onFocusPane={onFocusPane}
+      renderPane={() => <><div data-pane-toolbar><button type="button">Close</button></div><p>transcript</p></>} />)
+    const close = screen.getAllByRole("button", { name: "Close" })[0]!
+    fireEvent.mouseDown(close)
+    fireEvent.focus(close)
+    expect(onFocusPane).not.toHaveBeenCalled()
+    fireEvent.mouseDown(screen.getAllByText("transcript")[0]!)
+    expect(onFocusPane).toHaveBeenCalledWith(0)
+  })
+
   it("previews divider moves without rerendering pane bodies per pointer move", () => {
     const renders = vi.fn()
     const onResize = vi.fn()

@@ -1,5 +1,5 @@
 import type { TabKey } from "./tab-contributions.js"
-import { MIN_RATIO } from "./split-layout.js"
+import { MAX_PANES, MIN_RATIO } from "./split-layout.js"
 
 export type SessionSurface =
   | { readonly kind: "chat"; readonly id: string }
@@ -12,6 +12,8 @@ export interface SessionSurfacePane {
 }
 
 export interface SessionSurfaceLayout {
+  /** Null records an explicit close, so restoring the layout must not reopen main. */
+  readonly mainChatId?: string | null
   readonly panes: ReadonlyArray<SessionSurfacePane>
   readonly focused: number
   readonly openViews: ReadonlyArray<Extract<SessionSurface, { kind: "view" }>>
@@ -31,7 +33,7 @@ export type SessionSurfaceCommand =
   | "focus-3"
 export const SESSION_SURFACE_MIN_PX = 220
 export const maxSessionSurfacesForWidth = (width: number): number =>
-  width <= 0 ? 4 : Math.max(1, Math.min(4, Math.floor(width / SESSION_SURFACE_MIN_PX)))
+  width <= 0 ? MAX_PANES : Math.max(1, Math.min(MAX_PANES, Math.floor(width / SESSION_SURFACE_MIN_PX)))
 export const SESSION_SURFACE_STORAGE_PREFIX = "sb.session-surfaces.v1:"
 
 export const sessionSurfaceKey = (surface: SessionSurface): string =>
@@ -95,11 +97,16 @@ export const selectSessionSurface = (
   const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (visible !== -1) return focusSessionSurface(layout, visible)
   if (layout.panes.length === 0) return { ...layout, panes: [{ surface, ratio: 1 }], focused: 0 }
+  const focused = layout.panes[layout.focused]?.surface
+  const replacingMain = focused?.kind === "chat" && focused.id === layout.mainChatId
+  const target = replacingMain
+    ? layout.panes.findIndex((pane) => pane.surface.kind !== "chat" || pane.surface.id !== layout.mainChatId)
+    : layout.focused
+  if (target === -1) return splitSessionSurface(layout, surface, layout.panes.length, MAX_PANES)
   return {
     ...layout,
-    panes: layout.panes.map((pane, index) =>
-      index === layout.focused ? { ...pane, surface } : pane
-    )
+    focused: target,
+    panes: layout.panes.map((pane, index) => index === target ? { ...pane, surface } : pane)
   }
 }
 
@@ -110,7 +117,7 @@ export const openSessionSurface = (
 ): SessionSurfaceLayout => {
   const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (visible !== -1) return focusSessionSurface(layout, visible)
-  return layout.panes.length < maxPanes
+  return layout.panes.length < Math.min(MAX_PANES, maxPanes)
     ? splitSessionSurface(layout, surface, layout.panes.length, maxPanes)
     : selectSessionSurface(layout, surface)
 }
@@ -133,7 +140,7 @@ export const splitSessionSurface = (
   maxPanes: number
 ): SessionSurfaceLayout => {
   const existing = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
-  if (existing === -1 && layout.panes.length >= maxPanes) return layout
+  if (existing === -1 && (layout.panes.length >= MAX_PANES || layout.panes.length >= maxPanes)) return layout
   const surfaces = layout.panes.map((pane) => pane.surface)
   if (existing !== -1) surfaces.splice(existing, 1)
   const adjusted = existing !== -1 && existing < at ? at - 1 : at
@@ -149,6 +156,10 @@ export const replaceSessionSurface = (
 ): SessionSurfaceLayout => {
   if (index < 0 || index >= layout.panes.length) return layout
   if (sameSurface(layout.panes[index]!.surface, surface)) return focusSessionSurface(layout, index)
+  const targetSurface = layout.panes[index]!.surface
+  if (targetSurface.kind === "chat" && targetSurface.id === layout.mainChatId) {
+    return selectSessionSurface({ ...layout, focused: index }, surface)
+  }
   const duplicate = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   const kept = layout.panes.filter((_, paneIndex) => paneIndex === index || paneIndex !== duplicate)
   const target = duplicate !== -1 && duplicate < index ? index - 1 : index
@@ -164,9 +175,11 @@ export const closeSessionPane = (
   fallback: SessionSurface
 ): SessionSurfaceLayout => {
   if (index < 0 || index >= layout.panes.length) return layout
+  const closed = layout.panes[index]!.surface
   const panes = normalise(layout.panes.filter((_, paneIndex) => paneIndex !== index))
   return {
     ...layout,
+    ...(closed.kind === "chat" && closed.id === layout.mainChatId ? { mainChatId: null } : {}),
     panes: panes.length > 0 ? panes : [{ surface: fallback, ratio: 1 }],
     focused: Math.min(index, Math.max(0, panes.length - 1))
   }
@@ -205,6 +218,7 @@ export const closeSessionSurface = (
     ...layout,
     panes,
     focused,
+    ...(surface.kind === "chat" && surface.id === layout.mainChatId ? { mainChatId: null } : {}),
     openViews:
       surface.kind === "view"
         ? layout.openViews.filter((view) => sessionSurfaceKey(view) !== key)
@@ -218,6 +232,7 @@ export const closeAllSessionViews = (
 ): SessionSurfaceLayout => {
   const panes = normalise(layout.panes.filter((pane) => pane.surface.kind !== "view"))
   return {
+    ...layout,
     panes: panes.length > 0 ? panes : [{ surface: fallback, ratio: 1 }],
     focused: clampFocus(layout.focused, panes.length || 1),
     openViews: []
@@ -280,6 +295,7 @@ export const pruneSessionSurfaceLayout = (
     return allowed.has(key) && views.findIndex((candidate) => sameSurface(candidate, view)) === index
   })
   return {
+    ...layout,
     panes: panes.length > 0 ? panes : [{ surface: fallback, ratio: 1 }],
     focused: clampFocus(layout.focused, panes.length || 1),
     openViews
@@ -288,16 +304,20 @@ export const pruneSessionSurfaceLayout = (
 
 export const loadSessionSurfaceLayout = (
   sessionId: string,
-  fallback: SessionSurface
+  fallback: SessionSurface,
+  mainChatId?: string
 ): SessionSurfaceLayout => {
+  const initial = mainChatId
+    ? openSessionSurface({ ...createSessionSurfaceLayout({ kind: "chat", id: mainChatId }), mainChatId }, fallback, MAX_PANES)
+    : createSessionSurfaceLayout(fallback)
   try {
     const raw = localStorage.getItem(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`)
-    if (raw === null) return createSessionSurfaceLayout(fallback)
+    if (raw === null) return initial
     const parsed = JSON.parse(raw) as Partial<SessionSurfaceLayout>
     if (!(Array.isArray(parsed.panes) && Array.isArray(parsed.openViews))) {
-      return createSessionSurfaceLayout(fallback)
+      return initial
     }
-    const panes = parsed.panes
+    let panes = parsed.panes
       .filter(
         (pane): pane is SessionSurfacePane =>
           typeof pane === "object" &&
@@ -307,19 +327,30 @@ export const loadSessionSurfaceLayout = (
           Number.isFinite((pane as SessionSurfacePane).ratio) &&
           (pane as SessionSurfacePane).ratio > 0
       )
-      .slice(0, 4)
+    const focusedSurface = panes[clampFocus(parsed.focused ?? 0, panes.length)]?.surface
+    const main = parsed.mainChatId === null ? null : mainChatId ?? (typeof parsed.mainChatId === "string" ? parsed.mainChatId : undefined)
+    if (main) {
+      const mainPane = panes.find((pane) => pane.surface.kind === "chat" && pane.surface.id === main)
+        ?? { surface: { kind: "chat" as const, id: main }, ratio: 1 }
+      const oldIndex = panes.indexOf(mainPane)
+      panes = panes.filter((pane) => pane !== mainPane).slice(0, MAX_PANES - 1)
+      panes.splice(Math.max(0, Math.min(oldIndex, panes.length)), 0, mainPane)
+    } else {
+      panes = panes.slice(0, MAX_PANES)
+    }
     const openViews = parsed.openViews.filter(
       (view): view is Extract<SessionSurface, { kind: "view" }> =>
         isSurface(view) && view.kind === "view"
     )
-    if (panes.length === 0) return createSessionSurfaceLayout(fallback)
+    if (panes.length === 0) return initial
     return {
+      ...(main !== undefined ? { mainChatId: main } : {}),
       panes: normalise(panes),
-      focused: clampFocus(parsed.focused ?? 0, panes.length),
+      focused: Math.max(0, panes.findIndex((pane) => focusedSurface && sameSurface(pane.surface, focusedSurface))),
       openViews
     }
   } catch {
-    return createSessionSurfaceLayout(fallback)
+    return initial
   }
 }
 

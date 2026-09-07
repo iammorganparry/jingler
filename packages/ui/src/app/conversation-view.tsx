@@ -514,6 +514,7 @@ return (virtualItems[0])
   }>({ messages: [], keys: [], next: 0 })
   itemKeyState.current = updateTranscriptRowKeys(itemKeyState.current, messages)
   const itemKeys = itemKeyState.current.keys
+  const getItemKey = useCallback((index: number) => itemKeys[index]!, [itemKeys])
   // Per-item identity reuse: `messages` gets a new identity on every streamed
   // token, so this memo re-runs per token — but only the LIVE turn's preview
   // text actually changes. Reusing the previous item object (and, when nothing
@@ -556,7 +557,7 @@ return (virtualItems[0])
     count: messages.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 140,
-    getItemKey: (i) => itemKeys[i]!,
+    getItemKey,
     overscan: 6
   })
   const virtualItems = virtualizer.getVirtualItems()

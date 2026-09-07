@@ -1,4 +1,4 @@
-import { type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
+import { type DragEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type SyntheticEvent, useCallback, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { cn } from "../lib/cn.js"
 import { useContainerWidth } from "../hooks/use-container-width.js"
@@ -96,6 +96,12 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   onResize,
   emptyState
 }: SplitViewProps<TPane>) {
+  const focusFromContent = (event: SyntheticEvent, index: number) => {
+    // Toolbar actions already name their pane. Focusing first can publish a late
+    // active-chat update that reopens the pane immediately after it was closed.
+    if (event.target instanceof Element && event.target.closest("[data-pane-toolbar]")) return
+    onFocusPane?.(index)
+  }
   const renderSplitPaneContainer = (pane: TPane, index: number) => {
   function getPaneTransition() {
     return (draggingDivider !== null ? INSTANT : switched ? FAST : SPRING)
@@ -124,34 +130,15 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
           return (
             <motion.div
               key={paneId(pane)}
-              // `layout` moves a pane when its NEIGHBOURS change size or count.
-              // Suspended mid-divider-drag: there, the width already tracks the
-              // pointer exactly, and a spring on top of it only adds lag.
-              layout={draggingDivider === null}
-              custom={pane.ratio}
+              // Position-only transforms keep text crisp and avoid per-frame wrapping/measurement.
+              layout={paneLayout}
               variants={paneVariants}
-              // A pane inserted into the split you're looking at grows out of a
-              // sliver and pushes its neighbours aside, because that IS what
-              // happened. A pane that arrives by a switch starts at its final
-              // width and only fades — nothing was inserted.
-              initial={switched ? "swap" : "hidden"}
+              initial="hidden"
               animate="visible"
-              exit="exit"
-              // The other half of suspending `layout` below. `visible` is a
-              // function of the ratio, so a divider drag re-resolves it on every
-              // pointer-move — with a spring, each of those starts a new ~260ms
-              // animation toward the new width, and the pane trails the cursor
-              // exactly as if `layout` had never been suspended. Mid-drag the
-              // pointer IS the animation, so the width is written on the frame
-              // it changes.
-              // Mid-drag the pointer is the animation (INSTANT). A switch is a
-              // 140ms fade at full width (FAST) — the width is already right, so
-              // a spring would have nothing to travel but the opacity. Everything
-              // else springs.
               transition={getPaneTransition()}
               // `order` interleaves the panes with the dividers, which are
               // rendered as a separate run below (see the note there).
-              style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2 }}
+              style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2, contain: "layout paint" }}
               data-testid={`${testIdPrefix}-pane-${index}`}
               {...{ [`data-${testIdPrefix}-pane-index`]: index }}
               data-session={testIdPrefix === "split" ? paneId(pane) : undefined}
@@ -160,8 +147,8 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
               // Focus follows a mousedown anywhere in the pane, captured so a
               // click on a control inside still registers the pane as focused
               // first.
-              onMouseDownCapture={() => onFocusPane?.(index)}
-              onFocusCapture={() => onFocusPane?.(index)}
+              onMouseDownCapture={(event) => focusFromContent(event, index)}
+              onFocusCapture={(event) => focusFromContent(event, index)}
               onDragOver={(e) => {
                 if (!(onSplitWith || onReplacePane)) return
                 if (!carriesPayload(e, dragMime)) return
@@ -210,6 +197,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   // a spring chasing the pointer lags behind it, which feels like the divider
   // is stuck to elastic rather than to the cursor.
   const [draggingDivider, setDraggingDivider] = useState<number | null>(null)
+  const paneLayout = draggingDivider === null ? "position" : false
   // Doubles as the divider drag's reference box and as the source of the
   // width-derived pane cap below — one measurement, two uses.
   const [rowRef, rowWidth] = useContainerWidth<HTMLDivElement>()
@@ -368,15 +356,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
         testIdPrefix === "surface" ? "gap-1.5 bg-panel p-1.5" : "bg-hairline"
       )}
     >
-      {/*
-        Keyed by the switch token, so a switch REMOUNTS the presence tree: the
-        panes that were here go in the same frame, with no exit animation to
-        play (motion can only run one from props the leaving element already
-        had, which is why this is a key rather than a different `exit` variant).
-        `initial` follows suit — normally false, so a pane already on screen when
-        the split mounts doesn't animate in, but true on a switch, which is what
-        lets the arriving panes fade.
-      */}
+      {/* Fresh sessions fade in; surviving panes keep their transcript state. */}
       <AnimatePresence key={presenceKey} initial={switched} mode="popLayout">
         {group.panes.map(renderSplitPaneContainer)}
       </AnimatePresence>

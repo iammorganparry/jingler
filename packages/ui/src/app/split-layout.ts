@@ -35,7 +35,7 @@ export interface Pane {
 }
 
 /**
- * A split: 1–4 sessions side by side, left to right.
+ * A split: 1–3 sessions side by side, left to right.
  *
  * A group of ONE is not a degenerate case — it is what an ordinary,
  * un-split session is. That is the whole trick of this model.
@@ -61,12 +61,8 @@ export interface Workspace {
   readonly activeGroupId: string | null
 }
 
-/**
- * Arc's limit, and a sane one: past four panes on a laptop display each pane is
- * too narrow to read a transcript in. A single constant if that judgement ever
- * changes.
- */
-export const MAX_PANES = 4
+/** Keep transcripts readable when several panes are open. */
+export const MAX_PANES = 3
 
 /** Smallest share a pane may be dragged to — below this it can't be read. */
 export const MIN_RATIO = 0.15

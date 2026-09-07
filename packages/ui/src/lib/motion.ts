@@ -68,44 +68,10 @@ export const EXIT: Transition = { duration: 0.19, ease: [0.4, 0, 1, 1] }
  */
 export const INSTANT: Transition = { duration: 0 }
 
-/**
- * A pane entering, leaving, or resizing within a split.
- *
- * Animates `flexGrow` rather than `width`: the panes share a flex row, so
- * growing one must shrink its neighbours *in the same frame*. A width animation
- * would need every sibling animated in lockstep and would still fight the
- * flexbox. `0.001` rather than `0` because a flex child with zero grow snaps
- * shut instantly instead of easing.
- *
- * **`visible` deliberately carries no `transition` of its own**, so the caller's
- * `transition` prop governs it. A transition declared inside a variant outranks
- * the component's, which made this the second half of a bug: `visible` is a
- * function of the ratio, so every divider pointer-move re-resolved it and
- * started a fresh spring toward the new `flexGrow`. Suspending `layout` mid-drag
- * — the fix that was there — only ever addressed the other half, and the pane
- * went on trailing the pointer through a ~260ms spring: precisely the elastic
- * feel the suspension existed to prevent. `split-view` now hands down `INSTANT`
- * while a divider is down and `SPRING` the rest of the time.
- *
- * `exit` keeps its own, because a leaving pane is unmounting and has no caller
- * left to inherit from.
- */
+/** Width is committed once; SplitView animates position without reflowing transcripts per frame. */
 export const paneVariants: Variants = {
-  hidden: { flexGrow: 0.001, opacity: 0 },
-  visible: (ratio: number) => ({ flexGrow: ratio, opacity: 1 }),
-  exit: { flexGrow: 0.001, opacity: 0, transition: SPRING },
-  /**
-   * The entry state for a pane that arrives by a chat SWITCH rather than by an
-   * edit to the split — already the right width, only not yet visible.
-   *
-   * `hidden` describes a pane being inserted into a split you are looking at:
-   * it should push its neighbours aside, because that is what happened. A switch
-   * is not that. Nothing was inserted — the whole row was replaced — so growing
-   * the new pane out of a sliver animates a rearrangement that never occurred,
-   * and the app reads as if it dismantled a split and built another one every
-   * time you clicked a session in the sidebar.
-   */
-  swap: (ratio: number) => ({ flexGrow: ratio, opacity: 0 })
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 }
 }
 
 /**

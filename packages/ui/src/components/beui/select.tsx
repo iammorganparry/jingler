@@ -438,6 +438,7 @@ return ({
   }, [ctx.reduce, open]);
 
   useLayoutEffect(() => {
+    if (!open) return;
     const node = innerRef.current;
     if (!node) return;
     const measure = () => setHeight(node.offsetHeight);
@@ -445,7 +446,7 @@ return ({
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
-  });
+  }, [open]);
 
   // On open, flip upward when there isn't room below and there's more above.
   useLayoutEffect(() => {

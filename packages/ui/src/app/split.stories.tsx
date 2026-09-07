@@ -199,7 +199,7 @@ export const TwoPaneSplit: Story = {
 export const FourPaneSplit: Story = {
   args: { initial: workspaceOf(["s1", "s2", "s3", "s4"]) },
   parameters: {
-    docs: { description: { story: `Arc's maximum is ${MAX_PANES} panes; the model refuses a fifth.` } }
+    docs: { description: { story: `Arc's maximum is ${MAX_PANES} panes; the model refuses another.` } }
   }
 }
 

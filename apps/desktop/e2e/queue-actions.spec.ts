@@ -35,6 +35,8 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
  * queue-only specs use a dedicated busy turn and do not depend on planning.
  */
 const parkABusyRun = async (window: import("@playwright/test").Page): Promise<void> => {
+  await window.evaluate(() => localStorage.setItem("jingler:mcp-import-prompt:v1", "done"))
+  await window.reload()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[queue-hold]] exercise queue actions")
   await composer.press("Enter")
@@ -78,11 +80,32 @@ test("a queued message can be handed off to a fresh chat", async ({ launchApp })
 
   await window.getByTitle(/^Hand off/).first().click()
 
-  // A second chat opens and becomes the active one; the message runs THERE, so it
+  // A second chat opens beside the main chat; the message runs THERE, so it
   // is no longer queued against the busy chat.
   const handedOff = window.getByTitle("2. Chat 2")
   await expect(handedOff).toBeVisible({ timeout: 15_000 })
   await expect(handedOff).toHaveAttribute("aria-current", "page")
   await expect(window.getByText("write the release notes for v2")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible()
+})
+
+test("repeated queued handoffs never hide main or exceed three panes", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+  await parkABusyRun(window)
+  const main = window.locator('[data-surface]').filter({ hasText: "Holding the active turn for queue actions." }).first()
+  const mainKey = await main.getAttribute("data-surface")
+  const mainPane = window.locator(`[data-surface=${JSON.stringify(mainKey)}]`)
+  for (let i = 0; i < 4; i++) {
+    const composer = mainPane.getByPlaceholder("Queue a message while the agent works…")
+    await composer.fill(`[[queue-hold]] handed off ${i}`)
+    await composer.press("Enter")
+    await mainPane.getByTitle(/^Hand off/).first().click()
+    await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", String(Math.min(i + 2, 3)))
+    await expect(mainPane).toBeVisible()
+    await expect(mainPane.getByText("Queued", { exact: true })).toHaveCount(0)
+  }
+  await mainPane.getByRole("button", { name: /^Close pane/ }).click()
+  await expect(mainPane).toHaveCount(0)
 })
