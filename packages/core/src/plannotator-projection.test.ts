@@ -4,6 +4,7 @@ import {
   PlannotatorProjection,
   plannotatorProjectionToPlanDocument
 } from "./plannotator-projection.js"
+import { PlanDocument } from "./plan-document.js"
 import { planStageExecutionStatus } from "./plan-view.js"
 
 describe("Plannotator native projection", () => {
@@ -120,6 +121,10 @@ describe("Plannotator native projection", () => {
           text: "Service tests green",
           status: "pending",
           testReferences: [{ path: "src/auth.test.ts", cases: ["issues tokens"] }]
+        }, {
+          step: 4,
+          text: "Manual review complete",
+          status: "pending"
         }],
         files: [{ path: "src/auth.ts", change: "A" }],
         diagrams: ["sequenceDiagram"],
@@ -151,6 +156,9 @@ describe("Plannotator native projection", () => {
     expect(stage.acceptance[0]!.testReferences).toEqual([
       { path: "src/auth.test.ts", cases: ["issues tokens"] }
     ])
+    expect(stage.acceptance[1]!.testReferences).toEqual([])
+    // Electron IPC preserves explicit undefined properties, unlike JSON serialization.
+    expect(() => Schema.decodeUnknownSync(PlanDocument)(structuredClone(document))).not.toThrow()
     expect(stage.files).toEqual([{ path: "src/auth.ts", change: "A" }])
     expect(stage.complexity).toBe("medium")
     expect(planStageExecutionStatus(stage)).toBe("running")

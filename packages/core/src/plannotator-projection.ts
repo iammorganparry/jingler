@@ -234,7 +234,7 @@ const structuredStageToPlanStage = (
     text: criterion.text,
     status: criterion.status,
     evidence: null,
-    testReferences: criterion.testReferences?.map((reference) => ({
+    testReferences: (criterion.testReferences ?? []).map((reference) => ({
       path: reference.path,
       cases: reference.cases
     }))
