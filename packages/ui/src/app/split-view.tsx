@@ -359,8 +359,8 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
         testIdPrefix === "surface" ? "gap-1.5 bg-panel p-1.5" : "bg-hairline"
       )}
     >
-      {/* Fresh sessions fade in; surviving panes keep their transcript state. */}
-      <AnimatePresence key={presenceKey} initial={switched} mode="popLayout">
+      {/* Session switches render immediately; pane edits keep their animations. */}
+      <AnimatePresence key={presenceKey} initial={false} mode="popLayout">
         {group.panes.map(renderSplitPaneContainer)}
       </AnimatePresence>
 

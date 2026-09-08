@@ -1,3 +1,4 @@
+import { measureSessionSwitch } from "./session-switch-latency.js"
 import { writeFile } from "node:fs/promises"
 import { expect, sessionRow, test } from "./fixtures.js"
 
@@ -33,12 +34,13 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   await cdp.send("Profiler.enable")
   await cdp.send("Profiler.start")
   const durations: number[] = []
+  const switchLatencies = []
   try {
     for (let i = 0; i < 12; i++) {
       const start = Date.now()
-      await sessionRow(window, "other session").click({ timeout: 5_000 })
+      switchLatencies.push(await measureSessionSwitch(window, "s_other", 'textarea[placeholder="Message the agent…"]'))
       await expect(window.locator('[data-session="s_other"]:visible')).toHaveCount(1, { timeout: 5_000 })
-      await sessionRow(window, "review session").click({ timeout: 5_000 })
+      switchLatencies.push(await measureSessionSwitch(window, "s_review", 'textarea[disabled]'))
       await expect(running).toBeVisible({ timeout: 5_000 })
       await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible({ timeout: 5_000 })
       durations.push(Date.now() - start)
@@ -49,6 +51,9 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
     await writeFile(path, JSON.stringify(profile))
     await testInfo.attach("pr-review-session-switch.cpuprofile", { path, contentType: "application/json" })
     await cdp.detach()
-    console.log(`PR_REVIEW_SESSION_SWITCH ${JSON.stringify({ roundTripsMs: durations })}`)
+    console.log(`PR_REVIEW_SESSION_SWITCH ${JSON.stringify({ roundTripsMs: durations, switchLatencies })}`)
   }
+  await testInfo.attach("pr-review-switch-latency.json", { body: JSON.stringify(switchLatencies), contentType: "application/json" })
+  expect([...switchLatencies].sort((a, b) => a.visibleMs - b.visibleMs)[Math.floor(switchLatencies.length / 2)]!.visibleMs).toBeLessThan(100)
+
 })

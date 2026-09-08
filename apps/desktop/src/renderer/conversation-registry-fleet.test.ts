@@ -7,11 +7,14 @@ import {
   reduceSubagentFleetEvent
 } from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import {
+  __debugActorCount,
   disposeConversationActor,
   fleetRecoveryEvents,
   fleetRetryDecision,
   getConversationActor
 } from "./conversation-registry.js"
+
+import { setVisibleSessionIds } from "./active-session.js"
 
 const mocks = vi.hoisted(() => ({ snapshot: vi.fn() }))
 vi.mock("./rpc-client.js", () => ({
@@ -19,6 +22,7 @@ vi.mock("./rpc-client.js", () => ({
     agentSubagentFleetSnapshot: mocks.snapshot,
     sessionsTranscriptPage: vi.fn(async () => ({ messages: [], hasMore: false, cursor: null })),
     planCurrent: vi.fn(async () => null),
+    agentChatBusy: vi.fn(async () => false),
     workspaceFiles: vi.fn(async () => []),
     sessionsDiff: vi.fn(async () => ""),
     skillsList: vi.fn(async () => []),
@@ -109,11 +113,28 @@ const session = {
 
 afterEach(() => {
   disposeConversationActor(session.id)
+  disposeConversationActor("old-visible")
+  setVisibleSessionIds(new Set())
   mocks.snapshot.mockReset()
   vi.useRealTimers()
 })
 
 describe("conversation registry fleet recovery", () => {
+  it("keeps newly mounted sibling actors alive until session visibility commits", async () => {
+    vi.useFakeTimers()
+    const chats = Array.from({ length: 6 }, (_, i) => ({ id: `chat-${i}`, title: `Chat ${i}`, createdAt: session.updatedAt, updatedAt: session.updatedAt }))
+    const old = { ...session, id: "old-visible", chats }
+    setVisibleSessionIds(new Set([old.id]))
+    for (const chat of chats) getConversationActor(old, chat.id)
+    const next = { ...session, chats: chats.slice(0, 3) }
+    const actors = next.chats.map((chat) => getConversationActor(next, chat.id))
+    expect(actors.every((actor) => actor.getSnapshot().status === "active")).toBe(true)
+    setVisibleSessionIds(new Set([next.id]))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(actors.every((actor) => actor.getSnapshot().status === "active" && actor.getSnapshot().context.loaded)).toBe(true)
+    expect(__debugActorCount()).toBeLessThanOrEqual(6)
+  })
+
   it("persists unknown recovery after four inactive RPC failures", async () => {
     vi.useFakeTimers()
     mocks.snapshot.mockRejectedValue(new Error("Pi session is not active"))

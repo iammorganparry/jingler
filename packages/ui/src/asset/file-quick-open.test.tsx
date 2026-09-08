@@ -67,6 +67,18 @@ describe("FileQuickOpen", () => {
     )
   })
 
+  it("does not read file paths while closed and populates them on opening", () => {
+    const readPath = vi.fn(() => "src/lazy.ts")
+    const files = [{ get path() { return readPath() }, status: "clean" as const }]
+    const props = { entries: files, onOpenChange: vi.fn(), onOpenPath: vi.fn() }
+    const { rerender } = render(<FileQuickOpen {...props} open={false} />)
+    rerender(<FileQuickOpen {...props} open={false} onOpenPath={vi.fn()} />)
+    expect(readPath).not.toHaveBeenCalled()
+    rerender(<FileQuickOpen {...props} open />)
+    expect(screen.getByText("lazy.ts")).toBeTruthy()
+    expect(readPath).toHaveBeenCalled()
+  })
+
   it("reports tree loading instead of claiming there are no files", () => {
     render(
       <FileQuickOpen

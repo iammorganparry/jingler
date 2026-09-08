@@ -1,3 +1,6 @@
+import { measureSessionSwitch } from "./session-switch-latency.js"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 import type { Page } from "@playwright/test"
@@ -166,17 +169,31 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
   const { window } = await launchApp({
     configured: true, withRepo: true,
     sessions: ({ repoPath }) => sessions.map((session) => ({ ...session, worktreePath: repoPath })),
-    transcripts: histories
+    transcripts: histories,
+    seed: ({ repoPath }) => {
+      const directory = join(repoPath, "src", "switch-stress")
+      mkdirSync(directory, { recursive: true })
+      for (let i = 0; i < 4000; i++) writeFileSync(join(directory, `module-${i}.ts`), `export const value = ${i}\n`)
+    }
   })
   await window.evaluate(() => localStorage.setItem("jingler:mcp-import-prompt:v1", "done"))
   await window.reload()
+  const firstVisits = []
   for (const session of sessions) {
-    await sessionRow(window, session.title).click()
+    firstVisits.push(await measureSessionSwitch(window, session.id, '[data-testid="conversation-scroll"] [data-index]'))
     const active = window.locator(`[data-session="${session.id}"]:visible`)
     const composer = active.getByPlaceholder("Message the agent…")
     await composer.fill("[[queue-hold]] keep this session running during the benchmark")
     await composer.press("Enter")
     await expect(window.locator(`[data-session="${session.id}"]:visible`).getByText("Holding the active turn for queue actions.")).toBeVisible()
+  }
+  const cachedSwitches = []
+  for (let i = 0; i < 12; i++) {
+    cachedSwitches.push(await measureSessionSwitch(window, sessions[i % sessions.length]!.id, '[data-testid="conversation-scroll"] [data-index]'))
+  }
+  console.log(`CACHED_SESSION_SWITCH_LATENCY ${JSON.stringify(cachedSwitches)}`)
+  for (const session of sessions) {
+    await sessionRow(window, session.title).click()
     for (const title of ["Stress 1", "Stress 2"]) {
       await window.getByRole("button", { name: title, exact: true }).click()
     }
@@ -185,6 +202,13 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
   const cdp = await window.context().newCDPSession(window)
   await cdp.send("Profiler.enable")
   await cdp.send("Profiler.start")
+  const repeatSwitches = []
+  for (let i = 0; i < 12; i++) {
+    repeatSwitches.push(await measureSessionSwitch(window, sessions[i % sessions.length]!.id, '[data-testid="conversation-scroll"] [data-index]'))
+  }
+  const latency = { firstVisits, cachedSwitches, repeatSwitches }
+  console.log(`SESSION_SWITCH_LATENCY ${JSON.stringify(latency)}`)
+  await testInfo.attach("session-switch-latency.json", { body: JSON.stringify(latency), contentType: "application/json" })
   const result = await measure(window, sessions)
   const { profile } = await cdp.send("Profiler.stop")
   const profilePath = testInfo.outputPath("multi-session.cpuprofile")
@@ -209,4 +233,6 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
     await composer.press("Enter")
     await expect(resumed.getByText("Holding the active turn for queue actions.")).toBeVisible()
   }
+  expect([...cachedSwitches].sort((a, b) => a.visibleMs - b.visibleMs)[Math.floor(cachedSwitches.length / 2)]!.visibleMs).toBeLessThan(100)
+
 })
