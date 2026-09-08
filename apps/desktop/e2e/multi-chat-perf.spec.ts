@@ -109,6 +109,15 @@ test("benchmark rich transcripts while opening, moving and closing chat panes", 
   await testInfo.attach("multi-chat-frame-times.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" })
   expect(result.maxPanes).toBeLessThanOrEqual(3)
   const scrolls = window.locator('[data-testid="conversation-scroll"]:visible')
+  const history = scrolls.first()
+  await history.evaluate((element) => { element.scrollTop = 0 })
+  await expect(history.getByText(/^Check change 40 in/)).toBeVisible()
+  await history.getByTestId("load-earlier").click()
+  await expect(history.getByTestId("load-earlier")).toHaveCount(0)
+  await expect(history.getByText(/^Check change 40 in/)).toBeVisible()
+  await history.evaluate((element) => { element.scrollTop = 0 })
+  await expect(history.getByText(/^Check change 0 in/)).toBeVisible()
+
   for (let i = 0; i < await scrolls.count(); i++) {
     const scroll = scrolls.nth(i)
     for (const bottom of [false, true, false, true]) {

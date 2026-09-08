@@ -132,6 +132,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
               key={paneId(pane)}
               // Position-only transforms keep text crisp and avoid per-frame wrapping/measurement.
               layout={paneLayout}
+              layoutDependency={group.panes}
               variants={paneVariants}
               initial="hidden"
               animate="visible"

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { SplitGroup } from "./split-layout.js"
 import { SplitView } from "./split-view.js"
@@ -92,6 +92,22 @@ describe("SplitView — switching vs editing", () => {
     expect(onFocusPane).not.toHaveBeenCalled()
     fireEvent.mouseDown(screen.getAllByText("transcript")[0]!)
     expect(onFocusPane).toHaveBeenCalledWith(0)
+  })
+
+  it("does not remeasure pane geometry for focus-only updates, but still measures reordering", async () => {
+    const group = groupOf(["a", "b"])
+    const body = (pane: { sessionId: string }) => <div>{pane.sessionId}</div>
+    const { rerender } = render(<SplitView group={group} renderPane={body} />)
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+    const measure = vi.spyOn(screen.getByTestId("split-pane-0"), "getBoundingClientRect")
+    try {
+      rerender(<SplitView group={{ ...group, focused: 1 }} renderPane={body} />)
+      expect(measure).not.toHaveBeenCalled()
+      rerender(<SplitView group={{ ...group, panes: [...group.panes].reverse() }} renderPane={body} />)
+      expect(measure).toHaveBeenCalled()
+    } finally {
+      measure.mockRestore()
+    }
   })
 
   it("previews divider moves without rerendering pane bodies per pointer move", () => {

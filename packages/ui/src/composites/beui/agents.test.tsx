@@ -1,8 +1,70 @@
-import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { BEUI_AGENT_COMPONENTS, MessageScroller, ToolApproval } from "./index.js"
 
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals() })
+
+const scrollMetrics = (viewport: HTMLElement, top: number) => Object.defineProperties(viewport, {
+  scrollHeight: { configurable: true, value: 1000 },
+  clientHeight: { configurable: true, value: 200 },
+  scrollTop: { configurable: true, writable: true, value: top }
+})
+
 describe("BeUI agent catalog", () => {
+  it.each(["wheel", "touch", "keyboard"])("protects initial positioning until the reader uses %s", (input) => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] })
+    const onFollowChange = vi.fn()
+    render(<MessageScroller onFollowChange={onFollowChange}><div>Message</div></MessageScroller>)
+    const viewport = screen.getByRole("region", { name: "Conversation" })
+    scrollMetrics(viewport, 700)
+    fireEvent.scroll(viewport)
+    expect(onFollowChange).not.toHaveBeenCalled()
+    if (input === "wheel") fireEvent.wheel(viewport, { deltaY: -100 })
+    else if (input === "touch") fireEvent.touchStart(viewport)
+    else fireEvent.keyDown(viewport, { key: "PageUp" })
+    viewport.scrollTop = 600
+    fireEvent.scroll(viewport)
+    expect(onFollowChange).toHaveBeenCalledWith(false)
+  })
+
+  it("releases initial scroll protection when already at the end", () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] })
+    const onFollowChange = vi.fn()
+    render(<MessageScroller onFollowChange={onFollowChange}><div>Message</div></MessageScroller>)
+    const viewport = screen.getByRole("region", { name: "Conversation" })
+    scrollMetrics(viewport, 800)
+    act(() => vi.advanceTimersByTime(20))
+    viewport.scrollTop = 600
+    fireEvent.scroll(viewport)
+    expect(onFollowChange).toHaveBeenCalledWith(false)
+  })
+  it("keeps an in-flight catch-up protected through a resize at the live edge", () => {
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame"] })
+    const resizes: Array<() => void> = []
+    vi.stubGlobal("ResizeObserver", class implements ResizeObserver {
+      constructor(callback: ResizeObserverCallback) { resizes.push(() => callback([], this)) }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    const onFollowChange = vi.fn()
+    render(<MessageScroller onFollowChange={onFollowChange}><div>Message</div></MessageScroller>)
+    const viewport = screen.getByRole("region", { name: "Conversation" })
+    scrollMetrics(viewport, 700)
+    let top = 700
+    Object.defineProperty(viewport, "scrollTop", { configurable: true, get: () => top, set: (value: number) => { top = Math.min(800, value) } })
+    act(() => vi.advanceTimersByTime(20))
+    expect(viewport.scrollTop).toBe(800)
+    act(() => { for (const resize of resizes) resize() })
+    viewport.scrollTop = 600
+    fireEvent.scroll(viewport)
+    expect(onFollowChange).not.toHaveBeenCalled()
+    fireEvent.wheel(viewport, { deltaY: -100 })
+    viewport.scrollTop = 500
+    fireEvent.scroll(viewport)
+    expect(onFollowChange).toHaveBeenCalledWith(false)
+  })
+
   it("keeps all 17 official Agent entries unique", () => {
     expect(BEUI_AGENT_COMPONENTS).toHaveLength(17)
     expect(new Set(BEUI_AGENT_COMPONENTS)).toHaveLength(17)
@@ -12,7 +74,8 @@ describe("BeUI agent catalog", () => {
     const onFollowChange = vi.fn()
     render(<MessageScroller onFollowChange={onFollowChange}><div>Message</div></MessageScroller>)
     const viewport = screen.getByRole("region", { name: "Conversation" })
-    Object.defineProperties(viewport, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 }, scrollTop: { configurable: true, writable: true, value: 100 } })
+    scrollMetrics(viewport, 100)
+    fireEvent.wheel(viewport, { deltaY: -100 })
     fireEvent.scroll(viewport)
     expect(onFollowChange).toHaveBeenCalledWith(false)
     viewport.scrollTop = 800

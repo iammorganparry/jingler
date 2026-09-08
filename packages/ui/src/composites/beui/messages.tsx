@@ -170,6 +170,11 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     railFrameRef.current = requestAnimationFrame(() => { syncRailItems(); updateActiveRailItem() })
   }, [controlledRail, navigation, syncRailItems, updateActiveRailItem])
 
+  const finishProgrammaticScroll = useCallback(() => {
+    programmaticScrollRef.current = false
+    scrollTimerRef.current = undefined
+  }, [])
+
   const scrollToEnd = useCallback((behavior: ScrollBehavior) => {
     const viewport = viewportRef.current
     if (!viewport) return
@@ -178,13 +183,16 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     // interpret. This early-out is the brake that lets the
     // resize → scroll → virtualizer-measure → resize cycle converge instead of
     // cycling forever (a runaway renderer leaked gigabytes through it).
-    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1) return
+    if (viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 1) {
+      if (scrollTimerRef.current === undefined) finishProgrammaticScroll()
+      return
+    }
     programmaticScrollRef.current = true
     if (typeof viewport.scrollTo === "function") viewport.scrollTo({ top: viewport.scrollHeight, behavior })
     else viewport.scrollTop = viewport.scrollHeight
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current)
-    scrollTimerRef.current = window.setTimeout(() => { programmaticScrollRef.current = false }, behavior === "smooth" ? 320 : 100)
-  }, [])
+    scrollTimerRef.current = window.setTimeout(finishProgrammaticScroll, behavior === "smooth" ? 320 : 100)
+  }, [finishProgrammaticScroll])
 
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current
@@ -207,6 +215,8 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
 
   useLayoutEffect(() => {
     followingRef.current = followOutput
+    // A virtualizer can restore its offset before our first animation frame runs.
+    programmaticScrollRef.current = followOutput
     if (!followOutput) return
     frameRef.current = requestAnimationFrame(() => scrollToEnd("auto"))
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current) }
@@ -264,8 +274,8 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
     const top = viewport.scrollTop + targetRect.top - viewportRect.top - (viewport.clientHeight - targetRect.height) / 2
     scrollRailViewport(viewport, top, behavior)
     if (scrollTimerRef.current) window.clearTimeout(scrollTimerRef.current)
-    scrollTimerRef.current = window.setTimeout(() => { programmaticScrollRef.current = false }, behavior === "smooth" ? 320 : 0)
-  }, [railItems, reduce, scrollToEnd, setFollowing, smooth])
+    scrollTimerRef.current = window.setTimeout(finishProgrammaticScroll, behavior === "smooth" ? 320 : 0)
+  }, [finishProgrammaticScroll, railItems, reduce, scrollToEnd, setFollowing, smooth])
 
   const viewport = <section ref={setViewportRef} aria-label={label} data-testid={viewportTestId} {...restViewportProps} onScroll={event => { handleScroll(); onViewportScroll?.(event) }} onWheel={event => { programmaticScrollRef.current = false; onViewportWheel?.(event) }} onTouchStart={event => { programmaticScrollRef.current = false; onViewportTouchStart?.(event) }} onKeyDown={event => { if (["ArrowUp", "PageUp", "Home"].includes(event.key)) programmaticScrollRef.current = false; onViewportKeyDown?.(event) }} className={cn("h-full overflow-y-auto overscroll-contain outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring", navigation === "rail" ? "[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : "[scrollbar-gutter:stable]", viewportClassName, navigation === "rail" && railVisible && "pr-10")}>
     <div ref={contentRef} role="log" aria-live="polite" aria-relevant="additions text" aria-busy={busy} className={contentClassName} {...contentProps}>{children}</div>

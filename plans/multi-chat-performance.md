@@ -8,6 +8,38 @@ Approved approach: cap panes at three, keep main visible unless explicitly close
 - [x] Run tests and benchmark, tune measured bottlenecks, and report frame times and remaining limits.
 - [x] Test the operator-approved bounded Activity retention experiment; compare FPS and memory, then reject it because the gain did not justify its cost and lifecycle problems.
 
+## Continued tuning
+
+- [x] Inspect the current CPU profile for opening/session-switching costs.
+- [x] Test small changes targeting forced layout and redundant row mounting; keep retention out.
+- [x] Run the concurrent-session benchmark and regression checks; record results and remaining spikes.
+
+### Continuation changes
+
+- Pane geometry is measured only when the pane list/ratios change, not for focus-only renders (`layoutDependency`). Rich message rows also get layout containment.
+- The virtualizer waits for both history and its viewport, then starts near the live edge with `initialOffset`. It no longer mounts the oldest rich rows merely to discard them on the first scroll. Tests cover both preloaded and delayed history.
+- Fixed the follow-mode race exposed by this change: a resize at the live edge must not clear protection for an in-flight catch-up scroll. Initial positioning is protected before the first animation frame; wheel, touch, keyboard, and later manual scrolling still take priority.
+- With that race fixed, a two-row overscan buffer passes the concurrent-send and scrolling checks. “Load earlier” is also tested to preserve the reader's position rather than jumping to the newest messages.
+
+### Latest continuation measurements
+
+| Three running sessions / 18 chat tabs | Average FPS | p95 frame | Worst frame | JS heap after GC | DOM nodes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fresh baseline before this continuation | 92.6 | 35.0ms | 132.1ms | 43.4MB | 4,525 |
+| First passing run with smaller buffer | 118.8 | 14.6ms | 104.9ms | 42.2MB | 2,952 |
+| Final repeat, including history-paging checks | 127.7 | 7.9ms | 62.6ms | 42.1MB | 2,952 |
+
+The final single-session run averaged **139.3fps**, p95 **7.7ms**, worst **41.7ms**.
+
+| Final concurrent-session action | Average FPS | p95 frame |
+| --- | ---: | ---: |
+| Switch session | 112.0 | 20.8ms |
+| Open chat | 119.3 | 20.9ms |
+| Move pane | 143.9 | 7.7ms |
+| Close pane | 135.3 | 7.9ms |
+
+Overall p95 now fits the 16.7ms/60fps budget in both final runs, without retention or increased heap. Cold opening/switching still has occasional spikes; not every frame meets that budget. These are 400ms interaction windows, not input-to-display latency measurements.
+
 ## Changes verified
 
 - Both outer session splits and inner chat/view splits cap at three. Restoring an older layout preserves main when trimming overflow.
@@ -24,7 +56,7 @@ One scripted turn is held busy in each session. The test verifies all three stay
 
 Measurements cover 400ms interaction windows on this machine's high-refresh display. FPS is derived from animation-frame timestamps, not a guarantee of compositor presentation on other hardware. Repeated runs varied; p95 and worst-frame measurements matter more than average FPS alone.
 
-## Results
+## First-pass results
 
 | Workload / revision | Average FPS | p95 frame | Worst frame |
 | --- | ---: | ---: | ---: |
@@ -33,7 +65,7 @@ Measurements cover 400ms interaction windows on this machine's high-refresh disp
 | Three running sessions, before dropdown/virtualizer fix | 77.0 | 49.4ms | 187.5ms |
 | Three running sessions, final with CSS containment | 99.3 | 28.1ms | 111.3ms |
 
-Final three-session results by action:
+First-pass three-session results by action:
 
 | Action | Average FPS | p95 frame |
 | --- | ---: | ---: |
@@ -42,7 +74,7 @@ Final three-session results by action:
 | Move pane | 136.2 | 7.7ms |
 | Close pane | 123.2 | 13.9ms |
 
-**Remaining limit:** movement and closing fit the 16.7ms budget at p95 in this run, but cold rich-chat opening and session switching still spike above it. A blanket steady-60fps claim would be false. Profiling still shows mounting and measuring rich transcript DOM as expensive.
+**First-pass limit:** movement and closing fit the 16.7ms budget at p95, but cold rich-chat opening and session switching still spiked above it. Profiling identified mounting and measuring rich transcript DOM as expensive; see the continuation measurements above for the subsequent improvements.
 
 ## Rejected retention experiment
 
@@ -56,12 +88,12 @@ Tested up to three recent session layouts and two hidden chat bodies per session
 
 Retention added about 20MB of JS heap and over five times the DOM nodes without a reliable overall frame-time win. JS heap is not total process/GPU memory. The smaller CSS containment change performed better without retaining additional pane trees.
 
-A smaller overscan experiment was also reverted after the concurrent-run check failed; the existing six-row buffer remains.
+The first smaller-overscan experiment was reverted after a concurrent-run check failed. Continued tracing later identified the follow-mode race that could leave newly arrived replies offscreen. After fixing that race, the two-row buffer passed; it is now used.
 
 ## Verification
 
-- 398 tests passed across 26 focused Vitest files; final CSS containment also passed the Electron checks below.
-- Five Electron e2e tests passed on the final build: rich multi-pane stress/scrolling, three concurrent sessions plus previously idle chat sends, queue editing, queued handoff, and repeated handoffs with explicit main closure.
+- 411 tests passed across 28 focused Vitest files, including initial row selection, geometry measurement, and follow-mode race regressions.
+- Five Electron e2e tests passed on the final build: rich multi-pane stress/scrolling and history paging, three concurrent sessions plus previously idle chat sends, queue editing, queued handoff, and repeated handoffs with explicit main closure.
 - UI and desktop TypeScript checks passed. Focused Biome lint has no errors; existing warnings remain. `git diff --check` passed.
 - Full repository test/lint/typecheck commands were not run. The environment uses Node 22.14.0 despite the repository declaring Node >=24.
 
@@ -77,8 +109,8 @@ The multi-session CPU profile is written under `apps/desktop/test-results/multi-
 ## Official guides used
 
 - React 19.2: [memo](https://react.dev/reference/react/memo), [useMemo](https://react.dev/reference/react/useMemo).
-- Motion 12.42: [layout animations](https://motion.dev/docs/react-layout-animations?platform=react).
+- Motion 12.42: [layout animations](https://motion.dev/docs/react-layout-animations?platform=react), [layoutDependency](https://motion.dev/docs/react-motion-component#layoutdependency).
 - CSS: [layout and paint containment](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/contain).
-- TanStack React Virtual 3.14: [Virtualizer](https://tanstack.com/virtual/latest/docs/api/virtualizer), including stable `getItemKey` and overscan cost.
+- TanStack React Virtual 3.14.5 / Virtual Core 3.17.3: [Virtualizer](https://tanstack.com/virtual/latest/docs/api/virtualizer), including `enabled`, `initialOffset`, stable `getItemKey`, and overscan cost.
 - Benchmark counters: Chrome DevTools Protocol [Runtime](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/) and [Memory](https://chromedevtools.github.io/devtools-protocol/tot/Memory/).
 - Rejected experiment: React [Activity](https://react.dev/reference/react/Activity) and XState [actor lifecycle](https://stately.ai/docs/actors).
