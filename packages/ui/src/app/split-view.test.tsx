@@ -43,6 +43,14 @@ describe("SplitView — switching vs editing", () => {
     expect(screen.getByTestId("split-pane-0").dataset.session).toBe("b")
   })
 
+  it("shows a switched session immediately but still animates an added pane", () => {
+    const { rerender } = renderView(groupOf(["a"]))
+    rerender(<SplitView group={groupOf(["b"])} renderPane={(pane) => <p>{pane.sessionId}</p>} />)
+    expect(screen.getByTestId("split-pane-0").style.opacity).toBe("1")
+    rerender(<SplitView group={groupOf(["b", "c"])} renderPane={(pane) => <p>{pane.sessionId}</p>} />)
+    expect(screen.getByTestId("split-pane-1").style.opacity).toBe("0")
+  })
+
   it("keeps a surviving pane's DOM node across an edit — it must not remount", () => {
     const { rerender } = renderView(groupOf(["a", "b"]))
     const before = screen.getByTestId("split-pane-0")

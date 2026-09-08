@@ -705,7 +705,8 @@ export const getConversationActor = (
   })
   actor.start()
   registry.set(key, actor)
-  evictIdleActors(key)
+  // The coalesced publish evicts after React commits visibility. Evicting during
+  // render can stop a sibling in the session that is still being mounted.
   return actor
 }
 

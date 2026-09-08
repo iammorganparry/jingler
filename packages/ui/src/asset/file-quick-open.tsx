@@ -31,7 +31,7 @@ export function FileQuickOpen({
   onOpenPath
 }: FileQuickOpenProps) {
   const items = useMemo<ReadonlyArray<PaletteItem>>(
-    () =>
+    () => !open ? [] :
       entries.map((entry) => {
         const { name, directory } = parts(entry.path)
         return {
@@ -43,7 +43,7 @@ export function FileQuickOpen({
           run: () => onOpenPath(entry.path)
         }
       }),
-    [entries, onOpenPath]
+    [entries, onOpenPath, open]
   )
   const suffix = sessionTitle?.trim()
   return (
