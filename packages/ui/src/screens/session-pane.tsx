@@ -1,5 +1,6 @@
 import {
   type ReactNode,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -33,7 +34,6 @@ import {
   type TabContext,
   type TabContribution,
   type TabKey,
-  type TabRenderContext,
   visibleTabs
 } from "../app/tab-contributions.js"
 import { ConversationView } from "../app/conversation-view.js"
@@ -47,7 +47,6 @@ import {
   closeAllSessionViews,
   closeSessionPane,
   closeSessionSurface,
-  createSessionSurfaceLayout,
   focusSessionSurface,
   loadSessionSurfaceLayout,
   maxSessionSurfacesForWidth,
@@ -59,7 +58,6 @@ import {
   replaceSessionSurface,
   resizeSessionSurface,
   saveSessionSurfaceLayout,
-  selectSessionSurface,
   sessionSurfaceKey,
   splitSessionSurface,
   type SessionSurface,
@@ -319,6 +317,28 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
   return tabs[0]?.id ?? BUILTIN_TAB.conversation
 }
 
+const noop = () => {}
+
+const SurfaceContent = memo(function SurfaceContent({
+  session, chatId, contribution, paneFocused, onSelectTab, onConnectGithub
+}: {
+  session: Session
+  chatId: string
+  contribution: TabContribution | undefined
+  paneFocused: boolean
+  onSelectTab: (id: TabKey) => void
+  onConnectGithub: () => void
+}) {
+  const paneSession = chatId === session.activeChatId ? session : { ...session, activeChatId: chatId }
+  return contribution?.render(paneSession, {
+    activeTabId: contribution.id,
+    splitOpen: false,
+    paneFocused,
+    onConnectGithub,
+    onSelectTab: (id) => { if (paneFocused || contribution.id === BUILTIN_TAB.conversation) onSelectTab(id) }
+  })
+})
+
 function SessionPaneBody(props: SessionPaneProps) {
   function buildProviderMenus() {
   const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
@@ -390,14 +410,15 @@ function SessionPaneBody(props: SessionPaneProps) {
                 current,
                 surface,
                 at,
-                maxSessionSurfacesForWidth(paneWidth)
+                maxSessionSurfacesForWidth(paneWidth),
+                mainChatId
               )
             )
           }}
           onReplacePane={(index, payload) => {
             const surface = parseSessionSurfaceKey(payload)
             if (!surface) return
-            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface))
+            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface, mainChatId))
           }}
           onResize={(index, delta) =>
             setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
@@ -444,15 +465,7 @@ function SessionPaneBody(props: SessionPaneProps) {
               onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
               onSelectFiles: () => selectTab(BUILTIN_TAB.files),
               activeSurface: focusedSurface,
-              onSelectSurface: (surface) => {
-                setSurfaceLayout((current) =>
-                  openSessionSurface(
-                    current,
-                    surface,
-                    maxSessionSurfacesForWidth(paneWidth)
-                  )
-                )
-              },
+              onSelectSurface: openSurface,
               onCloseSurface: (surface) => {
                 if (
                   surface.kind === "chat" &&
@@ -505,12 +518,21 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [])
   const fallbackSurface: SessionSurface = { kind: "chat", id: props.session.activeChatId }
   const [surfaceLayout, setSurfaceLayout] = useState<SessionSurfaceLayout>(() => {
-    const restored = loadSessionSurfaceLayout(props.session.id, fallbackSurface)
+    const restored = loadSessionSurfaceLayout(props.session.id, fallbackSurface, props.session.chats[0]?.id)
     if (props.initialTab && props.initialTab !== BUILTIN_TAB.conversation) {
       return openSessionView(restored, { kind: "view", id: props.initialTab })
     }
     return restored
   })
+  const mainChatId = props.session.chats[0]?.id
+  const openSurface = useCallback((surface: SessionSurface) => {
+    setSurfaceLayout((current) => openSessionSurface(
+      current,
+      surface,
+      maxSessionSurfacesForWidth(paneWidth),
+      mainChatId
+    ))
+  }, [mainChatId, paneWidth])
   const filePanePaths = useMemo(
     () => surfaceLayout.panes.flatMap(({ surface }) =>
       surface.kind === "file" ? [surface.id] : []
@@ -576,12 +598,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             : undefined
       if (focusedOwner !== props.session.activeChatId) {
         setTab(BUILTIN_TAB.conversation)
-        setSurfaceLayout((current) =>
-          selectSessionSurface(current, {
-            kind: "chat",
-            id: props.session.activeChatId
-          })
-        )
+        openSurface({ kind: "chat", id: props.session.activeChatId })
         setTarget(null)
       }
     }
@@ -746,13 +763,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         return
       }
       if (nextTab === BUILTIN_TAB.conversation) {
-        setSurfaceLayout((current) =>
-          openSessionSurface(
-            current,
-            { kind: "chat", id: active.activeChatId },
-            maxSessionSurfacesForWidth(paneWidth)
-          )
-        )
+        openSurface({ kind: "chat", id: active.activeChatId })
       } else if (nextTab === BUILTIN_TAB.files) {
         setSurfaceLayout((current) =>
           openSessionSurface(
@@ -780,6 +791,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       active,
       browserActive,
       openPlanReview,
+      openSurface,
       paneWidth,
       props.onSelectIssue,
       props.onToggleBrowser,
@@ -798,19 +810,9 @@ function SessionPaneBody(props: SessionPaneProps) {
     hasExplanation,
     diff: props.liveDiff?.[active.id] ?? null
   }
-  const connectGithub = props.onOpenSettings ?? (() => {})
+  const connectGithub = props.onOpenSettings ?? noop
 
-  /**
-   * The built-in tabs, then whatever plugins added.
-   *
-   * Rebuilt every render rather than memoised: the list is six closures over
-   * props that change on every render anyway, so a memo would need every one of
-   * them in its dependency array and would buy nothing but a stale-closure bug
-   * the first time someone forgot one. What must stay stable across renders is
-   * the MOUNTED SUBTREE, and that is keyed by surface identity below — not by
-   * the identity of this array.
-   */
-  const contributions: ReadonlyArray<TabContribution> = [
+  const contributions = useMemo<ReadonlyArray<TabContribution>>(() => [
     ...builtinTabContributions({
       conversation: (session, ctx) => {
         const paneCtx: ConversationPaneCtx = {
@@ -866,7 +868,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
-  ]
+  ], [props, openPlanReview, presentPlanDraft, planStepTarget, connectGithub])
 
   const tabs = visibleTabs(tabCtx, contributions)
   const allowedViewKeys = tabs.flatMap((contribution) => {
@@ -1067,24 +1069,6 @@ function SessionPaneBody(props: SessionPaneProps) {
       chatId === active.activeChatId ? active : { ...active, activeChatId: chatId }
     const paneFocused =
       (props.pane === undefined || props.pane.focused) && index === surfaceLayout.focused
-    const paneCtx: TabRenderContext = {
-      activeTabId:
-        surface.kind === "view"
-          ? surface.id
-          : surface.kind === "file"
-            ? BUILTIN_TAB.files
-            : BUILTIN_TAB.conversation,
-      splitOpen: false,
-      paneFocused,
-      onConnectGithub: connectGithub,
-      onSelectTab: selectTab
-    }
-    if (surface.kind === "chat") {
-      return conversationContribution?.render(paneSession, {
-        ...paneCtx,
-        activeTabId: BUILTIN_TAB.conversation
-      })
-    }
     if (surface.kind === "file") {
       return props.renderFiles?.(paneSession, {
         onSelectConversation: () => selectTab(BUILTIN_TAB.conversation),
@@ -1095,16 +1079,17 @@ function SessionPaneBody(props: SessionPaneProps) {
           )
       })
     }
-    const contribution = contributions.find((candidate) => candidate.id === surface.id)
-    return contribution?.render(paneSession, {
-      ...paneCtx,
-      // The conversation renderer reads focus from its own ctx assembled in the
-      // contribution closure. Keep the outer pane focused before interaction so
-      // only one composer takes the caret.
-      onSelectTab: (id) => {
-        if (paneFocused) selectTab(id)
-      }
-    })
+    const contribution = surface.kind === "chat"
+      ? conversationContribution
+      : contributions.find((candidate) => candidate.id === surface.id)
+    return <SurfaceContent
+      session={active}
+      chatId={chatId}
+      contribution={contribution}
+      paneFocused={paneFocused}
+      onSelectTab={selectTab}
+      onConnectGithub={connectGithub}
+    />
   }
 
   const focusSurface = useCallback((index: number) => {
@@ -1131,6 +1116,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   const renderSurfacePane = (pane: SessionSurfacePane, index: number) => (
     <>
       <div
+        data-pane-toolbar
         data-testid={`surface-pane-toolbar-${index}`}
         className="flex h-8 flex-none items-center justify-end px-1.5"
       >

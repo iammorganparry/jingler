@@ -83,9 +83,9 @@ describe("splitWith", () => {
   })
 
   it("refuses past MAX_PANES instead of evicting a pane the operator arranged", () => {
-    const ws = workspaceOf(["a", "b", "c", "d"])
+    const ws = workspaceOf(["a", "b", "c"])
     expect(ws.groups[0]!.panes).toHaveLength(MAX_PANES)
-    const next = splitWith(ws, ws.groups[0]!.id, "e", 4)
+    const next = splitWith(ws, ws.groups[0]!.id, "d", MAX_PANES)
     expect(next).toBe(ws)
   })
 
@@ -176,21 +176,20 @@ describe("closePane", () => {
    *
    * Previously only the last-pane case was covered, which is the one position
    * where focus happens to fall left — so the comment in `closePane` claiming
-   * "the left neighbour" read as verified behaviour when three of the four
-   * positions did the opposite. Pinning all four is what stops a description and
+   * "the left neighbour" read as verified behaviour when two of the three
+   * positions did the opposite. Pinning all three is what stops a description and
    * an implementation drifting apart again.
    */
   describe("focus after closing the FOCUSED pane", () => {
     const closeFocusedAt = (index: number) => {
-      const base = workspaceOf(["a", "b", "c", "d"])
+      const base = workspaceOf(["a", "b", "c"])
       const groupId = base.groups[0]!.id
       return closePane(focusPane(base, groupId, index), groupId, index)
     }
 
     it.each([
       [0, "b"],
-      [1, "c"],
-      [2, "d"]
+      [1, "c"]
     ])("keeps the slot when pane %i closes, landing on its right neighbour", (index, expected) => {
       // The pane to the right slides into the vacated slot, so focus stays put
       // on screen rather than being thrown somewhere by the close.
@@ -198,7 +197,7 @@ describe("closePane", () => {
     })
 
     it("falls to the LEFT only for the last pane, where the slot itself goes away", () => {
-      expect(focusedSessionId(closeFocusedAt(3))).toBe("c")
+      expect(focusedSessionId(closeFocusedAt(2))).toBe("b")
     })
   })
 
@@ -408,11 +407,7 @@ describe("persistence", () => {
 
     const pane = (sessionId: string, ratio: number) => ({ sessionId, ratio })
 
-    it("gives an over-cap group's overflow to a LATER group that has room", () => {
-      // The bug: panes were recorded as seen while filtering and capped after,
-      // so the fifth session's id was burned by a group that never showed it —
-      // and the group below, which had room, skipped it too. The session
-      // disappeared from the workspace entirely.
+    it("spills overflow into single-pane groups without duplicating later entries", () => {
       store([
         {
           id: "g:a",
@@ -429,9 +424,18 @@ describe("persistence", () => {
       ])
 
       const ws = load()
-      expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["a", "b", "c", "d"])
+      expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["a", "b", "c"])
       // The one that didn't fit is still somewhere, rather than nowhere.
-      expect(ws.groups[1]!.panes.map((p) => p.sessionId)).toEqual(["overflow"])
+      expect(ws.groups.flatMap((group) => group.panes.map((p) => p.sessionId))).toEqual(["a", "b", "c", "d", "overflow"])
+    })
+
+    it("preserves an active overflow session across load and save", () => {
+      store([{ id: "g:a", panes: ["a", "b", "c", "d"].map((id) => pane(id, 0.25)), focused: 3 }])
+      const ws = load()
+      expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["a", "b", "c"], ["d"]])
+      expect(focusedSessionId(ws)).toBe("d")
+      save(ws)
+      expect(load()).toEqual(ws)
     })
 
     it("still caps a lone over-cap group at MAX_PANES", () => {
@@ -504,7 +508,13 @@ describe("migrateLegacyLayout", () => {
 
   it("re-orders a legacy row-major 2x2 so panes keep their left-to-right reading", () => {
     const ws = migrateLegacyLayout({ mode: "2x2", slots: ["tl", "tr", "bl", "br"], focused: 0 })!
-    expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["tl", "bl", "tr", "br"])
+    expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["tl", "bl", "tr"])
+  })
+
+  it("preserves focused overflow when migrating a legacy four-pane grid", () => {
+    const ws = migrateLegacyLayout({ mode: "2x2", slots: ["tl", "tr", "bl", "br"], focused: 3 })!
+    expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["tl", "bl", "tr"], ["br"]])
+    expect(focusedSessionId(ws)).toBe("br")
   })
 
   it("is read on boot when there is no v2 workspace yet", () => {

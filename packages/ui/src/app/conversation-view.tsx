@@ -51,6 +51,7 @@ import { RunStats } from "../composites/run-stats.js"
  * entirely. Five is enough to see what's next without the list becoming the page.
  */
 const QUEUE_PREVIEW = 5
+const ESTIMATED_TURN_HEIGHT = 140
 
 /**
  * How much raw text feeds one rail preview. The rail shows at most ~144
@@ -457,7 +458,7 @@ return (virtualItems[0])
   // left edges stay aligned — that alignment is what makes the composer read as
   // the bottom of the same column rather than a separate strip.
   const gutter = atLeast(useWidthTier(), "mid") ? "px-[30px]" : "px-3"
-  const scrollRef = useRef<HTMLElement>(null)
+  const [viewport, setViewport] = useState<HTMLElement | null>(null)
   const transcriptRef = useRef<HTMLDivElement>(null)
   // MessageScroller owns live-edge following. Keeping the current decision in
   // state lets history paging pause it without racing the scroller's observer.
@@ -470,7 +471,7 @@ return (virtualItems[0])
     : messages[planAnchorIndex]!.parts.findLastIndex(isPlannotatorPlanTool)
   const showPlanTranscriptCard = planDocument !== null &&
     planAnchorIndex >= 0 &&
-    (planDocument.plan.sections.length > 0 || planDocument.plan.stages.length > 0)
+    planDocument.plan.sections.length + planDocument.plan.stages.length > 0
 
   // Shift+Tab cycles the HITL mode (works while typing in the composer). Plan
   // is part of the same Jingler-owned contract for every certified model.
@@ -514,6 +515,7 @@ return (virtualItems[0])
   }>({ messages: [], keys: [], next: 0 })
   itemKeyState.current = updateTranscriptRowKeys(itemKeyState.current, messages)
   const itemKeys = itemKeyState.current.keys
+  const getItemKey = useCallback((index: number) => itemKeys[index]!, [itemKeys])
   // Per-item identity reuse: `messages` gets a new identity on every streamed
   // token, so this memo re-runs per token — but only the LIVE turn's preview
   // text actually changes. Reusing the previous item object (and, when nothing
@@ -554,13 +556,17 @@ return (virtualItems[0])
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
   const virtualizer = useVirtualizer({
     count: messages.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => 140,
-    getItemKey: (i) => itemKeys[i]!,
-    overscan: 6
+    getScrollElement: () => viewport,
+    enabled: viewport !== null && messages.length > 0,
+    // Start at the live edge instead of rendering the oldest rich rows just to discard them.
+    initialOffset: () => following
+      ? Math.max(0, messages.length * ESTIMATED_TURN_HEIGHT - (viewport?.clientHeight ?? 0))
+      : 0,
+    estimateSize: () => ESTIMATED_TURN_HEIGHT,
+    getItemKey,
+    overscan: 2
   })
   const virtualItems = virtualizer.getVirtualItems()
-  const viewport = scrollRef.current
   const activeVirtualItem = getActiveVirtualItem()
   const activeRailId = activeVirtualItem ? itemKeys[activeVirtualItem.index] : itemKeys[0]
 
@@ -581,22 +587,22 @@ return (virtualItems[0])
   // and self-correct as they scroll into view.
   const restoreScroll = useRef<{ height: number; top: number } | null>(null)
   const handleLoadEarlier = useCallback(() => {
-    const el = scrollRef.current
+    const el = viewport
     if (el) restoreScroll.current = { height: el.scrollHeight, top: el.scrollTop }
     // Never let live-edge following yank the reader back down mid-prepend.
     setFollowing(false)
     onLoadEarlier?.()
-  }, [onLoadEarlier])
+  }, [onLoadEarlier, viewport])
 
   // Runs on the same `messages` change as the prepend. Following is paused, so
   // an errored load prepends nothing and equal heights make this a no-op.
   useLayoutEffect(() => {
-    const el = scrollRef.current
+    const el = viewport
     const saved = restoreScroll.current
     if (!el || !saved) return
     el.scrollTop = el.scrollHeight - saved.height + saved.top
     restoreScroll.current = null
-  }, [messages])
+  }, [messages, viewport])
 
   return (
     <div ref={modeHotkeyRef} className="flex min-h-0 min-w-0 flex-1">
@@ -615,10 +621,10 @@ return (virtualItems[0])
           navigationItems={messageRailItems}
           navigationActiveId={activeRailId}
           onNavigationSelect={handleRailSelect}
-          followOutput={following}
+          followOutput={following && messages.length > 0}
           onFollowChange={setFollowing}
           busy={busy}
-          viewportRef={scrollRef}
+          viewportRef={setViewport}
           viewportTestId="conversation-scroll"
           className="flex-1"
           viewportClassName={cn(
@@ -663,7 +669,7 @@ return (virtualItems[0])
                   data-index={item.index}
                   ref={virtualizer.measureElement}
                   className="absolute left-0 top-0 w-full"
-                  style={{ transform: `translateY(${item.start}px)` }}
+                  style={{ transform: `translateY(${item.start}px)`, contain: "layout" }}
                 >
                   {/* Centered content column (same width as the composer below). */}
                   <div className="mx-auto w-full max-w-[760px] pb-6">

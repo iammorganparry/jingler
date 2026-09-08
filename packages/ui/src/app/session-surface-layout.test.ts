@@ -33,9 +33,46 @@ const view = (
 beforeEach(() => localStorage.clear())
 
 describe("session surface layout", () => {
+  it("keeps the main chat through capacity replacement and reordering until explicitly closed", () => {
+    const main = { ...createSessionSurfaceLayout(chat("main")), mainChatId: "main" }
+    const two = openSessionSurface(main, chat("b"), 99)
+    const three = openSessionSurface(two, chat("c"), 99)
+    const focusedMain = selectSessionSurface(three, chat("main"))
+    const replaced = openSessionSurface(focusedMain, chat("d"), 99)
+    expect(replaced.panes.map(({ surface }) => surface.id)).toEqual(["main", "d", "c"])
+    expect(splitSessionSurface(replaced, chat("e"), 3, 99)).toBe(replaced)
+    const moved = moveSessionPane(replaced, 0, 2)
+    const selected = selectSessionSurface(moved, file("readme.md"))
+    expect(selected.panes.map(({ surface }) => surface.id)).toContain("main")
+    const dropped = replaceSessionSurface(selected, 2, chat("e"))
+    expect(dropped.panes.map(({ surface }) => surface.id)).toContain("main")
+
+    const closed = closeSessionPane(dropped, 2, chat("e"))
+    expect(closed.mainChatId).toBeNull()
+    saveSessionSurfaceLayout("closed-main", closed)
+    const restored = loadSessionSurfaceLayout("closed-main", chat("e"), "main")
+    expect(openSessionSurface(restored, chat("f"), 3).panes.map(({ surface }) => surface.id)).not.toContain("main")
+  })
+
+  it("opens beside a lone main chat even when the measured width only fits one pane", () => {
+    const main = { ...createSessionSurfaceLayout(chat("main")), mainChatId: "main" }
+    expect(openSessionSurface(main, chat("b"), 1).panes.map(({ surface }) => surface.id)).toEqual(["main", "b"])
+  })
+
+  it("migrates over-cap layouts without discarding the main chat", () => {
+    localStorage.setItem("sb.session-surfaces.v1:legacy", JSON.stringify({
+      panes: ["a", "b", "c", "main"].map((id) => ({ surface: chat(id), ratio: .25 })),
+      focused: 3, openViews: []
+    }))
+    const restored = loadSessionSurfaceLayout("legacy", chat("main"), "main")
+    expect(restored.panes).toHaveLength(3)
+    expect(restored.panes.map(({ surface }) => surface.id)).toContain("main")
+    expect(restored.mainChatId).toBe("main")
+  })
+
   it("allows two readable inner surfaces inside a typical outer half-pane", () => {
     expect(maxSessionSurfacesForWidth(500)).toBe(2)
-    expect(maxSessionSurfacesForWidth(900)).toBe(4)
+    expect(maxSessionSurfacesForWidth(900)).toBe(3)
   })
 
   it("selects in the focused pane and focuses an already visible surface", () => {
@@ -159,5 +196,18 @@ describe("session surface layout", () => {
     const pruned = pruneSessionSurfaceLayout(restored, allowed, chat("a"))
     expect(pruned.panes.map(({ surface }) => surface.kind)).toEqual(["view"])
     expect(pruned.openViews.map(({ id }) => id)).toEqual(["changes"])
+  })
+})
+
+describe("explicit main reopening", () => {
+  it.each(["open", "split", "replace"] as const)("restores main protection through %s", (operation) => {
+    const initial = { ...createSessionSurfaceLayout(chat("main")), mainChatId: "main" }
+    const closed = closeSessionPane(initial, 0, chat("other"))
+    const reopened = operation === "open" ? openSessionSurface(closed, chat("main"), 3, "main")
+      : operation === "split" ? splitSessionSurface(closed, chat("main"), 1, 3, "main")
+      : replaceSessionSurface(closed, 0, chat("main"), "main")
+    expect(reopened.mainChatId).toBe("main")
+    const next = openSessionSurface(reopened, chat("next"), 1)
+    expect(next.panes.some((pane) => pane.surface.id === "main")).toBe(true)
   })
 })

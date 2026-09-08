@@ -45,6 +45,8 @@ jobs:
       # a required local pre-PR gate; keeping it out of routine CI avoids a
       # heavyweight desktop build and browser runtime on every push.
       - name: Test
+        env:
+          VITEST_MAX_WORKERS: 4
         run: pnpm test
 
       - name: Deterministic pi behavior contract

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { SplitGroup } from "./split-layout.js"
 import { SplitView } from "./split-view.js"
@@ -80,6 +80,51 @@ describe("SplitView — switching vs editing", () => {
     expect(screen.queryAllByText(/^pane b$/)).toHaveLength(0)
     expect(screen.getByTestId("split-pane-0").dataset.session).toBe("c")
     expect(screen.getByTestId("split-pane-1").dataset.session).toBe("d")
+  })
+
+  it("does not publish chat focus before a toolbar close or move", () => {
+    const onFocusPane = vi.fn()
+    render(<SplitView group={groupOf(["a", "b"])} onFocusPane={onFocusPane}
+      renderPane={() => <><div data-pane-toolbar><button type="button">Close</button></div><p>transcript</p></>} />)
+    const close = screen.getAllByRole("button", { name: "Close" })[0]!
+    fireEvent.mouseDown(close)
+    fireEvent.focus(close)
+    expect(onFocusPane).not.toHaveBeenCalled()
+    fireEvent.mouseDown(screen.getAllByText("transcript")[0]!)
+    expect(onFocusPane).toHaveBeenCalledWith(0)
+  })
+
+  it.each(["mouseDown", "focus"] as const)("activates the outer session on nested toolbar %s without publishing chat focus", (event) => {
+    const outerFocus = vi.fn()
+    const innerFocus = vi.fn()
+    const action = vi.fn()
+    render(<SplitView group={groupOf(["a", "b"])} onFocusPane={outerFocus} renderPane={(pane) =>
+      pane.sessionId === "a" ? <p>Other session</p> :
+        <SplitView group={groupOf(["main", "chat"])} testIdPrefix="surface" onFocusPane={innerFocus}
+          renderPane={(_, index) => <div data-pane-toolbar><button type="button" onClick={action}>Close {index}</button></div>} />
+    } />)
+    const button = screen.getByRole("button", { name: "Close 1" })
+    fireEvent[event](button)
+    fireEvent.click(button)
+    expect(outerFocus).toHaveBeenCalledWith(1)
+    expect(innerFocus).not.toHaveBeenCalled()
+    expect(action).toHaveBeenCalledOnce()
+  })
+
+  it("does not remeasure pane geometry for focus-only updates, but still measures reordering", async () => {
+    const group = groupOf(["a", "b"])
+    const body = (pane: { sessionId: string }) => <div>{pane.sessionId}</div>
+    const { rerender } = render(<SplitView group={group} renderPane={body} />)
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+    const measure = vi.spyOn(screen.getByTestId("split-pane-0"), "getBoundingClientRect")
+    try {
+      rerender(<SplitView group={{ ...group, focused: 1 }} renderPane={body} />)
+      expect(measure).not.toHaveBeenCalled()
+      rerender(<SplitView group={{ ...group, panes: [...group.panes].reverse() }} renderPane={body} />)
+      expect(measure).toHaveBeenCalled()
+    } finally {
+      measure.mockRestore()
+    }
   })
 
   it("previews divider moves without rerendering pane bodies per pointer move", () => {

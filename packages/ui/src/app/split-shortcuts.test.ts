@@ -29,7 +29,6 @@ describe("shifted chords match the physical key, not the character", () => {
     ["Digit1", "!"],
     ["Digit2", "@"],
     ["Digit3", "#"],
-    ["Digit4", "$"],
     ["BracketLeft", "{"],
     ["BracketRight", "}"],
     ["Equal", "+"]

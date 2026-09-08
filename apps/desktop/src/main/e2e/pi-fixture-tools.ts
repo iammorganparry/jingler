@@ -191,16 +191,16 @@ const registerReviewPauseTool = (registry: ToolRegistry): void => {
     id: E2E_REVIEW_PAUSE_TOOL,
     version: "1",
     description: "Keep the deterministic reviewer observable while it inspects code.",
-    input: Schema.Struct({}),
+    input: Schema.Struct({ hold: Schema.optional(Schema.Boolean) }),
     risk: "read",
     roles: ["review"],
     modes: ["read-only"],
-    timeoutMs: 5_000,
+    timeoutMs: 120_000,
     outputBudget: 1_000,
-    cancellable: false,
+    cancellable: true,
     idempotency: "safe",
-    execute: () =>
-      Effect.runPromise(Effect.sleep("3 seconds").pipe(Effect.as({ inspected: true })))
+    execute: ({ hold }, context) =>
+      Effect.runPromise(Effect.sleep(hold ? "90 seconds" : "3 seconds").pipe(Effect.as({ inspected: true })), { signal: context.signal })
   })
 }
 

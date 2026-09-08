@@ -12,7 +12,7 @@ import {
   visibleTabs
 } from "../app/tab-contributions.js"
 import { testSession as session } from "../test-support.js"
-import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
+import { SESSION_SURFACE_DND_MIME, SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
@@ -552,8 +552,8 @@ describe("mount groups", () => {
       />
     )
 
-    expect(screen.getByTestId("surface-pane-1").dataset.focused).toBe("true")
-    expect(screen.getByTestId("surface-pane-1").dataset.surface).toContain("plan")
+    expect(screen.getByTestId("surface-pane-2").dataset.focused).toBe("true")
+    expect(screen.getByTestId("surface-pane-2").dataset.surface).toContain("plan")
   })
 
   it("hides Plan Review when no embedded review is active", () => {
@@ -626,7 +626,7 @@ describe("mount groups", () => {
     rect.mockRestore()
   })
 
-  it("replaces the focused pane when another readable split no longer fits", async () => {
+  it("keeps main beside Plan even when the width-derived capacity is one", async () => {
     const rect = mockPaneWidth(400)
     render(
       <SessionPane
@@ -640,8 +640,8 @@ describe("mount groups", () => {
 
     await screen.findByRole("button", { name: "Plan" })
     fireEvent.click(screen.getByRole("button", { name: "Plan" }))
-    expect(screen.getByTestId("surface-view").dataset.panes).toBe("1")
-    expect(screen.getByTestId("plan-presentation").textContent).toBe("plan")
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("2")
+    expect(screen.getAllByTestId("plan-presentation").map((node) => node.textContent)).toEqual(["conversation", "plan"])
     rect.mockRestore()
   })
 
@@ -766,6 +766,63 @@ describe("SessionPane", () => {
       "page"
     )
     expect(explanationTab.getAttribute("aria-current")).toBeNull()
+  })
+
+  it("does not rerender an unchanged transcript when a sibling pane moves", () => {
+    const renderConversation = vi.fn(() => <div>transcript</div>)
+    const s = session({ id: "memo" })
+    const props = { session: s, explanationSessions: new Set([s.id]), renderConversation,
+      renderExplanation: () => <div>explanation</div> }
+    const { rerender } = render(<SessionPane {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
+    const before = renderConversation.mock.calls.length
+    const transcript = screen.getByText("transcript")
+    fireEvent.click(screen.getByRole("button", { name: "Move pane 2 left" }))
+    expect(screen.getByText("transcript")).toBe(transcript)
+    expect(renderConversation).toHaveBeenCalledTimes(before)
+    const updated = vi.fn(() => <div>updated transcript</div>)
+    rerender(<SessionPane {...props} renderConversation={updated} />)
+    expect(screen.getByText("updated transcript")).toBeTruthy()
+  })
+
+  it.each(["tab", "edge drop", "replace drop"])("protects main again after reopening through %s", async (method) => {
+    const base = session({ id: "reopen" })
+    const mainId = base.activeChatId
+    const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }, { ...base.chats[0]!, id: "c" }], activeChatId: "b" }
+    render(<SessionPane session={s}
+      explanationSessions={new Set([s.id])}
+      renderExplanation={() => <div>explanation</div>}
+      renderConversation={(owner) => <div>chat {owner.activeChatId}</div>}
+      renderChatTabs={(_session, ctx) => <>{[mainId, "c"].map((id) =>
+        <button key={id} type="button" onClick={() => ctx.onSelectSurface?.({ kind: "chat", id })}>Open {id}</button>
+      )}</>} />)
+    fireEvent.click(screen.getByRole("button", { name: "Close pane 1" }))
+    await waitFor(() => expect(screen.queryByText(`chat ${mainId}`)).toBeNull())
+    if (method === "tab") fireEvent.click(screen.getByRole("button", { name: `Open ${mainId}` }))
+    else {
+      const pane = screen.getByTestId("surface-pane-0")
+      vi.spyOn(pane, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, toJSON: () => ({}) })
+      fireEvent.drop(pane, { clientX: method === "edge drop" ? 990 : 500,
+        dataTransfer: { types: [SESSION_SURFACE_DND_MIME], getData: () => JSON.stringify(["chat", mainId, null]) } })
+    }
+    expect(screen.getByText(`chat ${mainId}`)).toBeTruthy()
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("sb.session-surfaces.v1:reopen")!).mainChatId).toBe(mainId))
+    fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
+    fireEvent.mouseDown(screen.getByText(`chat ${mainId}`))
+    fireEvent.click(screen.getByRole("button", { name: "Open c" }))
+    expect(screen.getByText(`chat ${mainId}`)).toBeTruthy()
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("3")
+  })
+
+  it("keeps main visible when an external chat change follows a queued handoff", () => {
+    const s = session({ id: "handoff" })
+    const renderConversation = (owner: Session) => <div>chat {owner.activeChatId}</div>
+    const { rerender } = render(<SessionPane session={s} renderConversation={renderConversation} />)
+    const added = { ...s.chats[0]!, id: "handed-off" }
+    rerender(<SessionPane session={{ ...s, chats: [...s.chats, added], activeChatId: added.id }} renderConversation={renderConversation} />)
+    expect(screen.getByText(`chat ${s.activeChatId}`)).toBeTruthy()
+    expect(screen.getByText(`chat ${added.id}`)).toBeTruthy()
+    expect(screen.getByTestId("surface-view").dataset.panes).toBe("2")
   })
 
   it("moves and closes the focused surface from controls on that pane", () => {

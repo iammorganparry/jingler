@@ -11,6 +11,25 @@ import {
 afterEach(cleanup);
 
 describe("BeUI production selection primitives", () => {
+  it("does not force layout for closed menus or remeasure an unchanged open menu", () => {
+    const height = vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(100);
+    const menu = (label: string) => <Select value="ask" placement="top">
+      <SelectTrigger ariaLabel="Permission mode">{label}</SelectTrigger>
+      <SelectContent><SelectItem value="ask">Ask</SelectItem></SelectContent>
+    </Select>;
+    try {
+      const { rerender } = render(menu("Ask"));
+      rerender(menu("Updated label"));
+      expect(height).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Permission mode" }));
+      expect(height).toHaveBeenCalled();
+      const measured = height.mock.calls.length;
+      rerender(menu("Another label"));
+      expect(height).toHaveBeenCalledTimes(measured);
+    } finally {
+      height.mockRestore();
+    }
+  });
   it("uses Select for a non-search choice", () => {
     const onValueChange = vi.fn();
     render(
