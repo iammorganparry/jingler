@@ -12,7 +12,7 @@ import {
   visibleTabs
 } from "../app/tab-contributions.js"
 import { testSession as session } from "../test-support.js"
-import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
+import { SESSION_SURFACE_DND_MIME, SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 
 beforeEach(() => localStorage.clear())
 afterEach(cleanup)
@@ -785,7 +785,7 @@ describe("SessionPane", () => {
     expect(screen.getByText("updated transcript")).toBeTruthy()
   })
 
-  it("protects main again after the operator explicitly reopens its pane", async () => {
+  it.each(["tab", "edge drop", "replace drop"])("protects main again after reopening through %s", async (method) => {
     const base = session({ id: "reopen" })
     const mainId = base.activeChatId
     const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }, { ...base.chats[0]!, id: "c" }], activeChatId: "b" }
@@ -798,9 +798,17 @@ describe("SessionPane", () => {
       )}</>} />)
     fireEvent.click(screen.getByRole("button", { name: "Close pane 1" }))
     await waitFor(() => expect(screen.queryByText(`chat ${mainId}`)).toBeNull())
-    fireEvent.click(screen.getByRole("button", { name: `Open ${mainId}` }))
+    if (method === "tab") fireEvent.click(screen.getByRole("button", { name: `Open ${mainId}` }))
+    else {
+      const pane = screen.getByTestId("surface-pane-0")
+      vi.spyOn(pane, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700, toJSON: () => ({}) })
+      fireEvent.drop(pane, { clientX: method === "edge drop" ? 990 : 500,
+        dataTransfer: { types: [SESSION_SURFACE_DND_MIME], getData: () => JSON.stringify(["chat", mainId, null]) } })
+    }
+    expect(screen.getByText(`chat ${mainId}`)).toBeTruthy()
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("sb.session-surfaces.v1:reopen")!).mainChatId).toBe(mainId))
     fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
-    fireEvent.click(screen.getByRole("button", { name: `Open ${mainId}` }))
+    fireEvent.mouseDown(screen.getByText(`chat ${mainId}`))
     fireEvent.click(screen.getByRole("button", { name: "Open c" }))
     expect(screen.getByText(`chat ${mainId}`)).toBeTruthy()
     expect(screen.getByTestId("surface-view").dataset.panes).toBe("3")

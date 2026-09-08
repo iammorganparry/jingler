@@ -99,7 +99,8 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
   const focusFromContent = (event: SyntheticEvent, index: number) => {
     // Toolbar actions already name their pane. Focusing first can publish a late
     // active-chat update that reopens the pane immediately after it was closed.
-    if (event.target instanceof Element && event.target.closest("[data-pane-toolbar]")) return
+    if (event.target instanceof Element &&
+      event.target.closest("[data-pane-toolbar]")?.closest("[data-pane-owner]") === event.currentTarget) return
     onFocusPane?.(index)
   }
   const renderSplitPaneContainer = (pane: TPane, index: number) => {
@@ -140,6 +141,7 @@ export function SplitView<TPane extends { readonly ratio: number } = Pane>({
               // `order` interleaves the panes with the dividers, which are
               // rendered as a separate run below (see the note there).
               style={{ flexGrow: pane.ratio, flexBasis: 0, order: index * 2, contain: "layout paint" }}
+              data-pane-owner
               data-testid={`${testIdPrefix}-pane-${index}`}
               {...{ [`data-${testIdPrefix}-pane-index`]: index }}
               data-session={testIdPrefix === "split" ? paneId(pane) : undefined}

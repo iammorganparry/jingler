@@ -216,8 +216,8 @@ export function MessageScroller({ followOutput = true, followThreshold = 56, smo
   useLayoutEffect(() => {
     followingRef.current = followOutput
     // A virtualizer can restore its offset before our first animation frame runs.
-    programmaticScrollRef.current = followOutput
     if (!followOutput) return
+    programmaticScrollRef.current = true
     frameRef.current = requestAnimationFrame(() => scrollToEnd("auto"))
     return () => { if (frameRef.current) cancelAnimationFrame(frameRef.current) }
   }, [followOutput, scrollToEnd])

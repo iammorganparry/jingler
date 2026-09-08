@@ -8,6 +8,21 @@ Approved approach: cap panes at three, keep main visible unless explicitly close
 - [x] Run tests and benchmark, tune measured bottlenecks, and report frame times and remaining limits.
 - [x] Test the operator-approved bounded Activity retention experiment; compare FPS and memory, then reject it because the gain did not justify its cost and lifecycle problems.
 
+## Review-corrected workload
+
+The original single-session benchmark mislabeled an already-visible chat as an open and then closed main by index. Its single-session measurements below are historical only, not evidence of protected-main performance. The corrected workload opens an absent chat, moves/closes that same surface by identity, and asserts main remains visible after every action in both workloads.
+
+Latest verified build after review fixes:
+
+| Workload | Average FPS | p95 frame | Worst frame |
+| --- | ---: | ---: | ---: |
+| Single session, protected main | 134.8 | 7.8ms | 49.3ms |
+| Three running sessions, protected main | 125.5 | 13.8ms | 75.8ms |
+
+Concurrent action p95: switch 27.9ms, open 20.9ms, move 7.6ms, close 7.8ms. Heap after GC: 42.1MB; DOM nodes: 2,952. Cold opening/switching still exceeds the 16.7ms budget on some frames. The workload changed, so these are not a controlled before/after comparison with the earlier numbers.
+
+Review verification: 183 focused unit tests passed; six built-Electron tests passed (corrected benchmarks, queue handoffs, and PR/reviewer session-switch coverage); UI and desktop typechecks passed; focused lint has no errors (warnings remain). New regressions failed against the old production code. The separate reported freeze remains unresolved; see `plans/pr-review-session-freeze.md`.
+
 ## Continued tuning
 
 - [x] Inspect the current CPU profile for opening/session-switching costs.

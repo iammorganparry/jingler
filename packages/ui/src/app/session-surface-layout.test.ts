@@ -198,3 +198,16 @@ describe("session surface layout", () => {
     expect(pruned.openViews.map(({ id }) => id)).toEqual(["changes"])
   })
 })
+
+describe("explicit main reopening", () => {
+  it.each(["open", "split", "replace"] as const)("restores main protection through %s", (operation) => {
+    const initial = { ...createSessionSurfaceLayout(chat("main")), mainChatId: "main" }
+    const closed = closeSessionPane(initial, 0, chat("other"))
+    const reopened = operation === "open" ? openSessionSurface(closed, chat("main"), 3, "main")
+      : operation === "split" ? splitSessionSurface(closed, chat("main"), 1, 3, "main")
+      : replaceSessionSurface(closed, 0, chat("main"), "main")
+    expect(reopened.mainChatId).toBe("main")
+    const next = openSessionSurface(reopened, chat("next"), 1)
+    expect(next.panes.some((pane) => pane.surface.id === "main")).toBe(true)
+  })
+})

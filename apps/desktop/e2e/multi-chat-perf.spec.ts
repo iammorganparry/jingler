@@ -25,9 +25,10 @@ const transcripts = Object.fromEntries(chats.map((chat) => [chat.id,
   }))
 ]))
 
-const measure = (window: Page, sessionIds: string[] = []) => window.evaluate(async (sessionIds) => {
+const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sessions) => {
+    const multiple = sessions.length > 1
     const frames: number[] = []
-    const actions = sessionIds.length ? ["switch-session", "open-chat", "move-pane", "close-pane"] : ["open-chat", "move-pane", "close-pane"]
+    const actions = multiple ? ["switch-session", "open-chat", "move-pane", "close-pane"] : ["open-chat", "move-pane", "close-pane"]
     const actionFrames = actions.map(() => [] as number[])
     let actionIndex = 0
     const longTasks: number[] = []
@@ -46,28 +47,46 @@ const measure = (window: Page, sessionIds: string[] = []) => window.evaluate(asy
     }
     handle = requestAnimationFrame(sample)
     let maxPanes = 0
-    const operations = sessionIds.length ? 36 : 24
+    const operations = multiple ? 36 : 24
+    let openedChatId = ""
+    const paneFor = (chatId: string) => [...document.querySelectorAll<HTMLElement>("[data-surface]")]
+      .find((pane) => pane.getClientRects().length > 0 && pane.dataset.surface === JSON.stringify(["chat", chatId, null]))
     const control = (i: number) => {
-      const buttons = [...document.querySelectorAll<HTMLButtonElement>("button")].filter((button) => button.getClientRects().length > 0)
-      const named = (name: string) => buttons.find((button) => button.getAttribute("aria-label") === name)
-      const tab = (n: number) => buttons.find((button) => button.textContent === `Stress ${n}`)
-      if (!sessionIds.length) {
-        if (i % 3 === 0) return tab(1 + (Math.floor(i / 3) % 5))
-        return named(i % 3 === 1 ? "Move pane 2 left" : "Close pane 2")
+      const cycle = Math.floor(i / actions.length)
+      const session = sessions[cycle % sessions.length]!
+      if (actions[actionIndex] === "switch-session") {
+        return document.querySelector<HTMLElement>(`[data-testid="session-row-${session.id}"]`)
       }
-      switch (i % 4) {
-        case 0: return document.querySelector<HTMLElement>(`[data-testid="session-row-${sessionIds[Math.floor(i / 4) % sessionIds.length]}"]`)
-        case 1: return tab(3 + (Math.floor(i / 4) % 3))
-        case 2: return named("Move pane 3 left")
-        default: return named("Close pane 2")
+      if (actions[actionIndex] === "open-chat") {
+        const candidates = [...session.chats.slice(3), ...session.chats.slice(1, 3)]
+        const chat = [...candidates.slice(cycle % candidates.length), ...candidates.slice(0, cycle % candidates.length)]
+          .find((candidate) => !paneFor(candidate.id))
+        if (!chat) throw new Error("No unopened benchmark chat")
+        openedChatId = chat.id
+        return [...document.querySelectorAll<HTMLButtonElement>("button")]
+          .find((button) => button.getClientRects().length > 0 && button.textContent === chat.title)
+      }
+      const pane = paneFor(openedChatId)
+      return pane?.querySelector<HTMLButtonElement>(actions[actionIndex] === "move-pane"
+        ? 'button[aria-label^="Move pane"][aria-label$=" left"]'
+        : 'button[aria-label^="Close pane"]')
+    }
+    const assertAction = (mainId: string, i: number) => {
+      if (!paneFor(mainId)) throw new Error(`Main disappeared at operation ${i}`)
+      if (actions[actionIndex] === "switch-session") return
+      const visible = paneFor(openedChatId) !== undefined
+      if (visible !== (actions[actionIndex] !== "close-pane")) {
+        throw new Error(`Benchmark action did not change the expected surface at operation ${i}`)
       }
     }
     for (let i = 0; i < operations; i++) {
       actionIndex = i % actions.length
+      const session = sessions[Math.floor(i / actions.length) % sessions.length]!
       const button = control(i)
       if (!button) throw new Error(`Missing benchmark control at operation ${i}`)
       button.click()
       await new Promise((resolve) => setTimeout(resolve, 400))
+      assertAction(session.chats[0]!.id, i)
       maxPanes = Math.max(maxPanes, [...document.querySelectorAll("[data-surface-pane-index]")].filter((pane) => pane.getClientRects().length > 0).length)
     }
     cancelAnimationFrame(handle)
@@ -86,7 +105,7 @@ const measure = (window: Page, sessionIds: string[] = []) => window.evaluate(asy
       operations, ...stats(frames), longTasks, maxPanes,
       actions: Object.fromEntries(actions.map((action, i) => [action, stats(actionFrames[i]!)]))
     }
-  }, sessionIds)
+  }, sessions.map(({ id, chats }) => ({ id, chats })))
 
 test("benchmark rich transcripts while opening, moving and closing chat panes", async ({ launchApp }, testInfo) => {
   test.setTimeout(180_000)
@@ -166,7 +185,7 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
   const cdp = await window.context().newCDPSession(window)
   await cdp.send("Profiler.enable")
   await cdp.send("Profiler.start")
-  const result = await measure(window, sessions.map(({ id }) => id))
+  const result = await measure(window, sessions)
   const { profile } = await cdp.send("Profiler.stop")
   const profilePath = testInfo.outputPath("multi-session.cpuprofile")
   await writeFile(profilePath, JSON.stringify(profile))

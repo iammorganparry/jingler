@@ -528,15 +528,7 @@ const remapLegacy2x2 = (slots: ReadonlyArray<string | null>): ReadonlyArray<stri
   slots[3] ?? null
 ]
 
-/**
- * Upgrade a stored preset grid into a single split.
- *
- * The operator had those sessions side by side on purpose, so they stay side by
- * side — as one group, which is the only thing this model can mean by "all of
- * these on screen at once". Overflow past `MAX_PANES` is dropped rather than
- * spilled into extra groups: an old `2|2` holds at most four, so in practice
- * this never truncates.
- */
+/** Upgrade a preset grid, keeping overflow sessions in single-pane groups. */
 export const migrateLegacyLayout = (raw: unknown): Workspace | null => {
   if (typeof raw !== "object" || raw === null) return null
   const parsed = raw as { mode?: unknown; slots?: unknown; focused?: unknown }
@@ -551,14 +543,16 @@ export const migrateLegacyLayout = (raw: unknown): Workspace | null => {
   const ids: Array<string> = []
   let focused = 0
   stored.forEach((id, i) => {
-    if (typeof id !== "string" || id === "" || seen.has(id) || ids.length >= MAX_PANES) return
+    if (typeof id !== "string" || id === "" || seen.has(id)) return
     if (i <= focusedSlot) focused = ids.length
     seen.add(id)
     ids.push(id)
   })
   if (ids.length === 0) return null
-  const panes = evenly(ids)
-  return { groups: [{ id: idFor(panes), panes, focused }], activeGroupId: idFor(panes) }
+  const originalFocus = parsed.slots[focusedSlot]
+  const focusedId = typeof originalFocus === "string" && ids.includes(originalFocus) ? originalFocus : ids[focused]
+  const groups = restoreStoredGroups([{ id: "", panes: evenly(ids), focused: ids.indexOf(focusedId!) }])
+  return { groups, activeGroupId: groups.find((group) => group.panes.some((pane) => pane.sessionId === focusedId))!.id }
 }
 
 /**
@@ -609,7 +603,6 @@ const isPane = (value: unknown): value is Pane =>
 const takeStoredPanes = (storedPanes: ReadonlyArray<unknown>, seen: Set<string>): Array<Pane> => {
       const panes: Array<Pane> = []
       for (const p of storedPanes) {
-        if (panes.length >= MAX_PANES) break
         if (!isPane(p) || seen.has(p.sessionId)) continue
         seen.add(p.sessionId)
         panes.push(p)
@@ -622,15 +615,16 @@ const restoreStoredGroups = (storedGroups: ReadonlyArray<SplitGroup>): Array<Spl
     const groups: Array<SplitGroup> = []
     for (const g of storedGroups) {
       if (typeof g !== "object" || g === null || !Array.isArray(g.panes)) continue
-      // Cap and record in LOCKSTEP. Filtering first and slicing after left the
-      // dropped overflow in `seen`, so a stale store with a five-pane group
-      // burned its fifth session's id: a LATER group naming that session skipped
-      // it too, and it vanished from the workspace entirely rather than being
-      // kept by the group that still had room for it.
       const panes = takeStoredPanes(g.panes, seen)
       if (panes.length === 0) continue
-      const focused = typeof g.focused === "number" && Number.isInteger(g.focused) ? g.focused : 0
-      groups.push(withPanes({ id: "", panes, focused: 0 }, restoreRatios(panes), focused))
+      const focusedPane = g.panes[typeof g.focused === "number" && Number.isInteger(g.focused) ? g.focused : 0]
+      const kept = panes.slice(0, MAX_PANES)
+      const focused = isPane(focusedPane) ? Math.max(0, kept.findIndex((pane) => pane.sessionId === focusedPane.sessionId)) : 0
+      groups.push(withPanes({ id: "", panes: kept, focused: 0 }, restoreRatios(kept), focused))
+      for (const pane of panes.slice(MAX_PANES)) {
+        const single = [{ ...pane, ratio: 1 }]
+        groups.push({ id: idFor(single), panes: single, focused: 0 })
+      }
     }
     return groups
 }
@@ -652,10 +646,11 @@ export const load = (): Workspace => {
     // subscription.
     const groups = restoreStoredGroups(parsed.groups)
     if (groups.length === 0) return EMPTY_WORKSPACE
-    const activeGroupId =
-      typeof parsed.activeGroupId === "string" && groups.some((g) => g.id === parsed.activeGroupId)
-        ? parsed.activeGroupId
-        : groups[0]!.id
+    const storedActive = parsed.groups.find((group) => group?.id === parsed.activeGroupId)
+    const activePane = Array.isArray(storedActive?.panes) ? storedActive.panes[storedActive.focused] : undefined
+    const activeGroupId = (isPane(activePane)
+      ? groups.find((group) => group.panes.some((pane) => pane.sessionId === activePane.sessionId))
+      : groups.find((group) => group.id === parsed.activeGroupId))?.id ?? groups[0]!.id
     return { groups, activeGroupId }
   } catch {
     return EMPTY_WORKSPACE

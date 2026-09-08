@@ -110,11 +110,22 @@ export const selectSessionSurface = (
   }
 }
 
+const protectReopenedMain = (
+  layout: SessionSurfaceLayout,
+  surface: SessionSurface,
+  mainChatId: string | null | undefined
+): SessionSurfaceLayout =>
+  surface.kind === "chat" && surface.id === mainChatId && layout.mainChatId !== mainChatId
+    ? { ...layout, mainChatId }
+    : layout
+
 export const openSessionSurface = (
   layout: SessionSurfaceLayout,
   surface: SessionSurface,
-  maxPanes: number
+  maxPanes: number,
+  mainChatId = layout.mainChatId
 ): SessionSurfaceLayout => {
+  layout = protectReopenedMain(layout, surface, mainChatId)
   const visible = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (visible !== -1) return focusSessionSurface(layout, visible)
   return layout.panes.length < Math.min(MAX_PANES, maxPanes)
@@ -137,10 +148,12 @@ export const splitSessionSurface = (
   layout: SessionSurfaceLayout,
   surface: SessionSurface,
   at: number,
-  maxPanes: number
+  maxPanes: number,
+  mainChatId = layout.mainChatId
 ): SessionSurfaceLayout => {
   const existing = layout.panes.findIndex((pane) => sameSurface(pane.surface, surface))
   if (existing === -1 && (layout.panes.length >= MAX_PANES || layout.panes.length >= maxPanes)) return layout
+  layout = protectReopenedMain(layout, surface, mainChatId)
   const surfaces = layout.panes.map((pane) => pane.surface)
   if (existing !== -1) surfaces.splice(existing, 1)
   const adjusted = existing !== -1 && existing < at ? at - 1 : at
@@ -152,9 +165,11 @@ export const splitSessionSurface = (
 export const replaceSessionSurface = (
   layout: SessionSurfaceLayout,
   index: number,
-  surface: SessionSurface
+  surface: SessionSurface,
+  mainChatId = layout.mainChatId
 ): SessionSurfaceLayout => {
   if (index < 0 || index >= layout.panes.length) return layout
+  layout = protectReopenedMain(layout, surface, mainChatId)
   if (sameSurface(layout.panes[index]!.surface, surface)) return focusSessionSurface(layout, index)
   const targetSurface = layout.panes[index]!.surface
   if (targetSurface.kind === "chat" && targetSurface.id === layout.mainChatId) {

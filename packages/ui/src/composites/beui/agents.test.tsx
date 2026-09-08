@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { BEUI_AGENT_COMPONENTS, MessageScroller, ToolApproval } from "./index.js"
@@ -81,6 +82,28 @@ describe("BeUI agent catalog", () => {
     viewport.scrollTop = 800
     fireEvent.scroll(viewport)
     expect(onFollowChange).toHaveBeenLastCalledWith(true)
+  })
+
+  it("keeps controlled follow mode off during smooth navigation to an earlier rail item", async () => {
+    const changes = vi.fn()
+    const Controlled = () => {
+      const [following, setFollowing] = useState(true)
+      return <MessageScroller followOutput={following} onFollowChange={(value) => { changes(value); setFollowing(value) }} navigation="rail" viewportRef={(node) => { if (node) scrollMetrics(node, 800) }}>
+        <div data-slot="message" data-from="user">Earlier</div>
+        <div data-slot="message" data-from="assistant">Latest</div>
+      </MessageScroller>
+    }
+    render(<Controlled />)
+    const first = await screen.findByRole("button", { name: "Go to user message 1 of 2" })
+    const viewport = screen.getByRole("region", { name: "Conversation" })
+    scrollMetrics(viewport, 800)
+    const scrollTo = vi.fn()
+    viewport.scrollTo = scrollTo
+    fireEvent.click(first)
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }))
+    viewport.scrollTop = 780
+    fireEvent.scroll(viewport)
+    expect(changes.mock.calls).toEqual([[false]])
   })
 
   it("builds the official clickable rail from Message rows", async () => {

@@ -577,7 +577,9 @@ const stormResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessa
 const reviewResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
   if (lastMessage?.role !== "toolResult" || lastMessage.toolName !== E2E_REVIEW_PAUSE_TOOL) {
-    return fauxAssistantMessage(fauxToolCall(E2E_REVIEW_PAUSE_TOOL, {}), {
+    return fauxAssistantMessage(fauxToolCall(E2E_REVIEW_PAUSE_TOOL, {
+      hold: operatorText(context).some((text) => text.includes("[[review-switch-stress]]"))
+    }), {
       stopReason: "toolUse"
     })
   }

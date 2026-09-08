@@ -94,6 +94,23 @@ describe("SplitView — switching vs editing", () => {
     expect(onFocusPane).toHaveBeenCalledWith(0)
   })
 
+  it.each(["mouseDown", "focus"] as const)("activates the outer session on nested toolbar %s without publishing chat focus", (event) => {
+    const outerFocus = vi.fn()
+    const innerFocus = vi.fn()
+    const action = vi.fn()
+    render(<SplitView group={groupOf(["a", "b"])} onFocusPane={outerFocus} renderPane={(pane) =>
+      pane.sessionId === "a" ? <p>Other session</p> :
+        <SplitView group={groupOf(["main", "chat"])} testIdPrefix="surface" onFocusPane={innerFocus}
+          renderPane={(_, index) => <div data-pane-toolbar><button type="button" onClick={action}>Close {index}</button></div>} />
+    } />)
+    const button = screen.getByRole("button", { name: "Close 1" })
+    fireEvent[event](button)
+    fireEvent.click(button)
+    expect(outerFocus).toHaveBeenCalledWith(1)
+    expect(innerFocus).not.toHaveBeenCalled()
+    expect(action).toHaveBeenCalledOnce()
+  })
+
   it("does not remeasure pane geometry for focus-only updates, but still measures reordering", async () => {
     const group = groupOf(["a", "b"])
     const body = (pane: { sessionId: string }) => <div>{pane.sessionId}</div>

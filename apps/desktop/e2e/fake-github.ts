@@ -794,6 +794,14 @@ export const startFakeGitHubServer = async (
               }
             },
             {
+              matches: () => (tail === "/commits" && method === "GET"),
+              handle: function listPullCommits() {
+                if (!requirePermissions("pull_requests:read")) return;
+                json(res, 200, []);
+                return;
+              }
+            },
+            {
               matches: () => (tail === "/reviews" && method === "GET"),
               handle: function listPullReviews() {
                 if (!requirePermissions("pull_requests:read")) return;

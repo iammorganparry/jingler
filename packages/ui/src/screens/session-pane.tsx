@@ -410,14 +410,15 @@ function SessionPaneBody(props: SessionPaneProps) {
                 current,
                 surface,
                 at,
-                maxSessionSurfacesForWidth(paneWidth)
+                maxSessionSurfacesForWidth(paneWidth),
+                mainChatId
               )
             )
           }}
           onReplacePane={(index, payload) => {
             const surface = parseSessionSurfaceKey(payload)
             if (!surface) return
-            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface))
+            setSurfaceLayout((current) => replaceSessionSurface(current, index, surface, mainChatId))
           }}
           onResize={(index, delta) =>
             setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
@@ -526,9 +527,10 @@ function SessionPaneBody(props: SessionPaneProps) {
   const mainChatId = props.session.chats[0]?.id
   const openSurface = useCallback((surface: SessionSurface) => {
     setSurfaceLayout((current) => openSessionSurface(
-      surface.kind === "chat" && surface.id === mainChatId ? { ...current, mainChatId } : current,
+      current,
       surface,
-      maxSessionSurfacesForWidth(paneWidth)
+      maxSessionSurfacesForWidth(paneWidth),
+      mainChatId
     ))
   }, [mainChatId, paneWidth])
   const filePanePaths = useMemo(
@@ -761,13 +763,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         return
       }
       if (nextTab === BUILTIN_TAB.conversation) {
-        setSurfaceLayout((current) =>
-          openSessionSurface(
-            current,
-            { kind: "chat", id: active.activeChatId },
-            maxSessionSurfacesForWidth(paneWidth)
-          )
-        )
+        openSurface({ kind: "chat", id: active.activeChatId })
       } else if (nextTab === BUILTIN_TAB.files) {
         setSurfaceLayout((current) =>
           openSessionSurface(
@@ -795,6 +791,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       active,
       browserActive,
       openPlanReview,
+      openSurface,
       paneWidth,
       props.onSelectIssue,
       props.onToggleBrowser,

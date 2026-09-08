@@ -407,11 +407,7 @@ describe("persistence", () => {
 
     const pane = (sessionId: string, ratio: number) => ({ sessionId, ratio })
 
-    it("gives an over-cap group's overflow to a LATER group that has room", () => {
-      // The bug: panes were recorded as seen while filtering and capped after,
-      // so the fifth session's id was burned by a group that never showed it —
-      // and the group below, which had room, skipped it too. The session
-      // disappeared from the workspace entirely.
+    it("spills overflow into single-pane groups without duplicating later entries", () => {
       store([
         {
           id: "g:a",
@@ -430,7 +426,16 @@ describe("persistence", () => {
       const ws = load()
       expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["a", "b", "c"])
       // The one that didn't fit is still somewhere, rather than nowhere.
-      expect(ws.groups[1]!.panes.map((p) => p.sessionId)).toEqual(["overflow"])
+      expect(ws.groups.flatMap((group) => group.panes.map((p) => p.sessionId))).toEqual(["a", "b", "c", "d", "overflow"])
+    })
+
+    it("preserves an active overflow session across load and save", () => {
+      store([{ id: "g:a", panes: ["a", "b", "c", "d"].map((id) => pane(id, 0.25)), focused: 3 }])
+      const ws = load()
+      expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["a", "b", "c"], ["d"]])
+      expect(focusedSessionId(ws)).toBe("d")
+      save(ws)
+      expect(load()).toEqual(ws)
     })
 
     it("still caps a lone over-cap group at MAX_PANES", () => {
@@ -504,6 +509,12 @@ describe("migrateLegacyLayout", () => {
   it("re-orders a legacy row-major 2x2 so panes keep their left-to-right reading", () => {
     const ws = migrateLegacyLayout({ mode: "2x2", slots: ["tl", "tr", "bl", "br"], focused: 0 })!
     expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["tl", "bl", "tr"])
+  })
+
+  it("preserves focused overflow when migrating a legacy four-pane grid", () => {
+    const ws = migrateLegacyLayout({ mode: "2x2", slots: ["tl", "tr", "bl", "br"], focused: 3 })!
+    expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["tl", "bl", "tr"], ["br"]])
+    expect(focusedSessionId(ws)).toBe("br")
   })
 
   it("is read on boot when there is no v2 workspace yet", () => {
