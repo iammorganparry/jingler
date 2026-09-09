@@ -28,6 +28,9 @@ One-line intent. Size each stage so its finished changes could form one reviewab
 - [ ] Concrete step
   - [ ] Optional substep
 
+### Technical explanation
+Explain current behavior, proposed behavior, relevant files/symbols, and material tradeoffs.
+
 ### Acceptance
 - [ ] Observable check (test: path/to/test.ts::case name)
 
@@ -38,7 +41,7 @@ One-line intent. Size each stage so its finished changes could form one reviewab
 > depends: earlier-stage-id
 ```
 
-Each `##` heading is a logical commit boundary, not an instruction to run `git commit`. Keep stage IDs stable across revisions. Dependencies reference those IDs.
+Untagged `##` headings are document sections; only headings with an `id` comment are stages. Each stage is a logical commit boundary, not an instruction to run `git commit`, and must include intent, approach, steps, a technical explanation, acceptance tests, proposed files, and complexity. Keep stage IDs stable across revisions. Dependencies reference those IDs.
 
 Checkbox markers are durable execution state:
 

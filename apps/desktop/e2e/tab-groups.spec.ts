@@ -143,7 +143,7 @@ test("tabs split inside one pane of an outer session split", async ({ launchApp 
   await expect(first.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
   await expect(first.getByTestId("surface-pane-0").getByRole("button", { name: "Close pane 1" })).toBeVisible()
   await expect(first.getByTestId("surface-pane-1").getByRole("button", { name: "Close pane 2" })).toBeVisible()
-  await expect(window.getByTestId("title-bar").getByRole("button", { name: /^Close pane/ })).toHaveCount(0)
+  await expect(window.getByTestId("title-bar").getByRole("button", { name: /^Close pane/ })).toHaveCount(1)
   await expect(window.getByTestId("view-rail")).toHaveCount(1)
   expect(
     await window.getByTestId("view-rail").evaluate((rail) => rail.parentElement?.id)

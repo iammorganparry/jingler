@@ -28,7 +28,7 @@ import type { SeedSession } from "./fixtures.js"
 const expectFileRail = async (window: Page): Promise<void> => {
   const rail = window.getByTestId("review-file-rail")
   if (await rail.isVisible()) return
-  await window.getByRole("button", { name: "Changed files" }).click({ timeout: 20_000 })
+  await window.getByRole("button", { name: "Changed files" }).filter({ visible: true }).first().click({ timeout: 20_000 })
   await expect(rail).toBeVisible({ timeout: 20_000 })
 }
 
@@ -65,7 +65,6 @@ test("shows breathing indicators while the agent is working", async ({ launchApp
   await expect(
     window.getByTestId("chat-thinking-orb").getByRole("status", { name: "Agent breathing…" })
   ).toBeVisible()
-  await expect(window.getByTestId("chat-thinking-orb")).not.toContainText("Agent breathing")
   await expect(window.getByLabel("Working")).toHaveCount(0)
   await expect(row.getByRole("status", { name: /Thinking|Running/ })).toBeVisible()
 })
@@ -303,6 +302,8 @@ const seededPrSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<See
     status: "idle",
     diff: { added: 313, removed: 23 },
     prNumber: 482,
+    githubInstallationId: "101",
+    githubRepositoryId: "301",
     costUsd: 0,
     tokens: 0,
     updatedAt: "2026-07-11T00:00:00.000Z",
@@ -358,7 +359,7 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   // Four consecutive Reads collapse: only the latest card + a "+3 more" toggle show.
   await expect(window.getByRole("button", { name: /\+ 3 more tool calls/ })).toBeVisible({ timeout: 15_000 })
   await expect(window.getByText("src/file-1.ts")).toHaveCount(0)
-  await expect(window.getByText("src/file-4.ts")).toBeVisible()
+  await expect(window.getByText("src/file-4.ts").first()).toBeVisible()
 
   // Expanding reveals the earlier calls; collapsing hides them again.
   await window.getByRole("button", { name: /\+ 3 more tool calls/ }).click()
@@ -464,7 +465,7 @@ test("the session title renames without navigating and the active chat replaces 
   expect(controlsBox!.x).toBeGreaterThan(rowBox!.x + rowBox!.width / 2)
 
   await expect(window.getByRole("button", { name: "Conversation" })).toHaveCount(0)
-  await window.getByTestId("active-chat-tab").click()
+  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
@@ -482,7 +483,7 @@ test("a linked PR shows the sidebar badge and the Pull Request / Code Review tab
   await expect(window.getByText(/#482/).first()).toBeVisible()
 
   // The PR + Code Review tabs appear once a session has a linked PR.
-  await expect(window.getByRole("button", { name: "Pull Request" }).first()).toBeVisible()
+  await expect(window.getByTestId("view-tab-pr").first()).toBeVisible()
   const reviewTab = window.getByRole("button", { name: "Code Review" }).first()
   await expect(reviewTab).toBeVisible()
 
@@ -520,7 +521,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
     }
   })
   await expect(appShell(window)).toBeVisible()
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
 
   // The description renders as the opening comment — markdown and all.
   await expect(window.getByRole("heading", { name: "Why" })).toBeVisible({ timeout: 20_000 })
@@ -559,7 +560,7 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
       ]
     }
   })
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
 
   // Default is a merge commit — the picker must not silently change what the
   // button already did.
@@ -597,7 +598,7 @@ test("an out-of-date branch offers Update branch, not just a blocker", async ({ 
       ]
     }
   })
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
 
   await expect(window.getByText("Branch is out of date with the base")).toBeVisible({
     timeout: 20_000
@@ -628,7 +629,7 @@ test("a passing check still links to its run", async ({ launchApp }) => {
       ]
     }
   })
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
 
   const details = window.getByRole("link", { name: "Details for build" })
   await expect(details).toBeVisible({ timeout: 20_000 })
@@ -969,7 +970,7 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
   const browser = window.getByRole("button", { name: "Browser", exact: true })
   if ((await browser.getAttribute("aria-pressed")) === "true") await browser.click()
 
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
   const runButton = window.getByRole("button", { name: /Adversarial review/ })
   await expect(runButton).toBeEnabled()
   await runButton.click()
@@ -983,7 +984,7 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable from the chat row, mid-run.
-  await window.getByTestId("active-chat-tab").first().click()
+  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
 

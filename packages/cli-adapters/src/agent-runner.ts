@@ -191,6 +191,27 @@ interface ActiveRun {
   readonly replyGate: Effect.Semaphore
 }
 
+const updateSessionCompletion = (
+  event: StreamEvent,
+  completionDeclared: Ref.Ref<boolean>,
+  liveTasks: Effect.Effect<number>,
+  active: Ref.Ref<Map<string, ActiveRun>>,
+  sessionId: string,
+  out: Mailbox.Mailbox<StreamEvent>
+) => Effect.gen(function* () {
+  if (event._tag === "SessionCompletionDeclared") {
+    yield* Ref.set(completionDeclared, true)
+    return
+  }
+  if (event._tag !== "Done" || !(yield* Ref.get(completionDeclared))) return
+  if ((yield* liveTasks) > 0 || (yield* Ref.get(active)).size > 1) return
+  const persisted = yield* SessionStore.setStatus(sessionId, "settled").pipe(
+    Effect.as(true),
+    Effect.catchAll(() => Effect.succeed(false))
+  )
+  if (persisted) yield* out.offer({ _tag: "SessionSettled" })
+})
+
 type PromptEnv =
   | AgentTurnDriver
   | ConfigService
@@ -667,6 +688,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * behaviour and cannot fail a run (`Effect.ignore` at the call site).
            */
           const sawTerminal = yield* Ref.make(false)
+          const completionDeclared = yield* Ref.make(false)
+          /** Unsettled background tasks belonging to this chat, right now. */
+          const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
+            Effect.provide(env),
+            Effect.orElseSucceed(() => 0)
+          )
           /**
            * Resolved when the turn reaches its terminal event.
            *
@@ -685,6 +712,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // assistant placeholder, never race it and leave that placeholder open.
           const emit = (event: StreamEvent): Effect.Effect<void> =>
             turnMutation.withPermits(1)(Effect.gen(function* () {
+              yield* updateSessionCompletion(
+                event,
+                completionDeclared,
+                liveTasks,
+                active,
+                sessionId,
+                out
+              )
               // Codex can surface one app-server failure as both `turn.failed`
               // and `error`. The first terminal owns the turn; folding the
               // second printed the same context-overflow message twice.
@@ -1068,12 +1103,6 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * run still alive after this is genuinely lingering.
            */
           const SELF_EXIT_GRACE = "5 seconds"
-
-          /** Unsettled background tasks belonging to this chat, right now. */
-          const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
-            Effect.provide(env),
-            Effect.orElseSucceed(() => 0)
-          )
 
           /** Read the run's fate from the policy in `run-lifetime.ts`. */
           const fate = (consumerAttached: boolean) =>

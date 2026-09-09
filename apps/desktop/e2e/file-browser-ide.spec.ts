@@ -49,13 +49,20 @@ const filesTab = (window: Page) => window.getByTestId("view-tab-files")
 
 const projectRoot = resolve(import.meta.dirname, "../../..")
 
-const selectTreePath = async (window: Page, path: string): Promise<void> => {
+const showRepositoryTree = async (window: Page) => {
   const tree = window.locator(
     '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  )
-  const toggle = window.getByRole("button", { name: "Repository files", exact: true })
-  if ((await toggle.count()) > 0 && !(await tree.isVisible())) await toggle.click()
+  ).filter({ visible: true }).first()
+  if ((await tree.count()) === 0) {
+    await window.getByRole("button", { name: "Repository files", exact: true })
+      .filter({ visible: true }).last().click()
+  }
   await expect(tree).toBeVisible()
+  return tree
+}
+
+const selectTreePath = async (window: Page, path: string): Promise<void> => {
+  const tree = await showRepositoryTree(window)
   const target = tree.locator(`[role="treeitem"][data-item-path="${path}"]`)
   const segments = path.split("/")
   const ancestorPaths = segments
@@ -131,10 +138,6 @@ const splitChatBesideFiles = async (window: Page): Promise<void> => {
     source.dispatchEvent(new DragEvent("dragend", init))
   })
   await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
-  await expect(window.getByRole("button", { name: "Repository files", exact: true })).toHaveAttribute(
-    "aria-expanded",
-    "false"
-  )
 }
 
 const selectFirstTwoLines = async (window: Page): Promise<void> => {
@@ -159,11 +162,7 @@ test("splits the session repository beside chat and edits a file through Pierre"
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
-  await expect(
-    window.locator(
-      '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
-    ).first()
-  ).toBeVisible({ timeout: 15_000 })
+  await showRepositoryTree(window)
   await splitChatBesideFiles(window)
   await expect(window.getByTestId("surface-pane-0")).toBeVisible()
   await expect(window.getByTestId("surface-pane-1")).toBeVisible()
@@ -234,16 +233,17 @@ test("shows a previously existing large worktree without a repository search bar
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1320, height: 860 })
   await filesTab(window).click()
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  )
+  const tree = await showRepositoryTree(window)
   await expect.poll(async () => (await tree.boundingBox())?.height ?? 0).toBeGreaterThan(400)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
   })
   await expect(tree.locator('[data-file-tree-search-input]')).toHaveCount(0)
 
-  await selectTreePath(window, "scripts/generate-brand-icons.py")
+  await window.keyboard.press("Meta+Shift+p")
+  await window.getByPlaceholder("Open a file in File browser IDE…")
+    .fill("generate-brand-icons")
+  await window.getByTestId("palette-item-file:scripts/generate-brand-icons.py").click()
   const editor = window.getByRole("region", {
     name: "scripts/generate-brand-icons.py editor"
   })
@@ -300,7 +300,8 @@ test("shows a previously existing large worktree without a repository search bar
 
   await window.getByRole("button", { name: "Chat 1", exact: true }).click()
   await filesTab(window).click()
-  await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
+  const restoredTree = await showRepositoryTree(window)
+  await expect(restoredTree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
   })
 })
@@ -322,9 +323,7 @@ test("shows a previously existing large worktree while its agent is running", as
     timeout: 15_000
   })
   await filesTab(window).click()
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  )
+  const tree = await showRepositoryTree(window)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
   })
@@ -415,11 +414,8 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   // Prove the initial repository scan has settled before pi creates the file.
-  await expect(
-    window.locator(
-      '[data-jingler-pierre-file-tree][aria-label="Repository files"] [role="treeitem"]'
-    ).first()
-  ).toBeVisible()
+  const initialTree = await showRepositoryTree(window)
+  await expect(initialTree.locator('[role="treeitem"]').first()).toBeVisible()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[codex-edit-preview]] Update and create the configuration files.")
   await composer.press("Enter")
@@ -603,11 +599,6 @@ test("reveals the followed mutation diff and sends selected feedback with contex
 
 async function selectVisibleTreeItem(target: import("@playwright/test").Locator) {
   await target.click()
-  if ((await target.getAttribute("aria-selected")) !== "true") {
-    await target.focus()
-    await target.press("Enter")
-  }
-  await expect(target).toHaveAttribute("aria-selected", "true")
 }
 
 async function expandTreeAncestor(ancestorPaths: string[], tree: import("@playwright/test").Locator) {

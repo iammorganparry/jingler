@@ -56,6 +56,8 @@ test("plan scratchpad tracks progress in a normal session without plan mode", as
   })
   await expect(appShell(launched.window)).toBeVisible()
 
+  const skipImport = launched.window.getByRole("button", { name: "Skip import" })
+  if (await skipImport.isVisible()) await skipImport.click()
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
   await composer.click()
   await expect(launched.window.locator("[data-mode='accept-edits']")).toBeVisible()

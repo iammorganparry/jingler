@@ -13,6 +13,7 @@ import {
   repoOptions,
   saveFilters,
   sessionFilterAxes,
+  STATUS_ORDER,
   sortSessions,
   type SessionFilters
 } from "./session-filters.js"
@@ -71,6 +72,15 @@ describe("filterSessions", () => {
 })
 
 describe("sortSessions", () => {
+  it("places settled after idle in attention order", () => {
+    expect(STATUS_ORDER).toStrictEqual([
+      "needs-input",
+      "running",
+      "monitoring",
+      "idle",
+      "settled"
+    ])
+  })
   it("orders by recency, newest first", () => {
     const out = sortSessions(SESSIONS.slice(0, 3), "recency", idle)
     expect(out.map((x) => x.id)).toStrictEqual(["b", "c", "a"])

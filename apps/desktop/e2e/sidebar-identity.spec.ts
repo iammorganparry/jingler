@@ -119,7 +119,7 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   })
   expect(sidebarSurface.radius).toBe(0)
   expect(sidebarSurface.backdrop).toBe("none")
-  expect(sidebarSurface.background).toBe("rgba(0, 0, 0, 0)")
+  expect(sidebarSurface.background).toBe(appBackground)
   await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)"

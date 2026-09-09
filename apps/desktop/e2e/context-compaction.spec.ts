@@ -61,10 +61,9 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   // ── The meter reads a live snapshot across the RPC boundary ──
   const meter = window.getByRole("button", { name: "Compact now" })
   await expect(meter).toBeVisible({ timeout: 20_000 })
-  // The scripted provider reports context in the 40k range. Seeing it here proves
-  // the Usage event reached the renderer AND that `Context.state` resolved a
-  // trigger point — the meter renders nothing without one.
-  await expect(meter).toContainText(/4\d(?:\.\d)?k/)
+  // A concrete token count proves the Usage event reached the renderer and that
+  // `Context.state` resolved a trigger point; the exact total varies with prompt framing.
+  await expect(meter).toContainText(/\d+(?:\.\d)?k context/)
 
   // ── Compact ──
   await meter.click()

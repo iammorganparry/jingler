@@ -846,6 +846,10 @@ export const StreamEvent = Schema.Union(
     tokensBefore: Schema.Number
   }),
   /** Terminal context size, or 0 when the harness cannot report it. */
+  /** The owning top-level agent explicitly declares all requested work resolved. */
+  Schema.TaggedStruct("SessionCompletionDeclared", {}),
+  /** Host-admitted completion, emitted only after reconciliation and blocker checks. */
+  Schema.TaggedStruct("SessionSettled", {}),
   Schema.TaggedStruct("Done", {
     costUsd: Schema.Number,
     tokens: Schema.Number
@@ -1102,7 +1106,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
       )
     })),
 
-    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", () => msg),
+    Match.tag("SessionIssueLinksChanged", "PlannotatorStateChanged", "SessionCompletionDeclared", "SessionSettled", () => msg),
 
     Match.tag("GateRequested", (e) => {
       const part: GatePart = { _tag: "Gate", gate: e.gate }
@@ -1879,12 +1883,12 @@ export const activityLabel = (activity: SessionActivity): string =>
  * every extra word competes with the branch name beside it and the reader is
  * scanning a column, not reading a sentence.
  *
- * Five is the whole point. A reader scanning the sidebar asks one question — does
- * this session need me? — and the answer is: not yet (Thinking/Running), not for
- * a while (Monitoring), yes (Needs Input), or no (Idle). Anything finer is detail
- * they didn't ask for at the price of the thing they did.
+ * A reader scanning the sidebar asks one question — does this session need me? —
+ * and the answer is: not yet (Thinking/Running), not for a while (Monitoring),
+ * yes (Needs Input), paused (Idle), or resolved (Settled). Anything finer is
+ * detail they didn't ask for at the price of the thing they did.
  */
-export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "monitoring" | "idle"
+export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "monitoring" | "idle" | "settled"
 
 /**
  * What a session reports in the sidebar, from its live activity (when it has one)
@@ -1901,9 +1905,8 @@ export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "mon
  *    that will not return on its own. That's the state Monitoring names.
  *  - **Needing approval is needing input.** Two ways to be blocked on a human,
  *    one thing for the human to do about it.
- *  - **"done" folds to idle.** It's in `SessionStatus` but nothing writes it —
- *    `SettledSessionStatus` (the only thing persisted back) is idle | needs-input.
- *    A session that finished is a session doing nothing.
+ *  - **Legacy "done" folds to idle.** Nothing writes it. Settled is reserved for
+ *    an explicit, host-admitted declaration that all requested work is resolved.
  */
 export const displayStatusOf = (
   activity: SessionActivity | null | undefined,
@@ -1924,6 +1927,8 @@ export const displayStatusOf = (
     }
   }
   switch (status) {
+    case "settled":
+      return "settled"
     case "needs-input":
       return "needs-input"
     case "thinking":

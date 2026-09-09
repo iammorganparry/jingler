@@ -48,6 +48,7 @@ import {
 	startNativePlanReviewSession,
 } from "./native-review.ts";
 import { parsePlanMarkdown, type ParsedPlanMarkdown } from "./plan-parse.ts";
+import { validatePlanMarkdown } from "./plan-validation.ts";
 import {
 	getAssistantMessageText,
 } from "./assistant-message.ts";
@@ -892,6 +893,17 @@ export default function plannotator(pi: ExtensionAPI): void {
 							text: `Error: ${inputPath} is empty. Write your plan first, then call ${PLAN_SUBMIT_TOOL} again.`,
 						},
 					],
+					details: { approved: false },
+				};
+			}
+
+			const validationErrors = validatePlanMarkdown(planContent);
+			if (validationErrors.length > 0) {
+				return {
+					content: [{
+						type: "text",
+						text: `Error: ${inputPath} is not ready for review:\n${validationErrors.map((error) => `- ${error}`).join("\n")}`,
+					}],
 					details: { approved: false },
 				};
 			}

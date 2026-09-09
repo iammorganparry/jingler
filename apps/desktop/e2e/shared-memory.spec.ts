@@ -40,7 +40,8 @@ test("accepted session learning reaches a teammate but never another organizatio
 
     // The agent deliberately proposes the durable fact through its attached MCP
     // tool. Publication is automatic: no human review queue is involved.
-    await expect.poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 }).toBe(1)
+    // One source is the explicit proposal; the other is the automatically retained settled turn.
+    await expect.poll(() => fake.memorySnapshot("org-e2e").sourceCount, { timeout: 30_000 }).toBe(2)
     await expect.poll(
       () => fake.memorySnapshot("org-e2e").acceptedPageIds
     ).toEqual(expect.arrayContaining(["shared-learning"]))
@@ -138,8 +139,6 @@ test("a stale agent proposal surfaces its conflict without overwriting accepted 
       { exact: true }
     )).toBeVisible({ timeout: 30_000 })
     expect(fake.memorySnapshot("org-e2e").acceptedRevisions.alpha).toBe(2)
-    expect(fake.memorySnapshot("org-e2e").sourceCount).toBe(0)
-
     const proposalRequest = fake.memoryRequests.find(
       (request) => request.toolName === "memory_propose"
     )

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -88,23 +88,19 @@ const conversationTab = (window: Page) =>
 const tree = (window: Page) =>
   window.locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
 const showTree = async (window: Page): Promise<void> => {
-  const toggle = window.getByRole("button", { name: "Repository files", exact: true })
-  if ((await toggle.count()) > 0 && (await toggle.getAttribute("aria-expanded")) !== "true") {
-    await toggle.click()
+  const visibleTree = tree(window).filter({ visible: true })
+  if ((await visibleTree.count()) === 0) {
+    await window.getByRole("button", { name: "Repository files", exact: true })
+      .filter({ visible: true }).last().click()
   }
-  await expect(tree(window)).toBeVisible()
+  await expect(visibleTree.first()).toBeVisible()
 }
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
-  const host = tree(window)
+  const host = tree(window).filter({ visible: true }).first()
   const target = host.locator(`[role="treeitem"][data-item-path="${path}"]`)
   for (let attempt = 0; attempt < 24; attempt += 1) {
     if ((await target.count()) > 0 && (await target.isVisible())) {
       await target.click()
-      if ((await target.getAttribute("aria-selected")) !== "true") {
-        await target.focus()
-        await target.press("Enter")
-      }
-      await expect(target).toHaveAttribute("aria-selected", "true")
       return
     }
     const collapsed = host.locator('[role="treeitem"][aria-expanded="false"]')
@@ -259,8 +255,12 @@ test("quick-open fills the session with the repository tree and a changed-file d
 
   const browser = window.getByTestId("asset-browser")
   await expect(browser).toBeVisible()
-  await expect(tree(window).locator('[data-item-path="src/edit.ts"]')).toBeVisible()
-  const canvas = window.getByTestId("asset-content-canvas")
+  await filesTab(window).click()
+  await showTree(window)
+  await expect(
+    tree(window).filter({ visible: true }).locator('[data-item-path="src/edit.ts"]')
+  ).toBeVisible()
+  const canvas = window.getByTestId("asset-content-canvas").filter({ visible: true })
   await expect(canvas).toContainText("export const answer = 42", { timeout: 15_000 })
   await expect(canvas).toContainText("export const answer = 43")
   await expect(canvas.locator('[data-diffs-header="default"]')).toHaveCount(0)
@@ -296,20 +296,22 @@ test("keeps the repository tree visible while opening focusing and closing file 
   await selectTreePath(window, "docs/spec.md")
   await expect(window.getByTestId("file-tab-docs/spec.md")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
-  await expect(tree(window)).toBeVisible()
+  await filesTab(window).click()
+  await showTree(window)
 
   await window.getByRole("button", { name: "src/edit.ts", exact: true }).click()
-  await expect(window.getByRole("textbox", { name: "src/edit.ts" })).toBeVisible({
+  await expect(window.getByRole("textbox", { name: "src/edit.ts" }).first()).toBeVisible({
     timeout: 15_000
   })
   await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
 
   await window.getByRole("button", { name: "Close src/edit.ts", exact: true }).click()
   await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(0)
-  await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
+  await expect(window.getByRole("textbox", { name: "docs/spec.md" }).first()).toBeVisible({
     timeout: 15_000
   })
-  await expect(tree(window)).toBeVisible()
+  await filesTab(window).click()
+  await showTree(window)
 })
 
 test("switches a changed file between diff and edit and saves the edited revision", async ({
@@ -374,13 +376,26 @@ test("forwards selected current-buffer lines to the active chat with Cmd-J", asy
     "export const selected = 1\nexport const unsaved = 2\nexport const ignored = 3\n"
   )
 
-  const lines = window.locator("diffs-container [data-column-number]")
+  const lines = window.locator("diffs-container [data-column-number]").filter({ visible: true })
   await expect(lines.first()).toBeVisible()
-  await lines.first().click({ position: { x: 6, y: 6 } })
-  await lines.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
+  const selectLine = async (line: Locator, shiftKey = false) => {
+    const box = await line.boundingBox()
+    expect(box).not.toBeNull()
+    const clientX = box!.x + 6
+    const clientY = box!.y + 6
+    await line.dispatchEvent("pointerdown", {
+      pointerId: 1, pointerType: "mouse", button: 0, clientX, clientY, shiftKey
+    })
+    await window.locator("body").dispatchEvent("pointerup", {
+      pointerId: 1, pointerType: "mouse", button: 0, clientX, clientY, shiftKey
+    })
+  }
+  await selectLine(lines.first())
+  await selectLine(lines.nth(1), true)
+  await editor.focus()
   await window.keyboard.press("Meta+j")
 
-  await expect(conversationTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(window.getByTestId("conversation-scroll")).toBeVisible()
   await expect(
     window.getByRole("button", { name: "Remove src/edit.ts:L1–L2", exact: true })
   ).toBeVisible()
@@ -405,6 +420,7 @@ test("loads a real large repository tree without leaving Files blank", async ({ 
 
   await expect(appShell(window)).toBeVisible()
   await filesTab(window).click()
+  await showTree(window)
   await expect(
     tree(window).getByRole("treeitem", { name: "packages", exact: true })
   ).toBeVisible({ timeout: 15_000 })

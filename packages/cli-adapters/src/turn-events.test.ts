@@ -49,6 +49,11 @@ describe("routeOf", () => {
     ).toBe("stream-only")
   })
 
+  it("keeps session completion control events OUT of the transcript", () => {
+    expect(routeOf({ _tag: "SessionCompletionDeclared" })).toBe("stream-only")
+    expect(routeOf({ _tag: "SessionSettled" })).toBe("stream-only")
+  })
+
   it("keeps Plannotator's disposable projection OUT of the transcript", () => {
     expect(routeOf({
       _tag: "PlannotatorStateChanged",

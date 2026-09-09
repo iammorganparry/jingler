@@ -598,6 +598,45 @@ const PLANNOTATOR_E2E_PLAN = [
   "Run the focused auth checks."
 ].join("\n")
 
+const STRUCTURED_REVIEW_PLAN = [
+  "# Auth replacement",
+  "",
+  "## Context",
+  "Replace the auth flow with a deterministic test implementation.",
+  "",
+  "## Implement auth <!-- id: implement-auth -->",
+  "Implement the auth change.",
+  "### Approach",
+  "- Replace the token format",
+  "### Technical explanation",
+  "The implementation replaces the token format at the existing auth entry point.",
+  "### Tasks",
+  "- [ ] Implement the auth change",
+  "### Acceptance",
+  "- [ ] Auth implementation passes (test: src/auth.test.ts::implements auth)",
+  "### Files",
+  "- `src/auth.ts` — M",
+  "> complexity: low",
+  "",
+  "## Verify auth <!-- id: verify-auth -->",
+  "Verify the auth change.",
+  "### Approach",
+  "- Run focused auth checks",
+  "### Technical explanation",
+  "Verification checks the existing auth entry point without changing its callers.",
+  "### Tasks",
+  "- [ ] Verify the auth change",
+  "### Acceptance",
+  "- [ ] Auth verification passes (test: src/auth.test.ts::verifies auth)",
+  "### Files",
+  "- `src/auth.test.ts` — M",
+  "> complexity: low",
+  "> depends: implement-auth",
+  "",
+  "## Verification",
+  "Run the focused auth checks."
+].join("\n")
+
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
@@ -619,11 +658,11 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   )) {
     if (recentToolResultCount(context, E2E_PLAN_PROGRESS_TOOL) === 0) {
       return fauxAssistantMessage([
-        fauxText("Implemented the first plan step. [DONE:1]"),
+        fauxText("Implemented the first plan step. [DONE:1] [DONE:2]"),
         fauxToolCall(E2E_PLAN_PROGRESS_TOOL, {}, { id: "plannotator-progress" })
       ], { stopReason: "toolUse" })
     }
-    return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:2]")
+    return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:2] [DONE:3] [DONE:4]")
   }
   const submitCount = context.messages.filter(
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
@@ -634,16 +673,19 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
         PLAN_WRITE_TOOL,
         {
           path: "PLAN.md",
-          content: PLANNOTATOR_E2E_PLAN.replace(
-            "Replace the auth flow",
-            "Revise the auth flow while keeping the existing token format"
+          content: STRUCTURED_REVIEW_PLAN.replace(
+            "- Replace the token format",
+            "- Revise auth while keeping the existing token format"
+          ).replace(
+            "The implementation replaces the token format at the existing auth entry point.",
+            "The implementation preserves compatibility by keeping the existing token format."
           )
         },
         "plannotator-rewrite"
       )
     }
     return fauxAssistantMessage(
-      "Implemented and verified the approved plan. [DONE:1] [DONE:2]"
+      "Implemented and verified the approved plan. [DONE:1] [DONE:2] [DONE:3] [DONE:4]"
     )
   }
   if (
@@ -655,7 +697,7 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     if (toolResultText(lastMessage).includes("not found")) {
       return callTool(
         WRITE_TOOL,
-        { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+        { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
         "plannotator-write-fallback"
       )
     }
@@ -667,7 +709,7 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
   }
   return callTool(
     PLAN_WRITE_TOOL,
-    { path: "PLAN.md", content: PLANNOTATOR_E2E_PLAN },
+    { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
     "plannotator-write"
   )
 }
@@ -721,7 +763,7 @@ const RICH_SCRATCHPAD_PLAN = [
   "",
   "> complexity: medium",
   "",
-  "## Rollout",
+  "## Rollout <!-- id: stage-rollout -->",
   "Switch callers over once the store holds.",
   "",
   "- [ ] Flip the flag"
@@ -748,6 +790,12 @@ const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
 
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const prompt = latestOperatorText(context)
+  if (prompt.includes("[[complete-session]]")) {
+    const lastMessage = context.messages.at(-1)
+    return lastMessage?.role === "toolResult" && lastMessage.toolName === "jingler_complete_session"
+      ? fauxAssistantMessage("All requested work is complete.")
+      : callTool("jingler_complete_session", {}, "complete-session")
+  }
   if (prompt.includes("[[beui-production]]")) {
     return fauxAssistantMessage([
       "Production renderers are mounted.",

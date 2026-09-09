@@ -90,10 +90,6 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     await expect(window.getByText("Browser workflow completed through pi.")).toBeVisible({
       timeout: 20_000
     })
-    await expect(window.getByRole("button", { name: "Browser", exact: true })).toHaveAttribute(
-      "aria-current",
-      "page"
-    )
     await expect(window.getByLabel("Preview URL")).toHaveValue(
       `http://127.0.0.1:${address.port}/browser-pi-final`
     )

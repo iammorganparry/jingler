@@ -1,5 +1,5 @@
 import type { FileChange } from "@jingler/core"
-import { ArrowRight, ChevronRight } from "lucide-react"
+import { ArrowRight, ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { cn } from "../lib/cn.js"
@@ -105,7 +105,14 @@ function FileChangeRow({
 }
 
 /** Canonical post-execution create/modify/delete/rename evidence for a tool call. */
-export function FileChangeList({ changes }: { readonly changes: ReadonlyArray<FileChange> }) {
+export function FileChangeList({
+  changes,
+  initialLimit
+}: {
+  readonly changes: ReadonlyArray<FileChange>
+  readonly initialLimit?: number
+}) {
+  const [expanded, setExpanded] = useState(false)
   // A single change with a preview is already fully described by the tool
   // card's own header (path, status, diff stat) — repeating it as a row would
   // stack three title bars over one diff. Multi-file changes keep their rows:
@@ -123,15 +130,28 @@ export function FileChangeList({ changes }: { readonly changes: ReadonlyArray<Fi
     )
   }
   const eagerPreview = changes.length <= EAGER_PREVIEW_MAX
+  const limited = initialLimit !== undefined && changes.length > initialLimit
+  const visible = limited && !expanded ? changes.slice(0, initialLimit) : changes
   return (
     <div className="divide-y divide-line/60 border-t border-line/60 bg-editor">
-      {changes.map((change) => (
+      {visible.map((change) => (
         <FileChangeRow
           key={`${change.status}:${change.oldPath ?? ""}:${change.path}`}
           change={change}
           eagerPreview={eagerPreview}
         />
       ))}
+      {limited && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-left font-mono text-[11px] text-muted-foreground outline-none transition-colors hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {expanded ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+          {expanded ? "View less" : `View more (${changes.length - initialLimit} files)`}
+        </button>
+      )}
     </div>
   )
 }

@@ -942,6 +942,8 @@ export const conversationMachine = setup({
       event.type === "SHARED_PLAN_UPDATED" &&
       (context.sharedPlanChatId !== event.producingChatId ||
         JSON.stringify(context.sharedPlan) !== JSON.stringify(event.plan)),
+    isSessionSettled: ({ event }) =>
+      event.type === "STREAM_EVENT" && event.event._tag === "SessionSettled",
     isTerminal: ({ event }) =>
       event.type === "STREAM_EVENT" &&
       (event.event._tag === "Done" || event.event._tag === "Failed"),
@@ -1153,7 +1155,13 @@ export const conversationMachine = setup({
       const images = event.images ?? []
       const now = new Date().toISOString()
       const id = stamp()
+      if (context.persistedStatus === "settled") {
+        void rpc.sessionsSetStatus(context.session.id, "idle").then(publishSessionUpdate).catch(() => {})
+      }
       return {
+        ...(context.persistedStatus === "settled"
+          ? { session: { ...context.session, status: "idle" as const }, persistedStatus: "idle" as const }
+          : {}),
         pendingText: text,
         pendingAgentContext: agentContext,
         pendingImages: images,
@@ -1401,7 +1409,13 @@ export const conversationMachine = setup({
       if (next === undefined) return {}
       const now = new Date().toISOString()
       const id = stamp()
+      if (context.persistedStatus === "settled") {
+        void rpc.sessionsSetStatus(context.session.id, "idle").then(publishSessionUpdate).catch(() => {})
+      }
       return {
+        ...(context.persistedStatus === "settled"
+          ? { session: { ...context.session, status: "idle" as const }, persistedStatus: "idle" as const }
+          : {}),
         queued: rest,
         pendingText: next.text,
         pendingAgentContext: next.agentContext,
@@ -1432,6 +1446,11 @@ export const conversationMachine = setup({
           ]) }
         : {}
     ),
+    applySettled: assign(({ context }) => {
+      const session = { ...context.session, status: "settled" as const }
+      publishSessionUpdate(session)
+      return { session, persistedStatus: "settled" as const }
+    }),
     foldEvent: assign(({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return {}
       const e = event.event
@@ -1889,7 +1908,11 @@ export const conversationMachine = setup({
       // operator activity (or nothing) — so the settled status falls straight out
       // of it, and a busy status is unrepresentable rather than merely avoided.
       const activity = activityOf(context.messages, "idle")
-      const status: SettledSessionStatus = activity ? "needs-input" : "idle"
+      const status: SettledSessionStatus = activity
+        ? "needs-input"
+        : context.persistedStatus === "settled"
+          ? "settled"
+          : "idle"
       if (status === context.persistedStatus) return {}
       // The machine writes this on its own, far from App.tsx — announce the
       // returned record so `appMachine`'s session list (the sidebar's fallback)
@@ -2218,6 +2241,7 @@ export const conversationMachine = setup({
           }
         ],
         STREAM_EVENT: [
+          { guard: "isSessionSettled", actions: "applySettled" },
           {
             guard: "isDuplicateExternalAcceptance",
             target: "refreshingDiff",

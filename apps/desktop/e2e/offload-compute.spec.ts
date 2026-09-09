@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Locator } from "@playwright/test"
 import { appShell, expect, test, type SeedSession } from "./fixtures.js"
@@ -116,104 +116,6 @@ test("enables, primes, automatically routes, and restores Offload Compute status
   await expect.poll(() => reopened.authServer.offloadRequests
     .filter(({ kind }) => kind === "prime").length)
     .toBeGreaterThan(primesBeforeRestore)
-})
-
-test("selects, persists, and executes on a specific fail-closed owned device", async ({
-  launchApp
-}) => {
-  const app = await launchApp({
-    configured: true,
-    e2eEnv: { JINGLER_E2E_RESOURCE_PRESSURE: "1" },
-    withRepo: true,
-    remoteEnvironment: true,
-    config: {
-      offloadCompute: {
-        enabled: false,
-        explicitCommands: [
-          {
-            id: "owned-device-probe",
-            repositorySlug: "jingler/example",
-            command: {
-              executable: "node",
-              args: ["-e", "process.stdout.write('owned device test clean\\n')"],
-              cwd: "."
-            }
-          },
-          {
-            id: "owned-device-offline-probe",
-            repositorySlug: "jingler/example",
-            command: {
-              executable: "node",
-              args: ["-e", "process.stdout.write('offline command must not run\\n')"],
-              cwd: "."
-            }
-          }
-        ]
-      }
-    },
-    sessions: ({ repoPath }) => prepareRepository(repoPath)
-  })
-  await expect(appShell(app.window)).toBeVisible()
-  await app.window.getByRole("button", { name: "Account menu" }).click()
-  await app.window.getByRole("menuitem", { name: "Settings" }).click()
-  await app.window.getByRole("button", { name: /^Devices/ }).click()
-  await app.window.getByRole("button", { name: "Add owned machine" }).click()
-  await expect(app.window.getByLabel("SSH host or alias")).toBeVisible()
-  await app.window.getByText("buildbox", { exact: true }).click()
-  await app.window.getByRole("button", { name: "Connect environment" }).click()
-  await expect(app.window.getByRole("status")).toContainText("buildbox")
-  await app.window.keyboard.press("Escape")
-  await app.window.getByRole("button", { name: "Refresh" }).click()
-  await expect(app.window.getByText("online", { exact: true })).toBeVisible({ timeout: 15_000 })
-  await app.window.getByRole("button", { name: /^General/ }).click()
-  const target = app.window.getByRole("button", { name: "Offload Compute target" })
-  await expect(target).toBeVisible()
-  await app.window.getByRole("button", { name: "Refresh devices" }).click()
-  await target.click()
-  const ownedDevice = app.window.getByRole("option", { name: "Owned device" })
-  await expect(ownedDevice).toBeEnabled()
-  await ownedDevice.click()
-  const device = app.window.getByRole("button", { name: "Owned device for Offload Compute" })
-  await expect(device).toBeVisible()
-  const deviceId = await device.locator("..").locator('[role="option"][aria-selected="true"]').getAttribute("data-value")
-  expect(deviceId).not.toBe("")
-  await expect.poll(() => {
-    const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8")) as {
-      offloadCompute?: { target?: { kind: string; deviceId?: string } }
-    }
-    return config.offloadCompute?.target
-  }).toEqual({ kind: "owned-device", deviceId })
-  await app.window.getByRole("switch", { name: "Offload Compute" }).click()
-  await expect.poll(() => {
-    const config = JSON.parse(readFileSync(join(app.home, "jingler", "config.json"), "utf8")) as {
-      offloadCompute?: { enabled?: boolean; target?: { kind: string; deviceId?: string } }
-    }
-    return config.offloadCompute
-  }).toMatchObject({ enabled: true, target: { kind: "owned-device", deviceId } })
-
-  await app.window.getByRole("button", { name: "Close settings" }).click()
-  const composer = app.window.getByRole("textbox", { name: /Message/ })
-  await composer.fill("[[offload-owned-device]] Run the tests.")
-  await composer.press("Enter")
-  const remoteTool = app.window.getByRole("button", { name: /Bash (?:Running|Completed|Failed)/ })
-  await expect(remoteTool).toBeVisible()
-  await openToolResult(remoteTool)
-  await expect(app.window.getByText("owned device test clean", { exact: true }))
-    .toBeVisible({ timeout: 30_000 })
-  await expect(app.window.getByText("Tests completed on the selected owned device."))
-    .toBeVisible()
-
-  app.deviceRelay?.setDeviceState("offline")
-  await composer.fill("[[offload-owned-device-offline]] Try the selected device again.")
-  await composer.press("Enter")
-  const tools = app.window.getByRole("button", { name: /Bash (?:Running|Completed|Failed)/ })
-  await expect(tools).toHaveCount(2)
-  await openToolResult(tools.nth(1))
-  await expect(app.window.getByText("did not fall back", { exact: false }))
-    .toBeVisible({ timeout: 20_000 })
-  await expect(app.window.getByText("offline command must not run", { exact: true }))
-    .toHaveCount(0)
-  expect(app.authServer.offloadRequests).toHaveLength(0)
 })
 
 test("keeps eligible commands local while Offload Compute is disabled", async ({

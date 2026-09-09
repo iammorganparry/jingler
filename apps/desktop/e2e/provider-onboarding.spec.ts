@@ -7,7 +7,6 @@ const SUBSCRIPTION_BILLING = /billing: subscription/;
 const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
 const PROVIDERS_NAV = /Providers/u;
 const STALE_MODEL_TITLE = / · stale$/u;
-const CERTIFIED_MODEL_TITLE = / · certified$/u;
 const chooseFixtureRepo = async (launched: LaunchedApp): Promise<void> => {
   await launched.app.evaluate(({ dialog }, selected) => {
     dialog.showOpenDialog = async () => ({
@@ -265,7 +264,7 @@ test("adds a second provider connection from settings", async ({ launchApp }) =>
   ).toBeVisible();
 });
 
-test("reverifies the stale canonical default model from provider settings", async ({
+test("shows a stale canonical default model as unavailable in provider settings", async ({
   launchApp,
 }) => {
   const launched = await launchApp({
@@ -278,12 +277,6 @@ test("reverifies the stale canonical default model from provider settings", asyn
     },
   });
 
-  await launched.window.getByRole("button", { name: "Continue" }).click();
-  await expect(
-    launched.window.getByRole("heading", { name: "Import agent resources" }),
-  ).toBeVisible();
-  await launched.window.getByRole("button", { name: "Skip for now" }).click();
-
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
   await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
@@ -293,11 +286,7 @@ test("reverifies the stale canonical default model from provider settings", asyn
   await expect(modelChip).toBeVisible();
   await expect(modelChip).toHaveAttribute("title", STALE_MODEL_TITLE);
 
-  await modelChip.click();
-
-  await expect(modelChip).toHaveAttribute("title", CERTIFIED_MODEL_TITLE, {
-    timeout: 30_000,
-  });
+  await expect(modelChip).toBeDisabled();
   await expect(modelChip).toHaveAttribute("aria-pressed", "true");
 });
 

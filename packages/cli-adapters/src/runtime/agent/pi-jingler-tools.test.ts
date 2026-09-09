@@ -264,6 +264,23 @@ describe("Jingler peer-agent tools", () => {
   })
 })
 
+describe("Jingler session completion tool", () => {
+  it("publishes completion only from owning top-level roles", async () => {
+    const publishEvent = vi.fn(() => Effect.void)
+    const registry = createJinglerControlTools(runtimeContext({ publishEvent }))
+    const result = await Effect.runPromise(registry.execute({
+      id: "jingler_complete_session",
+      arguments: {},
+      role: "conversation",
+      mode: "auto"
+    }))
+    expect(result.status).toBe("success")
+    expect(publishEvent).toHaveBeenCalledWith({ _tag: "SessionCompletionDeclared" })
+    expect(registry.capabilitiesFor("background", "auto").map(({ id }) => id))
+      .not.toContain("jingler_complete_session")
+  })
+})
+
 describe("Jingler explanation tool containment", () => {
   it("publishes a typed explanation from the main conversation", async () => {
     const publishExplanation = vi.fn(() => Effect.void)

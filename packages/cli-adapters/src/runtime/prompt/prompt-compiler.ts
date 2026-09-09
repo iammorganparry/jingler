@@ -97,6 +97,11 @@ const toolProtocol = (tools: ReadonlyArray<PromptToolCapability>): ReadonlyArray
           "Infer when the operator wants a technical topic explained, compared, traced, or visualized — including phrases such as ‘show me’ — and publish a focused visual artifact with jingler_publish_explanation. Choose the smallest useful mix of prose, pseudocode or trees in code blocks, tables, and Mermaid. Treat /explain as an explicit hard trigger. Keep short factual answers and incidental uses of the word ‘explain’ in normal chat; do not publish an artifact when a concise reply is clearer."
         ]
       : []),
+    ...(ids.has("jingler_complete_session")
+      ? [
+          "Call jingler_complete_session only in the final successful turn when every requested task, test, question, child run, and background task is resolved. Ending a response is not completion; do not call it for partial progress, failure, interruption, or work waiting on the operator."
+        ]
+      : []),
     ...(ids.has("subagent")
       ? [
           "For delegated agent work, use the native subagent tool so runs remain contained and visible in Fleet. Never launch coding CLIs through command_execute as a substitute. Self-implementation stays in Main; never use a child named main as its proxy. Select a catalog agent and name every child. Run one child directly; reserve workflowScript for two or more children. Runs are foreground by default; use async plus subagent_wait for long multi-child work. Resume only inside runs.run or runs.all."

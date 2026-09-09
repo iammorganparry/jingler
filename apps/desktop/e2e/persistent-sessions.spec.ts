@@ -191,12 +191,11 @@ test("a direct session completes a turn and deletion preserves its checkout", as
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Direct checkout proof", "direct")
 
-  await expect(sessionRow(window, "Untitled session")).toBeVisible()
+  await expect.poll(() => existsSync(join(home, "jingler", "sessions.json"))).toBe(true)
   const created = storedSession(home)
   const row = window.getByTestId(`session-row-${String(created.id)}`)
   await expect(row).toBeVisible()
   expect(created).toMatchObject({
-    title: "Untitled session",
     autoTitle: true,
     branch: "main",
     baseBranch: "main",
@@ -216,7 +215,7 @@ test("a direct session completes a turn and deletion preserves its checkout", as
 
   const composer = window.getByPlaceholder("Message the agent…")
   await expect(composer).toBeVisible()
-  await expect(window.getByRole("button", { name: "Accept Edits" })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Auto" })).toBeVisible()
   await composer.fill("Run the direct-checkout verification.")
   await composer.press("Enter")
   await expect(

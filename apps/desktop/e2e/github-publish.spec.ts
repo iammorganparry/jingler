@@ -55,12 +55,12 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Ship deterministic publish")
-  await expect(sessionRow(window, "Untitled session")).toBeVisible()
+  await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
   // A fresh task is detached until the first understanding/retitle pass. The
   // real RPC must persist an actionable failure without staging or touching
   // GitHub, even if the user asks to publish immediately.
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect(window.getByText("Publishing stopped")).toBeVisible()
   await expect(window.getByText(/Finish creating the semantic task branch/)).toBeVisible()
@@ -93,7 +93,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   // the awkward partial-success boundary: a restart must discover PR #900 and
   // continue without manufacturing another commit or PR.
   githubServer.failNext("update-pr")
-  await window.getByRole("button", { name: "Pull Request" }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect(window.getByText(`Branch: ${session.branch}`)).toBeVisible()
   await window.getByRole("button", { name: /publishing again/i }).dblclick()
   await expect(window.getByText("Publishing stopped")).toBeVisible({ timeout: 25_000 })
@@ -136,7 +136,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
 
   await expect(appShell(restarted.window)).toBeVisible()
   await sessionRow(restarted.window, "Implement deterministic publishing").click()
-  await restarted.window.getByRole("button", { name: "Pull Request" }).click()
+  await restarted.window.getByTestId("view-tab-pr").click()
   await expect(restarted.window.getByText("Publishing stopped")).toBeVisible()
   await restarted.window.getByRole("button", { name: /Retry from updating-pr/ }).click()
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step, { timeout: 25_000 }).toBe("complete")
@@ -174,7 +174,7 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Publish automatically")
-  await expect(sessionRow(window, "Untitled session")).toBeVisible()
+  await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
   const detached = sessionsAt(home)[0]!
   prepareHermeticPush(detached.worktreePath, repoPath)
@@ -237,7 +237,7 @@ test("publishes a migration-era established jingler branch without renaming it",
 
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Publish historical session").click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect.poll(
     () => sessionsAt(home)[0]?.publish?.step,

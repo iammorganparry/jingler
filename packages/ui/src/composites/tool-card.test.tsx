@@ -154,6 +154,43 @@ describe("tool card — canonical file changes", () => {
     })
   })
 
+  it("limits final reconciliation to ten files and expands without truncating other tool cards", () => {
+    const changes = Array.from({ length: 12 }, (_, index) => ({
+      status: "M" as const,
+      path: `src/file-${index + 1}.ts`,
+      oldPath: null,
+      added: 1,
+      removed: 0,
+      binary: false,
+      noNewlineAtEnd: false,
+      beforeBytes: 1,
+      afterBytes: 2,
+      preview: null,
+      patchArtifactId: null
+    }))
+    const fileChanges = {
+      id: "changes-many",
+      callId: "reconcile:changes-many",
+      changes,
+      totals: { added: 12, removed: 0 },
+      authoritative: true as const,
+      reconciledAt: "2026-08-10T12:00:00.000Z"
+    }
+    const { rerender } = render(
+      <MessageTurn message={tool({ id: "reconcile:changes-many", name: "Workspace changes", fileChanges })} />
+    )
+
+    expect(document.querySelectorAll("[data-file-path]")).toHaveLength(10)
+    fireEvent.click(screen.getByRole("button", { name: "View more (2 files)" }))
+    expect(document.querySelectorAll("[data-file-path]")).toHaveLength(12)
+    fireEvent.click(screen.getByRole("button", { name: "View less" }))
+    expect(document.querySelectorAll("[data-file-path]")).toHaveLength(10)
+
+    rerender(<MessageTurn message={tool({ id: "ordinary", fileChanges })} />)
+    expect(document.querySelectorAll("[data-file-path]")).toHaveLength(12)
+    expect(screen.queryByRole("button", { name: /View more/ })).toBeNull()
+  })
+
   it("labels binary changes without pretending they have a text diff", () => {
     render(
       <MessageTurn

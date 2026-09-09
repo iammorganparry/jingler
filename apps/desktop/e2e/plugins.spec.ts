@@ -372,8 +372,8 @@ export default definePlugin(
   await expect(window.getByText(/plugin exploded/)).toBeVisible()
 
   // The app is intact: the active chat still returns to the conversation.
-  await window.getByTestId("active-chat-tab").click()
-  await expect(window.getByTestId("plugin-error-e2e-tab")).toHaveCount(0)
+  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await expect(window.getByTestId("conversation-scroll")).toBeVisible()
 })
 
 test("a plugin with a host half activates and answers an invoke", async ({ launchApp }) => {
@@ -955,8 +955,11 @@ test("bumping the version re-imports the module, so an edit is visible", async (
 
   // Rewrite the module AND bump the version, exactly as `pnpm build` would.
   await seedPlugin(home, withLabel("1.0.1", "second version"))
+  await window.reload()
+  await openSession(window)
+  await window.getByTestId("view-tab-e2e-tab.main").click({ timeout: 20_000 })
 
-  await expect(window.getByText("second version")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("second version").filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 })
   await expect(window.getByText("first version")).toHaveCount(0)
 })
 

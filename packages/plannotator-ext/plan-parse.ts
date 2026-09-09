@@ -7,8 +7,9 @@
  * - optional YAML frontmatter: `title:` / `revision:`
  * - content before the first `## ` heading → overview section blocks (TL;DR
  *   first, prose/lists/code/mermaid; a leading `# ` heading names the plan)
- * - each `## ` heading → a stage (id = slug, overridable with
- *   `<!-- id: my-stage -->` at the end of the heading line)
+ * - when any `##` heading has `<!-- id: ... -->`, only tagged headings are
+ *   stages and untagged `##` headings are document sections
+ * - legacy plans without tagged headings keep treating every `##` as a stage
  * - the first paragraph under a stage → its intent; later paragraphs → notes
  * - `### Approach` bullets (or the stage's first plain bullet list) → approach
  * - checkboxes → tasks; indentation nests one level of subtasks;
@@ -351,15 +352,35 @@ class StageBuilder {
 	}
 }
 
+const isDocumentTitle = (
+	match: RegExpExecArray | null,
+	stage: StageBuilder | null,
+	title: string | null,
+): match is RegExpExecArray => match !== null && stage === null && title === null;
+
 export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
 	const frontmatter = parseFrontmatter(allLines);
 	const lines = allLines.slice(frontmatter.bodyStart);
 	const checkboxByLine = new Map(scanChecklist(lines.join("\n")).map((item) => [item.line, item]));
+	const explicitStages = lines.some((line) => {
+		const heading = STAGE_HEADING.exec(line);
+		return heading !== null && STAGE_ID_COMMENT.test(heading[1]);
+	});
 
 	let title = frontmatter.title;
 	const checklist: ChecklistItem[] = [];
-	const overview = new SectionBuilder();
+	const sections: PlanSection[] = [];
+	let section = new SectionBuilder();
+	let sectionTitle: string | null = null;
+	const finishSection = () => {
+		section.flush();
+		if (section.blocks.length > 0 || sectionTitle !== null) {
+			sections.push({ title: sectionTitle, blocks: section.blocks });
+		}
+		section = new SectionBuilder();
+		sectionTitle = null;
+	};
 	const stages: ParsedPlanStage[] = [];
 	let stage: StageBuilder | null = null;
 	let fence: { language: string; lines: string[] } | null = null;
@@ -374,7 +395,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 					// Non-mermaid stage code fences are dropped from the structure
 					// (they stay in the markdown, which remains the source of truth).
 				} else {
-					overview.code(fence.language, code);
+					section.code(fence.language, code);
 				}
 				fence = null;
 			} else {
@@ -389,8 +410,18 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 
 		const stageHeading = STAGE_HEADING.exec(raw);
 		if (stageHeading !== null) {
-			if (stage !== null) stages.push(stage.finish());
-			stage = new StageBuilder(stageHeading[1]);
+			const tagged = STAGE_ID_COMMENT.test(stageHeading[1]);
+			if (!explicitStages || tagged) {
+				if (stage !== null) stages.push(stage.finish());
+				else finishSection();
+				stage = new StageBuilder(stageHeading[1]);
+			} else {
+				if (stage !== null) {
+					stages.push(stage.finish());
+					stage = null;
+				} else finishSection();
+				sectionTitle = stageHeading[1].trim();
+			}
 			continue;
 		}
 
@@ -412,21 +443,21 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 		}
 
 		const titleHeading = /^#\s+(.+?)\s*$/.exec(raw);
-		if (titleHeading !== null && stage === null && title === null) {
+		if (isDocumentTitle(titleHeading, stage, title)) {
 			title = titleHeading[1];
 			continue;
 		}
 
 		if (stage !== null) stage.line(raw);
-		else overview.line(raw);
+		else section.line(raw);
 	}
 	if (stage !== null) stages.push(stage.finish());
-	overview.flush();
+	else finishSection();
 
 	return {
 		title,
 		revision: frontmatter.revision,
-		sections: overview.blocks.length > 0 ? [{ title: null, blocks: overview.blocks }] : [],
+		sections,
 		stages,
 		checklist,
 	};

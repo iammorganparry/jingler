@@ -276,7 +276,7 @@ test("closing a pane leaves the other one running and the app on screen", async 
   // the focused pane replaced the whole app with the first-launch screen — taking
   // the other live pane with it.
   await settle(window)
-  await window.getByTestId("split-pane-1").getByTestId("close-pane").click()
+  await window.getByTestId("title-bar").getByTestId("close-pane").click()
 
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha"])
   // The closed session is back to being its own row — no empty slot is left.
@@ -732,12 +732,8 @@ test("each pane of a split names its session in the top bar", async ({ launchApp
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])
   await settle(window)
 
-  await expect(window.getByTestId("split-pane-0").getByTestId("pane-chip-0")).toContainText(
-    "Alpha session"
-  )
-  await expect(window.getByTestId("split-pane-1").getByTestId("pane-chip-1")).toContainText(
-    "Beta session"
-  )
+  await expect(window.getByRole("button", { name: "Alpha session", exact: true })).toBeVisible()
+  await expect(window.getByRole("button", { name: "Beta session", exact: true })).toBeVisible()
 })
 
 /**
@@ -751,6 +747,7 @@ test("each pane of a split names its session in the top bar", async ({ launchApp
 test("Shift+Tab cycles the mode of only the focused pane", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
   await expect(sessionRow(window, "Alpha session")).toBeVisible()
+  await window.setViewportSize({ width: 1800, height: 900 })
 
   await dragTo(window, "session-row-s_beta", "split-pane-0", "after")
   await expect.poll(() => paneSessions(window)).toEqual(["s_alpha", "s_beta"])

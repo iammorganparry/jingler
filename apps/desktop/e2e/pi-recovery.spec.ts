@@ -46,7 +46,9 @@ const seededSession = (repoPath: string, recovery: boolean): SeedSession => ({
 test("opens provider recovery for a migrated session", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
+    config: { providerSetupCompleted: true },
     withRepo: true,
+    piFixture: { scenarioId: "runtime-recovery", authRoute: "api-key", seedConnection: false },
     sessions: ({ repoPath }) => [seededSession(repoPath, false)]
   })
 

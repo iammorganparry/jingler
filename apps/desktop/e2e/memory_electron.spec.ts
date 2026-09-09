@@ -12,7 +12,8 @@ test("eligible team members open bounded Memory views from the persistent sideba
   await expect(window.getByTestId("memory-sidebar-item")).toBeVisible()
   await window.getByTestId("memory-sidebar-item").click()
   await expect(window.getByTestId("memory-workspace")).toBeVisible()
-  await window.getByLabel("Memory organization").selectOption("org-e2e")
+  await window.getByLabel("Memory organization").click()
+  await window.getByRole("option", { name: "Jingler Team" }).click()
   await expect(window.getByRole("heading", { name: "Memory overview" })).toBeVisible()
   await expect(window.getByText("10000", { exact: true })).toBeVisible()
 
@@ -23,10 +24,12 @@ test("eligible team members open bounded Memory views from the persistent sideba
   // fake honours because the real analytics never windows current state.
   const searches = window.locator('section[aria-labelledby="memory-retrieval-title"] dd').first()
   await expect(searches).toHaveText("32") // default 30d window
-  await window.getByLabel("Memory time range").selectOption("7d")
+  await window.getByLabel("Memory time range").click()
+  await window.getByRole("option", { name: "7 days" }).click()
   await expect(searches).toHaveText("9")
   await expect(window.getByText("10000", { exact: true })).toBeVisible()
-  await window.getByLabel("Memory time range").selectOption("all")
+  await window.getByLabel("Memory time range").click()
+  await window.getByRole("option", { name: "All time" }).click()
   await expect(searches).toHaveText("90")
 
   await window.getByRole("button", { name: HEALTH_FINDINGS }).click()

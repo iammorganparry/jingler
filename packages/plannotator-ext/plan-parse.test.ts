@@ -37,7 +37,7 @@ Stand up the new auth service behind the existing route.
 sequenceDiagram
 \`\`\`
 
-## Database
+## Database <!-- id: stage-db -->
 Move sessions into Postgres.
 
 - [ ] Write the migration
@@ -66,7 +66,7 @@ describe("parsePlanMarkdown", () => {
       "diagram"
     ])
 
-    expect(parsed.stages.map(({ id }) => id)).toEqual(["stage-auth", "database"])
+    expect(parsed.stages.map(({ id }) => id)).toEqual(["stage-auth", "stage-db"])
     const auth = parsed.stages[0]
     expect(auth.title).toBe("Auth service")
     expect(auth.intent).toBe("Stand up the new auth service behind the existing route.")
@@ -93,6 +93,19 @@ describe("parsePlanMarkdown", () => {
     expect(auth.complexity).toBe("medium")
     expect(auth.dependencies).toEqual(["stage-db"])
     expect(auth.diagrams).toEqual(["sequenceDiagram"])
+  })
+
+  it("separates explicit stages from document sections without renumbering checkboxes", () => {
+    const parsed = parsePlanMarkdown(`## Context\nWhy this matters.\n\n## Ship <!-- id: ship -->\nDeliver it.\n\n### Approach\n- Reuse it\n\n- [ ] Implement\n\n### Technical explanation\nUse the existing path.\n\n### Acceptance\n- [ ] Works (test: src/a.test.ts::works)\n\n### Files\n- \`src/a.ts\` — M\n\n## Verification\n- Run tests\n`)
+
+    expect(parsed.stages.map(({ id }) => id)).toEqual(["ship"])
+    expect(parsed.sections.map(({ title }) => title)).toEqual(["Context", "Verification"])
+    expect(parsed.sections[0]?.blocks).toContainEqual({ kind: "prose", text: "Why this matters." })
+    expect(parsed.checklist.map(({ step, text }) => [step, text])).toEqual([
+      [1, "Implement"],
+      [2, "Works (test: src/a.test.ts::works)"]
+    ])
+    expect(parsed.stages[0]?.notes).toEqual(["Use the existing path."])
   })
 
   it("parses a plain flat checklist exactly as before", () => {

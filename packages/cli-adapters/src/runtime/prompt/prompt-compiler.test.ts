@@ -87,6 +87,20 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("Resume only inside runs.run or runs.all")
   })
 
+  it("tells agents when explicit session completion is allowed", () => {
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "auto"),
+      tools: [{
+        id: "jingler_complete_session",
+        version: "1",
+        description: "Declare all requested work resolved."
+      }],
+      tokenBudget: 2_000
+    })
+    expect(result.text).toContain("Ending a response is not completion")
+    expect(result.text).toContain("every requested task, test, question, child run, and background task")
+  })
+
   it("requires a Plannotator checklist item to be tested and committed before completion", () => {
     const result = new PromptCompiler().compile({
       layers: runtimeInvariantLayers("plan-execution", "accept-edits"),

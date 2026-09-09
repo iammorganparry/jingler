@@ -27,8 +27,8 @@ test("signed out shows the sign-in wall", async ({ launchApp }) => {
   await expect(window.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
   await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
   await expect(window.getByRole("button", { name: /continue with google/i })).toBeVisible()
-  // The app shell must NOT be reachable behind the wall.
-  await expect(appShell(window)).toHaveCount(0)
+  // Window chrome remains visible, but authenticated session controls must not.
+  await expect(window.getByTestId("session-sidebar")).toHaveCount(0)
 })
 
 test("requesting a magic link shows the sent confirmation", async ({ launchApp }) => {

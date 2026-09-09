@@ -186,7 +186,7 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
   await window.getByRole("button", { name: "Close settings" }).click()
 
   await sessionRow(window, "GitHub integration").click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect(window.getByText(/installation for @acme is suspended/i)).toBeVisible()
   await window.getByRole("button", { name: "Repair GitHub access" }).click()
   await expect(window.getByText("Connected as @octocat")).toBeVisible()
@@ -209,7 +209,7 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
     githubServer.requests.filter((request) => request.path.startsWith("/repos/acme/widget"))
   ).toHaveLength(inaccessibleRepositoryRequests)
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect(window.getByText(/acme\/widget is outside the repositories/i)).toBeVisible()
   await expect(window.getByRole("button", { name: "Manage repositories" })).toBeVisible()
 
@@ -241,7 +241,7 @@ test("selected repository changes update live feature access without a restart",
 
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "GitHub integration").click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect.poll(() => githubServer.requests.filter(
     (request) => request.path === "/repos/acme/widget/pulls"
   ).length).toBeGreaterThan(0)
@@ -254,7 +254,7 @@ test("selected repository changes update live feature access without a restart",
   githubServer.setInstallation({ repositories: [] })
   await window.getByRole("button", { name: "Refresh" }).click()
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect(window.getByText(/acme\/widget is not included/i)).toBeVisible()
   await expect(window.getByRole("button", { name: "Manage repositories" })).toBeVisible()
 
@@ -264,6 +264,6 @@ test("selected repository changes update live feature access without a restart",
   })
   await window.getByRole("button", { name: "Refresh" }).click()
   await window.getByRole("button", { name: "Close settings" }).click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("view-tab-pr").click()
   await expect(window.getByText(/acme\/widget is not included/i)).toHaveCount(0)
 })

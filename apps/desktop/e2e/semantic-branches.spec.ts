@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
+import { appShell, createWorkspace, expect, test } from "./fixtures.js"
 
 const sessions = (home: string): Array<{
   title: string
@@ -40,7 +40,7 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
 
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Fix token refresh")
-  await expect(sessionRow(window, "Untitled session")).toBeVisible()
+  await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
   const composerBranch = window.getByTestId("composer-branch")
   await expect(composerBranch).toHaveText("Naming branch…")
 
