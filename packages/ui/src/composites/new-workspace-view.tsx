@@ -590,6 +590,16 @@ function getContent() {
     else send({ type: "CLOSE" });
   }, [props.open, props.requestedPr, props.requestedProjectId, send]);
 
+  const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
+  const previousProjectRequest = React.useRef(projectRequest);
+  React.useEffect(() => {
+    const changed = previousProjectRequest.current !== projectRequest;
+    previousProjectRequest.current = projectRequest;
+    if (props.open && projectRequest && changed) {
+      send({ type: "SET_PROJECT", projectId: projectRequest });
+    }
+  }, [projectRequest, props.open, send]);
+
   React.useEffect(() => {
     if (!props.open || state.context.projectId !== "") return;
     const project = props.projects.find(

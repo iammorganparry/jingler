@@ -325,6 +325,7 @@ function PreviewAddProjectDialog(props: {
         listGitHubRepositories={async () => GITHUB_REPOSITORIES}
         register={async ({ path, name }) => previewProject(path, name)}
         createDirectory={async ({ path, name }) => previewProject(path, name)}
+        clone={async ({ destination, name }) => previewProject(destination, name)}
         cloneFromGitHub={async ({ destination, name }) => previewProject(destination, name)}
         onAdded={props.onAdded}
       />

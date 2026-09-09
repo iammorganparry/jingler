@@ -153,6 +153,7 @@ export interface JinglerAppProps {
   onListGitHubRepositories?: () => Promise<ReadonlyArray<GitHubCloneRepository>>
   onRegisterProject?: (input: { path: string; name?: string }) => Promise<Project>
   onCreateProjectDirectory?: (input: { path: string; name?: string }) => Promise<Project>
+  onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
   onCloneProjectFromGitHub?: (input: { installationId: string; repository: string; destination: string; name?: string }) => Promise<Project>
   onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
   /** Absolute paths of starred repos — surfaced first in the picker + sidebar. */
@@ -333,6 +334,8 @@ export interface JinglerAppProps {
       readonly onClosed?: () => void
     }
   ) => ReactNode
+  /** Render the focused session's file tree in the Explorer column. */
+  renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
   /** Select a repository path in a session's persistent Files state. */
   onOpenFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
@@ -393,11 +396,6 @@ export interface JinglerAppProps {
   ) => Promise<Session>
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
-  /** Persist or unpersist a session and return its updated record upstream. */
-  onSetSessionPersistent?: (
-    id: string,
-    persistent: boolean
-  ) => Promise<void> | void
   /** Archive an active session from the sidebar quick-actions (undoable). */
   onArchiveSession?: (id: string) => void
   /** Restore an archived session from the sidebar quick-actions. */
@@ -479,6 +477,11 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
           />
         }
         sessions={sessions}
+        projects={projects}
+        projectOwners={projectOwners}
+        onAddProject={getAddProjectAction()}
+        onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}
+        renderExplorer={renderExplorer}
         environments={environments}
         activeSessionId={selected}
         onSelectSession={selectSession}
@@ -517,7 +520,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}
         isBrowserActive={isBrowserActive}
-        onSetSessionPersistent={onSetSessionPersistent}
         onArchiveSession={onArchiveSession}
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
@@ -526,6 +528,13 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         renderFiles={renderFiles}
         renderBrowser={renderBrowser}
         onOpenFile={onOpenFile}
+        onOpenExplorerFile={(sessionId, path) => {
+          onOpenFile?.(sessionId, path)
+          setTabRequest((previous) => ({
+            tabId: BUILTIN_TAB.files,
+            nonce: (previous?.nonce ?? 0) + 1
+          }))
+        }}
         onRequestCloseFile={onRequestCloseFile}
         renderChatTabs={renderChatTabs}
         renderSubagentTabs={renderSubagentTabs}
@@ -598,7 +607,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
          }
 
 function getAddProjectAction() {
-    return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub
+    return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProject && onCloneProjectFromGitHub
                   ? () => setAddProjectOpen(true)
                   : undefined)
   }
@@ -613,7 +622,7 @@ function getActiveTabContext(active: Session) {
     }
 
          function renderAddProjectDialog() {
-           return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProjectFromGitHub && (
+           return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProject && onCloneProjectFromGitHub && (
         <AddProjectDialog
           open={addProjectOpen}
           onClose={() => setAddProjectOpen(false)}
@@ -623,6 +632,7 @@ function getActiveTabContext(active: Session) {
           listGitHubRepositories={onListGitHubRepositories}
           register={onRegisterProject}
           createDirectory={onCreateProjectDirectory}
+          clone={onCloneProject}
           cloneFromGitHub={onCloneProjectFromGitHub}
           onAdded={() => {
             setAddProjectOpen(false)
@@ -692,7 +702,7 @@ function getActiveTabContext(active: Session) {
               projects={projects}
               environments={environments}
               environmentStartup={pendingEnvironmentSession}
-              defaultProjectId={projects.find((project) => project.path === defaultRepoPath)?.id}
+              defaultProjectId={newSessionProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
               requestedProjectId={requestedNewSession?.projectId}
               requestedPr={requestedNewSession?.pr}
               providerCatalog={providerConnections?.catalog}
@@ -718,7 +728,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, onSignOut, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, onLoadUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, renderReview, renderCode, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, onOpenFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onSetSessionPersistent, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, memory } = defaultProps(props, {
+  const { sessions, user, onSignOut, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, onLoadUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, renderReview, renderCode, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, memory } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -828,6 +838,7 @@ function getActiveTabContext(active: Session) {
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
+  const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
   const [requestedNewSession, setRequestedNewSession] = useState<
     JinglerAppProps["newSessionRequest"]
   >(null)
@@ -888,6 +899,15 @@ function getActiveTabContext(active: Session) {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
+    setNewSessionProjectId(null)
+    setNewOpen(true)
+  }, [memory])
+  const openNewSessionForProject = useCallback((projectId: string) => {
+    memory?.onClose()
+    setPullRequestsOpen(false)
+    setSettingsOpen(false)
+    setRequestedNewSession(null)
+    setNewSessionProjectId(projectId)
     setNewOpen(true)
   }, [memory])
 
@@ -971,6 +991,14 @@ function getActiveTabContext(active: Session) {
     const paths = new Set(starredRepos)
     return new Set(repos.filter((r) => paths.has(r.path)).map((r) => r.name))
   }, [repos, starredRepos])
+  const projectOwners = useMemo(() => {
+    const owners: Record<string, string> = {}
+    for (const project of projects) {
+      const owner = repos.find((repo) => repo.path === project.path)?.githubSlug?.split("/")[0]
+      if (owner) owners[project.id] = owner
+    }
+    return owners
+  }, [projects, repos])
   const repoOwners = useMemo(() => {
     const owners: Record<string, string> = {}
     for (const session of sessions) {

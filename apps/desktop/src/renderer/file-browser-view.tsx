@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import type { AssetPayload, DebugViewSnapshot, Session } from "@jingler/core"
 import {
   AssetBrowser,
+  AssetRepositoryTree,
   AssetCanvas,
   AssetError,
   AssetTooLarge,
@@ -44,6 +45,38 @@ export interface FileBrowserViewProps {
   /** Path-owned mode used by nested file splits. */
   readonly path?: string
   readonly onClosed?: () => void
+}
+
+export interface FileBrowserExplorerProps {
+  readonly session: Session
+  readonly onOpenPath: (path: string) => void
+}
+
+export function FileBrowserExplorer({ session, onOpenPath }: FileBrowserExplorerProps) {
+  const browser = useFileBrowser(session.id, session.worktreePath)
+  useEffect(() => browser.activate(), [browser.activate])
+
+  return (
+    <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
+      <div className="flex-none border-b border-hairline px-3 py-2">
+        <div className="truncate font-mono text-[10.5px] text-text">{session.branch}</div>
+        <div className="truncate text-[10px] text-dim" title={session.worktreePath}>{session.worktreePath}</div>
+      </div>
+      <div className="relative min-h-0 flex-1">
+        <AssetRepositoryTree
+          entries={browser.entries}
+          selectedPath={browser.selectedPath}
+          treeLoading={browser.treeLoading}
+          treeError={browser.treeError}
+          onRetryTree={browser.refreshTree}
+          onSelectPath={(path) => {
+            browser.open(path)
+            onOpenPath(path)
+          }}
+        />
+      </div>
+    </section>
+  )
 }
 
 export interface FileBrowserQuickOpenProps {
@@ -205,6 +238,7 @@ export function FileBrowserView({
         selectedPath={browser.selectedPath}
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
+        hideTree
         toolbar={
           <>
             {/* The open file, filename-first: the directory clips, the name

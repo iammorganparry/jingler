@@ -112,6 +112,24 @@ describe("newWorkspaceMachine", () => {
     configured.stop()
   })
 
+  it("switches projects while a remote source is loading", async () => {
+    const actor = actorFor(undefined, {
+      loadPullRequests: () => new Promise(() => {})
+    }).start()
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SET_SOURCE", source: "pr" })
+    await waitFor(actor, (snapshot) => snapshot.matches("sourceLoading"))
+    actor.send({ type: "SET_PROJECT", projectId: "p-remote" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    expect(actor.getSnapshot().context).toMatchObject({
+      projectId: "p-remote",
+      source: "blank",
+      resolvedProject: projects[1]
+    })
+    actor.stop()
+  })
+
   it("resets incompatible checkout selections when the project changes", async () => {
     const actor = actorFor().start()
     actor.send({ type: "OPEN", projectId: "p-local" })

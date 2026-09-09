@@ -74,14 +74,13 @@ test("groups chats by attention and opens session views in a responsive two-thir
 
   await window.getByTestId("session-row-s_needs_input").click()
   await window.getByRole("button", { name: "Files", exact: true }).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
 
   const surfaces = window.getByTestId("surface-view")
   await expect(surfaces).toHaveAttribute("data-panes", "2")
   const tree = window.getByRole("region", { name: "Repository files" })
-  if (!(await tree.isVisible())) {
-    await window.getByRole("button", { name: "Repository files", exact: true }).click()
-  }
   await expect(tree).toBeVisible()
+  await expect(window.getByRole("region", { name: "Repository browser" })).toHaveCount(0)
 
   await window.setViewportSize({ width: 900, height: 700 })
   await window.waitForTimeout(120)

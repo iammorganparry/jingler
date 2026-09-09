@@ -300,9 +300,10 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     )
     expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
 
-    // The selected Browser tab is session state too: closing Beta must not
-    // close Alpha, and returning to Beta must keep its browser out of view.
+    // Open Browser surfaces are session state too. Focusing Chat does not close
+    // the adjacent Browser pane, and switching sessions restores each pane.
     await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+    await expect(url).toHaveValue(`${origin}/beta-history`)
     await sessionRow(window, "Preview Alpha").click()
     await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/alpha-history`)
@@ -567,6 +568,10 @@ test("retains each session browser while Files owns two split panes", async ({ l
     await betaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
     await window.getByTestId("view-tab-browser").click()
     await expect(betaPane.getByLabel("Preview URL")).toHaveValue(origin)
+    await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
+
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.blur())
+    await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
   } finally {
     await closeServer(server)
   }

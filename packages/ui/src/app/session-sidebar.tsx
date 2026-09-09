@@ -1,6 +1,6 @@
 import * as React from "react"
 import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
-import { displayStatusOf, persistentOf, UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
   BrainCircuit,
@@ -28,7 +28,6 @@ import { StatusDot } from "../components/status-dot.js"
 import { FilterMenu } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { ProviderIcon } from "../components/provider-icon.js"
-import { PersistentSessionTile } from "../composites/persistent-session-tile.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { AISidebarSurface } from "../composites/beui/shell.js"
@@ -51,7 +50,12 @@ import {
 export interface SessionSidebarProps {
   /** Global command search shown below the sidebar header. */
   search?: React.ReactNode
+  workspaceView?: "sessions" | "explorer"
+  onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
+  explorer?: React.ReactNode
   sessions: ReadonlyArray<Session>
+  /** Full session set used to render mixed-project split pills. */
+  splitSessions?: ReadonlyArray<Session>
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
   /**
@@ -74,8 +78,6 @@ export interface SessionSidebarProps {
   onSelect: (id: string) => void
   /** Manually rename a session (double-click its title) — pins the auto-name. */
   onRename?: (id: string, title: string) => void
-  /** Promote or demote a session from the persistent tray. */
-  onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from its row quick-actions (undoable via restore). */
   onArchive?: (id: string) => void | Promise<void>
   /** Restore an archived session from its row quick-actions. */
@@ -146,7 +148,11 @@ function SidebarBody({
   width,
   onResize,
   search,
+  workspaceView = "sessions",
+  onWorkspaceViewChange,
+  explorer,
   sessions,
+  splitSessions = sessions,
   environments = [],
   activeSessionId,
   splitGroups,
@@ -157,7 +163,6 @@ function SidebarBody({
   onSplitWith,
   onSelect,
   onRename,
-  onSetPersistent,
   onArchive,
   onRestore,
   onDelete,
@@ -470,14 +475,6 @@ return (renderExpandedGroupHeading())
     [sessions, filters]
   )
 
-  // The tray is fixed navigation, independent of the list filters below it.
-  // Archived persistent sessions step out until restored, while keeping their
-  // flag in storage so restoration puts them straight back here.
-  const persistentSessions = React.useMemo(
-    () => sessions.filter((session) => persistentOf(session) && !session.archived),
-    [sessions]
-  )
-
   /**
    * Sessions that sit inside a SPLIT of two panes or more.
    *
@@ -502,9 +499,7 @@ return (renderExpandedGroupHeading())
   const groups = React.useMemo(
     () =>
       groupSessions(
-        filtered.filter(
-          (s) => !((persistentOf(s) && !s.archived) || splitMemberIds.has(s.id))
-        ),
+        filtered.filter((session) => !splitMemberIds.has(session.id)),
         filters,
         statusOf,
         starredRepoNames
@@ -552,15 +547,14 @@ return (renderExpandedGroupHeading())
     <SplitRow
       key={split.id}
       group={split}
-      sessions={sessions}
+      sessions={splitSessions}
       liveActivity={liveActivity}
       active={split.id === activeGroupId}
       onFocusPane={onFocusPane}
       onClosePane={onClosePane}
       onSeparateAll={onSeparateAll}
       onSplitWith={onSplitWith}
-      onSetPersistent={onSetPersistent}
-      splitCandidates={sessions.filter(
+      splitCandidates={splitSessions.filter(
         (c) => !(c.archived || split.panes.some((p) => p.sessionId === c.id))
       )}
     />
@@ -584,7 +578,6 @@ return (renderExpandedGroupHeading())
         active={s.id === activeSessionId}
         onSelect={onSelect}
         onRename={onRename}
-        onSetPersistent={onSetPersistent}
         onArchive={onArchive}
         onRestore={onRestore}
         onDelete={onDelete}
@@ -634,7 +627,11 @@ return (renderExpandedGroupHeading())
           platform. `text-brand` for the same reason it was branded up there —
           it is the one spot of colour in a monochrome column.
         */}
-        <JinglerMark className="h-[14px] w-auto flex-none text-brand" />
+        {onWorkspaceViewChange ? (
+          <span className="text-[13px] font-semibold text-text-bright">Workspace</span>
+        ) : (
+          <JinglerMark className="h-[14px] w-auto flex-none text-brand" />
+        )}
         {/* The rail's expand button lives in the same corner, so the control
             that changes this state is in one place rather than two. */}
         {onCollapse && (
@@ -706,51 +703,40 @@ return (renderExpandedGroupHeading())
 
       {search ? <div className="px-3 pb-2">{search}</div> : null}
 
+      {onWorkspaceViewChange ? (
+        <div className="mx-3 mb-2 grid grid-cols-2 rounded-lg bg-sunken p-0.5" role="tablist" aria-label="Workspace">
+          {(["sessions", "explorer"] as const).map((view) => (
+            <button
+              key={view}
+              type="button"
+              role="tab"
+              aria-selected={workspaceView === view}
+              onClick={() => onWorkspaceViewChange(view)}
+              className={cn(
+                "h-7 rounded-md text-[11.5px] font-semibold capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                workspaceView === view ? "bg-surface text-text-bright" : "text-dim hover:text-text"
+              )}
+            >
+              {view === "sessions" ? "Sessions" : "Explorer"}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {workspaceView === "explorer" ? (
+        <div className="min-h-0 flex-1 border-t border-hairline">{explorer}</div>
+      ) : (
+        <>
       {renderPullRequestsLink()}
 
       {renderMemoryLink()}
 
       {renderPendingEnvironment()}
 
-      {/* Fixed persistent navigation: never narrowed by the ordinary list's
-          status/repo filters, and never duplicated in those groups. */}
-      <div
-        data-testid="persistent-session-tray"
-        className="grid max-h-64 flex-none grid-cols-3 gap-1.5 overflow-y-auto px-3 pb-2"
-      >
-        {persistentSessions.length > 0 ? (
-          persistentSessions.map((session) => (
-            <PersistentSessionTile
-              key={session.id}
-              session={session}
-              activity={liveActivity?.[session.id]}
-              active={session.id === activeSessionId}
-              onSelect={onSelect}
-              onUnpersist={
-                onSetPersistent
-                  ? (id) => onSetPersistent(id, false)
-                  : undefined
-              }
-              onArchive={onArchive}
-              onDelete={onDelete}
-            />
-          ))
-        ) : (
-          <button
-            type="button"
-            data-testid="persistent-session-add"
-            onClick={onNewSession}
-            aria-label="New session"
-            title="New session"
-            className="flex h-[68px] min-w-0 items-center justify-center rounded-2xl border border-dashed border-line text-dim outline-none transition-colors hover:border-blue hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Plus size={16} />
-          </button>
-        )}
-      </div>
-
       {/* Groups (or the empty hint when there are no sessions yet) */}
       {renderSessionList()}
+        </>
+      )}
 
       {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out). */}
       <div className="flex-none border-t border-hairline p-1.5">
@@ -848,9 +834,7 @@ function SessionRail({
   /** Re-dock the sidebar (the top button). */
   onExpand: () => void
 }) {
-  const live = sessions.filter((s) => !s.archived)
-  const persistent = live.filter(persistentOf)
-  const ordinary = live.filter((session) => !persistentOf(session))
+  const live = sessions.filter((session) => !session.archived)
 
   const renderCell = (s: Session) => {
     const active = s.id === activeSessionId
@@ -870,7 +854,6 @@ function SessionRail({
         <button
           type="button"
           data-session-id={s.id}
-          data-persistent={persistentOf(s) ? "true" : undefined}
           onClick={() => onSelect?.(s.id)}
           aria-current={active ? "page" : undefined}
           // No `title` — the card IS the tooltip, and a native tooltip
@@ -1012,14 +995,7 @@ function SessionRail({
             )}
           </button>
         )}
-        {persistent.map(renderCell)}
-        {persistent.length > 0 && ordinary.length > 0 && (
-          <span
-            data-testid="persistent-rail-separator"
-            className="my-1 h-px w-6 flex-none bg-hairline"
-          />
-        )}
-        {ordinary.map(renderCell)}
+        {live.map(renderCell)}
       </div>
     </div>
   )

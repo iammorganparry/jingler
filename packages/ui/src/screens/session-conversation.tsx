@@ -1,8 +1,9 @@
-import type { ReactNode } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import type {
   DiffStat,
   Environment,
   IssueIdentity,
+  Project,
   SessionPrStatus,
   Session,
   SessionActivity,
@@ -10,6 +11,8 @@ import type {
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
+import { ProjectSidebar } from "../app/project-sidebar.js"
+import { preferredSessionId, projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
@@ -26,6 +29,11 @@ export interface SessionConversationProps {
   /** Global command search shown at the top of the sidebar. */
   search?: ReactNode
   sessions: ReadonlyArray<Session>
+  projects?: ReadonlyArray<Project>
+  projectOwners?: Readonly<Record<string, string>>
+  onAddProject?: () => void
+  onNewSessionForProject?: (projectId: string) => void
+  renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
   onSelectSession: (id: string) => void
@@ -67,8 +75,6 @@ export interface SessionConversationProps {
   onToggleBrowser?: (sessionId: string, chatId: string) => void
   /** Whether the named session's browser is currently visible. */
   isBrowserActive?: (sessionId: string, chatId: string) => boolean
-  /** Promote or demote a session from the persistent tray. */
-  onSetSessionPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
   onArchiveSession?: (id: string) => void
   /** Restore an archived session from the sidebar quick-actions. */
@@ -108,6 +114,8 @@ export interface SessionConversationProps {
   /** Render the browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  /** Open a file selected from the workspace Explorer and reveal its Files surface. */
+  onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   /**
    * Render a session's chat pills into the tab row's `chatSlot`. A render prop
@@ -225,13 +233,60 @@ export interface SessionConversationProps {
  * tab body and docks) lives in `SessionPane`, which is what the grid multiplies.
  */
 export function SessionConversation(props: SessionConversationProps) {
+  const projects = props.projects ?? []
+  const activeSession = props.sessions.find((session) => session.id === props.activeSessionId) ?? null
+  const activeSessionId = activeSession?.id ?? null
+  const activeSessionProjectId = activeSession
+    ? projectIdForSession(activeSession, projects)
+    : null
+  const [selectedProjectId, setSelectedProjectId] = useState(
+    () => activeSessionProjectId ?? projects[0]?.id ?? UNASSIGNED_PROJECT_ID
+  )
+  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
+
+  useEffect(() => {
+    if (activeSessionId === null || activeSessionProjectId === null) return
+    setSelectedProjectId(activeSessionProjectId)
+    try {
+      localStorage.setItem(`jingler.project.last-session.${activeSessionProjectId}`, activeSessionId)
+    } catch {
+      // Selection still works when storage is unavailable.
+    }
+  }, [activeSessionId, activeSessionProjectId])
+
+  const projectSessions = useMemo(
+    () => sessionsForProject(props.sessions, projects, selectedProjectId),
+    [props.sessions, projects, selectedProjectId]
+  )
+
+  const selectProject = (projectId: string) => {
+    setSelectedProjectId(projectId)
+    let remembered: string | null = null
+    try {
+      remembered = localStorage.getItem(`jingler.project.last-session.${projectId}`)
+    } catch {
+      // Fall through to the newest session.
+    }
+    const next = preferredSessionId(sessionsForProject(props.sessions, projects, projectId), remembered)
+    if (next) props.onSelectSession(next)
+    else if (projectId !== UNASSIGNED_PROJECT_ID) props.onNewSessionForProject?.(projectId)
+  }
+
+  const openNewSession = () => {
+    if (selectedProjectId !== UNASSIGNED_PROJECT_ID && props.onNewSessionForProject) {
+      props.onNewSessionForProject(selectedProjectId)
+      return
+    }
+    props.onNewSession?.()
+  }
+
          function getProps() {
            if (props.pullRequestsView) return (props.pullRequestsView)
            if (props.memoryView) return (props.memoryView)
            if (props.settingsView) return (props.settingsView)
            if (props.showEmpty) return (<EmptyConversation
             version={props.version}
-            onNewSession={props.onNewSession}
+            onNewSession={openNewSession}
           />)
            return (<SessionSplit
             group={group}
@@ -294,9 +349,29 @@ export function SessionConversation(props: SessionConversationProps) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 bg-panel">
+      {props.projects !== undefined ? (
+        <ProjectSidebar
+          projects={projects}
+          sessions={props.sessions}
+          activeProjectId={selectedProjectId}
+          projectOwners={props.projectOwners}
+          onSelect={selectProject}
+          onAddProject={props.onAddProject}
+        />
+      ) : null}
       <SessionSidebar
         search={props.search}
-        sessions={props.sessions}
+        workspaceView={workspaceView}
+        onWorkspaceViewChange={setWorkspaceView}
+        explorer={
+          activeSession && projectIdForSession(activeSession, projects) === selectedProjectId
+            ? props.renderExplorer?.(activeSession, (path) =>
+                (props.onOpenExplorerFile ?? props.onOpenFile)?.(activeSession.id, path)
+              )
+            : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
+        }
+        sessions={projectSessions}
+        splitSessions={props.sessions}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
         splitGroups={props.splitGroups}
@@ -307,14 +382,13 @@ export function SessionConversation(props: SessionConversationProps) {
         onSplitWith={props.onSplitGroupWith}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
-        onSetPersistent={props.onSetSessionPersistent}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}
         liveActivity={props.liveActivity}
         prStates={props.prStates}
         repoOwners={props.repoOwners}
-        onNewSession={props.onNewSession}
+        onNewSession={openNewSession}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
         onOpenSettings={props.onOpenSettings}

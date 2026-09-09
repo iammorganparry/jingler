@@ -325,6 +325,9 @@ export const newWorkspaceMachine = setup({
           }
         : {}
     ),
+    selectProject: assign(({ event }) => event.type === "SET_PROJECT"
+      ? { projectId: event.projectId, branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null }
+      : {}),
     setMode: assign(({ event }) => event.type === "SET_MODE" ? { mode: event.mode } : {}),
     setReasoning: assign(({ event }) => event.type === "SET_REASONING" ? { reasoning: event.reasoning } : {}),
     setSource: assign(({ event }) => event.type === "SET_SOURCE" ? { ...resetSource, source: event.source, draft: "", error: null } : {}),
@@ -406,6 +409,7 @@ export const newWorkspaceMachine = setup({
       },
       on: {
         CLOSE: { target: "closed", actions: "close" },
+        SET_PROJECT: { target: "loading", reenter: true, actions: "selectProject" },
         SET_ENVIRONMENT: {
           target: "loading",
           reenter: true,
@@ -425,7 +429,7 @@ export const newWorkspaceMachine = setup({
     editing: {
       on: {
         CLOSE: { target: "closed", actions: "close" },
-        SET_PROJECT: { target: "loading", actions: assign(({ event }) => ({ projectId: event.projectId, branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null })) },
+        SET_PROJECT: { target: "loading", actions: "selectProject" },
         SET_ENVIRONMENT: { target: "loading", actions: assign(({ event }) => ({ environmentId: event.environmentId, branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null })) },
         SET_SOURCE: [
           { guard: "sourceNeedsLoading", target: "sourceLoading", actions: "setSource" },
@@ -453,6 +457,7 @@ export const newWorkspaceMachine = setup({
       },
       on: {
         CLOSE: { target: "closed", actions: "close" },
+        SET_PROJECT: { target: "loading", actions: "selectProject" },
         SET_SOURCE: [
           { guard: "sourceNeedsLoading", target: "sourceLoading", reenter: true, actions: "setSource" },
           { target: "editing", actions: "setSource" }

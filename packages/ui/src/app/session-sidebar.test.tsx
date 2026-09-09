@@ -18,6 +18,20 @@ const rowOrder = () =>
   )
 
 describe("SessionSidebar session identity", () => {
+  it("renders persistent data as an ordinary session without pin controls", () => {
+    const select = vi.fn()
+    render(<SessionSidebar activeSessionId={null} onSelect={select}
+      onArchive={() => {}} sessions={[session({ id: "legacy", persistent: true })]}
+      defaultFilters={DEFAULT_FILTERS} />)
+    const row = screen.getByTestId("session-row-legacy")
+    fireEvent.click(row)
+    expect(select).toHaveBeenCalledWith("legacy")
+    fireEvent.contextMenu(row)
+    expect(screen.getByRole("menuitem", { name: "Archive" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "Persist" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull()
+  })
+
   it("renders global search above the session list", () => {
     render(
       <SessionSidebar
@@ -466,125 +480,5 @@ describe("SessionSidebar split placement", () => {
     )
     expect(screen.queryByText("Split")).toBeNull()
     expect(screen.queryByText("Splits")).toBeNull()
-  })
-})
-
-describe("SessionSidebar persistent tray", () => {
-  it("promotes an ordinary active row through its context menu", () => {
-    const onSetPersistent = vi.fn()
-    render(
-      <SessionSidebar
-        activeSessionId="ordinary"
-        onSelect={() => {}}
-        onSetPersistent={onSetPersistent}
-        sessions={[session({ id: "ordinary", title: "Ordinary session" })]}
-        defaultFilters={DEFAULT_FILTERS}
-      />
-    )
-
-    fireEvent.contextMenu(screen.getByTestId("session-row-ordinary"))
-    fireEvent.click(screen.getByRole("menuitem", { name: "Persist" }))
-    expect(onSetPersistent).toHaveBeenCalledWith("ordinary", true)
-  })
-
-  it("renders active persistent sessions once in the fixed tray", () => {
-    const onSelect = vi.fn()
-    render(
-      <SessionSidebar
-        activeSessionId="kept"
-        onSelect={onSelect}
-        sessions={[
-          session({ id: "kept", title: "Kept session", persistent: true }),
-          session({ id: "ordinary", title: "Ordinary session" })
-        ]}
-        defaultFilters={DEFAULT_FILTERS}
-      />
-    )
-
-    expect(screen.getByTestId("persistent-session-tile-kept")).toBeDefined()
-    expect(
-      screen.getByTestId("persistent-session-tray").className
-    ).toContain("overflow-y-auto")
-    expect(screen.queryByTestId("session-row-kept")).toBeNull()
-    expect(screen.getByTestId("session-row-ordinary")).toBeDefined()
-    expect(screen.queryByTestId("persistent-session-add")).toBeNull()
-
-    fireEvent.click(screen.getByRole("button", { name: "Kept session" }))
-    expect(onSelect).toHaveBeenCalledWith("kept")
-  })
-
-  it("shows one tray add tile when no active session is persistent", () => {
-    const onNewSession = vi.fn()
-    render(
-      <SessionSidebar
-        activeSessionId={null}
-        onSelect={() => {}}
-        onNewSession={onNewSession}
-        sessions={[]}
-        defaultFilters={DEFAULT_FILTERS}
-      />
-    )
-
-    const tray = screen.getByTestId("persistent-session-tray")
-    expect(tray.querySelectorAll("[data-testid='persistent-session-add']")).toHaveLength(1)
-    fireEvent.click(screen.getByTestId("persistent-session-add"))
-    expect(onNewSession).toHaveBeenCalledTimes(1)
-  })
-
-  it("keeps archived persistent sessions out of the tray and returns them after restoration", () => {
-    const onRestore = vi.fn()
-    const archived = session({
-      id: "kept",
-      title: "Kept session",
-      persistent: true,
-      archived: true,
-      archiveReason: "closed",
-      archivedAt: "2026-07-18T08:00:00.000Z"
-    })
-    const view = render(
-      <SessionSidebar
-        activeSessionId={null}
-        onSelect={() => {}}
-        onRestore={onRestore}
-        sessions={[archived]}
-        defaultFilters={{ ...DEFAULT_FILTERS, status: "archived" }}
-      />
-    )
-
-    expect(screen.queryByTestId("persistent-session-tile-kept")).toBeNull()
-    expect(screen.getByTestId("session-row-kept")).toBeDefined()
-    fireEvent.contextMenu(screen.getByTestId("session-row-kept"))
-    fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
-    expect(onRestore).toHaveBeenCalledWith("kept")
-
-    view.rerender(
-      <SessionSidebar
-        activeSessionId="kept"
-        onSelect={() => {}}
-        onRestore={onRestore}
-        sessions={[session({ id: "kept", title: "Kept session", persistent: true })]}
-        defaultFilters={{ ...DEFAULT_FILTERS, status: "archived" }}
-      />
-    )
-    expect(screen.getByTestId("persistent-session-tile-kept")).toBeDefined()
-    expect(screen.queryByTestId("session-row-kept")).toBeNull()
-  })
-
-  it("keeps the persistent tray visible while ordinary rows are filtered", () => {
-    render(
-      <SessionSidebar
-        activeSessionId="kept"
-        onSelect={() => {}}
-        sessions={[
-          session({ id: "kept", title: "Kept session", repo: "jingler", persistent: true }),
-          session({ id: "other", title: "Other repo", repo: "elsewhere" })
-        ]}
-        defaultFilters={{ ...DEFAULT_FILTERS, repo: "elsewhere" }}
-      />
-    )
-
-    expect(screen.getByTestId("persistent-session-tile-kept")).toBeDefined()
-    expect(screen.getByTestId("session-row-other")).toBeDefined()
-    expect(screen.queryByTestId("session-row-kept")).toBeNull()
   })
 })

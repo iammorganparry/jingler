@@ -79,7 +79,7 @@ import {
   usePullRequestInbox,
 } from "./use-pull-request-inbox.js";
 import { ReviewPane } from "./review-pane.js";
-import { FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
+import { FileBrowserExplorer, FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
@@ -810,22 +810,6 @@ function AuthedApp({
       .sessionsRename(sessionId, title)
       .then((session) => send({ type: "SESSION_UPDATED", session }));
   };
-  const setSessionPersistent = async (
-    sessionId: string,
-    persistent: boolean,
-  ): Promise<void> => {
-    setSessionMutationError(null);
-    try {
-      const session = await rpc.sessionsSetPersistent(sessionId, persistent);
-      send({ type: "SESSION_UPDATED", session });
-    } catch (error) {
-      setSessionMutationError(
-        error instanceof Error
-          ? error.message
-          : "Could not update the persistent session.",
-      );
-    }
-  };
   const deleteSession = async (sessionId: string) => {
     const chatIds =
       sessions
@@ -1520,6 +1504,7 @@ function AuthedApp({
         onListGitHubRepositories={projectController.listGitHubRepositories}
         onRegisterProject={projectController.register}
         onCreateProjectDirectory={projectController.createDirectory}
+        onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
         starredRepos={starredRepos}
@@ -1707,7 +1692,6 @@ function AuthedApp({
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
-        onSetSessionPersistent={setSessionPersistent}
         onArchiveSession={archiveSession}
         onRestoreSession={restoreSession}
         onDeleteSession={(id) =>
@@ -1741,6 +1725,9 @@ function AuthedApp({
             onAddMcp={mcp.add}
             paneFocused={ctx.paneFocused ?? true}
           />
+        )}
+        renderExplorer={(session, onOpenPath) => (
+          <FileBrowserExplorer session={session} onOpenPath={onOpenPath} />
         )}
         renderFiles={(session, ctx) => (
           <FileBrowserView

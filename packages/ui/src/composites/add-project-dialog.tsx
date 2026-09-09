@@ -47,10 +47,9 @@ const METHODS: ReadonlyArray<{
   description: string
   icon: ComponentType<{ size?: number; className?: string }>
 }> = [
-  { id: "existing", label: "Search for directory", description: "Find a directory on this computer", icon: Search },
-  { id: "browse", label: "Browse", description: "Open Finder and choose an existing Git repository", icon: Folder },
-  { id: "clone", label: "Clone from GitHub", description: "Choose from repositories available to your GitHub App", icon: GithubMark },
-  { id: "new", label: "New directory", description: "Create and initialise an empty Git repository", icon: FolderGit2 }
+  { id: "clone", label: "Remote repository", description: "Clone from GitHub or any Git URL", icon: GithubMark },
+  { id: "existing", label: "Local repository", description: "Choose an existing Git repository", icon: Search },
+  { id: "new", label: "New local repository", description: "Create a directory and run git init", icon: FolderGit2 }
 ]
 
 const isAbsolutePath = (value: string): boolean =>
@@ -179,11 +178,29 @@ function GitHubRepositoryPicker(props: {
   repositories: ReadonlyArray<GitHubCloneRepository>
   loading: boolean
   error: string | null
+  remoteUrl: string
+  onRemoteUrl: (url: string) => void
+  onCloneRemote: () => void
   onSelect: (repository: GitHubCloneRepository) => void
 }) {
   return (
-    <Command loop>
-      <CommandInput autoFocus placeholder="Search GitHub repositories…" />
+    <div>
+      <div className="flex gap-2 border-b border-line p-4">
+        <Input
+          autoFocus
+          aria-label="Git repository URL"
+          placeholder="https://github.com/acme/repo.git or git@github.com:acme/repo.git"
+          value={props.remoteUrl}
+          onChange={(event) => props.onRemoteUrl(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && props.remoteUrl.trim()) props.onCloneRemote()
+          }}
+        />
+        <Button disabled={!props.remoteUrl.trim()} onClick={props.onCloneRemote}>Continue</Button>
+      </div>
+      <div className="px-4 pt-3 text-[10px] font-medium uppercase tracking-wide text-dim">Or choose from GitHub</div>
+      <Command loop>
+      <CommandInput placeholder="Search GitHub repositories…" />
       <CommandList className="max-h-[420px] min-h-[260px]">
         {props.loading && (
           <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-muted-foreground">
@@ -218,12 +235,14 @@ function GitHubRepositoryPicker(props: {
           )
         })}
       </CommandList>
-    </Command>
+      </Command>
+    </div>
   )
 }
 
 function CloneConfirmation(props: {
-  repository: GitHubCloneRepository
+  repository: GitHubCloneRepository | null
+  remoteUrl: string
   destination: string
   name: string
   error: string | null
@@ -234,8 +253,10 @@ function CloneConfirmation(props: {
       <div className="flex items-start gap-3 rounded-lg bg-hover px-3 py-3">
         <span aria-hidden="true" className="mt-0.5 flex-none text-muted-foreground"><GithubMark size={18} /></span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-medium text-text-bright">{props.repository.fullName}</span>
-          <span className="mt-0.5 block text-[11px] text-muted-foreground">Authenticated through your GitHub App connection</span>
+          <span className="block text-[13px] font-medium text-text-bright">{props.repository?.fullName ?? props.remoteUrl}</span>
+          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+            {props.repository ? "Authenticated through your GitHub App connection" : "Git will use your configured local credentials"}
+          </span>
         </span>
       </div>
       <label className="block space-y-1.5">
@@ -251,13 +272,20 @@ function CloneConfirmation(props: {
   )
 }
 
+const canSubmitProject = (
+  method: AddProjectMethod | null,
+  selectedRepository: GitHubCloneRepository | null,
+  remoteUrl: string,
+  path: string
+): boolean => path.trim().length > 0 && (method !== "clone" || selectedRepository !== null || remoteUrl.trim().length > 0)
+
 const titleFor = (directory: boolean, github: boolean, cloneReady: boolean, form: boolean, method: AddProjectMethod | null): string => {
   if (directory) return "Search for directory"
-  if (github) return "Clone from GitHub"
+  if (github) return "Remote repository"
   if (cloneReady) return "Ready to clone"
   if (!form) return "Add project"
-  if (method === "clone") return "Clone from GitHub"
-  if (method === "new") return "New directory"
+  if (method === "clone") return "Remote repository"
+  if (method === "new") return "New local repository"
   return "Add project"
 }
 
@@ -272,8 +300,8 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
 
          function getDirectory() {
            if (directory) return (<DirectoryBrowser key={directoryListing?.path ?? "loading"} listing={directoryListing} loading={directoryLoading} error={directoryError} onOpen={(nextPath) => send({ type: "OPEN_DIRECTORY", ...(nextPath === undefined ? {} : { path: nextPath }) })} />)
-           if (github) return (<GitHubRepositoryPicker repositories={githubRepositories} loading={githubLoading} error={githubError} onSelect={(repository) => send({ type: "SELECT_GITHUB_REPOSITORY", repository })} />)
-           if (cloneReady && selectedGitHubRepository) return (<CloneConfirmation repository={selectedGitHubRepository} destination={path} name={name} error={error} onName={(value) => send({ type: "SET_NAME", name: value })} />)
+           if (github) return (<GitHubRepositoryPicker repositories={githubRepositories} loading={githubLoading} error={githubError} remoteUrl={remoteUrl} onRemoteUrl={(url) => send({ type: "SET_REMOTE_URL", url })} onCloneRemote={() => send({ type: "SELECT_REMOTE_URL" })} onSelect={(repository) => send({ type: "SELECT_GITHUB_REPOSITORY", repository })} />)
+           if (cloneReady) return (<CloneConfirmation repository={selectedGitHubRepository} remoteUrl={remoteUrl} destination={path} name={name} error={error} onName={(value) => send({ type: "SET_NAME", name: value })} />)
            if (form) return (<ProjectForm path={path} name={name} error={error} onPath={(value) => send({ type: "SET_PATH", path: value })} onName={(value) => send({ type: "SET_NAME", name: value })} />)
            return (<MethodPicker onSelect={(value) => send({ type: "SELECT", method: value })} />)
          }
@@ -285,7 +313,7 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
   useEffect(() => {
     send({ type: props.open ? "OPEN" : "CLOSE" })
   }, [props.open, send])
-  const { method, path, name, error, directoryListing, directoryError, githubRepositories, selectedGitHubRepository, githubError } = state.context
+  const { method, path, name, error, directoryListing, directoryError, githubRepositories, selectedGitHubRepository, remoteUrl, githubError } = state.context
   const submitting = state.matches("submitting")
   const cloneReady = state.matches("cloneReady") || (submitting && method === "clone")
   const form = state.matches("form") || (submitting && method !== "clone")
@@ -293,7 +321,7 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
   const directoryLoading = state.matches("directoryLoading")
   const github = state.matches("githubRepositories") || state.matches("githubRepositoriesLoading") || state.matches("cloneDestinationBrowsing")
   const githubLoading = state.matches("githubRepositoriesLoading")
-  const canSubmit = method === "clone" ? selectedGitHubRepository !== null && path.trim().length > 0 : path.trim().length > 0
+  const canSubmit = canSubmitProject(method, selectedGitHubRepository, remoteUrl, path)
 
   return (
     <Dialog open={props.open} onOpenChange={(open) => send({ type: open ? "OPEN" : "CLOSE" })}>
@@ -304,7 +332,7 @@ export function AddProjectDialog(props: AddProjectDialogProps) {
         </DialogBody>
         {directory && directoryListing && !directoryLoading && (
           <DialogFooter className="justify-between">
-            <span className="text-[10px] text-dim">Enter opens a folder · paste a path to jump</span>
+            <Button variant="ghost" onClick={() => send({ type: "BROWSE" })}><Folder size={14} /> Browse in Finder</Button>
             <Button onClick={() => send({ type: "CHOOSE_DIRECTORY", path: directoryListing.path })}><FolderGit2 size={14} /> Choose current folder</Button>
           </DialogFooter>
         )}
