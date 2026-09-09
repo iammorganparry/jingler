@@ -104,6 +104,14 @@ export const createJinglerControlTools = (
       id: "jingler_complete_session",
       description: "Declare that all work requested in this session is resolved. Call only in the final successful turn after tests, questions, child work, and background work are complete.",
       input: Schema.Struct({}),
+      // Effect emits an empty struct as `anyOf: [object, array]` with no
+      // top-level `type`; Codex rejects that. Declare the object shape directly.
+      providerInputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false
+      },
       roles: ["conversation", "plan", "plan-execution"],
       execute: () => Effect.runPromise(context.publishEvent({ _tag: "SessionCompletionDeclared" }))
     })

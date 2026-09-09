@@ -258,6 +258,16 @@ describe("Jingler session completion tool", () => {
     expect(registry.capabilitiesFor("background", "auto").map(({ id }) => id))
       .not.toContain("jingler_complete_session")
   })
+
+  it("declares an object parameter schema so Codex accepts the tool", () => {
+    const registry = createJinglerControlTools(runtimeContext({}))
+    expect(registry.providerInputSchemaFor("jingler_complete_session")).toEqual({
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false
+    })
+  })
 })
 
 describe("Jingler explanation tool containment", () => {

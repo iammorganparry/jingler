@@ -314,13 +314,28 @@ const createResources = (
   nativeSubagentsEnabled: boolean
 ) => {
   const runtimeSpec = effectiveRuntimeSpec(spec)
-  const tools = [
+  const registryTools = [
     ...(registry?.capabilitiesFor(runtimeSpec.role, runtimeSpec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
+  // The plan scratchpad tools are registered by the Plannotator extension, not
+  // the registry, so the prompt's tool list has to name them explicitly.
+  const tools = [
+    ...registryTools,
+    {
+      id: "plannotator_submit_plan",
+      version: "1",
+      description: "Submit a Markdown plan for operator review."
+    },
+    {
+      id: "plannotator_update_plan",
+      version: "1",
+      description: "Refresh the active Markdown plan without requesting review."
+    }
+  ]
   // Plannotator reapplies this list on approval. Plan mode already has the
   // Auto tool set, so the phase change must not narrow or replace it.
-  const executionTools = tools.map(({ id }) => id)
+  const executionTools = registryTools.map(({ id }) => id)
   const eventBus = createEventBus()
   const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
     layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
