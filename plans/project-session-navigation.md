@@ -26,7 +26,7 @@ Candidate files; refine after tracing the complete rendering and selection flow:
 - `apps/desktop/e2e/sidebar-attention-layout.spec.ts` — update layout expectations and cover project-scoped navigation.
 
 ## Reuse
-- `SessionRow`, `PersistentSessionTile`, `SplitRow`, and existing sidebar action callbacks.
+- `SessionRow`, `SplitRow`, existing sidebar action callbacks, and the shared `Avatar` / `HoverCard` components.
 - Session filtering/grouping in `packages/ui/src/app/session-filters.ts`.
 - Existing resizable-width controls and width-tier responsiveness.
 - `useFileBrowser` and existing file-open/close behavior.
@@ -41,11 +41,11 @@ Make projects the first column and selected-project sessions the second.
 - Wire project selection and per-project last-used sessions in JinglerApp using the existing session selection callbacks. Default New Session to the selected project; reuse the Add Project dialog.
 - Preserve session actions and existing attention indicators.
 
-- [ ] Implement project selection and the adjacent project-scoped session list.
+- [x] Implement project selection and the adjacent project-scoped session list.
 
 ### Acceptance
-- [ ] Selecting a project lists only its sessions; selecting a session opens its existing content.
-- [ ] Projects without sessions remain reachable; global destinations and account actions remain reachable.
+- [x] Selecting a project lists only its sessions; selecting a session opens its existing content.
+- [x] Projects without sessions remain reachable; global destinations and account actions remain reachable.
 
 ### Files
 - `packages/ui/src/app/session-sidebar.tsx` — M
@@ -66,10 +66,10 @@ Switch the workspace column between Sessions and the real file tree.
 - Keep quick-open and Files entry points working, routing tree navigation to Explorer. Preserve dirty-file confirmation, asset previews, follow-agent, and debugger behavior.
 - Label the focused worktree; show existing loading/error/retry behavior for unavailable worktrees. No main-checkout fallback.
 
-- [ ] Wire Sessions / Explorer tabs to the existing file browsing flow.
+- [x] Wire Sessions / Explorer tabs to the existing file browsing flow.
 
 ### Acceptance
-- [ ] Explorer opens files from the chosen root without losing session or editor state.
+- [x] Explorer opens files from the chosen root without losing session or editor state.
 
 ### Files
 - `apps/desktop/src/renderer/App.tsx` — M
@@ -89,11 +89,11 @@ Protect existing session behavior while testing the new column structure.
 - Extend existing UI and desktop tests rather than adding a new test harness.
 - Check narrow windows, keyboard access, resizing, and split sessions.
 
-- [ ] Add behavioral coverage and run affected tests and type checks.
+- [x] Add behavioral coverage and run affected tests and type checks.
 
 ### Acceptance
-- [ ] Project switching, Explorer switching, session creation, and file opening pass automated checks.
-- [ ] Narrow layouts keep all navigation reachable without squeezing active content out of view.
+- [x] Project switching, Explorer switching, session creation, and file opening pass automated checks.
+- [x] Narrow layouts keep all navigation reachable without squeezing active content out of view.
 
 ### Files
 - `packages/ui/src/app/session-sidebar.test.tsx` — M
@@ -104,10 +104,13 @@ Protect existing session behavior while testing the new column structure.
 > depends: workspace-explorer
 
 ## Verification
-No implementation changes during planning. Planned new/updated behavioral cases:
+Implemented and verified. Behavioral coverage:
 - `packages/ui/src/app/project-navigation.test.ts`: project identity beats duplicate names; legacy fallback is environment-scoped; ambiguous sessions stay reachable; stale remembered selection falls back safely.
-- `packages/ui/src/app/session-sidebar.test.tsx`: project-specific lists, empty projects, project-scoped creation, global destinations, archived and persistent sessions.
-- `packages/ui/src/app/session-sidebar.responsive.test.tsx`: two columns when roomy, rail/overlay when narrow, keyboard open/close and focus return.
+- `packages/ui/src/screens/session-conversation.test.tsx`: project-scoped lists, remembered session restoration, and empty-project creation.
+- `packages/ui/src/app/session-sidebar.test.tsx`: session identity, split placement, and legacy persistent data rendered as ordinary rows.
+- `packages/ui/src/app/session-sidebar.responsive.test.tsx`: existing sidebar width-tier behavior; not a project-rail integration test.
+- `apps/desktop/e2e/sidebar-attention-layout.spec.ts`: attention order and Explorer/file layout at desktop widths.
+- `packages/ui/src/screens/project-session-flow.stories.tsx`: manual interactive project navigation preview, not an automated integration test.
 - `apps/desktop/e2e/sidebar-attention-layout.spec.ts`: switching A → B → A restores sessions; Explorer follows focused worktree; opening a file preserves unsaved edits across navigation; no duplicate visible file tree.
 - Existing file-browser-machine and use-file-browser tests must remain green; add focused coverage if integration changes require it.
 

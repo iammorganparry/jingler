@@ -4,14 +4,13 @@ import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
-import { activityLabel, displayStatusOf, issueReferenceOf, persistentOf } from "@jingler/core"
+import { activityLabel, displayStatusOf, issueReferenceOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
   Cloud,
   GitMerge,
   Monitor,
-  Pin,
   type LucideIcon,
   Trash2
 } from "lucide-react"
@@ -64,7 +63,6 @@ export function SessionRow({
   active = false,
   onSelect,
   onRename,
-  onSetPersistent,
   onArchive,
   onRestore,
   onDelete,
@@ -94,8 +92,6 @@ export function SessionRow({
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
   onRename?: (id: string, title: string) => void
-  /** Promote an active ordinary row into the persistent tray. */
-  onSetPersistent?: (id: string, persistent: boolean) => void
   /** Archive an active session (collapses into the Archived group; undoable). */
   onArchive?: (id: string) => void | Promise<void>
   /** Restore an archived session back to active. */
@@ -299,15 +295,6 @@ export function SessionRow({
          function getSessionActions() {
            if (pendingAction !== null) return ([])
 return ([
-    ...(!session.archived && !persistentOf(session) && onSetPersistent
-      ? [
-          {
-            label: "Persist",
-            icon: Pin,
-            onSelect: () => onSetPersistent(session.id, true)
-          }
-        ]
-      : []),
     ...(session.archived
       ? onRestore
         ? [

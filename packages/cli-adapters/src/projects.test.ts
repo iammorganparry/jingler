@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
@@ -107,6 +107,22 @@ describe("ProjectService", () => {
     expect(listed.value).toEqual([
       expect.objectContaining({ id: registered.value.id, availability: "missing" })
     ])
+  })
+
+  it("creates and initialises a new local repository", async () => {
+    const destination = join(repos.dir, "new-project")
+    const result = await runExit(
+      ProjectService.createDirectory({ path: destination, name: "New project" }).pipe(
+        Effect.provide(ProjectService.Default)
+      ),
+      temp.layer
+    )
+
+    expect(result._tag).toBe("Success")
+    expect(existsSync(join(destination, ".git"))).toBe(true)
+    if (result._tag === "Success") {
+      expect(result.value).toMatchObject({ name: "New project", path: destination })
+    }
   })
 
   it("clones projects without allowing interactive credential prompts", async () => {

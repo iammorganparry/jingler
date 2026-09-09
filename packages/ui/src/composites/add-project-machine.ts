@@ -1,7 +1,7 @@
 import type { GitHubCloneRepository, Project, ProjectDirectoryListing } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 
-export type AddProjectMethod = "existing" | "browse" | "clone" | "new"
+export type AddProjectMethod = "existing" | "clone" | "new"
 
 export interface AddProjectDeps {
   browse: () => Promise<string | null>
@@ -10,6 +10,7 @@ export interface AddProjectDeps {
   listGitHubRepositories: () => Promise<ReadonlyArray<GitHubCloneRepository>>
   register: (input: { path: string; name?: string }) => Promise<Project>
   createDirectory: (input: { path: string; name?: string }) => Promise<Project>
+  clone: (input: { url: string; destination: string; name?: string }) => Promise<Project>
   cloneFromGitHub: (input: {
     installationId: string
     repository: string
@@ -31,6 +32,7 @@ export interface AddProjectContext {
   directoryError: string | null
   githubRepositories: ReadonlyArray<GitHubCloneRepository>
   selectedGitHubRepository: GitHubCloneRepository | null
+  remoteUrl: string
   githubError: string | null
 }
 
@@ -42,12 +44,48 @@ type AddProjectEvent =
   | { type: "SET_PATH"; path: string }
   | { type: "SET_NAME"; name: string }
   | { type: "OPEN_DIRECTORY"; path?: string }
+  | { type: "BROWSE" }
   | { type: "CHOOSE_DIRECTORY"; path: string }
   | { type: "SELECT_GITHUB_REPOSITORY"; repository: GitHubCloneRepository }
+  | { type: "SET_REMOTE_URL"; url: string }
+  | { type: "SELECT_REMOTE_URL" }
   | { type: "SUBMIT" }
 
 const errorText = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Could not add the project."
+
+export const repositoryNameFromUrl = (value: string): string =>
+  value.trim().replace(/[\\/]+$/, "").split(/[/:]/).at(-1)?.replace(/\.git$/i, "") || "repository"
+
+const submitProject = (context: AddProjectContext): Promise<Project> => {
+  const deps = context.getDeps()
+  const name = context.name.trim() || undefined
+  if (context.method === "clone" && context.selectedGitHubRepository) {
+    return deps.cloneFromGitHub({
+      installationId: context.selectedGitHubRepository.installationId,
+      repository: context.selectedGitHubRepository.fullName,
+      destination: context.path.trim(),
+      ...(name === undefined ? {} : { name })
+    })
+  }
+  if (context.method === "clone") {
+    return deps.clone({
+      url: context.remoteUrl.trim(),
+      destination: context.path.trim(),
+      ...(name === undefined ? {} : { name })
+    })
+  }
+  if (context.method === "new") {
+    return deps.createDirectory({
+      path: context.path.trim(),
+      ...(name === undefined ? {} : { name })
+    })
+  }
+  return deps.register({
+    path: context.path.trim(),
+    ...(name === undefined ? {} : { name })
+  })
+}
 
 export const addProjectMachine = setup({
   types: {
@@ -75,7 +113,8 @@ export const addProjectMachine = setup({
   guards: {
     canSubmit: ({ context }) =>
       context.method === "clone"
-        ? context.selectedGitHubRepository !== null && context.path.trim().length > 0
+        ? (context.selectedGitHubRepository !== null || context.remoteUrl.trim().length > 0) &&
+          context.path.trim().length > 0
         : context.path.trim().length > 0,
     isClone: ({ context }) => context.method === "clone"
   },
@@ -90,6 +129,7 @@ export const addProjectMachine = setup({
       directoryError: null,
       githubRepositories: [],
       selectedGitHubRepository: null,
+      remoteUrl: "",
       githubError: null
     }),
     close: ({ context }) => context.getDeps().onClose(),
@@ -121,6 +161,7 @@ export const addProjectMachine = setup({
     directoryError: null,
     githubRepositories: [],
     selectedGitHubRepository: null,
+    remoteUrl: "",
     githubError: null
   }),
   states: {
@@ -142,17 +183,13 @@ export const addProjectMachine = setup({
             })
           },
           {
-            guard: ({ event }) => event.method === "browse",
-            target: "browsing",
-            actions: assign({ method: "browse", error: null })
-          },
-          {
             guard: ({ event }) => event.method === "clone",
             target: "githubRepositoriesLoading",
             actions: assign({
               method: "clone",
               githubRepositories: [],
               selectedGitHubRepository: null,
+              remoteUrl: "",
               githubError: null,
               error: null
             })
@@ -190,6 +227,7 @@ export const addProjectMachine = setup({
       on: {
         CLOSE: { target: "closed", actions: "close" },
         BACK: { target: "methods", actions: assign({ directoryError: null }) },
+        BROWSE: { target: "browsing", actions: assign({ error: null }) },
         OPEN_DIRECTORY: {
           target: "directoryLoading",
           actions: assign(({ event }) => ({
@@ -234,17 +272,34 @@ export const addProjectMachine = setup({
       },
       on: {
         CLOSE: { target: "closed", actions: "close" },
-        BACK: { target: "methods" }
+        BACK: { target: "methods" },
+        SET_REMOTE_URL: {
+          actions: assign(({ event }) => ({ remoteUrl: event.url, selectedGitHubRepository: null }))
+        },
+        SELECT_REMOTE_URL: {
+          guard: ({ context }) => context.remoteUrl.trim().length > 0,
+          target: "cloneDestinationBrowsing",
+          actions: assign({ githubError: null, error: null })
+        }
       }
     },
     githubRepositories: {
       on: {
         CLOSE: { target: "closed", actions: "close" },
         BACK: { target: "methods", actions: assign({ githubError: null }) },
+        SET_REMOTE_URL: {
+          actions: assign(({ event }) => ({ remoteUrl: event.url, selectedGitHubRepository: null }))
+        },
+        SELECT_REMOTE_URL: {
+          guard: ({ context }) => context.remoteUrl.trim().length > 0,
+          target: "cloneDestinationBrowsing",
+          actions: assign({ githubError: null, error: null })
+        },
         SELECT_GITHUB_REPOSITORY: {
           target: "cloneDestinationBrowsing",
           actions: assign(({ event }) => ({
             selectedGitHubRepository: event.repository,
+            remoteUrl: "",
             githubError: null,
             error: null
           }))
@@ -256,7 +311,8 @@ export const addProjectMachine = setup({
         src: "browseCloneDestination",
         input: ({ context }) => ({
           run: context.getDeps().browseCloneDestination,
-          repositoryName: context.selectedGitHubRepository?.fullName.split("/").at(-1) ?? "repository"
+          repositoryName: context.selectedGitHubRepository?.fullName.split("/").at(-1) ??
+            repositoryNameFromUrl(context.remoteUrl)
         }),
         onDone: [
           {
@@ -291,28 +347,7 @@ export const addProjectMachine = setup({
       invoke: {
         src: "submit",
         input: ({ context }) => ({
-          run: () => {
-            const deps = context.getDeps()
-            const name = context.name.trim() || undefined
-            if (context.method === "clone" && context.selectedGitHubRepository) {
-              return deps.cloneFromGitHub({
-                installationId: context.selectedGitHubRepository.installationId,
-                repository: context.selectedGitHubRepository.fullName,
-                destination: context.path.trim(),
-                ...(name === undefined ? {} : { name })
-              })
-            }
-            if (context.method === "new") {
-              return deps.createDirectory({
-                path: context.path.trim(),
-                ...(name === undefined ? {} : { name })
-              })
-            }
-            return deps.register({
-              path: context.path.trim(),
-              ...(name === undefined ? {} : { name })
-            })
-          }
+          run: () => submitProject(context)
         }),
         onDone: { target: "closed", actions: ["added", "close"] },
         onError: [

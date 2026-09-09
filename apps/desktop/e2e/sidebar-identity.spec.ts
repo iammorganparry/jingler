@@ -22,7 +22,7 @@ const sessions: ReadonlyArray<SeedSession> = [
   },
   {
     id: "s_idle",
-    repo: "widget",
+    repo: "jingler",
     branch: "chore/quiet",
     title: "Quiet maintenance",
     status: "idle",
@@ -57,6 +57,7 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
 }) => {
   const { window } = await launchApp({
     configured: true,
+    isolateSystemHome: true,
     withRepo: true,
     seed: ({ repoPath }) => {
       execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/widget.git"], {
@@ -75,15 +76,20 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   const attention = window.locator('[data-testid="session-row-s_attention"]').last()
   const running = window.locator('[data-testid="session-row-s_running"]').last()
   const idle = window.locator('[data-testid="session-row-s_idle"]').last()
-  await expect(attention).toBeVisible()
+  await expect(window.getByTestId("project-sidebar")).toBeVisible()
   await expect(running).toBeVisible()
+  await expect(idle).toHaveCount(0)
+  await expect(attention).toHaveCount(0)
+
+  await window.getByRole("button", { name: "Unassigned", exact: true }).click()
+  await expect(attention).toBeVisible()
   await expect(idle).toBeVisible()
-  const positions = await Promise.all([attention, running, idle].map((row) => row.boundingBox()))
+  await expect(running).toHaveCount(0)
+  const positions = await Promise.all([attention, idle].map((row) => row.boundingBox()))
   expect(positions[0]!.y).toBeLessThan(positions[1]!.y)
-  expect(positions[0]!.y).toBeLessThan(positions[2]!.y)
+  await expect(window.getByText("Needs Input", { exact: true }).first()).toBeVisible()
 
   await expect(attention).toContainText("jingler")
-  await expect(attention).toContainText("Needs Input")
   await expect(attention).toContainText("#5501")
   await expect(window.getByTestId("session-location-s_attention")).toHaveAttribute(
     "title",
@@ -91,6 +97,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   )
   await expect(attention.getByTitle("OpenAI")).toBeVisible()
 
+  await window.getByRole("button", { name: "widget", exact: true }).click()
+  await expect(running).toBeVisible()
   await expect(window.getByTestId("session-location-s_running")).toHaveAttribute(
     "title",
     "Local session"
@@ -120,6 +128,10 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(sidebarSurface.radius).toBe(0)
   expect(sidebarSurface.backdrop).toBe("none")
   expect(sidebarSurface.background).toBe(appBackground)
+  await expect(window.getByTestId("project-sidebar")).toHaveCSS(
+    "background-color",
+    sidebarSurface.background
+  )
   await expect(window.getByRole("separator", { name: "Resize sidebar" })).toHaveCSS(
     "background-color",
     "rgba(0, 0, 0, 0)"

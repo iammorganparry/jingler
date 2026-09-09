@@ -199,43 +199,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   // still-blank WebContents starts a second load and Electron aborts the first.
   const controlledNavigations = new Set<string>()
   const pendingNavigations = new Map<string, { requestedUrl: string; redirects: Set<string> }>()
-  let visibilityWindow: BrowserWindow | null = null
-  let windowFocused = process.env.JINGLER_E2E_HEADLESS === "1"
-
   const mainWindow = (): BrowserWindow | null => BrowserWindow.getAllWindows()[0] ?? null
-
-  const syncBrowserVisibility = (visible: boolean): void => {
-    for (const [key, view] of browserViews) {
-      view.setVisible(visible && visibleBrowserSessions.has(key))
-    }
-  }
-
-  // A visible browser WebContentsView may activate its host when a background load finishes.
-  // Keep browser previews hidden while Jingler is inactive; agent control still works.
-  const hideBrowserViews = (): void => {
-    windowFocused = false
-    syncBrowserVisibility(false)
-  }
-  const restoreBrowserViews = (): void => {
-    windowFocused = true
-    syncBrowserVisibility(true)
-  }
-  const unbindWindowVisibility = (): void => {
-    visibilityWindow?.off("blur", hideBrowserViews)
-    visibilityWindow?.off("focus", restoreBrowserViews)
-    visibilityWindow?.off("closed", unbindWindowVisibility)
-    visibilityWindow = null
-  }
-
-  const bindWindowVisibility = (win: BrowserWindow): void => {
-    if (visibilityWindow === win) return
-    unbindWindowVisibility()
-    visibilityWindow = win
-    windowFocused = process.env.JINGLER_E2E_HEADLESS === "1" || win.isFocused()
-    win.on("blur", hideBrowserViews)
-    win.on("focus", restoreBrowserViews)
-    win.on("closed", unbindWindowVisibility)
-  }
 
   const setOwnerVisible = (
     views: Map<string, WebContentsView>,
@@ -245,7 +209,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   ) => {
     if (wanted) visibleSessions.add(sessionId)
     else visibleSessions.delete(sessionId)
-    views.get(sessionId)?.setVisible(wanted && (views !== browserViews || windowFocused))
+    views.get(sessionId)?.setVisible(wanted)
   }
 
   /** Load a URL, swallowing failures (dev server down, PDF deleted) so the RPC
@@ -257,7 +221,6 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const createView = (owner: PreviewOwner, sessionId: string | null, chatId: string | null = null): WebContentsView | null => {
     const win = mainWindow()
     if (!win) return null
-    bindWindowVisibility(win)
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
@@ -447,10 +410,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     visibleAssetSessions.delete(sessionId)
   }
 
-  yield* Effect.addFinalizer(() => Effect.sync(() => {
-    unbindWindowVisibility()
-    closeAllNow()
-  }))
+  yield* Effect.addFinalizer(() => Effect.sync(closeAllNow))
 
   return {
     openBrowser: (sessionId, chatId, url, bounds) =>
