@@ -1498,6 +1498,7 @@ function AuthedApp({
         onSignOut={onSignOut}
         repos={repos}
         projects={projectController.projects}
+        projectsLoading={projectController.loading}
         onBrowseProject={projectController.browse}
         onBrowseCloneDestination={projectController.browseCloneDestination}
         onListProjectDirectories={projectController.listDirectories}
