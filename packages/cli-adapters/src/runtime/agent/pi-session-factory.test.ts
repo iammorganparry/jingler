@@ -208,6 +208,10 @@ describe("pi session creation", () => {
     expect(captured[0]?.tools).toEqual(
       expect.arrayContaining(["write", "edit", "plannotator_submit_plan"])
     )
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain(
+      "- plannotator_submit_plan: Submit a Markdown plan for operator review."
+    )
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("- plannotator_update_plan:")
     expect(captured[0]?.customTools?.map(({ name }) => name)).not.toContain(
       "jingler_submit_plan"
     )
@@ -278,7 +282,8 @@ describe("pi session creation", () => {
     ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
-      "jingler_publish_explanation"
+      "jingler_publish_explanation",
+      "jingler_complete_session"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),

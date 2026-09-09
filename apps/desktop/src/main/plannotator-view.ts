@@ -1,6 +1,7 @@
 import {
   BrowserBounds,
   type BrowserBounds as BrowserBoundsData,
+  type PlanBlock,
   PlanDocument,
   type PlanDocument as PlanDocumentData,
   type PlanTaskStatus
@@ -120,23 +121,78 @@ const taskMarker = (status: PlanTaskStatus) => {
   return " "
 }
 
+const blockMarkdown = (block: PlanBlock): ReadonlyArray<string> => {
+  switch (block.kind) {
+    case "prose":
+      return [block.text]
+    case "heading":
+      return [`${"#".repeat(block.level)} ${block.text}`]
+    case "list":
+      return block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : "-"} ${item}`)
+    case "code":
+      return [`\`\`\`${block.language ?? ""}`, block.code, "```"]
+    case "table":
+      return [
+        `| ${block.headers.join(" | ")} |`,
+        `| ${block.headers.map(() => "---").join(" | ")} |`,
+        ...block.rows.map((row) => `| ${row.join(" | ")} |`)
+      ]
+    case "diagram":
+      return ["```mermaid", block.source, "```"]
+  }
+}
+
+const testReferenceMarkdown = (
+  references: ReadonlyArray<{ readonly path: string; readonly cases: ReadonlyArray<string> }>
+): string => references.length === 0
+  ? ""
+  : ` (test: ${references.map(({ path, cases }) => `${path}::${cases.join(", ")}`).join("; ")})`
+
+const stageMarkdown = (
+  stage: PlanDocumentData["plan"]["stages"][number]
+): ReadonlyArray<string> => [
+  "",
+  `## ${stage.title} <!-- id: ${stage.id} -->`,
+  ...(stage.intent.length > 0 ? [stage.intent] : []),
+  ...(stage.approach.length === 0
+    ? []
+    : ["", "### Approach", ...stage.approach.map((step) => `- ${step}`)]),
+  ...(stage.tasks ?? []).map((task) => `- [${taskMarker(task.status)}] ${task.text}`),
+  ...((stage.notes.length === 0 && (stage.walkthrough?.length ?? 0) === 0)
+    ? []
+    : [
+        "",
+        "### Technical explanation",
+        ...[...stage.notes, ...(stage.walkthrough ?? [])].flatMap(blockMarkdown)
+      ]),
+  ...stage.diagrams.flatMap((diagram) => ["", "```mermaid", diagram.source, "```"]),
+  ...(stage.acceptance.length === 0
+    ? []
+    : [
+        "",
+        "### Acceptance",
+        ...stage.acceptance.map((criterion) =>
+          `- [${criterion.status === "passed" || criterion.status === "waived" ? "x" : " "}] ${criterion.text}${testReferenceMarkdown(criterion.testReferences ?? [])}`
+        )
+      ]),
+  ...(stage.files.length === 0
+    ? []
+    : ["", "### Files", ...stage.files.map((file) => `- \`${file.path}\` — ${file.change}`)]),
+  ...(stage.complexity === undefined ? [] : ["", `> complexity: ${stage.complexity}`]),
+  ...(stage.dependencies === undefined || stage.dependencies.length === 0
+    ? []
+    : [`> depends: ${stage.dependencies.join(", ")}`])
+]
+
 export const reviewMarkdownOf = (document: PlanDocumentData): string =>
   document.sourceMarkdown ?? [
     `# ${document.plan.title}`,
-    ...document.plan.stages.flatMap((stage) => [
+    ...document.plan.sections.flatMap((section) => [
       "",
-      `## ${stage.title}`,
-      ...(stage.tasks ?? []).map((task) => `- [${taskMarker(task.status)}] ${task.text}`),
-      ...(stage.acceptance.length === 0
-        ? []
-        : [
-            "",
-            "### Acceptance",
-            ...stage.acceptance.map((criterion) =>
-              `- [${criterion.status === "passed" || criterion.status === "waived" ? "x" : " "}] ${criterion.text}`
-            )
-          ])
+      ...(section.title.length > 0 ? [`## ${section.title}`] : []),
+      ...section.blocks.flatMap((block) => ["", ...blockMarkdown(block)])
     ]),
+    ...document.plan.stages.flatMap(stageMarkdown),
     ""
   ].join("\n")
 

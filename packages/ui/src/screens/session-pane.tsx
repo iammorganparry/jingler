@@ -85,7 +85,8 @@ const DISPLAY_TONE: Record<SessionDisplayStatus, "yellow" | "blue" | "green"> = 
   running: "yellow",
   monitoring: "yellow",
   "needs-input": "blue",
-  idle: "yellow"
+  idle: "yellow",
+  settled: "green"
 }
 
 /**
@@ -437,6 +438,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             onRenameTitle={
               props.onRenameSession ? (title) => props.onRenameSession?.(active.id, title) : undefined
             }
+            onClosePane={props.onClosePane}
             // The chat pills share the tab row, behind a divider. Built by the
             // renderer (RPCs + live activity), threaded in as an opaque node.
             chatSlot={props.renderChatTabs?.(active, {

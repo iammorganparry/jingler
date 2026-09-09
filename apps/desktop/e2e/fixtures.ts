@@ -280,9 +280,9 @@ export interface LaunchOptions {
    */
   readonly userDataDir?: string;
   /**
-   * Point the launched process's home-directory discovery at this launch's
-   * throwaway home. Use when testing imports from ~/.agents, ~/.claude, or
-   * similar roots without reading or mutating the developer's real files.
+   * Point home-directory discovery at this launch's throwaway home (default true).
+   * Set false only for explicit physical-host QA; routine tests must not discover
+   * the developer's real MCP, shell, or provider files.
    */
   readonly isolateSystemHome?: boolean;
   /** Seed config.json so the app boots configured (past first-run). */
@@ -894,7 +894,7 @@ function fixtureLaunchEnvironment({
     JINGLER_E2E_HEADLESS: process.env.JINGLER_E2E_HEADED === "1" ? "0" : "1",
     ...options.e2eEnv,
   };
-  if (options.isolateSystemHome) Object.assign(launchEnv, { HOME: home });
+  if (options.isolateSystemHome !== false) Object.assign(launchEnv, { HOME: home });
   if (deviceRelay) {
     Object.assign(launchEnv, {
       JINGLER_DEVICE_RELAY_URL: deviceRelay.url,

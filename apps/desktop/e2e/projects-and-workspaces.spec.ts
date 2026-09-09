@@ -244,9 +244,16 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   // Plan tab reviews and approves it — there is no separate plan store.
   await expect.poll(() => existsSync(join(worktreePath, "PLAN.md")), { timeout: 20_000 }).toBe(true)
   await launched.window.getByTestId("view-tab-plan").first().click()
-  await launched.window.getByRole("button", { name: "More plan actions" }).click()
-  await launched.window.getByRole("menuitem", { name: "Approve and auto", exact: true }).click()
-  await launched.window.getByTestId("active-chat-tab").first().click()
+  await expect.poll(() => launched.app.evaluate(async ({ webContents }) => {
+    const review = webContents.getAllWebContents()
+      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
+    return review?.executeJavaScript(
+      "fetch('/api/approve', { method: 'POST' }).then((response) => response.status)"
+    ) ?? 0
+  })).toBe(200)
+  await launched.window.getByRole("button", {
+    name: "[[plan]] refactor auth to a TokenStore", exact: true
+  }).click()
   await expect(
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })

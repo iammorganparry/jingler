@@ -254,7 +254,12 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
       onStop={onStop}
       className={WIDTH}
     >
-      {canonicalChanges.length > 0 && <FileChangeList changes={canonicalChanges} />}
+      {canonicalChanges.length > 0 && (
+        <FileChangeList
+          changes={canonicalChanges}
+          initialLimit={tool.id.startsWith("reconcile:") ? 10 : undefined}
+        />
+      )}
       {openable && expanded && (
         <div className="border-t border-line bg-editor">
           {/* The header truncates a long command to one line; this is where you

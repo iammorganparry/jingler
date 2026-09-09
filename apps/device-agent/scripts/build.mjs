@@ -17,6 +17,7 @@ await build({
   entryPoints: [resolve(import.meta.dirname, "../src/index.ts")],
   bundle: true,
   platform: "node",
+  mainFields: ["module", "main"],
   format: "esm",
   target: "node24",
   outfile: resolve(payload, "jingler-device.mjs"),
@@ -44,6 +45,7 @@ await cp(
 
 const packageRoots = [
   "@dietrichgebert/ponytail",
+  "@jingler/plannotator-ext",
   "pi-subagents",
   "@earendil-works/pi-agent-core",
   "@earendil-works/pi-ai",
@@ -55,7 +57,9 @@ const copied = new Set()
 const copyPackage = async (name) => {
   if (copied.has(name)) return
   copied.add(name)
-  const source = resolve(root, "node_modules", name)
+  const source = name === "@jingler/plannotator-ext"
+    ? resolve(root, "packages/plannotator-ext")
+    : resolve(root, "node_modules", name)
   const manifest = JSON.parse(await readFile(resolve(source, "package.json"), "utf8"))
   const destination = resolve(payload, "node_modules", name)
   await mkdir(dirname(destination), { recursive: true })
@@ -73,6 +77,12 @@ const copyPackage = async (name) => {
 }
 
 for (const name of packageRoots) await copyPackage(name)
+// The compatibility entry is executed beside dist/node_modules; the archive uses
+// runtime-payload/node_modules. Keep both layouts runnable from the same build.
+await cp(resolve(payload, "node_modules"), resolve(dist, "node_modules"), {
+  recursive: true,
+  dereference: true
+})
 
 await run("tar", [
   "-czf",

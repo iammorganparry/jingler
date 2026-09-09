@@ -266,6 +266,40 @@ beforeEach(() => {
   h.reasoningCalls.length = 0
 })
 
+describe("conversationMachine — persisted Settled", () => {
+  it.each([false, true])("preserves persisted Settled through load and reopens on new work (load failure: %s)", async (loadFails) => {
+    if (loadFails) h.transcriptGate = Promise.reject(new Error("disk unavailable"))
+    const actor = createActor(conversationMachine, {
+      input: { session: { ...session, status: "settled" } }
+    }).start()
+    try {
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      expect(actor.getSnapshot().context.persistedStatus).toBe("settled")
+      expect(actor.getSnapshot().context.loaded).toBe(!loadFails)
+      expect(h.statusWrites).toEqual([])
+
+      actor.send({ type: "SEND", text: "Follow-up work" })
+      expect(actor.getSnapshot().context.persistedStatus).toBe("idle")
+      expect(actor.getSnapshot().context.session.status).toBe("idle")
+      await waitFor(actor, () => h.agentRunCalls.length === 1)
+      expect(h.statusWrites).toEqual(["idle"])
+    } finally {
+      actor.stop()
+    }
+  })
+
+  it("keeps old Idle sessions Idle without completion evidence", async () => {
+    const actor = start()
+    try {
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      expect(actor.getSnapshot().context.persistedStatus).toBe("idle")
+      expect(h.statusWrites).toEqual([])
+    } finally {
+      actor.stop()
+    }
+  })
+})
+
 describe("conversationMachine — remote session envelopes", () => {
   it("starts observing a remote turn from idle without dropping its first event", async () => {
     const actor = start()

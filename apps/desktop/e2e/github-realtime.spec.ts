@@ -284,14 +284,12 @@ test("uses a distinct relay Durable Object connection per linked session and rep
     ).length;
   };
   await expect.poll(acceptedTurnCount).toBe(1);
-  expect(githubRelay.acknowledgements.some((ack) => ack.cursor === 1)).toBe(
-    false,
-  );
+  await expect.poll(() =>
+    githubRelay.acknowledgements.some((ack) => ack.cursor === 1)
+  ).toBe(true);
 
-  // Force the exact crash boundary: main durably accepted and scheduled the
-  // visible turn, but the injected mark-dispatched failure left its outbox row
-  // pending and cursor unacknowledged. Fresh-app replay must hit transcript
-  // idempotency, not create another instruction or agent run.
+  // The first mark attempt fails, then the live retry acknowledges it. Restarting
+  // must still preserve transcript idempotency and never create another turn.
   await launched.app.close();
   const restarted = await launchApp({
     configured: true,
@@ -366,13 +364,10 @@ test("uses a distinct relay Durable Object connection per linked session and rep
   await expect(currentWindow.getByText(busy, { exact: false })).toHaveCount(1, {
     timeout: 20_000,
   });
-  expect(githubRelay.acknowledgements.some((ack) => ack.cursor === 3)).toBe(
-    false,
-  );
+  await expect.poll(() =>
+    githubRelay.acknowledgements.some((ack) => ack.cursor === 3)
+  ).toBe(true);
   await currentWindow.getByRole("button", { name: /Allow once/ }).click();
-  await expect
-    .poll(() => githubRelay.acknowledgements.some((ack) => ack.cursor === 3))
-    .toBe(true);
 
   const busyTranscript = join(
     restarted.home,

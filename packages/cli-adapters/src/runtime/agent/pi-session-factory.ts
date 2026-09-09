@@ -322,6 +322,16 @@ const createResources = (
 ) => {
   const tools = [
     ...(registry?.capabilitiesFor(spec.role, spec.mode) ?? []),
+    {
+      id: "plannotator_submit_plan",
+      version: "1",
+      description: "Submit a Markdown plan for operator review."
+    },
+    {
+      id: "plannotator_update_plan",
+      version: "1",
+      description: "Refresh the active Markdown plan without requesting review."
+    },
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
   // Written for every mode: plan runs swap to the plan-execution toolset on

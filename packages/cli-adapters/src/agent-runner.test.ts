@@ -179,6 +179,85 @@ describe("isContextOverflowFailure", () => {
   })
 })
 
+describe("AgentRunner session completion", () => {
+  it.each(["background", "sibling"] as const)("blocks completion while %s work is live", async (blocker) => {
+    await Effect.runPromise(Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      let calls = 0
+      const adapter = Layer.succeed(AgentTurnDriver, AgentTurnDriver.of({
+        run: (_sessionId, _spec, ctx) => Effect.gen(function* () {
+          if (blocker === "sibling" && calls++ === 0) {
+            yield* Deferred.succeed(started, undefined)
+            yield* Effect.never
+          }
+          if (blocker === "background") yield* ctx.emit({
+            _tag: "BackgroundTaskStarted", id: "completion-blocker",
+            description: "Pending work", taskType: "bash", subagentType: null, toolUseId: null
+          })
+          yield* ctx.emit({ _tag: "SessionCompletionDeclared" })
+          yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }),
+        stop: () => Effect.void
+      }))
+      const base = Layer.mergeAll(
+        AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
+        ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
+        BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+      )
+      yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        if (blocker === "sibling") {
+          const sibling = yield* SessionStore.createChat(SESSION)
+          yield* Effect.fork(runner.prompt(SESSION, sibling.activeChatId, "pending").pipe(Stream.runDrain))
+          yield* Deferred.await(started)
+        }
+        const events = yield* runner.prompt(SESSION, SESSION, "finish").pipe(
+          Stream.takeUntil((event) => event._tag === "Done"), Stream.runCollect
+        )
+        expect(Array.from(events).some((event) => event._tag === "SessionSettled")).toBe(false)
+        expect((yield* SessionStore.get(SESSION)).status).toBe("idle")
+        yield* runner.stop(SESSION)
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.timeout("10 seconds")))
+  })
+
+  it("settles only after an explicit declaration and successful terminal event", async () => {
+    let declare = false
+    const adapter = Layer.succeed(
+      AgentTurnDriver,
+      AgentTurnDriver.of({
+        run: (_sessionId, _spec, ctx) => Effect.gen(function* () {
+          if (declare) yield* ctx.emit({ _tag: "SessionCompletionDeclared" })
+          yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+        }),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      adapter,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    await Effect.runPromise(Effect.gen(function* () {
+      const runner = yield* AgentRunner
+      yield* runner.prompt(SESSION, SESSION, "partial").pipe(Stream.runDrain)
+      expect((yield* SessionStore.get(SESSION)).status).toBe("idle")
+      declare = true
+      const events = yield* runner.prompt(SESSION, SESSION, "finish").pipe(Stream.runCollect)
+      expect(Array.from(events).some((event) => event._tag === "SessionSettled")).toBe(true)
+      expect((yield* SessionStore.get(SESSION)).status).toBe("settled")
+    }).pipe(Effect.provide(base)))
+  })
+})
+
 describe("AgentRunner remote MCP attachments", () => {
   it("supplies the Preview HTTP entry without persisting its bearer", async () => {
     const captured: AgentTurnSpec[] = []

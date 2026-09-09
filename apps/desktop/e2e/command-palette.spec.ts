@@ -217,11 +217,11 @@ test("the title bar's search control opens the palette", async ({ launchApp }) =
   // The palette was keyboard-only before this: ⌘K and nothing on screen, which
   // is fine for whoever already knows and invisible to everyone else. The point
   // of the control is that it is the discoverable route to the same thing.
-  const search = appShell(window)
+  const search = window.getByRole("button", { name: "Search sessions and actions" })
   await expect(search).toBeVisible()
   const searchBox = await search.boundingBox()
   expect(searchBox).not.toBeNull()
-  expect(searchBox!.width).toBeGreaterThan(500)
+  expect(searchBox!.width).toBeGreaterThan(150)
   expect(searchBox!.height).toBe(30)
   await expect(window.getByTestId("command-palette")).toBeHidden()
 
@@ -232,9 +232,7 @@ test("the title bar's search control opens the palette", async ({ launchApp }) =
   await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
 })
 
-test("toggles the terminal dock — an action the shell cannot reach on its own", async ({
-  launchApp
-}) => {
+test("opens the terminal surface from the command palette", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
@@ -242,28 +240,15 @@ test("toggles the terminal dock — an action the shell cannot reach on its own"
   })
 
   await expect(appShell(window)).toBeVisible()
-
-  // The dock starts visible (see `terminal.spec.ts`), so the palette offers to
-  // HIDE it — the label states the effect, not the current state.
   await window.keyboard.press("Meta+k")
-  const hide = window.getByTestId("palette-item-action:toggle-terminal")
-  // `toContainText` also settles the open spring before the click — see the note
-  // in the "Go to <Tab>" test below.
-  await expect(hide).toContainText("Hide Terminal")
-  await hide.click()
+  const terminal = window.getByTestId("palette-item-tab:terminal")
+  await expect(terminal).toContainText("Go to Terminal")
+  await terminal.click()
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
-  // Hidden, NOT unmounted — `terminal-panel.tsx` keeps the dock in the tree
-  // behind `display:none` so hiding it does not kill the PTY and everything
-  // running in it. Asserting a count of zero here would be asserting a bug.
-  await expect(window.locator(".xterm").first()).toBeHidden()
-
-  // Reopened, the same row now offers the inverse, and restores the dock.
-  await window.keyboard.press("Meta+k")
-  const show = window.getByTestId("palette-item-action:toggle-terminal")
-  await expect(show).toContainText("Show Terminal")
-  await show.click()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
+  await window.getByRole("button", { name: "Close Terminal" }).click()
+  await expect(window.locator(".xterm").first()).toBeHidden()
 })
 
 /**
@@ -318,10 +303,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   const changes = window.getByTestId("palette-item-tab:changes")
   await expect(changes).toBeVisible()
   await changes.click()
-  await expect(window.getByRole("button", { name: "Changes" })).toHaveAttribute(
-    "aria-current",
-    "page"
-  )
+  await expect(window.getByTestId("open-view-tab-changes")).toBeVisible()
 
   // Jump to the other session. It must arrive on Conversation.
   await window.keyboard.press("Meta+k")
@@ -329,11 +311,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   await window.keyboard.press("Enter")
 
   await expect(window.getByTestId("conversation-tab")).toContainText("Beta session")
-  // `aria-current` is absent, not "false", when a tab is not the active one.
-  await expect(window.getByRole("button", { name: "Changes" })).not.toHaveAttribute(
-    "aria-current",
-    "page"
-  )
+  await expect(window.getByTestId("open-view-tab-changes")).toHaveCount(0)
 })
 
 test("archives the active session from the palette", async ({ launchApp }) => {

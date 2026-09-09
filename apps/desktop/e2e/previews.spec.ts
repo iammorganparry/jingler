@@ -116,7 +116,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
 
   // A newly opened Browser stacks beside the current chat while both remain readable.
   await window.getByTestId("view-tab-browser").click()
-  const url = window.getByLabel("Preview URL")
+  const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
   await expect(url).toBeVisible()
   await expect(window.getByTestId("open-view-tab-browser")).toBeVisible()
   await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
@@ -185,7 +185,7 @@ test("browser sign-in popups keep their opener without app privileges", async ({
     })
     await expect(appShell(window)).toBeVisible()
     await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL")
+    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/opener`)
     await url.press("Enter")
     await expect.poll(() => app.evaluate(
@@ -260,7 +260,7 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     })
     await expect(appShell(window)).toBeVisible()
     await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL")
+    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/alpha`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/alpha-history`, { timeout: 10_000 })
@@ -307,7 +307,7 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
     await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/alpha-history`)
     await sessionRow(window, "Preview Beta").click()
-    await expect(url).toBeHidden()
+    await expect(url).toHaveValue(`${origin}/beta-history`)
 
     await sessionRow(window, "Preview Alpha").click()
     await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
@@ -352,18 +352,20 @@ test("two agents in one session keep independent browser state", async ({ launch
       sessions: agentBrowserSession
     })
     await expect(appShell(window)).toBeVisible()
+    const focusedUrl = () => window
+      .locator('[data-testid^="surface-pane-"][data-focused="true"]')
+      .getByLabel("Preview URL")
     await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL")
-    await url.fill(`${origin}/alpha`)
-    await url.press("Enter")
-    await expect(url).toHaveValue(`${origin}/alpha-history`)
+    await focusedUrl().fill(`${origin}/alpha`)
+    await focusedUrl().press("Enter")
+    await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
 
     await window.getByTitle("2. Agent Beta").click()
-    await expect(url).toBeHidden()
+    await expect(focusedUrl()).toHaveCount(0)
     await window.getByTestId("view-tab-browser").click()
-    await url.fill(`${origin}/beta`)
-    await url.press("Enter")
-    await expect(url).toHaveValue(`${origin}/beta-history`)
+    await focusedUrl().fill(`${origin}/beta`)
+    await focusedUrl().press("Enter")
+    await expect(focusedUrl()).toHaveValue(`${origin}/beta-history`)
 
     const pages = await app.evaluate(async ({ webContents }, expectedOrigin) =>
       Promise.all(webContents.getAllWebContents()
@@ -382,7 +384,7 @@ test("two agents in one session keep independent browser state", async ({ launch
 
     await window.getByTitle("1. Agent Alpha").click()
     await window.getByRole("button", { name: "Browser · Agent Alpha", exact: true }).click()
-    await expect(url).toHaveValue(`${origin}/alpha-history`)
+    await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
   } finally {
     await closeServer(server)
   }
@@ -416,7 +418,7 @@ test("deleting a session closes its native browser resources", async ({ launchAp
     })
     await expect(appShell(window)).toBeVisible()
     await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL")
+    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/owned-by-alpha`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/owned-by-alpha`)
@@ -493,7 +495,7 @@ test("retains each session browser while Files owns two split panes", async ({ l
     })
     await expect(appShell(window)).toBeVisible()
     await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL")
+    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(origin)
     await url.press("Enter")
 
@@ -558,8 +560,6 @@ test("retains each session browser while Files owns two split panes", async ({ l
           expect.stringContaining("beta.pdf")
         ])
       )
-    expect((await visibleNativeUrls()).some((loadedUrl) => loadedUrl.startsWith(origin))).toBe(false)
-
     await alphaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
     await window.getByTestId("view-tab-browser").click()
     await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(origin)

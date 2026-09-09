@@ -438,9 +438,9 @@ return ([
     )
   }
 
-  // Off the display rollup, not the raw status, so the row that SAYS "Idle" is
-  // the row that dims — including a "done" session, which folds to idle.
-  const idle = display === "idle"
+  // Off the display rollup, not the raw status: paused and resolved rows dim,
+  // while live work and requests for input keep their visual weight.
+  const idle = display === "idle" || display === "settled"
   const age =
     activeStartedAt !== null && !Number.isNaN(activeStartedAt)
       ? compactAge(activeStartedAt, now)
@@ -469,7 +469,8 @@ return ([
   )
 }
 
-const idleStatus = (status: ReturnType<typeof displayStatusOf>): boolean => status === "idle"
+const idleStatus = (status: ReturnType<typeof displayStatusOf>): boolean =>
+  status === "idle" || status === "settled"
 
 /** A compact icon button in a row's hover action bar. */
 function RowAction({

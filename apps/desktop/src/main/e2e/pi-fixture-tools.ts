@@ -77,7 +77,7 @@ const startWatcher = (
     yield* publishAll(context, watcherEvents(taskId))
     if (!completes) return
     Effect.runFork(
-      Effect.sleep("2 seconds").pipe(
+      Effect.sleep("15 seconds").pipe(
         Effect.zipRight(
           publishAll(context, [
             {

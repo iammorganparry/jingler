@@ -99,9 +99,11 @@ test("a new chat stays empty while its own transcript loads", async ({ launchApp
     "page"
   )
 
+  const activePane = launched.window.locator('[data-testid^="surface-pane-"][data-focused="true"]')
+  await expect(activePane).toBeVisible()
   await Promise.all([250, 500, 1_000, 2_000, 4_000].map(async (delay) => {
     await launched.window.waitForTimeout(delay)
-    expect(await priorContent.count()).toBe(0)
+    expect(await activePane.getByText("The release checklist is ready.").count()).toBe(0)
   }))
 })
 

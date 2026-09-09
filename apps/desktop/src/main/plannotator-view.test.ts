@@ -91,4 +91,46 @@ describe("reviewMarkdownOf", () => {
     expect(reviewMarkdownOf(legacyDocument)).toContain("- [ ] Implement auth")
     expect(reviewMarkdownOf(legacyDocument)).toContain("- [x] Verify auth")
   })
+
+  it("renders available technical stage detail when source markdown is absent", () => {
+    const document: PlanDocument = {
+      ...legacyDocument,
+      plan: {
+        ...legacyDocument.plan,
+        sections: [{
+          id: "context",
+          title: "Context",
+          blocks: [{ kind: "prose", id: "why", text: "Why this matters." }]
+        }],
+        stages: [{
+          id: "ship-auth",
+          title: "Ship auth",
+          intent: "Users can sign in.",
+          approach: ["Reuse the session store"],
+          tasks: [{ id: "task-1", text: "Implement sign-in", status: "pending" }],
+          files: [{ path: "src/auth.ts", change: "M" }],
+          diagrams: [{ id: "flow", source: "graph TD; A-->B" }],
+          notes: [{ kind: "prose", id: "note", text: "The route calls the shared store." }],
+          acceptance: [{
+            id: "accept-1",
+            text: "Sign-in succeeds",
+            testReferences: [{ path: "src/auth.test.ts", cases: ["signs in"] }],
+            status: "pending",
+            evidence: null
+          }],
+          dependencies: ["database"],
+          complexity: "medium"
+        }],
+        annotations: []
+      }
+    }
+    const markdown = reviewMarkdownOf(document)
+    expect(markdown).toContain("## Context\n\nWhy this matters.")
+    expect(markdown).toContain("## Ship auth <!-- id: ship-auth -->")
+    expect(markdown).toContain("### Technical explanation\nThe route calls the shared store.")
+    expect(markdown).toContain("(test: src/auth.test.ts::signs in)")
+    expect(markdown).toContain("- `src/auth.ts` — M")
+    expect(markdown).toContain("```mermaid\ngraph TD; A-->B\n```")
+    expect(markdown).toContain("> depends: database")
+  })
 })

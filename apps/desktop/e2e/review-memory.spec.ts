@@ -125,12 +125,12 @@ test("the code review tab holds a large changeset without mounting all of it", a
 
   // The diff changing under a mounted pane — an agent editing while you watch.
   // This used to step up ~118MB and never give it back.
-  const beforeChurn = await heapMb()
   for (let rev = 1; rev <= 4; rev++) {
     for (let n = 0; n < FILES; n++) {
       writeFileSync(join(repoPath, `module_${n}.ts`), bigSource(n, rev))
     }
-    await window.getByTestId("active-chat-tab").click()
+    await window.getByTestId("chat-tab-c_s_review_mem_1")
+      .getByRole("button", { name: "Chat 1", exact: true }).click()
     await window.waitForTimeout(300)
     await openChanges()
   }

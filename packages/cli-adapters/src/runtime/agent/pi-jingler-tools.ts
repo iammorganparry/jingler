@@ -98,6 +98,15 @@ export const createJinglerControlTools = (
       execute: ({ explanation }) => Effect.runPromise(context.publishExplanation?.(explanation) ?? Effect.void)
     })
   )
+  registry.register(
+    controlTool({
+      id: "jingler_complete_session",
+      description: "Declare that all work requested in this session is resolved. Call only in the final successful turn after tests, questions, child work, and background work are complete.",
+      input: Schema.Struct({}),
+      roles: ["conversation", "plan", "plan-execution"],
+      execute: () => Effect.runPromise(context.publishEvent({ _tag: "SessionCompletionDeclared" }))
+    })
+  )
   return registry
 }
 

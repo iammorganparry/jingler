@@ -59,7 +59,7 @@ import {
 } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { MAX_PANES } from "./split-layout.js"
-import { matchSplitShortcut } from "./split-shortcuts.js"
+import { matchSplitShortcut, type SplitShortcut } from "./split-shortcuts.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   type SessionSurfaceCommand
@@ -435,6 +435,28 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
  * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
+const hasSimpleOuterSplit = (group: ReturnType<typeof useSplitLayout>["group"]) => {
+  if ((group?.panes.length ?? 0) <= 1) return false
+  const focused = document.querySelector('[data-split-pane-index][data-focused="true"]')
+  return (focused?.querySelectorAll('[data-surface-pane-index]').length ?? 0) <= 1
+}
+
+const routeSplitShortcut = (
+  event: KeyboardEvent,
+  shortcut: SplitShortcut,
+  group: ReturnType<typeof useSplitLayout>["group"],
+  split: ReturnType<typeof useSplitLayout>
+): boolean => {
+  if (!group) return false
+  event.preventDefault()
+  if (!hasSimpleOuterSplit(group)) return true
+  if (shortcut.type === "focus-pane") split.focusPane(group.id, shortcut.index)
+  else if (shortcut.type === "focus-neighbour") split.focusNeighbour(shortcut.direction)
+  else if (shortcut.type === "move-pane") split.moveFocused(shortcut.direction)
+  else if (shortcut.type === "close-pane") split.closeFocused()
+  return false
+}
+
 export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
@@ -723,9 +745,8 @@ function getActiveTabContext(active: Session) {
         if (addNextSessionAsPane()) e.preventDefault()
         return
       }
-      if (!group) return
+      if (!routeSplitShortcut(e, shortcut, group, split)) return
       const detail = surfaceCommandForShortcut(shortcut)!
-      e.preventDefault()
       window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail }))
   }
 

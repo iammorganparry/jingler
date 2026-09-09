@@ -85,7 +85,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
 
   // Approving chat 1 resolves ONLY chat 1's gate — the runs are independent.
   await window.getByRole("button", { name: /Allow once/ }).click()
-  await expect(window.getByText("1 passed")).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByText("1 passed").filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 })
 
   // Chat 2 is still parked at its own gate, untouched by chat 1 finishing.
   await window

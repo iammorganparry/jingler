@@ -82,7 +82,7 @@ describe("Plannotator native projection", () => {
     expect(document.plan.stages).toHaveLength(1)
   })
 
-  it("maps a structured payload losslessly into the rich document", () => {
+  it("preserves structured stage details and checklist identity", () => {
     const projection = Schema.decodeUnknownSync(PlannotatorProjection)({
       phase: "executing",
       planFilePath: "PLAN.md",
@@ -154,5 +154,30 @@ describe("Plannotator native projection", () => {
     expect(stage.files).toEqual([{ path: "src/auth.ts", change: "A" }])
     expect(stage.complexity).toBe("medium")
     expect(planStageExecutionStatus(stage)).toBe("running")
+    expect(stage.approach).toEqual(["Add the module", "Delete the old one"])
+    expect(stage.notes).toEqual([{
+      kind: "prose", id: "stage-auth-note-1", text: "Watch the token format."
+    }])
+    expect(stage.dependencies).toEqual([])
+
+    // The publisher reparses checked Markdown into both checklist and stage statuses.
+    const completed = plannotatorProjectionToPlanDocument({
+      ...projection,
+      checklist: projection.checklist.map((item) => ({ ...item, completed: true })),
+      stages: projection.stages!.map((entry) => ({
+        ...entry,
+        tasks: entry.tasks.map((task) => ({
+          ...task, status: "completed",
+          subtasks: task.subtasks.map((subtask) => ({ ...subtask, status: "completed" }))
+        })),
+        acceptance: entry.acceptance.map((criterion) => ({ ...criterion, status: "passed" }))
+      }))
+    }, "session-1", "chat-1", "2026-08-27T00:01:00.000Z").plan.stages[0]!
+    expect(completed).toEqual({
+      ...stage,
+      tasks: stage.tasks!.map((task) => ({ ...task, status: "completed" })),
+      acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" }))
+    })
+    expect(planStageExecutionStatus(completed)).toBe("completed")
   })
 })

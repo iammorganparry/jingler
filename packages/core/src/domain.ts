@@ -232,6 +232,7 @@ export const SessionStatus = Schema.Literal(
   "running",
   "needs-input",
   "idle",
+  "settled",
   "done",
 );
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
@@ -245,7 +246,7 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
  * in the type means the boundary enforces it, rather than every caller having to
  * remember. Live, in-flight state is `SessionActivity`, which is never persisted.
  */
-export const SettledSessionStatus = Schema.Literal("idle", "needs-input");
+export const SettledSessionStatus = Schema.Literal("idle", "needs-input", "settled");
 export type SettledSessionStatus = Schema.Schema.Type<
   typeof SettledSessionStatus
 >;

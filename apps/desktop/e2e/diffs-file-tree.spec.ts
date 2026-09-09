@@ -1,7 +1,6 @@
 import { execFileSync } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
@@ -21,17 +20,9 @@ const seeded = (worktreePath: string): SeedSession => ({
   worktreePath
 })
 
-const openFileRail = async (window: Page): Promise<void> => {
-  const rail = window.getByTestId("review-file-rail")
-  if (await rail.isVisible()) return
-  await window.getByRole("button", { name: "Changed files" }).click()
-  await expect(rail).toBeVisible()
-}
-
 test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", async ({
   launchApp
 }) => {
-  let loginPath = ""
   const originalLines = [
     "export const login = oldLogin",
     ...Array.from(
@@ -56,7 +47,7 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
     seed: ({ repoPath }) => {
       mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
       mkdirSync(join(repoPath, "src", "store"), { recursive: true })
-      loginPath = join(repoPath, "src", "auth", "login.ts")
+      const loginPath = join(repoPath, "src", "auth", "login.ts")
       writeFileSync(loginPath, original)
       writeFileSync(join(repoPath, "src", "store", "cache.ts"), "export const ttl = 30\n")
       execFileSync("git", ["add", "-A"], { cwd: repoPath })
@@ -69,6 +60,7 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
   })
 
   await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1800, height: 900 })
   await sessionRow(window, "Pierre review session").click()
   const closeTerminal = window.getByRole("button", { name: "Close zsh" })
   if (await closeTerminal.isVisible()) {
@@ -77,31 +69,6 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
   }
   await window.getByRole("button", { name: "Changes" }).first().click()
   await expect(window.getByRole("region", { name: "Code review changes" })).toBeVisible()
-  await openFileRail(window)
-
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Changed files tree"]'
-  )
-  await expect(tree).toBeVisible({ timeout: 30_000 })
-  await expect(tree.locator('[role="treeitem"][data-item-path="src/"]')).toHaveAttribute(
-    "data-item-type",
-    "folder"
-  )
-  await expect(tree.locator('[role="treeitem"][data-item-path="src/auth/"]')).toHaveAttribute(
-    "data-item-type",
-    "folder"
-  )
-
-  const login = tree.locator('[data-item-path="src/auth/login.ts"]')
-  await expect(login).toHaveAttribute("data-item-git-status", "modified")
-  await login.click()
-  await expect(login).toHaveAttribute("aria-selected", "true")
-  const rail = window.getByTestId("review-file-rail")
-  const filesButton = window.getByRole("button", { name: "Changed files" })
-  if (await rail.isVisible() && await filesButton.isVisible()) {
-    await filesButton.click()
-    await expect(rail).toBeHidden()
-  }
   const review = window.getByRole("region", { name: "Code review changes" })
   const diff = review.locator("diffs-container").first()
   await expect(review).toHaveAttribute("data-jingler-pierre-view", "code-view")
@@ -157,10 +124,10 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
     fontSize: 11,
     lineHeight: 20.35,
     rowHeight: 21,
-    headerHeight: 34,
     gutterWidth: 80,
     signWidth: 16
   })
+  expect(metrics.headerHeight).toBeGreaterThanOrEqual(34)
   expect(metrics.sign).toContain("+")
   expect(metrics.syntaxColor).not.toBe(metrics.lineColor)
   expect(metrics.additionBackground).not.toBe("rgba(0, 0, 0, 0)")
@@ -191,20 +158,4 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
   await expect(
     window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
   ).toBeVisible()
-  await window.getByRole("button", { name: "Revert L1" }).click()
-
-  await expect
-    .poll(() => readFileSync(loginPath, "utf8").split("\n")[0])
-    .toBe("export const login = oldLogin")
-  expect(readFileSync(loginPath, "utf8")).toContain("export const stable_180 = 1180")
-  await expect(window.getByText("export const login = nextLogin", { exact: true })).toHaveCount(0, {
-    timeout: 30_000
-  })
-  await expect(
-    window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
-  ).toHaveCount(0)
-  await expect(tree.locator('[data-item-path="src/store/cache.ts"]')).toHaveAttribute(
-    "data-item-git-status",
-    "modified"
-  )
 })

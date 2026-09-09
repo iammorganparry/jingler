@@ -44,6 +44,8 @@ export const routeOf = (event: StreamEvent): EventRoute => {
     event._tag === "SessionIssueLinksChanged" ||
     event._tag === "PlanDraft" ||
     event._tag === "PlannotatorStateChanged" ||
+    event._tag === "SessionCompletionDeclared" ||
+    event._tag === "SessionSettled" ||
     event._tag === "SubagentFleetChanged" ||
     event._tag === "SubagentFleetControlAcknowledged"
   ) {

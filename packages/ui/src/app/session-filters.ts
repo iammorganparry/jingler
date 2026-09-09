@@ -80,7 +80,8 @@ export const STATUS_ORDER: ReadonlyArray<SessionDisplayStatus> = [
   "needs-input",
   "running",
   "monitoring",
-  "idle"
+  "idle",
+  "settled"
 ]
 
 /** Sort rank for `sortBy: "status"` — the same most-active-first order. */

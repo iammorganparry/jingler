@@ -11,6 +11,7 @@ export const statusTextClass: Record<SessionStatus, string> = {
   running: "text-blue",
   "needs-input": "text-blue",
   idle: "text-line-strong",
+  settled: "text-green",
   done: "text-green"
 }
 
@@ -20,11 +21,12 @@ export const statusDotClass: Record<SessionStatus, string> = {
   running: "bg-blue",
   "needs-input": "bg-blue",
   idle: "bg-line-strong",
+  settled: "bg-green",
   done: "bg-green"
 }
 
 /**
- * The five words a session may report in the sidebar — its row label, and its
+ * The six words a session may report in the sidebar — its row label, and its
  * group header when grouping by status.
  *
  * This is the ONLY place the sidebar names a state. It replaced a lowercase
@@ -42,7 +44,8 @@ export const displayStatusLabel: Record<SessionDisplayStatus, string> = {
   running: "Running",
   "needs-input": "Needs Input",
   monitoring: "Monitoring",
-  idle: "Idle"
+  idle: "Idle",
+  settled: "Settled"
 }
 
 /**
@@ -59,7 +62,8 @@ export const displayStatusTone: Record<SessionDisplayStatus, SessionStatus> = {
   running: "running",
   "needs-input": "needs-input",
   monitoring: "running",
-  idle: "idle"
+  idle: "idle",
+  settled: "settled"
 }
 
 /** Whether a status should glow/pulse its dot. */

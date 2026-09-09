@@ -1283,7 +1283,7 @@ describe("activityOf", () => {
 })
 
 /**
- * The sidebar is allowed exactly five words. `displayStatusOf` is what enforces
+ * The sidebar is allowed exactly six words. `displayStatusOf` is what enforces
  * that, so what matters here is TOTALITY and the collapses: every activity kind
  * and every session status must land on one of the five, and the ones that
  * deliberately share a word must keep sharing it.
@@ -1296,7 +1296,8 @@ describe("displayStatusOf", () => {
     "running",
     "needs-input",
     "monitoring",
-    "idle"
+    "idle",
+    "settled"
   ]
 
   const ALL_KINDS: ReadonlyArray<ActivityKind> = [
@@ -1363,11 +1364,11 @@ describe("displayStatusOf", () => {
     expect(displayStatusOf(undefined, "needs-input")).toBe("needs-input")
     expect(displayStatusOf(null, "running")).toBe("running")
     expect(displayStatusOf(null, "thinking")).toBe("thinking")
+    expect(displayStatusOf(null, "settled")).toBe("settled")
   })
 
-  // "done" is in SessionStatus but nothing writes it (SettledSessionStatus is
-  // idle | needs-input), and it isn't one of the five. A session that finished is
-  // a session doing nothing.
+  // Legacy "done" is still readable but never written. It is not proof that all
+  // requested work resolved, so only the explicit "settled" state gets that label.
   it("folds the unreachable done status to idle", () => {
     expect(displayStatusOf(null, "done")).toBe("idle")
   })
