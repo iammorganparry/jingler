@@ -58,6 +58,12 @@ function ProjectAvatar({
           size={32}
           className="rounded-[10px]"
         />
+        <span
+          aria-hidden
+          className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-panel"
+        >
+          {sessionCount}
+        </span>
         {project.availability !== "available" ? (
           <span className="absolute bottom-0 right-0 size-2 rounded-full bg-yellow ring-2 ring-panel" />
         ) : null}
@@ -71,6 +77,7 @@ export function ProjectSidebar({
   sessions,
   activeProjectId,
   projectOwners,
+  loading = false,
   onSelect,
   onAddProject
 }: {
@@ -78,42 +85,63 @@ export function ProjectSidebar({
   sessions: ReadonlyArray<Session>
   activeProjectId: string
   projectOwners?: Readonly<Record<string, string>>
+  loading?: boolean
   onSelect: (projectId: string) => void
   onAddProject?: () => void
 }) {
-  const hasUnassigned = sessions.some(
+  const openSessions = [...sessions]
+    .filter((session) => !session.archived)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const hasUnassigned = openSessions.some(
     (session) => projectIdForSession(session, projects) === UNASSIGNED_PROJECT_ID
   )
-  const items: ReadonlyArray<ProjectItem> = hasUnassigned
+  const candidates: ReadonlyArray<ProjectItem> = hasUnassigned
     ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available" }]
     : projects
+  const items = candidates
+    .map((project) => ({
+      project,
+      sessions: openSessions.filter(
+        (session) => projectIdForSession(session, projects) === project.id
+      )
+    }))
+    .filter(({ sessions: projectSessions }) => projectSessions.length > 0)
+    .sort(
+      (a, b) =>
+        Number(b.project.id === activeProjectId) - Number(a.project.id === activeProjectId) ||
+        b.sessions[0]!.updatedAt.localeCompare(a.sessions[0]!.updatedAt)
+    )
 
   return (
     <nav
       aria-label="Projects"
       data-testid="project-sidebar"
+      aria-busy={loading}
       className="flex w-[60px] flex-none flex-col items-center border-r border-hairline bg-panel py-2"
     >
       <JinglerMark className="mb-2 h-5 w-auto flex-none text-brand" />
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-2">
-        {items.map((project) => {
-          const projectSessions = sessions.filter(
-            (session) => projectIdForSession(session, projects) === project.id && !session.archived
-          )
-          return (
-            <ProjectAvatar
-              key={project.id}
-              project={project}
-              owner={projectOwners?.[project.id]}
-              active={activeProjectId === project.id}
-              sessionCount={projectSessions.length}
-              activeSessionCount={projectSessions.filter((session) =>
-                ["running", "thinking", "needs-input"].includes(session.status)
-              ).length}
-              onSelect={() => onSelect(project.id)}
-            />
-          )
-        })}
+        {loading
+          ? [0, 1, 2].map((index) => (
+              <span
+                key={index}
+                data-testid="project-skeleton"
+                className="size-10 flex-none animate-pulse rounded-xl bg-surface"
+              />
+            ))
+          : items.map(({ project, sessions: projectSessions }) => (
+              <ProjectAvatar
+                key={project.id}
+                project={project}
+                owner={projectOwners?.[project.id]}
+                active={activeProjectId === project.id}
+                sessionCount={projectSessions.length}
+                activeSessionCount={projectSessions.filter((session) =>
+                  ["running", "thinking", "needs-input"].includes(session.status)
+                ).length}
+                onSelect={() => onSelect(project.id)}
+              />
+            ))}
       </div>
       {onAddProject ? (
         <button

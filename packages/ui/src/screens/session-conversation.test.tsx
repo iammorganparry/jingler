@@ -15,10 +15,10 @@ const sessions = [
   testSession({ id: "b1", projectId: "beta", title: "Beta one" })
 ]
 
-function Navigation({ onCreate = () => {} }: { onCreate?: (id: string) => void }) {
+function Navigation() {
   const [active, setActive] = useState("a1")
   return <><output aria-label="Active session">{active}</output><SessionConversation projects={projects} sessions={sessions} activeSessionId={active}
-    onSelectSession={setActive} onNewSessionForProject={onCreate} showEmpty /></>
+    onSelectSession={setActive} showEmpty /></>
 }
 
 afterEach(() => {
@@ -48,12 +48,4 @@ it("routes Explorer files through the reveal callback", () => {
   fireEvent.click(screen.getByRole("tab", { name: "Explorer" }))
   fireEvent.click(screen.getByRole("button", { name: "index.ts" }))
   expect(open).toHaveBeenCalledWith("a1", "src/index.ts")
-})
-
-it("starts a session for an empty project", () => {
-  const create = vi.fn()
-  render(<Navigation onCreate={create} />)
-  fireEvent.click(screen.getByRole("button", { name: "empty" }))
-  expect(create).toHaveBeenCalledWith("empty")
-  expect(screen.queryByTestId("session-row-a1")).toBeNull()
 })

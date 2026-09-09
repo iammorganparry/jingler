@@ -147,6 +147,7 @@ export interface JinglerAppProps {
   repos?: ReadonlyArray<Repo>
   /** Durable registered repositories, independent of workspaces. */
   projects?: ReadonlyArray<Project>
+  projectsLoading?: boolean
   onBrowseProject?: () => Promise<string | null>
   onBrowseCloneDestination?: (repositoryName: string) => Promise<string | null>
   onListProjectDirectories?: (path?: string) => Promise<ProjectDirectoryListing>
@@ -478,6 +479,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         }
         sessions={sessions}
         projects={projects}
+        projectsLoading={props.projectsLoading}
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
         onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}

@@ -30,6 +30,7 @@ export interface SessionConversationProps {
   search?: ReactNode
   sessions: ReadonlyArray<Session>
   projects?: ReadonlyArray<Project>
+  projectsLoading?: boolean
   projectOwners?: Readonly<Record<string, string>>
   onAddProject?: () => void
   onNewSessionForProject?: (projectId: string) => void
@@ -355,6 +356,7 @@ export function SessionConversation(props: SessionConversationProps) {
           sessions={props.sessions}
           activeProjectId={selectedProjectId}
           projectOwners={props.projectOwners}
+          loading={props.projectsLoading}
           onSelect={selectProject}
           onAddProject={props.onAddProject}
         />
