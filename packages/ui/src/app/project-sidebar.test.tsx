@@ -22,7 +22,7 @@ const sessions = [
 afterEach(cleanup)
 
 describe("ProjectSidebar", () => {
-  it("shows projects with open sessions, selected first then most recent, with counts", () => {
+  it("shows every project, selected first then sessions by recency, with counts", () => {
     render(
       <ProjectSidebar
         projects={projects}
@@ -37,11 +37,12 @@ describe("ProjectSidebar", () => {
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Alpha",
       "Beta",
-      "Gamma"
+      "Gamma",
+      "Empty"
     ])
-    expect(screen.queryByRole("button", { name: "Empty" })).toBeNull()
     expect(within(screen.getByRole("button", { name: "Alpha" })).getByText("2")).toBeTruthy()
     expect(within(screen.getByRole("button", { name: "Beta" })).getByText("1")).toBeTruthy()
+    expect(within(screen.getByRole("button", { name: "Empty" })).getByText("0")).toBeTruthy()
     const avatar = screen.getByAltText("A")
     expect(avatar.getAttribute("src")).toContain("github.com/acme.png")
   })
