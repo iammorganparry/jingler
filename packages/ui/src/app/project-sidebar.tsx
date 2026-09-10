@@ -120,7 +120,7 @@ export function ProjectSidebar({
       className="flex w-[60px] flex-none flex-col items-center border-r border-hairline bg-panel py-2"
     >
       <JinglerMark className="mb-2 h-5 w-auto flex-none text-brand" />
-      <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-2">
+      <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-2 pt-1">
         {loading
           ? [0, 1, 2].map((index) => (
               <span
