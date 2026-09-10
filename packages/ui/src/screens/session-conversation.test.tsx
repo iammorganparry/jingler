@@ -17,8 +17,15 @@ const sessions = [
 
 function Navigation() {
   const [active, setActive] = useState("a1")
-  return <><output aria-label="Active session">{active}</output><SessionConversation projects={projects} sessions={sessions} activeSessionId={active}
-    onSelectSession={setActive} showEmpty /></>
+  const [currentSessions, setCurrentSessions] = useState(sessions)
+  return <>
+    <output aria-label="Active session">{active}</output>
+    <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
+      session.id === "a1" ? { ...session, updatedAt: "2026-08-01T00:00:00.000Z" } : session
+    ))}>Update Alpha</button>
+    <SessionConversation projects={projects} sessions={currentSessions} activeSessionId={active}
+      onSelectSession={setActive} showEmpty />
+  </>
 }
 
 afterEach(() => {
@@ -26,17 +33,18 @@ afterEach(() => {
   localStorage.clear()
 })
 
-it("restores each project's remembered session", () => {
+it("keeps the selected project scoped until one of its sessions is selected", () => {
   render(<Navigation />)
-  fireEvent.click(screen.getByTestId("session-row-a2"))
-  expect(localStorage.getItem("jingler.project.last-session.alpha")).toBe("a2")
   fireEvent.click(screen.getByRole("button", { name: "beta" }))
-  expect(screen.queryByTestId("session-row-a2")).toBeNull()
+  expect(screen.queryByTestId("session-row-a1")).toBeNull()
   expect(screen.getByTestId("session-row-b1")).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "alpha" }))
-  expect(screen.queryByTestId("session-row-b1")).toBeNull()
-  expect(localStorage.getItem("jingler.project.last-session.alpha")).toBe("a2")
-  expect(screen.getByLabelText("Active session").textContent).toBe("a2")
+  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
+
+  fireEvent.click(screen.getByRole("button", { name: "Update Alpha" }))
+  expect(screen.getByTestId("session-row-b1")).toBeTruthy()
+
+  fireEvent.click(screen.getByTestId("session-row-b1"))
+  expect(screen.getByLabelText("Active session").textContent).toBe("b1")
 })
 
 it("routes Explorer files through the reveal callback", () => {

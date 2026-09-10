@@ -12,7 +12,7 @@ import type {
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import { SessionSidebar } from "../app/session-sidebar.js"
 import { ProjectSidebar } from "../app/project-sidebar.js"
-import { preferredSessionId, projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
+import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
@@ -231,7 +231,6 @@ export interface SessionConversationProps {
 export function SessionConversation(props: SessionConversationProps) {
   const projects = props.projects ?? []
   const activeSession = props.sessions.find((session) => session.id === props.activeSessionId) ?? null
-  const activeSessionId = activeSession?.id ?? null
   const activeSessionProjectId = activeSession
     ? projectIdForSession(activeSession, projects)
     : null
@@ -241,32 +240,15 @@ export function SessionConversation(props: SessionConversationProps) {
   const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
 
   useEffect(() => {
-    if (activeSessionId === null || activeSessionProjectId === null) return
-    setSelectedProjectId(activeSessionProjectId)
-    try {
-      localStorage.setItem(`jingler.project.last-session.${activeSessionProjectId}`, activeSessionId)
-    } catch {
-      // Selection still works when storage is unavailable.
-    }
-  }, [activeSessionId, activeSessionProjectId])
+    if (activeSessionProjectId !== null) setSelectedProjectId(activeSessionProjectId)
+  }, [activeSessionProjectId])
 
   const projectSessions = useMemo(
     () => sessionsForProject(props.sessions, projects, selectedProjectId),
     [props.sessions, projects, selectedProjectId]
   )
 
-  const selectProject = (projectId: string) => {
-    setSelectedProjectId(projectId)
-    let remembered: string | null = null
-    try {
-      remembered = localStorage.getItem(`jingler.project.last-session.${projectId}`)
-    } catch {
-      // Fall through to the newest session.
-    }
-    const next = preferredSessionId(sessionsForProject(props.sessions, projects, projectId), remembered)
-    if (next) props.onSelectSession(next)
-    else if (projectId !== UNASSIGNED_PROJECT_ID) props.onNewSessionForProject?.(projectId)
-  }
+  const selectProject = (projectId: string) => setSelectedProjectId(projectId)
 
   const openNewSession = () => {
     if (selectedProjectId !== UNASSIGNED_PROJECT_ID && props.onNewSessionForProject) {

@@ -25,12 +25,3 @@ export function sessionsForProject(
 ): ReadonlyArray<Session> {
   return sessions.filter((session) => projectIdForSession(session, projects) === projectId)
 }
-
-export function preferredSessionId(
-  sessions: ReadonlyArray<Session>,
-  rememberedId?: string | null
-): string | null {
-  const available = sessions.filter((session) => !session.archived)
-  if (rememberedId && available.some((session) => session.id === rememberedId)) return rememberedId
-  return [...available].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.id ?? null
-}

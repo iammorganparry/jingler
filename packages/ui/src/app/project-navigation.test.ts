@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { Project, Session } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { preferredSessionId, projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
+import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
 
 const project = (values: Partial<Project> & Pick<Project, "id" | "name" | "path">): Project => ({
   availability: "available",
@@ -34,13 +34,4 @@ describe("project navigation", () => {
     expect(projectIdForSession(session({ id: "remote", repoPath: "/repos/a", environmentId: "device" }), [...projects, remote])).toBe("remote")
   })
 
-  it("falls back from stale memory to the newest live session", () => {
-    const sessions = [
-      session({ id: "old", updatedAt: "2026-01-01T00:00:00.000Z" }),
-      session({ id: "new", updatedAt: "2026-02-01T00:00:00.000Z" }),
-      session({ id: "archived", archived: true, updatedAt: "2026-03-01T00:00:00.000Z" })
-    ]
-    expect(preferredSessionId(sessions, "missing")).toBe("new")
-    expect(preferredSessionId(sessions, "old")).toBe("old")
-  })
 })
