@@ -11,6 +11,7 @@ import {
 } from "./runtime/provider-connection.js";
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js";
+import { SubagentModelAssignments } from "./runtime/subagent-settings.js";
 import { OffloadComputeSettings } from "./offload-compute.js";
 import { WebSearchConfig } from "./web-search.js";
 
@@ -926,6 +927,8 @@ export const WorkspaceConfig = Schema.Struct({
   defaultModelId: Schema.optional(ProviderModelId),
   /** Permission mode used for new chats across every provider model. */
   defaultMode: Schema.optional(ExecutionMode),
+  /** Persistent role-to-model overrides for Jingler's managed subagents. */
+  subagentModels: Schema.optional(SubagentModelAssignments),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   /** First-run provider authentication was completed or explicitly skipped. */
   providerSetupCompleted: Schema.optional(Schema.Boolean),

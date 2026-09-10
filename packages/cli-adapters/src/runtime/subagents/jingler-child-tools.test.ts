@@ -43,29 +43,35 @@ describe("Jingler child tools extension", () => {
     }))
     process.env.JINGLER_SUBAGENT_CAPABILITY = capabilityPath
     const registered: string[] = []
-    const setActiveTools = vi.fn()
-    let sessionStart: (() => void) | undefined
+    let activeTools = ["contact_supervisor"]
+    const setActiveTools = vi.fn((tools: string[]) => {
+      activeTools = tools
+    })
+    const events = new Map<string, () => void>()
     const module = await import(
       `${extensionPath.href}?test=${crypto.randomUUID()}`
     ) as { default: (pi: {
       registerTool: (tool: { readonly name: string }) => void
-      on: (event: "session_start", handler: () => void) => void
+      on: (event: "session_start" | "before_agent_start", handler: () => void) => void
       getActiveTools: () => string[]
       setActiveTools: (tools: string[]) => void
     }) => void }
 
     module.default({
       registerTool: (tool) => registered.push(tool.name),
-      on: (_event, handler) => {
-        sessionStart = handler
+      on: (event, handler) => {
+        events.set(event, handler)
       },
-      getActiveTools: () => ["contact_supervisor"],
+      getActiveTools: () => activeTools,
       setActiveTools
     })
-    sessionStart?.()
+    events.get("session_start")?.()
+    activeTools = ["contact_supervisor"]
+    events.get("before_agent_start")?.()
 
     expect(registered).toEqual(["workspace_read_file", "workspace_list_files"])
-    expect(setActiveTools).toHaveBeenCalledWith([
+    expect(setActiveTools).toHaveBeenCalledTimes(2)
+    expect(setActiveTools).toHaveBeenLastCalledWith([
       "contact_supervisor",
       "workspace_read_file",
       "workspace_list_files"

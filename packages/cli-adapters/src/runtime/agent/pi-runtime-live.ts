@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto"
 import { isAbsolute, join, resolve } from "node:path"
-import type { ManagedResource, PiRunSpec } from "@jingler/core"
+import type {
+  ManagedResource,
+  PiRunSpec,
+  ProviderConnection,
+  WorkspaceConfig
+} from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
@@ -67,6 +72,24 @@ const managedSecretDigest = (values: Readonly<Record<string, string>>): string =
       left.localeCompare(right)
     )))
     .digest("hex")
+
+const assignedSubagentConnections = (
+  saved: WorkspaceConfig | null,
+  connections: ReadonlyArray<ProviderConnection>
+): ReadonlyArray<ProviderConnection> => {
+  if (Object.keys(saved?.subagentModels ?? {}).length === 0) return []
+  if (!saved?.defaultConnectionId) {
+    throw new Error("Subagent models require a default provider connection")
+  }
+  const assigned = connections.find(({ id }) => id === saved.defaultConnectionId)
+  if (!assigned) throw new Error("The subagent provider connection is unavailable")
+  if (Object.values(saved.subagentModels ?? {}).some((model) =>
+    !String(model).startsWith(`${assigned.providerId}/`)
+  )) {
+    throw new Error("Subagent models must use the default provider connection")
+  }
+  return [assigned]
+}
 
 export interface PluginToolSuccessfulResult
   extends Omit<ToolSuccessfulResult, "origin"> {
@@ -168,11 +191,27 @@ export const makePiAgentRuntimeLive = (
       childCredentials,
       subagentBroker,
       resolveConnection: (spec) => validateProviderConnection(providers, spec),
+      resolveSubagentConfig: () => Effect.gen(function* () {
+        const saved = yield* config.get()
+        return {
+          models: saved?.subagentModels ?? {},
+          connections: Object.keys(saved?.subagentModels ?? {}).length === 0
+            ? []
+            : assignedSubagentConnections(saved, yield* providers.status)
+        }
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(AppPaths, paths)
+      ),
       terminalTracker: (spec) => new FileChangeTracker({
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.piSessionId ?? spec.runId
       }),
       lockedCapabilityFingerprint: (spec) => Effect.gen(function* () {
+        const runtimeConfig = yield* config.get().pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(AppPaths, paths)
+        )
         const managedMcp = yield* configuredMcp
         const managedFiles = yield* managedResources.enabledForTarget(
           spec.targetCapabilities.targetId
@@ -205,6 +244,8 @@ export const makePiAgentRuntimeLive = (
           preparedCatalogs.delete(oldest)
         }
         return JSON.stringify({
+          subagentModels: runtimeConfig?.subagentModels ?? {},
+          subagentConnectionId: runtimeConfig?.defaultConnectionId ?? null,
           managedMcp: managedMcp.map((server) => server.transport === "stdio"
             ? {
                 name: server.name,

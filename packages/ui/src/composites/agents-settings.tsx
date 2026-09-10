@@ -1,8 +1,13 @@
-import type {
-  DetectedResourceCandidate,
-  ManagedResource,
-  ManagedResourceSelector,
-  ResourceDetectionResult
+import {
+  JINGLER_SUBAGENT_NAMES,
+  ProviderModelId,
+  type DetectedResourceCandidate,
+  type ManagedResource,
+  type ManagedResourceSelector,
+  type ProviderCatalogModel,
+  type ResourceDetectionResult,
+  type JinglerSubagentName,
+  type SubagentModelAssignments
 } from "@jingler/core"
 import { Boxes, Check, FolderOpen, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "../components/button.js"
@@ -11,12 +16,15 @@ import { Toggle } from "../components/toggle.js"
 
 export interface AgentsSettingsProps {
   readonly resources: ReadonlyArray<ManagedResource>
+  readonly models: ReadonlyArray<ProviderCatalogModel>
+  readonly modelAssignments: SubagentModelAssignments
   readonly detection: ResourceDetectionResult | null
   readonly selectedCandidateIds: ReadonlySet<string>
   readonly loading: boolean
   readonly reviewing: boolean
   readonly error?: string | null
   readonly onDetect: () => void
+  readonly onSetModel: (agent: JinglerSubagentName, modelId: ProviderModelId | null) => void
   readonly onToggleCandidate: (id: string) => void
   readonly onImportSelected: () => void
   readonly onCancelDetection: () => void
@@ -32,6 +40,9 @@ const scopeLabel = (resource: ManagedResource): string =>
     : resource.scope.allowedTargets.length === 0
       ? "Portable · all targets"
       : `Portable · ${resource.scope.allowedTargets.join(", ")}`
+
+const agentLabel = (agent: JinglerSubagentName): string =>
+  agent[0]!.toUpperCase() + agent.slice(1)
 
 function CandidateRow({
   candidate,
@@ -80,6 +91,43 @@ export function AgentsSettings(props: AgentsSettingsProps) {
             <RefreshCw size={13} /> Detect resources
           </Button>
         </header>
+
+        <div className="overflow-hidden rounded-lg border border-line bg-panel">
+          <div className="border-b border-hairline px-4 py-3">
+            <strong className="text-[12px] text-text-bright">Subagent models</strong>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              Pin a role to a certified model from the default provider, or inherit the orchestrator.
+            </p>
+          </div>
+          {JINGLER_SUBAGENT_NAMES.map((agent) => {
+            const assigned = props.modelAssignments[agent]
+            const unavailable = assigned && !props.models.some(({ id }) => id === assigned)
+            return (
+              <label
+                key={agent}
+                className="grid grid-cols-[120px_minmax(0,1fr)] items-center gap-3 border-b border-hairline px-4 py-2.5 last:border-b-0"
+              >
+                <span className="text-[11.5px] font-medium text-text-bright">{agentLabel(agent)}</span>
+                <select
+                  aria-label={`${agentLabel(agent)} model`}
+                  value={assigned ?? ""}
+                  disabled={props.loading}
+                  onChange={(event) => props.onSetModel(
+                    agent,
+                    event.target.value === "" ? null : ProviderModelId.make(event.target.value)
+                  )}
+                  className="min-w-0 rounded-md border border-line bg-sunken px-2 py-1.5 text-[11px] text-text-body"
+                >
+                  <option value="">Inherit orchestrator</option>
+                  {unavailable && assigned && <option value={assigned}>Unavailable · {assigned}</option>}
+                  {props.models.map((model) => (
+                    <option key={model.id} value={model.id}>{model.label} · {model.id}</option>
+                  ))}
+                </select>
+              </label>
+            )
+          })}
+        </div>
 
         {props.error && (
           <Callout tone="red">

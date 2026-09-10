@@ -4879,6 +4879,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
     ConfigService.setDefaultMode(defaultMode),
+  "Config.setSubagentModel": ({ agent, modelId }) =>
+    ConfigService.setSubagentModel(agent, modelId),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),

@@ -48,7 +48,9 @@ export default function jinglerChildTools(pi) {
       }
     })
   }
-  pi.on("session_start", () => {
+  const activateBrokeredTools = () => {
     pi.setActiveTools([...new Set([...pi.getActiveTools(), ...brokeredTools])])
-  })
+  }
+  pi.on("session_start", activateBrokeredTools)
+  pi.on("before_agent_start", activateBrokeredTools)
 }

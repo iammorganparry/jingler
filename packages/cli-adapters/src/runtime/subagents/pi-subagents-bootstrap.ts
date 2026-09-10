@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
+import { JINGLER_SUBAGENT_NAMES, type SubagentModelAssignments } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import {
   defaultPiChildLauncherConfig,
@@ -14,16 +15,7 @@ const PI_SUBAGENTS_AGENT_DIR = join(
   dirname(PI_SUBAGENTS_EXTENSION_PATH),
   "agents"
 )
-export const JINGLER_SUBAGENT_AGENT_NAMES = [
-  "delegate",
-  "oracle",
-  "researcher",
-  "reviewer",
-  "scout",
-  "worker",
-  "fanout"
-] as const
-const BUILTIN_AGENTS = JINGLER_SUBAGENT_AGENT_NAMES.filter(
+const BUILTIN_AGENTS = JINGLER_SUBAGENT_NAMES.filter(
   (agent) => agent !== "fanout"
 )
 const STANDARD_CHILD_TOOLS = "contact_supervisor"
@@ -103,13 +95,14 @@ const writeConfig = async (path: string): Promise<void> => {
 const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
-  tools = STANDARD_CHILD_TOOLS
+  tools = STANDARD_CHILD_TOOLS,
+  model?: string
 ): string => source
   .replace(/^tools:.*$/m, `tools: ${tools}`)
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
   .replace(
     /^---\n/u,
-    `---\nextensions: ${childToolsPath}, ${PONYTAIL_EXTENSION_PATH}\n`
+    `---\nextensions: ${childToolsPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
   )
 
 /**
@@ -119,7 +112,8 @@ const rewriteAgentProfile = (
  */
 export const materializePiSubagentProfiles = async (
   agentDir: string,
-  childToolsPath: string
+  childToolsPath: string,
+  models: SubagentModelAssignments = {}
 ): Promise<void> => {
   const target = join(agentDir, "agents")
   await mkdir(target, { recursive: true, mode: 0o700 })
@@ -127,7 +121,7 @@ export const materializePiSubagentProfiles = async (
     const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
     await writeFile(
       join(target, `${agent}.md`),
-      rewriteAgentProfile(source, childToolsPath),
+      rewriteAgentProfile(source, childToolsPath, STANDARD_CHILD_TOOLS, models[agent]),
       { encoding: "utf8", mode: 0o600 }
     )
   }))
@@ -147,7 +141,8 @@ export const materializePiSubagentProfiles = async (
         "You are a fan-out coordinator. Delegate bounded independent tasks, coordinate results, and do not edit the workspace directly."
       ),
     childToolsPath,
-    FANOUT_CHILD_TOOLS
+    FANOUT_CHILD_TOOLS,
+    models.fanout
   )
   await writeFile(join(target, "fanout.md"), fanout, {
     encoding: "utf8",
@@ -166,7 +161,8 @@ export const materializePiSubagentProfiles = async (
  * controls ambiguous, so it fails closed.
  */
 export const preparePiSubagentsRuntime = (
-  agentDir: string
+  agentDir: string,
+  models: SubagentModelAssignments = {}
 ): Effect.Effect<void, PiSubagentsBootstrapError> =>
   Effect.tryPromise({
     try: async () => {
@@ -180,7 +176,11 @@ export const preparePiSubagentsRuntime = (
       process.env.PI_CODING_AGENT_DIR = expected
       await writeConfig(configPath(expected))
       const launcher = defaultPiChildLauncherConfig(expected)
-      await materializePiSubagentProfiles(expected, launcher.childToolsPath)
+      await materializePiSubagentProfiles(
+        expected,
+        launcher.childToolsPath,
+        models
+      )
       await Effect.runPromise(preparePiChildLauncher(launcher))
     },
     catch: (cause) =>

@@ -106,11 +106,14 @@ const useAgentSettings = (
 
   return {
     resources,
+    models: FLOW_PROVIDER_CATALOG.connections.flatMap(({ models }) => models),
+    modelAssignments: {},
     detection: FLOW_RESOURCE_DETECTION,
     selectedCandidateIds,
     loading: false,
     reviewing,
     onDetect: noop,
+    onSetModel: noop,
     onToggleCandidate: (id) => {
       setSelectedCandidateIds((selected) => {
         const next = new Set(selected)

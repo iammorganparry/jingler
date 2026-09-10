@@ -92,6 +92,7 @@ import type {
   ProviderLoginEvent,
   ProviderId,
   ProviderModelId,
+  JinglerSubagentName,
   CodexLoginMethod,
   DetectedResourceCandidate,
   McpConfigEntry,
@@ -767,6 +768,11 @@ export const rpc = {
   /** Turn plan mode's unattended (read-only) command execution on or off. */
   configSetDefaultMode: (defaultMode: ExecutionMode): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultMode({ defaultMode })),
+  configSetSubagentModel: (
+    agent: JinglerSubagentName,
+    modelId: ProviderModelId | null
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setSubagentModel({ agent, modelId })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
   /** Persist ADHD mode; resolves with the whole updated config. */

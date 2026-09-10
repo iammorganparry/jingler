@@ -1,7 +1,13 @@
 import { writeFileSync } from "node:fs"
 import { mkdirSync } from "node:fs"
 import { FileSystem } from "@effect/platform"
-import { defaultPlan, DEFAULT_THEME_ID } from "@jingler/core"
+import {
+  defaultPlan,
+  DEFAULT_THEME_ID,
+  ProviderConnectionId,
+  ProviderId,
+  ProviderModelId
+} from "@jingler/core"
 
 const DEFAULT_PLAN_TEMPLATE_HTML = JSON.stringify(defaultPlan("PRD: Template"))
 import { Effect } from "effect"
@@ -55,6 +61,58 @@ describe("ConfigService", () => {
       providerSetupCompleted: false
     })
     expect(exit.value).not.toHaveProperty("lastRepoPath")
+  })
+
+  it("persists and clears a subagent model assignment", async () => {
+    const model = ProviderModelId.make("openai-codex/gpt-5.6-sol")
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setSubagentModel("worker", model)
+        const assigned = yield* ConfigService.get()
+        yield* ConfigService.setSubagentModel("worker", null)
+        return { assigned, cleared: yield* ConfigService.get() }
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.assigned?.subagentModels?.worker).toBe(model)
+    expect(exit.value.cleared?.subagentModels?.worker).toBeUndefined()
+  })
+
+  it("serializes concurrent subagent model assignments", async () => {
+    const worker = ProviderModelId.make("openai-codex/gpt-5.6-sol")
+    const reviewer = ProviderModelId.make("openai-codex/gpt-6-astra")
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* Effect.all([
+          ConfigService.setSubagentModel("worker", worker),
+          ConfigService.setSubagentModel("reviewer", reviewer)
+        ], { concurrency: "unbounded" })
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value?.subagentModels).toMatchObject({ worker, reviewer })
+  })
+
+  it("clears assignments from another provider when the default changes", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setSubagentModel(
+          "worker",
+          ProviderModelId.make("openai-codex/gpt-5.6-sol")
+        )
+        return yield* ConfigService.setDefaultProviderModel(
+          ProviderConnectionId.make("anthropic-default"),
+          ProviderId.make("anthropic"),
+          ProviderModelId.make("anthropic/claude-opus")
+        )
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.subagentModels).toEqual({})
   })
 
   it("returns null before first-run setup (no config file)", async () => {

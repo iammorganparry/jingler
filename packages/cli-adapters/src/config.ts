@@ -9,6 +9,7 @@ import type {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  JinglerSubagentName,
   WebSearchConfig,
 } from "@jingler/core"
 import {
@@ -32,7 +33,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   const truthyKeys = [
     "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
+    "subagentModels", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
@@ -103,6 +104,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
   {
     accessors: true,
     sync: () => {
+      const writeLock = Effect.runSync(Effect.makeSemaphore(1))
       const get = (): Effect.Effect<WorkspaceConfig | null, ConfigError, ConfigEnv> =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem
@@ -134,9 +136,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
        * a null `reposDir` on first write.
        */
       const patch = (
-        patch: Partial<WorkspaceConfig>
+        update: Partial<WorkspaceConfig> | ((existing: WorkspaceConfig | null) => Partial<WorkspaceConfig>)
       ): Effect.Effect<WorkspaceConfig, ConfigError, ConfigEnv> =>
-        Effect.gen(function* () {
+        writeLock.withPermits(1)(Effect.gen(function* () {
           const existing = yield* get()
           const createdAt =
             existing?.createdAt ?? (yield* Effect.sync(() => new Date().toISOString()))
@@ -144,10 +146,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             reposDir: existing?.reposDir ?? null,
             createdAt,
             ...preservedSettings(existing),
-            ...patch
+            ...(typeof update === "function" ? update(existing) : update)
           }
           return yield* persist(config)
-        })
+        }))
 
       const setReposDir = (dir: string) => patch({ reposDir: dir })
 
@@ -161,6 +163,16 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       /** Permission mode used when creating chats across every provider model. */
       const setDefaultMode = (defaultMode: ExecutionMode) => patch({ defaultMode })
+
+      const setSubagentModel = (
+        agent: JinglerSubagentName,
+        modelId: ProviderModelId | null
+      ) => patch((existing) => {
+        const subagentModels = { ...(existing?.subagentModels ?? {}) }
+        if (modelId === null) delete subagentModels[agent]
+        else subagentModels[agent] = modelId
+        return { subagentModels }
+      })
 
       /** Whether plan mode runs its (read-only) commands without asking. */
       const setPlanAutoRun = (planAutoRun: boolean) => patch({ planAutoRun })
@@ -205,12 +217,17 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         defaultProviderId: ProviderId,
         defaultModelId: ProviderModelId
       ) =>
-        patch({
+        patch((existing) => ({
           defaultConnectionId,
           defaultProviderId,
           defaultModelId,
+          subagentModels: Object.fromEntries(
+            Object.entries(existing?.subagentModels ?? {}).filter(([, model]) =>
+              String(model).startsWith(`${defaultProviderId}/`)
+            )
+          ),
           connectionSelectionRequired: false
-        })
+        }))
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -282,6 +299,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setGit,
         setNotifications,
         setDefaultMode,
+        setSubagentModel,
         setPlanAutoRun,
         setAdhdMode,
         setFontScale,

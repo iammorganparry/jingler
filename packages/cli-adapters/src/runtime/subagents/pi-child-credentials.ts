@@ -21,6 +21,14 @@ export class PiChildCredentialError extends Data.TaggedError(
 export const childCredentialKey = (parentPiSessionId: string): string =>
   createHash("sha256").update(parentPiSessionId).digest("hex")
 
+export const childProviderConnections = (
+  parent: ProviderConnection,
+  assigned: ReadonlyArray<ProviderConnection>
+): ReadonlyArray<ProviderConnection> => [
+  parent,
+  ...assigned.filter(({ providerId }) => providerId !== parent.providerId)
+]
+
 export const childCapabilityFileName = (agent: string): string => {
   if (!SAFE_AGENT_NAME.test(agent)) throw new Error("Unsafe child agent name")
   return `capability-${agent}.json`
@@ -38,22 +46,32 @@ export class PiChildCredentials {
 
   materialize(
     parentPiSessionId: string,
-    connection: ProviderConnection,
+    connections: ReadonlyArray<ProviderConnection>,
     capabilities: ReadonlyArray<SubagentCapability>
   ): Effect.Effect<string, PiChildCredentialError> {
-    return this.credentials.read(connection.id).pipe(
+    const providers = new Set(connections.map(({ providerId }) => providerId))
+    if (connections.length === 0 || providers.size !== connections.length) {
+      return Effect.fail(new PiChildCredentialError({
+        message: "Subagent credentials require one connection per provider"
+      }))
+    }
+    return Effect.all(connections.map((connection) =>
+      this.credentials.read(connection.id).pipe(
+        Effect.map((stored) => ({ connection, stored }))
+      )
+    )).pipe(
       Effect.mapError(
         (cause) =>
           new PiChildCredentialError({
-            message: "Could not read the selected provider credential",
+            message: "Could not read the selected provider credentials",
             cause
           })
       ),
-      Effect.flatMap((stored) =>
-        stored === null
+      Effect.flatMap((resolved) =>
+        resolved.some(({ stored }) => stored === null)
           ? Effect.fail(
               new PiChildCredentialError({
-                message: "The selected provider credential is unavailable"
+                message: "A selected provider credential is unavailable"
               })
             )
           : Effect.tryPromise({
@@ -76,9 +94,12 @@ export class PiChildCredentials {
                 const temporary = [
                   {
                     path: `${authPath}.${nonce}`,
-                    content: `${JSON.stringify({
-                      [connection.providerId]: toPiCredential(stored)
-                    })}\n`
+                    content: `${JSON.stringify(Object.fromEntries(
+                      resolved.map(({ connection, stored }) => [
+                        connection.providerId,
+                        toPiCredential(stored!)
+                      ])
+                    ))}\n`
                   },
                   ...capabilityPaths.map(({ capability, path }) => ({
                     path: `${path}.${nonce}`,

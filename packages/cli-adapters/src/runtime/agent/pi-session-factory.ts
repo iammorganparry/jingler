@@ -17,13 +17,18 @@ import type {
   RegisterSubagentCapabilityCeilingOptions,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
-import { PlannotatorProjection, type PlannotatorReviewDecision } from "@jingler/core"
+import {
+  JINGLER_SUBAGENT_NAMES,
+  PlannotatorProjection,
+  type PlannotatorReviewDecision
+} from "@jingler/core"
 import type {
   Message,
   PiRunSpec,
   ProviderConnection,
   RuntimeDiagnosticSnapshot,
-  StreamEvent
+  StreamEvent,
+  SubagentModelAssignments
 } from "@jingler/core"
 import { Data, Effect, Option, Schema } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
@@ -45,11 +50,11 @@ import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
+import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.js"
 import {
-  JINGLER_SUBAGENT_AGENT_NAMES,
-  preparePiSubagentsRuntime
-} from "../subagents/pi-subagents-bootstrap.js"
-import type { PiChildCredentials } from "../subagents/pi-child-credentials.js"
+  childProviderConnections,
+  type PiChildCredentials
+} from "../subagents/pi-child-credentials.js"
 import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
 import {
@@ -202,6 +207,10 @@ export interface PiSessionFactoryOptions {
   readonly resolveConnection: (
     spec: PiRunSpec
   ) => Effect.Effect<ProviderConnection, AgentRuntimeError>
+  readonly resolveSubagentConfig?: () => Effect.Effect<{
+    readonly models: SubagentModelAssignments
+    readonly connections: ReadonlyArray<ProviderConnection>
+  }, Error>
   readonly promptCompiler?: PromptCompiler
   readonly toolRegistry?: ToolRegistry | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly createToolRegistry?: (
@@ -591,7 +600,16 @@ const createSessionHandle = (
         })
       )
     }
-    yield* preparePiSubagentsRuntime(options.agentDir).pipe(
+    const subagentConfig = options.resolveSubagentConfig
+      ? yield* options.resolveSubagentConfig().pipe(
+          Effect.mapError((cause) => new AgentRuntimeError({
+            reason: "authentication",
+            message: "Could not resolve subagent configuration",
+            cause
+          }))
+        )
+      : { models: {}, connections: [] }
+    yield* preparePiSubagentsRuntime(options.agentDir, subagentConfig.models).pipe(
       Effect.mapError(
         (cause) =>
           new AgentRuntimeError({
@@ -653,6 +671,7 @@ const createSessionHandle = (
       registry,
       context,
       connection,
+      subagentConfig.connections,
       prepared,
       tracker,
       snapshot,
@@ -684,6 +703,7 @@ function* bindSubagentCapabilities(
   registry: ToolRegistry,
   context: AgentRuntimeContext,
   connection: ProviderConnection,
+  assignedConnections: ReadonlyArray<ProviderConnection>,
   prepared: Effect.Effect.Success<ReturnType<typeof createResources>>,
   tracker: FileChangeTracker | undefined,
   snapshot: WorktreeSnapshot | null,
@@ -705,7 +725,7 @@ function* bindSubagentCapabilities(
       const parentPiSessionId = embedded.result.session.sessionId
       const capability = yield* options.subagentBroker.register({
         parentPiSessionId,
-        agents: JINGLER_SUBAGENT_AGENT_NAMES,
+        agents: JINGLER_SUBAGENT_NAMES,
         spec,
         registry,
         context,
@@ -745,12 +765,16 @@ function* bindSubagentCapabilities(
             "contact_supervisor",
             "subagent"
           ],
-          allowedAgents: [...JINGLER_SUBAGENT_AGENT_NAMES],
+          allowedAgents: [...JINGLER_SUBAGENT_NAMES],
           denyExtensions: false
         }
       })
+      const childConnections = childProviderConnections(
+        embedded.connection,
+        assignedConnections
+      )
       yield* options.childCredentials
-        .materialize(parentPiSessionId, embedded.connection, capability)
+        .materialize(parentPiSessionId, childConnections, capability)
         .pipe(
           Effect.mapError(
             (cause) =>

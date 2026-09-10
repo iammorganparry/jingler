@@ -3,11 +3,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { resolveSubagentLaunchContract } from "pi-subagents/preflight"
 import { afterEach, describe, expect, it } from "vitest"
+import { JINGLER_SUBAGENT_NAMES, ProviderModelId } from "@jingler/core"
 import { PONYTAIL_EXTENSION_PATH } from "../resources/ponytail-resources.js"
-import {
-  JINGLER_SUBAGENT_AGENT_NAMES,
-  materializePiSubagentProfiles
-} from "./pi-subagents-bootstrap.js"
+import { materializePiSubagentProfiles } from "./pi-subagents-bootstrap.js"
 
 const roots: string[] = []
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR
@@ -22,7 +20,7 @@ afterEach(async () => {
 const ceiling = {
   version: 1 as const,
   allowedTools: ["workspace_read_file", "contact_supervisor", "subagent"],
-  allowedAgents: [...JINGLER_SUBAGENT_AGENT_NAMES],
+  allowedAgents: [...JINGLER_SUBAGENT_NAMES],
   denyExtensions: false,
   sources: ["jingler-runtime"]
 }
@@ -37,6 +35,10 @@ const resolveAgent = (cwd: string, agent: string) =>
       provider: "anthropic",
       id: "claude-test",
       fullId: "anthropic/claude-test"
+    }, {
+      provider: "openai-codex",
+      id: "gpt-5.6-sol",
+      fullId: "openai-codex/gpt-5.6-sol"
     }],
     artifactDir: "session",
     parentSessionFile: join(cwd, "sessions", "parent.jsonl"),
@@ -50,15 +52,20 @@ describe("managed pi-subagent profiles", () => {
     roots.push(root)
     const childTools = join(root, "jingler-child-tools.mjs")
     await writeFile(childTools, "export default () => undefined\n")
-    await materializePiSubagentProfiles(root, childTools)
+    await materializePiSubagentProfiles(root, childTools, {
+      worker: ProviderModelId.make("openai-codex/gpt-5.6-sol")
+    })
     process.env.PI_CODING_AGENT_DIR = root
 
     const scout = await resolveAgent(root, "scout")
+    const worker = await resolveAgent(root, "worker")
     const fanout = await resolveAgent(root, "fanout")
     expect(scout.ok).toBe(true)
+    expect(worker.ok).toBe(true)
     expect(fanout.ok).toBe(true)
-    if (!(scout.ok && fanout.ok)) return
+    if (!(scout.ok && worker.ok && fanout.ok)) return
     expect(scout.contract.model).toBe("anthropic/claude-test:low")
+    expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:high")
     expect(scout.contract.inheritProjectContext).toBe(false)
     expect(scout.contract.roots.outputPath).toContain(
       join("subagent-artifacts", "outputs", "preflight", "context.md")

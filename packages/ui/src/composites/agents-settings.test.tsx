@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { ManagedResourceId } from "@jingler/core"
+import { ManagedResourceId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentsSettings } from "./agents-settings.js"
@@ -13,7 +13,20 @@ describe("AgentsSettings", () => {
   it("reviews detected resources and manages imported resources", () => {
     const onImportSelected = vi.fn()
     const onSetEnabled = vi.fn()
+    const onSetModel = vi.fn()
+    const sol = ProviderModelId.make("openai-codex/gpt-5.6-sol")
+    const unavailable = ProviderModelId.make("openai-codex/retired")
     render(<AgentsSettings
+      models={[{
+        providerId: ProviderId.make("openai-codex"),
+        id: sol,
+        label: "GPT-5.6 Sol",
+        capabilities: { contextWindow: 200_000, reasoning: ["high"], vision: true },
+        verification: "certified",
+        selectable: true,
+        certificationKey: "sol"
+      }]}
+      modelAssignments={{ reviewer: unavailable }}
       resources={[{
         id: resourceId, kind: "prompt", name: "Review", description: "Review", enabled: true,
         trust: "operator-approved", scope: { kind: "portable", allowedTargets: [] },
@@ -28,6 +41,7 @@ describe("AgentsSettings", () => {
       loading={false}
       reviewing
       onDetect={vi.fn()}
+      onSetModel={onSetModel}
       onToggleCandidate={vi.fn()}
       onImportSelected={onImportSelected}
       onCancelDetection={vi.fn()}
@@ -36,8 +50,14 @@ describe("AgentsSettings", () => {
       onRemove={vi.fn()}
       onRetry={vi.fn()}
     />)
+    expect((screen.getByRole("combobox", { name: "Reviewer model" }) as HTMLSelectElement).value)
+      .toBe(unavailable)
+    fireEvent.change(screen.getByRole("combobox", { name: "Worker model" }), {
+      target: { value: sol }
+    })
     fireEvent.click(screen.getByRole("button", { name: "Import 1" }))
     fireEvent.click(screen.getByRole("switch", { name: "Disable Review" }))
+    expect(onSetModel).toHaveBeenCalledWith("worker", sol)
     expect(onImportSelected).toHaveBeenCalledOnce()
     expect(onSetEnabled).toHaveBeenCalledWith({ id: resourceId }, false)
   })

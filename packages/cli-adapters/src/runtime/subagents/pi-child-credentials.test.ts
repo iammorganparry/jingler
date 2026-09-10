@@ -8,7 +8,10 @@ import {
 import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
 import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
-import { PiChildCredentials } from "./pi-child-credentials.js"
+import {
+  childProviderConnections,
+  PiChildCredentials
+} from "./pi-child-credentials.js"
 
 const roots: string[] = []
 afterEach(async () =>
@@ -36,6 +39,18 @@ const connection = Schema.decodeUnknownSync(ProviderConnection)({
   updatedAt: "2026-08-10T00:00:00.000Z"
 })
 
+const alternateAnthropicConnection = Schema.decodeUnknownSync(ProviderConnection)({
+  ...connection,
+  id: "anthropic-alternate"
+})
+
+const codexConnection = Schema.decodeUnknownSync(ProviderConnection)({
+  ...connection,
+  id: "codex-oauth",
+  providerId: "openai-codex",
+  authKind: "openai-codex-oauth"
+})
+
 const capability = (parentPiSessionId: string, agent = "worker") => ({
   version: 1 as const,
   endpoint: "http://127.0.0.1:1234/v1/subagent-tool",
@@ -49,7 +64,14 @@ const capability = (parentPiSessionId: string, agent = "worker") => ({
 })
 
 describe("PiChildCredentials", () => {
-  it("materializes only the selected provider under restrictive permissions", async () => {
+  it("keeps the parent account when an assignment uses the same provider", () => {
+    expect(childProviderConnections(connection, [
+      alternateAnthropicConnection,
+      codexConnection
+    ])).toEqual([connection, codexConnection])
+  })
+
+  it("materializes parent and assigned-provider credentials under restrictive permissions", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-child-auth-"))
     roots.push(root)
     const credentials = new InMemoryProviderCredentialStore()
@@ -60,12 +82,19 @@ describe("PiChildCredentials", () => {
       refresh: null,
       expiresAt: null
     }))
+    await Effect.runPromise(credentials.write({
+      connectionId: codexConnection.id,
+      authKind: "openai-codex-oauth",
+      access: "codex-access",
+      refresh: "codex-refresh",
+      expiresAt: null
+    }))
     const children = new PiChildCredentials(root, credentials)
 
     const directory = await Effect.runPromise(
       children.materialize(
         "parent-pi-session",
-        connection,
+        [connection, codexConnection],
         [
           capability("parent-pi-session", "worker"),
           capability("parent-pi-session", "reviewer")
@@ -74,7 +103,13 @@ describe("PiChildCredentials", () => {
     )
 
     expect(JSON.parse(await readFile(join(directory, "auth.json"), "utf8"))).toEqual({
-      anthropic: { type: "api_key", key: "secret" }
+      anthropic: { type: "api_key", key: "secret" },
+      "openai-codex": {
+        type: "oauth",
+        access: "codex-access",
+        refresh: "codex-refresh",
+        expires: Number.MAX_SAFE_INTEGER
+      }
     })
     expect(JSON.parse(await readFile(join(directory, "capability-worker.json"), "utf8")))
       .toEqual(capability("parent-pi-session", "worker"))
@@ -100,7 +135,7 @@ describe("PiChildCredentials", () => {
       expiresAt: null
     }))
     const children = new PiChildCredentials(root, credentials)
-    await Effect.runPromise(children.materialize("stale", connection, [capability("stale")]))
+    await Effect.runPromise(children.materialize("stale", [connection], [capability("stale")]))
 
     await Effect.runPromise(children.clear())
 
@@ -119,8 +154,8 @@ describe("PiChildCredentials", () => {
       expiresAt: null
     }))
     const children = new PiChildCredentials(root, credentials)
-    await Effect.runPromise(children.materialize("one", connection, [capability("one")]))
-    await Effect.runPromise(children.materialize("two", connection, [capability("two")]))
+    await Effect.runPromise(children.materialize("one", [connection], [capability("one")]))
+    await Effect.runPromise(children.materialize("two", [connection], [capability("two")]))
 
     await Effect.runPromise(children.remove("one"))
 

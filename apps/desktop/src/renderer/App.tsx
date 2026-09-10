@@ -17,6 +17,11 @@ import type {
   GitConfig,
   IssueIdentity,
   GithubConfig,
+  JinglerSubagentName,
+  ProviderCatalog,
+  ProviderCatalogModel,
+  ProviderConnectionId,
+  ProviderModelId,
   NotificationsConfig,
   OffloadComputeSettings,
   PublishCheckpoint,
@@ -123,6 +128,14 @@ const ARCHIVE_POLL_MS = 60_000;
 
 /** How long a fetched PR state stays fresh before the sweep will re-fetch it. */
 const PR_STATE_STALE_MS = 5 * 60_000;
+
+const subagentModelsFor = (
+  catalog: ProviderCatalog | null,
+  connectionId: ProviderConnectionId | null,
+): ReadonlyArray<ProviderCatalogModel> =>
+  catalog?.connections
+    .find(({ connection }) => connection.id === connectionId)
+    ?.models.filter(({ selectable }) => selectable) ?? [];
 
 /**
  * How long a relay connection must stay troubled before the "reconnecting"
@@ -404,6 +417,13 @@ function AuthedApp({
   };
   const saveDefaultMode = (value: ExecutionMode) =>
     rpc.configSetDefaultMode(value).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const saveSubagentModel = (
+    agent: JinglerSubagentName,
+    modelId: ProviderModelId | null,
+  ) =>
+    rpc.configSetSubagentModel(agent, modelId).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const savePlanAutoRun = (value: boolean) =>
@@ -1369,6 +1389,8 @@ function AuthedApp({
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,
+          models: subagentModelsFor(providerCatalog.catalog, defaultConnectionId),
+          modelAssignments: configQuery.data?.subagentModels ?? {},
           detection: agentsSettings.snapshot.context.detection,
           selectedCandidateIds:
             agentsSettings.snapshot.context.selectedCandidateIds,
@@ -1380,6 +1402,7 @@ function AuthedApp({
           reviewing: agentsSettings.snapshot.matches("reviewing"),
           error: agentsSettings.snapshot.context.error,
           onDetect: () => agentsSettings.send({ type: "DETECT" }),
+          onSetModel: saveSubagentModel,
           onToggleCandidate: (id) =>
             agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),
           onImportSelected: () =>

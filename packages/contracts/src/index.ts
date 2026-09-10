@@ -100,6 +100,8 @@ import {
   ConnectClaudeTokenInput,
   StartCodexLoginInput,
   ProviderConnectionInput,
+  ProviderModelId,
+  JinglerSubagentName,
   SetProviderApiKeyInput,
   SetDefaultProviderModelInput,
   SetSessionProviderModelInput,
@@ -1192,6 +1194,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({ defaultMode: ExecutionMode })
+  }),
+
+  Rpc.make("Config.setSubagentModel", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({
+      agent: JinglerSubagentName,
+      modelId: Schema.NullOr(ProviderModelId)
+    })
   }),
 
   /**
