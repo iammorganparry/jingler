@@ -417,14 +417,6 @@ export interface JinglerAppProps {
   version?: string
   /** Global pull-request inbox, rendered as a sidebar takeover. */
   pullRequestsView?: ReactNode
-  /** First-class paid-team Memory destination, rendered as a sidebar takeover. */
-  memory?: {
-    readonly eligible: boolean
-    readonly active: boolean
-    readonly content: ReactNode
-    readonly onOpen: () => void
-    readonly onClose: () => void
-  }
 }
 
 const noBranches = async (): Promise<ReadonlyArray<string>> => []
@@ -560,7 +552,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         onOpenPullRequests={
           pullRequestsView
             ? () => {
-                memory?.onClose()
                 setSettingsOpen(false)
                 setNewOpen(false)
                 setPullRequestsOpen(true)
@@ -568,19 +559,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
             : undefined
         }
         pullRequestsView={pullRequestsOpen ? pullRequestsView : undefined}
-        memoryEligible={memory?.eligible}
-        memoryActive={memory?.active}
-        onOpenMemory={
-          memory
-            ? () => {
-              setPullRequestsOpen(false)
-              setSettingsOpen(false)
-              setNewOpen(false)
-              memory.onOpen()
-              }
-            : undefined
-        }
-        memoryView={memory?.active ? memory.content : undefined}
         newSessionViewActive={newOpen}
         newSessionView={
           renderNewWorkspace()
@@ -730,7 +708,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, onSignOut, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, onLoadUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, renderReview, renderCode, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, memory } = defaultProps(props, {
+  const { sessions, user, onSignOut, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, onLoadUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, renderReview, renderCode, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -850,13 +828,12 @@ function getActiveTabContext(active: Session) {
   const pendingEnvironmentSession = environmentStartup.context.pending
   const selectSession = useCallback(
     (id: string) => {
-      memory?.onClose()
       setPullRequestsOpen(false)
       setNewOpen(false)
       setRequestedNewSession(null)
       setSelected(id)
     },
-    [memory, setSelected]
+    [setSelected]
   )
   const group = split.group
   const [addProjectOpen, setAddProjectOpen] = useState(false)
@@ -868,7 +845,6 @@ function getActiveTabContext(active: Session) {
   >("providers")
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
-      memory?.onClose()
       setPullRequestsOpen(false)
       setNewOpen(false)
       setSettingsSection(section)
@@ -876,7 +852,7 @@ function getActiveTabContext(active: Session) {
       if (section === "runtime") runtimeInspector?.onRefresh()
       setSettingsOpen(true)
     },
-    [memory, providerConnections, runtimeInspector, settingsSection]
+    [providerConnections, runtimeInspector, settingsSection]
   )
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [fileQuickOpenSessionId, setFileQuickOpenSessionId] = useState<
@@ -897,28 +873,25 @@ function getActiveTabContext(active: Session) {
   } | null>(null)
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
   const openNewSession = useCallback(() => {
-    memory?.onClose()
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
     setNewSessionProjectId(null)
     setNewOpen(true)
-  }, [memory])
+  }, [])
   const openNewSessionForProject = useCallback((projectId: string) => {
-    memory?.onClose()
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
     setNewSessionProjectId(projectId)
     setNewOpen(true)
-  }, [memory])
+  }, [])
 
   const openPendingEnvironmentSession = useCallback(() => {
-    memory?.onClose()
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setNewOpen(true)
-  }, [memory])
+  }, [])
 
   // A remote create resolves in the child before the parent's XState
   // SESSION_CREATED update has produced a new `sessions` prop. Selecting that
@@ -944,7 +917,6 @@ function getActiveTabContext(active: Session) {
   const requestTabId = selectSessionRequest?.tabId
   useEffect(() => {
     if (requestId === undefined) return
-    memory?.onClose()
     setPullRequestsOpen(false)
     setSelected(requestId)
     if (requestTabId) setTabRequest({ tabId: requestTabId, nonce: requestNonce ?? 0 })
@@ -958,7 +930,6 @@ function getActiveTabContext(active: Session) {
   const newSessionRequestNonce = newSessionRequest?.nonce
   useEffect(() => {
     if (!newSessionRequest) return
-    memory?.onClose()
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(newSessionRequest)

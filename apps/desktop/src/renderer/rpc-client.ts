@@ -51,18 +51,13 @@ import type {
   McpServerStatus,
   OffloadComputeSettings,
   Message,
-  MemoryConfig,
   Project,
   ProjectDirectoryListing,
   PermissionMode,
-  PlanCommentMessageDeliveryState,
   PlanDocument,
-  PlanPrd,
-  PlanMentionDelivery,
   PlanTemplateConfig,
   PrFileChange,
   PrMergeMethod,
-  PrState,
   SessionPrStatus,
   PrSummary,
   PublishCheckpoint,
@@ -115,23 +110,6 @@ import {
   AssetListRpcs,
   JinglerCoreRpcs,
   JinglerReviewRpcs,
-  MemoryAccess as MemoryAccessSchema,
-  MemoryCaptureRecovery as MemoryCaptureRecoverySchema,
-  MemoryDashboardSummary as MemoryDashboardSummarySchema,
-  MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
-  MemoryExport as MemoryExportSchema,
-  MemoryGraphView as MemoryGraphViewSchema,
-  MemoryPageDetail as MemoryPageDetailSchema,
-  MemorySearchResult as MemorySearchResultSchema,
-  type MemoryAccess,
-  type MemoryCaptureRecovery,
-  type MemoryDashboardSummary,
-  type MemoryEdgeEvidence,
-  type MemoryExport,
-  type MemoryGraphView,
-  type MemoryPageDetail,
-  type MemorySearchResult,
-  type MemorySuggestionsView,
   type SessionCreationPhase,
   type SessionCreationUpdate
 } from "@jingler/contracts"
@@ -148,7 +126,6 @@ import {
   Layer,
   ManagedRuntime,
   Runtime,
-  Schema,
   Scope,
   Stream
 } from "effect"
@@ -256,11 +233,6 @@ const drainSessionCreation = (
     return created
   }).catch((error) => Promise.reject(unwrapRpcFailure(error)))
 }
-
-const decodeMemoryResult = <A, I>(
-  schema: Schema.Schema<A, I>,
-  value: unknown
-): Promise<A> => Schema.decodeUnknownPromise(schema)(value)
 
 /**
  * Forward a run's events to `onEvent`, guaranteeing the turn settles.
@@ -424,84 +396,6 @@ export const rpc = {
   },
   /** What each installed harness will actually be billed to. */
   configGet: (): Promise<WorkspaceConfig | null> => run((c) => c.Config.get()),
-  memoryAccess: (): Promise<MemoryAccess> =>
-    run((c) => c.Memory.request({ operation: "access" })).then((value) =>
-      decodeMemoryResult(MemoryAccessSchema, value)
-    ),
-  memoryConfigure: (memory: MemoryConfig): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setMemory(memory)),
-  memoryRecover: (): Promise<MemoryCaptureRecovery> =>
-    run((c) => c.Memory.request({ operation: "recover" })).then((value) =>
-      decodeMemoryResult(MemoryCaptureRecoverySchema, value)
-    ),
-  memoryDashboard: (
-    organizationId: string,
-    range: string
-  ): Promise<MemoryDashboardSummary> =>
-    run((c) =>
-      c.Memory.request({ organizationId, operation: "dashboard", range })
-    ).then((value) => decodeMemoryResult(MemoryDashboardSummarySchema, value)),
-  memoryGraph: (
-    organizationId: string,
-    limit = 250
-  ): Promise<MemoryGraphView> =>
-    run((c) =>
-      c.Memory.request({ organizationId, operation: "graph", limit })
-    ).then((value) => decodeMemoryResult(MemoryGraphViewSchema, value)),
-  memoryNeighborhood: (
-    organizationId: string,
-    nodeId: string,
-    limit = 100
-  ): Promise<MemoryGraphView> =>
-    run((c) =>
-      c.Memory.request({
-        organizationId,
-        operation: "neighborhood",
-        nodeId,
-        limit
-      })
-    ).then((value) => decodeMemoryResult(MemoryGraphViewSchema, value)),
-  memoryEdgeEvidence: (
-    organizationId: string,
-    edgeId: string
-  ): Promise<MemoryEdgeEvidence> =>
-    run((c) =>
-      c.Memory.request({ organizationId, operation: "edgeEvidence", edgeId })
-    ).then((value) => decodeMemoryResult(MemoryEdgeEvidenceSchema, value)),
-  memorySearch: (
-    organizationId: string,
-    query: string,
-    limit = 50
-  ): Promise<ReadonlyArray<MemorySearchResult>> =>
-    run((c) =>
-      c.Memory.request({ organizationId, operation: "search", query, limit })
-    ).then((value) =>
-      decodeMemoryResult(Schema.Array(MemorySearchResultSchema), value)
-    ),
-  memoryPage: (
-    organizationId: string,
-    pageId: string
-  ): Promise<MemoryPageDetail> =>
-    run((c) =>
-      c.Memory.request({ organizationId, operation: "page", pageId })
-    ).then((value) => decodeMemoryResult(MemoryPageDetailSchema, value)),
-  memoryExport: (organizationId: string): Promise<MemoryExport> =>
-    run((c) => c.Memory.request({ organizationId, operation: "export" })).then(
-      (value) => decodeMemoryResult(MemoryExportSchema, value)
-    ),
-  /** Advisory relatedness suggestions — NON-AUTHORITATIVE, never accepted edges. */
-  memorySuggestions: (
-    organizationId: string,
-    pageId?: string,
-    limit = 5
-  ): Promise<MemorySuggestionsView> =>
-    run((c) =>
-      c.Memory.suggestions({
-        organizationId,
-        limit,
-        ...(pageId === undefined ? {} : { pageId })
-      })
-    ),
   chooseReposDir: (): Promise<WorkspaceConfig | null> =>
     run((c) => c.Setup.chooseReposDir()),
   workspaceRepos: (): Promise<ReadonlyArray<Repo>> =>

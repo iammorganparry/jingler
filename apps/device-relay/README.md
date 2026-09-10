@@ -17,7 +17,7 @@ pnpm --filter @jingler/device-relay exec wrangler deploy
 
 Configure `DEVICE_RELAY_SIGNING_SECRET` as a Wrangler secret. It must equal the
 server's `DEVICE_RELAY_SIGNING_SECRET`, be at least 32 random bytes, and must not
-reuse BetterAuth, GitHub relay, webhook, or Memory secrets. The first deployment
+reuse BetterAuth, GitHub relay, or webhook secrets. The first deployment
 applies the `v1` SQLite Durable Object migration in `wrangler.jsonc`.
 
 The public origin is `https://device-relay.jingler.dev`. The server mints

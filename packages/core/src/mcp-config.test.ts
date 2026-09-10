@@ -57,7 +57,7 @@ describe("mcpNameError", () => {
   })
 
   it("rejects reserved names case-insensitively and the jingler- prefix", () => {
-    for (const name of ["browser", "Memory", "jingler-anything"]) {
+    for (const name of ["browser", "Plan", "jingler-anything"]) {
       expect(mcpNameError(name)).toContain("reserved")
     }
   })

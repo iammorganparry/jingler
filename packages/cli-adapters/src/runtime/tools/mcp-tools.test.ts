@@ -83,17 +83,15 @@ const fakeFactory = (
   }
 
 describe("MCP source policy", () => {
-  it("pins browser, memory, and configured source risks", () => {
+  it("pins browser and configured source risks", () => {
     const named = (name: string): RuntimeMcpServer => ({ ...server, name })
     expect(
       jinglerMcpSources({
         browser: named("browser"),
-        memory: named("memory"),
         configured: [named("configured")]
       }).map(({ server: source, risk }) => [source.name, risk])
     ).toEqual([
       ["browser", "execute"],
-      ["memory", "network"],
       ["configured", "execute"]
     ])
   })
@@ -146,9 +144,9 @@ it("discovers, namespaces, validates, invokes, and closes stateless MCP clients"
 })
 
 it("dials the CURRENT server config at call time when a live resolver is present", async () => {
-  // Registration happens once per pi session, but the browser MCP lease is a
-  // fresh loopback port + bearer per RUN. A tool bound to the registration
-  // snapshot dialled turn 1's dead endpoint on every later turn.
+  // Registration happens once per pi session, but a live MCP lease can rotate
+  // per run. A tool bound to the registration snapshot would keep dialing the
+  // first run's dead endpoint.
   const dialled: string[] = []
   const factory: McpToolClientFactory = (requested) => {
     dialled.push("url" in requested ? requested.url : "stdio")
@@ -164,12 +162,11 @@ it("dials the CURRENT server config at call time when a live resolver is present
   await Effect.runPromise(
     registerMcpTools(
       registry,
-      // The memory slot keeps the "network" risk so `execute` needs no
-      // approval seam; the live-resolution mechanics are slot-independent.
-      jinglerMcpSources(
-        { memory: currentLease },
-        () => ({ memory: currentLease })
-      ),
+      [{
+        server: currentLease,
+        risk: "network",
+        resolveServer: () => currentLease
+      }],
       factory
     )
   )
@@ -233,7 +230,7 @@ it("turns MCP error results into structured tool failures", async () => {
 })
 
 it("isolates discovery failures to the unavailable MCP server", async () => {
-  const unavailable = { ...server, name: "unavailable-memory" }
+  const unavailable = { ...server, name: "unavailable-server" }
   const state: FakeClientState = { calls: [], closes: 0 }
   const registry = new ToolRegistry()
   const factory: McpToolClientFactory = (requested) =>
@@ -269,10 +266,10 @@ it("isolates discovery failures to the unavailable MCP server", async () => {
   ).toEqual(["mcp__jingler-browser__navigate"])
   expect(report.health).toEqual([
     { name: "jingler-browser", status: "healthy" },
-    { name: "unavailable-memory", status: "failed" }
+    { name: "unavailable-server", status: "failed" }
   ])
   expect(report.failures).toEqual([
-    expect.objectContaining({ serverName: "unavailable-memory" })
+    expect.objectContaining({ serverName: "unavailable-server" })
   ])
   expect(state.closes).toBe(2)
 })

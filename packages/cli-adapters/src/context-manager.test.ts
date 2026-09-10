@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
-import { Effect, Layer, Ref, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
@@ -889,29 +889,6 @@ describe("the mid-flow hold", () => {
 })
 
 describe("ContextManager.compactNow", () => {
-  it("adds the latest accepted recall block to pre-compaction context", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seed()
-        yield* ContextManager.rememberMemoryContext(
-          SESSION,
-          [
-            "<team-memory>policy</team-memory>",
-            "<recalled-memories>Accepted retry decision.</recalled-memories>"
-          ].join("\n")
-        )
-        yield* ContextManager.compactNow(SESSION, { waitForReady: true })
-        yield* ContextManager.applyWhenReady(SESSION)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-
-    expect(rec.specs[0]?.prompt).toContain(
-      "<recalled-memories>Accepted retry decision.</recalled-memories>"
-    )
-    expect(rec.specs[0]?.prompt).not.toContain("<team-memory>policy</team-memory>")
-  })
 
   it("waits for an in-flight recovery digest before the next turn resumes", async () => {
     const rec = recorder()
@@ -1206,29 +1183,6 @@ describe("chat-scoped context", () => {
     expect(snap.window).toBe(200_000)
     expect(snap.triggerAt).not.toBeNull()
     expect(snap.phase).not.toBe("unknown")
-  })
-
-  it("uses the chat context key for accepted memory during compaction", async () => {
-    const rec = recorder()
-    await run(
-      Effect.gen(function* () {
-        yield* seedChat()
-        const messages = yield* TranscriptStore.list(SESSION)
-        yield* Effect.forEach(messages, (message) => TranscriptStore.append(CHAT, message))
-        yield* ContextManager.bindContext(CHAT, SESSION)
-        yield* ContextManager.rememberMemoryContext(
-          CHAT,
-          "<recalled-memories>Chat-scoped accepted evidence.</recalled-memories>"
-        )
-        yield* ContextManager.compactNow(CHAT, { waitForReady: true })
-        yield* ContextManager.applyWhenReady(CHAT)
-      }),
-      recordingAdapter(GOOD_REPLY, rec)
-    )
-
-    expect(rec.specs[0]?.sessionId).toBe(SESSION)
-    expect(rec.specs[0]?.chatId).toBe(CHAT)
-    expect(rec.specs[0]?.prompt).toContain("Chat-scoped accepted evidence.")
   })
 
   it("reports an unknown window for a chat it was never told the owner of", async () => {

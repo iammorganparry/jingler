@@ -34,11 +34,7 @@ import {
   githubPushPermissions,
   GitHubEventStore,
   GitService,
-  MemoryService,
-  type MemoryServiceEnvironment,
-  attachMemoryToSessionSpec,
   type SecretStore,
-  SecretStoreUnavailable,
   planDraftPost,
   PluginRegistry,
   PluginSecretStore,
@@ -109,8 +105,6 @@ import {
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
-  Environment as EnvironmentSchema,
-  EnvironmentError,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
@@ -120,7 +114,6 @@ import {
   SubagentFleetSnapshot,
   Message as MessageSchema,
   Session as SessionSchema,
-  PublishCheckpoint as PublishCheckpointSchema,
   Project as ProjectSchema,
   RemotePublishPrepared as RemotePublishPreparedSchema,
   ProviderConnectionError,
@@ -160,22 +153,14 @@ import type {
   GitHubFeedbackClaimStatus,
   Environment,
   SettledSessionStatus,
-  WorkspaceConfig,
   WorkspaceTransferCheckpoint,
 } from "@jingler/core";
-import type { GitHubRepository, AgentTurnSpec } from "@jingler/cli-adapters";
+import type { GitHubRepository, } from "@jingler/cli-adapters";
 import {
   AssetListRpcs,
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   JinglerRpcs,
-  MemoryAccess as MemoryAccessSchema,
-  MemoryDashboardSummary as MemoryDashboardSummarySchema,
-  MemoryEdgeEvidence as MemoryEdgeEvidenceSchema,
-  MemoryGraphView as MemoryGraphViewSchema,
-  MemoryPageDetail as MemoryPageDetailSchema,
-  MemorySuggestionsView as MemorySuggestionsViewSchema,
-  MemoryUiError,
   type SessionCreationPhase,
   type SessionCreationUpdate,
 } from "@jingler/contracts";
@@ -197,11 +182,10 @@ import {
   Stream,
 } from "effect";
 import type { WebContents } from "electron";
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { BrowserWindow, ipcMain, shell } from "electron";
 import { showNotification, shouldNotify } from "./notifications.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
-import { createZipArchive } from "./zip.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
 import {
   firePageGone,
@@ -293,382 +277,6 @@ export const githubConnectionDisconnect = (): Effect.Effect<
   AuthError,
   GitHubAuth
 > => GitHubAuth.disconnect().pipe(Effect.mapError(githubConnectionError));
-
-const MemoryBackendSearch = Schema.Struct({
-  results: Schema.Array(
-    Schema.Struct({
-      pageId: Schema.String,
-      revisionId: Schema.String,
-      revision: Schema.Number,
-      path: Schema.String,
-      title: Schema.String,
-      snippet: Schema.String,
-    }),
-  ),
-});
-
-const MemoryBackendPage = Schema.Struct({
-  page: Schema.Struct({
-    id: Schema.String,
-    path: Schema.String,
-    title: Schema.String,
-    revision: Schema.Number,
-    aliases: Schema.Array(Schema.String),
-    tags: Schema.Array(Schema.String),
-    body: Schema.String,
-    citations: Schema.Array(
-      Schema.Struct({
-        id: Schema.String,
-        sourceId: Schema.String,
-        locator: Schema.optional(Schema.String),
-        quote: Schema.optional(Schema.String),
-      }),
-    ),
-  }),
-  revision: Schema.Struct({
-    id: Schema.String,
-    pageId: Schema.String,
-    revision: Schema.Number,
-    authorId: Schema.String,
-    createdAt: Schema.String,
-    acceptedAt: Schema.String,
-  }),
-  sourceIds: Schema.Array(Schema.String),
-  citationIds: Schema.Array(Schema.String),
-  backlinks: Schema.Array(Schema.String),
-});
-
-const MemoryBackendSuggestions = Schema.Struct({
-  version: Schema.Literal(1),
-  vectorSource: Schema.Literal("turbopuffer", "lexical"),
-  suggestions: Schema.Array(
-    Schema.Struct({
-      sourceId: Schema.String,
-      targetId: Schema.String,
-      method: Schema.Literal("lexical", "embedding"),
-      score: Schema.Number,
-      evidence: Schema.Struct({
-        method: Schema.Literal("lexical", "embedding"),
-        cosine: Schema.Number,
-        sharedTerms: Schema.optional(Schema.Array(Schema.String)),
-        sharedTags: Schema.optional(Schema.Array(Schema.String)),
-        sharedSources: Schema.optional(Schema.Array(Schema.String)),
-        sharedSchemas: Schema.optional(Schema.Array(Schema.String)),
-        model: Schema.optional(Schema.String),
-        neighborRank: Schema.optional(Schema.Number),
-      }),
-    }),
-  ),
-});
-
-const MemoryBackendExport = Schema.Struct({
-  format: Schema.Literal("jingler-obsidian-vault"),
-  version: Schema.Literal(1),
-  files: Schema.Array(
-    Schema.Struct({ path: Schema.String, content: Schema.String }),
-  ),
-});
-
-const memoryUiFailure = (message: string, status = 503): MemoryUiError =>
-  new MemoryUiError({ message, status });
-
-const decodeMemory = <A, I>(
-  schema: Schema.Schema<A, I>,
-  value: unknown,
-  message: string,
-): Effect.Effect<A, MemoryUiError> =>
-  Schema.decodeUnknown(schema)(value).pipe(
-    Effect.mapError(() => memoryUiFailure(message, 502)),
-  );
-
-const memoryTool = (
-  organizationId: string,
-  name: string,
-  args: Readonly<Record<string, unknown>>,
-) =>
-  Effect.flatMap(MemoryService, (service) =>
-    service
-      .uiRequest({ organizationId, name, arguments: args })
-      .pipe(
-        Effect.flatMap((value) =>
-          value === null
-            ? Effect.fail(
-                memoryUiFailure("Team memory is unavailable or unauthorized"),
-              )
-            : Effect.succeed(value),
-        ),
-      ),
-  );
-
-const memoryAccess = () =>
-  Effect.flatMap(MemoryService, (service) => service.access()).pipe(
-    Effect.flatMap((access) =>
-      decodeMemory(
-        MemoryAccessSchema,
-        access === null
-          ? { eligible: false, selectedOrganizationId: null, organizations: [] }
-          : {
-              eligible: access.organizations.length > 0,
-              selectedOrganizationId: access.selectedOrganizationId,
-              organizations: access.organizations,
-            },
-        "Memory access response was invalid",
-      ),
-    ),
-  );
-
-const memoryRecover = () =>
-  Effect.flatMap(MemoryService, (service) => service.recoverCaptures()).pipe(
-    Effect.flatMap((result) =>
-      result === null
-        ? Effect.fail(
-            memoryUiFailure(
-              "Memory recovery requires an enabled organization",
-              401,
-            ),
-          )
-        : Effect.succeed(result),
-    ),
-  );
-
-const memoryDashboard = (organizationId: string, range: string) =>
-  memoryTool(organizationId, "memory_dashboard", { range }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryDashboardSummarySchema,
-        value,
-        "Memory dashboard response was invalid",
-      ),
-    ),
-  );
-
-const memoryGraph = (organizationId: string, limit: number) =>
-  memoryTool(organizationId, "memory_graph", {
-    limit: Math.min(250, Math.max(1, limit)),
-  }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryGraphViewSchema,
-        value,
-        "Memory graph response was invalid",
-      ),
-    ),
-  );
-
-const memoryNeighborhood = (
-  organizationId: string,
-  nodeId: string,
-  limit: number,
-) =>
-  memoryTool(organizationId, "memory_graph_neighborhood", {
-    nodeId,
-    limit: Math.min(100, Math.max(1, limit)),
-  }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryGraphViewSchema,
-        value,
-        "Memory neighborhood response was invalid",
-      ),
-    ),
-  );
-
-const memoryEvidence = (organizationId: string, edgeId: string) =>
-  memoryTool(organizationId, "memory_edge_evidence", { edgeId }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryEdgeEvidenceSchema,
-        value,
-        "Memory edge evidence response was invalid",
-      ),
-    ),
-  );
-
-const memorySearch = (organizationId: string, query: string, limit: number) =>
-  memoryTool(organizationId, "memory_search", {
-    query,
-    limit: Math.min(100, Math.max(1, limit)),
-  }).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryBackendSearch,
-        value,
-        "Memory search response was invalid",
-      ),
-    ),
-    Effect.map((response) =>
-      response.results.map((result) => ({
-        pageId: result.pageId,
-        path: result.path,
-        title: result.title,
-        revisionId: result.revisionId,
-        snippet: result.snippet,
-      })),
-    ),
-  );
-
-const memoryPage = (organizationId: string, pageId: string) =>
-  Effect.all(
-    {
-      page: memoryTool(organizationId, "memory_read", { pageId }).pipe(
-        Effect.flatMap((value) =>
-          decodeMemory(
-            MemoryBackendPage,
-            value,
-            "Memory page response was invalid",
-          ),
-        ),
-      ),
-      neighborhood: memoryNeighborhood(
-        organizationId,
-        `page:${pageId}`,
-        100,
-      ).pipe(Effect.orElseSucceed(() => null)),
-    },
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.flatMap(({ page, neighborhood }) => {
-      const node = neighborhood?.nodes.find(
-        (candidate) => candidate.pageId === pageId,
-      );
-      return decodeMemory(
-        MemoryPageDetailSchema,
-        {
-          ...page,
-          backlinks: page.backlinks,
-          contributors: [page.revision.authorId],
-          health: node?.health ?? {
-            brokenLinks: 0,
-            contradictions: 0,
-            orphan: true,
-          },
-        },
-        "Memory page detail was invalid",
-      );
-    }),
-  );
-
-export const memoryExport = (organizationId: string) =>
-  Effect.gen(function* () {
-    const filename = `jingler-memory-${organizationId}.zip`;
-    const dialog = yield* DialogService;
-    const destination = yield* dialog.saveFile({
-      title: "Export team memory",
-      defaultPath: filename,
-    });
-    if (destination === null) return { filename, saved: false };
-    const value = yield* memoryTool(organizationId, "memory_export", {});
-    const vault = yield* decodeMemory(
-      MemoryBackendExport,
-      value,
-      "Memory vault export was invalid",
-    );
-    const fs = yield* FileSystem.FileSystem;
-    yield* fs.writeFile(destination, createZipArchive(vault.files));
-    return { filename, saved: true };
-  }).pipe(Effect.mapError(() => memoryUiFailure("Memory vault export failed")));
-
-const memoryRpcRequest = (input: {
-  readonly organizationId?: string;
-  readonly operation:
-    | "access"
-    | "dashboard"
-    | "graph"
-    | "neighborhood"
-    | "edgeEvidence"
-    | "search"
-    | "page"
-    | "recover"
-    | "export";
-  readonly range?: string;
-  readonly limit?: number;
-  readonly nodeId?: string;
-  readonly edgeId?: string;
-  readonly query?: string;
-  readonly pageId?: string;
-}) => {
-  const organizationId = input.organizationId ?? "";
-  switch (input.operation) {
-    case "access":
-      return memoryAccess();
-    case "dashboard":
-      return memoryDashboard(organizationId, input.range ?? "all");
-    case "graph":
-      return memoryGraph(organizationId, input.limit ?? 250);
-    case "neighborhood":
-      return memoryNeighborhood(
-        organizationId,
-        input.nodeId ?? "",
-        input.limit ?? 100,
-      );
-    case "edgeEvidence":
-      return memoryEvidence(organizationId, input.edgeId ?? "");
-    case "search":
-      return memorySearch(organizationId, input.query ?? "", input.limit ?? 50);
-    case "page":
-      return memoryPage(organizationId, input.pageId ?? "");
-    case "recover":
-      return memoryRecover();
-    case "export":
-      return memoryExport(organizationId);
-  }
-};
-
-/**
- * `Memory.suggestions` handler — advisory relatedness only. A NEW, separate path
- * from `memoryRpcRequest`: it fetches suggestions through the hosted grant (which
- * stays in the main process), optionally scopes them to a page, and maps ids to
- * best-effort titles. It never touches the accepted graph or an edge endpoint.
- */
-const memorySuggestions = (
-  organizationId: string,
-  pageId: string | undefined,
-  limit: number,
-) =>
-  Effect.flatMap(MemoryService, (service) =>
-    service
-      .suggestions({
-        organizationId,
-        ...(pageId === undefined || pageId === "" ? {} : { pageId }),
-        limit: Math.min(50, Math.max(1, limit)),
-      })
-      .pipe(
-        Effect.flatMap((value) =>
-          value === null
-            ? Effect.fail(
-                memoryUiFailure("Team memory is unavailable or unauthorized"),
-              )
-            : Effect.succeed(value),
-        ),
-      ),
-  ).pipe(
-    Effect.flatMap((value) =>
-      decodeMemory(
-        MemoryBackendSuggestions,
-        value,
-        "Memory suggestions response was invalid",
-      ),
-    ),
-    Effect.flatMap((view) => {
-      return decodeMemory(
-        MemorySuggestionsViewSchema,
-        {
-          version: 1,
-          vectorSource: view.vectorSource,
-          suggestions: view.suggestions.map((link) => ({
-            sourceId: link.sourceId,
-            targetId: link.targetId,
-            method: link.method,
-            score: link.score,
-            sourceTitle: link.sourceId,
-            targetTitle: link.targetId,
-            evidence: link.evidence,
-          })),
-        },
-        "Memory suggestions view was invalid",
-      );
-    }),
-  );
 
 /**
  * `Setup.chooseReposDir` handler. Opens the native picker; a cancelled dialog (or
@@ -5233,7 +4841,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Effect.zipRight(ContextManager.compactNow(chatId)),
     ),
   "Config.setContext": (context) => ConfigService.setContext(context),
-  "Config.setMemory": (memory) => ConfigService.setMemory(memory),
   "Config.setOffloadCompute": (offloadCompute) =>
     Effect.gen(function* () {
       const updated = yield* ConfigService.setOffloadCompute(offloadCompute)
@@ -5247,9 +4854,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       )
       return updated
     }),
-  "Memory.request": memoryRpcRequest,
-  "Memory.suggestions": ({ organizationId, pageId, limit }) =>
-    memorySuggestions(organizationId, pageId, limit ?? 5),
   // Returns the updated session so the renderer can patch its cache without a
   // refetch, matching every other session mutation.
   "Sessions.setAutoCompact": ({ id, autoCompact }) =>
@@ -5918,7 +5522,6 @@ export type RpcServerRequirements =
   | GitHubAuth
   | GitHubEventStore
   | GitService
-  | MemoryService
   | Path.Path
   | PluginAuth
   | PluginHost

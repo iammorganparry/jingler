@@ -71,8 +71,7 @@ const write32 = (buffer: Buffer, offset: number, value: number): void => {
 
 /**
  * Percent-decode up to a few times so a doubly-encoded traversal (`%252e%252e`)
- * can't slip past the segment checks. Mirrors `decodedPath` in
- * packages/memory `lint.ts`.
+ * can't slip past the segment checks.
  */
 const decodedArchivePath = (path: string): string => {
   let decoded = path
@@ -89,11 +88,8 @@ const decodedArchivePath = (path: string): string => {
 }
 
 /**
- * Mirrors packages/memory `unsafeMemoryPathReason` (@jingler/memory is not a
- * dependency of the desktop app, so its validator can't be imported here). The
- * reserved-namespace and outer-whitespace rules are intentionally omitted — the
- * vault export legitimately ships `.obsidian/` and `_jingler/` roots. Every
- * other check is kept: without them a `C:/secret.md` (drive-qualified) or
+ * The path checks are intentionally strict: without them a `C:/secret.md`
+ * (drive-qualified) or
  * `file:...` (scheme-qualified) entry, a NUL byte, or a percent-encoded `..`
  * would resolve OUTSIDE the chosen directory on extract, especially on Windows.
  */

@@ -58,7 +58,6 @@ const DIGEST_TIMEOUT = "90 seconds"
  * that has never once produced a result they can see.
  */
 const MAX_FAILURES = 2
-const RECALLED_MEMORY_PATTERN = /<recalled-memories>[\s\S]*?<\/recalled-memories>/u
 
 interface SessionContext {
   readonly status: "idle" | "preparing" | "ready"
@@ -137,7 +136,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
     accessors: true,
     effect: Effect.gen(function* () {
       const states = yield* Ref.make(new Map<string, SessionContext>())
-      const memoryContexts = yield* Ref.make(new Map<string, string>())
       /** Live digest fibers, so a stopped or deleted session can cancel its own. */
       const fibers = yield* Ref.make(new Map<string, Fiber.RuntimeFiber<void, never>>())
       /** Chat context key → owning session id. Legacy callers use the same id. */
@@ -164,18 +162,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
      */
     const bindContext = (contextId: string, sessionId: string): Effect.Effect<void> =>
         Ref.update(owners, (map) => new Map(map).set(contextId, sessionId))
-
-      const rememberMemoryContext = (
-        contextId: string,
-        instructions: string | null
-      ): Effect.Effect<void> =>
-        Ref.update(memoryContexts, (contexts) => {
-          const next = new Map(contexts)
-          const recalled = instructions?.match(RECALLED_MEMORY_PATTERN)?.[0]
-          if (recalled === undefined) next.delete(contextId)
-          else next.set(contextId, recalled)
-          return next
-        })
 
       const ownerOf = (contextId: string): Effect.Effect<string> =>
         Effect.map(Ref.get(owners), (map) => map.get(contextId) ?? contextId)
@@ -286,7 +272,7 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             return yield* fail(sessionId, "provider connection unavailable")
           }
 
-        return yield* runDigestTurn(memoryContexts,
+        return yield* runDigestTurn(
           sessionId,
           messages,
           settings,
@@ -576,11 +562,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
             next.delete(contextId)
             return next
           })
-          yield* Ref.update(memoryContexts, (map) => {
-            const next = new Map(map)
-            next.delete(contextId)
-            return next
-          })
         })
 
       /** Everything the meter and Settings need to describe a session. */
@@ -624,7 +605,6 @@ export class ContextManager extends Effect.Service<ContextManager>()(
 
       return {
         bindContext,
-        rememberMemoryContext,
         observe,
         settle,
         applyIfReady,
@@ -750,7 +730,6 @@ function* prepareDigestIfNeeded(
 }
 
 function* runDigestTurn(
-  memoryContexts: Ref.Ref<Map<string, string>>,
   sessionId: string,
   messages: ReadonlyArray<Message>,
   settings: DigestSettings,
@@ -762,13 +741,7 @@ function* runDigestTurn(
   through: string,
   setState: (sessionId: string, fn: (prev: SessionContext) => SessionContext) => Effect.Effect<void>
 ) {
-  const memoryContext = (yield* Ref.get(memoryContexts)).get(sessionId)
-  const compactionPrompt = [
-    digestPrompt(renderTranscript(messages)),
-    ...(memoryContext === undefined
-      ? []
-      : ["Relevant accepted memory for consolidation context only:", memoryContext])
-  ].join("\n\n")
+  const compactionPrompt = digestPrompt(renderTranscript(messages))
   const spec: AgentTurnSpec = {
     sessionId: settings.session.id,
     chatId: settings.chat.id,

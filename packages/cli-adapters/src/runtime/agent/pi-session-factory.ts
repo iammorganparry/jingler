@@ -41,7 +41,7 @@ import { AgentRuntimeError } from "./agent-runtime.js"
 import { createJinglerControlTools } from "./pi-jingler-tools.js"
 import { assertLockedPiResources, createLockedPiResources } from "./locked-pi-resources.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
-import { createPiTools, isMemoryReflectionTool } from "./pi-tool-bridge.js"
+import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
@@ -407,7 +407,6 @@ interface EmbeddedSession {
   readonly subscribePlannotatorNotice: (listener: (message: string) => void) => () => void
   readonly decidePlanReview: (decision: PlannotatorReviewDecision) => void
   readonly stopPlannotatorProjection: () => void
-  readonly setMemoryReflectionActive: (active: boolean) => void
 }
 
 const createEmbeddedSession = (
@@ -439,14 +438,8 @@ const createEmbeddedSession = (
           message: `Certified model is unavailable: ${spec.modelId}`
         })
       }
-      let memoryReflectionActive = false
       const toolSpec = plannotatorExecutionSpec(spec)
-      const customTools = registry
-        ? [...createPiTools(registry, toolSpec, context, {
-            allowTool: (toolId) =>
-              !memoryReflectionActive || isMemoryReflectionTool(toolId)
-          })]
-        : []
+      const customTools = registry ? [...createPiTools(registry, toolSpec, context)] : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)
       // The plan scratchpad tools ride in EVERY mode: submit opens operator
@@ -474,10 +467,7 @@ const createEmbeddedSession = (
         subscribePlannotator: configured.subscribePlannotator,
         subscribePlannotatorNotice: configured.subscribePlannotatorNotice,
         decidePlanReview: (decision) => deliverPlanReviewDecision(events, decision),
-        stopPlannotatorProjection: configured.stopPlannotatorProjection,
-        setMemoryReflectionActive: (active) => {
-          memoryReflectionActive = active
-        }
+        stopPlannotatorProjection: configured.stopPlannotatorProjection
       }
     },
     catch: (cause) =>
@@ -496,7 +486,6 @@ interface SessionHandleInput {
   readonly spec: PiRunSpec
   readonly tracker: FileChangeTracker | undefined
   readonly snapshot: WorktreeSnapshot | null
-  readonly registry: ToolRegistry | undefined
   readonly observe?: (event: StreamEvent) => void
   readonly childCredentials?: PiChildCredentials
   readonly subagentBroker?: SubagentCapabilityBroker
@@ -511,7 +500,6 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     spec,
     tracker,
     snapshot,
-    registry,
     observe,
     childCredentials,
     subagentBroker,
@@ -597,12 +585,6 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       return { costUsd: stats.cost, tokens: stats.tokens.total }
     },
     ...(observe ? { observe } : {}),
-    ...(registry
-      ? {
-          memoryReflectionPrompt: () => registry.memoryReflectionPrompt(spec.role),
-          setMemoryReflectionActive: embedded.setMemoryReflectionActive
-        }
-      : {}),
     ...(tracker && snapshot
       ? {
           reconcile: () => Effect.runPromise(tracker.reconcile(snapshot, spec.cwd))
@@ -856,7 +838,6 @@ function* observeSessionDiagnostics(
       spec,
       tracker,
       snapshot,
-      registry,
       observe,
       childCredentials: options.childCredentials,
       subagentBroker: options.subagentBroker,

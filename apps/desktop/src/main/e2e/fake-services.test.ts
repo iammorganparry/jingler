@@ -69,37 +69,6 @@ const request = (url: string, path: string, token: string, body?: unknown, metho
   })
 
 describe("fixture HTTP dispatch", () => {
-  it("preserves MCP admission, alternating instances, and tool result bodies", async () => {
-    const server = await startFakeAuthServer()
-    cleanups.push(server.close)
-    const grantResponse = await request(server.url, "/api/memory/grant", server.token, { organizationId: "org-e2e" })
-    const { grant } = await grantResponse.json()
-    const call = (name: string, args: unknown = {}) => fixtureFetch(`${server.url}/api/mcp`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${grant}`,
-        "content-type": "application/json",
-        "x-jingler-organization-id": "org-e2e",
-        "mcp-protocol-version": "2026-07-28"
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "request-1", method: "tools/call", params: { name, arguments: args } })
-    })
-    const search = await call("memory_search", { query: "alpha" })
-    expect(search.status).toBe(200)
-    expect(search.headers.get("x-fake-next-instance")).toBe("next-a")
-    expect((await search.json()).result.structuredContent.data).toMatchObject({ query: "alpha", results: expect.any(Array) })
-    const evidence = await call("memory_edge_evidence")
-    expect(evidence.headers.get("x-fake-next-instance")).toBe("next-b")
-    expect((await evidence.json()).result.structuredContent.data).toHaveProperty("evidence.pageId", "alpha")
-    expect((await call("memory_read", { pageId: "missing" })).status).toBe(200)
-    for (const name of ["memory_dashboard", "memory_suggestions", "memory_graph", "memory_graph_neighborhood", "memory_reviews", "memory_navigation", "memory_export", "memory_propose", "memory_workflow_status", "memory_review", "unknown_tool"]) {
-      const result = await call(name)
-      expect((await result.json()).result.structuredContent.data).toBeTypeOf("object")
-    }
-    expect((await request(server.url, "/api/mcp", "invalid", {})).status).toBe(401)
-    expect((await fixtureFetch(`${server.url}/api/mcp`)).status).toBe(405)
-    expect((await fixtureFetch(`${server.url}/missing`)).status).toBe(404)
-  })
 
   it.each(["success", "failed"] as const)("keeps the offload preparing-to-%s sequence", async (offloadResult) => {
     const server = await startFakeAuthServer({ offloadResult })

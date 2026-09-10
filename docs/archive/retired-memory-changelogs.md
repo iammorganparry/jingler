@@ -1,4 +1,9 @@
-# @jingler/memory-worker
+# Retired Memory package changelogs
+
+These entries preserve the published release history of the removed packages.
+
+## `@jingler/memory-worker`
+
 
 ## 0.2.1
 
@@ -72,3 +77,18 @@
 - Updated dependencies [e98acda]
   - @jingler/core@0.1.0
   - @jingler/memory@0.1.0
+
+## `@jingler/memory`
+
+
+## 0.2.1
+
+## 0.2.0
+
+## 0.1.3
+
+## 0.1.2
+
+## 0.1.1
+
+## 0.1.0

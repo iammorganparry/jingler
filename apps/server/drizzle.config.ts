@@ -22,7 +22,7 @@ if (existsSync(envFile)) {
 
 // Read DATABASE_URL directly rather than via `./src/env.js`: a schema push needs
 // only the connection string, and going through the app's env validator would
-// demand unrelated prod secrets (BETTER_AUTH_SECRET, MEMORY_GRANT_SECRET, …) that
+// demand unrelated prod secrets (BETTER_AUTH_SECRET, …) that
 // drizzle-kit has no use for. The local default matches `env.ts`.
 const databaseUrl =
   process.env.DATABASE_URL?.trim() || "postgres://postgres:postgres@localhost:5433/jingler"

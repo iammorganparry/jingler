@@ -3,8 +3,6 @@ import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   ToolRegistry,
-  type ToolMemoryHooks,
-  type ToolResultEnvelope
 } from "../tools/tool-registry.js"
 import { registerWorkspaceInspectionTools } from "../tools/workspace-tools.js"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
@@ -17,11 +15,9 @@ const spec = {
 
 const mutationRegistry = (
   execute: () => Promise<unknown>,
-  denied: () => Effect.Effect<void> = () => Effect.void,
-  memory?: ToolMemoryHooks
+  denied: () => Effect.Effect<void> = () => Effect.void
 ): ToolRegistry => {
   const registry = new ToolRegistry({
-    ...(memory === undefined ? {} : { memory }),
     observer: {
       started: () => Effect.succeed({ cwd: "/workspace", tree: "tree-before" }),
       settled: (_request, _risk, _state, _result) =>
@@ -81,66 +77,6 @@ describe("pi tool bridge", () => {
     expect(canUseTool).toHaveBeenCalledWith({ toolId: "workspace_edit", risk: "mutate" })
     expect(execute).toHaveBeenCalledOnce()
     expect(result?.details).toMatchObject({ status: "success" })
-  })
-
-  it("structurally blocks non-memory tools during hidden reflection", async () => {
-    const execute = vi.fn(async () => ({ changed: true }))
-    const canUseTool = vi.fn(() => Effect.succeed("allow" as const))
-    const registry = mutationRegistry(execute)
-    const [tool] = createPiTools(registry, spec, {
-      ...inactiveRuntimeActivity,
-      canUseTool,
-      askQuestion: () => Effect.succeed([]),
-    }, { allowTool: () => false })
-
-    const result = await tool?.execute(
-      "hidden-workspace-edit",
-      { path: "src/hidden.ts" },
-      undefined,
-      undefined,
-      {} as never
-    )
-
-    expect((result!.details as ToolResultEnvelope)).toMatchObject({
-      status: "error",
-      error: { code: "forbidden" }
-    })
-    expect(canUseTool).not.toHaveBeenCalled()
-    expect(execute).not.toHaveBeenCalled()
-  })
-
-  it("returns cited tool memory before allowing risky execution", async () => {
-    const memory: ToolMemoryHooks = {
-      recall: async () => "<tool-memory>revision:accepted-1</tool-memory>",
-      recordFailure: async () => undefined,
-      failures: () => []
-    }
-    const execute = vi.fn(async () => ({ changed: true }))
-    const registry = mutationRegistry(execute, () => Effect.void, memory)
-    const [tool] = createPiTools(registry, spec, {
-      ...inactiveRuntimeActivity,
-      canUseTool: () => Effect.succeed("allow"),
-      askQuestion: () => Effect.succeed([]),
-    })
-
-    const result = await tool?.execute(
-      "call-memory",
-      { path: "src/a.ts" },
-      undefined,
-      undefined,
-      {} as never
-    )
-
-    expect(result?.content[0]).toMatchObject({
-      type: "text",
-      text: expect.stringMatching(/^<tool-memory>[\s\S]*Review the cited tool memory/u)
-    })
-    expect((result!.details as ToolResultEnvelope)).toMatchObject({
-      status: "error",
-      value: null,
-      error: { retryable: true }
-    })
-    expect(execute).not.toHaveBeenCalled()
   })
 
   it("advertises no-argument tools as strict object schemas", () => {

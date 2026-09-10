@@ -76,7 +76,6 @@ export const MCP_RESERVED_NAMES: ReadonlySet<string> = new Set([
   "browser",
   "jingler",
   "jingler-browser",
-  "memory",
   "permission",
   "plan",
   "question",

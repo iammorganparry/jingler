@@ -28,8 +28,6 @@ pnpm --filter @jingler/server dev # http://localhost:9100
 ```
 
 Health check: `curl http://localhost:9100/health` → `{"status":"ok",…}`.
-Team Memory readiness: `curl http://localhost:9100/api/memory/health`. It returns
-`ok`, `degraded` (with HTTP 503), or `disabled` without exposing credentials.
 
 Request a magic link (the link is logged to the server console):
 
@@ -121,12 +119,6 @@ See `.env.example`. Core production variables and optional integration variables
 | `GITHUB_APP_TOKEN_ENCRYPTION_PREVIOUS_KEY` | Optional previous token root key during an explicit rotation window. Remove only after every stored token has refreshed or the affected users have reconnected. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth client. Redirect: `<BETTER_AUTH_URL>/api/auth/callback/google`. |
 | `RESEND_API_KEY` | Magic-link email. Omit in dev to log links to the console. |
-| `MEMORY_ENABLED` | Paid-team Memory rollout/circuit-breaker. Set `false` to disable grants, MCP, and capture without deleting accepted Markdown. |
-| `MEMORY_GRANT_SECRET` | Dedicated HMAC key for short-lived organization grants. Never reuse the auth or Worker secret. |
-| `MEMORY_GRANT_AUDIENCE` / `MEMORY_GRANT_TTL_SECONDS` | MCP audience (`jingler-memory-mcp`) and organization-grant lifetime (default `3600`). |
-| `MEMORY_WORKER_URL` | Private Cloudflare Memory Worker origin. |
-| `MEMORY_WORKER_SERVICE_SECRET` | Rotating Next.js-to-Worker credential; must equal the Worker's `MEMORY_SERVICE_SECRET`. |
-| `MEMORY_REQUEST_TIMEOUT_MS` | Bounded private-service timeout (default `5000`). |
 | `CRON_SECRET` | Vercel Cron bearer for `/api/cron/github-outbox`. Required in production; generate at least 32 random bytes. |
 | `DEVICE_RELAY_URL` | Device relay origin; production is `https://device-relay.jingler.dev`. |
 | `DEVICE_RELAY_SIGNING_SECRET` | HMAC key for short-lived device grants. Must equal the Worker's secret and must not reuse BetterAuth or another relay key. |
@@ -224,23 +216,6 @@ including both sides of an installation/repository/PR identity change. The relay
 consequently creates one event Durable Object per linked session without
 receiving the local session id or any GitHub credential.
 
-Team Memory is gated twice: `MEMORY_ENABLED` is the global rollout/circuit
-breaker, and on top of it `POST /api/memory/grant` issues a grant only for an
-organization the caller belongs to that has an active paid plan — every other
-organization gets `403` even when the feature is globally enabled. See the
-[shared-memory operations guide](../../docs/shared-memory.md) for the Cloudflare
-Worker bindings, turbopuffer vector layer, monitoring, export, rebuild, and
-credential rotation (including the turbopuffer key).
-
-Headless MCP clients use organization-scoped Personal Access Tokens. An
-authenticated user creates one with `POST /api/memory/tokens`, lists hash-free
-metadata with `GET /api/memory/tokens`, and revokes their own token with
-`DELETE /api/memory/tokens/:id`. Plaintext `jmem_…` credentials are returned once;
-only SHA-256 hashes are stored. Every MCP request re-checks token revocation,
-expiry, exact organization, live membership, and paid-plan eligibility. See the
-[team-memory setup guide](../../skills/jingler-team-memory/references/setup.md) for
-request examples.
-
 ## Testing
 
 ```bash
@@ -318,11 +293,3 @@ or request authorization headers. To roll back, restore the previous Vercel
 deployment and compatible secrets. Set `GITHUB_APP_ENABLED=false` as the product
 integration circuit breaker; this disables new GitHub operations without
 deleting installation ownership records.
-
-The Memory endpoint is a stateless Streamable HTTP POST endpoint for MCP
-`2026-07-28`. It deliberately has no initialize exchange, GET/SSE transport,
-session ID, cookie, or instance affinity. Deployments can therefore scale across
-Vercel instances; workflow and proposal handles carry durable progress. Rotate
-the Worker credential using the Worker's current/previous-secret overlap, then
-rotate the grant secret separately. See [the shared-memory operations guide](../../docs/shared-memory.md)
-for bindings, monitoring, export, rebuild, and recovery.

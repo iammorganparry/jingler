@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto"
+
 import type {
   AgentRosterEntry,
   ContextDigest,
-  ApprovalGate,
   Attachment,
   ExplanationPayload,
   ExternalInstructionIdentity,
@@ -27,10 +26,7 @@ import {
   BranchDriftError,
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
-  isBackgroundTaskEvent,
   isFileMutationTool,
-  isSubagentEvent,
-  MEMORY_CONFIG_DEFAULT,
   PLAN_AUTO_RUN_DEFAULT,
   setQuestionAnswers,
   settleStreaming,
@@ -72,12 +68,6 @@ import { branchAt, ensureWorktreeLinked } from "./git.js"
 import { BrowserControlMcpService,
   type BrowserControlMcpAttachment
 } from "./browser-control-mcp-service.js"
-import { MemoryService, MemoryServiceLive } from "./memory.js"
-import {
-  memoryRecallQuery,
-  recentMemoryRecallTurns
-} from "./memory-recall.js"
-import { attachMemoryToSessionSpec } from "./memory-session.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
@@ -85,7 +75,6 @@ import { BackgroundTaskStore } from "./background-tasks.js"
 import { ExplanationStore } from "./explanation-store.js"
 import {
   appendSteeredReply,
-  collectSteeredReply,
   invokeSteer,
   makeSteeredReplyWaiter,
   type SteeredReplyWaiter
@@ -235,9 +224,8 @@ type PromptEnv =
  * paused run.
  */
 export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRunner", {
-  dependencies: [MemoryServiceLive, ExplanationStore.Default],
+  dependencies: [ExplanationStore.Default],
   effect: Effect.gen(function* () {
-    const memoryService = yield* MemoryService
     const explanationStore = yield* ExplanationStore
     // gateId → the pending gate (shared across prompt/decideGate/stop calls).
     /** Human-in-the-loop state, and the rule that decides what needs approval. */
@@ -568,16 +556,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const browserAttachment = yield* (
             yield* BrowserControlMcpService
           ).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
-          // Jingler owns this pre-turn boundary, so recall is deterministic for
-          // every harness (including Codex, which has no context-injecting hook).
-          // The pure query builder adds stable project identity without the
-          // machine-local checkout path; MemoryService redacts and bounds it at
-          // the network boundary.
-          const memoryConfig = workspaceConfig?.memory ?? MEMORY_CONFIG_DEFAULT
-          const { baseSpec, memoryAttachment } = yield* prepareMemoryTurnSpec(
-            memoryConfig,
-            memoryService,
-            operatorText,
+          const spec = prepareTurnSpec(
             session,
             priorMessages,
             sessionId,
@@ -592,14 +571,13 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             worktreePath,
             promptText,
             primer,
-                    planPointer,
-                    adhd,
+            planPointer,
+            adhd,
             ask,
-                    planProtocol,
+            planProtocol,
             images,
             reasoning
           )
-          const spec = attachMemoryToSessionSpec(baseSpec, memoryAttachment)
 
           // Clear the PERSISTED id too, so a crash between here and the harness
           // reporting its new id can't leave the session pointing at a thread
@@ -761,15 +739,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   // publishing it first lets that cancellation interrupt everything
                   // below the offer, stranding a fully verified document in
                   // `approved`/`executing`.
-                  yield* retainCompletedTurn(
-                    memoryService,
-                    sessionId,
-                  chatId,
-                    session.repo,
-                    operatorText,
-                    next,
-                    event
-                  )
+                  yield* settleCompletedTurn(chatId, event)
                   yield* out.offer(event)
                   // Hand every context reading to the manager, but only let a SETTLED
                   // turn start a digest.
@@ -790,7 +760,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Re-read the live mode each call so an in-run change (e.g. a plan
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
-              if (verdict(liveMode, allow, req, planAutoRun, false) === "allow") {
+              if (verdict(liveMode, allow, req, planAutoRun) === "allow") {
                 return "allow" as const
               }
               const gn = yield* nextId
@@ -1398,13 +1368,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
   })
 }) {}
 
-function* prepareMemoryTurnSpec(
-  memoryConfig: {
-    readonly enabled: boolean
-    readonly organizationId: string | null
-  },
-  memoryService: MemoryService,
-  operatorText: string,
+function prepareTurnSpec(
   session: Session,
   priorMessages: ReadonlyArray<Message>,
   sessionId: string,
@@ -1437,28 +1401,11 @@ function* prepareMemoryTurnSpec(
     | null
     | undefined
 ) {
-  const memoryAttempted =
-    memoryConfig.enabled &&
-    memoryConfig.organizationId !== null &&
-    memoryConfig.organizationId.length > 0
-  const memoryAttachment = yield* memoryService.attachment(
-    memoryRecallQuery({
-      operatorText,
-      repo: session.repo,
-      branch: session.branch,
-      recentTurns: recentMemoryRecallTurns(priorMessages)
-    }),
-    `${sessionId}:${chatId}`
-  )
-  yield* ContextManager.rememberMemoryContext(chatId, memoryAttachment?.instructions ?? null)
   // Operator-configured mcp.json servers are resolved inside the pi
   // runtime per run (`pi-runtime-live`), not here.
-  const mcp = {
-    memory: null,
-    browser: browserAttachment
-  }
+  const mcp = { browser: browserAttachment }
 
-  const baseSpec: AgentTurnSpec = {
+  const spec: AgentTurnSpec = {
     sessionId,
     chatId,
     connectionId,
@@ -1501,14 +1448,9 @@ function* prepareMemoryTurnSpec(
     images,
     mode,
     reasoning: reasoning ?? chat.reasoning ?? null,
-    mcp,
-    memoryAttachmentStatus: !memoryAttempted
-      ? "disabled"
-      : memoryAttachment === null
-        ? "failed"
-        : "available"
+    mcp
   }
-  return { baseSpec, memoryAttachment }
+  return spec
 }
 
 const resolveTurnChat = (sessionId: string, chatId: string) =>
@@ -1637,35 +1579,8 @@ const observeTurnContext = (chatId: string, event: StreamEvent) =>
     }
   })
 
-const retainCompletedTurn = (
-  memoryService: MemoryService,
-  sessionId: string,
-  chatId: string,
-  repository: string,
-  operatorText: string,
-  next: Message,
-  event: StreamEvent
-) =>
-  Effect.gen(function* () {
-    if (event._tag === "Done") {
-      yield* ContextManager.settle(chatId).pipe(Effect.ignore)
-      const assistantText = next.parts
-        .filter((part) => part._tag === "Text")
-        .map((part) => part.text)
-        .join("\n")
-      yield* memoryService
-        .retainSettledTurn({
-          sessionId,
-          chatId,
-          turnId: next.id,
-          repository,
-          userText: operatorText,
-          assistantText,
-          settledAt: new Date().toISOString()
-        })
-        .pipe(Effect.ignore)
-    }
-  })
+const settleCompletedTurn = (chatId: string, event: StreamEvent) =>
+  event._tag === "Done" ? ContextManager.settle(chatId).pipe(Effect.ignore) : Effect.void
 
 interface ActiveTurnSteering {
   readonly turnSteer: Ref.Ref<SteerTurn | null>

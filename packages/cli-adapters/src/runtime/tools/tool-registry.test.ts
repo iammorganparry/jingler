@@ -137,60 +137,6 @@ describe("ToolRegistry", () => {
     expect(result.error?.code).toBe("invalid-input")
   })
 
-  it("requests one bounded reflection only for a mutating memory-enabled run without a proposal", async () => {
-    const registry = new ToolRegistry({
-      observer: {
-        started: () => Effect.succeed({ cwd: "/workspace", tree: "before" }),
-        settled: () => Effect.succeed({
-          id: "changes-1",
-          callId: "call-1",
-          changes: [],
-          totals: { added: 0, removed: 0 },
-          authoritative: true,
-          reconciledAt: "2026-08-15T12:00:00.000Z"
-        })
-      }
-    })
-    registry.register(definition({ id: "workspace_edit", risk: "mutate" }))
-    registry.register(definition({
-      id: "mcp__jingler-memory__memory_propose",
-      risk: "network"
-    }))
-    registry.register(definition({
-      id: "mcp__jingler-memory__memory_workflow_status",
-      risk: "network"
-    }))
-
-    expect(registry.memoryReflectionPrompt("conversation")).toBeNull()
-    await Effect.runPromise(registry.execute({
-      id: "workspace_edit",
-      arguments: { path: "a" },
-      role: "conversation",
-      mode: "ask"
-    }))
-    expect(registry.memoryReflectionPrompt("conversation")).toContain("Silently perform")
-    expect(registry.memoryReflectionPrompt("review")).toBeNull()
-
-    await Effect.runPromise(registry.execute({
-      id: "mcp__jingler-memory__memory_propose",
-      arguments: { path: "memory" },
-      role: "conversation",
-      mode: "ask"
-    }))
-    expect(registry.memoryReflectionPrompt("conversation")).toBeNull()
-    await Effect.runPromise(registry.execute({
-      id: "mcp__jingler-memory__memory_workflow_status",
-      arguments: { path: "workflow-1" },
-      role: "conversation",
-      mode: "ask"
-    }))
-    expect(registry.memoryTelemetry()).toMatchObject({
-      mutatingExecutions: 1,
-      proposals: 1,
-      workflowPolls: 1
-    })
-  })
-
   it("refuses mutation when authoritative tracking is unavailable", async () => {
     const execute = vi.fn(async () => null)
     const registry = new ToolRegistry()

@@ -181,11 +181,6 @@ export interface SessionConversationProps {
   /** Remote creation remains navigable before its durable Session record exists. */
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   onSelectPendingEnvironmentSession?: () => void
-  /** Organization-scoped Memory takeover; credentials remain outside this tree. */
-  memoryView?: ReactNode
-  memoryEligible?: boolean
-  memoryActive?: boolean
-  onOpenMemory?: () => void
   /** Global Pull Requests takeover. */
   pullRequestsView?: ReactNode
   pullRequestsActive?: boolean
@@ -283,7 +278,6 @@ export function SessionConversation(props: SessionConversationProps) {
 
          function getProps() {
            if (props.pullRequestsView) return (props.pullRequestsView)
-           if (props.memoryView) return (props.memoryView)
            if (props.settingsView) return (props.settingsView)
            if (props.showEmpty) return (<EmptyConversation
             version={props.version}
@@ -401,9 +395,6 @@ export function SessionConversation(props: SessionConversationProps) {
         collapsedRepoNames={props.collapsedRepoNames}
         onToggleCollapsed={props.onToggleCollapsed}
         version={props.version}
-        memoryEligible={props.memoryEligible}
-        memoryActive={props.memoryActive}
-        onOpenMemory={props.onOpenMemory}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
         pendingEnvironmentSession={props.pendingEnvironmentSession}

@@ -52,9 +52,6 @@ describe("GitHub App configuration", () => {
       NODE_ENV: "production",
       BETTER_AUTH_SECRET: "auth-secret",
       BETTER_AUTH_URL: "https://auth.jingler.test",
-      MEMORY_ENABLED: "false",
-      MEMORY_GRANT_SECRET: "memory-grant-secret",
-      MEMORY_WORKER_SERVICE_SECRET: "memory-worker-secret",
       CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
     }
     expect(loadEnv(production).githubAppEnabled).toBe(false)
@@ -86,9 +83,6 @@ describe("GitHub App configuration", () => {
       NODE_ENV: "production",
       BETTER_AUTH_SECRET: "auth-secret",
       BETTER_AUTH_URL: "https://auth.jingler.test",
-      MEMORY_ENABLED: "false",
-      MEMORY_GRANT_SECRET: "memory-grant-secret",
-      MEMORY_WORKER_SERVICE_SECRET: "memory-worker-secret",
       CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz",
       GITHUB_APP_ENABLED: "true",
       GITHUB_APP_ID: "1234",

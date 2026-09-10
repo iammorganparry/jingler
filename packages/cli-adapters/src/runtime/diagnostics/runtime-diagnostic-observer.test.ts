@@ -28,18 +28,8 @@ const connection: ProviderConnection = {
   updatedAt: "2026-08-10T00:00:00.000Z"
 }
 
-const registry = (
-  lifecycle: {
-    attachmentStatus: "disabled" | "available" | "failed"
-    queuedRetentions: number
-    retryingRetentions: number
-  } = {
-    attachmentStatus: "failed",
-    queuedRetentions: 2,
-    retryingRetentions: 1
-  }
-): ToolRegistry => {
-  const result = new ToolRegistry({ memoryLifecycle: () => lifecycle })
+const registry = (): ToolRegistry => {
+  const result = new ToolRegistry()
   result.register({
     id: "workspace_write",
     version: "1",
@@ -54,10 +44,7 @@ const registry = (
     idempotency: "keyed",
     execute: async () => ({ ok: true })
   })
-  result.setMcpHealth([
-    { name: "jingler-browser", status: "healthy" },
-    { name: "jingler-memory", status: "failed" }
-  ])
+  result.setMcpHealth([{ name: "jingler-browser", status: "healthy" }])
   return result
 }
 
@@ -123,42 +110,10 @@ describe("runtime diagnostic observer", () => {
       promptHash: "prompt-hash",
       retries: 2,
       fileChangeStatuses: ["A"],
-      mcpHealth: [
-        { name: "jingler-browser", status: "healthy" },
-        { name: "jingler-memory", status: "failed" }
-      ],
-      memory: {
-        mutatingExecutions: 0,
-        advisories: 0,
-        proposals: 0,
-        workflowPolls: 0,
-        failureCandidates: 0,
-        attachmentStatus: "failed",
-        queuedRetentions: 2,
-        retryingRetentions: 1
-      },
+      mcpHealth: [{ name: "jingler-browser", status: "healthy" }],
       terminalCause: "done",
       mutations: [{ callId: "call-1", toolId: "workspace_write", status: "settled", fileChangeSetIds: ["changes-1"] }]
     })
     expect(JSON.stringify(result)).not.toContain("secret")
-  })
-
-  it("keeps post-turn retention queue state live after Done is recorded", () => {
-    const lifecycle = {
-      attachmentStatus: "available" as const,
-      queuedRetentions: 0,
-      retryingRetentions: 0
-    }
-    const diagnosticObserver = observer(registry(lifecycle))
-    const done = diagnosticObserver.observe({ _tag: "Done", costUsd: 0, tokens: 1 })
-
-    lifecycle.queuedRetentions = 1
-    lifecycle.retryingRetentions = 1
-
-    expect(done.memory).toMatchObject({
-      attachmentStatus: "available",
-      queuedRetentions: 1,
-      retryingRetentions: 1
-    })
   })
 })

@@ -369,7 +369,7 @@ export const FLOW_ENVIRONMENTS = [
           "question_ask",
           "plan_submit"
         ],
-        resourceIds: ["review-changes", "team-memory"],
+        resourceIds: ["review-changes"],
         targetId: "cloud-storybook"
       }
     },
@@ -417,7 +417,6 @@ export const FLOW_RUNTIME_DIAGNOSTIC = decode(RuntimeDiagnosticSnapshot, {
     "workspace_write",
     "question_ask",
     "plan_submit",
-    "mcp.team-memory"
   ],
   mode: "ask",
   retries: 0,
@@ -430,7 +429,6 @@ export const FLOW_RUNTIME_DIAGNOSTIC = decode(RuntimeDiagnosticSnapshot, {
   }],
   fileChangeStatuses: ["A", "M", "D", "R"],
   mcpHealth: [
-    { name: "team-memory", status: "healthy" },
     { name: "context7", status: "healthy" }
   ],
   terminalCause: "completed",

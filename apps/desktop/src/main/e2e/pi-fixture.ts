@@ -19,7 +19,7 @@ import {
   ReasoningEffort,
   type ModelCertification
 } from "@jingler/core"
-import { Option, Schema } from "effect"
+import { Schema } from "effect"
 import { type DiscoveredProviderModel } from "@jingler/cli-adapters"
 import { scriptedPiScenarioResponses } from "@jingler/cli-adapters/runtime/certification/pi-scenario-fixture"
 import { E2E_PI_CONNECTION_ID, E2E_PI_MODEL_ID, E2E_PI_PROVIDER_ID } from "./fixture-identity.js"
@@ -56,8 +56,6 @@ const RENAME_TOOL = "workspace_rename"
 const COMMAND_TOOL = "command_execute"
 const SUBAGENT_TOOL = "subagent"
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
-const MEMORY_PROPOSE_TOOL = "mcp__jingler-memory__memory_propose"
-const MEMORY_WORKFLOW_TOOL = "mcp__jingler-memory__memory_workflow_status"
 const E2E_CONTEXT_WINDOW = 1_000_000
 const observedRouteFor = (authRoute: E2ePiFixture["authRoute"]): string =>
   `e2e-${authRoute}`
@@ -73,33 +71,6 @@ const DIGEST_REPLY = `\`\`\`json
 \`\`\``
 const MODERN_CONFIG =
   "export const mode = 'modern'\nexport const retries = 2\nexport const timeout = 1_000\n"
-const MEMORY_MARKDOWN =
-  "# Refund rate limiting\n\nRefund retries share one team limiter so bursts cannot multiply across workers."
-const PI_MEMORY_MARKDOWN =
-  "# Safe printf templates\n\nReusable printf templates quote percent signs before command execution."
-
-const MemoryToolResult = Schema.Struct({
-  structuredContent: Schema.optional(
-    Schema.Struct({
-      data: Schema.optional(
-        Schema.Struct({
-          workflowId: Schema.optional(Schema.String),
-          status: Schema.optional(Schema.String),
-          conflicts: Schema.optional(
-            Schema.Array(
-              Schema.Struct({
-                pageId: Schema.String,
-                expectedBaseRevisionId: Schema.String,
-                currentHeadRevisionId: Schema.String
-              })
-            )
-          )
-        })
-      )
-    })
-  )
-})
-
 /** Test fixtures are accepted only in an explicitly marked Electron e2e process. */
 export const loadE2ePiFixture = (): E2ePiFixture | null => {
   const path = process.env.JINGLER_E2E_PI_FIXTURE
@@ -231,18 +202,6 @@ const recentToolResultCount = (context: PiContext, toolName: string): number => 
   return count
 }
 
-const memoryToolData = (context: PiContext) => {
-  const message = context.messages.at(-1)
-  if (message?.role !== "toolResult") return null
-  return Option.match(
-    Schema.decodeUnknownOption(Schema.parseJson(MemoryToolResult))(toolResultText(message)),
-    {
-      onNone: () => null,
-      onSome: (result) => result.structuredContent?.data ?? null
-    }
-  )
-}
-
 const callTool = (
   name: string,
   input: Parameters<typeof fauxToolCall>[1],
@@ -335,127 +294,6 @@ const supervisorSubagentResponse = (
     )
   }
   return fauxAssistantMessage("Reviewer detached promptly and is waiting for supervisor input.")
-}
-
-const memoryResponse = (
-  context: PiContext
-): ReturnType<typeof fauxAssistantMessage> | null => {
-  const prompt = operatorText(context).find(
-    (text) =>
-      text.includes("[[memory-propose]]") || text.includes("[[memory-propose-conflict]]")
-  )
-  if (prompt === undefined) return null
-
-  const lastMessage = context.messages.at(-1)
-  if (lastMessage?.role !== "toolResult") {
-    return callTool(
-      MEMORY_PROPOSE_TOOL,
-      prompt.includes("[[memory-propose-conflict]]")
-        ? {
-            pageId: "alpha",
-            baseRevisionId: "revision:alpha:1",
-            markdown: "# Alpha memory\n\nA stale update must never overwrite revision two."
-          }
-        : {
-            pageId: "shared-learning",
-            baseRevisionId: "new",
-            markdown: MEMORY_MARKDOWN
-          },
-      "memory-propose"
-    )
-  }
-
-  const data = memoryToolData(context)
-  if (lastMessage.toolName === MEMORY_PROPOSE_TOOL) {
-    const conflict = data?.conflicts?.[0]
-    if (data?.status === "conflict" && conflict !== undefined) {
-      return fauxAssistantMessage(
-        `Memory proposal conflict for ${conflict.pageId}: expected ${conflict.expectedBaseRevisionId}; current ${conflict.currentHeadRevisionId}.`
-      )
-    }
-    if (data?.workflowId !== undefined) {
-      return callTool(
-        MEMORY_WORKFLOW_TOOL,
-        { workflowId: data.workflowId },
-        "memory-workflow-status"
-      )
-    }
-  }
-  return fauxAssistantMessage("Memory proposal workflow completed through pi.")
-}
-
-const memoryRecoveryResponse = (
-  context: PiContext
-): ReturnType<typeof fauxAssistantMessage> => {
-  const prompt = latestOperatorText(context)
-  const lastMessage = context.messages.at(-1)
-  if (prompt.includes("[[memory-recovery-hold]]")) {
-    return lastMessage?.role === "toolResult" &&
-      lastMessage.toolName === E2E_HELD_SUBAGENTS_TOOL
-      ? fauxAssistantMessage("Completed the offline turn while a child remains active.")
-      : callTool(E2E_HELD_SUBAGENTS_TOOL, { phase: "direct-start" }, "memory-recovery-hold")
-  }
-  if (prompt.includes("[[memory-recovery-search]]")) {
-    return lastMessage?.role === "toolResult" &&
-      lastMessage.toolName === "mcp__jingler-memory__memory_search"
-      ? fauxAssistantMessage("Memory tools recovered without restarting the conversation.")
-      : callTool(
-          "mcp__jingler-memory__memory_search",
-          { query: "recovered-tool-catalog", limit: 5 },
-          "memory-recovery-search"
-        )
-  }
-  return fauxAssistantMessage("Completed through deterministic pi.")
-}
-
-const memoryLifecycleResponse = (
-  context: PiContext
-): ReturnType<typeof fauxAssistantMessage> => {
-  const lastMessage = context.messages.at(-1)
-  if (lastMessage?.role !== "toolResult") {
-    return callTool(
-      COMMAND_TOOL,
-      { command: "printf -- 'memory lifecycle complete\\n'" },
-      "memory-lifecycle-command"
-    )
-  }
-  if (lastMessage.toolName === COMMAND_TOOL) {
-    if (toolResultText(lastMessage).includes("<tool-memory")) {
-      return callTool(
-        COMMAND_TOOL,
-        { command: "printf -- 'memory lifecycle complete\\n'" },
-        "memory-lifecycle-command-retry"
-      )
-    }
-    return callTool(
-      MEMORY_PROPOSE_TOOL,
-      {
-        pageId: "pi-command-learning",
-        baseRevisionId: "new",
-        markdown: PI_MEMORY_MARKDOWN
-      },
-      "memory-lifecycle-propose-advised"
-    )
-  }
-  const data = memoryToolData(context)
-  if (lastMessage.toolName === MEMORY_PROPOSE_TOOL && data?.workflowId !== undefined) {
-    return callTool(
-      MEMORY_WORKFLOW_TOOL,
-      { workflowId: data.workflowId },
-      "memory-lifecycle-workflow"
-    )
-  }
-  const advisoryObserved = context.messages.some(
-    (message) =>
-      message.role === "toolResult" &&
-      message.toolName === COMMAND_TOOL &&
-      toolResultText(message).includes("<tool-memory")
-  )
-  return fauxAssistantMessage(
-    advisoryObserved
-      ? "PI memory lifecycle completed with a cited tool advisory."
-      : "PI memory lifecycle completed without a tool advisory."
-  )
 }
 
 const fileBrowserResponse = (
@@ -875,21 +713,6 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
         }),
         fauxAssistantMessage("Managed skill loaded through pi.")
       ]
-    case "memory-lifecycle":
-      return Array.from({ length: 8 }, () => memoryLifecycleResponse)
-    case "memory-recovery":
-      return Array.from({ length: 8 }, () => memoryRecoveryResponse)
-    case "memory-recall":
-      return [
-        fauxAssistantMessage(
-          fauxToolCall("mcp__jingler-memory__memory_search", {
-            query: "alpha",
-            limit: 5
-          }),
-          { stopReason: "toolUse" }
-        ),
-        fauxAssistantMessage("Completed through deterministic pi.")
-      ]
     case "live-web-search":
       return Array.from({ length: 8 }, () => liveWebSearchResponse)
     case "browser-control":
@@ -1014,8 +837,6 @@ function scenarioFixtureResponse(context: PiContext) {
   if (supervisorSubagent !== null) return supervisorSubagent
   const heldSubagents = heldSubagentsResponse(context)
   if (heldSubagents !== null) return heldSubagents
-  const memory = memoryResponse(context)
-  if (memory !== null) return memory
   if (operatorText(context).some((text) => text.includes("adversarial code reviewer"))) {
     return reviewResponse(context)
   }

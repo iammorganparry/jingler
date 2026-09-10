@@ -16,8 +16,6 @@ import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
 
-export const MEMORY_REFLECTION_TIMEOUT_MS = 15_000
-
 export interface PiSessionHandle {
   /** Resumable Pi session file/id persisted by Jingler. */
   readonly id: string
@@ -46,10 +44,6 @@ export interface PiSessionHandle {
   readonly usage: () => { readonly costUsd: number; readonly tokens: number }
   readonly observe?: (event: StreamEvent) => void
   readonly reconcile?: () => Promise<FileChangeSet | null>
-  /** One hidden post-turn reflection prompt, or null when the run does not qualify. */
-  readonly memoryReflectionPrompt?: () => string | null
-  /** Structurally restrict tools while the hidden reflection phase is active. */
-  readonly setMemoryReflectionActive?: (active: boolean) => void
 }
 
 export interface PiSessionFactory {
@@ -168,68 +162,18 @@ const subscribeToSession = (
   ) ?? (() => {})
   const normalize = createPiEventNormalizer()
   let previousPlanPhase = handle.plannotatorPhase?.() ?? "idle"
-  let reflectionStarted = false
-  let reflectionActive = false
-  let reflectionTimeout: ReturnType<typeof setTimeout> | null = null
-  const finishReflection = () => {
-    const wasActive = reflectionActive
-    reflectionActive = false
-    if (wasActive) handle.setMemoryReflectionActive?.(false)
-    if (reflectionTimeout !== null) clearTimeout(reflectionTimeout)
-    reflectionTimeout = null
-  }
   const unsubscribeSession = handle.subscribe((event) => {
-    emitVisibleAgentEvent(reflectionActive, event, sink, normalize, handle)
+    emitVisibleAgentEvent(false, event, sink, normalize, handle)
     if (event.type !== "agent_settled") return
-
     const planPhase = handle.plannotatorPhase?.() ?? "idle"
     if (planPhase === "executing" && previousPlanPhase !== "executing") {
       previousPlanPhase = planPhase
       return
     }
     previousPlanPhase = planPhase
-
-    if (!reflectionStarted) {
-      const prompt = handle.memoryReflectionPrompt?.() ?? null
-      if (prompt !== null) {
-        reflectionStarted = true
-        reflectionActive = true
-        handle.setMemoryReflectionActive?.(true)
-        reflectionTimeout = setTimeout(() => {
-          reflectionTimeout = null
-          Effect.runFork(
-            Effect.tryPromise({
-              try: () => handle.interrupt(),
-              catch: () => null
-            }).pipe(Effect.catchAll(() => Effect.void))
-          )
-          Effect.runFork(settleSession(handle, sink))
-        }, MEMORY_REFLECTION_TIMEOUT_MS)
-        Effect.runFork(
-          Effect.tryPromise({
-            try: () => handle.prompt(prompt),
-            catch: (cause) =>
-              new AgentRuntimeError({
-                reason: "provider",
-                message: "pi memory reflection failed",
-                cause
-              })
-          }).pipe(
-            Effect.catchAll(() => {
-              finishReflection()
-              return settleSession(handle, sink)
-            })
-          )
-        )
-        return
-      }
-    }
-
-    finishReflection()
     Effect.runFork(settleSession(handle, sink))
   })
   return () => {
-    finishReflection()
     unsubscribeFleet()
     unsubscribePlannotator()
     unsubscribePlannotatorNotice()
@@ -326,9 +270,6 @@ const rebindableContext = (
 ): AgentRuntimeContext => ({
   get mcp() {
     return holder.current.mcp
-  },
-  get memoryAttachmentStatus() {
-    return holder.current.memoryAttachmentStatus
   },
   publishEvent: (event) => holder.current.publishEvent(event),
   registerBackgroundStop: (stop) => holder.current.registerBackgroundStop(stop),
