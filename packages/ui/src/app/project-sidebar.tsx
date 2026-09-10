@@ -6,7 +6,7 @@ import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
 
-type ProjectItem = Pick<Project, "id" | "name" | "availability"> & { readonly path?: string }
+type ProjectItem = Pick<Project, "id" | "name" | "availability" | "updatedAt"> & { readonly path?: string }
 
 function ProjectAvatar({
   project,
@@ -96,7 +96,7 @@ export function ProjectSidebar({
     (session) => projectIdForSession(session, projects) === UNASSIGNED_PROJECT_ID
   )
   const candidates: ReadonlyArray<ProjectItem> = hasUnassigned
-    ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available" }]
+    ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available", updatedAt: "" }]
     : projects
   const items = candidates
     .map((project) => ({
@@ -105,11 +105,13 @@ export function ProjectSidebar({
         (session) => projectIdForSession(session, projects) === project.id
       )
     }))
-    .filter(({ sessions: projectSessions }) => projectSessions.length > 0)
     .sort(
       (a, b) =>
         Number(b.project.id === activeProjectId) - Number(a.project.id === activeProjectId) ||
-        b.sessions[0]!.updatedAt.localeCompare(a.sessions[0]!.updatedAt)
+        Number(b.sessions.length > 0) - Number(a.sessions.length > 0) ||
+        (b.sessions[0]?.updatedAt ?? b.project.updatedAt).localeCompare(
+          a.sessions[0]?.updatedAt ?? a.project.updatedAt
+        )
     )
 
   return (
