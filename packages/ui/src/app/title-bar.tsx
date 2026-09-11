@@ -18,6 +18,7 @@ export function TitleBar({
       style={drag}
       className="flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
+      <div aria-hidden className="w-11 flex-none" />
       <div
         id="session-tab-bar-portal"
         style={noDrag}
