@@ -32,6 +32,31 @@ describe("SessionSidebar session identity", () => {
     expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull()
   })
 
+  it("shows project activity while collapsed and clears it when work stops", () => {
+    const sessions = [
+      session({ id: "ordinary", repo: "widget", status: "idle" }),
+      session({ id: "worker", repo: "widget", status: "running", persistent: true }),
+      session({ id: "archived", repo: "quiet", status: "running", archived: true }),
+      session({ id: "quiet", repo: "quiet", status: "needs-input" })
+    ]
+    const props = {
+      sessions,
+      activeSessionId: "ordinary",
+      onSelect: vi.fn(),
+      defaultFilters: { ...DEFAULT_FILTERS, groupBy: "repo" as const },
+      onToggleCollapsed: vi.fn(),
+      collapsedRepoNames: new Set(["widget"])
+    }
+    const { rerender } = render(<SessionSidebar {...props} />)
+    expect(screen.getByRole("status", { name: "widget: sessions in progress" })).toBeTruthy()
+    expect(screen.queryByTestId("session-row-ordinary")).toBeNull()
+    expect(screen.queryByRole("status", { name: "quiet: sessions in progress" })).toBeNull()
+
+    rerender(<SessionSidebar {...props} liveActivity={{ worker: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 } }} />)
+    expect(screen.getByRole("status", { name: "widget: sessions in progress" })).toBeTruthy()
+    rerender(<SessionSidebar {...props} sessions={sessions.map((s) => s.id === "worker" ? { ...s, status: "idle" } : s)} />)
+    expect(screen.queryByRole("status", { name: "widget: sessions in progress" })).toBeNull()
+  })
   it("renders global search above the session list", () => {
     render(
       <SessionSidebar

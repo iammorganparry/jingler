@@ -159,9 +159,18 @@ describe("groupSessions", () => {
     expect(groupSessions([], DEFAULT_FILTERS, idle)).toStrictEqual([])
   })
 
-  it("groups by repo in first-seen order", () => {
+  it("keeps repo order independent of session recency and activity", () => {
     const out = groupSessions(active, { ...DEFAULT_FILTERS, groupBy: "repo" }, idle)
-    expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
+    expect(out.map((g) => g.key)).toStrictEqual(["gtm-grid", "jingler"])
+    const changed = active.toReversed().map((item) => ({
+      ...item,
+      updatedAt: item.id === "a" ? "2026-07-22T12:00:00.000Z" : item.updatedAt
+    }))
+    for (const sortBy of ["recency", "name", "status"] as const) {
+      expect(groupSessions(changed, { ...DEFAULT_FILTERS, groupBy: "repo", sortBy },
+        (item) => item.id === "a" ? "running" : "idle"
+      ).map((group) => group.key)).toStrictEqual(["gtm-grid", "jingler"])
+    }
   })
 
   it("floats starred repos to the top without reordering the rest", () => {
@@ -169,9 +178,9 @@ describe("groupSessions", () => {
       active,
       { ...DEFAULT_FILTERS, groupBy: "repo" },
       idle,
-      new Set(["gtm-grid"])
+      new Set(["jingler"])
     )
-    expect(out.map((g) => g.key)).toStrictEqual(["gtm-grid", "jingler"])
+    expect(out.map((g) => g.key)).toStrictEqual(["jingler", "gtm-grid"])
   })
 
   it("omits status groups with nothing in them", () => {
