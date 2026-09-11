@@ -73,22 +73,27 @@ const managedSecretDigest = (values: Readonly<Record<string, string>>): string =
     )))
     .digest("hex")
 
+// Typed failures, not throws: a throw inside the resolving Effect is a defect,
+// which the session factory's `mapError` cannot classify, and the operator
+// then sees a bare "The agent run failed." instead of which setting is wrong.
 const assignedSubagentConnections = (
   saved: WorkspaceConfig | null,
   connections: ReadonlyArray<ProviderConnection>
-): ReadonlyArray<ProviderConnection> => {
-  if (Object.keys(saved?.subagentModels ?? {}).length === 0) return []
+): Effect.Effect<ReadonlyArray<ProviderConnection>, Error> => {
+  if (Object.keys(saved?.subagentModels ?? {}).length === 0) return Effect.succeed([])
   if (!saved?.defaultConnectionId) {
-    throw new Error("Subagent models require a default provider connection")
+    return Effect.fail(new Error("Subagent models require a default provider connection"))
   }
   const assigned = connections.find(({ id }) => id === saved.defaultConnectionId)
-  if (!assigned) throw new Error("The subagent provider connection is unavailable")
+  if (!assigned) {
+    return Effect.fail(new Error("The subagent provider connection is unavailable"))
+  }
   if (Object.values(saved.subagentModels ?? {}).some((model) =>
     !String(model).startsWith(`${assigned.providerId}/`)
   )) {
-    throw new Error("Subagent models must use the default provider connection")
+    return Effect.fail(new Error("Subagent models must use the default provider connection"))
   }
-  return [assigned]
+  return Effect.succeed([assigned])
 }
 
 export interface PluginToolSuccessfulResult
@@ -197,7 +202,7 @@ export const makePiAgentRuntimeLive = (
           models: saved?.subagentModels ?? {},
           connections: Object.keys(saved?.subagentModels ?? {}).length === 0
             ? []
-            : assignedSubagentConnections(saved, yield* providers.status)
+            : yield* assignedSubagentConnections(saved, yield* providers.status)
         }
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),

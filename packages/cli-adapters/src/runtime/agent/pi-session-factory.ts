@@ -311,6 +311,13 @@ const validateConnection = (
         })
       )
 
+/**
+ * System-prompt ceiling in estimated tokens. The invariant layers take about a
+ * quarter of this; the rest is the active-tools list, which grows with every
+ * attached MCP server and plugin, so the headroom is deliberate.
+ */
+const DEFAULT_PROMPT_TOKEN_BUDGET = 8_000
+
 const effectiveRuntimeSpec = (spec: PiRunSpec): PiRunSpec =>
   spec.mode === "plan"
     ? { ...spec, role: "conversation", mode: "auto" }
@@ -346,12 +353,20 @@ const createResources = (
   // Auto tool set, so the phase change must not narrow or replace it.
   const executionTools = registryTools.map(({ id }) => id)
   const eventBus = createEventBus()
-  const compiled = (options.promptCompiler ?? new PromptCompiler()).compile({
-    layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
-    tools,
-    tokenBudget: options.promptTokenBudget ?? 4_000
-  })
-  return createLockedPiResources({
+  // A thrown compile error would be a defect the run cannot classify, so the
+  // operator would see a bare "The agent run failed." with the reason lost.
+  return Effect.try({
+    try: () => (options.promptCompiler ?? new PromptCompiler()).compile({
+      layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+      tools,
+      tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
+    }),
+    catch: (cause) => new AgentRuntimeError({
+      reason: "runtime",
+      message: cause instanceof Error ? cause.message : "Could not compile the system prompt",
+      cause
+    })
+  }).pipe(Effect.flatMap((compiled) => createLockedPiResources({
     cwd: spec.cwd,
     agentDir: options.agentDir,
     systemPrompt: compiled.text,
@@ -365,13 +380,15 @@ const createResources = (
     ),
     Effect.mapError(
       (cause) =>
-        new AgentRuntimeError({
-          reason: "runtime",
-          message: cause.message,
-          cause
-        })
+        cause instanceof AgentRuntimeError
+          ? cause
+          : new AgentRuntimeError({
+              reason: "runtime",
+              message: cause.message,
+              cause
+            })
     )
-  )
+  )))
 }
 
 interface EmbeddedSessionInput {
@@ -427,7 +444,7 @@ const createEmbeddedSession = (
           message: `Certified model is unavailable: ${spec.modelId}`
         })
       }
-      const toolSpec = plannotatorExecutionSpec(spec)
+      const toolSpec = effectiveRuntimeSpec(spec)
       const customTools = registry ? [...createPiTools(registry, toolSpec, context)] : []
       const thinkingLevel = thinkingLevelFor(spec.reasoning)
       const sessionManager = sessionManagerFor(spec, options.sessionsDir)

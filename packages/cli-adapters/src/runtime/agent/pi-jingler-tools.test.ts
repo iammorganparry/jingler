@@ -129,6 +129,40 @@ describe("Jingler target-owned tools", () => {
     expect(askQuestion).not.toHaveBeenCalled()
   })
 
+  it("keeps configured MCP servers behind mcp_search instead of the active tool set", async () => {
+    const configured = { name: "issues", url: "http://127.0.0.1:4321/mcp", headers: {} }
+    const browser = { name: "jingler-browser", url: "http://127.0.0.1:1234/mcp", headers: {} }
+    const listed: Array<string> = []
+    const registry = await Effect.runPromise(createJinglerTools({
+      context: runtimeContext(),
+      cwd: "/workspace",
+      mcp: { browser, configured: [configured] },
+      mcpClientFactory: (server) => {
+        listed.push(server.name)
+        return Effect.succeed({
+          listTools: () => Effect.succeed({
+            tools: [{
+              name: "lookup",
+              description: "Look something up",
+              inputSchema: { type: "object", properties: {}, additionalProperties: false }
+            }]
+          }),
+          callTool: () => Effect.succeed({ content: [] }),
+          close: Effect.void
+        })
+      }
+    }))
+    const ids = registry.capabilitiesFor("conversation", "auto").map(({ id }) => id)
+    // The browser server is eager: its tools are first-class on turn one.
+    expect(ids).toContain("mcp__jingler-browser__lookup")
+    // The configured server is not: only the discovery pair is active, and
+    // it has not even been dialled yet.
+    expect(ids).toContain("mcp_search")
+    expect(ids).toContain("mcp_call")
+    expect(ids).not.toContain("mcp__issues__lookup")
+    expect(listed).toEqual(["jingler-browser"])
+  })
+
   it("treats a null browser lease as detached", async () => {
     const askQuestion = vi.fn(() => Effect.succeed([]))
     const registry = await Effect.runPromise(createJinglerTools({

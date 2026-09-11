@@ -212,9 +212,10 @@ export interface JinglerToolRegistryInput {
 }
 
 /**
- * Jingler's own MCP servers (browser, memory) are discovered eagerly so their
- * tools are callable on the first turn; operator-configured servers register
- * progressively, so a slow or absent server never delays session start.
+ * Jingler's own browser server is discovered eagerly so its tools are callable
+ * on the first turn; operator-configured servers register progressively behind
+ * mcp_search / mcp_call, so a slow or absent server never delays session start
+ * and a large catalog never crowds the system prompt.
  */
 const registerJinglerMcpSources = (
   registry: ToolRegistry,
@@ -223,7 +224,7 @@ const registerJinglerMcpSources = (
   Effect.gen(function* () {
     const mcpSources = input.mcp ? jinglerMcpSources(input.mcp, input.liveMcp) : []
     const eagerMcpSources = mcpSources.filter(({ server }) =>
-      server.name === input.mcp?.browser?.name || server.name === input.mcp?.memory?.name
+      server.name === input.mcp?.browser?.name
     )
     const configuredMcpSources = mcpSources.filter(({ server }) =>
       input.mcp?.configured?.some(({ name }) => name === server.name) === true
@@ -261,13 +262,11 @@ export const createJinglerTools = (
         input.mcp?.browser != null
       )
     }
-    const mcpSources = input.mcp ? jinglerMcpSources(input.mcp, input.liveMcp) : []
-    if (mcpSources.length > 0) {
-      const report = yield* (input.mcpClientFactory
-        ? registerMcpTools(registry, mcpSources, input.mcpClientFactory)
-        : registerMcpTools(registry, mcpSources))
-      registry.setMcpHealth(report.health)
-    }
+    // Progressive by design: only Jingler's own browser server lands in the
+    // active tool set. Every operator-configured server is reached through
+    // mcp_search / mcp_call, so the prompt and the provider tool list stay
+    // bounded no matter how many servers are attached.
+    yield* registerJinglerMcpSources(registry, input)
 
     return registry
   })

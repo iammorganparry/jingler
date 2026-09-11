@@ -71,10 +71,9 @@ const basename = (target: string | null): string => target?.split("/").pop() ?? 
 export const verdict = (
   mode: PermissionMode,
   allow: ReadonlySet<string>,
-  req: PermissionRequest,
-  planAutoRun: boolean = PLAN_AUTO_RUN_DEFAULT
+  req: PermissionRequest
 ): "allow" | "gate" => {
-  if (mode === "auto") return "allow"
+  if (mode === "auto" || mode === "plan") return "allow"
   if (isAllowlisted(allow, req.command)) return "allow"
   if (req.kind === "edit") return mode === "accept-edits" ? "allow" : "gate"
   return "gate"

@@ -27,7 +27,6 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
   isFileMutationTool,
-  PLAN_AUTO_RUN_DEFAULT,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
@@ -809,7 +808,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // Re-read the live mode each call so an in-run change (e.g. a plan
               // approval restoring the exec mode) takes effect on this same turn.
               const liveMode = (yield* Ref.get(modes)).get(chatId) ?? mode
-              if (verdict(liveMode, allow, req, planAutoRun) === "allow") {
+              if (verdict(liveMode, allow, req) === "allow") {
                 return "allow" as const
               }
               const gn = yield* nextId
@@ -1027,10 +1026,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   liveBranch: failure.liveBranch
                 })
               }
-              return emit({
-                _tag: "Failed",
-                message: failure instanceof AgentRunError ? failure.message : "The agent run failed."
-              })
+              return Effect.logError("agent run failed", Cause.pretty(cause)).pipe(
+                Effect.andThen(emit({ _tag: "Failed", message: describeRunFailure(cause) }))
+              )
             }),
             Effect.ensuring(
               Ref.update(active, (m) => {
@@ -1501,6 +1499,28 @@ function prepareTurnSpec(
     mcp
   }
   return spec
+}
+
+/**
+ * The operator-facing line for a turn that ended in an error the run did not
+ * classify. A bare "The agent run failed." hides the one thing that would let
+ * anyone fix it, so carry the underlying message — whether it arrived as a
+ * typed failure or as a defect thrown from setup.
+ */
+const describeRunFailure = (cause: Cause.Cause<unknown>): string => {
+  const failure = Option.getOrUndefined(Cause.failureOption(cause))
+  if (failure instanceof AgentRunError) return failure.message
+  const detail = failureDetail(failure) ?? failureDetail(Option.getOrUndefined(Cause.dieOption(cause)))
+  return detail ? `The agent run failed: ${detail}` : "The agent run failed."
+}
+
+const failureDetail = (value: unknown): string | null => {
+  if (value === undefined || value === null) return null
+  if (typeof value === "string") return value
+  if (typeof value === "object" && "message" in value && typeof value.message === "string") {
+    return value.message
+  }
+  return null
 }
 
 const resolveTurnChat = (sessionId: string, chatId: string) =>

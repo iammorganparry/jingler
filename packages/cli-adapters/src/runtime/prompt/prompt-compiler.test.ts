@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { PromptCompiler, type PromptLayer } from "./prompt-compiler.js"
+import { PromptBudgetError, PromptCompiler, type PromptLayer } from "./prompt-compiler.js"
 import { promptLayer, runtimeInvariantLayers } from "./role-profiles.js"
 
 const tool = { id: "workspace_read", version: "1", description: "Read a bounded project file." }
@@ -200,5 +200,40 @@ describe("PromptCompiler", () => {
     )
     const second = compiler.compile({ layers: secondLayers, tools: [], tokenBudget: 1_000 })
     expect(second.manifest.hash).not.toBe(first.manifest.hash)
+  })
+
+  it("compacts tool descriptions to their first sentence before failing the required tools layer", () => {
+    // Forty tools with paragraph-length descriptions: far more than the
+    // budget can hold verbatim, comfortably enough once each is one sentence.
+    const verbose = Array.from({ length: 40 }, (_, index) => ({
+      id: `tool_${index}`,
+      version: "1",
+      description: `Do the ${index}th thing. ${"Long guidance about when and how to call it. ".repeat(6)}`
+    }))
+    const result = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "ask"),
+      tools: verbose,
+      tokenBudget: 2_500
+    })
+    const section = result.manifest.sections.find((candidate) => candidate.id === "runtime.active-tools")
+    expect(section?.truncated).toBe(true)
+    expect(result.text).toContain("- tool_7: Do the 7th thing.")
+    expect(result.text).not.toContain("Long guidance")
+    expect(result.manifest.activeTools).toHaveLength(40)
+  })
+
+  it("still fails when even the compacted tools layer cannot fit", () => {
+    const many = Array.from({ length: 400 }, (_, index) => ({
+      id: `tool_${index}`,
+      version: "1",
+      description: "Do a thing."
+    }))
+    expect(() =>
+      new PromptCompiler().compile({
+        layers: runtimeInvariantLayers("conversation", "ask"),
+        tools: many,
+        tokenBudget: 1_500
+      })
+    ).toThrow(PromptBudgetError)
   })
 })
