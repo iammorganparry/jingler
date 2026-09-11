@@ -519,7 +519,7 @@ function renderEditableTitle() {
         </div>
         )}
 
-        {status && (
+        {status && !inTitleBar && (
           // The status word is the first thing to go: it's a duplicate of the
           // sidebar row's own indicator, so nothing is lost that isn't on screen
           // a few hundred pixels to the left.

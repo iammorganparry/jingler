@@ -18,11 +18,6 @@ export function TitleBar({
       style={drag}
       className="flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
-      <div style={noDrag} className="relative flex flex-none gap-2">
-        <span className="size-3 rounded-full bg-[#ff5f57]" />
-        <span className="size-3 rounded-full bg-[#febc2e]" />
-        <span className="size-3 rounded-full bg-[#28c840]" />
-      </div>
       <div
         id="session-tab-bar-portal"
         style={noDrag}

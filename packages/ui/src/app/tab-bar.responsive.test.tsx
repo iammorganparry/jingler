@@ -104,6 +104,14 @@ describe("TabBar at width", () => {
     expect(viewTabs.nextElementSibling).toBe(status)
   })
 
+  it("hides the duplicate session status in the title bar", () => {
+    renderAt(1200, {
+      inTitleBar: true,
+      status: { label: "Thinking", tone: "yellow" }
+    })
+    expect(screen.queryByTestId("session-status")).toBeNull()
+  })
+
   it("gives the session title less room as the pane narrows, and drops it at tiny", () => {
     const title = "feat(signals): account-first resolution"
     const widthAt = (width: number) => {
