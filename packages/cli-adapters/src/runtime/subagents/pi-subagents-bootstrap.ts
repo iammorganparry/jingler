@@ -1,7 +1,11 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { dirname, join, resolve } from "node:path"
-import { JINGLER_SUBAGENT_NAMES, type SubagentModelAssignments } from "@jingler/core"
+import {
+  JINGLER_SUBAGENT_NAMES,
+  type JinglerSubagentName,
+  type SubagentModelAssignments
+} from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import {
   defaultPiChildLauncherConfig,
@@ -18,8 +22,18 @@ const PI_SUBAGENTS_AGENT_DIR = join(
 const BUILTIN_AGENTS = JINGLER_SUBAGENT_NAMES.filter(
   (agent) => agent !== "fanout"
 )
-const STANDARD_CHILD_TOOLS = "contact_supervisor"
-const FANOUT_CHILD_TOOLS = "subagent, contact_supervisor"
+export type PiSubagentProfileTools = Partial<
+  Record<JinglerSubagentName, ReadonlyArray<string>>
+>
+
+const profileTools = (
+  brokered: ReadonlyArray<string> = [],
+  fanout = false
+): string => [...new Set([
+  ...(fanout ? ["subagent"] : []),
+  "contact_supervisor",
+  ...brokered
+])].join(", ")
 
 const PiSubagentConfig = Schema.Struct({
   artifactDir: Schema.Literal("session"),
@@ -96,7 +110,7 @@ const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
   claudeProviderPath: string,
-  tools = STANDARD_CHILD_TOOLS,
+  tools: string,
   model?: string
 ): string => source
   .replace(/^tools:.*$/m, `tools: ${tools}`)
@@ -108,14 +122,15 @@ const rewriteAgentProfile = (
 
 /**
  * Shadow vendor profiles with Jingler-managed definitions. Brokered tools are
- * registered by the explicit child extension; this frontmatter grants only
- * supervisor coordination. The one fanout profile opts into nested spawning.
+ * registered by the explicit child extension; their names must also be in Pi's
+ * hard tool allowlist. The one fanout profile opts into nested spawning.
  */
 export const materializePiSubagentProfiles = async (
   agentDir: string,
   childToolsPath: string,
   claudeProviderPath: string,
-  models: SubagentModelAssignments = {}
+  models: SubagentModelAssignments = {},
+  tools: PiSubagentProfileTools = {}
 ): Promise<void> => {
   const target = join(agentDir, "agents")
   await mkdir(target, { recursive: true, mode: 0o700 })
@@ -127,7 +142,7 @@ export const materializePiSubagentProfiles = async (
         source,
         childToolsPath,
         claudeProviderPath,
-        STANDARD_CHILD_TOOLS,
+        profileTools(tools[agent]),
         models[agent]
       ),
       { encoding: "utf8", mode: 0o600 }
@@ -150,7 +165,7 @@ export const materializePiSubagentProfiles = async (
       ),
     childToolsPath,
     claudeProviderPath,
-    FANOUT_CHILD_TOOLS,
+    profileTools(tools.fanout, true),
     models.fanout
   )
   await writeFile(join(target, "fanout.md"), fanout, {
@@ -171,7 +186,8 @@ export const materializePiSubagentProfiles = async (
  */
 export const preparePiSubagentsRuntime = (
   agentDir: string,
-  models: SubagentModelAssignments = {}
+  models: SubagentModelAssignments = {},
+  tools: PiSubagentProfileTools = {}
 ): Effect.Effect<void, PiSubagentsBootstrapError> =>
   Effect.tryPromise({
     try: async () => {
@@ -189,7 +205,8 @@ export const preparePiSubagentsRuntime = (
         expected,
         launcher.childToolsPath,
         launcher.claudeProviderPath,
-        models
+        models,
+        tools
       )
       await Effect.runPromise(preparePiChildLauncher(launcher))
     },

@@ -56,9 +56,13 @@ describe("managed pi-subagent profiles", () => {
       writeFile(childTools, "export default () => undefined\n"),
       writeFile(claudeProvider, "export default () => undefined\n")
     ])
-    await materializePiSubagentProfiles(root, childTools, claudeProvider, {
-      worker: ProviderModelId.make("openai-codex/gpt-5.6-sol")
-    })
+    await materializePiSubagentProfiles(
+      root,
+      childTools,
+      claudeProvider,
+      { worker: ProviderModelId.make("openai-codex/gpt-5.6-sol") },
+      { worker: ["workspace_read_file"] }
+    )
     process.env.PI_CODING_AGENT_DIR = root
 
     const scout = await resolveAgent(root, "scout")
@@ -70,6 +74,10 @@ describe("managed pi-subagent profiles", () => {
     if (!(scout.ok && worker.ok && fanout.ok)) return
     expect(scout.contract.model).toBe("anthropic/claude-test:low")
     expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:high")
+    expect(worker.contract.tools.requestedBuiltin).toEqual([
+      "contact_supervisor",
+      "workspace_read_file"
+    ])
     expect(scout.contract.inheritProjectContext).toBe(false)
     expect(scout.contract.roots.outputPath).toContain(
       join("subagent-artifacts", "outputs", "preflight", "context.md")

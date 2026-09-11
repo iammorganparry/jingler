@@ -53,12 +53,18 @@ import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
-import { preparePiSubagentsRuntime } from "../subagents/pi-subagents-bootstrap.js"
+import {
+  preparePiSubagentsRuntime,
+  type PiSubagentProfileTools
+} from "../subagents/pi-subagents-bootstrap.js"
 import {
   childProviderConnections,
   type PiChildCredentials
 } from "../subagents/pi-child-credentials.js"
-import type { SubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
+import {
+  subagentCapabilityToolIds,
+  type SubagentCapabilityBroker
+} from "../subagents/subagent-capability-broker.js"
 import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
 import {
   makeSubagentFleetEventHub,
@@ -637,7 +643,15 @@ const createSessionHandle = (
           }))
         )
       : { models: {}, connections: [] }
-    yield* preparePiSubagentsRuntime(options.agentDir, subagentConfig.models).pipe(
+    const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.map((agent) => [
+      agent,
+      subagentCapabilityToolIds(registry, spec, agent)
+    ])) as PiSubagentProfileTools
+    yield* preparePiSubagentsRuntime(
+      options.agentDir,
+      subagentConfig.models,
+      profileTools
+    ).pipe(
       Effect.mapError(
         (cause) =>
           new AgentRuntimeError({

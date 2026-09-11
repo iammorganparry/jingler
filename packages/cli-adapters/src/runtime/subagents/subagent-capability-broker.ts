@@ -109,7 +109,7 @@ const responseFrom = (result: ToolResultEnvelope): SubagentToolResponse => ({
   error: result.error
 })
 
-const childExecutionProfile = (
+export const childExecutionProfile = (
   spec: SubagentParentSpec,
   agent: string
 ): { readonly role: AgentRole; readonly mode: RuntimeMode } =>
@@ -117,7 +117,7 @@ const childExecutionProfile = (
     ? { role: "review", mode: "read-only" }
     : { role: spec.role, mode: spec.mode }
 
-const childTools = (
+export const subagentCapabilityTools = (
   registry: ToolRegistry,
   role: AgentRole,
   mode: RuntimeMode
@@ -145,6 +145,15 @@ const childTools = (
     }),
   SUPERVISOR_STATE_TOOL
 ]
+
+export const subagentCapabilityToolIds = (
+  registry: ToolRegistry,
+  spec: SubagentParentSpec,
+  agent: string
+): ReadonlyArray<string> => {
+  const profile = childExecutionProfile(spec, agent)
+  return subagentCapabilityTools(registry, profile.role, profile.mode).map(({ id }) => id)
+}
 
 const readBody = (request: IncomingMessage): Effect.Effect<string, Error> =>
   Effect.tryPromise({
@@ -251,7 +260,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
           const capabilities = agents.map((agent) => {
             const token = randomBytes(32).toString("base64url")
             const profile = childExecutionProfile(input.spec, agent)
-            const tools = childTools(input.registry, profile.role, profile.mode)
+            const tools = subagentCapabilityTools(input.registry, profile.role, profile.mode)
             children.set(token, {
               parentPiSessionId: input.parentPiSessionId,
               agent,
