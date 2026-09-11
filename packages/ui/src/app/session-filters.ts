@@ -212,11 +212,11 @@ export const groupSessions = (
     else byRepo.set(s.repo, [s])
   }
   const groups = [...byRepo].map(([key, list]) => ({ key, sessions: list }))
-  // Project positions must not follow session recency or live activity.
-  return groups.sort(
-    (a, b) =>
-      Number(starredRepoNames?.has(b.key) ?? false) - Number(starredRepoNames?.has(a.key) ?? false) ||
-      a.key.localeCompare(b.key)
+  if (!starredRepoNames || starredRepoNames.size === 0) return groups
+  // Stable sort: starred repo groups float to the top, order otherwise kept —
+  // which means repos stay in first-seen order rather than jumping alphabetical.
+  return [...groups].sort(
+    (a, b) => Number(starredRepoNames.has(b.key)) - Number(starredRepoNames.has(a.key))
   )
 }
 

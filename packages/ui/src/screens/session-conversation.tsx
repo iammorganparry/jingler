@@ -331,6 +331,7 @@ export function SessionConversation(props: SessionConversationProps) {
           projects={projects}
           sessions={props.sessions}
           activeProjectId={selectedProjectId}
+          liveActivity={props.liveActivity}
           projectOwners={props.projectOwners}
           loading={props.projectsLoading}
           onSelect={selectProject}

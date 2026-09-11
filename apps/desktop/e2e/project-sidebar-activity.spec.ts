@@ -1,6 +1,6 @@
 import { appShell, expect, test } from "./fixtures.js"
 
-test("project headings show activity and stay ordered after selection and collapse", async ({ launchApp }) => {
+test("projects show live activity and stay ordered after selection", async ({ launchApp }) => {
   const { window } = await launchApp({
     configured: true,
     isolateSystemHome: true,
@@ -23,23 +23,23 @@ test("project headings show activity and stay ordered after selection and collap
   })
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1500, height: 860 })
-  await window.getByRole("button", { name: "Filter and sort sessions" }).click()
-  await window.getByRole("menuitem", { name: /^Group by/ }).hover()
-  await window.getByRole("menuitem", { name: "Repository", exact: true }).click()
-
-  const headings = window.getByRole("button", { name: /^(Expand|Collapse) repository$/ })
-  await expect(headings).toHaveText(["alpha", "widget"])
+  const projects = window.getByTestId("project-sidebar")
+  const items = projects.locator('[data-testid^="project-row-"]')
+  await expect(items).toHaveCount(2)
+  const order = await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))
+  await projects.getByRole("button", { name: "widget", exact: true }).click()
   await window.getByTestId("session-row-worker").click()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[queue-hold]] keep this project busy")
   await composer.press("Enter")
-  const activity = window.getByRole("status", { name: "widget: sessions in progress" })
+  const activity = projects.getByRole("status", { name: "widget: sessions in progress" })
   await expect(activity).toBeVisible()
-  await expect(window.getByRole("status", { name: "alpha: sessions in progress" })).toHaveCount(0)
-  await window.getByTestId("session-row-quiet").click()
-  await expect(headings).toHaveText(["alpha", "widget"])
-  await headings.filter({ hasText: "widget" }).click()
+  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
+  await expect(window.getByTestId("session-row-quiet")).toBeVisible()
   await expect(window.getByTestId("session-row-worker")).toBeHidden()
   await expect(activity).toBeVisible()
-  await expect(headings).toHaveText(["alpha", "widget"])
+  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
+  await projects.getByRole("button", { name: "widget", exact: true }).click()
+  await expect(window.getByTestId("session-row-worker")).toBeVisible()
+  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
 })

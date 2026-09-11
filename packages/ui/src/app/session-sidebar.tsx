@@ -353,11 +353,6 @@ return (renderExpandedGroupHeading())
             <div key={key}>
               <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
                 {renderGroupHeading()}
-                {filters.groupBy === "repo" && runningRepos.has(key) && (
-                  <span role="status" aria-label={`${key}: sessions in progress`} title="Sessions in progress">
-                    <StatusDot status="running" size={8} />
-                  </span>
-                )}
                 {filters.groupBy === "repo" && onToggleStar && (
                   <Button
                     variant="ghost"
@@ -442,11 +437,6 @@ return (renderExpandedGroupHeading())
       return display === "thinking" ? "running" : display
     },
     [liveActivity]
-  )
-
-  const runningRepos = React.useMemo(
-    () => new Set(sessions.filter((s) => !s.archived && statusOf(s) === "running").map((s) => s.repo)),
-    [sessions, statusOf]
   )
 
   const filtered = React.useMemo(

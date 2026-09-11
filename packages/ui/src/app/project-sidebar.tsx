@@ -1,12 +1,13 @@
-import type { Project, Session } from "@jingler/core"
+import { displayStatusOf, type Project, type Session, type SessionActivity } from "@jingler/core"
 import { Plus } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { HoverCard } from "../components/hover-card.js"
+import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
 
-type ProjectItem = Pick<Project, "id" | "name" | "availability" | "updatedAt"> & { readonly path?: string }
+type ProjectItem = Pick<Project, "id" | "name" | "availability"> & { readonly path?: string }
 
 function ProjectAvatar({
   project,
@@ -64,6 +65,11 @@ function ProjectAvatar({
         >
           {sessionCount}
         </span>
+        {activeSessionCount > 0 ? (
+          <span role="status" aria-label={`${project.name}: sessions in progress`} className="absolute bottom-0 left-0 flex rounded-full ring-2 ring-panel">
+            <StatusDot status="running" size={8} />
+          </span>
+        ) : null}
         {project.availability !== "available" ? (
           <span className="absolute bottom-0 right-0 size-2 rounded-full bg-yellow ring-2 ring-panel" />
         ) : null}
@@ -76,6 +82,7 @@ export function ProjectSidebar({
   projects,
   sessions,
   activeProjectId,
+  liveActivity,
   projectOwners,
   loading = false,
   onSelect,
@@ -84,19 +91,18 @@ export function ProjectSidebar({
   projects: ReadonlyArray<Project>
   sessions: ReadonlyArray<Session>
   activeProjectId: string
+  liveActivity?: Readonly<Record<string, SessionActivity>>
   projectOwners?: Readonly<Record<string, string>>
   loading?: boolean
   onSelect: (projectId: string) => void
   onAddProject?: () => void
 }) {
-  const openSessions = [...sessions]
-    .filter((session) => !session.archived)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const openSessions = sessions.filter((session) => !session.archived)
   const hasUnassigned = openSessions.some(
     (session) => projectIdForSession(session, projects) === UNASSIGNED_PROJECT_ID
   )
   const candidates: ReadonlyArray<ProjectItem> = hasUnassigned
-    ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available", updatedAt: "" }]
+    ? [...projects, { id: UNASSIGNED_PROJECT_ID, name: "Unassigned", availability: "available" }]
     : projects
   const items = candidates
     .map((project) => ({
@@ -105,14 +111,6 @@ export function ProjectSidebar({
         (session) => projectIdForSession(session, projects) === project.id
       )
     }))
-    .sort(
-      (a, b) =>
-        Number(b.project.id === activeProjectId) - Number(a.project.id === activeProjectId) ||
-        Number(b.sessions.length > 0) - Number(a.sessions.length > 0) ||
-        (b.sessions[0]?.updatedAt ?? b.project.updatedAt).localeCompare(
-          a.sessions[0]?.updatedAt ?? a.project.updatedAt
-        )
-    )
 
   return (
     <nav
@@ -139,7 +137,7 @@ export function ProjectSidebar({
                 active={activeProjectId === project.id}
                 sessionCount={projectSessions.length}
                 activeSessionCount={projectSessions.filter((session) =>
-                  ["running", "thinking", "needs-input"].includes(session.status)
+                  ["running", "thinking"].includes(displayStatusOf(liveActivity?.[session.id], session.status))
                 ).length}
                 onSelect={() => onSelect(project.id)}
               />

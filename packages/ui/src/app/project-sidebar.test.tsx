@@ -22,8 +22,8 @@ const sessions = [
 afterEach(cleanup)
 
 describe("ProjectSidebar", () => {
-  it("shows every project, selected first then sessions by recency, with counts", () => {
-    render(
+  it("preserves project order when selection and session recency change, with counts", () => {
+    const { rerender } = render(
       <ProjectSidebar
         projects={projects}
         sessions={sessions}
@@ -45,6 +45,30 @@ describe("ProjectSidebar", () => {
     expect(within(screen.getByRole("button", { name: "Empty" })).getByText("0")).toBeTruthy()
     const avatar = screen.getByAltText("A")
     expect(avatar.getAttribute("src")).toContain("github.com/acme.png")
+    rerender(<ProjectSidebar projects={projects} sessions={sessions.toReversed()} activeProjectId="gamma" onSelect={() => {}} />)
+    expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Alpha", "Beta", "Gamma", "Empty"
+    ])
+  })
+
+  it("shows live work on unselected projects, excluding archived and waiting sessions", () => {
+    const props = {
+      projects,
+      sessions: [
+        testSession({ id: "working", projectId: "beta", status: "idle" }),
+        testSession({ id: "waiting", projectId: "alpha", status: "needs-input" }),
+        testSession({ id: "archived", projectId: "empty", status: "running", archived: true })
+      ],
+      activeProjectId: "alpha",
+      onSelect: vi.fn()
+    }
+    const { rerender } = render(<ProjectSidebar {...props} liveActivity={{
+      working: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 }
+    }} />)
+    expect(screen.getByRole("status", { name: "Beta: sessions in progress" })).toBeTruthy()
+    expect(screen.getAllByRole("status")).toHaveLength(1)
+    rerender(<ProjectSidebar {...props} />)
+    expect(screen.queryByRole("status")).toBeNull()
   })
 
   it("shows project details when its avatar receives focus", async () => {
