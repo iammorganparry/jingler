@@ -12,10 +12,12 @@ const projects: Project[] = ["alpha", "beta", "empty"].map((id) => ({
 const sessions = [
   testSession({ id: "a1", projectId: "alpha", title: "Alpha one" }),
   testSession({ id: "a2", projectId: "alpha", title: "Alpha two" }),
-  testSession({ id: "b1", projectId: "beta", title: "Beta one" })
+  testSession({ id: "b1", projectId: "beta", title: "Beta one", updatedAt: "2026-01-01" }),
+  testSession({ id: "b2", projectId: "beta", title: "Beta two", updatedAt: "2026-02-01" }),
+  testSession({ id: "b3", projectId: "beta", title: "Archived beta", updatedAt: "2026-03-01", archived: true })
 ]
 
-function Navigation() {
+function Navigation({ showEmpty = true }: { showEmpty?: boolean }) {
   const [active, setActive] = useState("a1")
   const [currentSessions, setCurrentSessions] = useState(sessions)
   return <>
@@ -23,8 +25,12 @@ function Navigation() {
     <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
       session.id === "a1" ? { ...session, updatedAt: "2026-08-01T00:00:00.000Z" } : session
     ))}>Update Alpha</button>
+    <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
+      session.id === "b1" ? { ...session, archived: true } : session
+    ))}>Archive Beta one</button>
+    <button type="button" onClick={() => setCurrentSessions((current) => current.filter((session) => session.id !== "b1"))}>Delete Beta one</button>
     <SessionConversation projects={projects} sessions={currentSessions} activeSessionId={active}
-      onSelectSession={setActive} showEmpty />
+      onSelectSession={setActive} showEmpty={showEmpty} renderConversation={(session) => <div data-testid="session-content">{session.id}</div>} />
   </>
 }
 
@@ -33,18 +39,36 @@ afterEach(() => {
   localStorage.clear()
 })
 
-it("keeps the selected project scoped until one of its sessions is selected", () => {
+it("opens the newest active session on first visit and restores the last viewed session on return", () => {
   render(<Navigation />)
   fireEvent.click(screen.getByRole("button", { name: "beta" }))
   expect(screen.queryByTestId("session-row-a1")).toBeNull()
-  expect(screen.getByTestId("session-row-b1")).toBeTruthy()
-  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
-
-  fireEvent.click(screen.getByRole("button", { name: "Update Alpha" }))
-  expect(screen.getByTestId("session-row-b1")).toBeTruthy()
-
+  expect(screen.getByLabelText("Active session").textContent).toBe("b2")
   fireEvent.click(screen.getByTestId("session-row-b1"))
   expect(screen.getByLabelText("Active session").textContent).toBe("b1")
+  fireEvent.click(screen.getByRole("button", { name: "alpha" }))
+  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
+  fireEvent.click(screen.getByRole("button", { name: "Update Alpha" }))
+  fireEvent.click(screen.getByRole("button", { name: "beta" }))
+  expect(screen.getByLabelText("Active session").textContent).toBe("b1")
+})
+
+it.each(["Archive Beta one", "Delete Beta one"])("falls back when the remembered session is unavailable: %s", (action) => {
+  render(<Navigation />)
+  fireEvent.click(screen.getByRole("button", { name: "beta" }))
+  fireEvent.click(screen.getByTestId("session-row-b1"))
+  fireEvent.click(screen.getByRole("button", { name: "alpha" }))
+  fireEvent.click(screen.getByRole("button", { name: action }))
+  fireEvent.click(screen.getByRole("button", { name: "beta" }))
+  expect(screen.getByLabelText("Active session").textContent).toBe("b2")
+})
+
+it("shows an empty project instead of the previous project's conversation", () => {
+  render(<Navigation showEmpty={false} />)
+  expect(screen.getByTestId("session-content").textContent).toBe("a1")
+  fireEvent.click(screen.getByRole("button", { name: "empty" }))
+  expect(screen.queryByTestId("session-content")).toBeNull()
+  expect(screen.getByRole("heading", { name: "Start your first session" })).toBeTruthy()
 })
 
 it("routes Explorer files through the reveal callback", () => {

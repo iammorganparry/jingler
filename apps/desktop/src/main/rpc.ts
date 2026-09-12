@@ -3863,21 +3863,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     environmentId === undefined
       ? Effect.gen(function* () {
           const sessions = yield* SessionStore.list();
-          const discovered = yield* WorkspaceService.listRepos().pipe(
-            Effect.orElseSucceed(() => []),
-          );
-          const projects = yield* ProjectService.backfill([
-            ...sessions.flatMap((session) =>
-              session.environmentId !== undefined ||
-              session.repoPath === undefined
-                ? []
-                : [{ path: session.repoPath, name: session.repo }],
-            ),
-            ...discovered.map((repository) => ({
-              path: repository.path,
-              name: repository.name,
-            })),
-          ]);
+          const projects = yield* ProjectService.backfill(sessions);
           const byPath = new Map(
             projects.map((project) => [project.path, project.id]),
           );

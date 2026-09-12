@@ -45,6 +45,45 @@ describe("ProjectService", () => {
     })
   })
 
+  it("hides unmarked legacy registrations without deleting them and restores an explicit re-import", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "legacy"))
+    const registered = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    if (registered._tag !== "Success") throw new Error("Registration failed")
+    const file = join(temp.root, "projects.json")
+    const legacy = { ...registered.value, imported: undefined }
+    writeFileSync(file, JSON.stringify([legacy]))
+
+    const hidden = await runExit(ProjectService.backfill([]).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(hidden).toMatchObject({ _tag: "Success", value: [] })
+    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(1)
+    expect(existsSync(join(repoPath, ".git"))).toBe(true)
+
+    const restored = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(restored).toMatchObject({ _tag: "Success", value: { id: legacy.id, imported: true, createdAt: legacy.createdAt } })
+    const listed = await runExit(ProjectService.backfill([]).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(listed).toMatchObject({ _tag: "Success", value: [{ id: legacy.id, imported: true }] })
+  })
+
+  it("recovers session-referenced legacy registrations even when missing, but not remote-only references", async () => {
+    mkdirSync(temp.root, { recursive: true })
+    const file = join(temp.root, "projects.json")
+    const legacy = ["by-id", "by-path", "remote-only", "unused"].map((id) => ({
+      id, name: id, path: join(repos.dir, id), availability: "missing",
+      createdAt: "2026-01-01", updatedAt: "2026-01-01"
+    }))
+    writeFileSync(file, JSON.stringify(legacy))
+    const result = await runExit(ProjectService.backfill([
+      { projectId: "by-id", repo: "by-id" },
+      { repoPath: join(repos.dir, "by-path"), repo: "by-path" },
+      { projectId: "remote-only", repo: "remote-only", environmentId: "device" }
+    ]).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(result).toMatchObject({ _tag: "Success", value: [
+      { id: "by-id", imported: true, availability: "missing" },
+      { id: "by-path", imported: true, availability: "missing" }
+    ] })
+    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(4)
+  })
+
   it("backfills one project per legacy repository without mutating sessions", async () => {
     const alpha = initGitRepo(join(repos.dir, "alpha"))
     const beta = initGitRepo(join(repos.dir, "beta"))
@@ -56,9 +95,7 @@ describe("ProjectService", () => {
     const before = JSON.stringify(legacy)
 
     const result = await runExit(
-      ProjectService.backfill(
-        legacy.map((session) => ({ path: session.repoPath, name: session.repo }))
-      ).pipe(Effect.provide(ProjectService.Default)),
+      ProjectService.backfill(legacy).pipe(Effect.provide(ProjectService.Default)),
       temp.layer
     )
 
@@ -74,8 +111,8 @@ describe("ProjectService", () => {
 
     const result = await runExit(
       ProjectService.backfill([
-        { path: missing, name: "deleted" },
-        { path: valid, name: "valid" }
+        { repoPath: missing, repo: "deleted" },
+        { repoPath: valid, repo: "valid" }
       ]).pipe(Effect.provide(ProjectService.Default)),
       temp.layer
     )

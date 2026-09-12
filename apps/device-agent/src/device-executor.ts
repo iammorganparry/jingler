@@ -517,6 +517,34 @@ const safeProjectDirectory = (name: string): string => {
   return safe || "project"
 }
 
+const listDeviceProjects = Effect.flatMap(SessionStore.list(), (sessions) => ProjectService.backfill(sessions))
+
+export const ensureDeviceProject = (input: { url: string; name: string }) => Effect.gen(function* () {
+  const projects = yield* listDeviceProjects
+  const discovered = yield* WorkspaceService.listRepos().pipe(Effect.orElseSucceed(() => []))
+  const candidates = [...projects.filter((project) => project.availability === "available"), ...discovered]
+  const wanted = normalizedRemoteUrl(input.url)
+  for (const project of candidates) {
+    const remote = yield* GitService.remoteUrl(project.path).pipe(Effect.orElseSucceed(() => null))
+    if (remote !== null && normalizedRemoteUrl(remote) === wanted) {
+      return yield* ProjectService.register({ path: project.path, name: project.name })
+    }
+  }
+
+  const config = yield* ConfigService.get()
+  if (config === null || config.reposDir === null) {
+    return yield* Effect.fail(new Error("The remote host has no repository directory configured."))
+  }
+  const directory = safeProjectDirectory(input.name)
+  const collision = [...projects, ...discovered].some((project) => project.path === join(config.reposDir!, directory))
+  const suffix = createHash("sha256").update(wanted).digest("hex").slice(0, 8)
+  return yield* ProjectService.clone({
+    url: input.url,
+    destination: join(config.reposDir, collision ? `${directory}-${suffix}` : directory),
+    name: input.name
+  })
+})
+
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
   jinglerRoot: string,
@@ -538,13 +566,6 @@ export const makeLiveDeviceSessionCommandExecutor = (
           )
         )
       : Effect.succeed(explicit)
-
-  const listProjects = Effect.gen(function* () {
-    const discovered = yield* WorkspaceService.listRepos().pipe(Effect.orElseSucceed(() => []))
-    return yield* ProjectService.backfill(
-      discovered.map((repository) => ({ path: repository.path, name: repository.name }))
-    )
-  })
 
   return makeDeviceSessionCommandExecutor({
     create: (input) => run(SessionStore.create(input)),
@@ -573,31 +594,11 @@ export const makeLiveDeviceSessionCommandExecutor = (
         useWorktree: true
       })
     })),
-    listProjects: () => run(listProjects),
+    listProjects: () => run(listDeviceProjects),
     registerProject: (input) => run(ProjectService.register(input)),
     createProjectDirectory: (input) => run(ProjectService.createDirectory(input)),
     cloneProject: (input) => run(ProjectService.clone(input)),
-    ensureProject: (input) => run(Effect.gen(function* () {
-      const projects = yield* listProjects
-      const wanted = normalizedRemoteUrl(input.url)
-      for (const project of projects.filter((candidate) => candidate.availability === "available")) {
-        const remote = yield* GitService.remoteUrl(project.path).pipe(Effect.orElseSucceed(() => null))
-        if (remote !== null && normalizedRemoteUrl(remote) === wanted) return project
-      }
-
-      const config = yield* ConfigService.get()
-      if (config === null || config.reposDir === null) {
-        return yield* Effect.fail(new Error("The remote host has no repository directory configured."))
-      }
-      const directory = safeProjectDirectory(input.name)
-      const collision = projects.some((project) => project.path === join(config.reposDir!, directory))
-      const suffix = createHash("sha256").update(wanted).digest("hex").slice(0, 8)
-      return yield* ProjectService.clone({
-        url: input.url,
-        destination: join(config.reposDir, collision ? `${directory}-${suffix}` : directory),
-        name: input.name
-      })
-    })),
+    ensureProject: (input) => run(ensureDeviceProject(input)),
     removeProject: (id) => run(ProjectService.remove(id)),
     run: (sessionId, input, emit) => run(
       Effect.gen(function* () {

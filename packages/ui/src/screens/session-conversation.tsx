@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   DiffStat,
   Environment,
@@ -239,16 +239,27 @@ export function SessionConversation(props: SessionConversationProps) {
   )
   const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
 
+  const lastSessionIds = useRef(new Map<string, string>())
   useEffect(() => {
-    if (activeSessionProjectId !== null) setSelectedProjectId(activeSessionProjectId)
-  }, [activeSessionProjectId])
+    if (activeSessionProjectId !== null && props.activeSessionId !== null) {
+      lastSessionIds.current.set(activeSessionProjectId, props.activeSessionId)
+      setSelectedProjectId(activeSessionProjectId)
+    }
+  }, [activeSessionProjectId, props.activeSessionId])
 
   const projectSessions = useMemo(
     () => sessionsForProject(props.sessions, projects, selectedProjectId),
     [props.sessions, projects, selectedProjectId]
   )
 
-  const selectProject = (projectId: string) => setSelectedProjectId(projectId)
+  const selectProject = (projectId: string) => {
+    setSelectedProjectId(projectId)
+    const candidates = sessionsForProject(props.sessions, projects, projectId).filter((session) => !session.archived)
+    const lastId = lastSessionIds.current.get(projectId)
+    const session = candidates.find((candidate) => candidate.id === lastId) ??
+      candidates.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+    if (session) props.onSelectSession(session.id)
+  }
 
   const openNewSession = () => {
     if (selectedProjectId !== UNASSIGNED_PROJECT_ID && props.onNewSessionForProject) {
@@ -261,7 +272,7 @@ export function SessionConversation(props: SessionConversationProps) {
          function getProps() {
            if (props.pullRequestsView) return (props.pullRequestsView)
            if (props.settingsView) return (props.settingsView)
-           if (props.showEmpty) return (<EmptyConversation
+           if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
             onNewSession={openNewSession}
           />)

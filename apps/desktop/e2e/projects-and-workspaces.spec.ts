@@ -11,7 +11,7 @@ import {
   test
 } from "./fixtures.js"
 
-const SEARCH_FOR_DIRECTORY = /Search for directory/
+const LOCAL_REPOSITORY = /^Local repository/
 
 const makeProject = (home: string, name: string): string => {
   const projectPath = join(home, name)
@@ -26,15 +26,15 @@ const makeProject = (home: string, name: string): string => {
 const addProject = async (window: Page, projectPath: string) => {
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
-  await window.getByRole("button", { name: "Add project" }).click()
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
   await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible()
-  await window.getByRole("option", { name: SEARCH_FOR_DIRECTORY }).click()
+  await window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
   const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…")
   await directorySearch.fill(projectPath)
   await directorySearch.press("Enter")
   await expect(window.getByText(projectPath, { exact: true })).toBeVisible()
   await window.getByRole("button", { name: "Choose current folder" }).click()
-  await window.getByRole("button", { name: "Add project" }).click()
+  await window.getByRole("dialog").getByRole("button", { name: "Add project" }).click()
 }
 
 const createWorkspace = async (
@@ -80,6 +80,41 @@ test("adds an existing directory as a project without creating a workspace", asy
   expect(existsSync(sessionsFile) ? JSON.parse(readFileSync(sessionsFile, "utf8")) : []).toEqual([])
 })
 
+test("only lists imported projects and restores a hidden legacy project when imported again", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    isolateSystemHome: true,
+    seed: ({ home, reposDir, repoPath }) => {
+      const hiddenPath = makeProject(reposDir, "unimported")
+      makeProject(reposDir, "discovered-only")
+      mkdirSync(join(home, "jingler"), { recursive: true })
+      writeFileSync(join(home, "jingler", "projects.json"), JSON.stringify([
+        { id: "imported-widget", name: "widget", path: repoPath, imported: true, availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+        { id: "legacy-hidden", name: "unimported", path: hiddenPath, availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" }
+      ]))
+    }
+  })
+  const projects = launched.window.getByRole("navigation", { name: "Projects" })
+  await expect(appShell(launched.window)).toBeVisible()
+  await expect(projects.getByRole("button", { name: "widget", exact: true })).toBeVisible()
+  await expect(projects.getByRole("button", { name: "unimported", exact: true })).toHaveCount(0)
+  await expect(projects.getByRole("button", { name: "discovered-only", exact: true })).toHaveCount(0)
+  const hiddenPath = join(launched.reposDir, "unimported")
+  await launched.app.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, hiddenPath)
+  await projects.getByRole("button", { name: "Add project" }).click()
+  const dialog = launched.window.getByRole("dialog")
+  await dialog.getByRole("option", { name: LOCAL_REPOSITORY }).click()
+  await dialog.getByRole("button", { name: "Browse in Finder" }).click()
+  await expect(dialog.getByRole("textbox", { name: "Project directory" })).toHaveValue(hiddenPath)
+  await dialog.getByRole("button", { name: "Add project" }).click()
+  await expect(projects.getByRole("button", { name: "unimported", exact: true })).toBeVisible()
+  await expect(projects.getByRole("button", { name: "discovered-only", exact: true })).toHaveCount(0)
+  expect(existsSync(join(hiddenPath, ".git"))).toBe(true)
+})
+
 test("Browse opens the native file browser and registers its selected repository", async ({ launchApp }) => {
   const launched = await launchApp({ configured: true })
   const projectPath = makeProject(launched.home, "native-browse-project")
@@ -88,10 +123,11 @@ test("Browse opens the native file browser and registers its selected repository
   }, projectPath)
 
   await launched.window.getByTestId("new-session").click()
-  await launched.window.getByRole("button", { name: "Add project" }).click()
-  await launched.window.getByRole("option", { name: /^Browse/ }).click()
+  await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+  await launched.window.getByRole("option", { name: LOCAL_REPOSITORY }).click()
+  await launched.window.getByRole("button", { name: "Browse in Finder" }).click()
   await expect(launched.window.getByRole("textbox", { name: "Project directory" })).toHaveValue(projectPath)
-  await launched.window.getByRole("button", { name: "Add project" }).click()
+  await launched.window.getByRole("dialog").getByRole("button", { name: "Add project" }).click()
 
   await expect(launched.window.getByRole("button", { name: "Project", exact: true })).toContainText("native-browse-project")
 })
@@ -121,8 +157,8 @@ test("Clone from GitHub loads installation repositories and clones with GitHub c
     }, cloneParent)
 
     await launched.window.getByTestId("new-session").click()
-    await launched.window.getByRole("button", { name: "Add project" }).click()
-    await launched.window.getByRole("option", { name: /^Clone from GitHub/ }).click()
+    await launched.window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click()
+    await launched.window.getByRole("option", { name: /^Remote repository/ }).click()
     await launched.window.getByRole("option", { name: /widget.*acme on GitHub/i }).click()
     await expect(launched.window.getByText(join(cloneParent, "widget"))).toBeVisible()
     await launched.window.getByRole("button", { name: "Clone project" }).click()

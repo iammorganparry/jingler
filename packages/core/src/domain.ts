@@ -423,6 +423,8 @@ export type ProjectAvailability = Schema.Schema.Type<
 /** A durable repository registration, independent of any workspace/session. */
 export const Project = Schema.Struct({
   id: Schema.String,
+  /** Explicitly imported or recovered from a session, not directory discovery. */
+  imported: Schema.optional(Schema.Boolean),
   /** Stable paired-device identity. Absent means this desktop. */
   environmentId: Schema.optional(Schema.String),
   name: Schema.String,

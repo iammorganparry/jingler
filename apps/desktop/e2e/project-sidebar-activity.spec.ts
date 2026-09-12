@@ -15,6 +15,7 @@ test("projects show live activity and stay ordered after selection", async ({ la
       title: session.id,
       branch: "main",
       worktreePath: repoPath,
+      ...(session.id === "worker" ? { repoPath } : {}),
       diff: { added: 0, removed: 0 },
       prNumber: null,
       costUsd: 0,
@@ -30,7 +31,7 @@ test("projects show live activity and stay ordered after selection", async ({ la
   await expect(items).toHaveText(["U2", "W1"])
   const order = await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))
   await projects.getByRole("button", { name: "widget", exact: true }).click()
-  await window.getByTestId("session-row-worker").click()
+  await expect(window.getByTestId("conversation-tab")).toHaveAttribute("title", /widget \/ worker/)
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[queue-hold]] keep this project busy")
   await composer.press("Enter")
@@ -38,10 +39,17 @@ test("projects show live activity and stay ordered after selection", async ({ la
   await expect(activity).toBeVisible()
   await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
   await expect(window.getByTestId("session-row-quiet")).toBeVisible()
+  await expect(window.getByTestId("conversation-tab")).toHaveAttribute("title", /alpha \/ quiet \(/)
+  await window.getByTestId("session-row-quiet-two").click()
+  await expect(window.getByTestId("conversation-tab")).toHaveAttribute("title", /alpha \/ quiet-two/)
   await expect(window.getByTestId("session-row-worker")).toBeHidden()
   await expect(activity).toBeVisible()
   expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
   await projects.getByRole("button", { name: "widget", exact: true }).click()
   await expect(window.getByTestId("session-row-worker")).toBeVisible()
+  await expect(window.getByTestId("conversation-tab")).toHaveAttribute("title", /widget \//)
+  expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
+  await projects.getByRole("button", { name: "Unassigned", exact: true }).click()
+  await expect(window.getByTestId("conversation-tab")).toHaveAttribute("title", /alpha \/ quiet-two/)
   expect(await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))).toEqual(order)
 })

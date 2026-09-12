@@ -1,3 +1,10 @@
+import { existsSync } from "node:fs"
+import { ConfigService } from "@jingler/cli-adapters/config"
+import { GitService } from "@jingler/cli-adapters/git"
+import { ProjectService } from "@jingler/cli-adapters/projects"
+import { SessionStore } from "@jingler/cli-adapters/sessions"
+import { WorkspaceService } from "@jingler/cli-adapters/workspace"
+import { initGitRepo, runExit, withTempRoot } from "../../../packages/cli-adapters/src/test-support.js"
 import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -11,10 +18,11 @@ import {
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
-import { Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   DeviceOperationError,
+  ensureDeviceProject,
   makeDeviceSessionCommandExecutor,
   type DeviceExecutorServices
 } from "./device-executor.js"
@@ -442,4 +450,32 @@ describe("device session command executor", () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+})
+
+
+it.each([true, false])("prepares only the requested remote project when an unimported checkout exists (same origin: %s)", async (sameOrigin) => {
+  const temp = withTempRoot()
+  try {
+    const origin = initGitRepo(join(temp.root, "origin"))
+    const reposDir = join(temp.root, "repos")
+    const checkout = initGitRepo(join(reposDir, "checkout"), { remote: sameOrigin ? origin : join(temp.root, "other-origin") })
+    initGitRepo(join(reposDir, "unrelated"))
+    const result = await runExit(Effect.gen(function* () {
+      yield* ConfigService.setReposDir(reposDir)
+      const project = yield* ensureDeviceProject({ url: origin, name: "checkout" })
+      const listed = yield* ProjectService.list()
+      return { project, listed }
+    }).pipe(Effect.provide(Layer.mergeAll(
+      ConfigService.Default, ProjectService.Default, SessionStore.Default,
+      WorkspaceService.Default, GitService.Default
+    ))), temp.layer)
+    if (result._tag !== "Success") throw new Error(String(result.cause))
+    expect(result.value.project.imported).toBe(true)
+    expect(result.value.listed).toEqual([result.value.project])
+    if (sameOrigin) expect(result.value.project.path).toBe(checkout)
+    else expect(result.value.project.path).toMatch(/checkout-[a-f0-9]{8}$/)
+    expect(existsSync(join(checkout, ".git"))).toBe(true)
+  } finally {
+    temp.cleanup()
+  }
 })

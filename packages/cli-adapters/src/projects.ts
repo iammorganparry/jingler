@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import type { CommandExecutor } from "@effect/platform"
 import { FileSystem, Path } from "@effect/platform"
 import { GitError, Project as ProjectSchema } from "@jingler/core"
-import type { Project } from "@jingler/core"
+import type { Project, Session } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { runGit, runGitWithEnv } from "./command.js"
@@ -99,7 +99,7 @@ export class ProjectService extends Effect.Service<ProjectService>()(
 
       const list = (): Effect.Effect<ReadonlyArray<Project>, never, ProjectStoreEnv> =>
         Effect.flatMap(readPersisted(), (projects) =>
-          Effect.forEach(projects, availability, { concurrency: 8 }).pipe(
+          Effect.forEach(projects.filter((project) => project.imported === true), availability, { concurrency: 8 }).pipe(
             Effect.map((items) =>
               items.sort((left, right) => left.name.localeCompare(right.name))
             )
@@ -135,6 +135,7 @@ export class ProjectService extends Effect.Service<ProjectService>()(
               const existing = current.find((project) => project.id === id)
               const project: Project = {
                 id,
+                imported: true,
                 ...(input.environmentId === undefined
                   ? {}
                   : { environmentId: input.environmentId }),
@@ -218,14 +219,31 @@ export class ProjectService extends Effect.Service<ProjectService>()(
 
       /** Register each unique legacy repository without mutating the source sessions. */
       const backfill = (
-        repositories: ReadonlyArray<RegisterProjectInput>
+        sessions: ReadonlyArray<Pick<Session, "projectId" | "repoPath" | "repo" | "environmentId">>
       ): Effect.Effect<ReadonlyArray<Project>, GitError, ProjectStoreEnv> =>
         Effect.gen(function* () {
           const path = yield* Path.Path
+          const localSessions = sessions.filter((session) => session.environmentId === undefined)
+          const sessionProjectIds = new Set(localSessions.map((session) => session.projectId))
+          const sessionPaths = new Set(localSessions.flatMap((session) => session.repoPath ? [path.resolve(session.repoPath)] : []))
+          yield* lock.withPermits(1)(Effect.gen(function* () {
+            const current = yield* readPersisted()
+            const recovered = current.map((project) =>
+              project.environmentId === undefined &&
+              (sessionProjectIds.has(project.id) || sessionPaths.has(project.path)) &&
+              project.imported !== true
+                ? { ...project, imported: true }
+                : project
+            )
+            if (recovered.some((project, index) => project !== current[index])) yield* writePersisted(recovered)
+          }))
+          const repositories = localSessions.flatMap((session) =>
+            session.repoPath ? [{ path: session.repoPath, name: session.repo }] : []
+          )
           const unique = new Map<string, RegisterProjectInput>()
           for (const repository of repositories) {
             const resolved = path.resolve(repository.path)
-            const key = `${repository.environmentId ?? "local"}\0${resolved}`
+            const key = resolved
             if (!unique.has(key)) unique.set(key, { ...repository, path: resolved })
           }
           // Legacy records are hints, not authoritative registrations. Deleted
