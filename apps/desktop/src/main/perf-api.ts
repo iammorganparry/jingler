@@ -62,6 +62,9 @@ export interface PerfSample {
     readonly xterm: number
     readonly longTasks: number
     readonly loopLagP95: number
+    /** Running CSS/WAAPI animations and the top `<tag>.<keyframes>×n` buckets — see the renderer perf hook. */
+    readonly animations?: number
+    readonly animationTop?: ReadonlyArray<string>
   }
 }
 

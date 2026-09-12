@@ -1,4 +1,4 @@
-import * as React from "react"
+import { Spin } from "../components/spin.js"
 import type { Environment, SshHost } from "@jingler/core"
 import { Plus, RefreshCw } from "lucide-react"
 import { Button } from "../components/button.js"
@@ -87,11 +87,9 @@ export function EnvironmentDialog(props: EnvironmentDialogProps) {
                       </span>
                     </div>
                     {props.state === "discovering" && (
-                      <RefreshCw
-                        aria-label="Discovering hosts"
-                        className="animate-spin text-muted-foreground"
-                        size={14}
-                      />
+                      <Spin className="text-muted-foreground">
+                        <RefreshCw aria-label="Discovering hosts" size={14} />
+                      </Spin>
                     )}
                   </header>
                   {props.hosts.map((host) => (

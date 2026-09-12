@@ -1,7 +1,7 @@
+import { Spin } from "../components/spin.js"
 import { useEffect, useState } from "react"
 import type { GitConfig, GithubConfig, GitHubAppConnectionStatus } from "@jingler/core"
 import { GitBranch, RefreshCw, Settings } from "lucide-react"
-import { cn } from "../lib/cn.js"
 import { GithubMark } from "../components/github-mark.js"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -136,7 +136,7 @@ export function SettingsDialog({
             </div>
             {onRefresh && (
               <Button variant="secondary" size="sm" onClick={onRefresh} disabled={refreshing}>
-                <RefreshCw size={12} className={cn(refreshing && "animate-spin")} />
+                <Spin active={refreshing}><RefreshCw size={12} /></Spin>
                 Refresh
               </Button>
             )}

@@ -92,6 +92,8 @@ const ICON_ROLL_VARIANTS: Variants = {
       opacity: { duration: 0.28, ease: EASE_OUT },
       filter: { duration: 0.42, ease: EASE_OUT },
     },
+    // Landed = no filter effect left on the element (see action-swap.tsx).
+    transitionEnd: { filter: "none" },
   },
   exit: {
     opacity: 0.5,
@@ -114,6 +116,7 @@ const TEXT_ROLL_VARIANTS: Variants = {
       opacity: { duration: 0.3, ease: EASE_OUT },
       filter: { duration: 0.42, ease: EASE_OUT },
     },
+    transitionEnd: { filter: "none" },
   },
   exit: {
     opacity: 0.5,
@@ -162,7 +165,7 @@ function renderLoadingIcon() {
               initial={reduce ? false : "initial"}
               animate={reduce ? { opacity: 1 } : "animate"}
               exit={reduce ? undefined : "exit"}
-              className="inline-flex will-change-transform"
+              className="inline-flex"
             >
               {renderLoadingIcon()}
             </motion.span>
@@ -211,7 +214,7 @@ function renderLoadingIcon() {
               initial={reduce ? false : "initial"}
               animate={reduce ? { opacity: 1 } : "animate"}
               exit={reduce ? undefined : "exit"}
-              className="inline-block will-change-transform"
+              className="inline-block"
             >
               {children}
             </motion.span>

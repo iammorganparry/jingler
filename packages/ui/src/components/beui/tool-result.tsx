@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/agents/tool-result
 
+import { Spin } from "../spin.js"
 import {
   Ban,
   Braces,
@@ -104,7 +105,7 @@ function StatusIcon({
   reduce: boolean;
 }) {
   if (status === "running") {
-    return <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />;
+    return <Spin active={!reduce}><LoaderCircle className="size-3" /></Spin>;
   }
   if (status === "success") return <CircleCheck className="size-3" />;
   if (status === "error") return <CircleX className="size-3" />;

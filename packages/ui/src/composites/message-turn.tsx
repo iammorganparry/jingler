@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import { createContext, memo, type ReactNode, useContext, useState } from "react"
 import type { ContentPart, GateDecision, Message, PlanDocument, ProviderId, ToolCall as ToolCallModel } from "@jingler/core"
 import {
@@ -111,7 +112,7 @@ function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPar
         meta.tone
       )}
     >
-      <Icon className={cn("size-3", progress.status === "in-progress" && "animate-spin")} />
+      <Spin active={progress.status === "in-progress"}><Icon className="size-3" /></Spin>
       <span>{label}</span>
       <span className="font-sans font-medium">{meta.label}</span>
     </span>

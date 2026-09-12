@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import type { GitHubCloneRepository, ProjectDirectoryListing } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import {
@@ -108,7 +109,7 @@ function DirectoryBrowser(props: {
       <CommandList className="max-h-[360px] min-h-[240px]">
         {props.loading && (
           <div className="flex items-center justify-center gap-2 py-10 text-[12px] text-muted-foreground">
-            <LoaderCircle size={14} className="animate-spin" /> Loading folders…
+            <Spin><LoaderCircle size={14} /></Spin> Loading folders…
           </div>
         )}
         {!props.loading && props.error && (
@@ -204,7 +205,7 @@ function GitHubRepositoryPicker(props: {
       <CommandList className="max-h-[420px] min-h-[260px]">
         {props.loading && (
           <div className="flex items-center justify-center gap-2 py-12 text-[12px] text-muted-foreground">
-            <LoaderCircle size={14} className="animate-spin" /> Loading repositories from GitHub…
+            <Spin><LoaderCircle size={14} /></Spin> Loading repositories from GitHub…
           </div>
         )}
         {!props.loading && props.error && (

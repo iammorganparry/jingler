@@ -91,6 +91,7 @@ function buildVariants(side: Side): Variants {
         opacity: { duration: 0.14, ease: EASE_OUT },
         filter: { duration: 0.18, ease: EASE_OUT },
       },
+      transitionEnd: { filter: "none" },
     },
     exit: {
       opacity: 0,

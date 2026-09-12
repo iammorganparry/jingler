@@ -146,19 +146,60 @@ const rendersReport = (): string => {
   return JSON.stringify(report)
 }
 
+/**
+ * Running animations, bucketed by "<tag>.<animation-name>" so a sample names
+ * WHAT is animating, not just how much. A CSS animation Blink cannot hand to
+ * the compositor (SVG children, `filter`/`color`/`background-position`
+ * keyframes, inline boxes) recomputes style and paints on the main thread
+ * every frame for as long as it runs — measured as 45 fresh `ComputedStyle`
+ * objects per frame and 19% `(program)` time in an otherwise idle renderer.
+ * `getAnimations()` walks the animation list, not the DOM, so it stays cheap.
+ */
+const animationBuckets = (): { running: number; top: string[] } => {
+  if (typeof document.getAnimations !== "function") return { running: 0, top: [] }
+  const counts = new Map<string, number>()
+  let running = 0
+  for (const animation of document.getAnimations()) {
+    if (animation.playState !== "running") continue
+    running += 1
+    const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null
+    const tag = target instanceof Element ? target.tagName.toLowerCase() : "?"
+    const name =
+      animation instanceof CSSAnimation
+        ? animation.animationName
+        : animation instanceof CSSTransition
+          ? `transition:${animation.transitionProperty}`
+          : "waapi"
+    const key = `${tag}.${name}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([key, count]) => `${key}×${count}`)
+  return { running, top }
+}
+
 const snapshot = (): {
   actors: number
   queryCache: number
   xterm: number
   longTasks: number
   loopLagP95: number
-} => ({
-  actors: __debugActorCount(),
-  queryCache: queryClient.getQueryCache().getAll().length,
-  xterm: document.querySelectorAll(".xterm").length,
-  longTasks: longTaskCount,
-  loopLagP95: loopLagP95()
-})
+  animations: number
+  animationTop: string[]
+} => {
+  const animations = animationBuckets()
+  return {
+    actors: __debugActorCount(),
+    queryCache: queryClient.getQueryCache().getAll().length,
+    xterm: document.querySelectorAll(".xterm").length,
+    longTasks: longTaskCount,
+    loopLagP95: loopLagP95(),
+    animations: animations.running,
+    animationTop: animations.top
+  }
+}
 
 declare global {
   interface Window {

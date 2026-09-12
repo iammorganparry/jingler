@@ -615,11 +615,19 @@
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: sb-jingler-text-shine 2.8s linear infinite;
+  /*
+   * Three passes, then still. Both shines animate properties Blink cannot
+   * hand to the compositor (`background-position` under `background-clip:
+   * text`; `color` + `filter: drop-shadow` on an SVG), so while they run the
+   * main thread restyles and repaints every frame. "Follow agent" stays on
+   * for whole sessions; an infinite shine there was a permanent 60Hz tax on
+   * an idle window. The active state still reads from the gradient fill.
+   */
+  animation: sb-jingler-text-shine 2.8s linear 3;
 }
 
 .jingler-mode-toggle.is-active .jingler-mode-toggle__mark {
-  animation: sb-jingler-mark-shine 2.8s ease-in-out infinite;
+  animation: sb-jingler-mark-shine 2.8s ease-in-out 3;
 }
 
 @media (prefers-reduced-motion: reduce) {

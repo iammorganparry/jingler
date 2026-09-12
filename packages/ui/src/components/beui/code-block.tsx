@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/agents/code-block
 
+import { Spin } from "../spin.js"
 import { Check, Copy, FileCode2, LoaderCircle } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import {
@@ -150,7 +151,7 @@ export function CodeBlock({
           )}
         >
           {streaming ? (
-            <LoaderCircle className={cn("size-3", !reduce && "animate-spin")} />
+            <Spin active={!reduce}><LoaderCircle className="size-3" /></Spin>
           ) : (
             <Check className="size-3" />
           )}

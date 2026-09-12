@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import * as React from "react"
 import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
@@ -271,7 +272,7 @@ function SidebarBody({
                 ? <Cloud size={15} aria-hidden />
                 : <Server size={15} aria-hidden />}
               {pendingEnvironmentSession.error === null ? (
-                <LoaderCircle className="absolute -bottom-1 -right-1 animate-spin text-blue" size={10} aria-hidden />
+                <Spin className="absolute -bottom-1 -right-1 text-blue"><LoaderCircle size={10} aria-hidden /></Spin>
               ) : (
                 <CircleAlert className="absolute -bottom-1 -right-1 text-red" size={10} aria-hidden />
               )}
@@ -932,7 +933,7 @@ function SessionRail({
               ? <Cloud size={16} />
               : <Server size={16} />}
             {pendingEnvironmentSession.error === null ? (
-              <LoaderCircle className="absolute -bottom-px -right-px animate-spin" size={9} />
+              <Spin className="absolute -bottom-px -right-px"><LoaderCircle size={9} /></Spin>
             ) : (
               <CircleAlert className="absolute -bottom-px -right-px text-red" size={9} />
             )}

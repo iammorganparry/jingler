@@ -1,3 +1,4 @@
+import { Spin } from "../../components/spin.js"
 import { type ReactNode, useState } from "react"
 import { AnimatePresence, m } from "motion/react"
 import { Check, ChevronDown, Circle, CircleStop, LoaderCircle, Send, ShieldCheck, X } from "lucide-react"
@@ -20,7 +21,7 @@ export interface AgentTodoItem { id: string; title: ReactNode; status: AgentTodo
 export function AgentTodoList({ items, title = "Tasks", defaultOpen = true, className }: { items: ReadonlyArray<AgentTodoItem>; title?: ReactNode; defaultOpen?: boolean; className?: string }) {
   const [open, setOpen] = useState(defaultOpen)
   const done = items.filter(item => item.status === "done").length
-  const icon = (status: AgentTodoStatus) => status === "done" ? <Check className="size-3.5 text-green" /> : status === "running" ? <LoaderCircle className="size-3.5 animate-spin text-blue" /> : status === "blocked" ? <X className="size-3.5 text-red" /> : <Circle className="size-3.5 text-dim" />
+  const icon = (status: AgentTodoStatus) => status === "done" ? <Check className="size-3.5 text-green" /> : status === "running" ? <Spin><LoaderCircle className="size-3.5 text-blue" /></Spin> : status === "blocked" ? <X className="size-3.5 text-red" /> : <Circle className="size-3.5 text-dim" />
   return <section className={cn("overflow-hidden rounded-xl border border-line bg-panel", className)}><button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left"><strong className="flex-1 text-[12px] text-text-bright">{title}</strong><span className="font-mono text-[10px] text-dim">{done}/{items.length}</span><m.span animate={{ rotate: open ? 180 : 0 }} transition={SPRING}><ChevronDown className="size-3.5 text-dim" /></m.span></button><AnimatePresence initial={false}>{open && <m.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} transition={SPRING} className="overflow-hidden"><ol className="border-t border-line p-1.5">{items.map(item => <m.li layout key={item.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-text">{icon(item.status)}<span className={cn("min-w-0 flex-1", item.status === "done" && "text-muted-foreground line-through")}>{item.title}</span>{item.meta && <span className="font-mono text-[9px] text-dim">{item.meta}</span>}</m.li>)}</ol></m.div>}</AnimatePresence></section>
 }
 

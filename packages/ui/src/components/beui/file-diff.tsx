@@ -1,6 +1,7 @@
 "use client";
 // beui.dev/components/agents/file-diff
 
+import { Spin } from "../spin.js"
 import {
   Check,
   ChevronDown,
@@ -105,10 +106,9 @@ export function FileDiff({
         </span>
         <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/60">
           {streaming ? (
-            <LoaderCircle
-              aria-label="Applying changes"
-              className={cn("size-3.5", !reduce && "animate-spin")}
-            />
+            <Spin active={!reduce}>
+              <LoaderCircle aria-label="Applying changes" className="size-3.5" />
+            </Spin>
           ) : (
             <Check aria-label="Changes applied" className="size-3.5" />
           )}

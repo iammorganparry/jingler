@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import * as React from "react";
 import type {
   Environment,
@@ -99,11 +100,9 @@ function EnvironmentStartupProgress({
                 {complete ? (
                   <Check size={13} aria-hidden />
                 ) : active ? (
-                  <LoaderCircle
-                    size={13}
-                    className="animate-spin"
-                    aria-hidden
-                  />
+                  <Spin>
+                    <LoaderCircle size={13} aria-hidden />
+                  </Spin>
                 ) : (
                   <span className="size-1 rounded-full bg-current" />
                 )}

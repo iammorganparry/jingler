@@ -28,7 +28,12 @@ guess at leaks when you can measure.
    - `js-heap-leak` — plain V8 retention.
    - `native-churn` — RSS grows, JS heap flat (buffers/compositor/IPC).
 3. Reproduce the problem while `pnpm perf watch` runs; watch which counter
-   moves with the repro.
+   moves with the repro. `anim:N [tag.name×k,…]` is the count of RUNNING
+   CSS/WAAPI animations bucketed by target tag and keyframe name. A single
+   animation Blink cannot composite (SVG children, `filter`/`color`/
+   `background-position` keyframes, inline boxes) forces a main-thread frame
+   every 16ms for as long as it runs — the idle-app signature is
+   `(program)` at 15–30% in `cpu-profile` with no JS on the stack.
 4. `pnpm perf leak-check --warmup 60` — baseline snapshot, 60s for YOU to
    reproduce, target snapshot, settle, final snapshot; then memlab names the
    leaked constructors and retainer paths. (memlab runs via npx on demand.)
@@ -59,6 +64,14 @@ guess at leaks when you can measure.
      allocation churn (compositor/paint), same root cause as the above.
    - `v8 isolates:N` > 1 = workers; each has its own heap the CDP counters
      never see.
+   - `cc/tile_memory` in the hundreds of MB with a ~2.5k-wide window = layer
+     explosion. Every element with `will-change: transform`/`filter` or a
+     non-`none` `filter` left behind by a motion enter animation (`blur(0px)`
+     is NOT none) is its own composited layer with its own raster tiles.
+     Measured: 218 landed `ActionSwapText` labels = 413MB of tiles and a 30%
+     busy main thread with nothing moving. Landed variants must
+     `transitionEnd: { filter: "none" }` and never carry a static
+     `will-change` class.
    - Use `--dumps 6 --interval 30` for a 3-minute Δ when hunting a ratchet.
 
 ## Reading the numbers

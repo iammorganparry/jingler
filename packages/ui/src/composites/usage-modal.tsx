@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import type { ProviderUsage, Usage, UsageStatus, UsageWindow } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
 import { Badge } from "../components/badge.js"
@@ -124,7 +125,7 @@ export function UsageModal({
             ))
           ) : loading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-[13px] text-muted-foreground">
-              <RefreshCw size={13} className="animate-spin" />
+              <Spin><RefreshCw size={13} /></Spin>
               Reading plan usage…
             </div>
           ) : (
@@ -134,7 +135,7 @@ export function UsageModal({
           )}
         </DialogBody>
         <DialogFooter className="justify-start text-[11px] text-muted-foreground">
-          <RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
+          <Spin active={loading}><RefreshCw size={12} /></Spin>
           {loading && providers.length > 0 ? "Refreshing…" : `Last updated: ${fmtUpdated(usage?.fetchedAt ?? null)}`}
         </DialogFooter>
       </DialogContent>

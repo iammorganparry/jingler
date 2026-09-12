@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import { FolderOpen, Plus } from "lucide-react"
 import { JinglerMark } from "../brand/jingler-mark.js"
 
@@ -21,7 +22,7 @@ export function EmptyConversation({
       <div className="flex flex-1 flex-col items-center justify-center px-10">
         <div className="flex max-w-[452px] flex-col items-center text-center">
           <span className="mb-[26px] flex size-14 items-center justify-center rounded-[14px] border border-brand/30 bg-brand/10">
-            <JinglerMark className="animate-breathe h-7 w-auto text-brand" />
+            <Spin animation="breathe"><JinglerMark className="h-7 w-auto text-brand" /></Spin>
           </span>
 
           <h1 className="m-0 mb-3 text-[20px] font-semibold tracking-[-0.2px] text-text-bright">

@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import { useEffect, useState } from "react"
 import { Loader } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -44,7 +45,7 @@ export function RunStats({
         className
       )}
     >
-      {busy && <Loader className="size-3 animate-spin text-dim" />}
+      {busy && <Spin><Loader className="size-3 text-dim" /></Spin>}
       <span>{elapsed}</span>
     </span>
   )

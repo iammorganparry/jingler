@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import {
   planStageExecutionStatus,
   type Plan,
@@ -79,7 +80,7 @@ function StageStatusIcon({ status }: { status: PlanStageExecutionStatus }) {
     case "completed":
       return <CheckCircle2 className="size-3.5 shrink-0 text-green" />
     case "running":
-      return <Loader2 className="size-3.5 shrink-0 animate-spin text-blue" />
+      return <Spin className="shrink-0"><Loader2 className="size-3.5 text-blue" /></Spin>
     case "blocked":
     case "failed":
       return <CircleAlert className="size-3.5 shrink-0 text-yellow" />
@@ -94,7 +95,7 @@ function TaskStatusIcon({ status }: { status: PlanTaskStatus }) {
     case "completed":
       return <CheckCircle2 className="size-3 shrink-0 text-green" />
     case "in-progress":
-      return <Loader2 className="size-3 shrink-0 animate-spin text-blue" />
+      return <Spin className="shrink-0"><Loader2 className="size-3 text-blue" /></Spin>
     case "blocked":
       return <CircleAlert className="size-3 shrink-0 text-yellow" />
     case "pending":

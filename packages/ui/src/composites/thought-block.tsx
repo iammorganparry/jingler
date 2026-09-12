@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import { useState } from "react"
 import { AnimatePresence, m } from "motion/react"
 import { Brain, ChevronRight } from "lucide-react"
@@ -50,9 +51,9 @@ export function ThoughtBlock({
         aria-expanded={open}
         className="group flex items-center gap-1.5 text-left"
       >
-        <Brain
-          className={cn("size-3.5 flex-none text-dim", streaming && "animate-pulse-dot")}
-        />
+        <Spin animation="pulse-dot" active={streaming} className="flex-none">
+          <Brain className="size-3.5 text-dim" />
+        </Spin>
         <span className="font-mono text-[10.5px] text-muted-foreground transition-colors group-hover:text-text">
           {label}
         </span>

@@ -40,7 +40,8 @@ const LIST_VARIANTS: Variants = {
 };
 const ITEM_VARIANTS: Variants = {
   hidden: { opacity: 0, y: -6, filter: "blur(3px)" },
-  show: { opacity: 1, y: 0, filter: "blur(0px)" },
+  // `transitionEnd` takes the landed blur off the item — see action-swap.tsx.
+  show: { opacity: 1, y: 0, filter: "blur(0px)", transitionEnd: { filter: "none" } },
 };
 
 export type SelectPlacement = "bottom" | "top";

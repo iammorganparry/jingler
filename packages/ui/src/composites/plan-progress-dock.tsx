@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import type { PlanDocument, PlanPrdStage, PlanTaskStatus } from "@jingler/core"
 import { planStageExecutionStatus } from "@jingler/core"
 import {
@@ -105,10 +106,9 @@ export function PlanTaskList({
               onClick={() => onOpenStage?.(stage.id)}
               className="group flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <Icon
-                aria-hidden="true"
-                className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")}
-              />
+              <Spin active={status === "in-progress"} className="shrink-0">
+                <Icon aria-hidden="true" className={cn("size-3.5", config.className)} />
+              </Spin>
               <span className={cn(
                 "min-w-0 flex-1 truncate text-[11.5px]",
                 status === "done" ? "text-muted-foreground line-through decoration-line-strong" : "text-text-body"
@@ -137,7 +137,7 @@ export function PlanTaskList({
               onClick={() => onOpenStage?.(stage.id)}
               className="group flex min-h-7 w-full items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <StageIcon aria-hidden="true" className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")} />
+              <Spin active={status === "in-progress"} className="shrink-0"><StageIcon aria-hidden="true" className={cn("size-3.5", config.className)} /></Spin>
               <span className="min-w-0 flex-1 truncate text-[11.5px] font-medium text-text-body">{stage.title}</span>
             </button>
             {tasks.length > 0 && (
@@ -147,7 +147,7 @@ export function PlanTaskList({
                   const TaskIcon = ts.icon
                   return (
                     <li key={task.id} className="flex min-h-5 items-center gap-1.5 text-[10.5px] text-muted-foreground">
-                      <TaskIcon aria-hidden="true" className={cn("size-3 shrink-0", ts.className, task.status === "in-progress" && "animate-spin")} />
+                      <Spin active={task.status === "in-progress"} className="shrink-0"><TaskIcon aria-hidden="true" className={cn("size-3", ts.className)} /></Spin>
                       <span className={cn("min-w-0 flex-1 truncate", task.status === "completed" && "line-through decoration-line-strong")}>{task.text}</span>
                     </li>
                   )
@@ -228,10 +228,9 @@ export function PlanTaskList({
                   onClick={() => onOpenStage?.(stage.id)}
                   className="group flex min-h-8 w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <Icon
-                    aria-hidden="true"
-                    className={cn("size-3.5 shrink-0", config.className, status === "in-progress" && "animate-spin")}
-                  />
+                  <Spin active={status === "in-progress"} className="shrink-0">
+                    <Icon aria-hidden="true" className={cn("size-3.5", config.className)} />
+                  </Spin>
                   <span className={cn(
                     "min-w-0 flex-1 truncate text-[11.5px]",
                     status === "done" ? "text-muted-foreground line-through decoration-line-strong" : "text-text-body"

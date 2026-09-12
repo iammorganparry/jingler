@@ -30,7 +30,7 @@
 import { spawnSync } from "node:child_process"
 import { readFileSync, existsSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { join, dirname } from "node:path"
+import { join } from "node:path"
 import { detectTrends } from "./trend.mjs"
 import { printMemoryReport, summarizeMemoryInfra } from "./memory-infra.mjs"
 
@@ -101,7 +101,15 @@ const sampleLine = (s) => {
       `docs:${s.renderer.documents}`
     )
   }
-  if (s.app) parts.push(`actors:${s.app.actors}`, `lagP95:${s.app.loopLagP95}ms`)
+  if (s.app) {
+    parts.push(`actors:${s.app.actors}`, `lagP95:${s.app.loopLagP95}ms`)
+    // Running CSS/WAAPI animations. One un-composited animation is enough to
+    // keep the main thread painting every frame; the top buckets name it.
+    if (typeof s.app.animations === "number") {
+      const top = Array.isArray(s.app.animationTop) ? s.app.animationTop.slice(0, 3).join(",") : ""
+      parts.push(`anim:${s.app.animations}${top ? ` [${top}]` : ""}`)
+    }
+  }
   return parts.join("  ")
 }
 
@@ -253,8 +261,11 @@ switch (command) {
     if (statSync(target).isDirectory()) {
       runMemlab(["find-leaks", "--work-dir", target])
     } else {
-      runMemlab(["analyze", "unbound-object", `--snapshot-dir=${dirname(target)}`])
-      runMemlab(["analyze", "detached-DOM", `--snapshot-dir=${dirname(target)}`])
+      // A lone snapshot has no series for the unbound-* analyses (they need
+      // memlab's own snap-seq meta and die with "snapshot meta data invalid");
+      // detached-DOM and shape both read a single --snapshot file.
+      runMemlab(["analyze", "detached-DOM", "--snapshot", target])
+      runMemlab(["analyze", "shape", "--snapshot", target])
     }
     break
   }

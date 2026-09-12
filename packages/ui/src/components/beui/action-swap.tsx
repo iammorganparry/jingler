@@ -21,6 +21,15 @@ const ROLL_EXIT_TRANSITION = { duration: 0.14, ease: EASE_OUT } as const;
 const SWAP_BLUR = "blur(8px)";
 const ROLL_BLUR = "blur(3px)";
 
+// Once a label has landed, the blur must come OFF the element, not sit at
+// `blur(0px)`: a non-`none` filter is a paint effect Blink applies on every
+// repaint, and paired with an always-on `will-change` it promoted every
+// landed label to its own composited layer. A transcript with 218 tool
+// headers ran 218 layers, 400MB of raster tiles and a 30% busy main thread
+// with nothing moving. Motion resolves `none` back to `blur(0px)` when the
+// exit starts, so the roll-out still blurs.
+const CLEAR_FILTER = { filter: "none" } as const;
+
 // Cascade rolls the label one letter at a time, left to right. The leaving
 // and landing strings overlap as independent layers (no shared cells), so
 // proportional glyph widths never jitter. Exits cascade at half the enter
@@ -34,6 +43,7 @@ const CASCADE_LETTER_VARIANTS: Variants = {
     y: "0%",
     filter: "blur(0px)",
     transition: { ...SPRING_SWAP, delay },
+    transitionEnd: CLEAR_FILTER,
   }),
   exit: (delay: number = 0) => ({
     opacity: 0,
@@ -51,6 +61,7 @@ const TEXT_VARIANTS: Record<CoreAnimation, Variants> = {
       scale: 1,
       filter: "blur(0px)",
       transition: BLUR_TRANSITION,
+      transitionEnd: CLEAR_FILTER,
     },
     exit: {
       opacity: 0,
@@ -66,6 +77,7 @@ const TEXT_VARIANTS: Record<CoreAnimation, Variants> = {
       y: "0%",
       filter: "blur(0px)",
       transition: ROLL_TRANSITION,
+      transitionEnd: CLEAR_FILTER,
     },
     exit: {
       opacity: 0,
@@ -137,7 +149,7 @@ export function ActionSwapText({
                   key={i}
                   custom={i * CASCADE_STAGGER}
                   variants={CASCADE_LETTER_VARIANTS}
-                  className="inline-block whitespace-pre will-change-[opacity,filter,transform]"
+                  className="inline-block whitespace-pre"
                 >
                   {char}
                 </motion.span>
@@ -151,11 +163,11 @@ export function ActionSwapText({
             key={`${animation}-${value}`}
             variants={TEXT_VARIANTS[coreAnimation]}
             initial={reduce ? false : "initial"}
-            animate={reduce ? { opacity: 1, filter: "blur(0px)", scale: 1, y: 0 } : "animate"}
+            animate={reduce ? { opacity: 1, filter: "none", scale: 1, y: 0 } : "animate"}
             exit={reduce ? undefined : "exit"}
             // Truncation lives on the layer that holds the text — the layer
             // moves as a whole, so clipping it never eats the roll.
-            className="absolute left-0 top-[0.08em] inline-block max-w-full truncate will-change-[opacity,filter,transform]"
+            className="absolute left-0 top-[0.08em] inline-block max-w-full truncate"
           >
             {children}
           </motion.span>

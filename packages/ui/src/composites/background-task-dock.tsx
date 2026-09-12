@@ -1,3 +1,4 @@
+import { Spin } from "../components/spin.js"
 import * as React from "react"
 import type { BackgroundTask } from "@jingler/core"
 import { ChevronRight, FileText, Loader2, Octagon, X } from "lucide-react"
@@ -50,7 +51,7 @@ function TaskRow({
       className="flex items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 hover:bg-surface/40"
     >
       {live ? (
-        <Loader2 size={13} className="flex-none animate-spin text-blue" />
+        <Spin className="flex-none text-blue"><Loader2 size={13} /></Spin>
       ) : (
         <span className={cn("size-[7px] flex-none rounded-full", task.status === "failed" ? "bg-red" : "bg-purple")} />
       )}
