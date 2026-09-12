@@ -22,7 +22,7 @@ const sessions = [
 afterEach(cleanup)
 
 describe("ProjectSidebar", () => {
-  it("preserves project order when selection and session recency change, with counts", () => {
+  it("sorts by open-session count, preserving ties regardless of selection and recency", () => {
     const { rerender } = render(
       <ProjectSidebar
         projects={projects}
@@ -45,10 +45,17 @@ describe("ProjectSidebar", () => {
     expect(within(screen.getByRole("button", { name: "Empty" })).getByText("0")).toBeTruthy()
     const avatar = screen.getByAltText("A")
     expect(avatar.getAttribute("src")).toContain("github.com/acme.png")
-    rerender(<ProjectSidebar projects={projects} sessions={sessions.toReversed()} activeProjectId="gamma" onSelect={() => {}} />)
-    expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Alpha", "Beta", "Gamma", "Empty"
-    ])
+    const updatedSessions = [
+      ...sessions.toReversed(),
+      testSession({ id: "gamma-two", projectId: "gamma" }),
+      testSession({ id: "gamma-three", projectId: "gamma" })
+    ]
+    for (const activeProjectId of ["gamma", "empty"]) {
+      rerender(<ProjectSidebar projects={projects} sessions={updatedSessions} activeProjectId={activeProjectId} onSelect={() => {}} />)
+      expect(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual([
+        "Gamma", "Alpha", "Beta", "Empty"
+      ])
+    }
   })
 
   it("shows live work on unselected projects, excluding archived and waiting sessions", () => {

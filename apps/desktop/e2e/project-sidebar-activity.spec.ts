@@ -7,7 +7,8 @@ test("projects show live activity and stay ordered after selection", async ({ la
     withRepo: true,
     sessions: ({ repoPath }) => [
       { id: "worker", repo: "widget", status: "running", updatedAt: "2026-08-07T12:00:00.000Z" },
-      { id: "quiet", repo: "alpha", status: "idle", updatedAt: "2026-08-07T10:00:00.000Z" }
+      { id: "quiet", repo: "alpha", status: "idle", updatedAt: "2026-08-07T10:00:00.000Z" },
+      { id: "quiet-two", repo: "alpha", status: "idle", updatedAt: "2026-08-07T09:00:00.000Z" }
     ].map((session) => ({
       ...session,
       status: session.id === "worker" ? "running" as const : "idle" as const,
@@ -26,6 +27,7 @@ test("projects show live activity and stay ordered after selection", async ({ la
   const projects = window.getByTestId("project-sidebar")
   const items = projects.locator('[data-testid^="project-row-"]')
   await expect(items).toHaveCount(2)
+  await expect(items).toHaveText(["U2", "W1"])
   const order = await items.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-testid")))
   await projects.getByRole("button", { name: "widget", exact: true }).click()
   await window.getByTestId("session-row-worker").click()

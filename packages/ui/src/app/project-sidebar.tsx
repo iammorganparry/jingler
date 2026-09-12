@@ -111,6 +111,7 @@ export function ProjectSidebar({
         (session) => projectIdForSession(session, projects) === project.id
       )
     }))
+    .sort((a, b) => b.sessions.length - a.sessions.length)
 
   return (
     <nav
