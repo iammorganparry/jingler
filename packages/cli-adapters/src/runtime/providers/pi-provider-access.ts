@@ -28,16 +28,8 @@ import {
 } from "./claude-cli-provider.js"
 
 const credentialFor = (authKind: AuthKind, access: string): Credential =>
-  authKind === "openai-codex-oauth" || authKind === "claude-setup-token"
-    ? {
-        type: "oauth",
-        access,
-        refresh: "",
-        expires:
-          authKind === "claude-setup-token"
-            ? Number.MAX_SAFE_INTEGER
-            : Date.now() + 10 * 60_000
-      }
+  authKind === "openai-codex-oauth"
+    ? { type: "oauth", access, refresh: "", expires: Date.now() + 10 * 60_000 }
     : { type: "api_key", key: access }
 
 /** A single explicit credential with no environment or unrelated-store fallback. */
@@ -71,7 +63,6 @@ const isolatedCredentialStore = (
   }
 }
 
-const CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL = "claude-haiku-4-5"
 const TRAILING_SLASH = /\/$/u
 
 const ASTRA_MODEL = {
@@ -115,13 +106,8 @@ export const registerClaudeCliProvider = (
   })
 }
 
-export const selectEntitlementModel = <Model extends { readonly id: string }>(
-  models: ReadonlyArray<Model>,
-  authKind: AuthKind
-): Model => {
-  const model = authKind === "claude-setup-token"
-    ? models.find(({ id }) => id === CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL) ?? models[0]
-    : models[0]
+const selectEntitlementModel = <Model>(models: ReadonlyArray<Model>): Model => {
+  const model = models[0]
   if (!model) throw new Error("No authenticated model is available")
   return model
 }
@@ -129,11 +115,10 @@ export const selectEntitlementModel = <Model extends { readonly id: string }>(
 const entitlementModel = async (
   runtime: ModelRuntime,
   providerId: string,
-  authKind: AuthKind,
   signal: AbortSignal
 ) => {
   const models = await runtime.getAvailable(providerId, { signal })
-  return selectEntitlementModel(models, authKind)
+  return selectEntitlementModel(models)
 }
 
 const redactedEndpoint = (baseUrl: string): string => {
@@ -183,7 +168,7 @@ export const probePiEntitlement = async (input: {
   readonly signal: AbortSignal
 }): Promise<EntitlementProbeResult> => {
   if (input.authKind === "claude-setup-token") {
-    await verifyLocalClaudeSubscription()
+    await verifyLocalClaudeSubscription({ signal: input.signal })
     return {
       entitlement: "active",
       planLabel: "Claude subscription",
@@ -203,12 +188,7 @@ export const probePiEntitlement = async (input: {
     signal: input.signal
   })
   registerJinglerModels(runtime)
-  const model = await entitlementModel(
-    runtime,
-    input.providerId,
-    input.authKind,
-    input.signal
-  )
+  const model = await entitlementModel(runtime, input.providerId, input.signal)
   let providerResponse: ProviderResponse | null = null
   const response = await runtime.completeSimple(
     model,

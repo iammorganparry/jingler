@@ -19,7 +19,9 @@ const connection = (
     expiresAt: null,
     quotaLabel: null,
     rateLimitLabel: null,
-    confirmedBillingRoute: "subscription"
+    confirmedBillingRoute: "subscription",
+    observedRoute:
+      authKind === "claude-setup-token" ? "claude-cli:subscription" : ""
   },
   createdAt: "2026-08-10T00:00:00.000Z",
   updatedAt: "2026-08-10T00:00:00.000Z"
@@ -53,13 +55,13 @@ describe("pi credential store", () => {
     })
   })
 
-  it("exposes a Claude setup-token as non-refreshing OAuth", async () => {
+  it("exposes only the current Claude CLI marker as non-refreshing OAuth", async () => {
     const claude = connection("claude-setup-token")
     const credentials = new InMemoryProviderCredentialStore()
     await Effect.runPromise(credentials.write({
       connectionId: claude.id,
       authKind: claude.authKind,
-      access: "sk-ant-oat-fixture",
+      access: "claude-cli",
       refresh: null,
       expiresAt: null
     }))
@@ -68,9 +70,17 @@ describe("pi credential store", () => {
     expect(await store.list()).toEqual([{ providerId: "anthropic", type: "oauth" }])
     expect(await store.read("anthropic")).toEqual({
       type: "oauth",
-      access: "sk-ant-oat-fixture",
+      access: "claude-cli",
       refresh: "",
       expires: Number.MAX_SAFE_INTEGER
     })
+    await Effect.runPromise(credentials.write({
+      connectionId: claude.id,
+      authKind: claude.authKind,
+      access: "legacy-setup-token",
+      refresh: null,
+      expiresAt: null
+    }))
+    await expect(store.read("anthropic")).rejects.toThrow("Reauthentication required")
   })
 })

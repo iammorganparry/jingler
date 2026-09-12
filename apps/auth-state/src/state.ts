@@ -76,7 +76,9 @@ const activeCredentials = (
   now: number,
 ): readonly StoredCredential[] =>
   Object.values(state.credentials).filter(
-    (credential) => credential.expiresAt > now,
+    (credential) =>
+      credential.expiresAt > now &&
+      credential.providerConnection?.authKind !== "claude-setup-token",
   );
 
 export const emptyAuthState = (subject: string): AuthStateRecord => ({

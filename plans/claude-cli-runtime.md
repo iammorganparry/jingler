@@ -2,7 +2,7 @@
 
 ## Goal
 
-Run Claude subscription inference through the locally authenticated Claude Code CLI while retaining Pi as Jingler's agent loop, so existing normalized tools, permissions, Plannotator, subagents, sessions, steering, and events keep working unchanged.
+Run Claude subscription inference through the locally authenticated Claude Code CLI while retaining Pi as Jingler's agent loop, so existing normalized tools, permissions, Plannotator, sessions, steering, and events keep working unchanged.
 
 ## Steps
 
@@ -13,11 +13,18 @@ Run Claude subscription inference through the locally authenticated Claude Code 
 - [x] Add focused unit tests and Electron onboarding e2e coverage.
 - [x] Run targeted tests, typecheck, lint, full tests, real Claude conversation QA, and review the diff/security behavior.
 
+## Ponytail review fixes
+
+- [x] Require the current Claude CLI marker and route when restoring a connection.
+- [x] Reject malformed critical Claude stream records.
+- [x] Pass entitlement cancellation through and remove dead Claude probe code.
+- [x] Run focused and full validation, then re-review.
+
 ## Guardrails
 
 - Invoke the operator-installed `claude` executable and its existing login; never persist or pass its OAuth credential into inference. Existing usage polling may read it transiently.
 - Remove `ANTHROPIC_API_KEY` and API-provider environment variables from the child so the CLI cannot silently use API billing.
 - Claude's built-in tools stay disabled. MCP calls are captured, not executed; Pi remains the only tool executor.
-- Keep all workspace mutation, command permission, question, plan, and subagent behavior in the existing Pi/Jingler runtime.
+- Keep workspace mutation, command permission, question, and plan behavior in Pi/Jingler. Native Claude child inference fails closed until child runtimes can install the CLI relay.
 - Do not add ACP or the Claude Agent SDK.
 - Fail closed on malformed stream events, missing CLI authentication, unsupported images, or uncertain billing route.

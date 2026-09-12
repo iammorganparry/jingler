@@ -51,6 +51,17 @@ const codexConnection = Schema.decodeUnknownSync(ProviderConnection)({
   authKind: "openai-codex-oauth"
 })
 
+const claudeCliConnection = Schema.decodeUnknownSync(ProviderConnection)({
+  ...connection,
+  id: "claude-cli",
+  authKind: "claude-setup-token",
+  subscription: {
+    ...connection.subscription,
+    confirmedBillingRoute: "subscription",
+    observedRoute: "claude-cli:subscription"
+  }
+})
+
 const capability = (parentPiSessionId: string, agent = "worker") => ({
   version: 1 as const,
   endpoint: "http://127.0.0.1:1234/v1/subagent-tool",
@@ -64,6 +75,15 @@ const capability = (parentPiSessionId: string, agent = "worker") => ({
 })
 
 describe("PiChildCredentials", () => {
+  it("rejects Claude CLI credentials until child runtimes install the relay", async () => {
+    const children = new PiChildCredentials("/tmp/unused", new InMemoryProviderCredentialStore())
+    await expect(Effect.runPromise(children.materialize(
+      "parent-pi-session",
+      [claudeCliConnection],
+      [capability("parent-pi-session")]
+    ))).rejects.toThrow("Claude CLI connections are unavailable to native subagents")
+  })
+
   it("keeps the parent account when an assignment uses the same provider", () => {
     expect(childProviderConnections(connection, [
       alternateAnthropicConnection,

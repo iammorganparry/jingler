@@ -477,7 +477,10 @@ const providerCredentialFrom = (
           expiresAt: new Date(expiresAt),
         };
       }
-      if (credential.providerId === "anthropic") {
+      if (
+        credential.providerId === "anthropic" &&
+        credential.authKind === "api-key"
+      ) {
         return {
           provider: "claude",
           proxy: "claude",
@@ -485,10 +488,7 @@ const providerCredentialFrom = (
           providerId: credential.providerId,
           authKind: credential.authKind,
           billingRoute,
-          authorizationHeader:
-            credential.authKind === "claude-setup-token"
-              ? `Bearer ${credential.access}`
-              : `X-Api-Key ${credential.access}`,
+          authorizationHeader: `X-Api-Key ${credential.access}`,
           upstream: "anthropic-api",
           expiresAt: new Date(expiresAt),
         };

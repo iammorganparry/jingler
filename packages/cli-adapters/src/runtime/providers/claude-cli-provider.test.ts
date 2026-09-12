@@ -119,6 +119,26 @@ console.log(JSON.stringify({type:"result",subtype:leaked?"error":"success",is_er
     })
   })
 
+  it("rejects malformed critical stream events", async () => {
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",index:0,delta:{type:"text_delta",text:42}}}))
+console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"ignored"}))
+`)
+    const events = await collect(createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise(() => {}),
+        close: async () => {}
+      })
+    })(model, context))
+    const error = events.at(-1)
+    expect(error?.type === "error" ? error.error.errorMessage : null)
+      .toContain("malformed critical stream event")
+  })
+
   it("closes the relay when process creation fails", async () => {
     let relayClosed = false
     const stream = createClaudeCliStreamSimple({

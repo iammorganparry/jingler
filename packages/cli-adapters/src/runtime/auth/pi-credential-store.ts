@@ -10,7 +10,7 @@ import type {
   StoredProviderCredential
 } from "./credential-store.js"
 
-export const toPiCredential = (
+const toPiCredentialValue = (
   credential: StoredProviderCredential
 ): Credential =>
   credential.authKind === "openai-codex-oauth" ||
@@ -25,6 +25,22 @@ export const toPiCredential = (
         expires: credential.expiresAt ?? Number.MAX_SAFE_INTEGER
       }
     : { type: "api_key", key: credential.access }
+
+export const toPiCredential = (
+  connection: ProviderConnection,
+  credential: StoredProviderCredential
+): Credential => {
+  if (credential.authKind !== connection.authKind) {
+    throw new Error("Reauthentication required")
+  }
+  if (
+    connection.authKind === "claude-setup-token" && (
+      credential.access !== "claude-cli" ||
+      connection.subscription.observedRoute !== "claude-cli:subscription"
+    )
+  ) throw new Error("Reauthentication required")
+  return toPiCredentialValue(credential)
+}
 
 const fromPiCredential = (
   connection: ProviderConnection,
@@ -69,29 +85,26 @@ export const makePiCredentialStore = (
     read: async (providerId) => {
       if (providerId !== connection.providerId) return 
       const credential = await Effect.runPromise(credentials.read(connection.id))
-      return credential === null ? undefined : toPiCredential(credential)
+      return credential === null
+        ? undefined
+        : toPiCredential(connection, credential)
     },
     list: async (): Promise<ReadonlyArray<CredentialInfo>> => {
       const credential = await Effect.runPromise(credentials.read(connection.id))
-      return credential === null
-        ? []
-        : [
-            {
-              providerId: connection.providerId,
-              type:
-                credential.authKind === "openai-codex-oauth" ||
-                credential.authKind === "claude-setup-token"
-                  ? "oauth"
-                  : "api_key"
-            }
-          ]
+      if (credential === null) return []
+      return [{
+        providerId: connection.providerId,
+        type: toPiCredential(connection, credential).type
+      }]
     },
     modify: (providerId, change) =>
       serial(async () => {
         if (providerId !== connection.providerId) return 
         const current = await Effect.runPromise(credentials.read(connection.id))
         const next = await change(
-          current === null ? undefined : toPiCredential(current)
+          current === null
+            ? undefined
+            : toPiCredential(connection, current)
         )
         if (next !== undefined) {
           await Effect.runPromise(

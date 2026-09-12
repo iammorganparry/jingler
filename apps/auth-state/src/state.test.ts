@@ -126,7 +126,7 @@ describe("provider connection isolation", () => {
 });
 
 describe("subscription capabilities", () => {
-  it("admits managed execution from Claude subscription auth", () => {
+  it("excludes legacy Claude subscription credentials from managed execution", () => {
     const now = 1_000;
     const claude: AuthStateRecord = {
       ...emptyAuthState("user_1"),
@@ -150,14 +150,11 @@ describe("subscription capabilities", () => {
       },
     };
     expect(snapshotOf(claude, now)).toMatchObject({
-      capabilities: ["managed.session.execute"],
-      credentialCapabilities: [expect.objectContaining({ provider: "claude" })],
-      providerConnections: [
-        expect.objectContaining({
-          connectionId: "connection_claude",
-          authKind: "claude-setup-token",
-        }),
-      ],
+      capabilities: [],
+      credentialCapabilities: [],
+      providerConnections: [],
     });
+    expect(resolveCredential(claude, "claude", "capability_claude", now))
+      .toBeNull();
   });
 });

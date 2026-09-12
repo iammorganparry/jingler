@@ -41,6 +41,24 @@ describe("provider capability validation", () => {
     })
   })
 
+  it("rejects legacy Claude subscription capabilities", () => {
+    expect(validateCapability({
+      subject: "user_1",
+      provider: "claude",
+      upstream: "anthropic-api",
+      authorizationHeader: "Bearer legacy-setup-token",
+      expiresAt: 2_000,
+      proxy: "claude",
+      connectionId: "connection_claude",
+      providerId: "anthropic",
+      authKind: "claude-setup-token",
+      billingRoute: "subscription",
+    }, 1_000)).toEqual({
+      ok: false,
+      error: "Invalid provider connection capability",
+    });
+  });
+
   it("rejects a search provider paired with another upstream", () => {
     expect(validateCapability({
       subject: "user_1",

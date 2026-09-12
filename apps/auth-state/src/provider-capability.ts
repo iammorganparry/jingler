@@ -134,9 +134,8 @@ const matchesProviderRoute = (
     connection.proxy === "claude" &&
     connection.providerId === "anthropic" &&
     upstream === "anthropic-api" &&
-    ((connection.authKind === "claude-setup-token" &&
-      connection.billingRoute === "subscription") ||
-      (connection.authKind === "api-key" && connection.billingRoute === "api"))
+    connection.authKind === "api-key" &&
+    connection.billingRoute === "api"
   );
 };
 

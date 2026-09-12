@@ -276,30 +276,6 @@ describe("environment routes", () => {
         accountId: "account_codex",
       },
     },
-    {
-      label: "Claude setup-token subscription",
-      selection: {
-        connectionId: "connection_claude_subscription",
-        providerId: "anthropic",
-        modelId: "anthropic/claude-fable-5",
-      },
-      credential: {
-        version: 1,
-        connectionId: "connection_claude_subscription",
-        providerId: "anthropic",
-        authKind: "claude-setup-token",
-        access: `setup-${"a".repeat(30)}`,
-        expiresAt: Date.now() + 60 * 60 * 1_000,
-        accountId: null,
-        billingRoute: "subscription",
-      },
-      expected: {
-        proxy: "claude",
-        provider: "claude",
-        upstream: "anthropic-api",
-        authorizationHeader: `Bearer setup-${"a".repeat(30)}`,
-      },
-    },
   ] satisfies ReadonlyArray<{
     label: string;
     selection: {
@@ -349,11 +325,12 @@ describe("environment routes", () => {
   });
 
   it.each([
-    ["openai-codex-oauth", "openai-codex"],
-    ["claude-setup-token", "anthropic"],
+    ["openai-codex-oauth", "openai-codex", "api"],
+    ["claude-setup-token", "anthropic", "api"],
+    ["claude-setup-token", "anthropic", "subscription"],
   ] as const)(
-    "rejects %s credentials mislabeled as API billing",
-    async (authKind, providerId) => {
+    "rejects unsupported %s credentials with %s billing",
+    async (authKind, providerId, billingRoute) => {
       const syncCapabilities = vi.fn(async () => undefined);
       const { app } = harness({ syncCapabilities });
       const response = await app.request("/api/environments/managed", {
@@ -368,7 +345,7 @@ describe("environment routes", () => {
             access: `credential-${"x".repeat(30)}`,
             expiresAt: Date.now() + 60 * 60 * 1_000,
             accountId: authKind === "openai-codex-oauth" ? "account_codex" : null,
-            billingRoute: "api",
+            billingRoute,
           }),
         },
         body: JSON.stringify({

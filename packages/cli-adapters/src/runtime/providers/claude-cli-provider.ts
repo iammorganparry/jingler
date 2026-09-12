@@ -113,12 +113,15 @@ export const checkClaudeSubscription = (
   })
 
 export const verifyLocalClaudeSubscription = (
-  options: Pick<ClaudeCliProviderOptions, "binary" | "environment"> = {}
+  options: Pick<ClaudeCliProviderOptions, "binary" | "environment"> & {
+    readonly signal?: AbortSignal
+  } = {}
 ): Promise<void> => {
   const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
   return checkClaudeSubscription(
     binary,
-    subscriptionEnvironment(options.environment ?? process.env)
+    subscriptionEnvironment(options.environment ?? process.env),
+    options.signal
   )
 }
 
@@ -277,6 +280,20 @@ type DecodedClaudeLine =
   | { readonly kind: "result"; readonly value: typeof ClaudeResult.Type }
   | { readonly kind: "ignored" }
 
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : null
+
+const isCriticalClaudeRecord = (value: unknown): boolean => {
+  const record = recordOf(value)
+  if (record?.type === "result") return true
+  const event = recordOf(record?.event)
+  if (record?.type !== "stream_event" || event?.type !== "content_block_delta") return false
+  const delta = recordOf(event.delta)
+  return delta?.type === "text_delta" || delta?.type === "thinking_delta"
+}
+
 const decodeClaudeLine = (line: string): DecodedClaudeLine => {
   let value: unknown
   try {
@@ -287,7 +304,11 @@ const decodeClaudeLine = (line: string): DecodedClaudeLine => {
   const delta = Option.getOrNull(decodeStreamDelta(value))
   if (delta !== null) return { kind: "delta", value: delta }
   const result = Option.getOrNull(decodeResult(value))
-  return result === null ? { kind: "ignored" } : { kind: "result", value: result }
+  if (result !== null) return { kind: "result", value: result }
+  if (isCriticalClaudeRecord(value)) {
+    throw new Error("Claude CLI emitted a malformed critical stream event")
+  }
+  return { kind: "ignored" }
 }
 
 const closeContentEvent = (
