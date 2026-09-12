@@ -153,6 +153,16 @@ export class AuthBroker extends Context.Tag("@jingler/AuthBroker")<
   AuthBrokerShape
 >() {}
 
+const hasCurrentClaudeCliCredential = (
+  connection: ProviderConnection,
+  credential: StoredProviderCredential | null
+): boolean =>
+  connection.authKind !== "claude-setup-token" || (
+    credential?.authKind === "claude-setup-token" &&
+    credential.access === "claude-cli" &&
+    connection.subscription.observedRoute === "claude-cli:subscription"
+  )
+
 interface ConnectionInput {
   readonly id: ProviderConnectionId
   readonly provider: string
@@ -192,7 +202,9 @@ class LiveAuthBroker implements AuthBrokerShape {
           ? Effect.succeed(connection)
           : this.options.credentials.read(connection.id).pipe(
               Effect.map((credential) =>
-                credential !== null && credential.authKind === connection.authKind
+                credential !== null &&
+                credential.authKind === connection.authKind &&
+                hasCurrentClaudeCliCredential(connection, credential)
                   ? connection
                   : {
                       ...connection,
@@ -247,10 +259,7 @@ class LiveAuthBroker implements AuthBrokerShape {
 
   connectClaudeToken: AuthBrokerShape["connectClaudeToken"] = (input) =>
     Effect.gen(this, function* () {
-      const access = input.token.trim()
-      if (!access.startsWith("sk-ant-oat")) {
-        return yield* this.fail("Claude setup-token is not recognized")
-      }
+      const access = "claude-cli"
       const id = yield* decodeConnectionId(input.id)
       return yield* this.connect({
         id,
@@ -294,8 +303,15 @@ class LiveAuthBroker implements AuthBrokerShape {
   resolve: AuthBrokerShape["resolve"] = (id) =>
     Effect.gen(this, function* () {
       const connection = yield* this.requireConnection(id)
+      if (connection.status !== "authenticated") {
+        return yield* this.fail("Reauthentication required")
+      }
       const stored = yield* this.readCredential(id)
-      if (stored === null || stored.authKind !== connection.authKind) {
+      if (
+        stored === null ||
+        stored.authKind !== connection.authKind ||
+        !hasCurrentClaudeCliCredential(connection, stored)
+      ) {
         return yield* this.fail("Reauthentication required")
       }
       const credential = yield* this.refreshIfNeeded(stored)
@@ -314,7 +330,13 @@ class LiveAuthBroker implements AuthBrokerShape {
     Effect.gen(this, function* () {
       const current = yield* this.requireConnection(id)
       const stored = yield* this.readCredential(id)
-      if (stored === null) return yield* this.fail("Reauthentication required")
+      if (
+        stored === null ||
+        (current.authKind === "claude-setup-token" && (
+          current.status !== "authenticated" ||
+          !hasCurrentClaudeCliCredential(current, stored)
+        ))
+      ) return yield* this.fail("Reauthentication required")
       const credential = yield* this.refreshIfNeeded(stored)
       const connection = yield* this.probe({
         id,

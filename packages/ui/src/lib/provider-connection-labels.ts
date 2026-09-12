@@ -3,7 +3,7 @@ import type { AuthKind, AuthStatus, SubscriptionStatus } from "@jingler/core"
 export const providerAuthRouteLabel = (authKind: AuthKind): string => {
   switch (authKind) {
     case "claude-setup-token":
-      return "Claude Pro / Max setup-token"
+      return "Claude CLI subscription"
     case "openai-codex-oauth":
       return "ChatGPT Codex subscription"
     case "api-key":

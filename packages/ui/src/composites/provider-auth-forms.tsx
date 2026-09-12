@@ -46,43 +46,31 @@ export function ProviderAuthForms({
             </span>
           </div>
           <p className="text-[11px] leading-[1.55] text-muted-foreground">
-            Run <code className="font-mono text-text">claude setup-token</code>,
-            then paste the token once. Jingler sends it directly to encrypted
-            main-process storage and clears this field.
+            Install Claude Code and run <code className="font-mono text-text">claude auth login</code>.
+            Jingler uses that login for inference and reads its OAuth token transiently for the usage widget, without storing it.
           </p>
           <div className="flex gap-2">
-            <Input
-              ref={claudeToken}
-              type="password"
-              autoComplete="off"
-              placeholder="Claude setup-token"
+            <Button
+              variant="primary"
+              onClick={() => onConnectClaude("claude-cli")}
               disabled={busy}
-            />
-            <Button variant="primary" onClick={submitClaude} disabled={busy}>
+            >
               {isPending("claude-setup-token") && <Spinner size={13} />}
               {isPending("claude-setup-token")
-                ? "Connecting Claude…"
+                ? "Checking Claude CLI…"
                 : mode === "reconnect"
-                  ? "Reconnect Claude"
-                  : "Connect Claude"}
+                  ? "Reconnect Claude CLI"
+                  : "Use Claude CLI"}
             </Button>
           </div>
         </div>
       ))
          }
 
-  const claudeToken = useRef<HTMLInputElement>(null)
   const apiKey = useRef<HTMLInputElement>(null)
   const [apiProvider, setApiProvider] = useState("anthropic")
   const allows = (kind: AuthKind) => authKinds.includes(kind)
   const isPending = (kind: AuthKind) => pendingAuthKind === kind
-
-  const submitClaude = () => {
-    const token = claudeToken.current?.value.trim() ?? ""
-    if (!token) return
-    if (claudeToken.current) claudeToken.current.value = ""
-    onConnectClaude(token)
-  }
 
   const submitApiKey = () => {
     const key = apiKey.current?.value.trim() ?? ""

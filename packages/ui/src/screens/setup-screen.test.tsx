@@ -145,18 +145,13 @@ describe("SetupScreen", () => {
     expect(screen.queryByText(/Claude Code|Codex CLI|opencode/u)).toBeNull();
   });
 
-  it("submits a Claude setup-token once and clears the password field", () => {
+  it("connects the authenticated Claude CLI without collecting credentials", () => {
     const onConnectClaude = vi.fn();
     render(<SetupScreen {...props({ step: "provider", onConnectClaude })} />);
-    const input = screen.getByPlaceholderText(
-      "Claude setup-token",
-    ) as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "setup-token-secret" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect Claude" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Claude CLI" }));
 
-    expect(onConnectClaude).toHaveBeenCalledWith("setup-token-secret");
-    expect(input.value).toBe("");
-    expect(input.type).toBe("password");
+    expect(onConnectClaude).toHaveBeenCalledWith("claude-cli");
+    expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull();
   });
 
   it("submits an API key for the selected BeUI provider", () => {
@@ -209,7 +204,7 @@ describe("SetupScreen", () => {
     );
 
     const accountDetails = screen
-      .getByPlaceholderText("Claude setup-token")
+      .getByRole("button", { name: "Use Claude CLI" })
       .closest("details");
     expect(accountDetails?.open).toBe(false);
     fireEvent.click(screen.getByText("Add another account"));
@@ -252,10 +247,10 @@ describe("SetupScreen", () => {
     );
 
     expect(
-      screen.getAllByText("Claude Pro / Max setup-token needs attention"),
+      screen.getAllByText("Claude CLI subscription needs attention"),
     ).toHaveLength(1);
     expect(screen.getByText(/billed as API credits/u)).toBeTruthy();
-    expect(screen.getByPlaceholderText("Claude setup-token")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Use Claude CLI" })).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
         .disabled,

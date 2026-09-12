@@ -21,18 +21,15 @@ import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { EntitlementProbeResult } from "../auth/auth-broker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
 import { ProviderCatalogError, type DiscoveredProviderModel } from "./provider-catalog.js"
+import {
+  createClaudeCliStreamSimple,
+  verifyLocalClaudeSubscription,
+  type ClaudeCliProviderOptions
+} from "./claude-cli-provider.js"
 
 const credentialFor = (authKind: AuthKind, access: string): Credential =>
-  authKind === "openai-codex-oauth" || authKind === "claude-setup-token"
-    ? {
-        type: "oauth",
-        access,
-        refresh: "",
-        expires:
-          authKind === "claude-setup-token"
-            ? Number.MAX_SAFE_INTEGER
-            : Date.now() + 10 * 60_000
-      }
+  authKind === "openai-codex-oauth"
+    ? { type: "oauth", access, refresh: "", expires: Date.now() + 10 * 60_000 }
     : { type: "api_key", key: access }
 
 /** A single explicit credential with no environment or unrelated-store fallback. */
@@ -66,7 +63,7 @@ const isolatedCredentialStore = (
   }
 }
 
-const CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL = "claude-haiku-4-5"
+const TRAILING_SLASH = /\/$/u
 
 const ASTRA_MODEL = {
   id: "gpt-6-astra",
@@ -88,21 +85,29 @@ const ASTRA_MODEL = {
 }
 
 export const registerJinglerModels = (runtime: ModelRuntime): void => {
-  const provider = runtime.getProvider("openai-codex")
-  if (provider === undefined || provider.getModels().some(({ id }) => id === ASTRA_MODEL.id)) return
+  const codex = runtime.getProvider("openai-codex")
+  if (codex === undefined || codex.getModels().some(({ id }) => id === ASTRA_MODEL.id)) return
   runtime.registerProvider("openai-codex", {
     ...runtime.getRegisteredProviderConfig("openai-codex"),
-    models: [...provider.getModels(), ASTRA_MODEL]
+    models: [...codex.getModels(), ASTRA_MODEL]
   })
 }
 
-export const selectEntitlementModel = <Model extends { readonly id: string }>(
-  models: ReadonlyArray<Model>,
-  authKind: AuthKind
-): Model => {
-  const model = authKind === "claude-setup-token"
-    ? models.find(({ id }) => id === CLAUDE_SETUP_TOKEN_ENTITLEMENT_MODEL) ?? models[0]
-    : models[0]
+export const registerClaudeCliProvider = (
+  runtime: ModelRuntime,
+  options: ClaudeCliProviderOptions
+): void => {
+  const anthropic = runtime.getProvider("anthropic")
+  if (!anthropic?.getModels().every(({ api }) => api === "anthropic-messages")) return
+  runtime.registerProvider("anthropic", {
+    ...runtime.getRegisteredProviderConfig("anthropic"),
+    api: "anthropic-messages",
+    streamSimple: createClaudeCliStreamSimple(options)
+  })
+}
+
+const selectEntitlementModel = <Model>(models: ReadonlyArray<Model>): Model => {
+  const model = models[0]
   if (!model) throw new Error("No authenticated model is available")
   return model
 }
@@ -110,11 +115,10 @@ export const selectEntitlementModel = <Model extends { readonly id: string }>(
 const entitlementModel = async (
   runtime: ModelRuntime,
   providerId: string,
-  authKind: AuthKind,
   signal: AbortSignal
 ) => {
   const models = await runtime.getAvailable(providerId, { signal })
-  return selectEntitlementModel(models, authKind)
+  return selectEntitlementModel(models)
 }
 
 const redactedEndpoint = (baseUrl: string): string => {
@@ -123,7 +127,7 @@ const redactedEndpoint = (baseUrl: string): string => {
   endpoint.password = ""
   endpoint.search = ""
   endpoint.hash = ""
-  return endpoint.toString().replace(/\/$/u, "")
+  return endpoint.toString().replace(TRAILING_SLASH, "")
 }
 
 interface ObservedProviderRoute {
@@ -147,14 +151,6 @@ export const classifyObservedBillingRoute = (
     endpoint.hostname === "chatgpt.com" &&
     endpoint.pathname.startsWith("/backend-api")
   ) return "subscription"
-  // pi declares this OAuth route subscription-billed (`isSubscription: true`);
-  // it is the only route a Claude Pro/Max setup token can ever observe.
-  if (
-    authKind === "claude-setup-token" &&
-    model.provider === "anthropic" &&
-    model.api === "anthropic-messages" &&
-    endpoint.hostname === "api.anthropic.com"
-  ) return "subscription"
   return null
 }
 
@@ -171,6 +167,17 @@ export const probePiEntitlement = async (input: {
   readonly access: string
   readonly signal: AbortSignal
 }): Promise<EntitlementProbeResult> => {
+  if (input.authKind === "claude-setup-token") {
+    await verifyLocalClaudeSubscription({ signal: input.signal })
+    return {
+      entitlement: "active",
+      planLabel: "Claude subscription",
+      quotaLabel: null,
+      rateLimitLabel: null,
+      billingRoute: "subscription",
+      observedRoute: "claude-cli:subscription"
+    }
+  }
   const runtime = await ModelRuntime.create({
     credentials: isolatedCredentialStore(
       input.providerId,
@@ -181,12 +188,7 @@ export const probePiEntitlement = async (input: {
     signal: input.signal
   })
   registerJinglerModels(runtime)
-  const model = await entitlementModel(
-    runtime,
-    input.providerId,
-    input.authKind,
-    input.signal
-  )
+  const model = await entitlementModel(runtime, input.providerId, input.signal)
   let providerResponse: ProviderResponse | null = null
   const response = await runtime.completeSimple(
     model,
@@ -217,9 +219,7 @@ export const probePiEntitlement = async (input: {
     throw new Error("Provider entitlement probe returned no observable HTTP route")
   }
   const billingRoute = classifyObservedBillingRoute(input.authKind, model)
-  const intendedSubscription =
-    input.authKind === "claude-setup-token" ||
-    input.authKind === "openai-codex-oauth"
+  const intendedSubscription = input.authKind === "openai-codex-oauth"
   return {
     entitlement:
       intendedSubscription && billingRoute !== "subscription"

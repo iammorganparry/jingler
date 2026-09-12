@@ -178,7 +178,10 @@ describe("ProviderConnections", () => {
         quotaLabel: null,
         rateLimitLabel: null,
         billingRoute: authKind === "api-key" ? "api" : "subscription",
-        observedRoute: `fixture-${authKind}`
+        observedRoute:
+          authKind === "claude-setup-token"
+            ? "claude-cli:subscription"
+            : `fixture-${authKind}`
       })
     }))
     const certification = {
@@ -186,7 +189,7 @@ describe("ProviderConnections", () => {
       modelId: "anthropic:test",
       authRoute: {
         kind: "claude-setup-token" as const,
-        observedRoute: "claude-setup-token",
+        observedRoute: "claude-cli:subscription",
         subscription: true,
         entitlementConfirmed: true,
         apiBillingFallbackObserved: false

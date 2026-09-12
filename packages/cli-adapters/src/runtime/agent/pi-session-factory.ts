@@ -34,7 +34,10 @@ import { Data, Effect, Option, Schema } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
-import { registerJinglerModels } from "../providers/pi-provider-access.js"
+import {
+  registerClaudeCliProvider,
+  registerJinglerModels
+} from "../providers/pi-provider-access.js"
 import {
   PromptCompiler,
   type PromptToolCapability
@@ -231,6 +234,11 @@ export interface PiSessionFactoryOptions {
   readonly childCredentials?: PiChildCredentials
   readonly subagentBroker?: SubagentCapabilityBroker
 }
+
+const usesClaudeCli = (connection: ProviderConnection): boolean =>
+  connection.providerId === "anthropic" &&
+  connection.authKind === "claude-setup-token" &&
+  connection.subscription.observedRoute === "claude-cli:subscription"
 
 const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
   const qualified = String(spec.modelId)
@@ -437,6 +445,9 @@ const createEmbeddedSession = (
       })
       await options.configureModelRuntime?.(modelRuntime)
       registerJinglerModels(modelRuntime)
+      if (usesClaudeCli(connection)) {
+        registerClaudeCliProvider(modelRuntime, { cwd: spec.cwd })
+      }
       const rawModelId = modelIdForProvider(spec, connection)
       const model = modelRuntime.getModel(connection.providerId, rawModelId)
       if (!model) {

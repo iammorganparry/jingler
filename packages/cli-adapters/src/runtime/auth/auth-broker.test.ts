@@ -3,6 +3,7 @@ import { Effect, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import { type CodexOAuthFlow, describeCause, makeAuthBroker } from "./auth-broker.js"
 import { InMemoryProviderCredentialStore } from "./credential-store.js"
+import { makePiCredentialStore } from "./pi-credential-store.js"
 
 const id = (value: string) => Schema.decodeUnknownSync(ProviderConnectionId)(value)
 const activeProbe = vi.fn(async () => ({
@@ -11,7 +12,7 @@ const activeProbe = vi.fn(async () => ({
   quotaLabel: null,
   rateLimitLabel: null,
   billingRoute: "subscription" as const,
-  observedRoute: "fixture-subscription"
+  observedRoute: "claude-cli:subscription"
 }))
 
 const oauth = (expires: number): CodexOAuthFlow => ({
@@ -43,14 +44,56 @@ describe("AuthBroker", () => {
       .toBe("reauthentication-required")
   })
 
-  it("validates a Claude setup-token and exposes only an account fingerprint", async () => {
+  it("requires reauthentication for a legacy Claude setup-token connection", async () => {
+    const credentials = new InMemoryProviderCredentialStore()
+    const broker = await Effect.runPromise(makeAuthBroker({
+      credentials,
+      codexOAuth: oauth(Date.now() + 60_000),
+      probe: activeProbe
+    }))
+    const connection = await Effect.runPromise(broker.connectClaudeToken({
+      id: "claude-legacy",
+      token: "ignored",
+      targetId: "desktop"
+    }))
+    await Effect.runPromise(credentials.write({
+      connectionId: connection.id,
+      authKind: "claude-setup-token",
+      access: "legacy-setup-token",
+      refresh: null,
+      expiresAt: null
+    }))
+
+    activeProbe.mockClear()
+    await Effect.runPromise(broker.restore([connection]))
+
+    expect((await Effect.runPromise(broker.get(connection.id)))?.status)
+      .toBe("reauthentication-required")
+    expect((await Effect.runPromiseExit(broker.resolve(connection.id)))._tag)
+      .toBe("Failure")
+    expect((await Effect.runPromiseExit(broker.refresh(connection.id)))._tag)
+      .toBe("Failure")
+    expect(activeProbe).not.toHaveBeenCalled()
+    await expect(makePiCredentialStore(connection, credentials).read("anthropic"))
+      .rejects.toThrow("Reauthentication required")
+    await expect(makePiCredentialStore(
+      { ...connection, authKind: "api-key" },
+      credentials
+    ).read("anthropic")).rejects.toThrow("Reauthentication required")
+  })
+
+  it("validates the local Claude CLI and stores only a non-secret route marker", async () => {
     const credentials = new InMemoryProviderCredentialStore()
     const broker = await Effect.runPromise(makeAuthBroker({ credentials, codexOAuth: oauth(Date.now() + 60_000), probe: activeProbe }))
     const connection = await Effect.runPromise(broker.connectClaudeToken({ id: "claude-1", token: "sk-ant-oat-fixture-value", targetId: "desktop" }))
     expect(connection.status).toBe("authenticated")
-    expect(connection.subscription.observedRoute).toBe("fixture-subscription")
+    expect(connection.subscription.observedRoute).toBe("claude-cli:subscription")
     expect(connection.account?.fingerprint).not.toContain("fixture-value")
     expect(JSON.stringify(connection)).not.toContain("sk-ant-oat")
+    expect((await Effect.runPromise(credentials.read(id("claude-1"))))?.access)
+      .toBe("claude-cli")
+    expect((await Effect.runPromise(broker.resolve(connection.id))).access)
+      .toBe("claude-cli")
   })
 
   it("runs Codex OAuth and persists rotated access and refresh state", async () => {
