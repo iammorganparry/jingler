@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest"
 import {
   classifyObservedBillingRoute,
   modelReasoningCapabilities,
+  registerClaudeCliProvider,
   registerJinglerModels,
   selectEntitlementModel,
 } from "./pi-provider-access.js"
@@ -24,6 +25,17 @@ describe("Jingler model additions", () => {
       cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }
     })
   })
+
+  it("installs the Claude CLI stream only for an explicit subscription route", async () => {
+    const apiRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
+    registerJinglerModels(apiRuntime)
+    expect(apiRuntime.getRegisteredProviderConfig("anthropic")?.streamSimple).toBeUndefined()
+
+    const subscriptionRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
+    registerClaudeCliProvider(subscriptionRuntime, { cwd: "/tmp" })
+    expect(subscriptionRuntime.getRegisteredProviderConfig("anthropic")?.streamSimple)
+      .toBeTypeOf("function")
+  })
 })
 
 describe("observed provider billing routes", () => {
@@ -40,16 +52,11 @@ describe("observed provider billing routes", () => {
     })).toBeNull()
   })
 
-  it("confirms Claude subscription on pi's Anthropic OAuth route", () => {
+  it("never treats Anthropic API traffic as the Claude CLI subscription route", () => {
     expect(classifyObservedBillingRoute("claude-setup-token", {
       provider: "anthropic",
       api: "anthropic-messages",
       baseUrl: "https://api.anthropic.com"
-    })).toBe("subscription")
-    expect(classifyObservedBillingRoute("claude-setup-token", {
-      provider: "anthropic",
-      api: "anthropic-messages",
-      baseUrl: "https://proxy.example.com"
     })).toBeNull()
   })
 })

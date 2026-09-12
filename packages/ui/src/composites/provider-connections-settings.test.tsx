@@ -162,18 +162,10 @@ describe("ProviderConnectionsSettings", () => {
       />
     )
 
-    fireEvent.change(screen.getByPlaceholderText("Claude setup-token"), {
-      target: { value: "sk-ant-oat-replacement" }
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Reconnect Claude" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect Claude CLI" }))
 
-    expect(onConnectClaude).toHaveBeenCalledWith(
-      "claude-max",
-      "sk-ant-oat-replacement"
-    )
-    expect(
-      (screen.getByPlaceholderText("Claude setup-token") as HTMLInputElement).value
-    ).toBe("")
+    expect(onConnectClaude).toHaveBeenCalledWith("claude-max", "claude-cli")
+    expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull()
   })
 
   it("shows the pinned account, target, plan, and billing route", () => {
@@ -189,7 +181,7 @@ describe("ProviderConnectionsSettings", () => {
         onSetApiKey={vi.fn()}
       />
     )
-    expect(screen.getAllByText("Claude Pro / Max setup-token").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Claude CLI subscription").length).toBeGreaterThan(0)
     expect(screen.getByText(/account-ab12/u)).toBeTruthy()
     expect(screen.getByText(/Max · desktop · billing: subscription/u)).toBeTruthy()
     expect(
@@ -241,7 +233,7 @@ describe("ProviderConnectionsSettings", () => {
     )
     fireEvent.click(
       screen.getByRole("button", {
-        name: "Remove Claude Pro / Max setup-token connection"
+        name: "Remove Claude CLI subscription connection"
       })
     )
     expect(onRemove).toHaveBeenCalledWith("claude-max")

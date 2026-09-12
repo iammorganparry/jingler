@@ -285,11 +285,9 @@ const authenticateProvider = async (
     if (!config.allowClaudeReauthentication) {
       throw new Error("Claude reauthentication was not explicitly enabled");
     }
-    const token = window.getByPlaceholder("Claude setup-token");
-    await window.bringToFront();
-    await token.focus();
+    await window.getByRole("button", { name: "Use Claude CLI" }).click();
     await expect(
-      window.getByText("Claude Pro / Max setup-token", { exact: true }).last(),
+      window.getByText("Claude CLI subscription", { exact: true }).last(),
     ).toBeVisible({ timeout: 5 * 60_000 });
   } else {
     await window.getByRole("button", { name: "Open browser" }).click();

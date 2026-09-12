@@ -19,9 +19,9 @@ export const toPiCredential = (
         type: "oauth",
         access: credential.access,
         refresh: credential.refresh ?? "",
-        // Claude setup-tokens are non-refreshing OAuth credentials. Keeping
-        // them non-expiring here prevents pi from attempting a refresh with
-        // an empty token while retaining its OAuth request semantics.
+        // Claude CLI connections carry only a non-secret route marker. Pi still
+        // needs an OAuth-shaped credential to select the provider; the CLI relay
+        // owns authentication and never sends this value upstream.
         expires: credential.expiresAt ?? Number.MAX_SAFE_INTEGER
       }
     : { type: "api_key", key: credential.access }

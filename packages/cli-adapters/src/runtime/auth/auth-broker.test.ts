@@ -43,7 +43,7 @@ describe("AuthBroker", () => {
       .toBe("reauthentication-required")
   })
 
-  it("validates a Claude setup-token and exposes only an account fingerprint", async () => {
+  it("validates the local Claude CLI and stores only a non-secret route marker", async () => {
     const credentials = new InMemoryProviderCredentialStore()
     const broker = await Effect.runPromise(makeAuthBroker({ credentials, codexOAuth: oauth(Date.now() + 60_000), probe: activeProbe }))
     const connection = await Effect.runPromise(broker.connectClaudeToken({ id: "claude-1", token: "sk-ant-oat-fixture-value", targetId: "desktop" }))
@@ -51,6 +51,8 @@ describe("AuthBroker", () => {
     expect(connection.subscription.observedRoute).toBe("fixture-subscription")
     expect(connection.account?.fingerprint).not.toContain("fixture-value")
     expect(JSON.stringify(connection)).not.toContain("sk-ant-oat")
+    expect((await Effect.runPromise(credentials.read(id("claude-1"))))?.access)
+      .toBe("claude-cli")
   })
 
   it("runs Codex OAuth and persists rotated access and refresh state", async () => {

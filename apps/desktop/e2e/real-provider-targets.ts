@@ -31,7 +31,7 @@ export const REAL_PROVIDER_TARGETS: ReadonlyArray<RealProviderTarget> = [
     route: "claude",
     providerId: "anthropic",
     modelId: "anthropic/claude-sonnet-5",
-    connectionLabel: "Claude Pro / Max setup-token",
+    connectionLabel: "Claude CLI subscription",
     label: "Claude Sonnet 5",
   }),
 ];

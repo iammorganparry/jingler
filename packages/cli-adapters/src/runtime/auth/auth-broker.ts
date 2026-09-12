@@ -247,10 +247,7 @@ class LiveAuthBroker implements AuthBrokerShape {
 
   connectClaudeToken: AuthBrokerShape["connectClaudeToken"] = (input) =>
     Effect.gen(this, function* () {
-      const access = input.token.trim()
-      if (!access.startsWith("sk-ant-oat")) {
-        return yield* this.fail("Claude setup-token is not recognized")
-      }
+      const access = "claude-cli"
       const id = yield* decodeConnectionId(input.id)
       return yield* this.connect({
         id,

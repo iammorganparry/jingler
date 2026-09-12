@@ -39,7 +39,7 @@ const finishProviderSetup = async (
   ).toHaveCount(0);
   await expect(launched.window.getByText("Add another account")).toBeVisible();
   await expect(
-    launched.window.getByPlaceholder("Claude setup-token"),
+    launched.window.getByRole("button", { name: "Use Claude CLI" }),
   ).toBeHidden();
   await expect(
     launched.window.getByRole("button", { name: "Open browser" }),
@@ -59,10 +59,9 @@ const finishProviderSetup = async (
   await expect(launched.window.getByText(SUBSCRIPTION_BILLING)).toBeVisible();
 };
 
-test("connects Claude Max with a pinned setup-token subscription route", async ({
+test("connects the local Claude CLI subscription without collecting credentials", async ({
   launchApp,
 }) => {
-  const token = "sk-ant-oat-e2e-secret";
   const launched = await launchApp({
     withRepo: true,
     piFixture: {
@@ -73,17 +72,15 @@ test("connects Claude Max with a pinned setup-token subscription route", async (
   });
   await chooseFixtureRepo(launched);
 
-  const input = launched.window.getByPlaceholder("Claude setup-token");
-  await input.fill(token);
-  await launched.window.getByRole("button", { name: "Connect Claude" }).click();
-  await expect(input).toHaveValue("");
-  await finishProviderSetup(launched, "Claude Pro / Max setup-token");
+  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
+  await expect(launched.window.getByPlaceholder("Claude setup-token")).toHaveCount(0);
+  await finishProviderSetup(launched, "Claude CLI subscription");
 
   const metadata = readFileSync(
     join(launched.home, "jingler", "runtime", "provider-connections.json"),
     "utf8",
   );
-  expect(metadata).not.toContain(token);
+  expect(metadata).not.toContain("sk-ant-oat");
 });
 
 test("connects ChatGPT Codex with a pinned OAuth subscription route", async ({
@@ -142,10 +139,8 @@ test("recovers a configured workspace that has no selectable provider", async ({
   await expect(
     launched.window.getByRole("heading", { name: "Connect a model provider" }),
   ).toBeVisible();
-  const input = launched.window.getByPlaceholder("Claude setup-token");
-  await input.fill("sk-ant-oat-e2e-recovery");
-  await launched.window.getByRole("button", { name: "Connect Claude" }).click();
-  await finishProviderSetup(launched, "Claude Pro / Max setup-token");
+  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
+  await finishProviderSetup(launched, "Claude CLI subscription");
 });
 
 test("reconnects a restored subscription whose encrypted credential is missing", async ({
@@ -307,10 +302,7 @@ test("provider onboarding remains reachable at the minimum window height", async
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window
-    .getByPlaceholder("Claude setup-token")
-    .fill("sk-ant-oat-e2e-small-window");
-  await launched.window.getByRole("button", { name: "Connect Claude" }).click();
+  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
   const heading = launched.window.getByRole("heading", {
     name: "Connect a model provider",
   });

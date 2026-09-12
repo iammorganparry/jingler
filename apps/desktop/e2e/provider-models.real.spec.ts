@@ -53,12 +53,10 @@ const startProviderAuthentication = async (
   } else {
     test.skip(
       !allowClaudeReauthentication,
-      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly allow headed Claude setup-token entry.",
+      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly use the local Claude CLI login.",
     );
     if (!allowClaudeReauthentication) return;
-    const token = window.getByPlaceholder("Claude setup-token");
-    await window.bringToFront();
-    await token.focus();
+    await window.getByRole("button", { name: "Use Claude CLI" }).click();
   }
 
   await expect
@@ -66,7 +64,7 @@ const startProviderAuthentication = async (
       () => window.getByText(model.connectionLabel, { exact: true }).count(),
       { timeout: 5 * 60_000 },
     )
-    .toBeGreaterThan(1);
+    .toBeGreaterThan(0);
 };
 
 const finishFreshOnboarding = async (
@@ -196,12 +194,10 @@ const ensureAuthenticated = async (
   } else {
     test.skip(
       !allowClaudeReauthentication,
-      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly allow headed Claude setup-token entry.",
+      "Set JINGLER_REAL_CLAUDE_REAUTH=1 to explicitly use the local Claude CLI login.",
     );
     if (!allowClaudeReauthentication) return;
-    const token = window.getByPlaceholder("Claude setup-token");
-    await window.bringToFront();
-    await token.focus();
+    await window.getByRole("button", { name: "Reconnect Claude CLI" }).click();
   }
 
   await expect(reauthentication).toHaveCount(0, { timeout: 5 * 60_000 });

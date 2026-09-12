@@ -207,16 +207,22 @@ const fetchAnthropicOAuthUsage = async (
   fallbackAccess: (() => Promise<string | null>) | null,
   signal: AbortSignal
 ): Promise<ProviderUsageRead> => {
-  const primary = await requestAnthropicUsage(access, signal)
-  if (primary.kind === "settled") return primary.read
-  // A pasted setup-token authenticates inference but not the usage scope, so
-  // the endpoint rejects it. The Claude CLI's own browser-login token does
-  // carry the scope — borrow it for this one read before giving up.
   const borrowed =
     fallbackAccess === null ? null : await fallbackAccess().catch(() => null)
+  if (access === "claude-cli") {
+    if (borrowed === null) {
+      return unavailable("Sign in to the Claude CLI on this machine to read subscription usage.")
+    }
+    const cli = await requestAnthropicUsage(borrowed, signal)
+    return cli.kind === "settled"
+      ? cli.read
+      : unavailable(`Anthropic's usage endpoint rejected the Claude CLI login (HTTP ${cli.status}).`)
+  }
+  const primary = await requestAnthropicUsage(access, signal)
+  if (primary.kind === "settled") return primary.read
   if (borrowed === null || borrowed === access) {
     return unavailable(
-      `Anthropic's usage endpoint rejected this credential (HTTP ${primary.status}) — a pasted setup-token doesn't carry the usage scope. Sign in to the Claude CLI on this machine and Jingler reads usage from it instead.`
+      `Anthropic's usage endpoint rejected this setup-token (HTTP ${primary.status}). Sign in to the Claude CLI on this machine and Jingler reads usage from it instead.`
     )
   }
   const fallback = await requestAnthropicUsage(borrowed, signal)
