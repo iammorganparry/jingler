@@ -295,3 +295,53 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   ).toBeVisible({ timeout: 30_000 })
   await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
 })
+
+for (const entry of ["sidebar", "shortcut", "palette"] as const) {
+  test(`creates in the selected empty project rather than the previous project via ${entry}`, async ({ launchApp }) => {
+    const launched = await launchApp({ configured: true, isolateSystemHome: true })
+    const { window } = launched
+    const athena = makeProject(launched.home, "Athena")
+    const jingler = makeProject(launched.home, "Jingler")
+    await expect(appShell(window)).toBeVisible()
+    const rail = window.getByTestId("project-sidebar")
+    for (const path of [athena, jingler]) {
+      await launched.app.evaluate(({ dialog }, selected) => {
+        dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+      }, path)
+      await rail.getByRole("button", { name: "Add project" }).click()
+      const dialog = window.getByRole("dialog")
+      await dialog.getByRole("option", { name: LOCAL_REPOSITORY }).click()
+      await dialog.getByRole("button", { name: "Browse in Finder" }).click()
+      await expect(dialog.getByRole("textbox", { name: "Project directory" })).toHaveValue(path)
+      await dialog.getByRole("button", { name: "Add project" }).click()
+      await expect(dialog).toHaveCount(0)
+    }
+    await rail.getByRole("button", { name: "Athena", exact: true }).click()
+    await createWorkspace(window, { checkout: "Local" })
+    await expect.poll(() => realpathSync(JSON.parse(readFileSync(join(launched.home, "jingler", "config.json"), "utf8")).lastRepoPath)).toBe(realpathSync(athena))
+
+    if (entry === "sidebar") {
+      await window.getByTestId("new-session").click()
+      await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("Athena")
+      await rail.getByRole("button", { name: "Jingler", exact: true }).click()
+    } else {
+      await rail.getByRole("button", { name: "Jingler", exact: true }).click()
+      if (entry === "shortcut") await window.keyboard.press("Meta+n")
+      else {
+        await window.keyboard.press("Meta+k")
+        await window.getByPlaceholder("Jump to a session or run a command…").fill("New Workspace")
+        await window.getByRole("option", { name: /New Workspace/ }).click()
+      }
+    }
+    await expect(window.getByRole("button", { name: "Project", exact: true })).toContainText("Jingler")
+    await createWorkspace(window, { checkout: "Local" })
+    const persisted: ReadonlyArray<{ repoPath: string; worktreePath: string }> = JSON.parse(
+      readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8")
+    )
+    expect(persisted).toHaveLength(2)
+    expect(persisted.filter((session) => session.repoPath === realpathSync(athena))).toHaveLength(1)
+    expect(persisted.find((session) => session.repoPath === realpathSync(jingler))).toMatchObject({
+      worktreePath: realpathSync(jingler)
+    })
+  })
+}

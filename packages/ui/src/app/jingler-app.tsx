@@ -471,6 +471,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         }
         sessions={sessions}
         projects={projects}
+        selectedProjectId={selectedProjectId}
+        onSelectProject={setSelectedProjectId}
         projectsLoading={props.projectsLoading}
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
@@ -682,7 +684,7 @@ function getActiveTabContext(active: Session) {
               projects={projects}
               environments={environments}
               environmentStartup={pendingEnvironmentSession}
-              defaultProjectId={newSessionProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
+              defaultProjectId={selectedProjectId ?? projects.find((project) => project.path === defaultRepoPath)?.id}
               requestedProjectId={requestedNewSession?.projectId}
               requestedPr={requestedNewSession?.pr}
               providerCatalog={providerConnections?.catalog}
@@ -818,7 +820,7 @@ function getActiveTabContext(active: Session) {
   const selected = split.activeSessionId
   const setSelected = split.selectSession
   const [newOpen, setNewOpen] = useState(false)
-  const [newSessionProjectId, setNewSessionProjectId] = useState<string | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [requestedNewSession, setRequestedNewSession] = useState<
     JinglerAppProps["newSessionRequest"]
   >(null)
@@ -876,14 +878,13 @@ function getActiveTabContext(active: Session) {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
-    setNewSessionProjectId(null)
     setNewOpen(true)
   }, [])
   const openNewSessionForProject = useCallback((projectId: string) => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)
     setRequestedNewSession(null)
-    setNewSessionProjectId(projectId)
+    setSelectedProjectId(projectId)
     setNewOpen(true)
   }, [])
 

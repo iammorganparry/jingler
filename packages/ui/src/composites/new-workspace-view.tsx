@@ -601,12 +601,11 @@ function getContent() {
   }, [projectRequest, props.open, send]);
 
   React.useEffect(() => {
-    if (!props.open || state.context.projectId !== "") return;
-    const project = props.projects.find(
-      (candidate) => candidate.availability === "available",
-    );
+    if (!props.open || state.matches("closed") || state.context.projectId !== "") return;
+    const project = props.projects.find((candidate) => candidate.id === projectRequest) ??
+      props.projects.find((candidate) => candidate.availability === "available");
     if (project) send({ type: "SET_PROJECT", projectId: project.id });
-  }, [props.open, props.projects, send, state.context.projectId]);
+  }, [props.open, props.projects, projectRequest, send, state]);
 
   React.useEffect(() => {
     if (props.open) send({ type: "SYNC_MODELS" });

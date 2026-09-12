@@ -19,9 +19,11 @@ const sessions = [
 
 function Navigation({ showEmpty = true }: { showEmpty?: boolean }) {
   const [active, setActive] = useState("a1")
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
   const [currentSessions, setCurrentSessions] = useState(sessions)
   return <>
     <output aria-label="Active session">{active}</output>
+    <output aria-label="Selected project">{selectedProjectId}</output>
     <button type="button" onClick={() => setCurrentSessions((current) => current.map((session) =>
       session.id === "a1" ? { ...session, updatedAt: "2026-08-01T00:00:00.000Z" } : session
     ))}>Update Alpha</button>
@@ -30,6 +32,7 @@ function Navigation({ showEmpty = true }: { showEmpty?: boolean }) {
     ))}>Archive Beta one</button>
     <button type="button" onClick={() => setCurrentSessions((current) => current.filter((session) => session.id !== "b1"))}>Delete Beta one</button>
     <SessionConversation projects={projects} sessions={currentSessions} activeSessionId={active}
+      selectedProjectId={selectedProjectId} onSelectProject={setSelectedProjectId}
       onSelectSession={setActive} showEmpty={showEmpty} renderConversation={(session) => <div data-testid="session-content">{session.id}</div>} />
   </>
 }
@@ -67,6 +70,8 @@ it("shows an empty project instead of the previous project's conversation", () =
   render(<Navigation showEmpty={false} />)
   expect(screen.getByTestId("session-content").textContent).toBe("a1")
   fireEvent.click(screen.getByRole("button", { name: "empty" }))
+  expect(screen.getByLabelText("Selected project").textContent).toBe("empty")
+  expect(screen.getByLabelText("Active session").textContent).toBe("a1")
   expect(screen.queryByTestId("session-content")).toBeNull()
   expect(screen.getByRole("heading", { name: "Start your first session" })).toBeTruthy()
 })

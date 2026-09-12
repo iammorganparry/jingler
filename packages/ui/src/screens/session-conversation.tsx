@@ -30,6 +30,8 @@ export interface SessionConversationProps {
   search?: ReactNode
   sessions: ReadonlyArray<Session>
   projects?: ReadonlyArray<Project>
+  selectedProjectId?: string | null
+  onSelectProject?: (projectId: string) => void
   projectsLoading?: boolean
   projectOwners?: Readonly<Record<string, string>>
   onAddProject?: () => void
@@ -234,9 +236,11 @@ export function SessionConversation(props: SessionConversationProps) {
   const activeSessionProjectId = activeSession
     ? projectIdForSession(activeSession, projects)
     : null
-  const [selectedProjectId, setSelectedProjectId] = useState(
+  const [localProjectId, setLocalProjectId] = useState(
     () => activeSessionProjectId ?? projects[0]?.id ?? UNASSIGNED_PROJECT_ID
   )
+  const selectedProjectId = props.selectedProjectId ?? localProjectId
+  const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
   const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
 
   const lastSessionIds = useRef(new Map<string, string>())
@@ -245,7 +249,7 @@ export function SessionConversation(props: SessionConversationProps) {
       lastSessionIds.current.set(activeSessionProjectId, props.activeSessionId)
       setSelectedProjectId(activeSessionProjectId)
     }
-  }, [activeSessionProjectId, props.activeSessionId])
+  }, [activeSessionProjectId, props.activeSessionId, setSelectedProjectId])
 
   const projectSessions = useMemo(
     () => sessionsForProject(props.sessions, projects, selectedProjectId),
