@@ -48,8 +48,6 @@ import {
   useSplashHold,
   useThemeCatalog,
 } from "@jingler/ui";
-import {
-} from "lucide-react";
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
 import { ConversationPane } from "./conversation-pane.js";
@@ -1191,23 +1189,8 @@ function AuthedApp({
   // animation — see `useSplashHold`. Without it the shader's source image is
   // still decoding when the machine leaves `starting`, so the mark never draws
   // and the whole splash reads as a black flash.
-  if (splashHeld || state.matches("loading") || state.matches("starting")) {
-    return <LoadingScreen />;
-  }
-
-  if (state.matches("failure")) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-canvas p-8">
-        <div className="max-w-md rounded-lg border border-red/50 bg-sunken px-4 py-3 font-mono text-[13px] text-red">
-          Failed to load: {state.context.error}
-        </div>
-      </div>
-    );
-  }
-
-  if (state.matches("setup")) {
-    return renderAppSetup(state, github, repos, reposDir, send);
-  }
+  const gate = renderAuthedAppGate(splashHeld, state, github, repos, reposDir, send);
+  if (gate !== null) return gate;
 
   const selectedPullRequest = pullRequestInbox.selected;
   const selectedPullRequestTarget = selectedPullRequest
@@ -1948,6 +1931,31 @@ function AppContent({
       onSignOut={() => authSend({ type: "SIGN_OUT" })}
     />
   );
+}
+
+function renderAuthedAppGate(
+  splashHeld: boolean,
+  state: import("xstate").SnapshotFrom<typeof appMachine>,
+  github: ReturnType<typeof useGitHubConnection>,
+  repos: import("xstate").SnapshotFrom<typeof appMachine>["context"]["repos"],
+  reposDir: string | null,
+  send: import("xstate").ActorRefFrom<typeof appMachine>["send"]
+) {
+  if (splashHeld || state.matches("loading") || state.matches("starting")) {
+    return <LoadingScreen />;
+  }
+  if (state.matches("failure")) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-canvas p-8">
+        <div className="max-w-md rounded-lg border border-red/50 bg-sunken px-4 py-3 font-mono text-[13px] text-red">
+          Failed to load: {state.context.error}
+        </div>
+      </div>
+    );
+  }
+  return state.matches("setup")
+    ? renderAppSetup(state, github, repos, reposDir, send)
+    : null;
 }
 
 function renderAppSetup(
