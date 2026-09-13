@@ -22,7 +22,10 @@ import {
 import { Schema } from "effect"
 import { type DiscoveredProviderModel } from "@jingler/cli-adapters"
 import { scriptedPiScenarioResponses } from "@jingler/cli-adapters/runtime/certification/pi-scenario-fixture"
-import { E2E_PI_CONNECTION_ID, E2E_PI_MODEL_ID, E2E_PI_PROVIDER_ID } from "./fixture-identity.js"
+import {
+  E2E_PI_PROVIDER_ID,
+  e2ePiIdentity
+} from "./fixture-identity.js"
 import {
   E2E_BACKGROUND_TOOL,
   E2E_HELD_SUBAGENTS_TOOL,
@@ -46,7 +49,6 @@ const E2ePiFixture = Schema.Struct({
 export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
 
 const PROVIDER_ID = Schema.decodeUnknownSync(ProviderId)(E2E_PI_PROVIDER_ID)
-const MODEL_ID = Schema.decodeUnknownSync(ProviderModelId)(E2E_PI_MODEL_ID)
 const SUBMIT_PLAN_TOOL = "plannotator_submit_plan"
 const PLAN_WRITE_TOOL = "write"
 const QUESTION_TOOL = "jingler_ask_question"
@@ -80,10 +82,11 @@ export const loadE2ePiFixture = (): E2ePiFixture | null => {
   return Schema.decodeUnknownSync(E2ePiFixture)(JSON.parse(readFileSync(path, "utf8")))
 }
 
-export const e2eProviderConnection = (fixture: E2ePiFixture) =>
-  Schema.decodeUnknownSync(ProviderConnection)({
-    id: E2E_PI_CONNECTION_ID,
-    providerId: PROVIDER_ID,
+export const e2eProviderConnection = (fixture: E2ePiFixture) => {
+  const identity = e2ePiIdentity(fixture.scenarioId)
+  return Schema.decodeUnknownSync(ProviderConnection)({
+    id: identity.connectionId,
+    providerId: identity.providerId,
     authKind: fixture.authRoute,
     account: { fingerprint: "e2e-account", displayLabel: "Electron fixture" },
     targetId: "desktop",
@@ -100,6 +103,7 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) =>
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"
   })
+}
 
 const e2eDiscoveredModel = (
   fixture: E2ePiFixture,
@@ -108,7 +112,9 @@ const e2eDiscoveredModel = (
 ): DiscoveredProviderModel => ({
   providerId,
   id: Schema.decodeUnknownSync(ProviderModelId)(
-    `${providerId}/${index === 0 ? "eval-model" : `eval-model-${index + 1}`}`
+    fixture.scenarioId === "named-mcp"
+      ? e2ePiIdentity(fixture.scenarioId).modelId
+      : `${providerId}/${index === 0 ? "eval-model" : `eval-model-${index + 1}`}`
   ),
   label: `Deterministic pi model ${index + 1}`,
   capabilities: {
@@ -129,8 +135,12 @@ export const e2eDiscoveredModels = (
 
 export const e2eCertification = (
   fixture: E2ePiFixture,
-  providerId: ProviderId = PROVIDER_ID,
-  modelId: ProviderModelId = MODEL_ID
+  providerId: ProviderId = Schema.decodeUnknownSync(ProviderId)(
+    e2ePiIdentity(fixture.scenarioId).providerId
+  ),
+  modelId: ProviderModelId = Schema.decodeUnknownSync(ProviderModelId)(
+    e2ePiIdentity(fixture.scenarioId).modelId
+  )
 ): ModelCertification => ({
   providerId,
   modelId,
@@ -761,6 +771,7 @@ const withE2eSubscriptionAuth = (
     : provider
 
 export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
+  if (fixture.scenarioId === "named-mcp") return (_runtime: ModelRuntime): void => undefined
   const tokenSize =
     fixture.scenarioId === "plan-mode" || fixture.scenarioId === "context-compaction"
       ? { min: 4_096, max: 4_096 }

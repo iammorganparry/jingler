@@ -55,7 +55,7 @@ const handleRequest = async (
     tools: tools.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: tool.parameters
+      inputSchema: { ...tool.parameters, type: "object" as const }
     }))
   }))
   server.setRequestHandler(CallToolRequestSchema, async ({ params }) => {
