@@ -256,7 +256,6 @@ export const claudeCliArguments = (
   "--mcp-config", mcpConfigPath,
   "--tools", "",
   "--allowedTools", "mcp__jingler__*",
-  "--max-turns", "1",
   "--model", model.id,
   "--system-prompt", systemPrompt(context),
   ...effortArgs(options.reasoning)
