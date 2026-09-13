@@ -877,6 +877,7 @@ function fixtureLaunchEnvironment({
     "JINGLER_SUBAGENT_PROCESS_WORKER",
     "JINGLER_SUBAGENT_CHILD_TOOLS",
     "JINGLER_SUBAGENT_CHILD_TOOLS_PATH",
+    "JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH",
   ]) delete inheritedEnv[name];
   const launchEnv = {
     ...inheritedEnv,

@@ -65,16 +65,11 @@ describe("Jingler child tools extension", () => {
       getActiveTools: () => activeTools,
       setActiveTools
     })
-    expect(activeTools).toEqual([
-      "contact_supervisor",
-      "workspace_read_file",
-      "workspace_list_files"
-    ])
-    activeTools = ["contact_supervisor"]
+    expect(activeTools).toEqual(["contact_supervisor"])
     events.get("before_agent_start")?.()
 
     expect(registered).toEqual(["workspace_read_file", "workspace_list_files"])
-    expect(setActiveTools).toHaveBeenCalledTimes(2)
+    expect(setActiveTools).toHaveBeenCalledOnce()
     expect(setActiveTools).toHaveBeenLastCalledWith([
       "contact_supervisor",
       "workspace_read_file",

@@ -11,7 +11,7 @@ const payload = resolve(dist, "runtime-payload")
 const notice = await readFile(resolve(root, "THIRD-PARTY-LICENSES"), "utf8")
 
 await rm(dist, { recursive: true, force: true })
-await mkdir(payload, { recursive: true })
+await mkdir(resolve(payload, "runtime-assets"), { recursive: true })
 
 await build({
   entryPoints: [resolve(import.meta.dirname, "../src/index.ts")],
@@ -37,7 +37,14 @@ await cp(
 )
 await chmod(resolve(dist, "jingler-device.mjs"), 0o755)
 
-await mkdir(resolve(payload, "runtime-assets"), { recursive: true })
+await build({
+  entryPoints: [resolve(root, "packages/cli-adapters/src/runtime/providers/claude-cli-extension.ts")],
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  outfile: resolve(payload, "runtime-assets/jingler-claude-cli-provider.mjs")
+})
 await cp(
   resolve(root, "packages/cli-adapters/runtime-assets/jingler-child-tools.mjs"),
   resolve(payload, "runtime-assets/jingler-child-tools.mjs")

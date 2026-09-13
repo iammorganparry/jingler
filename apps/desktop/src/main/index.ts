@@ -409,16 +409,19 @@ if (!gotPrimaryLock) {
 
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
-    const subagentRuntimeRoot = app.isPackaged
-      ? join(process.resourcesPath, "subagent-runtime")
+    const packagedSubagentRoot = join(process.resourcesPath, "subagent-runtime")
+    process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= app.isPackaged
+      ? join(packagedSubagentRoot, "jingler-child-tools.mjs")
       : resolve(
           import.meta.dirname,
-          "../../../../packages/cli-adapters/runtime-assets"
+          "../../../../packages/cli-adapters/runtime-assets/jingler-child-tools.mjs"
         )
-    process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
-      subagentRuntimeRoot,
-      "jingler-child-tools.mjs"
-    )
+    process.env.JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH ??= app.isPackaged
+      ? join(packagedSubagentRoot, "jingler-claude-cli-provider.mjs")
+      : resolve(
+          import.meta.dirname,
+          "../../../../packages/cli-adapters/runtime-assets/jingler-claude-cli-provider.mjs"
+        )
     process.env.JINGLER_DEVICE_AGENT_BUNDLE ??= resolveDeviceAgentBundlePath(
       app.isPackaged,
       process.resourcesPath,

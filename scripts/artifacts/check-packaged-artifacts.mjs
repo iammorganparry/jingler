@@ -39,6 +39,7 @@ const deviceSource = execFileSync(
 const requiredDeviceEntries = [
   "./jingler-device.mjs",
   "./runtime-assets/jingler-child-tools.mjs",
+  "./runtime-assets/jingler-claude-cli-provider.mjs",
   "./node_modules/@dietrichgebert/ponytail/package.json",
   "./node_modules/@dietrichgebert/ponytail/pi-extension/index.js",
   "./node_modules/@dietrichgebert/ponytail/skills/ponytail/SKILL.md",
@@ -61,6 +62,9 @@ const issues = [
   ...(existsSync(resolve(resourcesPath, "subagent-runtime", "jingler-child-tools.mjs"))
     ? []
     : ["desktop resources are missing the Jingler child tool bridge"]),
+  ...(existsSync(resolve(resourcesPath, "subagent-runtime", "jingler-claude-cli-provider.mjs"))
+    ? []
+    : ["desktop resources are missing the Claude CLI child provider"]),
   ...(existsSync(resolve(resourcesPath, "THIRD-PARTY-LICENSES"))
     ? []
     : ["desktop resources are missing THIRD-PARTY-LICENSES"]),

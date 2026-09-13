@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   JINGLER_SUBAGENT_CHILD_TOOLS,
+  JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
   JINGLER_SUBAGENT_NODE,
   JINGLER_SUBAGENT_PROCESS_ISOLATION,
@@ -16,6 +17,7 @@ const names = [
   JINGLER_SUBAGENT_PROCESS_ISOLATION,
   PI_SUBAGENT_ELECTRON_RUN_AS_NODE,
   JINGLER_SUBAGENT_CREDENTIAL_ROOT,
+  JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH,
   JINGLER_SUBAGENT_NODE,
   JINGLER_SUBAGENT_CHILD_TOOLS
 ] as const
@@ -38,11 +40,16 @@ const config = async () => {
   const root = await mkdtemp(join(tmpdir(), "jingler-child-launcher-"))
   roots.push(root)
   const childToolsPath = join(root, "child-tools.mjs")
-  await writeFile(childToolsPath, "export default () => {}\n")
+  const claudeProviderPath = join(root, "claude-provider.mjs")
+  await Promise.all([
+    writeFile(childToolsPath, "export default () => {}\n"),
+    writeFile(claudeProviderPath, "export default () => {}\n")
+  ])
   return {
     credentialRoot: join(root, "credentials"),
     nodePath: process.execPath,
-    childToolsPath
+    childToolsPath,
+    claudeProviderPath
   }
 }
 
@@ -55,6 +62,7 @@ describe("preparePiChildLauncher", () => {
     expect(process.env.JINGLER_SUBAGENT_PROCESS_ISOLATION).toBe("1")
     expect(process.env.PI_SUBAGENT_ELECTRON_RUN_AS_NODE).toBe("1")
     expect(process.env.JINGLER_SUBAGENT_CREDENTIAL_ROOT).toBe(input.credentialRoot)
+    expect(process.env.JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH).toBe(input.claudeProviderPath)
     expect(process.env.JINGLER_SUBAGENT_NODE).toBe(process.execPath)
     expect(process.env.JINGLER_SUBAGENT_CHILD_TOOLS).toBe(input.childToolsPath)
   })

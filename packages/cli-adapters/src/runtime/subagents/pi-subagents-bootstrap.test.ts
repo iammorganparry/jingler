@@ -51,8 +51,12 @@ describe("managed pi-subagent profiles", () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
     roots.push(root)
     const childTools = join(root, "jingler-child-tools.mjs")
-    await writeFile(childTools, "export default () => undefined\n")
-    await materializePiSubagentProfiles(root, childTools, {
+    const claudeProvider = join(root, "jingler-claude-cli-provider.mjs")
+    await Promise.all([
+      writeFile(childTools, "export default () => undefined\n"),
+      writeFile(claudeProvider, "export default () => undefined\n")
+    ])
+    await materializePiSubagentProfiles(root, childTools, claudeProvider, {
       worker: ProviderModelId.make("openai-codex/gpt-5.6-sol")
     })
     process.env.PI_CODING_AGENT_DIR = root
@@ -75,6 +79,7 @@ describe("managed pi-subagent profiles", () => {
     expect(scout.contract.tools.disableAmbientExtensions).toBe(true)
     expect(scout.contract.tools.configuredExtensions).toEqual([
       childTools,
+      claudeProvider,
       PONYTAIL_EXTENSION_PATH
     ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
@@ -89,8 +94,12 @@ describe("managed pi-subagent profiles", () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-subagent-ceiling-"))
     roots.push(root)
     const childTools = join(root, "jingler-child-tools.mjs")
-    await writeFile(childTools, "export default () => undefined\n")
-    await materializePiSubagentProfiles(root, childTools)
+    const claudeProvider = join(root, "jingler-claude-cli-provider.mjs")
+    await Promise.all([
+      writeFile(childTools, "export default () => undefined\n"),
+      writeFile(claudeProvider, "export default () => undefined\n")
+    ])
+    await materializePiSubagentProfiles(root, childTools, claudeProvider)
     await mkdir(join(root, ".pi", "agents"), { recursive: true })
     await writeFile(join(root, ".pi", "agents", "ambient.md"), [
       "---",

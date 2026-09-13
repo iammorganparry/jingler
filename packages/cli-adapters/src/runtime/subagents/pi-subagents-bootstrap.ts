@@ -95,6 +95,7 @@ const writeConfig = async (path: string): Promise<void> => {
 const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
+  claudeProviderPath: string,
   tools = STANDARD_CHILD_TOOLS,
   model?: string
 ): string => source
@@ -102,7 +103,7 @@ const rewriteAgentProfile = (
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
   .replace(
     /^---\n/u,
-    `---\nextensions: ${childToolsPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
+    `---\nextensions: ${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
   )
 
 /**
@@ -113,6 +114,7 @@ const rewriteAgentProfile = (
 export const materializePiSubagentProfiles = async (
   agentDir: string,
   childToolsPath: string,
+  claudeProviderPath: string,
   models: SubagentModelAssignments = {}
 ): Promise<void> => {
   const target = join(agentDir, "agents")
@@ -121,7 +123,13 @@ export const materializePiSubagentProfiles = async (
     const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
     await writeFile(
       join(target, `${agent}.md`),
-      rewriteAgentProfile(source, childToolsPath, STANDARD_CHILD_TOOLS, models[agent]),
+      rewriteAgentProfile(
+        source,
+        childToolsPath,
+        claudeProviderPath,
+        STANDARD_CHILD_TOOLS,
+        models[agent]
+      ),
       { encoding: "utf8", mode: 0o600 }
     )
   }))
@@ -141,6 +149,7 @@ export const materializePiSubagentProfiles = async (
         "You are a fan-out coordinator. Delegate bounded independent tasks, coordinate results, and do not edit the workspace directly."
       ),
     childToolsPath,
+    claudeProviderPath,
     FANOUT_CHILD_TOOLS,
     models.fanout
   )
@@ -179,6 +188,7 @@ export const preparePiSubagentsRuntime = (
       await materializePiSubagentProfiles(
         expected,
         launcher.childToolsPath,
+        launcher.claudeProviderPath,
         models
       )
       await Effect.runPromise(preparePiChildLauncher(launcher))

@@ -24,11 +24,13 @@ registerBunOAuthFlows()
 
 // Pin the brokered child-tool extension before any remote session creates an
 // embedded parent; process-isolated children inherit this exact packaged path.
-process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??= join(
-  import.meta.dirname,
-  "runtime-assets",
-  "jingler-child-tools.mjs"
-)
+const childRuntimePath = (name: string): string =>
+  join(import.meta.dirname, "runtime-assets", name)
+
+process.env.JINGLER_SUBAGENT_CHILD_TOOLS_PATH ??=
+  childRuntimePath("jingler-child-tools.mjs")
+process.env.JINGLER_SUBAGENT_CLAUDE_PROVIDER_PATH ??=
+  childRuntimePath("jingler-claude-cli-provider.mjs")
 
 const args = process.argv.slice(2)
 const command = args[0]

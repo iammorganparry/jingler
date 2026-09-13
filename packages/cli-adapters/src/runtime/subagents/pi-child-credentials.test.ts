@@ -75,13 +75,33 @@ const capability = (parentPiSessionId: string, agent = "worker") => ({
 })
 
 describe("PiChildCredentials", () => {
-  it("rejects Claude CLI credentials until child runtimes install the relay", async () => {
-    const children = new PiChildCredentials("/tmp/unused", new InMemoryProviderCredentialStore())
-    await expect(Effect.runPromise(children.materialize(
+  it("materializes only the non-secret Claude CLI route marker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-child-claude-auth-"))
+    roots.push(root)
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId: claudeCliConnection.id,
+      authKind: "claude-setup-token",
+      access: "claude-cli",
+      refresh: null,
+      expiresAt: null
+    }))
+    const children = new PiChildCredentials(root, credentials)
+
+    const directory = await Effect.runPromise(children.materialize(
       "parent-pi-session",
       [claudeCliConnection],
       [capability("parent-pi-session")]
-    ))).rejects.toThrow("Claude CLI connections are unavailable to native subagents")
+    ))
+
+    expect(JSON.parse(await readFile(join(directory, "auth.json"), "utf8"))).toEqual({
+      anthropic: {
+        type: "oauth",
+        access: "claude-cli",
+        refresh: "",
+        expires: Number.MAX_SAFE_INTEGER
+      }
+    })
   })
 
   it("keeps the parent account when an assignment uses the same provider", () => {
