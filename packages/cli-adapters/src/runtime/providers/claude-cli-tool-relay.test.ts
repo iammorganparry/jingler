@@ -5,11 +5,18 @@ import { Type, type Tool } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "vitest"
 import { startClaudeCliToolRelay } from "./claude-cli-tool-relay.js"
 
-const tools: ReadonlyArray<Tool> = [{
-  name: "workspace_read_file",
-  description: "Read one workspace file.",
-  parameters: Type.Object({ path: Type.String() })
-}]
+const tools: ReadonlyArray<Tool> = [
+  {
+    name: "workspace_read_file",
+    description: "Read one workspace file.",
+    parameters: Type.Object({ path: Type.String() })
+  },
+  {
+    name: "jingler_ask_question",
+    description: "Ask the operator a question.",
+    parameters: Type.Unsafe({ properties: { question: { type: "string" } } })
+  }
+]
 
 describe("Claude CLI tool relay", () => {
   it("lists tools and captures one call without executing it", async () => {
@@ -25,9 +32,12 @@ describe("Claude CLI tool relay", () => {
     const client = new Client({ name: "relay-test", version: "1.0.0" })
     try {
       await client.connect(transport)
-      expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
-        "workspace_read_file"
+      const listed = (await client.listTools()).tools
+      expect(listed.map(({ name }) => name)).toEqual([
+        "workspace_read_file",
+        "jingler_ask_question"
       ])
+      expect(listed.every(({ inputSchema }) => inputSchema.type === "object")).toBe(true)
       await client.callTool({
         name: "workspace_read_file",
         arguments: { path: "package.json" }

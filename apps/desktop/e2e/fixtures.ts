@@ -43,6 +43,7 @@ import {
   E2E_PI_CONNECTION_ID,
   E2E_PI_MODEL_ID,
   E2E_PI_PROVIDER_ID,
+  e2ePiIdentity,
 } from "../src/main/e2e/fixture-identity.js";
 
 /** Match PlanStore's collision-proof directory for one physical checkout. */
@@ -200,16 +201,15 @@ export interface SeedSession {
   readonly activeChatId?: string;
 }
 
-const withCanonicalRuntimeIdentity = (session: SeedSession): SeedSession => {
+const withCanonicalRuntimeIdentity = (
+  session: SeedSession,
+  scenarioId: string,
+): SeedSession => {
   const identity =
     session.connectionSelectionRequired === true ||
     session.modelSelectionRequired === true
       ? {}
-      : {
-          connectionId: E2E_PI_CONNECTION_ID,
-          providerId: E2E_PI_PROVIDER_ID,
-          modelId: E2E_PI_MODEL_ID,
-        };
+      : e2ePiIdentity(scenarioId);
   const chatDefaults = session.mode === undefined ? {} : { mode: session.mode };
   const chats = session.chats?.map((chat) => ({
     ...identity,
@@ -730,10 +730,11 @@ function seedFixtureRecords(jinglerDir: string, options: LaunchOptions, reused: 
       createdAt: "2026-07-11T00:00:00.000Z",
     };
     if (piFixture.seedConnection !== false) {
+      const identity = e2ePiIdentity(piFixture.scenarioId);
       Object.assign(seededConfig, {
-        defaultConnectionId: E2E_PI_CONNECTION_ID,
-        defaultProviderId: E2E_PI_PROVIDER_ID,
-        defaultModelId: E2E_PI_MODEL_ID,
+        defaultConnectionId: identity.connectionId,
+        defaultProviderId: identity.providerId,
+        defaultModelId: identity.modelId,
         connectionSelectionRequired: false,
       });
     }
@@ -747,7 +748,11 @@ function seedFixtureRecords(jinglerDir: string, options: LaunchOptions, reused: 
     mkdirSync(jinglerDir, { recursive: true });
     writeFileSync(
       join(jinglerDir, "sessions.json"),
-      JSON.stringify(sessions.map(withCanonicalRuntimeIdentity), null, 2)
+      JSON.stringify(
+        sessions.map((session) => withCanonicalRuntimeIdentity(session, piFixture.scenarioId)),
+        null,
+        2,
+      )
     );
   }
   if (options.transcripts) {

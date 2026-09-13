@@ -230,6 +230,13 @@ const effortArgs = (reasoning: SimpleStreamOptions["reasoning"]): ReadonlyArray<
   return ["--effort", "high"]
 }
 
+const systemPrompt = (context: Context): string => {
+  const prompt = context.systemPrompt ?? ""
+  if (!context.tools?.some(({ name }) => name === "mcp_search")) return prompt
+  const policy = "Jingler's configured MCP services are available through mcp_search and mcp_call. When the user asks to use or inspect a named service, call mcp_search for that service before taking other action, then use mcp_call as needed. Never claim to have used a service without a successful tool result."
+  return prompt.length === 0 ? policy : `${prompt}\n\n${policy}`
+}
+
 export const claudeCliArguments = (
   model: Model<Api>,
   context: Context,
@@ -251,7 +258,7 @@ export const claudeCliArguments = (
   "--allowedTools", "mcp__jingler__*",
   "--max-turns", "1",
   "--model", model.id,
-  "--system-prompt", context.systemPrompt ?? "",
+  "--system-prompt", systemPrompt(context),
   ...effortArgs(options.reasoning)
 ]
 

@@ -46,6 +46,21 @@ describe("Claude CLI provider relay", () => {
     expect(args).toContain("high")
   })
 
+  it("requires Claude to use a named Jingler MCP service before other work", () => {
+    const mcpContext: Context = {
+      ...context,
+      tools: [...(context.tools ?? []), {
+        name: "mcp_search",
+        description: "Discover configured MCP capabilities. Servers: paper",
+        parameters: Type.Object({ query: Type.String() })
+      }]
+    }
+    const args = claudeCliArguments(model, mcpContext, {}, "/tmp/mcp.json")
+    const prompt = args[args.indexOf("--system-prompt") + 1]
+    expect(prompt).toContain("When the user asks to use or inspect a named service")
+    expect(prompt).toContain("call mcp_search for that service before taking other action")
+  })
+
   it("accepts only first-party Claude.ai subscription authentication", async () => {
     const valid = await executable(`
 console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"max"}))
