@@ -66,6 +66,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Build unpacked desktop artifact
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: pnpm --filter @jingler/desktop dist
       - name: Locate packaged resources
         run: |
