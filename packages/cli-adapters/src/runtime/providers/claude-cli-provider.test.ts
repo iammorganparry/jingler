@@ -41,6 +41,7 @@ describe("Claude CLI provider relay", () => {
     expect(args).toContain("--strict-mcp-config")
     expect(args).toContain("mcp__jingler__*")
     expect(args).toContain("--no-session-persistence")
+    expect(args).not.toContain("--max-turns")
     expect(args).toContain("--setting-sources")
     expect(args).toContain("")
     expect(args).toContain("high")

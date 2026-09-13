@@ -19,6 +19,7 @@ const fail = (message) => {
   console.log(JSON.stringify({ type: "result", subtype: "error", is_error: true, result: message }))
   process.exit(0)
 }
+if (args.includes("--max-turns")) fail("Claude received a turn cap")
 const prompt = valueAfter("--system-prompt")
 if (!prompt?.includes("call mcp_search for that service before taking other action")) {
   fail("Claude did not receive the named MCP policy")
