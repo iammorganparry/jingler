@@ -58,7 +58,9 @@ const SUBAGENT_TOOL = "subagent"
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
 const E2E_CONTEXT_WINDOW = 1_000_000
 const observedRouteFor = (authRoute: E2ePiFixture["authRoute"]): string =>
-  `e2e-${authRoute}`
+  authRoute === "claude-setup-token"
+    ? "claude-cli:subscription"
+    : `e2e-${authRoute}`
 const COMPACTION_THINKING = "context ".repeat(17_500)
 const DIGEST_REPLY = `\`\`\`json
 {
@@ -736,6 +738,28 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
   }
 }
 
+const withE2eSubscriptionAuth = (
+  provider: Provider,
+  authKind: E2ePiFixture["authRoute"]
+): Provider =>
+  authKind === "claude-setup-token" || authKind === "openai-codex-oauth"
+    ? {
+        ...provider,
+        auth: {
+          ...provider.auth,
+          oauth: {
+            name: "Deterministic subscription",
+            isSubscription: true,
+            login: async () => {
+              throw new Error("E2E login is supplied by AuthBroker")
+            },
+            refresh: async (credential) => credential,
+            toAuth: async (credential) => ({ apiKey: credential.access })
+          }
+        }
+      }
+    : provider
+
 export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
   const tokenSize =
     fixture.scenarioId === "plan-mode" || fixture.scenarioId === "context-compaction"
@@ -750,7 +774,10 @@ export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
   })
   provider.setResponses([...responsesFor(fixture)])
   return (runtime: ModelRuntime): void => {
-    runtime.registerNativeProvider(provider.provider)
+    runtime.registerNativeProvider(withE2eSubscriptionAuth(
+      provider.provider,
+      fixture.authRoute
+    ))
   }
 }
 
@@ -766,26 +793,11 @@ export const configureE2eVerificationProvider = (
     tokensPerSecond: 0
   })
   provider.setResponses([...scriptedPiScenarioResponses(scenarioId)])
-  const runtimeProvider: Provider =
-    authKind === "claude-setup-token" || authKind === "openai-codex-oauth"
-      ? {
-          ...provider.provider,
-          auth: {
-            ...provider.provider.auth,
-            oauth: {
-              name: "Deterministic subscription",
-              isSubscription: true,
-              login: async () => {
-                throw new Error("E2E login is supplied by AuthBroker")
-              },
-              refresh: async (credential) => credential,
-              toAuth: async (credential) => ({ apiKey: credential.access })
-            }
-          }
-        }
-      : provider.provider
   return (runtime: ModelRuntime): void => {
-    runtime.registerNativeProvider(runtimeProvider)
+    runtime.registerNativeProvider(withE2eSubscriptionAuth(
+      provider.provider,
+      authKind
+    ))
   }
 }
 

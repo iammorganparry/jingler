@@ -49,12 +49,6 @@ export class PiChildCredentials {
     connections: ReadonlyArray<ProviderConnection>,
     capabilities: ReadonlyArray<SubagentCapability>
   ): Effect.Effect<string, PiChildCredentialError> {
-    // ponytail: unblock Claude children when their runtime can install Jingler's CLI relay.
-    if (connections.some(({ authKind }) => authKind === "claude-setup-token")) {
-      return Effect.fail(new PiChildCredentialError({
-        message: "Claude CLI connections are unavailable to native subagents"
-      }))
-    }
     const providers = new Set(connections.map(({ providerId }) => providerId))
     if (connections.length === 0 || providers.size !== connections.length) {
       return Effect.fail(new PiChildCredentialError({

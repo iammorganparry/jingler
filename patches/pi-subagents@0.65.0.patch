@@ -371,7 +371,7 @@ new file mode 100644
 index 0000000000000000000000000000000000000000..84c1137923b9c6a73e11424fc9457fa4d39fffec
 --- /dev/null
 +++ b/src/runs/shared/process-child-session.ts
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,228 @@
 +import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 +import { createHash } from "node:crypto"
 +import * as fs from "node:fs"
@@ -404,6 +404,15 @@ index 0000000000000000000000000000000000000000..84c1137923b9c6a73e11424fc9457fa4
 +
 +export const isolatedChildEnvironment = (launch: ChildSessionLaunch): NodeJS.ProcessEnv => {
 +  const env = { ...process.env, ...launch.processEnv }
++  for (const key of [
++    "ANTHROPIC_API_KEY",
++    "ANTHROPIC_AUTH_TOKEN",
++    "ANTHROPIC_BASE_URL",
++    "CLAUDE_CODE_USE_BEDROCK",
++    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
++    "CLAUDE_CODE_USE_VERTEX",
++    "CLAUDE_CODE_USE_FOUNDRY"
++  ]) delete env[key]
 +  const root = env.JINGLER_SUBAGENT_CREDENTIAL_ROOT
 +  const parent = launch.runtime.parentSessionId ?? launch.runtime.orchestratorSessionId
 +  const agent = launch.runtime.agent

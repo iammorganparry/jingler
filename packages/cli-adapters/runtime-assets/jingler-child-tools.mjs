@@ -51,6 +51,6 @@ export default function jinglerChildTools(pi) {
   const activateBrokeredTools = () => {
     pi.setActiveTools([...new Set([...pi.getActiveTools(), ...brokeredTools])])
   }
-  activateBrokeredTools()
+  // Pi rejects action methods while extension factories load.
   pi.on("before_agent_start", activateBrokeredTools)
 }

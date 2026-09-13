@@ -156,7 +156,9 @@ export const ProviderConnectionsLive = Layer.effect(
       yield* credentials.write({
         connectionId: connection.id,
         authKind: connection.authKind,
-        access: "e2e-provider-credential",
+        access: connection.authKind === "claude-setup-token"
+          ? "claude-cli"
+          : "e2e-provider-credential",
         refresh: connection.authKind === "openai-codex-oauth" ? "e2e-refresh" : null,
         expiresAt: null
       })

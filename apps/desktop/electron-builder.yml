@@ -55,8 +55,10 @@ extraResources:
     to: THIRD-PARTY-LICENSES
   - from: ../../packages/plannotator-ext/assets
     to: plannotator
-  - from: ../../packages/cli-adapters/runtime-assets/jingler-child-tools.mjs
+  - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-child-tools.mjs
     to: subagent-runtime/jingler-child-tools.mjs
+  - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-claude-cli-provider.mjs
+    to: subagent-runtime/jingler-claude-cli-provider.mjs
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:

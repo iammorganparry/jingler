@@ -25,6 +25,6 @@ Run Claude subscription inference through the locally authenticated Claude Code 
 - Invoke the operator-installed `claude` executable and its existing login; never persist or pass its OAuth credential into inference. Existing usage polling may read it transiently.
 - Remove `ANTHROPIC_API_KEY` and API-provider environment variables from the child so the CLI cannot silently use API billing.
 - Claude's built-in tools stay disabled. MCP calls are captured, not executed; Pi remains the only tool executor.
-- Keep workspace mutation, command permission, question, and plan behavior in Pi/Jingler. Native Claude child inference fails closed until child runtimes can install the CLI relay.
+- Keep workspace mutation, command permission, question, and plan behavior in Pi/Jingler. Native Claude children install the same CLI relay and execute only their brokered child capabilities through Pi.
 - Do not add ACP or the Claude Agent SDK.
 - Fail closed on malformed stream events, missing CLI authentication, unsupported images, or uncertain billing route.
