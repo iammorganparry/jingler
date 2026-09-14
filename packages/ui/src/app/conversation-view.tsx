@@ -8,6 +8,7 @@ import type {
   GateDecision,
   Message,
   McpConfigEntry,
+  McpRemoteAuth,
   McpServer,
   PermissionMode,
   PlanDocument,
@@ -141,6 +142,7 @@ export interface ConversationViewProps {
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
   mcpServers?: ReadonlyArray<McpServer>
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
+  onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
   paused?: boolean
   /** Git branch backing the session's worktree, shown in the composer. */
@@ -288,7 +290,7 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -441,6 +443,7 @@ function renderSessionAnalytics() {
                 onAddMcp={onAddMcp}
                 mcpServers={mcpServers}
                 onSetMcpApiKey={onSetMcpApiKey}
+                onSetMcpAuth={onSetMcpAuth}
                 onAuthorizeMcp={onAuthorizeMcp}
                 paused={paused}
                 branch={branch}

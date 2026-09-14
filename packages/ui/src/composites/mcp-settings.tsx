@@ -2,6 +2,7 @@ import type {
   McpConfigEntry,
   McpImportCandidateView,
   McpImportSourceId,
+  McpRemoteAuth,
   McpServer,
   McpServerStatus
 } from "@jingler/core"
@@ -37,6 +38,7 @@ export interface McpSettingsProps {
   readonly probing: boolean
   readonly probe: () => void
   readonly setEnabled: (name: string, enabled: boolean) => Promise<void>
+  readonly setAuth: (name: string, auth: McpRemoteAuth) => Promise<void>
   readonly remove: (name: string) => Promise<void>
   readonly add: (name: string, entry: McpConfigEntry) => Promise<void>
   readonly setApiKey: (name: string, apiKey: string) => Promise<void>
@@ -415,6 +417,75 @@ function ImportFlow({
   )
 }
 
+interface McpAuthSetupDialogProps {
+  readonly server: McpServer | null
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly setAuth: McpSettingsProps["setAuth"]
+  readonly setApiKey: McpSettingsProps["setApiKey"]
+  readonly startAuthorization: McpSettingsProps["startAuthorization"]
+}
+
+export function McpAuthSetupDialog(props: McpAuthSetupDialogProps) {
+  return <McpAuthSetupDialogContent key={`${props.server?.name ?? "closed"}:${props.open}`} {...props} />
+}
+
+function McpAuthSetupDialogContent({
+  server,
+  open,
+  onOpenChange,
+  setAuth,
+  setApiKey,
+  startAuthorization
+}: McpAuthSetupDialogProps) {
+  const [kind, setKind] = React.useState<"oauth" | "api-key">("oauth")
+  const [apiKey, setApiKeyValue] = React.useState("")
+  const [header, setHeader] = React.useState("Authorization")
+  const [prefix, setPrefix] = React.useState("Bearer ")
+  if (server === null) return null
+  const submit = async () => {
+    if (kind === "oauth") {
+      await setAuth(server.name, { type: "oauth" })
+      await startAuthorization(server.name)
+    } else {
+      await setAuth(server.name, { type: "api-key", header: header.trim(), prefix })
+      await setApiKey(server.name, apiKey)
+    }
+    setApiKeyValue("")
+    onOpenChange(false)
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Configure authentication for {server.displayName}</DialogTitle>
+          <DialogDescription>Choose the authentication method required by this MCP server.</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-3">
+            <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} aria-label="Authentication method" className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text">
+              <option value="oauth">OAuth</option>
+              <option value="api-key">API key</option>
+            </select>
+            {kind === "api-key" && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Input value={header} onChange={(event) => setHeader(event.target.value)} aria-label="API key header" />
+                  <Input value={prefix} onChange={(event) => setPrefix(event.target.value)} aria-label="API key prefix" />
+                </div>
+                <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} />
+              </>
+            )}
+            <AsyncButton disabled={kind === "api-key" && (apiKey.length === 0 || header.trim().length === 0)} pendingLabel={kind === "oauth" ? "Opening…" : "Saving…"} onClick={submit}>
+              {kind === "oauth" ? "Continue with OAuth" : "Save API key"}
+            </AsyncButton>
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function McpApiKeyDialog({
   server,
   open,
@@ -468,16 +539,24 @@ function McpAuthAction({
   server,
   setApiKey,
   startAuthorization,
+  onConfigure,
   onError
 }: {
   readonly server: McpServer
   readonly setApiKey: McpSettingsProps["setApiKey"]
   readonly startAuthorization: McpSettingsProps["startAuthorization"]
+  readonly onConfigure: (server: McpServer) => void
   readonly onError: (message: string) => void
 }) {
   const [editing, setEditing] = React.useState(false)
   const [apiKey, setApiKeyValue] = React.useState("")
-  if (server.authKind === "none") return null
+  if (server.authKind === "none") {
+    return server.transport === "http" ? (
+      <button type="button" onClick={() => onConfigure(server)} className="text-[11px] text-blue hover:underline">
+        Set up auth
+      </button>
+    ) : null
+  }
   if (server.authKind === "oauth") {
     return (
       <AsyncButton
@@ -532,6 +611,7 @@ export function McpSettings({
   probing,
   probe,
   setEnabled,
+  setAuth,
   remove,
   add,
   setApiKey,
@@ -541,6 +621,7 @@ export function McpSettings({
   applyImport
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
+  const [authSetupServer, setAuthSetupServer] = React.useState<McpServer | null>(null)
   const run = (action: () => Promise<void>) => {
     setActionError(null)
     void action().catch((cause) =>
@@ -568,6 +649,7 @@ export function McpSettings({
                 server={server}
                 setApiKey={setApiKey}
                 startAuthorization={startAuthorization}
+                onConfigure={setAuthSetupServer}
                 onError={setActionError}
               />
               <Toggle
@@ -631,6 +713,14 @@ export function McpSettings({
       </div>
 
       <ImportFlow importCandidates={importCandidates} applyImport={applyImport} />
+      <McpAuthSetupDialog
+        server={authSetupServer}
+        open={authSetupServer !== null}
+        onOpenChange={(open) => { if (!open) setAuthSetupServer(null) }}
+        setAuth={setAuth}
+        setApiKey={setApiKey}
+        startAuthorization={startAuthorization}
+      />
     </div>
   )
 }

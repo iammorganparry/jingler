@@ -27,6 +27,7 @@ const props = (over: Partial<McpSettingsProps> = {}): McpSettingsProps => ({
   probing: false,
   probe: () => {},
   setEnabled: async () => {},
+  setAuth: async () => {},
   remove: async () => {},
   add: async () => {},
   setApiKey: async () => {},
@@ -56,6 +57,28 @@ describe("McpSettings", () => {
   it("surfaces a parse error instead of silently showing an empty list", () => {
     render(<McpSettings {...props({ servers: [], parseError: "mcp.json is not valid JSON" })} />)
     expect(screen.getByText(/mcp\.json could not be read/)).toBeTruthy()
+  })
+
+  it("configures OAuth for an existing HTTP server", async () => {
+    const setAuth = vi.fn(async () => {})
+    const startAuthorization = vi.fn(async () => {})
+    render(<McpSettings {...props({ setAuth, startAuthorization })} />)
+    fireEvent.click(screen.getByText("Set up auth"))
+    expect(screen.getByRole("dialog")).toBeTruthy()
+    fireEvent.click(screen.getByText("Continue with OAuth"))
+    await waitFor(() => expect(setAuth).toHaveBeenCalledWith("context7", { type: "oauth" }))
+    expect(startAuthorization).toHaveBeenCalledWith("context7")
+  })
+
+  it("clears an unsaved API key when auth setup closes", () => {
+    render(<McpSettings {...props()} />)
+    fireEvent.click(screen.getByText("Set up auth"))
+    fireEvent.change(screen.getByLabelText("Authentication method"), { target: { value: "api-key" } })
+    fireEvent.change(screen.getByLabelText("API key for Context7"), { target: { value: "do-not-reuse" } })
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    fireEvent.click(screen.getByText("Set up auth"))
+    fireEvent.change(screen.getByLabelText("Authentication method"), { target: { value: "api-key" } })
+    expect((screen.getByLabelText("API key for Context7") as HTMLInputElement).value).toBe("")
   })
 
   it("submits the add form as a remote entry", async () => {

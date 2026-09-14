@@ -4,6 +4,7 @@ import type {
   Attachment,
   Environment,
   McpConfigEntry,
+  McpRemoteAuth,
   McpServer,
   PermissionMode,
   PlanDocument,
@@ -28,6 +29,7 @@ import {
   Monitor,
   MousePointer2,
   Plus,
+  Search,
   Server,
   SlidersHorizontal,
   Sparkles,
@@ -45,7 +47,7 @@ import { Pill } from "../components/pill.js";
 import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
-import { McpApiKeyDialog, McpBrand, McpServerDialog } from "./mcp-settings.js";
+import { McpApiKeyDialog, McpAuthSetupDialog, McpBrand, McpServerDialog } from "./mcp-settings.js";
 import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
 import { PromptInputSurface } from "./beui/work.js";
 import {
@@ -235,6 +237,7 @@ type ComposerProps =  {
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>;
   mcpServers?: ReadonlyArray<McpServer>;
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>;
+  onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>;
   onAuthorizeMcp?: (name: string) => Promise<void>;
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void;
   /** Halt the running agent. Given one, the button becomes Stop while `busy`. */
@@ -348,7 +351,9 @@ function ComposerMcpMenu({
   servers,
   setActionsOpen,
   setApiKeyServer,
+  setAuthSetupServer,
   onSetApiKey,
+  onSetAuth,
   onAuthorize,
   onError,
   onConnect
@@ -356,21 +361,36 @@ function ComposerMcpMenu({
   readonly servers: ReadonlyArray<McpServer>
   readonly setActionsOpen: (open: boolean) => void
   readonly setApiKeyServer: (server: McpServer) => void
+  readonly setAuthSetupServer: (server: McpServer) => void
   readonly onSetApiKey?: (name: string, apiKey: string) => Promise<void>
+  readonly onSetAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   readonly onAuthorize?: (name: string) => Promise<void>
   readonly onError: (message: string | null) => void
   readonly onConnect: () => void
 }) {
+  const [query, setQuery] = useState("")
+  const manageable = servers.filter((server) => server.transport === "http")
+  const matches = manageable.filter((server) =>
+    `${server.displayName} ${server.name} ${server.target}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+  )
   return (
     <div className="border-t border-line pt-1">
-      {servers.map((server) => (
+      {manageable.length > 4 && (
+        <label className="mx-1.5 my-1 flex items-center gap-2 rounded-md border border-line px-2 py-1.5 text-muted-foreground focus-within:border-text-bright/30">
+          <Search size={13} aria-hidden />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search MCP servers" placeholder="Search servers" className="min-w-0 flex-1 bg-transparent text-xs text-text outline-none placeholder:text-dim" />
+        </label>
+      )}
+      <div className="max-h-64 overflow-y-auto">
+      {matches.map((server) => (
         <button
           key={server.name}
           type="button"
-          disabled={server.authKind === "none" || (server.authKind === "api-key" && onSetApiKey === undefined) || (server.authKind === "oauth" && onAuthorize === undefined)}
+          disabled={(server.authKind === "none" && (onSetAuth === undefined || onSetApiKey === undefined || onAuthorize === undefined)) || (server.authKind === "api-key" && onSetApiKey === undefined) || (server.authKind === "oauth" && onAuthorize === undefined)}
           onClick={() => {
             setActionsOpen(false)
-            if (server.authKind === "api-key") setApiKeyServer(server)
+            if (server.authKind === "none") setAuthSetupServer(server)
+            else if (server.authKind === "api-key") setApiKeyServer(server)
             else if (server.authKind === "oauth") {
               onError(null)
               void onAuthorize?.(server.name).catch((cause) =>
@@ -378,17 +398,19 @@ function ComposerMcpMenu({
               )
             }
           }}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface disabled:opacity-70"
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface disabled:opacity-60"
         >
           <McpBrand server={server} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-text-bright">{server.displayName}</span>
             <span className="block text-xs text-muted-foreground">
-              {server.authKind === "none" ? "Connected" : server.authState === "ready" ? "Reauthenticate" : "Authentication required"}
+              {server.authKind === "none" ? "Set up auth" : server.authState === "ready" ? "Reauthenticate" : "Authentication required"}
             </span>
           </span>
         </button>
       ))}
+      {matches.length === 0 && <p className="px-2.5 py-3 text-xs text-dim">No matching servers.</p>}
+      </div>
       <button type="button" onClick={onConnect} className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface focus-visible:bg-surface">
         <span className="mt-0.5 grid size-5 shrink-0 place-items-center text-muted-foreground [&_svg]:size-4"><Server size={15} /></span>
         <span className="min-w-0 flex-1"><span className="block text-sm text-text-bright">Connect MCP server</span><span className="mt-0.5 block text-xs leading-4 text-muted-foreground">Add tools for local sessions</span></span>
@@ -404,7 +426,11 @@ function ComposerMcpDialogs({
   onAddOpenChange,
   apiKeyServer,
   onApiKeyServerChange,
-  setApiKey
+  authSetupServer,
+  onAuthSetupServerChange,
+  setApiKey,
+  setAuth,
+  authorize
 }: {
   readonly error: string | null
   readonly add?: (name: string, entry: McpConfigEntry) => Promise<void>
@@ -412,13 +438,27 @@ function ComposerMcpDialogs({
   readonly onAddOpenChange: (open: boolean) => void
   readonly apiKeyServer: McpServer | null
   readonly onApiKeyServerChange: (server: McpServer | null) => void
+  readonly authSetupServer: McpServer | null
+  readonly onAuthSetupServerChange: (server: McpServer | null) => void
   readonly setApiKey?: (name: string, apiKey: string) => Promise<void>
+  readonly setAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
+  readonly authorize?: (name: string) => Promise<void>
 }) {
   return (
     <>
       {error !== null && <div role="alert" className="px-2 pt-1 text-[11px] text-red">{error}</div>}
       {add !== undefined && (
         <McpServerDialog open={addOpen} onOpenChange={onAddOpenChange} add={add} setApiKey={setApiKey} />
+      )}
+      {setApiKey !== undefined && setAuth !== undefined && authorize !== undefined && (
+        <McpAuthSetupDialog
+          server={authSetupServer}
+          open={authSetupServer !== null}
+          onOpenChange={(open) => { if (!open) onAuthSetupServerChange(null) }}
+          setAuth={setAuth}
+          setApiKey={setApiKey}
+          startAuthorization={authorize}
+        />
       )}
       {setApiKey !== undefined && (
         <McpApiKeyDialog
@@ -510,7 +550,9 @@ export function Composer(props: ComposerProps) {
                     servers={mcpServers}
                     setActionsOpen={setActionsOpen}
                     setApiKeyServer={setMcpApiKeyServer}
+                    setAuthSetupServer={setMcpAuthSetupServer}
                     onSetApiKey={onSetMcpApiKey}
+                    onSetAuth={onSetMcpAuth}
                     onAuthorize={onAuthorizeMcp}
                     onError={setMcpActionError}
                     onConnect={() => { setActionsOpen(false); setMcpDialogOpen(true) }}
@@ -629,7 +671,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+  const { skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -837,6 +879,7 @@ export function Composer(props: ComposerProps) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [mcpApiKeyServer, setMcpApiKeyServer] = useState<McpServer | null>(null);
+  const [mcpAuthSetupServer, setMcpAuthSetupServer] = useState<McpServer | null>(null);
   const [mcpActionError, setMcpActionError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -1163,7 +1206,11 @@ case "Escape": {
         onAddOpenChange={setMcpDialogOpen}
         apiKeyServer={mcpApiKeyServer}
         onApiKeyServerChange={setMcpApiKeyServer}
+        authSetupServer={mcpAuthSetupServer}
+        onAuthSetupServerChange={setMcpAuthSetupServer}
         setApiKey={onSetMcpApiKey}
+        setAuth={onSetMcpAuth}
+        authorize={onAuthorizeMcp}
       />
     </div>
   );

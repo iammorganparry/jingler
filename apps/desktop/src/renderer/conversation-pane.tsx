@@ -10,6 +10,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
   McpConfigEntry,
+  McpRemoteAuth,
   McpServer,
   Message,
   ProviderCatalog,
@@ -100,10 +101,11 @@ const localMcp = (
   servers: ReadonlyArray<McpServer> | undefined,
   add: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined,
   setApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined,
+  setAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined,
   authorize: ((name: string) => Promise<void>) | undefined
 ) => environmentId === undefined
-  ? { servers: servers ?? [], add, setApiKey, authorize }
-  : { servers: [], add: undefined, setApiKey: undefined, authorize: undefined }
+  ? { servers: servers ?? [], add, setApiKey, setAuth, authorize }
+  : { servers: [], add: undefined, setApiKey: undefined, setAuth: undefined, authorize: undefined }
 
 function McpRecoveryCards({
   servers,
@@ -170,6 +172,7 @@ export function ConversationPane({
   onAddMcp,
   mcpServers,
   onSetMcpApiKey,
+  onSetMcpAuth,
   onAuthorizeMcp,
   paneFocused = true
 }: {
@@ -211,6 +214,7 @@ export function ConversationPane({
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
   mcpServers?: ReadonlyArray<McpServer>
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
+  onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
@@ -226,6 +230,7 @@ export function ConversationPane({
     mcpServers,
     onAddMcp,
     onSetMcpApiKey,
+    onSetMcpAuth,
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
@@ -868,6 +873,7 @@ export function ConversationPane({
                       addLocalMcp: localMcpConfig.add,
                       mcpServers: localMcpConfig.servers,
                       onSetMcpApiKey: localMcpConfig.setApiKey,
+                      onSetMcpAuth: localMcpConfig.setAuth,
                       onAuthorizeMcp: localMcpConfig.authorize,
                       fleet,
                       controlSubagent,
@@ -885,6 +891,7 @@ export function ConversationPane({
                 addLocalMcp: localMcpConfig.add,
                 mcpServers: localMcpConfig.servers,
                 onSetMcpApiKey: localMcpConfig.setApiKey,
+                onSetMcpAuth: localMcpConfig.setAuth,
                 onAuthorizeMcp: localMcpConfig.authorize,
                 session,
                 liveDiffs,
@@ -998,6 +1005,7 @@ function renderFleetComposer({
   addLocalMcp,
   mcpServers,
   onSetMcpApiKey,
+  onSetMcpAuth,
   onAuthorizeMcp,
   fleet,
   controlSubagent,
@@ -1010,6 +1018,7 @@ function renderFleetComposer({
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
   mcpServers: ReadonlyArray<McpServer>;
   onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
+  onSetMcpAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined;
   onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
   fleet: SubagentFleetController;
   controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>;
@@ -1024,6 +1033,7 @@ function renderFleetComposer({
     onAddMcp={addLocalMcp}
     mcpServers={mcpServers}
     onSetMcpApiKey={onSetMcpApiKey}
+    onSetMcpAuth={onSetMcpAuth}
     onAuthorizeMcp={onAuthorizeMcp}
     branchPending={session.semanticBranchPending === true}
     busy={fleet.selectedNode!.status === "queued" ||
@@ -1073,6 +1083,7 @@ function renderMainConversation({
   addLocalMcp,
   mcpServers,
   onSetMcpApiKey,
+  onSetMcpAuth,
   onAuthorizeMcp,
   session,
   liveDiffs,
@@ -1106,6 +1117,7 @@ function renderMainConversation({
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
   mcpServers: ReadonlyArray<McpServer>;
   onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
+  onSetMcpAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined;
   onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
   session: Session;
   liveDiffs: Record<string, LiveDiffStat>;
@@ -1146,6 +1158,7 @@ function renderMainConversation({
     onAddMcp={addLocalMcp}
     mcpServers={mcpServers}
     onSetMcpApiKey={onSetMcpApiKey}
+    onSetMcpAuth={onSetMcpAuth}
     onAuthorizeMcp={onAuthorizeMcp}
     paused={convo.paused}
     branch={session.branch}

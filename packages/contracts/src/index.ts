@@ -52,6 +52,7 @@ import {
   PlanTemplateConfig,
   PrFileChange,
   McpConfigEntry,
+  McpRemoteAuth,
   McpImportCandidateView,
   McpImportSourceId,
   McpServer,
@@ -1029,6 +1030,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.Void,
     error: ConfigError,
     payload: { name: Schema.String, enabled: Schema.Boolean }
+  }),
+
+  Rpc.make("Mcp.setAuth", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: { name: Schema.String, auth: McpRemoteAuth }
   }),
 
   /** Save or replace one API key in the encrypted device credential document. */

@@ -42,6 +42,10 @@ export function useMcpSettings(): McpSettingsProps {
       await rpc.mcpSetEnabled(name, enabled)
       await invalidate()
     },
+    setAuth: async (name, auth) => {
+      await rpc.mcpSetAuth(name, auth)
+      await invalidate()
+    },
     remove: async (name: string) => {
       await rpc.mcpRemove(name)
       await invalidate()

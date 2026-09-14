@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Composer } from "./composer.js"
 
@@ -59,6 +59,37 @@ describe("Composer tools menu", () => {
     openMenu()
     fireEvent.click(screen.getByRole("button", { name: /Linear/ }))
     expect(authorize).toHaveBeenCalledWith("linear")
+  })
+
+  it("searches servers and opens auth setup for unconfigured HTTP entries", async () => {
+    const setAuth = vi.fn(async () => {})
+    const servers = ["Linear", "Sentry", "PostHog", "Figma", "Supabase"].map((displayName) => ({
+      name: displayName.toLocaleLowerCase(),
+      displayName,
+      iconUrl: null,
+      authKind: "none" as const,
+      authState: "not-required" as const,
+      transport: "http" as const,
+      scope: "user" as const,
+      target: `https://mcp.${displayName.toLocaleLowerCase()}.com/mcp`,
+      envKeys: [],
+      headerKeys: [],
+      enabled: true
+    }))
+    render(<Composer
+      onAddMcp={async () => {}}
+      onSetMcpAuth={setAuth}
+      onSetMcpApiKey={async () => {}}
+      onAuthorizeMcp={async () => {}}
+      mcpServers={servers}
+    />)
+
+    openMenu()
+    fireEvent.change(screen.getByLabelText("Search MCP servers"), { target: { value: "fig" } })
+    expect(screen.queryByText("Linear")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /Figma/ }))
+    fireEvent.click(screen.getByText("Continue with OAuth"))
+    await waitFor(() => expect(setAuth).toHaveBeenCalledWith("figma", { type: "oauth" }))
   })
 
   it("opens the existing skill palette from the menu", () => {
