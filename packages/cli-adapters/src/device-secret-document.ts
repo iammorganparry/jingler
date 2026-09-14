@@ -16,6 +16,8 @@ export interface DeviceSecretDocument {
   readonly agentCredentials?: Readonly<Record<string, unknown>>
   /** Target-local MCP header/environment values encrypted in the same device vault. */
   readonly managedMcpSecrets?: Readonly<Record<string, unknown>>
+  /** Operator MCP API keys and OAuth state, encrypted and keyed by server name. */
+  readonly mcpCredentials?: Readonly<Record<string, unknown>>
   /** EXA/Firecrawl keys encrypted in the same vault; never exposed to renderer reads. */
   readonly webSearchCredentials?: Readonly<Record<string, unknown>>
   readonly [key: string]: unknown

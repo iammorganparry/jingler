@@ -154,14 +154,44 @@ describe("parseOpencodeMcp", () => {
     ])
   })
 
-  it("rejects unsupported OAuth and invalid URLs per entry", () => {
+  it("imports OAuth and rejects invalid URLs per entry", () => {
     const candidates = parseOpencodeMcp(JSON.stringify({ mcp: {
-      oauth: { type: "remote", url: "https://example.com", oauth: {} },
+      oauth: {
+        type: "remote",
+        url: "https://example.com",
+        oauth: { clientId: "client", clientSecret: "{env:SECRET}", scope: "tools:read" }
+      },
+      noOauth: { type: "remote", url: "https://api.example.com", oauth: false },
       invalid: { type: "remote", url: "file:///tmp/mcp" },
       empty: null
     } }))
     expect(candidates.map(({ name, entry, problem }) => ({ name, entry, problem }))).toEqual([
-      { name: "oauth", entry: null, problem: "OAuth servers are not supported" },
+      {
+        name: "oauth",
+        entry: {
+          type: "remote",
+          url: "https://example.com",
+          auth: {
+            type: "oauth",
+            clientId: "client",
+            clientSecret: "{env:SECRET}",
+            scope: "tools:read"
+          },
+          headers: {},
+          enabled: true
+        },
+        problem: null
+      },
+      {
+        name: "noOauth",
+        entry: {
+          type: "remote",
+          url: "https://api.example.com",
+          headers: {},
+          enabled: true
+        },
+        problem: null
+      },
       { name: "invalid", entry: null, problem: "Invalid server configuration" },
       { name: "empty", entry: null, problem: "Invalid server configuration" }
     ])

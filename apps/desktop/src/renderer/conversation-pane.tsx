@@ -10,6 +10,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   Environment,
   McpConfigEntry,
+  McpServer,
   Message,
   ProviderCatalog,
   Session,
@@ -30,6 +31,8 @@ import {
   Composer,
   ConversationView,
   FleetAgentView,
+  McpApiKeyDialog,
+  McpBrand,
   ResizeHandle,
   RuntimeRecoveryCard,
   PlanReview,
@@ -92,6 +95,64 @@ const initialPlanSplitRatio = (): number => {
   }
 }
 
+const localMcp = (
+  environmentId: string | undefined,
+  servers: ReadonlyArray<McpServer> | undefined,
+  add: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined,
+  setApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined,
+  authorize: ((name: string) => Promise<void>) | undefined
+) => environmentId === undefined
+  ? { servers: servers ?? [], add, setApiKey, authorize }
+  : { servers: [], add: undefined, setApiKey: undefined, authorize: undefined }
+
+function McpRecoveryCards({
+  servers,
+  setApiKey,
+  authorize
+}: {
+  readonly servers: ReadonlyArray<McpServer>
+  readonly setApiKey?: (name: string, apiKey: string) => Promise<void>
+  readonly authorize?: (name: string) => Promise<void>
+}) {
+  const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const needsAuth = servers.filter((server) => server.enabled && server.authState === "needs-auth")
+  return (
+    <>
+      {error !== null && (
+        <div role="alert" className="border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red">{error}</div>
+      )}
+      {needsAuth.map((server) => (
+        <RuntimeRecoveryCard
+          key={server.name}
+          icon={<McpBrand server={server} />}
+          title={`Reconnect ${server.displayName}`}
+          message={`${server.displayName} needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run.`}
+          actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
+          actionDisabled={server.authKind === "oauth" ? authorize === undefined : setApiKey === undefined}
+          onAction={() => {
+            if (server.authKind === "api-key") setApiKeyServer(server)
+            else {
+              setError(null)
+              void authorize?.(server.name).catch((cause) =>
+                setError(cause instanceof Error ? cause.message : "MCP authorization failed")
+              )
+            }
+          }}
+        />
+      ))}
+      {setApiKey !== undefined && (
+        <McpApiKeyDialog
+          server={apiKeyServer}
+          open={apiKeyServer !== null}
+          onOpenChange={(open) => { if (!open) setApiKeyServer(null) }}
+          setApiKey={setApiKey}
+        />
+      )}
+    </>
+  )
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -107,6 +168,9 @@ export function ConversationPane({
   onSelectChanges,
   onOpenProviderSettings,
   onAddMcp,
+  mcpServers,
+  onSetMcpApiKey,
+  onAuthorizeMcp,
   paneFocused = true
 }: {
   session: Session
@@ -143,8 +207,11 @@ export function ConversationPane({
   onSelectChanges?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
-  /** Add one global MCP server from the composer. */
+  /** Add or repair global MCP connections from the composer/chat. */
   onAddMcp?: (name: string, entry: McpConfigEntry) => Promise<void>
+  mcpServers?: ReadonlyArray<McpServer>
+  onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
+  onAuthorizeMcp?: (name: string) => Promise<void>
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -154,7 +221,13 @@ export function ConversationPane({
   const activeChat =
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
-  const addLocalMcp = session.environmentId === undefined ? onAddMcp : undefined
+  const localMcpConfig = localMcp(
+    session.environmentId,
+    mcpServers,
+    onAddMcp,
+    onSetMcpApiKey,
+    onAuthorizeMcp
+  )
   const convo = useConversation(session, activeChat.id)
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
@@ -741,6 +814,11 @@ export function ConversationPane({
           onAction={() => onOpenProviderSettings?.()}
         />
       )}
+      <McpRecoveryCards
+        servers={localMcpConfig.servers}
+        setApiKey={localMcpConfig.setApiKey}
+        authorize={localMcpConfig.authorize}
+      />
       {mutationRecovery.error !== null && (
         <div
           role="alert"
@@ -787,7 +865,10 @@ export function ConversationPane({
           <div className="mx-auto w-full max-w-[760px]">
           {renderFleetComposer({
                       session,
-                      addLocalMcp,
+                      addLocalMcp: localMcpConfig.add,
+                      mcpServers: localMcpConfig.servers,
+                      onSetMcpApiKey: localMcpConfig.setApiKey,
+                      onAuthorizeMcp: localMcpConfig.authorize,
                       fleet,
                       controlSubagent,
                       convo,
@@ -801,7 +882,10 @@ export function ConversationPane({
       ) : (
         renderMainConversation({
                 convo,
-                addLocalMcp,
+                addLocalMcp: localMcpConfig.add,
+                mcpServers: localMcpConfig.servers,
+                onSetMcpApiKey: localMcpConfig.setApiKey,
+                onAuthorizeMcp: localMcpConfig.authorize,
                 session,
                 liveDiffs,
                 environments,
@@ -912,6 +996,9 @@ function handoffModelLabel(providerCatalog: ProviderCatalog | null | undefined, 
 function renderFleetComposer({
   session,
   addLocalMcp,
+  mcpServers,
+  onSetMcpApiKey,
+  onAuthorizeMcp,
   fleet,
   controlSubagent,
   convo,
@@ -921,6 +1008,9 @@ function renderFleetComposer({
 }: {
   session: Session;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
+  mcpServers: ReadonlyArray<McpServer>;
+  onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
+  onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
   fleet: SubagentFleetController;
   controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>;
   convo: Conversation;
@@ -932,6 +1022,9 @@ function renderFleetComposer({
     repo={session.repo}
     branch={session.branch}
     onAddMcp={addLocalMcp}
+    mcpServers={mcpServers}
+    onSetMcpApiKey={onSetMcpApiKey}
+    onAuthorizeMcp={onAuthorizeMcp}
     branchPending={session.semanticBranchPending === true}
     busy={fleet.selectedNode!.status === "queued" ||
       fleet.selectedNode!.status === "running" ||
@@ -978,6 +1071,9 @@ function renderFleetComposer({
 function renderMainConversation({
   convo,
   addLocalMcp,
+  mcpServers,
+  onSetMcpApiKey,
+  onAuthorizeMcp,
   session,
   liveDiffs,
   environments,
@@ -1008,6 +1104,9 @@ function renderMainConversation({
 }: {
   convo: Conversation;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
+  mcpServers: ReadonlyArray<McpServer>;
+  onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
+  onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
   session: Session;
   liveDiffs: Record<string, LiveDiffStat>;
   environments: Parameters<typeof ConversationPane>[0]["environments"];
@@ -1045,6 +1144,9 @@ function renderMainConversation({
     skills={convo.skills}
     files={convo.files}
     onAddMcp={addLocalMcp}
+    mcpServers={mcpServers}
+    onSetMcpApiKey={onSetMcpApiKey}
+    onAuthorizeMcp={onAuthorizeMcp}
     paused={convo.paused}
     branch={session.branch}
     branchPending={session.semanticBranchPending === true}

@@ -25,6 +25,39 @@ const RemoteMcpUrl = Schema.String.pipe(
   }, { message: () => "MCP URL must be HTTP(S) without embedded credentials" })
 )
 
+const isSecureRemote = (value: string): boolean => {
+  const url = new URL(value)
+  return url.protocol === "https:" || (
+    url.protocol === "http:" &&
+    (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]")
+  )
+}
+
+const McpIconUrl = Schema.String.pipe(
+  Schema.filter((value) => {
+    try {
+      return new URL(value).protocol === "https:"
+    } catch {
+      return false
+    }
+  }, { message: () => "MCP icon URL must use HTTPS" })
+)
+
+export const McpRemoteAuth = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("api-key"),
+    header: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256)),
+    prefix: Schema.optionalWith(Schema.String.pipe(Schema.maxLength(64)), { default: () => "" })
+  }),
+  Schema.Struct({
+    type: Schema.Literal("oauth"),
+    clientId: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+    clientSecret: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+    scope: Schema.optional(Schema.String.pipe(Schema.minLength(1)))
+  })
+)
+export type McpRemoteAuth = Schema.Schema.Type<typeof McpRemoteAuth>
+
 /** A remote MCP server reached over streamable HTTP (default) or SSE. */
 export const McpConfigRemote = Schema.Struct({
   type: Schema.Literal("remote"),
@@ -35,9 +68,19 @@ export const McpConfigRemote = Schema.Struct({
     Schema.Record({ key: Schema.String, value: Schema.String }),
     { default: () => ({}) }
   ),
+  auth: Schema.optional(McpRemoteAuth),
+  displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
-})
+}).pipe(
+  Schema.filter(
+    (entry) => entry.auth === undefined || (
+      entry.auth.type !== "oauth" || entry.transport !== "sse"
+    ) && isSecureRemote(entry.url),
+    { message: () => "Managed MCP authentication requires HTTPS (or loopback HTTP) and OAuth requires streamable HTTP" }
+  )
+)
 export type McpConfigRemote = Schema.Schema.Type<typeof McpConfigRemote>
 
 /** A local MCP server spawned as a child process over stdio. */
@@ -50,6 +93,8 @@ export const McpConfigLocal = Schema.Struct({
     { default: () => ({}) }
   ),
   cwd: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128))),
+  iconUrl: Schema.optional(McpIconUrl),
   enabled: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   timeout: Schema.optional(Schema.Number.pipe(Schema.positive()))
 })

@@ -56,6 +56,8 @@ import {
   McpImportSourceId,
   McpServer,
   McpServerStatus,
+  SetMcpApiKeyInput,
+  McpAuthorizationStart,
   OffloadComputeSettings,
   PrMergeMethod,
   BackgroundTask,
@@ -1027,6 +1029,20 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.Void,
     error: ConfigError,
     payload: { name: Schema.String, enabled: Schema.Boolean }
+  }),
+
+  /** Save or replace one API key in the encrypted device credential document. */
+  Rpc.make("Mcp.setApiKey", {
+    success: Schema.Void,
+    error: ConfigError,
+    payload: SetMcpApiKeyInput.fields
+  }),
+
+  /** Begin OAuth in the system browser; completion lands on a loopback callback. */
+  Rpc.make("Mcp.startAuthorization", {
+    success: McpAuthorizationStart,
+    error: ConfigError,
+    payload: { name: Schema.String }
   }),
 
   /** Parse one source config into redacted candidates for confirmation. */

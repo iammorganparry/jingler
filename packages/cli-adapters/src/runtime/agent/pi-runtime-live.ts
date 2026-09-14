@@ -144,7 +144,7 @@ export const makePiAgentRuntimeLive = (
     const providers = yield* ProviderConnections
     // Operator-configured servers from `~/jingler/mcp.json`, re-read per run so
     // hand-edits apply to the next turn without a restart.
-    const configuredMcp = McpConfigService.resolve().pipe(
+    const configuredMcp = McpConfigService.resolveAuthenticated(secretStore).pipe(
       Effect.provide(McpConfigService.Default),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(AppPaths, paths)

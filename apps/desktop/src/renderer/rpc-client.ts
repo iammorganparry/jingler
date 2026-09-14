@@ -357,6 +357,10 @@ export const rpc = {
     run((c) => c.Mcp.remove({ name })),
   mcpSetEnabled: (name: string, enabled: boolean): Promise<void> =>
     run((c) => c.Mcp.setEnabled({ name, enabled })),
+  mcpSetApiKey: (name: string, apiKey: string): Promise<void> =>
+    run((c) => c.Mcp.setApiKey({ name, apiKey })),
+  mcpStartAuthorization: (name: string) =>
+    run((c) => c.Mcp.startAuthorization({ name })),
   mcpImportCandidates: (
     source: McpImportSourceId
   ): Promise<ReadonlyArray<McpImportCandidateView>> =>

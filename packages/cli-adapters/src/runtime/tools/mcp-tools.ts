@@ -198,11 +198,14 @@ export const makeMcpToolClient: McpToolClientFactory = (server) =>
   )
 
 const authenticatedFetch = (
-  headers: Readonly<Record<string, string>>
-) => (url: string | URL, init: RequestInit): Promise<Response> => {
-  const merged = new Headers(init.headers)
+  headers: Readonly<Record<string, string>>,
+  onUnauthorized?: () => void
+) => async (url: string | URL, init?: RequestInit): Promise<Response> => {
+  const merged = new Headers(init?.headers)
   for (const [key, value] of Object.entries(headers)) merged.set(key, value)
-  return fetch(url, { ...init, headers: merged })
+  const response = await fetch(url, { ...init, headers: merged })
+  if (response.status === 401) onUnauthorized?.()
+  return response
 }
 
 const transportFor = (server: RuntimeMcpServer) => {
@@ -221,11 +224,13 @@ const transportFor = (server: RuntimeMcpServer) => {
   }
   return server.transport === "sse"
     ? new SSEClientTransport(url, {
-        eventSourceInit: { fetch: authenticatedFetch(server.headers) },
+        eventSourceInit: { fetch: authenticatedFetch(server.headers, server.onUnauthorized) },
         requestInit: { headers: server.headers }
       })
     : new StreamableHTTPClientTransport(url, {
-        requestInit: { headers: server.headers }
+        requestInit: { headers: server.headers },
+        authProvider: server.authProvider,
+        fetch: authenticatedFetch({}, server.onUnauthorized)
       })
 }
 

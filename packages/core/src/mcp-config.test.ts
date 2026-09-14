@@ -28,6 +28,27 @@ describe("McpConfigFile", () => {
     }
   })
 
+  it("models managed auth without accepting a credential value", () => {
+    const apiKey = decode(McpConfigEntry, {
+      type: "remote",
+      url: "https://mcp.linear.app/mcp",
+      auth: { type: "api-key", header: "Authorization", prefix: "Bearer " },
+      displayName: "Linear",
+      iconUrl: "https://linear.app/favicon.ico"
+    })
+    expect(Either.isRight(apiKey)).toBe(true)
+    const withUnexpectedSecret = decode(McpConfigEntry, {
+      type: "remote",
+      url: "https://example.com/mcp",
+      auth: { type: "api-key", header: "Authorization", apiKey: "secret" }
+    })
+    expect(Either.isRight(withUnexpectedSecret)).toBe(true)
+    if (Either.isRight(withUnexpectedSecret)) {
+      expect(JSON.stringify(withUnexpectedSecret.right)).not.toContain("secret")
+    }
+    if (Either.isRight(apiKey)) expect(JSON.stringify(apiKey.right)).not.toContain("secret")
+  })
+
   it("defaults a missing mcp key to an empty record", () => {
     const result = decode(McpConfigFile, {})
     expect(Either.isRight(result) && Object.keys(result.right.mcp).length).toBe(0)
@@ -41,6 +62,20 @@ describe("McpConfigFile", () => {
     expect(Either.isLeft(decode(McpConfigEntry, { type: "local", command: [""] }))).toBe(true)
     expect(Either.isLeft(decode(McpConfigEntry, {
       type: "remote", url: "https://example.com", timeout: 0
+    }))).toBe(true)
+  })
+
+  it("requires secure streamable HTTP for managed credentials", () => {
+    for (const entry of [
+      { type: "remote", url: "http://example.com/mcp", auth: { type: "api-key", header: "X-API-Key" } },
+      { type: "remote", url: "https://example.com/mcp", transport: "sse", auth: { type: "oauth" } }
+    ]) {
+      expect(Either.isLeft(decode(McpConfigEntry, entry))).toBe(true)
+    }
+    expect(Either.isRight(decode(McpConfigEntry, {
+      type: "remote",
+      url: "http://127.0.0.1:3000/mcp",
+      auth: { type: "api-key", header: "X-API-Key" }
     }))).toBe(true)
   })
 

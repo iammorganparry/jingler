@@ -194,14 +194,34 @@ export const parseCodexMcp = (raw: string): ReadonlyArray<McpImportCandidate> =>
   })
 }
 
-/** Parse `opencode.json`; unsupported OAuth entries stay visible but cannot import. */
+const opencodeOAuth = (value: unknown): Record<string, string> | null => {
+  const decoded = decodeUnknownMap(value)
+  if (Option.isNone(decoded)) return null
+  const clientId = decodeString(decoded.value.clientId ?? decoded.value.client_id)
+  const clientSecret = decodeString(decoded.value.clientSecret ?? decoded.value.client_secret)
+  const scope = decodeString(decoded.value.scope)
+  return {
+    type: "oauth",
+    ...(Option.isSome(clientId) ? { clientId: clientId.value } : {}),
+    ...(Option.isSome(clientSecret) ? { clientSecret: clientSecret.value } : {}),
+    ...(Option.isSome(scope) ? { scope: scope.value } : {})
+  }
+}
+
+/** Parse `opencode.json`, translating its explicit OAuth settings to managed MCP OAuth. */
 export const parseOpencodeMcp = (raw: string): ReadonlyArray<McpImportCandidate> => {
   const file = Schema.decodeUnknownOption(OpenCodeFile)(JSON.parse(raw))
   if (Option.isNone(file)) return []
   return Object.entries(file.value.mcp ?? {}).map(([name, entry]) => {
     const decoded = decodeUnknownMap(entry)
-    return Option.isSome(decoded) && "oauth" in decoded.value
-      ? candidate("opencode", name, null, "OAuth servers are not supported")
-      : candidate("opencode", name, entry)
+    if (Option.isNone(decoded) || !("oauth" in decoded.value)) {
+      return candidate("opencode", name, entry)
+    }
+    const { oauth, ...rest } = decoded.value
+    if (oauth === false) return candidate("opencode", name, rest)
+    const auth = opencodeOAuth(oauth)
+    return auth === null
+      ? candidate("opencode", name, null, "Unrecognised OAuth configuration")
+      : candidate("opencode", name, { ...rest, auth })
   })
 }

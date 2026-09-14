@@ -4,7 +4,9 @@ import type { FileSystem } from "@effect/platform"
 import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { AppPaths } from "./app-paths.js"
+import { McpAuthStore } from "./mcp-auth-store.js"
 import { McpConfigService } from "./mcp-config-service.js"
+import { makeInMemorySecretStore } from "./secret-store.js"
 import { runExit, withTempRoot } from "./test-support.js"
 
 /**
@@ -59,6 +61,10 @@ describe("McpConfigService", () => {
     expect(exit.value).toEqual([
       {
         name: "context7",
+        displayName: "context7",
+        iconUrl: null,
+        authKind: "none",
+        authState: "not-required",
         transport: "http",
         scope: "user",
         target: "https://mcp.context7.com/mcp",
@@ -68,6 +74,10 @@ describe("McpConfigService", () => {
       },
       {
         name: "local",
+        displayName: "local",
+        iconUrl: null,
+        authKind: "none",
+        authState: "not-required",
         transport: "stdio",
         scope: "user",
         target: "npx -y some-mcp",
@@ -99,6 +109,40 @@ describe("McpConfigService", () => {
         headers: { Authorization: "Bearer tok-123" }
       }
     ])
+  })
+
+  it("does not reuse a managed credential after the endpoint changes", async () => {
+    const secrets = await Effect.runPromise(makeInMemorySecretStore())
+    const auth = new McpAuthStore(secrets)
+    seed(JSON.stringify({ mcp: {
+      api: {
+        type: "remote",
+        url: "https://one.example.com/mcp",
+        auth: { type: "api-key", header: "X-API-Key" }
+      }
+    } }))
+    const first = await provided(McpConfigService.parsed())
+    expect(first._tag).toBe("Success")
+    if (first._tag !== "Success" || first.value[0]?.credentialIdentity === undefined) return
+    await Effect.runPromise(auth.write("api", {
+      type: "api-key",
+      identity: first.value[0].credentialIdentity,
+      apiKey: "secret"
+    }))
+    const authenticated = await provided(McpConfigService.resolveAuthenticated(secrets))
+    expect(authenticated._tag === "Success" && authenticated.value[0]).toMatchObject({
+      headers: { "X-API-Key": "secret" }
+    })
+
+    seed(JSON.stringify({ mcp: {
+      api: {
+        type: "remote",
+        url: "https://two.example.com/mcp",
+        auth: { type: "api-key", header: "X-API-Key" }
+      }
+    } }))
+    const replaced = await provided(McpConfigService.resolveAuthenticated(secrets))
+    expect(replaced._tag === "Success" && replaced.value[0]).toMatchObject({ headers: {} })
   })
 
   it("keeps a local cwd in runtime and probe launch details", async () => {

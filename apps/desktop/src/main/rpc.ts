@@ -34,7 +34,9 @@ import {
   githubPushPermissions,
   GitHubEventStore,
   GitService,
-  type SecretStore,
+  SecretStore,
+  McpAuthStore,
+  startMcpOAuthAuthorization,
   planDraftPost,
   PluginRegistry,
   PluginSecretStore,
@@ -402,20 +404,62 @@ const mcpCandidateTarget = (candidate: McpImportCandidate): string =>
       : candidate.entry.command.join(" ");
 
 const mcpList = () =>
-  McpConfigService.list().pipe(
-    Effect.map((servers) => ({ servers, error: null })),
-    Effect.catchAll((cause) =>
-      Effect.succeed({ servers: [], error: cause.message }),
-    ),
-  );
+  Effect.gen(function* () {
+    const secretStore = yield* SecretStore;
+    return yield* McpConfigService.listAuthenticated(secretStore).pipe(
+      Effect.map((servers) => ({ servers, error: null })),
+      Effect.catchAll((cause) =>
+        Effect.succeed({ servers: [], error: cause.message }),
+      ),
+    );
+  });
 
 const mcpStatus = () =>
+  Effect.gen(function* () {
+    const secretStore = yield* SecretStore;
+    const entries = yield* McpConfigService.parsedAuthenticated(secretStore).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    );
+    return yield* probeAll(entries, null, () => new Date().toISOString());
+  });
+
+const mcpEntry = (name: string) =>
   McpConfigService.parsed().pipe(
     Effect.mapError((cause) => mcpError(cause.message, cause)),
-    Effect.flatMap((entries) =>
-      probeAll(entries, null, () => new Date().toISOString()),
-    ),
+    Effect.flatMap((entries) => {
+      const entry = entries.find((candidate) => candidate.server.name === name);
+      return entry === undefined
+        ? Effect.fail(mcpError(`MCP server "${name}" does not exist`))
+        : Effect.succeed(entry);
+    }),
   );
+
+const mcpSetApiKey = (name: string, apiKey: string) =>
+  Effect.gen(function* () {
+    const entry = yield* mcpEntry(name);
+    if (entry.server.authKind !== "api-key") {
+      return yield* Effect.fail(mcpError(`MCP server "${name}" does not use API-key authentication`));
+    }
+    if (entry.credentialIdentity === undefined) {
+      return yield* Effect.fail(mcpError(`MCP server "${name}" has no credential identity`));
+    }
+    const secretStore = yield* SecretStore;
+    yield* new McpAuthStore(secretStore).write(name, {
+      type: "api-key",
+      identity: entry.credentialIdentity,
+      apiKey,
+    });
+  });
+
+const mcpStartAuthorization = (name: string) =>
+  Effect.gen(function* () {
+    const entry = yield* mcpEntry(name);
+    const secretStore = yield* SecretStore;
+    const authorizationUrl = yield* startMcpOAuthAuthorization(entry, secretStore).pipe(
+      Effect.mapError((cause) => mcpError(cause.message, cause)),
+    );
+    return { authorizationUrl, state: "authorizing" as const };
+  });
 
 const mcpApplyImport = (
   source: "claude" | "codex" | "opencode",
@@ -4762,13 +4806,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       Effect.mapError((cause) => mcpError(cause.message, cause)),
     ),
   "Mcp.remove": ({ name }) =>
-    McpConfigService.remove(name).pipe(
-      Effect.mapError((cause) => mcpError(cause.message, cause)),
-    ),
+    Effect.gen(function* () {
+      yield* McpConfigService.remove(name).pipe(
+        Effect.mapError((cause) => mcpError(cause.message, cause)),
+      );
+      const secretStore = yield* SecretStore;
+      yield* new McpAuthStore(secretStore).delete(name);
+    }),
   "Mcp.setEnabled": ({ name, enabled }) =>
     McpConfigService.setEnabled(name, enabled).pipe(
       Effect.mapError((cause) => mcpError(cause.message, cause)),
     ),
+  "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
+  "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
   "Mcp.importCandidates": ({ source }) =>
     mcpImportParse(source).pipe(
       Effect.map((candidates) =>

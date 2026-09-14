@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { FileSystem } from "@effect/platform"
 import type { McpConfigEntry, McpServer } from "@jingler/core"
 import {
@@ -8,6 +9,10 @@ import {
 } from "@jingler/core"
 import { Data, Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
+import { McpAuthStore, type StoredMcpCredential } from "./mcp-auth-store.js"
+import { isMcpOAuthAuthorizationActive } from "./mcp-oauth-flow.js"
+import { makeMcpOAuthProvider } from "./mcp-oauth.js"
+import type { SecretStoreShape } from "./secret-store.js"
 import type { ParsedMcpServer, RuntimeMcpServer } from "./runtime/mcp/attachment.js"
 
 /**
@@ -36,11 +41,24 @@ const decodeRawDocument = Schema.decodeUnknown(Schema.parseJson(RawMcpDocument))
 const decodeRawEntries = Schema.decodeUnknownOption(RawMcpEntries)
 const decodeRawEntry = Schema.decodeUnknownOption(RawMcpEntry)
 
+const credentialIdentity = (entry: McpConfigEntry): string | undefined =>
+  entry.type === "remote" && entry.auth !== undefined
+    ? createHash("sha256").update(JSON.stringify({
+        url: entry.url,
+        transport: entry.transport ?? "http",
+        auth: entry.auth
+      })).digest("hex")
+    : undefined
+
 /** Redact one entry into the renderer-safe shape. */
 const redact = (name: string, entry: McpConfigEntry): McpServer =>
   entry.type === "remote"
     ? {
         name,
+        displayName: entry.displayName ?? name,
+        iconUrl: entry.iconUrl ?? null,
+        authKind: entry.auth?.type ?? "none",
+        authState: entry.auth === undefined ? "not-required" : "needs-auth",
         transport: entry.transport ?? "http",
         scope: "user",
         target: entry.url,
@@ -50,6 +68,10 @@ const redact = (name: string, entry: McpConfigEntry): McpServer =>
       }
     : {
         name,
+        displayName: entry.displayName ?? name,
+        iconUrl: entry.iconUrl ?? null,
+        authKind: "none",
+        authState: "not-required",
         transport: "stdio",
         scope: "user",
         target: entry.command.join(" "),
@@ -80,34 +102,114 @@ const toRuntime = (
         ...(entry.cwd === undefined ? {} : { cwd: entry.cwd })
       }
 
+const authState = (
+  server: McpServer,
+  credential: StoredMcpCredential | null,
+  authorizing: boolean
+): McpServer["authState"] => {
+  if (authorizing) return "authorizing"
+  if (server.authKind === "none") return "not-required"
+  if (credential?.type !== server.authKind) return "needs-auth"
+  return credential.type !== "oauth" || credential.tokens !== undefined ? "ready" : "needs-auth"
+}
+
+const resolvedOAuthConfig = (
+  entry: McpConfigEntry,
+  env: Readonly<Record<string, string | undefined>>
+) => {
+  if (entry.type !== "remote" || entry.auth?.type !== "oauth") return undefined
+  const interpolate = (value: string) => interpolateEnvRecord({ value }, env).value
+  return {
+    ...(entry.auth.clientId === undefined ? {} : { clientId: interpolate(entry.auth.clientId) }),
+    ...(entry.auth.clientSecret === undefined ? {} : { clientSecret: interpolate(entry.auth.clientSecret) }),
+    ...(entry.auth.scope === undefined ? {} : { scope: entry.auth.scope })
+  }
+}
+
+const withCredential = async (
+  name: string,
+  entry: McpConfigEntry,
+  runtime: RuntimeMcpServer,
+  store: McpAuthStore,
+  env: Readonly<Record<string, string | undefined>>
+): Promise<RuntimeMcpServer> => {
+  if (entry.type !== "remote" || entry.auth === undefined || runtime.transport === "stdio") {
+    return runtime
+  }
+  const identity = credentialIdentity(entry)
+  if (identity === undefined) return runtime
+  const credential = await Effect.runPromise(store.read(name, identity))
+  if (entry.auth.type === "api-key") {
+    if (credential?.type !== "api-key") return runtime
+    const apiKey = credential.apiKey
+    return {
+      ...runtime,
+      headers: {
+        ...runtime.headers,
+        [entry.auth.header]: `${entry.auth.prefix}${apiKey}`
+      },
+      onUnauthorized: () => {
+        void Effect.runPromise(store.deleteIf(name, (current) =>
+          current.identity === identity && current.type === "api-key" && current.apiKey === apiKey
+        ))
+      }
+    }
+  }
+  if (credential?.type !== "oauth") return runtime
+  return {
+    ...runtime,
+    authProvider: makeMcpOAuthProvider(
+      name,
+      identity,
+      resolvedOAuthConfig(entry, env) ?? {},
+      store,
+      async () => {
+        if (isMcpOAuthAuthorizationActive(name, identity)) return
+        await Effect.runPromise(store.update(name, identity, (current) =>
+          current?.type === "oauth" && current.clientInformation !== undefined
+            ? { type: "oauth", identity, clientInformation: current.clientInformation }
+            : { type: "oauth", identity }
+        ))
+      },
+      () => !isMcpOAuthAuthorizationActive(name, identity)
+    )
+  }
+}
+
 /** Pair redacted metadata with launch details, for the shared probe. */
 const toParsed = (
   name: string,
   entry: McpConfigEntry,
   env: Readonly<Record<string, string | undefined>>
-): ParsedMcpServer =>
-  entry.type === "remote"
-    ? {
-        server: redact(name, entry),
-        launch: {
-          transport: entry.transport ?? "http",
-          args: [],
-          env: {},
-          url: entry.url,
-          headers: interpolateEnvRecord(entry.headers, env)
-        }
+): ParsedMcpServer => {
+  if (entry.type === "local") {
+    return {
+      server: redact(name, entry),
+      launch: {
+        transport: "stdio",
+        command: entry.command[0] ?? "",
+        args: entry.command.slice(1),
+        env: interpolateEnvRecord(entry.environment, env),
+        ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
+        headers: {}
       }
-    : {
-        server: redact(name, entry),
-        launch: {
-          transport: "stdio",
-          command: entry.command[0] ?? "",
-          args: entry.command.slice(1),
-          env: interpolateEnvRecord(entry.environment, env),
-          ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
-          headers: {}
-        }
-      }
+    }
+  }
+  const identity = credentialIdentity(entry)
+  const oauth = resolvedOAuthConfig(entry, env)
+  return {
+    server: redact(name, entry),
+    ...(identity === undefined ? {} : { credentialIdentity: identity }),
+    launch: {
+      transport: entry.transport ?? "http",
+      args: [],
+      env: {},
+      url: entry.url,
+      headers: interpolateEnvRecord(entry.headers, env),
+      ...(oauth === undefined ? {} : { oauth })
+    }
+  }
+}
 
 // ponytail: mutations serialize on one process-wide semaphore; per-file locks
 // if a second mcp.json path ever exists.
@@ -214,6 +316,26 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           )
         )
 
+      const listAuthenticated = (
+        secretStore: SecretStoreShape
+      ): Effect.Effect<ReadonlyArray<McpServer>, McpConfigError, Env> =>
+        entries().pipe(Effect.flatMap((configured) => {
+          const auth = new McpAuthStore(secretStore)
+          return Effect.forEach(Object.entries(configured), ([name, entry]) => {
+            const server = redact(name, entry)
+            const identity = credentialIdentity(entry)
+            if (identity === undefined) return Effect.succeed(server)
+            return auth.read(name, identity).pipe(Effect.map((credential) => ({
+              ...server,
+              authState: authState(
+                server,
+                credential,
+                isMcpOAuthAuthorizationActive(name, identity)
+              )
+            })))
+          })
+        }))
+
       /**
        * Enabled entries as secret-bearing runtime attachments. Best-effort: a
        * malformed file yields an empty list so a broken mcp.json never blocks
@@ -231,6 +353,21 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           Effect.orElseSucceed(() => [])
         )
 
+      const resolveAuthenticated = (
+        secretStore: SecretStoreShape,
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<RuntimeMcpServer>, never, Env> =>
+        entries().pipe(
+          Effect.flatMap((mcp) => {
+            const auth = new McpAuthStore(secretStore)
+            return Effect.forEach(
+              Object.entries(mcp).filter(([name, entry]) => entry.enabled && mcpNameError(name) === null),
+              ([name, entry]) => Effect.promise(() => withCredential(name, entry, toRuntime(name, entry, env), auth, env))
+            )
+          }),
+          Effect.orElseSucceed(() => [])
+        )
+
       /** Every entry (enabled or not) paired with launch details, for probing. */
       const parsed = (
         env: Readonly<Record<string, string | undefined>> = process.env
@@ -240,6 +377,23 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
             Object.entries(mcp).map(([name, entry]) => toParsed(name, entry, env))
           )
         )
+
+      const parsedAuthenticated = (
+        secretStore: SecretStoreShape,
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<ParsedMcpServer>, McpConfigError, Env> =>
+        entries().pipe(Effect.flatMap((mcp) => {
+          const auth = new McpAuthStore(secretStore)
+          return Effect.forEach(Object.entries(mcp), ([name, entry]) => {
+            const parsed = toParsed(name, entry, env)
+            return Effect.promise(async () => {
+              const runtime = await withCredential(name, entry, toRuntime(name, entry, env), auth, env)
+              return runtime.transport === "stdio"
+                ? parsed
+                : { ...parsed, launch: { ...parsed.launch, headers: runtime.headers, authProvider: runtime.authProvider, onUnauthorized: runtime.onUnauthorized } }
+            })
+          })
+        }))
 
       const writeAll = (
         additions: Readonly<Record<string, McpConfigEntry>>
@@ -299,7 +453,18 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           })
         })
 
-      return { list, resolve, parsed, write, writeAll, remove, setEnabled }
+      return {
+        list,
+        listAuthenticated,
+        resolve,
+        resolveAuthenticated,
+        parsed,
+        parsedAuthenticated,
+        write,
+        writeAll,
+        remove,
+        setEnabled
+      }
     }
   }
 ) {}
