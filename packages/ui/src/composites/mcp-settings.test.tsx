@@ -78,6 +78,29 @@ describe("McpSettings", () => {
     }))
   })
 
+  it("saves custom API-key headers and prefixes", async () => {
+    const add = vi.fn(async () => {})
+    const setApiKey = vi.fn(async () => {})
+    render(<McpSettings {...props({ add, setApiKey })} />)
+    fireEvent.click(screen.getByText("Add server"))
+    fireEvent.change(screen.getByLabelText("Server name"), { target: { value: "context7" } })
+    fireEvent.change(screen.getByLabelText("Server URL"), { target: { value: "https://mcp.context7.com/mcp" } })
+    fireEvent.change(screen.getByLabelText("Authentication"), { target: { value: "api-key" } })
+    fireEvent.change(screen.getByLabelText("API key header"), { target: { value: "X-API-Key" } })
+    fireEvent.change(screen.getByLabelText("API key prefix"), { target: { value: "" } })
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "secret" } })
+    fireEvent.click(screen.getByText("Save server"))
+
+    await waitFor(() => expect(add).toHaveBeenCalledWith("context7", {
+      type: "remote",
+      url: "https://mcp.context7.com/mcp",
+      headers: {},
+      auth: { type: "api-key", header: "X-API-Key", prefix: "" },
+      enabled: true
+    }))
+    expect(setApiKey).toHaveBeenCalledWith("context7", "secret")
+  })
+
   it("announces save failures without showing success", async () => {
     render(<McpSettings {...props({ add: async () => { throw new Error("cannot write config") } })} />)
     fireEvent.click(screen.getByText("Add server"))

@@ -8,6 +8,11 @@ export interface RuntimeRemoteMcpServer {
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
   readonly authProvider?: OAuthClientProvider
+  readonly oauth?: {
+    readonly clientId?: string
+    readonly clientSecret?: string
+    readonly scope?: string
+  }
   readonly onUnauthorized?: () => void
   readonly headerEnvironment?: Readonly<Record<string, string>>
 }
@@ -34,6 +39,11 @@ export interface McpLaunch {
   readonly url?: string
   readonly headers: Readonly<Record<string, string>>
   readonly authProvider?: OAuthClientProvider
+  readonly oauth?: {
+    readonly clientId?: string
+    readonly clientSecret?: string
+    readonly scope?: string
+  }
   readonly onUnauthorized?: () => void
   readonly headerEnvironment?: Readonly<Record<string, string>>
 }
@@ -42,6 +52,7 @@ export interface McpLaunch {
 export interface ParsedMcpServer {
   readonly server: McpServer
   readonly launch: McpLaunch
+  readonly credentialIdentity?: string
 }
 
 export const remoteMcpServer = (

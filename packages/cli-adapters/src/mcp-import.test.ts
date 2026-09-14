@@ -156,7 +156,12 @@ describe("parseOpencodeMcp", () => {
 
   it("imports OAuth and rejects invalid URLs per entry", () => {
     const candidates = parseOpencodeMcp(JSON.stringify({ mcp: {
-      oauth: { type: "remote", url: "https://example.com", oauth: {} },
+      oauth: {
+        type: "remote",
+        url: "https://example.com",
+        oauth: { clientId: "client", clientSecret: "{env:SECRET}", scope: "tools:read" }
+      },
+      noOauth: { type: "remote", url: "https://api.example.com", oauth: false },
       invalid: { type: "remote", url: "file:///tmp/mcp" },
       empty: null
     } }))
@@ -166,7 +171,22 @@ describe("parseOpencodeMcp", () => {
         entry: {
           type: "remote",
           url: "https://example.com",
-          auth: { type: "oauth" },
+          auth: {
+            type: "oauth",
+            clientId: "client",
+            clientSecret: "{env:SECRET}",
+            scope: "tools:read"
+          },
+          headers: {},
+          enabled: true
+        },
+        problem: null
+      },
+      {
+        name: "noOauth",
+        entry: {
+          type: "remote",
+          url: "https://api.example.com",
           headers: {},
           enabled: true
         },

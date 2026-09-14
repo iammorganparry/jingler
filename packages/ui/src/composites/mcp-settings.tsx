@@ -104,7 +104,9 @@ const formEntry = (
   kind: "remote" | "local",
   target: string,
   pairs: string,
-  authKind: "none" | "api-key" | "oauth"
+  authKind: "none" | "api-key" | "oauth",
+  apiKeyHeader: string,
+  apiKeyPrefix: string
 ): McpConfigEntry => {
   if (kind === "local") {
     return {
@@ -119,7 +121,7 @@ const formEntry = (
     url: target.trim(),
     headers: parsePairs(pairs),
     ...(authKind === "api-key"
-      ? { auth: { type: "api-key" as const, header: "Authorization", prefix: "Bearer " } }
+      ? { auth: { type: "api-key" as const, header: apiKeyHeader.trim(), prefix: apiKeyPrefix } }
       : authKind === "oauth" ? { auth: { type: "oauth" as const } } : {}),
     enabled: true
   }
@@ -141,6 +143,8 @@ export function McpServerForm({
   const [target, setTarget] = React.useState("")
   const [authKind, setAuthKind] = React.useState<"none" | "api-key" | "oauth">("none")
   const [apiKey, setApiKeyValue] = React.useState("")
+  const [apiKeyHeader, setApiKeyHeader] = React.useState("Authorization")
+  const [apiKeyPrefix, setApiKeyPrefix] = React.useState("Bearer ")
   const [pairs, setPairs] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
 
@@ -148,7 +152,7 @@ export function McpServerForm({
     setError(null)
     try {
       const serverName = name.trim()
-      await add(serverName, formEntry(kind, target, pairs, authKind))
+      await add(serverName, formEntry(kind, target, pairs, authKind, apiKeyHeader, apiKeyPrefix))
       if (authKind === "api-key" && apiKey.length > 0) {
         if (setApiKey === undefined) throw new Error("API-key storage is unavailable")
         await setApiKey(serverName, apiKey)
@@ -202,13 +206,28 @@ export function McpServerForm({
             <option value="oauth">OAuth</option>
           </select>
           {authKind === "api-key" && (
-            <Input
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKeyValue(event.target.value)}
-              placeholder="API key"
-              aria-label="API key"
-            />
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+              <Input
+                value={apiKeyHeader}
+                onChange={(event) => setApiKeyHeader(event.target.value)}
+                placeholder="Header"
+                aria-label="API key header"
+              />
+              <Input
+                value={apiKeyPrefix}
+                onChange={(event) => setApiKeyPrefix(event.target.value)}
+                placeholder="Prefix (optional)"
+                aria-label="API key prefix"
+              />
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={(event) => setApiKeyValue(event.target.value)}
+                placeholder="API key"
+                aria-label="API key"
+                className="col-span-2"
+              />
+            </div>
           )}
         </div>
       )}

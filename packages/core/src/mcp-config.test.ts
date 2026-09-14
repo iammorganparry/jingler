@@ -65,6 +65,20 @@ describe("McpConfigFile", () => {
     }))).toBe(true)
   })
 
+  it("requires secure streamable HTTP for managed credentials", () => {
+    for (const entry of [
+      { type: "remote", url: "http://example.com/mcp", auth: { type: "api-key", header: "X-API-Key" } },
+      { type: "remote", url: "https://example.com/mcp", transport: "sse", auth: { type: "oauth" } }
+    ]) {
+      expect(Either.isLeft(decode(McpConfigEntry, entry))).toBe(true)
+    }
+    expect(Either.isRight(decode(McpConfigEntry, {
+      type: "remote",
+      url: "http://127.0.0.1:3000/mcp",
+      auth: { type: "api-key", header: "X-API-Key" }
+    }))).toBe(true)
+  })
+
   it("rejects an unknown type", () => {
     expect(Either.isLeft(decode(McpConfigEntry, { type: "stdio", command: ["x"] }))).toBe(true)
   })

@@ -440,8 +440,15 @@ const mcpSetApiKey = (name: string, apiKey: string) =>
     if (entry.server.authKind !== "api-key") {
       return yield* Effect.fail(mcpError(`MCP server "${name}" does not use API-key authentication`));
     }
+    if (entry.credentialIdentity === undefined) {
+      return yield* Effect.fail(mcpError(`MCP server "${name}" has no credential identity`));
+    }
     const secretStore = yield* SecretStore;
-    yield* new McpAuthStore(secretStore).write(name, { type: "api-key", apiKey });
+    yield* new McpAuthStore(secretStore).write(name, {
+      type: "api-key",
+      identity: entry.credentialIdentity,
+      apiKey,
+    });
   });
 
 const mcpStartAuthorization = (name: string) =>

@@ -7,38 +7,51 @@ import { makeMcpOAuthProvider } from "./mcp-oauth.js"
 const run = <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect)
 
 describe("McpAuthStore", () => {
-  it("isolates, replaces, and removes per-server credentials", async () => {
+  it("binds credentials to connection identity and conditionally removes stale keys", async () => {
     const secrets = await run(makeInMemorySecretStore())
     const store = new McpAuthStore(secrets)
 
-    await run(store.write("linear", { type: "api-key", apiKey: "lin-secret" }))
-    await run(store.write("sentry", {
-      type: "oauth",
-      tokens: { access_token: "access", token_type: "bearer", refresh_token: "refresh" },
-      codeVerifier: "verifier",
-      state: "state"
-    }))
+    await run(store.write("linear", { type: "api-key", identity: "endpoint-a", apiKey: "old" }))
+    expect(await run(store.read("linear", "endpoint-b"))).toBeNull()
 
-    expect(await run(store.read("linear"))).toEqual({ type: "api-key", apiKey: "lin-secret" })
-    expect(await run(store.read("sentry"))).toMatchObject({
+    await run(store.write("linear", { type: "api-key", identity: "endpoint-a", apiKey: "new" }))
+    await run(store.deleteIf("linear", (credential) =>
+      credential.type === "api-key" && credential.identity === "endpoint-a" && credential.apiKey === "old"
+    ))
+    expect(await run(store.read("linear", "endpoint-a"))).toMatchObject({ apiKey: "new" })
+
+    await run(store.write("linear", { type: "oauth", identity: "endpoint-b" }))
+    expect(await run(store.writeIf(
+      "linear",
+      { type: "oauth", identity: "endpoint-c" },
+      () => false,
+      () => { throw new Error("expired write started") }
+    ))).toBe(false)
+    expect(await run(store.read("linear", "endpoint-c"))).toBeNull()
+    await run(store.update("linear", "endpoint-a", () => ({
       type: "oauth",
-      tokens: { access_token: "access", refresh_token: "refresh" }
-    })
+      identity: "endpoint-a",
+      tokens: { access_token: "stale", token_type: "bearer" }
+    })))
+    expect(await run(store.read("linear", "endpoint-b"))).toMatchObject({ identity: "endpoint-b" })
 
     await run(store.delete("linear"))
-    expect(await run(store.read("linear"))).toBeNull()
-    expect(await run(store.read("sentry"))).not.toBeNull()
+    expect(await run(store.read("linear", "endpoint-a"))).toBeNull()
+    expect(await run(store.read("linear", "endpoint-b"))).toBeNull()
   })
 
   it("persists SDK OAuth callbacks and invalidates only the requested scope", async () => {
     const secrets = await run(makeInMemorySecretStore())
     const store = new McpAuthStore(secrets)
+    await run(store.write("linear", { type: "oauth", identity: "endpoint-a" }))
+    let canInvalidate = false
     const provider = makeMcpOAuthProvider(
       "linear",
+      "endpoint-a",
+      {},
       store,
-      "http://127.0.0.1/callback",
       () => {},
-      "csrf-state"
+      () => canInvalidate
     )
 
     await provider.saveCodeVerifier("pkce-verifier")
@@ -48,6 +61,9 @@ describe("McpAuthStore", () => {
     expect(await provider.clientInformation()).toEqual({ client_id: "client-1" })
     expect(await provider.tokens()).toMatchObject({ access_token: "access", refresh_token: "refresh" })
 
+    await provider.invalidateCredentials?.("tokens")
+    expect(await provider.tokens()).toMatchObject({ access_token: "access" })
+    canInvalidate = true
     await provider.invalidateCredentials?.("tokens")
     expect(await provider.tokens()).toBeUndefined()
     expect(await provider.clientInformation()).toEqual({ client_id: "client-1" })

@@ -1,12 +1,16 @@
+import { createServer } from "node:http"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
+import { McpAuthStore } from "./mcp-auth-store.js"
 import { isMcpAuthorizationUrlAllowed, startMcpOAuthAuthorization } from "./mcp-oauth-flow.js"
 import type { ParsedMcpServer } from "./runtime/mcp/attachment.js"
-import { makeInMemorySecretStore, SecretStoreUnavailable } from "./secret-store.js"
+import { makeInMemorySecretStore } from "./secret-store.js"
 
 const ALREADY_IN_PROGRESS = /already in progress/
+const TIMED_OUT = /timed out/
 
 const ENTRY: ParsedMcpServer = {
+  credentialIdentity: "oauth-endpoint",
   server: {
     name: "oauth-test",
     displayName: "OAuth test",
@@ -39,21 +43,40 @@ describe("MCP OAuth authorization URL policy", () => {
     expect(isMcpAuthorizationUrlAllowed(new URL("custom-scheme://open"))).toBe(false)
   })
 
-  it("releases the per-server flow guard after an early connection failure", async () => {
+  it("times out the entire network setup and releases the flow guard", async () => {
+    const server = createServer(() => {})
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+    const address = server.address()
+    if (typeof address !== "object" || address === null) throw new Error("test server did not bind")
+    const hanging = {
+      ...ENTRY,
+      launch: { ...ENTRY.launch, url: `http://127.0.0.1:${address.port}/mcp` }
+    }
     const secrets = await Effect.runPromise(makeInMemorySecretStore())
-    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, secrets))).rejects.toThrow()
-    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, secrets)))
-      .rejects.not.toThrow(ALREADY_IN_PROGRESS)
+    try {
+      await expect(Effect.runPromise(startMcpOAuthAuthorization(hanging, secrets, 25)))
+        .rejects.toThrow(TIMED_OUT)
+      await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, secrets)))
+        .rejects.not.toThrow(ALREADY_IN_PROGRESS)
+    } finally {
+      server.closeAllConnections()
+      server.close()
+    }
   })
 
-  it("releases the flow guard even when encrypted credential writes fail", async () => {
-    const base = await Effect.runPromise(makeInMemorySecretStore())
-    const unavailable = {
-      ...base,
-      setDeviceSecrets: () => Effect.fail(new SecretStoreUnavailable({ message: "vault unavailable" }))
+  it("keeps working tokens and releases the flow guard after setup failure", async () => {
+    const secrets = await Effect.runPromise(makeInMemorySecretStore())
+    const auth = new McpAuthStore(secrets)
+    const working = {
+      type: "oauth" as const,
+      identity: "oauth-endpoint",
+      tokens: { access_token: "working", token_type: "bearer" }
     }
-    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, unavailable))).rejects.toThrow()
-    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, unavailable)))
+    await Effect.runPromise(auth.write("oauth-test", working))
+
+    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, secrets))).rejects.toThrow()
+    expect(await Effect.runPromise(auth.read("oauth-test", "oauth-endpoint"))).toEqual(working)
+    await expect(Effect.runPromise(startMcpOAuthAuthorization(ENTRY, secrets)))
       .rejects.not.toThrow(ALREADY_IN_PROGRESS)
   })
 })
