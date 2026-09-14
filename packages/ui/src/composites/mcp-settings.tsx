@@ -524,9 +524,9 @@ export function McpApiKeyDialog({
   )
 }
 
-export function McpBrand({ server }: { readonly server: McpServer }) {
+export function McpBrand({ server, compact = false }: { readonly server: McpServer; readonly compact?: boolean }) {
   return (
-    <span className="relative grid size-8 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-surface text-[12px] font-semibold text-text-bright">
+    <span className={`relative grid flex-none place-items-center overflow-hidden border border-line bg-surface font-semibold text-text-bright ${compact ? "size-6 rounded-md text-[10px]" : "size-8 rounded-lg text-[12px]"}`}>
       {server.displayName.slice(0, 1).toLocaleUpperCase()}
       {server.iconUrl !== null && (
         <img src={server.iconUrl} alt="" className="absolute inset-0 size-full object-cover" />

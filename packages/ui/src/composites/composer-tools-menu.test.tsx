@@ -2,7 +2,13 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Composer } from "./composer.js"
 
-afterEach(cleanup)
+const scrollIntoView = vi.fn()
+Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView })
+
+afterEach(() => {
+  cleanup()
+  scrollIntoView.mockClear()
+})
 
 const ADD_IMAGE_ITEM = /Add image/
 const SKILLS_ITEM = /Skills/
@@ -22,16 +28,16 @@ describe("Composer tools menu", () => {
 
     expect(screen.queryByLabelText("Attach an image")).toBeNull()
     openMenu()
-    expect(screen.getByRole("button", { name: ADD_IMAGE_ITEM })).toBeTruthy()
-    expect(screen.getByRole("button", { name: SKILLS_ITEM })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: MCP_ITEM })).toBeNull()
+    expect(screen.getByRole("option", { name: ADD_IMAGE_ITEM })).toBeTruthy()
+    expect(screen.getByRole("option", { name: SKILLS_ITEM })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: MCP_ITEM })).toBeNull()
   })
 
   it("opens the global MCP server dialog when configured", () => {
     render(<Composer onAddMcp={async () => {}} />)
 
     openMenu()
-    fireEvent.click(screen.getByRole("button", { name: MCP_ITEM }))
+    fireEvent.click(screen.getByRole("option", { name: MCP_ITEM }))
     expect(screen.getByRole("dialog")).toBeTruthy()
     expect(screen.getByText("Saves to ~/jingler/mcp.json and becomes available to local sessions on their next turn.")).toBeTruthy()
   })
@@ -57,7 +63,7 @@ describe("Composer tools menu", () => {
     />)
 
     openMenu()
-    fireEvent.click(screen.getByRole("button", { name: /Linear/ }))
+    fireEvent.click(screen.getByRole("option", { name: /Linear/ }))
     expect(authorize).toHaveBeenCalledWith("linear")
   })
 
@@ -77,6 +83,7 @@ describe("Composer tools menu", () => {
       enabled: true
     }))
     render(<Composer
+      initialValue="draft "
       onAddMcp={async () => {}}
       onSetMcpAuth={setAuth}
       onSetMcpApiKey={async () => {}}
@@ -84,10 +91,23 @@ describe("Composer tools menu", () => {
       mcpServers={servers}
     />)
 
+    const composer = screen.getByPlaceholderText("Message the agent…")
     openMenu()
-    fireEvent.change(screen.getByLabelText("Search MCP servers"), { target: { value: "fig" } })
+    expect(screen.getByPlaceholderText("Search actions…").getAttribute("aria-controls")).toBeTruthy()
+    fireEvent.keyDown(composer, { key: "ArrowDown" })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
+    expect((screen.getByRole("button", { name: "Send ↵" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(composer, { target: { value: "draft" } })
+    expect((composer as HTMLTextAreaElement).value).toBe("draft ")
+    scrollIntoView.mockClear()
+    fireEvent.change(composer, { target: { value: "draft fig" } })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled())
     expect(screen.queryByText("Linear")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Figma/ }))
+    const figma = screen.getByRole("option", { name: /Figma/ })
+    expect(figma.getAttribute("aria-selected")).toBe("true")
+    expect(composer.getAttribute("aria-activedescendant")).toBe(figma.id)
+    fireEvent.keyDown(composer, { key: "Enter" })
+    expect((composer as HTMLTextAreaElement).value).toBe("draft ")
     fireEvent.click(screen.getByText("Continue with OAuth"))
     await waitFor(() => expect(setAuth).toHaveBeenCalledWith("figma", { type: "oauth" }))
   })
@@ -96,7 +116,7 @@ describe("Composer tools menu", () => {
     render(<Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />)
 
     openMenu()
-    fireEvent.click(screen.getByRole("button", { name: SKILLS_ITEM }))
+    fireEvent.click(screen.getByRole("option", { name: SKILLS_ITEM }))
     expect(screen.getByText("/deploy")).toBeTruthy()
   })
 })

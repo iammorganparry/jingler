@@ -51,6 +51,10 @@ export interface MorphPopoverProps {
   /** Uncontrolled initial open state. */
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Optional larger element used to position and size the panel instead of the trigger. */
+  anchorRef?: React.MutableRefObject<HTMLElement | null>;
+  /** Optional external element that remains interactive without dismissing the panel. */
+  interactionRef?: React.MutableRefObject<HTMLElement | null>;
   className?: string;
 }
 
@@ -64,6 +68,8 @@ export function MorphPopover({
   open: controlledOpen,
   defaultOpen = false,
   onOpenChange,
+  anchorRef: externalAnchorRef,
+  interactionRef,
   className,
 }: MorphPopoverProps) {
   const baseId = useId();
@@ -90,10 +96,11 @@ export function MorphPopover({
   // trigger exactly (the content portals out of it), so it stands in until a
   // real trigger registers, and stands in again if that one unmounts. Both are
   // state, so a trigger arriving while the panel is open re-anchors it.
-  const anchorRef = useMemo<React.MutableRefObject<HTMLElement | null>>(
+  const fallbackAnchorRef = useMemo<React.MutableRefObject<HTMLElement | null>>(
     () => ({ current: trigger ?? root }),
     [root, trigger],
   );
+  const anchorRef = externalAnchorRef ?? fallbackAnchorRef;
 
   // The panel is a `role="dialog"` and goes inert the moment it closes, so
   // focus cannot be left sitting inside it: a dismissal hands it back to the
@@ -120,6 +127,7 @@ export function MorphPopover({
       if (
         root &&
         !root.contains(target) &&
+        !interactionRef?.current?.contains(target) &&
         !contentRef.current?.contains(target)
       )
         close();
@@ -130,7 +138,7 @@ export function MorphPopover({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("pointerdown", onPointer);
     };
-  }, [open, root, close]);
+  }, [open, root, close, interactionRef]);
 
   const ctx = useMemo<MorphContextValue>(
     () => ({
