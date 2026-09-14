@@ -95,6 +95,64 @@ const initialPlanSplitRatio = (): number => {
   }
 }
 
+const localMcp = (
+  environmentId: string | undefined,
+  servers: ReadonlyArray<McpServer> | undefined,
+  add: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined,
+  setApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined,
+  authorize: ((name: string) => Promise<void>) | undefined
+) => environmentId === undefined
+  ? { servers: servers ?? [], add, setApiKey, authorize }
+  : { servers: [], add: undefined, setApiKey: undefined, authorize: undefined }
+
+function McpRecoveryCards({
+  servers,
+  setApiKey,
+  authorize
+}: {
+  readonly servers: ReadonlyArray<McpServer>
+  readonly setApiKey?: (name: string, apiKey: string) => Promise<void>
+  readonly authorize?: (name: string) => Promise<void>
+}) {
+  const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const needsAuth = servers.filter((server) => server.enabled && server.authState === "needs-auth")
+  return (
+    <>
+      {error !== null && (
+        <div role="alert" className="border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red">{error}</div>
+      )}
+      {needsAuth.map((server) => (
+        <RuntimeRecoveryCard
+          key={server.name}
+          icon={<McpBrand server={server} />}
+          title={`Reconnect ${server.displayName}`}
+          message={`${server.displayName} needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run.`}
+          actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
+          actionDisabled={server.authKind === "oauth" ? authorize === undefined : setApiKey === undefined}
+          onAction={() => {
+            if (server.authKind === "api-key") setApiKeyServer(server)
+            else {
+              setError(null)
+              void authorize?.(server.name).catch((cause) =>
+                setError(cause instanceof Error ? cause.message : "MCP authorization failed")
+              )
+            }
+          }}
+        />
+      ))}
+      {setApiKey !== undefined && (
+        <McpApiKeyDialog
+          server={apiKeyServer}
+          open={apiKeyServer !== null}
+          onOpenChange={(open) => { if (!open) setApiKeyServer(null) }}
+          setApiKey={setApiKey}
+        />
+      )}
+    </>
+  )
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -110,7 +168,7 @@ export function ConversationPane({
   onSelectChanges,
   onOpenProviderSettings,
   onAddMcp,
-  mcpServers = [],
+  mcpServers,
   onSetMcpApiKey,
   onAuthorizeMcp,
   paneFocused = true
@@ -163,10 +221,13 @@ export function ConversationPane({
   const activeChat =
     session.chats.find((chat) => chat.id === session.activeChatId) ??
     session.chats[0]!
-  const addLocalMcp = session.environmentId === undefined ? onAddMcp : undefined
-  const localMcpServers = session.environmentId === undefined ? mcpServers : []
-  const [mcpApiKeyServer, setMcpApiKeyServer] = useState<McpServer | null>(null)
-  const [mcpAuthError, setMcpAuthError] = useState<string | null>(null)
+  const localMcpConfig = localMcp(
+    session.environmentId,
+    mcpServers,
+    onAddMcp,
+    onSetMcpApiKey,
+    onAuthorizeMcp
+  )
   const convo = useConversation(session, activeChat.id)
   const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
     string | undefined | null
@@ -753,35 +814,11 @@ export function ConversationPane({
           onAction={() => onOpenProviderSettings?.()}
         />
       )}
-      {mcpAuthError !== null && (
-        <div role="alert" className="border-b border-red/30 bg-red/5 px-3 py-2 text-[11px] text-red">{mcpAuthError}</div>
-      )}
-      {localMcpServers.filter((server) => server.enabled && server.authState === "needs-auth").map((server) => (
-        <RuntimeRecoveryCard
-          key={`mcp-auth:${server.name}`}
-          icon={<McpBrand server={server} />}
-          title={`Reconnect ${server.displayName}`}
-          message={`${server.displayName} needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run.`}
-          actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
-          actionDisabled={server.authKind === "oauth" ? onAuthorizeMcp === undefined : onSetMcpApiKey === undefined}
-          onAction={() => {
-            if (server.authKind === "oauth") {
-              setMcpAuthError(null)
-              void onAuthorizeMcp?.(server.name).catch((cause) =>
-                setMcpAuthError(cause instanceof Error ? cause.message : "MCP authorization failed")
-              )
-            } else setMcpApiKeyServer(server)
-          }}
-        />
-      ))}
-      {onSetMcpApiKey !== undefined && (
-        <McpApiKeyDialog
-          server={mcpApiKeyServer}
-          open={mcpApiKeyServer !== null}
-          onOpenChange={(open) => { if (!open) setMcpApiKeyServer(null) }}
-          setApiKey={onSetMcpApiKey}
-        />
-      )}
+      <McpRecoveryCards
+        servers={localMcpConfig.servers}
+        setApiKey={localMcpConfig.setApiKey}
+        authorize={localMcpConfig.authorize}
+      />
       {mutationRecovery.error !== null && (
         <div
           role="alert"
@@ -828,10 +865,10 @@ export function ConversationPane({
           <div className="mx-auto w-full max-w-[760px]">
           {renderFleetComposer({
                       session,
-                      addLocalMcp,
-                      mcpServers: localMcpServers,
-                      onSetMcpApiKey,
-                      onAuthorizeMcp,
+                      addLocalMcp: localMcpConfig.add,
+                      mcpServers: localMcpConfig.servers,
+                      onSetMcpApiKey: localMcpConfig.setApiKey,
+                      onAuthorizeMcp: localMcpConfig.authorize,
                       fleet,
                       controlSubagent,
                       convo,
@@ -845,10 +882,10 @@ export function ConversationPane({
       ) : (
         renderMainConversation({
                 convo,
-                addLocalMcp,
-                mcpServers: localMcpServers,
-                onSetMcpApiKey,
-                onAuthorizeMcp,
+                addLocalMcp: localMcpConfig.add,
+                mcpServers: localMcpConfig.servers,
+                onSetMcpApiKey: localMcpConfig.setApiKey,
+                onAuthorizeMcp: localMcpConfig.authorize,
                 session,
                 liveDiffs,
                 environments,
