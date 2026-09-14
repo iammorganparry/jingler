@@ -18,6 +18,10 @@ const stdio = (
 ): ParsedMcpServer => ({
   server: {
     name,
+    displayName: name,
+    iconUrl: null,
+    authKind: "none",
+    authState: "not-required",
     transport: "stdio",
     scope: "user",
     target: `node ${name}`,
@@ -37,6 +41,10 @@ const stdio = (
 const remote = (name: string, url: string): ParsedMcpServer => ({
   server: {
     name,
+    displayName: name,
+    iconUrl: null,
+    authKind: "none",
+    authState: "not-required",
     transport: "http",
     scope: "user",
     target: url,

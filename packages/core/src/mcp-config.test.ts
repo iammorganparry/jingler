@@ -28,6 +28,27 @@ describe("McpConfigFile", () => {
     }
   })
 
+  it("models managed auth without accepting a credential value", () => {
+    const apiKey = decode(McpConfigEntry, {
+      type: "remote",
+      url: "https://mcp.linear.app/mcp",
+      auth: { type: "api-key", header: "Authorization", prefix: "Bearer " },
+      displayName: "Linear",
+      iconUrl: "https://linear.app/favicon.ico"
+    })
+    expect(Either.isRight(apiKey)).toBe(true)
+    const withUnexpectedSecret = decode(McpConfigEntry, {
+      type: "remote",
+      url: "https://example.com/mcp",
+      auth: { type: "api-key", header: "Authorization", apiKey: "secret" }
+    })
+    expect(Either.isRight(withUnexpectedSecret)).toBe(true)
+    if (Either.isRight(withUnexpectedSecret)) {
+      expect(JSON.stringify(withUnexpectedSecret.right)).not.toContain("secret")
+    }
+    if (Either.isRight(apiKey)) expect(JSON.stringify(apiKey.right)).not.toContain("secret")
+  })
+
   it("defaults a missing mcp key to an empty record", () => {
     const result = decode(McpConfigFile, {})
     expect(Either.isRight(result) && Object.keys(result.right.mcp).length).toBe(0)

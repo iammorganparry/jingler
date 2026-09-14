@@ -1,5 +1,6 @@
 import type { McpServerStatus } from "@jingler/core"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js"
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -33,6 +34,7 @@ export const PROBE_CONCURRENCY = 4
 
 /** Error text is shown in the UI; cap it so a server dumping a stack can't flood the dialog. */
 const MAX_ERROR = 200
+const UNAUTHORIZED = /\b(401|unauthori[sz]ed|invalid[_ -]token)\b/iu
 
 const clientInfo = { name: "jingler", version: "0.0.0" } as const
 
@@ -69,9 +71,20 @@ const makeTransport = (launch: McpLaunch, cwd: string | null) => {
   if (launch.url === undefined) throw new Error("remote server has no url")
   const url = new URL(launch.url)
   const requestInit = Object.keys(launch.headers).length > 0 ? { headers: { ...launch.headers } } : undefined
+  const observedFetch = launch.onUnauthorized === undefined
+    ? undefined
+    : async (input: string | URL | Request, init?: RequestInit) => {
+        const response = await fetch(input, init)
+        if (response.status === 401) launch.onUnauthorized?.()
+        return response
+      }
   return launch.transport === "sse"
-    ? new SSEClientTransport(url, { requestInit })
-    : new StreamableHTTPClientTransport(url, { requestInit })
+    ? new SSEClientTransport(url, { requestInit, eventSourceInit: { fetch: observedFetch } })
+    : new StreamableHTTPClientTransport(url, {
+        requestInit,
+        authProvider: launch.authProvider,
+        fetch: observedFetch
+      })
 }
 
 /**
@@ -101,6 +114,9 @@ const message = (cause: unknown): string => {
   return raw.length > MAX_ERROR ? `${raw.slice(0, MAX_ERROR)}…` : raw
 }
 
+const isUnauthorized = (cause: unknown): boolean =>
+  cause instanceof UnauthorizedError || UNAUTHORIZED.test(message(cause))
+
 /**
  * Probe one server. Never fails — a probe that cannot connect is a `failed` status,
  * not an error, because "this server is broken" is exactly what we want to display.
@@ -121,11 +137,14 @@ export const probeServer = (
 
   return Effect.tryPromise({
     try: (signal) => connectAndCount(entry.launch, cwd, signal),
-    catch: (cause) => message(cause)
+    catch: (cause) => ({ message: message(cause), unauthorized: isUnauthorized(cause) })
   }).pipe(
     Effect.timeoutFail({
       duration: timeout,
-      onTimeout: () => `timed out after ${Duration.toMillis(timeout)}ms`
+      onTimeout: () => ({
+        message: `timed out after ${Duration.toMillis(timeout)}ms`,
+        unauthorized: false
+      })
     }),
     Effect.map((toolCount) => ({
       ...base,
@@ -135,7 +154,15 @@ export const probeServer = (
       checkedAt: now()
     })),
     Effect.catchAll((error) =>
-      Effect.succeed({ ...base, state: "failed" as const, toolCount: null, error, checkedAt: now() })
+      Effect.succeed({
+        ...base,
+        state: error.unauthorized && entry.server.authKind !== "none"
+          ? "needs-auth" as const
+          : "failed" as const,
+        toolCount: null,
+        error: error.message,
+        checkedAt: now()
+      })
     )
   )
 }

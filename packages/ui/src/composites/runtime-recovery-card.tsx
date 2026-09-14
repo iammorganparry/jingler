@@ -1,9 +1,11 @@
 import { AlertTriangle, ArrowRight, Search } from "lucide-react"
+import type { ReactNode } from "react"
 import { Button } from "../components/button.js"
 
 export interface RuntimeRecoveryCardProps {
   readonly title: string
   readonly message: string
+  readonly icon?: ReactNode
   readonly detail?: string | null
   readonly actionLabel: string
   readonly actionDisabled?: boolean
@@ -16,6 +18,7 @@ export interface RuntimeRecoveryCardProps {
 export function RuntimeRecoveryCard({
   title,
   message,
+  icon,
   detail = null,
   actionLabel,
   actionDisabled = false,
@@ -28,7 +31,7 @@ export function RuntimeRecoveryCard({
       aria-label="Runtime recovery"
       className="flex flex-none items-start gap-3 border-b border-yellow/30 bg-yellow/5 px-3 py-2.5"
     >
-      <AlertTriangle size={15} className="mt-0.5 flex-none text-yellow" />
+      {icon ?? <AlertTriangle size={15} className="mt-0.5 flex-none text-yellow" />}
       <div className="min-w-0 flex-1">
         <div className="text-[11.5px] font-semibold text-text-bright">{title}</div>
         <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{message}</p>

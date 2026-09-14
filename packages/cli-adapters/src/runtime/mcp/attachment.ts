@@ -1,3 +1,4 @@
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js"
 import type { McpServer, McpTransport } from "@jingler/core"
 
 /** Secret-bearing, main-process-only remote MCP attachment resolved for one pi run. */
@@ -6,6 +7,8 @@ export interface RuntimeRemoteMcpServer {
   readonly transport?: "http" | "sse"
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
+  readonly authProvider?: OAuthClientProvider
+  readonly onUnauthorized?: () => void
   readonly headerEnvironment?: Readonly<Record<string, string>>
 }
 
@@ -30,6 +33,8 @@ export interface McpLaunch {
   readonly cwd?: string
   readonly url?: string
   readonly headers: Readonly<Record<string, string>>
+  readonly authProvider?: OAuthClientProvider
+  readonly onUnauthorized?: () => void
   readonly headerEnvironment?: Readonly<Record<string, string>>
 }
 

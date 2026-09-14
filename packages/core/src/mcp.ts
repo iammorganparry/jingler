@@ -24,8 +24,20 @@ export type McpScope = Schema.Schema.Type<typeof McpScope>
  * `unknown` means configured but not yet contacted. Distinct from an absent
  * status, which means no probe result exists.
  */
-export const McpServerState = Schema.Literal("unknown", "connected", "failed", "disabled")
+export const McpServerState = Schema.Literal(
+  "unknown",
+  "connected",
+  "needs-auth",
+  "authorizing",
+  "failed",
+  "disabled"
+)
 export type McpServerState = Schema.Schema.Type<typeof McpServerState>
+
+export const McpAuthKind = Schema.Literal("none", "api-key", "oauth")
+export type McpAuthKind = Schema.Schema.Type<typeof McpAuthKind>
+export const McpAuthState = Schema.Literal("not-required", "ready", "needs-auth", "authorizing")
+export type McpAuthState = Schema.Schema.Type<typeof McpAuthState>
 
 /**
  * One configured MCP server.
@@ -38,6 +50,11 @@ export type McpServerState = Schema.Schema.Type<typeof McpServerState>
 export const McpServer = Schema.Struct({
   /** Stable runtime name, e.g. "linear". */
   name: Schema.String,
+  displayName: Schema.String,
+  /** Optional HTTPS artwork URL. The UI always has a monogram fallback. */
+  iconUrl: Schema.NullOr(Schema.String),
+  authKind: McpAuthKind,
+  authState: McpAuthState,
   transport: McpTransport,
   scope: McpScope,
   /**
@@ -68,6 +85,19 @@ export const McpServerStatus = Schema.Struct({
   checkedAt: Schema.String
 })
 export type McpServerStatus = Schema.Schema.Type<typeof McpServerStatus>
+
+/** Secret-bearing renderer input. This type is accepted by RPC and never returned. */
+export const SetMcpApiKeyInput = Schema.Struct({
+  name: Schema.String,
+  apiKey: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(65_536))
+})
+export type SetMcpApiKeyInput = Schema.Schema.Type<typeof SetMcpApiKeyInput>
+
+export const McpAuthorizationStart = Schema.Struct({
+  authorizationUrl: Schema.String,
+  state: McpServerState
+})
+export type McpAuthorizationStart = Schema.Schema.Type<typeof McpAuthorizationStart>
 
 /** Stable identity for a server across list/status/cache — name alone can collide across scopes. */
 export const mcpServerKey = (scope: McpScope, name: string): string => `${scope}:${name}`

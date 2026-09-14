@@ -8,6 +8,9 @@ import {
 } from "@jingler/core"
 import { Data, Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
+import { McpAuthStore, type StoredMcpCredential } from "./mcp-auth-store.js"
+import { makeMcpOAuthProvider } from "./mcp-oauth.js"
+import type { SecretStoreShape } from "./secret-store.js"
 import type { ParsedMcpServer, RuntimeMcpServer } from "./runtime/mcp/attachment.js"
 
 /**
@@ -41,6 +44,10 @@ const redact = (name: string, entry: McpConfigEntry): McpServer =>
   entry.type === "remote"
     ? {
         name,
+        displayName: entry.displayName ?? name,
+        iconUrl: entry.iconUrl ?? null,
+        authKind: entry.auth?.type ?? "none",
+        authState: entry.auth === undefined ? "not-required" : "needs-auth",
         transport: entry.transport ?? "http",
         scope: "user",
         target: entry.url,
@@ -50,6 +57,10 @@ const redact = (name: string, entry: McpConfigEntry): McpServer =>
       }
     : {
         name,
+        displayName: entry.displayName ?? name,
+        iconUrl: entry.iconUrl ?? null,
+        authKind: "none",
+        authState: "not-required",
         transport: "stdio",
         scope: "user",
         target: entry.command.join(" "),
@@ -79,6 +90,56 @@ const toRuntime = (
         env: interpolateEnvRecord(entry.environment, env),
         ...(entry.cwd === undefined ? {} : { cwd: entry.cwd })
       }
+
+const authState = (
+  server: McpServer,
+  credential: StoredMcpCredential | null
+): McpServer["authState"] => {
+  if (server.authKind === "none") return "not-required"
+  if (credential?.type !== server.authKind) return "needs-auth"
+  if (credential.type !== "oauth" || credential.tokens !== undefined) return "ready"
+  return credential.codeVerifier === undefined ? "needs-auth" : "authorizing"
+}
+
+const withCredential = async (
+  name: string,
+  entry: McpConfigEntry,
+  runtime: RuntimeMcpServer,
+  store: McpAuthStore
+): Promise<RuntimeMcpServer> => {
+  if (entry.type !== "remote" || entry.auth === undefined || runtime.transport === "stdio") {
+    return runtime
+  }
+  const credential = await Effect.runPromise(store.read(name))
+  if (entry.auth.type === "api-key") {
+    return credential?.type === "api-key"
+      ? {
+          ...runtime,
+          headers: {
+            ...runtime.headers,
+            [entry.auth.header]: `${entry.auth.prefix}${credential.apiKey}`
+          },
+          onUnauthorized: () => { void Effect.runPromise(store.delete(name)) }
+        }
+      : runtime
+  }
+  return {
+    ...runtime,
+    authProvider: makeMcpOAuthProvider(
+      name,
+      store,
+      "http://127.0.0.1",
+      async () => {
+        await Effect.runPromise(store.update(name, (current) =>
+          current?.type === "oauth" && current.clientInformation !== undefined
+            ? { type: "oauth", clientInformation: current.clientInformation }
+            : { type: "oauth" }
+        ))
+      },
+      "runtime-refresh-only"
+    )
+  }
+}
 
 /** Pair redacted metadata with launch details, for the shared probe. */
 const toParsed = (
@@ -214,6 +275,20 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           )
         )
 
+      const listAuthenticated = (
+        secretStore: SecretStoreShape
+      ): Effect.Effect<ReadonlyArray<McpServer>, McpConfigError, Env> =>
+        Effect.gen(function* () {
+          const servers = yield* list()
+          const auth = new McpAuthStore(secretStore)
+          return yield* Effect.forEach(servers, (server) =>
+            auth.read(server.name).pipe(Effect.map((credential) => ({
+              ...server,
+              authState: authState(server, credential)
+            })))
+          )
+        })
+
       /**
        * Enabled entries as secret-bearing runtime attachments. Best-effort: a
        * malformed file yields an empty list so a broken mcp.json never blocks
@@ -231,6 +306,21 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           Effect.orElseSucceed(() => [])
         )
 
+      const resolveAuthenticated = (
+        secretStore: SecretStoreShape,
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<RuntimeMcpServer>, never, Env> =>
+        entries().pipe(
+          Effect.flatMap((mcp) => {
+            const auth = new McpAuthStore(secretStore)
+            return Effect.forEach(
+              Object.entries(mcp).filter(([name, entry]) => entry.enabled && mcpNameError(name) === null),
+              ([name, entry]) => Effect.promise(() => withCredential(name, entry, toRuntime(name, entry, env), auth))
+            )
+          }),
+          Effect.orElseSucceed(() => [])
+        )
+
       /** Every entry (enabled or not) paired with launch details, for probing. */
       const parsed = (
         env: Readonly<Record<string, string | undefined>> = process.env
@@ -240,6 +330,23 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
             Object.entries(mcp).map(([name, entry]) => toParsed(name, entry, env))
           )
         )
+
+      const parsedAuthenticated = (
+        secretStore: SecretStoreShape,
+        env: Readonly<Record<string, string | undefined>> = process.env
+      ): Effect.Effect<ReadonlyArray<ParsedMcpServer>, McpConfigError, Env> =>
+        entries().pipe(Effect.flatMap((mcp) => {
+          const auth = new McpAuthStore(secretStore)
+          return Effect.forEach(Object.entries(mcp), ([name, entry]) => {
+            const parsed = toParsed(name, entry, env)
+            return Effect.promise(async () => {
+              const runtime = await withCredential(name, entry, toRuntime(name, entry, env), auth)
+              return runtime.transport === "stdio"
+                ? parsed
+                : { ...parsed, launch: { ...parsed.launch, headers: runtime.headers, authProvider: runtime.authProvider, onUnauthorized: runtime.onUnauthorized } }
+            })
+          })
+        }))
 
       const writeAll = (
         additions: Readonly<Record<string, McpConfigEntry>>
@@ -299,7 +406,18 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           })
         })
 
-      return { list, resolve, parsed, write, writeAll, remove, setEnabled }
+      return {
+        list,
+        listAuthenticated,
+        resolve,
+        resolveAuthenticated,
+        parsed,
+        parsedAuthenticated,
+        write,
+        writeAll,
+        remove,
+        setEnabled
+      }
     }
   }
 ) {}

@@ -39,6 +39,8 @@ export interface McpSettingsProps {
   readonly setEnabled: (name: string, enabled: boolean) => Promise<void>
   readonly remove: (name: string) => Promise<void>
   readonly add: (name: string, entry: McpConfigEntry) => Promise<void>
+  readonly setApiKey: (name: string, apiKey: string) => Promise<void>
+  readonly startAuthorization: (name: string) => Promise<void>
   readonly reveal: () => Promise<void>
   /** Import flow: load candidates from one source, then apply a selection. */
   readonly importCandidates: (
@@ -98,33 +100,59 @@ const decodeCommand = Schema.decodeUnknownSync(
 
 const parseCommand = (raw: string): ReadonlyArray<string> => decodeCommand(JSON.parse(raw))
 
+const formEntry = (
+  kind: "remote" | "local",
+  target: string,
+  pairs: string,
+  authKind: "none" | "api-key" | "oauth"
+): McpConfigEntry => {
+  if (kind === "local") {
+    return {
+      type: "local",
+      command: parseCommand(target.trim()),
+      environment: parsePairs(pairs),
+      enabled: true
+    }
+  }
+  return {
+    type: "remote",
+    url: target.trim(),
+    headers: parsePairs(pairs),
+    ...(authKind === "api-key"
+      ? { auth: { type: "api-key" as const, header: "Authorization", prefix: "Bearer " } }
+      : authKind === "oauth" ? { auth: { type: "oauth" as const } } : {}),
+    enabled: true
+  }
+}
+
 export function McpServerForm({
   add,
+  setApiKey,
   onDone,
   onCancel
 }: {
   readonly add: McpSettingsProps["add"]
+  readonly setApiKey?: McpSettingsProps["setApiKey"]
   readonly onDone: () => void
   readonly onCancel: () => void
 }) {
   const [name, setName] = React.useState("")
   const [kind, setKind] = React.useState<"remote" | "local">("remote")
   const [target, setTarget] = React.useState("")
+  const [authKind, setAuthKind] = React.useState<"none" | "api-key" | "oauth">("none")
+  const [apiKey, setApiKeyValue] = React.useState("")
   const [pairs, setPairs] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
 
   const submit = async () => {
     setError(null)
     try {
-      const entry: McpConfigEntry = kind === "remote"
-        ? { type: "remote", url: target.trim(), headers: parsePairs(pairs), enabled: true }
-        : {
-            type: "local",
-            command: parseCommand(target.trim()),
-            environment: parsePairs(pairs),
-            enabled: true
-          }
-      await add(name.trim(), entry)
+      const serverName = name.trim()
+      await add(serverName, formEntry(kind, target, pairs, authKind))
+      if (authKind === "api-key" && apiKey.length > 0) {
+        if (setApiKey === undefined) throw new Error("API-key storage is unavailable")
+        await setApiKey(serverName, apiKey)
+      }
       onDone()
       setName("")
       setTarget("")
@@ -161,6 +189,29 @@ export function McpServerForm({
         placeholder={kind === "remote" ? "https://mcp.example.com/mcp" : '["npx", "-y", "some-mcp"]'}
         aria-label={kind === "remote" ? "Server URL" : "Server command"}
       />
+      {kind === "remote" && (
+        <div className="flex items-center gap-2">
+          <select
+            value={authKind}
+            onChange={(event) => setAuthKind(event.target.value as typeof authKind)}
+            aria-label="Authentication"
+            className="h-11 rounded-xl border border-line bg-panel px-3.5 text-base text-text"
+          >
+            <option value="none">No authentication</option>
+            <option value="api-key">API key</option>
+            <option value="oauth">OAuth</option>
+          </select>
+          {authKind === "api-key" && (
+            <Input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKeyValue(event.target.value)}
+              placeholder="API key"
+              aria-label="API key"
+            />
+          )}
+        </div>
+      )}
       <label className="flex flex-col gap-1">
         <span className="text-[11px] text-muted-foreground">
           {kind === "remote" ? "Headers" : "Environment"} — one KEY=value per line.
@@ -191,10 +242,13 @@ export function McpServerForm({
   )
 }
 
-function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
+function AddServerForm({
+  add,
+  setApiKey
+}: Pick<McpSettingsProps, "add" | "setApiKey">) {
   const [open, setOpen] = React.useState(false)
   return open ? (
-    <McpServerForm add={add} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
+    <McpServerForm add={add} setApiKey={setApiKey} onDone={() => setOpen(false)} onCancel={() => setOpen(false)} />
   ) : (
     <button
       type="button"
@@ -209,11 +263,13 @@ function AddServerForm({ add }: { readonly add: McpSettingsProps["add"] }) {
 export function McpServerDialog({
   open,
   onOpenChange,
-  add
+  add,
+  setApiKey
 }: {
   readonly open: boolean
   readonly onOpenChange: (open: boolean) => void
   readonly add: McpSettingsProps["add"]
+  readonly setApiKey?: McpSettingsProps["setApiKey"]
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -227,6 +283,7 @@ export function McpServerDialog({
         <DialogBody>
           <McpServerForm
             add={add}
+            setApiKey={setApiKey}
             onDone={() => onOpenChange(false)}
             onCancel={() => onOpenChange(false)}
           />
@@ -339,6 +396,115 @@ function ImportFlow({
   )
 }
 
+export function McpApiKeyDialog({
+  server,
+  open,
+  onOpenChange,
+  setApiKey
+}: {
+  readonly server: McpServer | null
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  readonly setApiKey: McpSettingsProps["setApiKey"]
+}) {
+  const [apiKey, setApiKeyValue] = React.useState("")
+  if (server === null) return null
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{server.authState === "ready" ? "Replace" : "Add"} {server.displayName} API key</DialogTitle>
+          <DialogDescription>The key is encrypted by the OS credential vault and never written to mcp.json.</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div className="flex flex-col gap-3">
+            <Input type="password" value={apiKey} onChange={(event) => setApiKeyValue(event.target.value)} aria-label={`API key for ${server.displayName}`} autoFocus />
+            <AsyncButton
+              disabled={apiKey.length === 0}
+              pendingLabel="Saving…"
+              onClick={() => setApiKey(server.name, apiKey).then(() => {
+                setApiKeyValue("")
+                onOpenChange(false)
+              })}
+            >Save key</AsyncButton>
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function McpBrand({ server }: { readonly server: McpServer }) {
+  return (
+    <span className="relative grid size-8 flex-none place-items-center overflow-hidden rounded-lg border border-line bg-surface text-[12px] font-semibold text-text-bright">
+      {server.displayName.slice(0, 1).toLocaleUpperCase()}
+      {server.iconUrl !== null && (
+        <img src={server.iconUrl} alt="" className="absolute inset-0 size-full object-cover" />
+      )}
+    </span>
+  )
+}
+
+function McpAuthAction({
+  server,
+  setApiKey,
+  startAuthorization,
+  onError
+}: {
+  readonly server: McpServer
+  readonly setApiKey: McpSettingsProps["setApiKey"]
+  readonly startAuthorization: McpSettingsProps["startAuthorization"]
+  readonly onError: (message: string) => void
+}) {
+  const [editing, setEditing] = React.useState(false)
+  const [apiKey, setApiKeyValue] = React.useState("")
+  if (server.authKind === "none") return null
+  if (server.authKind === "oauth") {
+    return (
+      <AsyncButton
+        pendingLabel="Opening…"
+        onClick={() => startAuthorization(server.name).catch((cause) => {
+          const message = cause instanceof Error ? cause.message : "Authorization failed"
+          onError(message)
+          throw cause
+        })}
+      >
+        {server.authState === "ready" ? "Reauthorize" : "Authorize"}
+      </AsyncButton>
+    )
+  }
+  if (!editing) {
+    return (
+      <button type="button" onClick={() => setEditing(true)} className="text-[11px] text-blue hover:underline">
+        {server.authState === "ready" ? "Replace key" : "Add key"}
+      </button>
+    )
+  }
+  return (
+    <div className="flex items-center gap-1.5">
+      <Input
+        type="password"
+        value={apiKey}
+        onChange={(event) => setApiKeyValue(event.target.value)}
+        aria-label={`API key for ${server.displayName}`}
+        className="h-8 w-36"
+      />
+      <AsyncButton
+        disabled={apiKey.length === 0}
+        pendingLabel="Saving…"
+        onClick={() => setApiKey(server.name, apiKey).then(() => {
+          setApiKeyValue("")
+          setEditing(false)
+        }).catch((cause) => {
+          const message = cause instanceof Error ? cause.message : "Could not save API key"
+          onError(message)
+          throw cause
+        })}
+      >Save</AsyncButton>
+    </div>
+  )
+}
+
 export function McpSettings({
   servers,
   parseError,
@@ -349,10 +515,20 @@ export function McpSettings({
   setEnabled,
   remove,
   add,
+  setApiKey,
+  startAuthorization,
   reveal,
   importCandidates,
   applyImport
 }: McpSettingsProps) {
+  const [actionError, setActionError] = React.useState<string | null>(null)
+  const run = (action: () => Promise<void>) => {
+    setActionError(null)
+    void action().catch((cause) =>
+      setActionError(cause instanceof Error ? cause.message : "MCP action failed")
+    )
+  }
+
   const renderMcpServer = ((server) => {
           const status = statusFor(statuses, server.name)
           return (
@@ -360,6 +536,7 @@ export function McpSettings({
               key={server.name}
               className="flex max-w-xl items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
             >
+              <McpBrand server={server} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
                   <span className="text-[12.5px] font-medium text-text-body">{server.name}</span>
@@ -368,6 +545,12 @@ export function McpSettings({
                 </div>
                 <div className="truncate font-mono text-[10px] text-dim">{server.target}</div>
               </div>
+              <McpAuthAction
+                server={server}
+                setApiKey={setApiKey}
+                startAuthorization={startAuthorization}
+                onError={setActionError}
+              />
               <Toggle
                 checked={server.enabled}
                 onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
@@ -383,14 +566,6 @@ export function McpSettings({
             </div>
           )
         }) satisfies  Parameters<typeof servers.map>[0]
-
-  const [actionError, setActionError] = React.useState<string | null>(null)
-  const run = (action: () => Promise<void>) => {
-    setActionError(null)
-    void action().catch((cause) =>
-      setActionError(cause instanceof Error ? cause.message : "MCP action failed")
-    )
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -418,7 +593,7 @@ export function McpSettings({
       </div>
 
       <div className="flex items-center gap-2">
-        <AddServerForm add={add} />
+        <AddServerForm add={add} setApiKey={setApiKey} />
         <button
           type="button"
           onClick={probe}

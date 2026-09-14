@@ -40,6 +40,10 @@ describe("McpImportPrompt", () => {
       ready
       servers={[{
         name: "linear",
+        displayName: "linear",
+        iconUrl: null,
+        authKind: "none",
+        authState: "not-required",
         transport: "http",
         scope: "user",
         target: "https://linear.example/mcp",

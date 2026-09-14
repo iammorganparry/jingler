@@ -17,7 +17,8 @@ export function useMcpSettings(): McpSettingsProps {
 
   const query = useQuery({
     queryKey: mcpKey,
-    queryFn: () => rpc.mcpList()
+    queryFn: () => rpc.mcpList(),
+    refetchInterval: 5_000
   })
 
   const invalidate = () => {
@@ -47,6 +48,15 @@ export function useMcpSettings(): McpSettingsProps {
     },
     add: async (name: string, entry: McpConfigEntry) => {
       await rpc.mcpWrite(name, entry)
+      await invalidate()
+    },
+    setApiKey: async (name: string, apiKey: string) => {
+      await rpc.mcpSetApiKey(name, apiKey)
+      await invalidate()
+    },
+    startAuthorization: async (name: string) => {
+      const { authorizationUrl } = await rpc.mcpStartAuthorization(name)
+      await window.jingler.openExternal(authorizationUrl)
       await invalidate()
     },
     reveal: () => rpc.mcpReveal(),

@@ -59,6 +59,10 @@ describe("McpConfigService", () => {
     expect(exit.value).toEqual([
       {
         name: "context7",
+        displayName: "context7",
+        iconUrl: null,
+        authKind: "none",
+        authState: "not-required",
         transport: "http",
         scope: "user",
         target: "https://mcp.context7.com/mcp",
@@ -68,6 +72,10 @@ describe("McpConfigService", () => {
       },
       {
         name: "local",
+        displayName: "local",
+        iconUrl: null,
+        authKind: "none",
+        authState: "not-required",
         transport: "stdio",
         scope: "user",
         target: "npx -y some-mcp",

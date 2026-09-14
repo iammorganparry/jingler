@@ -7,6 +7,10 @@ const decode = <A, I>(schema: Schema.Schema<A, I>, input: unknown) =>
 
 const SERVER = {
   name: "linear",
+  displayName: "Linear",
+  iconUrl: "https://linear.app/favicon.ico",
+  authKind: "none",
+  authState: "not-required",
   transport: "stdio",
   scope: "user",
   target: "npx -y @linear/mcp",
@@ -19,7 +23,7 @@ describe("McpTransport / McpScope / McpServerState", () => {
   it("accepts every documented member", () => {
     for (const t of ["stdio", "http", "sse"]) expect(Either.isRight(decode(McpTransport, t))).toBe(true)
     for (const s of ["user", "project", "local"]) expect(Either.isRight(decode(McpScope, s))).toBe(true)
-    for (const s of ["unknown", "connected", "failed", "disabled"])
+    for (const s of ["unknown", "connected", "needs-auth", "authorizing", "failed", "disabled"])
       expect(Either.isRight(decode(McpServerState, s))).toBe(true)
   })
 
@@ -48,6 +52,10 @@ describe("McpServer", () => {
     const fields = Object.keys(McpServer.fields)
     expect(fields).toStrictEqual([
       "name",
+      "displayName",
+      "iconUrl",
+      "authKind",
+      "authState",
       "transport",
       "scope",
       "target",

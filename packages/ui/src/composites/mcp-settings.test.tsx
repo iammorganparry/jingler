@@ -7,6 +7,10 @@ afterEach(cleanup)
 
 const SERVER: McpServer = {
   name: "context7",
+  displayName: "Context7",
+  iconUrl: null,
+  authKind: "none",
+  authState: "not-required",
   transport: "http",
   scope: "user",
   target: "https://mcp.context7.com/mcp",
@@ -25,6 +29,8 @@ const props = (over: Partial<McpSettingsProps> = {}): McpSettingsProps => ({
   setEnabled: async () => {},
   remove: async () => {},
   add: async () => {},
+  setApiKey: async () => {},
+  startAuthorization: async () => {},
   reveal: async () => {},
   importCandidates: async () => [],
   applyImport: async () => [],

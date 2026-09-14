@@ -36,6 +36,31 @@ describe("Composer tools menu", () => {
     expect(screen.getByText("Saves to ~/jingler/mcp.json and becomes available to local sessions on their next turn.")).toBeTruthy()
   })
 
+  it("lists configured MCP connections and starts their auth action", () => {
+    const authorize = vi.fn(async () => {})
+    render(<Composer
+      onAddMcp={async () => {}}
+      onAuthorizeMcp={authorize}
+      mcpServers={[{
+        name: "linear",
+        displayName: "Linear",
+        iconUrl: null,
+        authKind: "oauth",
+        authState: "needs-auth",
+        transport: "http",
+        scope: "user",
+        target: "https://mcp.linear.app/mcp",
+        envKeys: [],
+        headerKeys: [],
+        enabled: true
+      }]}
+    />)
+
+    openMenu()
+    fireEvent.click(screen.getByRole("button", { name: /Linear/ }))
+    expect(authorize).toHaveBeenCalledWith("linear")
+  })
+
   it("opens the existing skill palette from the menu", () => {
     render(<Composer skills={[{ name: "/deploy", description: "Deploy the app", source: "skill" }]} />)
 

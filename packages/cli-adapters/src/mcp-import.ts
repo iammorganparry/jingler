@@ -194,14 +194,16 @@ export const parseCodexMcp = (raw: string): ReadonlyArray<McpImportCandidate> =>
   })
 }
 
-/** Parse `opencode.json`; unsupported OAuth entries stay visible but cannot import. */
+/** Parse `opencode.json`, translating its OAuth marker to managed MCP OAuth. */
 export const parseOpencodeMcp = (raw: string): ReadonlyArray<McpImportCandidate> => {
   const file = Schema.decodeUnknownOption(OpenCodeFile)(JSON.parse(raw))
   if (Option.isNone(file)) return []
   return Object.entries(file.value.mcp ?? {}).map(([name, entry]) => {
     const decoded = decodeUnknownMap(entry)
-    return Option.isSome(decoded) && "oauth" in decoded.value
-      ? candidate("opencode", name, null, "OAuth servers are not supported")
-      : candidate("opencode", name, entry)
+    if (Option.isNone(decoded) || !("oauth" in decoded.value)) {
+      return candidate("opencode", name, entry)
+    }
+    const { oauth: _oauth, ...rest } = decoded.value
+    return candidate("opencode", name, { ...rest, auth: { type: "oauth" } })
   })
 }
