@@ -24,7 +24,7 @@ vi.mock("./rpc-client.js", () => ({
     planCurrent: vi.fn(async () => null),
     agentChatBusy: vi.fn(async () => false),
     workspaceFiles: vi.fn(async () => []),
-    sessionsDiff: vi.fn(async () => ""),
+    sessionsDiffStat: vi.fn(async () => ({ added: 0, removed: 0, files: 0 })),
     skillsList: vi.fn(async () => []),
     reviewWatch: vi.fn(() => () => {})
   }
