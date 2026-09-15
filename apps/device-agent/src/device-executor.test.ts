@@ -85,7 +85,12 @@ const services = (): DeviceExecutorServices => ({
     acknowledgedAt: 1
   })),
   transcriptPage: vi.fn(async () => ({ messages: [], hasMore: false })),
-  diff: vi.fn(async () => "diff --git"),
+  diff: vi.fn(async () => ({
+    files: [{ path: "a.ts", added: 1, removed: 1, omitted: null }],
+    patch: "diff --git",
+    lineLimit: 20_000,
+    byteLimit: 2 * 1024 * 1024
+  })),
   diffStat: vi.fn(async () => ({ added: 1, removed: 1, files: 1 })),
   fileDiff: vi.fn(async () => ({ kind: "patch" as const, patch: "diff --git" })),
   files: vi.fn(async () => ["src/index.ts"]),

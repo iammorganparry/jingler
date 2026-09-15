@@ -37,11 +37,26 @@ const MIN_READABLE_DIFF_WIDTH = 560
 const REDOCK_DIFF_WIDTH = 600
 const FALLBACK_TOKENS = toTokens(jinglerDark)
 
+/** A changed file listed with counts whose patch was too large to transport. */
+export interface ReviewOmittedFile {
+  readonly path: string
+  readonly added: number
+  readonly removed: number
+  readonly reason: "lines" | "bytes"
+}
+
+const OMITTED_PREVIEW = 5
+const count = new Intl.NumberFormat("en-US")
+
 export interface CodeReviewViewProps {
   files: readonly PrFileChange[]
   reviewThreads?: readonly PrReviewThread[]
   activePath: string | null
   fileDiffs: readonly { readonly path: string; readonly diff: string }[]
+  /** Files whose diff is deliberately absent from `fileDiffs` (see `ReviewOmittedFile`). */
+  omittedFiles?: readonly ReviewOmittedFile[]
+  /** The per-file line limit behind `omittedFiles`, for the explanation. */
+  diffLineLimit?: number
   drafts: readonly ReviewDraft[]
   routeTargetSession: string | null
   connected: boolean
@@ -86,6 +101,8 @@ export function CodeReviewView({
   reviewThreads = [],
   activePath,
   fileDiffs,
+  omittedFiles = [],
+  diffLineLimit = 0,
   drafts,
   routeTargetSession,
   connected,
@@ -141,6 +158,31 @@ export function CodeReviewView({
                     onSendToAgent={onSendFindingToAgent}
                   />
                 ))}
+              </div>
+            )}
+            {omittedFiles.length > 0 && (
+              <div
+                data-testid="review-omitted-files"
+                className="flex-none border-b border-hairline bg-panel/40 p-3"
+              >
+                <Callout tone="yellow">
+                  {omittedFiles.length === 1
+                    ? "One file is too large to show inline"
+                    : `${count.format(omittedFiles.length)} files are too large to show inline`}
+                  {diffLineLimit > 0
+                    ? ` (over ${count.format(diffLineLimit)} changed lines or the size cap). `
+                    : ". "}
+                  {omittedFiles
+                    .slice(0, OMITTED_PREVIEW)
+                    .map(
+                      (file) =>
+                        `${file.path} (+${count.format(file.added)} −${count.format(file.removed)})`
+                    )
+                    .join(", ")}
+                  {omittedFiles.length > OMITTED_PREVIEW
+                    ? ` and ${count.format(omittedFiles.length - OMITTED_PREVIEW)} more.`
+                    : "."}
+                </Callout>
               </div>
             )}
             {files.length === 0 ? (

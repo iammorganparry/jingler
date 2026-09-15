@@ -13,6 +13,7 @@
  * Electron's structured-clone IPC.)
  */
 import {
+  EMPTY_REVIEW_DIFF,
   AgentRunner,
   AgentRuntime,
   AppPaths,
@@ -165,6 +166,7 @@ import {
   JinglerRpcs,
   SessionDiffStat,
   SessionFileDiff,
+  SessionReviewDiff,
   type SessionCreationPhase,
   type SessionCreationUpdate,
 } from "@jingler/contracts";
@@ -517,7 +519,7 @@ export const sessionDiff = (id: string) =>
     const session = yield* SessionStore.get(id).pipe(
       Effect.orElseSucceed(() => null),
     );
-    if (!session?.worktreePath) return "";
+    if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
   });
 
@@ -4425,7 +4427,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           execute: () =>
             remote
               .request(session, "Sessions.diff", {})
-              .pipe(Effect.flatMap(Schema.decodeUnknown(Schema.String))),
+              .pipe(Effect.flatMap(Schema.decodeUnknown(SessionReviewDiff))),
         },
       );
     }).pipe(

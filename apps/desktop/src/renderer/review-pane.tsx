@@ -54,6 +54,8 @@ export function ReviewPane({
       reviewThreads={review.reviewThreads}
       activePath={review.activePath}
       fileDiffs={review.fileDiffs}
+      omittedFiles={review.omittedFiles}
+      diffLineLimit={review.diffLineLimit}
       drafts={review.drafts}
       routeTargetSession={session.title}
       connected={connected}
