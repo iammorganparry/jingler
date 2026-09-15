@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { FileSystem } from "@effect/platform"
-import type { McpConfigEntry, McpServer } from "@jingler/core"
+import type { McpConfigEntry, McpRemoteAuth, McpServer } from "@jingler/core"
 import {
   interpolateEnvRecord,
   McpConfigEntry as McpConfigEntrySchema,
@@ -453,6 +453,28 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
           })
         })
 
+      const setAuth = (
+        name: string,
+        auth: McpRemoteAuth
+      ): Effect.Effect<void, McpConfigError, Env> =>
+        mutate((current, rawMcp) => {
+          const entry = current[name]
+          if (entry?.type !== "remote") {
+            return Effect.fail(new McpConfigError({ message: `Remote MCP server "${name}" does not exist` }))
+          }
+          const next = {
+            ...rawMcp,
+            [name]: {
+              ...Option.getOrElse(decodeRawEntry(rawMcp[name]), () => entry),
+              auth
+            }
+          }
+          return decodeFile(JSON.stringify({ mcp: next })).pipe(
+            Effect.as(next),
+            Effect.mapError((cause) => new McpConfigError({ message: "MCP authentication is not valid for this server", cause }))
+          )
+        })
+
       return {
         list,
         listAuthenticated,
@@ -463,7 +485,8 @@ export class McpConfigService extends Effect.Service<McpConfigService>()(
         write,
         writeAll,
         remove,
-        setEnabled
+        setEnabled,
+        setAuth
       }
     }
   }

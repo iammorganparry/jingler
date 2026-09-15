@@ -224,13 +224,25 @@ describe("McpConfigService", () => {
     expect(onDisk().$schema).toBe("https://example.com/schema.json")
   })
 
-  it("preserves unknown entry fields when toggling", async () => {
+  it("preserves entry fields when changing enabled state or authentication", async () => {
     seed(JSON.stringify({
       mcp: { context7: { type: "remote", url: "https://example.com", timeout: 30 } }
     }))
     await provided(McpConfigService.setEnabled("context7", false))
-    expect(onDisk().mcp.context7).toMatchObject({ timeout: 30, enabled: false })
+    await provided(McpConfigService.setAuth("context7", { type: "oauth" }))
+    expect(onDisk().mcp.context7).toMatchObject({ timeout: 30, enabled: false, auth: { type: "oauth" } })
     expect(statSync(join(temp.root, "mcp.json")).mode & 0o777).toBe(0o600)
+  })
+
+  it("rejects OAuth setup for an SSE server", async () => {
+    seed(JSON.stringify({ mcp: { legacy: {
+      type: "remote",
+      url: "https://example.com/sse",
+      transport: "sse"
+    } } }))
+    const exit = await provided(McpConfigService.setAuth("legacy", { type: "oauth" }))
+    expect(exit._tag).toBe("Failure")
+    expect(onDisk().mcp.legacy.auth).toBeUndefined()
   })
 
   it("refuses to mutate a malformed file rather than clobbering it", async () => {

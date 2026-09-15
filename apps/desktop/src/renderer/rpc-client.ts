@@ -48,6 +48,7 @@ import type {
   IssueReference,
   IssueProviderDescriptor,
   IssueSummary,
+  McpRemoteAuth,
   McpServerStatus,
   OffloadComputeSettings,
   Message,
@@ -357,6 +358,8 @@ export const rpc = {
     run((c) => c.Mcp.remove({ name })),
   mcpSetEnabled: (name: string, enabled: boolean): Promise<void> =>
     run((c) => c.Mcp.setEnabled({ name, enabled })),
+  mcpSetAuth: (name: string, auth: McpRemoteAuth): Promise<void> =>
+    run((c) => c.Mcp.setAuth({ name, auth })),
   mcpSetApiKey: (name: string, apiKey: string): Promise<void> =>
     run((c) => c.Mcp.setApiKey({ name, apiKey })),
   mcpStartAuthorization: (name: string) =>

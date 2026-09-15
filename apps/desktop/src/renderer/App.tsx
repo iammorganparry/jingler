@@ -1483,6 +1483,7 @@ function AuthedApp({
             onAddMcp={mcp.add}
             mcpServers={mcp.servers}
             onSetMcpApiKey={mcp.setApiKey}
+            onSetMcpAuth={mcp.setAuth}
             onAuthorizeMcp={mcp.startAuthorization}
             paneFocused={ctx.paneFocused ?? true}
           />
