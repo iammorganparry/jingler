@@ -138,6 +138,92 @@ const repoInfo = (
     }
   })
 
+export interface WorkspaceDiffStat {
+  readonly added: number
+  readonly removed: number
+  readonly files: number
+}
+
+export type WorkspaceFileDiff =
+  | { readonly kind: "patch"; readonly patch: string }
+  | {
+      readonly kind: "too-large"
+      readonly added: number
+      readonly removed: number
+      readonly reason: "lines" | "bytes"
+      readonly lineLimit: number
+      readonly byteLimit: number
+    }
+
+export const FILE_DIFF_LINE_LIMIT = 20_000
+export const FILE_DIFF_BYTE_LIMIT = 2 * 1024 * 1024
+
+const NUMSTAT_ENTRY = /^(\d+|-)\t(\d+|-)\t/
+
+const numstat = (output: string): WorkspaceDiffStat => {
+  let added = 0
+  let removed = 0
+  let files = 0
+  for (const entry of output.split("\0")) {
+    const match = NUMSTAT_ENTRY.exec(entry)
+    if (match === null) continue
+    added += match[1] === "-" ? 0 : Number(match[1])
+    removed += match[2] === "-" ? 0 : Number(match[2])
+    files++
+  }
+  return { added, removed, files }
+}
+
+const diffPaths = (nameStatus: string, wanted: string): readonly string[] => {
+  const fields = nameStatus.split("\0")
+  for (let index = 0; index < fields.length - 1;) {
+    const status = fields[index++] ?? ""
+    const first = fields[index++] ?? ""
+    if (!status.startsWith("R") && !status.startsWith("C")) {
+      if (first === wanted) return [wanted]
+      continue
+    }
+    const second = fields[index++] ?? ""
+    if (first === wanted || second === wanted) return [first, second]
+  }
+  return [wanted]
+}
+
+const gitObjectSize = (
+  worktreePath: string,
+  object: string,
+  environment: Readonly<Record<string, string>>
+) =>
+  runGitWithEnv(worktreePath, ["cat-file", "-s", object], environment).pipe(
+    Effect.map((output) => Number(output.trim()) || 0),
+    Effect.orElseSucceed(() => 0)
+  )
+
+const withStagedWorktree = <A, E, R>(
+  worktreePath: string,
+  use: (environment: Readonly<Record<string, string>>) => Effect.Effect<A, E, R>
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const directory = yield* fs.makeTempDirectoryScoped().pipe(
+        Effect.mapError(
+          (cause) => new GitError({ message: "Failed to create isolated Git index", cause })
+        )
+      )
+      const environment = { GIT_INDEX_FILE: path.join(directory, "index") }
+      yield* runGitWithEnv(worktreePath, ["read-tree", "HEAD"], environment)
+      yield* runGitWithEnv(worktreePath, ["add", "-A", "--", "."], environment)
+      return yield* use(environment)
+    })
+  )
+
+const stagedWorktreeGit = (worktreePath: string, args: readonly string[]) =>
+  withStagedWorktree(worktreePath, (environment) =>
+    runGitWithEnv(worktreePath, [...args], environment)
+  )
+
 type WorkspaceEnv =
   | ConfigService
   | FileSystem.FileSystem
@@ -234,24 +320,88 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         string,
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
+      > => stagedWorktreeGit(
+        worktreePath,
+        ["diff", "--cached", "--find-renames", "--binary", "HEAD"]
+      ),
+
+      /** Count a worktree diff without materializing or transporting its patch. */
+      diffStat: (
+        worktreePath: string
+      ): Effect.Effect<
+        WorkspaceDiffStat,
+        GitError,
+        FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
+      > => stagedWorktreeGit(
+        worktreePath,
+        ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD"]
+      ).pipe(Effect.map(numstat)),
+
+      /**
+       * Load one selected file's patch. Numstat is checked first so a generated
+       * file with hundreds of thousands of changed lines never enters the diff
+       * parser or crosses IPC.
+       */
+      boundedFileDiff: (
+        worktreePath: string,
+        path: string
+      ): Effect.Effect<
+        WorkspaceFileDiff,
+        GitError,
+        FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
       > =>
-        Effect.scoped(
+        withStagedWorktree(worktreePath, (environment) =>
           Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem
-            const path = yield* Path.Path
-            const directory = yield* fs.makeTempDirectoryScoped().pipe(
-              Effect.mapError(
-                (cause) => new GitError({ message: "Failed to create isolated Git index", cause })
-              )
-            )
-            const environment = { GIT_INDEX_FILE: path.join(directory, "index") }
-            yield* runGitWithEnv(worktreePath, ["read-tree", "HEAD"], environment)
-            yield* runGitWithEnv(worktreePath, ["add", "-A", "--", "."], environment)
-            return yield* runGitWithEnv(
+            const nameStatus = yield* runGitWithEnv(
               worktreePath,
-              ["diff", "--cached", "--find-renames", "--binary", "HEAD"],
+              ["diff", "--cached", "--find-renames", "--name-status", "-z", "HEAD"],
               environment
             )
+            const paths = diffPaths(nameStatus, path)
+            const stat = yield* runGitWithEnv(
+              worktreePath,
+              ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD", "--", ...paths],
+              environment
+            ).pipe(Effect.map(numstat))
+            if (stat.added + stat.removed > FILE_DIFF_LINE_LIMIT) {
+              return {
+                kind: "too-large" as const,
+                added: stat.added,
+                removed: stat.removed,
+                reason: "lines" as const,
+                lineLimit: FILE_DIFF_LINE_LIMIT,
+                byteLimit: FILE_DIFF_BYTE_LIMIT
+              }
+            }
+            const [beforeBytes, afterBytes] = yield* Effect.all([
+              gitObjectSize(worktreePath, `HEAD:${paths[0]}`, environment),
+              gitObjectSize(worktreePath, `:${paths.at(-1)}`, environment)
+            ])
+            if (beforeBytes + afterBytes > FILE_DIFF_BYTE_LIMIT) {
+              return {
+                kind: "too-large" as const,
+                added: stat.added,
+                removed: stat.removed,
+                reason: "bytes" as const,
+                lineLimit: FILE_DIFF_LINE_LIMIT,
+                byteLimit: FILE_DIFF_BYTE_LIMIT
+              }
+            }
+            const patch = yield* runGitWithEnv(
+              worktreePath,
+              ["diff", "--cached", "--find-renames", "HEAD", "--", ...paths],
+              environment
+            )
+            return patch.length > FILE_DIFF_BYTE_LIMIT
+              ? {
+                  kind: "too-large" as const,
+                  added: stat.added,
+                  removed: stat.removed,
+                  reason: "bytes" as const,
+                  lineLimit: FILE_DIFF_LINE_LIMIT,
+                  byteLimit: FILE_DIFF_BYTE_LIMIT
+                }
+              : { kind: "patch" as const, patch }
           })
         ),
 

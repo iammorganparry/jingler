@@ -163,6 +163,8 @@ import {
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   JinglerRpcs,
+  SessionDiffStat,
+  SessionFileDiff,
   type SessionCreationPhase,
   type SessionCreationUpdate,
 } from "@jingler/contracts";
@@ -517,6 +519,24 @@ export const sessionDiff = (id: string) =>
     );
     if (!session?.worktreePath) return "";
     return yield* WorkspaceService.diff(session.worktreePath);
+  });
+
+export const sessionDiffStat = (id: string) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(id).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (!session?.worktreePath) return { added: 0, removed: 0, files: 0 };
+    return yield* WorkspaceService.diffStat(session.worktreePath);
+  });
+
+export const sessionFileDiff = (id: string, path: string) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(id).pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (!session?.worktreePath) return { kind: "patch" as const, patch: "" };
+    return yield* WorkspaceService.boundedFileDiff(session.worktreePath, path);
   });
 
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
@@ -4413,6 +4433,52 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         cause instanceof GitError
           ? cause
           : new GitError({ message: "Could not load the session diff", cause }),
+      ),
+    ),
+  "Sessions.diffStat": ({ id }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(id);
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Sessions.diffStat",
+        {},
+        { execute: () => sessionDiffStat(id) },
+        {
+          execute: () =>
+            remote.request(session, "Sessions.diffStat", {}).pipe(
+              Effect.flatMap(Schema.decodeUnknown(SessionDiffStat)),
+            ),
+        },
+      );
+    }).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof GitError
+          ? cause
+          : new GitError({ message: "Could not count the session diff", cause }),
+      ),
+    ),
+  "Sessions.fileDiff": ({ id, path }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(id);
+      const remote = yield* RemoteSessionService;
+      return yield* routeSessionOperation(
+        session,
+        "Sessions.fileDiff",
+        { path },
+        { execute: () => sessionFileDiff(id, path) },
+        {
+          execute: () =>
+            remote.request(session, "Sessions.fileDiff", { path }).pipe(
+              Effect.flatMap(Schema.decodeUnknown(SessionFileDiff)),
+            ),
+        },
+      );
+    }).pipe(
+      Effect.mapError((cause) =>
+        cause instanceof GitError
+          ? cause
+          : new GitError({ message: "Could not load the file diff", cause }),
       ),
     ),
   // The streaming agent seam: unwrap the runner's `Stream<StreamEvent>` so the

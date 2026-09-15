@@ -53,7 +53,7 @@ import {
 } from "./subagent-fleet-machine.js"
 import { setSessionActivity } from "./session-activity.js"
 import { setPlanPresent } from "./plan-presence.js"
-import { clearSessionDiff, diffCounts, setSessionDiff } from "./diff-presence.js"
+import { clearSessionDiff, setSessionDiff } from "./diff-presence.js"
 import { isSessionVisible } from "./active-session.js"
 import type { ActorCandidate } from "./actor-eviction.js"
 import { keysToEvict, MAX_LIVE_ACTORS } from "./actor-eviction.js"
@@ -484,7 +484,7 @@ const recomputeSession = (sessionId: string, preferred?: ConversationSnapshot): 
     }
   }
   if (diffSnapshot === undefined) clearSessionDiff(sessionId)
-  else setSessionDiff(sessionId, diffCounts(diffSnapshot.context.patch))
+  else setSessionDiff(sessionId, diffSnapshot.context.diffStat)
 }
 
 /**

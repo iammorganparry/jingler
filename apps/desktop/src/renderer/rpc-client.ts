@@ -113,7 +113,9 @@ import {
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   type SessionCreationPhase,
-  type SessionCreationUpdate
+  type SessionCreationUpdate,
+  type SessionDiffStat,
+  type SessionFileDiff
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
@@ -602,6 +604,10 @@ export const rpc = {
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
   sessionsDiff: (id: string): Promise<string> =>
     run((c) => c.Sessions.diff({ id })),
+  sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
+    run((c) => c.Sessions.diffStat({ id })),
+  sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>
+    run((c) => c.Sessions.fileDiff({ id, path })),
   workspaceFiles: (
     repoPath: string,
     environmentId?: string,

@@ -60,7 +60,7 @@ const start = (
 ) => {
   const api: FileBrowserApi = {
     list: vi.fn().mockResolvedValue([{ path: "src/app.ts", status: "clean" }]),
-    diff: vi.fn().mockResolvedValue(""),
+    diff: vi.fn().mockResolvedValue({ kind: "patch", patch: "" }),
     read: vi.fn().mockResolvedValue(payload("before", "sha256:before")),
     write: vi.fn().mockResolvedValue(payload("after", "sha256:after")),
     ...overrides
@@ -92,6 +92,64 @@ describe("fileBrowserMachine", () => {
     actor.send({ type: "OPEN", path: "src/app.ts" })
     await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
     expect(api.read).toHaveBeenCalledWith("session-a", "src/app.ts")
+  })
+
+  it("loads file diffs on demand and reuses cached paths", async () => {
+    const diff = vi.fn(async (_sessionId: string, path: string) => ({
+      kind: "patch" as const,
+      patch: `diff for ${path}`
+    }))
+    const read = vi.fn(async (_sessionId: string, path: string) => ({
+      ...payload(path, `sha256:${path}`),
+      path
+    }))
+    const { actor } = start({
+      list: vi.fn().mockResolvedValue([
+        { path: "src/app.ts", status: "modified" as const },
+        { path: "src/other.ts", status: "modified" as const }
+      ]),
+      diff,
+      read
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+    expect(diff).not.toHaveBeenCalled()
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.patch === "diff for src/app.ts")
+    actor.send({ type: "OPEN", path: "src/other.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.patch === "diff for src/other.ts")
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.patch === "diff for src/app.ts")
+
+    expect(diff).toHaveBeenCalledTimes(2)
+
+    actor.send({ type: "REFRESH_DIFF" })
+    await waitFor(actor, () => diff.mock.calls.length === 3)
+    actor.send({ type: "OPEN", path: "src/other.ts" })
+    await waitFor(actor, () => diff.mock.calls.length === 4)
+  })
+
+  it("keeps oversized file metadata out of the patch field", async () => {
+    const { actor } = start({
+      list: vi.fn().mockResolvedValue([
+        { path: "generated.txt", status: "added" as const }
+      ]),
+      diff: vi.fn().mockResolvedValue({
+        kind: "too-large",
+        added: 762_645,
+        removed: 1_699,
+        reason: "lines",
+        lineLimit: 20_000,
+        byteLimit: 2 * 1024 * 1024
+      })
+    })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "OPEN", path: "generated.txt" })
+    await waitFor(actor, (snapshot) => snapshot.context.patchTooLarge !== null)
+
+    expect(actor.getSnapshot().context.patch).toBeNull()
+    expect(actor.getSnapshot().context.patchTooLarge).toMatchObject({ added: 762_645 })
   })
 
   it("reloads an actor created before its session worktree becomes available", async () => {
@@ -373,8 +431,7 @@ describe("fileBrowserMachine", () => {
   it("reloads the selected file and diff when the followed mutation completes", async () => {
     const diff = vi
       .fn()
-      .mockResolvedValueOnce("before patch")
-      .mockResolvedValueOnce("completed patch")
+      .mockResolvedValueOnce({ kind: "patch", patch: "completed patch" })
     const read = vi
       .fn()
       .mockResolvedValueOnce(payload("before", "sha256:before"))
@@ -409,7 +466,7 @@ describe("fileBrowserMachine", () => {
     )
 
     expect(read).toHaveBeenCalledTimes(2)
-    expect(diff).toHaveBeenCalledTimes(2)
+    expect(diff).toHaveBeenCalledTimes(1)
     expect(actor.getSnapshot().context).toMatchObject({
       viewMode: "diff",
       agentTargetEventId: "edit-current",
@@ -433,7 +490,9 @@ describe("fileBrowserMachine", () => {
       .mockResolvedValue([
         { path: "src/settings/config.ts", status: "renamed" as const }
       ])
-    const diff = vi.fn().mockResolvedValueOnce("").mockResolvedValue(renamePatch)
+    const diff = vi.fn()
+      .mockResolvedValueOnce({ kind: "patch", patch: "" })
+      .mockResolvedValue({ kind: "patch", patch: renamePatch })
     let moved = false
     const read = vi.fn((_: string, path: string) => {
       if (!moved && path === "src/config.ts") {
@@ -638,16 +697,27 @@ describe("fileBrowserMachine", () => {
     const read = vi.fn((_: string, path: string) =>
       Promise.resolve({ ...payload(path, `sha256:${path}`), path })
     )
-    const { actor } = start({ read })
+    const diff = vi.fn(async (_sessionId: string, path: string) => ({
+      kind: "patch" as const,
+      patch: `diff for ${path}`
+    }))
+    const { actor } = start({ read, diff })
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ document: { ready: "clean" } }) &&
+      snapshot.context.patch === "diff for src/app.ts"
+    )
     actor.send({ type: "OPEN", path: "src/other.ts" })
-    await waitFor(actor, (snapshot) => snapshot.context.selectedPath === "src/other.ts")
+    await waitFor(actor, (snapshot) =>
+      snapshot.context.selectedPath === "src/other.ts" &&
+      snapshot.context.patch === "diff for src/other.ts"
+    )
 
     actor.send({ type: "CLOSE", path: "src/other.ts" })
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ document: { ready: "clean" } }) &&
-      snapshot.context.selectedPath === "src/app.ts"
+      snapshot.context.selectedPath === "src/app.ts" &&
+      snapshot.context.patch === "diff for src/app.ts"
     )
 
     expect(actor.getSnapshot().context.openPaths).toEqual(["src/app.ts"])

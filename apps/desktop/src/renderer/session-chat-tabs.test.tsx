@@ -112,6 +112,7 @@ const controller = (
   treeLoading: false,
   treeError: null,
   patch: null,
+  patchTooLarge: null,
   patchError: null,
   selectedPath: "src/app.ts",
   payload: null,

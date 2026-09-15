@@ -54,6 +54,8 @@ export const managedRuntimeActionForOperation = (
       ? "session.start"
       : operation === "Projects.list" ||
           operation === "Sessions.diff" ||
+          operation === "Sessions.diffStat" ||
+          operation === "Sessions.fileDiff" ||
           operation === "Sessions.transcriptPage" ||
           operation === "Workspace.branches" ||
           operation === "Workspace.exportHandoff" ||

@@ -53,7 +53,6 @@ export interface Conversation {
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
   /** The worktree's current unified diff, for the Changes rail. */
-  readonly patch: string
   /** The agent is producing a turn (or paused at a gate). */
   readonly busy: boolean
   /** The agent is paused awaiting a HITL decision. */
@@ -218,7 +217,7 @@ export function useConversation(
   )
   const {
     messages, mode, reasoning, skills, files,
-    connectionId, providerId, modelId, patch, queued, steeringId,
+    connectionId, providerId, modelId, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, contextBreakdown, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
@@ -255,7 +254,6 @@ export function useConversation(
     connectionId,
     providerId,
     modelId,
-    patch,
     busy,
     paused,
     queued,

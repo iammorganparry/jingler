@@ -69,7 +69,7 @@ import { TerminalDockView } from "./terminal-dock-view.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
-import { diffCounts, setSessionDiff, useSessionDiffs } from "./diff-presence.js";
+import { setSessionDiff, useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
   disposeConversationActor,
@@ -1697,8 +1697,8 @@ function refreshCompletedSessions(completed: readonly string[], sessions: Readon
     // agent committing via the shell (a Bash ToolEnd carries no file diff),
     // so re-read the worktree diff once the run is over.
     void rpc
-      .sessionsDiff(id)
-      .then((patch) => setSessionDiff(id, diffCounts(patch)))
+      .sessionsDiffStat(id)
+      .then((diffStat) => setSessionDiff(id, diffStat))
       .catch(() => { });
     // Only auto-named sessions retitle; skip pinned/legacy ones (autoTitle not
     // explicitly true) to avoid a needless RPC. The handler guards too.
