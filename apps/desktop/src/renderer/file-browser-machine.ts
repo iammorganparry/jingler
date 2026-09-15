@@ -279,13 +279,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           diffCache: cacheFileDiff(context.diffCache, path, result)
         }
       }),
-      syncWorktree: assign(({ event }) =>
+      syncWorktree: assign(({ context, event }) =>
         event.type === "SYNC_WORKTREE"
           ? {
               worktreePath: event.worktreePath,
               patch: null,
               patchTooLarge: null,
-              diffPath: null,
+              patchError: null,
+              diffPath: context.selectedPath,
               diffCache: {}
             }
           : {}
@@ -478,10 +479,15 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       hasDiffPath: ({ context }) => context.selectedPath !== null,
       hasCachedDiff: ({ context, event }) => {
         const path = event.type === "LOAD_DIFF" ? event.path : context.selectedPath
-        return path !== null && context.diffCache[path] !== undefined
+        return path !== null && Object.hasOwn(context.diffCache, path)
       },
       worktreeChanged: ({ context, event }) =>
         event.type === "SYNC_WORKTREE" &&
+        context.worktreePath !== event.worktreePath,
+      selectedWorktreeChanged: ({ context, event }) =>
+        event.type === "SYNC_WORKTREE" &&
+        !context.documentOnly &&
+        context.selectedPath !== null &&
         context.worktreePath !== event.worktreePath,
       treeEmpty: ({ context }) => context.entries.length === 0,
       hasEditablePayload: ({ context }) =>
@@ -720,7 +726,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 { target: "loading", reenter: true, actions: "prepareDiff" }
               ],
               REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", reenter: true, actions: "prepareDiff" },
-              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", reenter: true, actions: "prepareDiff" }
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", reenter: true, actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading",
+                reenter: true
+              }
             },
             invoke: {
               src: "loadDiff",
@@ -762,14 +773,22 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 { target: "loading", actions: "prepareDiff" }
               ],
               REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
-              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" }
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading"
+              }
             }
           },
           error: {
             on: {
               LOAD_DIFF: { target: "loading", actions: "prepareDiff" },
               REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
-              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" }
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading"
+              }
             }
           }
         }

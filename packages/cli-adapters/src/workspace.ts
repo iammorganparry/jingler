@@ -5,7 +5,7 @@ import type { CommandExecutor } from "@effect/platform"
 import { Effect, Option } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { gitLine, runGit, runGitWithEnv } from "./command.js"
+import { gitLine, runGit, runGitRaw, runGitWithEnv } from "./command.js"
 
 /** How deep to descend from the repos directory before giving up on a branch. */
 const MAX_DEPTH = 3
@@ -201,6 +201,7 @@ const gitObjectSize = (
 
 const withStagedWorktree = <A, E, R>(
   worktreePath: string,
+  stagedPaths: readonly string[] | null,
   use: (environment: Readonly<Record<string, string>>) => Effect.Effect<A, E, R>
 ) =>
   Effect.scoped(
@@ -212,17 +213,113 @@ const withStagedWorktree = <A, E, R>(
           (cause) => new GitError({ message: "Failed to create isolated Git index", cause })
         )
       )
-      const environment = { GIT_INDEX_FILE: path.join(directory, "index") }
+      const objectDirectory = path.join(directory, "objects")
+      yield* fs.makeDirectory(objectDirectory).pipe(
+        Effect.mapError(
+          (cause) => new GitError({ message: "Failed to create isolated Git object store", cause })
+        )
+      )
+      const repositoryObjects = yield* runGit(worktreePath, [
+        "rev-parse",
+        "--git-path",
+        "objects"
+      ]).pipe(Effect.map((output) => path.resolve(worktreePath, output.trim())))
+      const environment = {
+        GIT_INDEX_FILE: path.join(directory, "index"),
+        GIT_OBJECT_DIRECTORY: objectDirectory,
+        GIT_ALTERNATE_OBJECT_DIRECTORIES: repositoryObjects
+      }
       yield* runGitWithEnv(worktreePath, ["read-tree", "HEAD"], environment)
-      yield* runGitWithEnv(worktreePath, ["add", "-A", "--", "."], environment)
+      yield* runGitWithEnv(
+        worktreePath,
+        ["--literal-pathspecs", "add", "-A", "--", ...(stagedPaths ?? ["."])],
+        environment
+      )
       return yield* use(environment)
     })
   )
 
 const stagedWorktreeGit = (worktreePath: string, args: readonly string[]) =>
-  withStagedWorktree(worktreePath, (environment) =>
+  withStagedWorktree(worktreePath, null, (environment) =>
     runGitWithEnv(worktreePath, [...args], environment)
   )
+
+const stagedPathsForFile = (worktreePath: string, path: string) =>
+  runGitRaw(worktreePath, ["diff", "--name-only", "--diff-filter=D", "-z", "HEAD"]).pipe(
+    Effect.map((output) => [
+      path,
+      ...output.split("\0").filter((candidate) => candidate.length > 0)
+    ])
+  )
+
+const boundedFileDiffFromIndex = (
+  worktreePath: string,
+  path: string,
+  environment: Readonly<Record<string, string>>
+) =>
+  Effect.gen(function* () {
+    const nameStatus = yield* runGitWithEnv(
+      worktreePath,
+      ["diff", "--cached", "--find-renames", "--name-status", "-z", "HEAD"],
+      environment
+    )
+    const paths = diffPaths(nameStatus, path)
+    const stat = yield* runGitWithEnv(
+      worktreePath,
+      [
+        "--literal-pathspecs",
+        "diff",
+        "--cached",
+        "--find-renames",
+        "--numstat",
+        "-z",
+        "HEAD",
+        "--",
+        ...paths
+      ],
+      environment
+    ).pipe(Effect.map(numstat))
+    if (stat.files === 0) return { kind: "patch" as const, patch: "" }
+    if (stat.added + stat.removed > FILE_DIFF_LINE_LIMIT) {
+      return {
+        kind: "too-large" as const,
+        added: stat.added,
+        removed: stat.removed,
+        reason: "lines" as const,
+        lineLimit: FILE_DIFF_LINE_LIMIT,
+        byteLimit: FILE_DIFF_BYTE_LIMIT
+      }
+    }
+    const [beforeBytes, afterBytes] = yield* Effect.all([
+      gitObjectSize(worktreePath, `HEAD:${paths[0]}`, environment),
+      gitObjectSize(worktreePath, `:${paths.at(-1)}`, environment)
+    ])
+    if (beforeBytes + afterBytes > FILE_DIFF_BYTE_LIMIT) {
+      return {
+        kind: "too-large" as const,
+        added: stat.added,
+        removed: stat.removed,
+        reason: "bytes" as const,
+        lineLimit: FILE_DIFF_LINE_LIMIT,
+        byteLimit: FILE_DIFF_BYTE_LIMIT
+      }
+    }
+    const patch = yield* runGitWithEnv(
+      worktreePath,
+      ["--literal-pathspecs", "diff", "--cached", "--find-renames", "HEAD", "--", ...paths],
+      environment
+    )
+    return patch.length > FILE_DIFF_BYTE_LIMIT
+      ? {
+          kind: "too-large" as const,
+          added: stat.added,
+          removed: stat.removed,
+          reason: "bytes" as const,
+          lineLimit: FILE_DIFF_LINE_LIMIT,
+          byteLimit: FILE_DIFF_BYTE_LIMIT
+        }
+      : { kind: "patch" as const, patch }
+  })
 
 type WorkspaceEnv =
   | ConfigService
@@ -350,59 +447,10 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
       > =>
-        withStagedWorktree(worktreePath, (environment) =>
-          Effect.gen(function* () {
-            const nameStatus = yield* runGitWithEnv(
-              worktreePath,
-              ["diff", "--cached", "--find-renames", "--name-status", "-z", "HEAD"],
-              environment
-            )
-            const paths = diffPaths(nameStatus, path)
-            const stat = yield* runGitWithEnv(
-              worktreePath,
-              ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD", "--", ...paths],
-              environment
-            ).pipe(Effect.map(numstat))
-            if (stat.added + stat.removed > FILE_DIFF_LINE_LIMIT) {
-              return {
-                kind: "too-large" as const,
-                added: stat.added,
-                removed: stat.removed,
-                reason: "lines" as const,
-                lineLimit: FILE_DIFF_LINE_LIMIT,
-                byteLimit: FILE_DIFF_BYTE_LIMIT
-              }
-            }
-            const [beforeBytes, afterBytes] = yield* Effect.all([
-              gitObjectSize(worktreePath, `HEAD:${paths[0]}`, environment),
-              gitObjectSize(worktreePath, `:${paths.at(-1)}`, environment)
-            ])
-            if (beforeBytes + afterBytes > FILE_DIFF_BYTE_LIMIT) {
-              return {
-                kind: "too-large" as const,
-                added: stat.added,
-                removed: stat.removed,
-                reason: "bytes" as const,
-                lineLimit: FILE_DIFF_LINE_LIMIT,
-                byteLimit: FILE_DIFF_BYTE_LIMIT
-              }
-            }
-            const patch = yield* runGitWithEnv(
-              worktreePath,
-              ["diff", "--cached", "--find-renames", "HEAD", "--", ...paths],
-              environment
-            )
-            return patch.length > FILE_DIFF_BYTE_LIMIT
-              ? {
-                  kind: "too-large" as const,
-                  added: stat.added,
-                  removed: stat.removed,
-                  reason: "bytes" as const,
-                  lineLimit: FILE_DIFF_LINE_LIMIT,
-                  byteLimit: FILE_DIFF_BYTE_LIMIT
-                }
-              : { kind: "patch" as const, patch }
-          })
+        Effect.flatMap(stagedPathsForFile(worktreePath, path), (stagedPaths) =>
+          withStagedWorktree(worktreePath, stagedPaths, (environment) =>
+            boundedFileDiffFromIndex(worktreePath, path, environment)
+          )
         ),
 
       /** The uncommitted working diff for one file (`git diff HEAD -- <path>`). */
@@ -410,14 +458,14 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         worktreePath: string,
         path: string
       ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
-        runGit(worktreePath, ["diff", "HEAD", "--", path]),
+        runGit(worktreePath, ["--literal-pathspecs", "diff", "HEAD", "--", path]),
 
       /** Discard ALL uncommitted changes to one file (`git checkout HEAD -- <path>`). */
       revertFile: (
         worktreePath: string,
         path: string
       ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
-        runGit(worktreePath, ["checkout", "HEAD", "--", path]).pipe(Effect.asVoid),
+        runGit(worktreePath, ["--literal-pathspecs", "checkout", "HEAD", "--", path]).pipe(Effect.asVoid),
 
       /**
        * Revert just the uncommitted changes in a NEW-file line range: take the
@@ -433,7 +481,7 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         endLine: number
       ): Effect.Effect<void, GitError, FileSystem.FileSystem | CommandExecutor.CommandExecutor> =>
         Effect.gen(function* () {
-          const full = yield* runGit(worktreePath, ["diff", "HEAD", "--", path])
+          const full = yield* runGit(worktreePath, ["--literal-pathspecs", "diff", "HEAD", "--", path])
           const patch = filterDiffHunks(full, startLine, endLine)
           if (patch === null) return
           const fs = yield* FileSystem.FileSystem

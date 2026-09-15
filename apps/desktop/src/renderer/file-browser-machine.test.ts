@@ -129,6 +129,23 @@ describe("fileBrowserMachine", () => {
     await waitFor(actor, () => diff.mock.calls.length === 4)
   })
 
+  it.each(["constructor", "toString", "__proto__"])(
+    "loads a prototype-named file instead of treating %s as cached",
+    async (path) => {
+      const diff = vi.fn().mockResolvedValue({ kind: "patch", patch: `diff for ${path}` })
+      const { actor } = start({
+        list: vi.fn().mockResolvedValue([{ path, status: "modified" as const }]),
+        diff
+      })
+      await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+      actor.send({ type: "OPEN", path })
+      await waitFor(actor, (snapshot) => snapshot.context.patch === `diff for ${path}`)
+
+      expect(diff).toHaveBeenCalledWith("session-a", path)
+    }
+  )
+
   it("keeps oversized file metadata out of the patch field", async () => {
     const { actor } = start({
       list: vi.fn().mockResolvedValue([
@@ -206,6 +223,26 @@ describe("fileBrowserMachine", () => {
       { path: "reports/created.md", status: "untracked" },
       { path: "src/app.ts", status: "clean" }
     ])
+  })
+
+  it("reloads the selected diff when a late worktree path arrives", async () => {
+    const diff = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "patch", patch: "" })
+      .mockResolvedValueOnce({ kind: "patch", patch: "diff from recovered worktree" })
+    const { actor } = start({ diff })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, () => diff.mock.calls.length === 1)
+    actor.send({ type: "SYNC_WORKTREE", worktreePath: "/late-worktree" })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.patch === "diff from recovered worktree"
+    )
+
+    expect(diff).toHaveBeenLastCalledWith("session-a", "src/app.ts")
+    expect(actor.getSnapshot().context.patchError).toBeNull()
   })
 
   it("loads, edits, and saves with the loaded revision", async () => {
