@@ -1,12 +1,15 @@
 /**
  * Renderer hook backing the Code Review tab. Owns two diff sources — the PR
- * (GitHub's diff API) and the session worktree's uncommitted changes (`git diff HEAD`)
- * — plus the "your review" draft tray. On the local source it also drives reverts
- * (line-range + whole-file) against the worktree, refetching after each.
+ * (GitHub's diff API) and the session worktree's uncommitted changes (a bounded
+ * `git diff HEAD`, see `Sessions.diff`) — plus the "your review" draft tray. On
+ * the local source it also drives reverts (line-range + whole-file) against the
+ * worktree, refetching after each.
  */
 import { useCallback, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
+import type { ReviewOmittedFile } from "@jingler/ui"
+import { diffBlocks, diffForPath } from "./review-diff-blocks.js"
 import { rpc } from "./rpc-client.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { prKey } from "./use-pull-request.js"
@@ -14,49 +17,6 @@ import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
 
 /** Which diff the Code Review is showing. */
 export type ReviewSource = "pr" | "local"
-
-/**
- * Extract a single file's section from a full unified diff (which concatenates
- * every changed file). The diff renderer expects only the active file's diff, so
- * we slice on `diff --git` boundaries.
- */
-const sliceDiffForFile = (diff: string, path: string | null): string => {
-  if (!path || diff.length === 0) return ""
-  const blocks: Array<string> = []
-  let current: Array<string> | null = null
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      if (current) blocks.push(current.join("\n"))
-      current = [line]
-    } else if (current) {
-      current.push(line)
-    }
-  }
-  if (current) blocks.push(current.join("\n"))
-  return blocks.find((b) => b.includes(` b/${path}`) || b.includes(`+++ b/${path}`)) ?? ""
-}
-
-/** Parse a full unified diff into per-file change entries (for the file list). */
-const parseDiffFiles = (diff: string): ReadonlyArray<PrFileChange> => {
-  if (diff.length === 0) return []
-  const files: Array<PrFileChange> = []
-  let cur: { path: string; additions: number; deletions: number } | null = null
-  const push = () => {
-    if (cur) files.push({ ...cur, commentCount: 0, viewed: false })
-  }
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("diff --git ")) {
-      push()
-      const m = line.match(/ b\/(.+)$/)
-      cur = { path: m?.[1] ?? "", additions: 0, deletions: 0 }
-    } else if (cur) {
-      if (line.startsWith("+") && !line.startsWith("+++")) cur.additions += 1
-      else if (line.startsWith("-") && !line.startsWith("---")) cur.deletions += 1
-    }
-  }
-  push()
-  return files
-}
 
 export interface ReviewDraft {
   readonly id: string
@@ -78,6 +38,13 @@ export interface ReviewState {
   readonly files: ReadonlyArray<PrFileChange>
   /** Every changed file's unified diff, in list order — for the continuous scroll view. */
   readonly fileDiffs: ReadonlyArray<{ readonly path: string; readonly diff: string }>
+  /**
+   * Local-source files listed with counts but whose patch main refused to
+   * transport (over the per-file line/byte limit, or the whole-review cap).
+   */
+  readonly omittedFiles: ReadonlyArray<ReviewOmittedFile>
+  /** The per-file line limit the omission explains, for the banner copy. */
+  readonly diffLineLimit: number
   readonly activePath: string | null
   readonly drafts: ReadonlyArray<ReviewDraft>
   /**
@@ -178,8 +145,21 @@ export function useReview(session: Session): ReviewState {
 
   const prFiles = prQuery.data?.files ?? []
   const prDiff = prQuery.data?.diff ?? ""
-  const localDiff = localQuery.data ?? ""
-  const localFiles = useMemo(() => parseDiffFiles(localDiff), [localDiff])
+  const localReview = localQuery.data
+  const localDiff = localReview?.patch ?? ""
+  // Counts come from Git numstat in main, never from walking the patch — an
+  // omitted file still shows its size in the rail.
+  const localFiles = useMemo<ReadonlyArray<PrFileChange>>(
+    () =>
+      (localReview?.files ?? []).map((file) => ({
+        path: file.path,
+        additions: file.added,
+        deletions: file.removed,
+        commentCount: 0,
+        viewed: false
+      })),
+    [localReview]
+  )
 
   const prAvailable = prFiles.length > 0
   const localAvailable = localFiles.length > 0
@@ -195,11 +175,23 @@ export function useReview(session: Session): ReviewState {
   )
   const fullDiff = effective === "local" ? localDiff : prDiff
   const activePath = selectedPath ?? files[0]?.path ?? null
-  // Every file's diff, sliced once from the full diff — the continuous scroll
+  // Every file's diff, from ONE split of the full diff — the continuous scroll
   // view renders them all stacked rather than one active file at a time.
+  const blocks = useMemo(() => diffBlocks(fullDiff), [fullDiff])
   const fileDiffs = useMemo(
-    () => files.map((f) => ({ path: f.path, diff: sliceDiffForFile(fullDiff, f.path) })),
-    [files, fullDiff]
+    () => files.map((f) => ({ path: f.path, diff: diffForPath(blocks, f.path) })),
+    [files, blocks]
+  )
+  const omittedFiles = useMemo<ReadonlyArray<ReviewOmittedFile>>(
+    () =>
+      effective === "local"
+        ? (localReview?.files ?? []).flatMap((file) =>
+            file.omitted === null
+              ? []
+              : [{ path: file.path, added: file.added, removed: file.removed, reason: file.omitted }]
+          )
+        : [],
+    [effective, localReview]
   )
 
   const setSource = useCallback((s: ReviewSource) => {
@@ -292,6 +284,8 @@ export function useReview(session: Session): ReviewState {
     localAvailable,
     files,
     fileDiffs,
+    omittedFiles,
+    diffLineLimit: localReview?.lineLimit ?? 0,
     activePath,
     drafts,
     // Threads belong to the PR. On the local (uncommitted) diff they'd anchor to

@@ -32,6 +32,7 @@ import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import {
   WorkspaceService,
   type WorkspaceDiffStat,
+  type WorkspaceReviewDiff,
   type WorkspaceFileDiff
 } from "@jingler/cli-adapters/workspace"
 import {
@@ -265,7 +266,7 @@ export interface DeviceExecutorServices {
   readonly transcriptPage: (
     input: Schema.Schema.Type<typeof TranscriptPagePayload>
   ) => Promise<unknown>
-  readonly diff: (sessionId: string) => Promise<string>
+  readonly diff: (sessionId: string) => Promise<WorkspaceReviewDiff>
   readonly diffStat: (sessionId: string) => Promise<WorkspaceDiffStat>
   readonly fileDiff: (sessionId: string, path: string) => Promise<WorkspaceFileDiff>
   readonly files: (sessionId: string, repoPath?: string) => Promise<ReadonlyArray<string>>

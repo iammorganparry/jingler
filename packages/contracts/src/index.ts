@@ -179,6 +179,29 @@ export const SessionFileDiff = Schema.Union(
 )
 export type SessionFileDiff = Schema.Schema.Type<typeof SessionFileDiff>
 
+/** One changed file in the Code Review pane's worktree diff. */
+export const SessionReviewFile = Schema.Struct({
+  path: Schema.String,
+  added: Schema.Number,
+  removed: Schema.Number,
+  /** Why the file's patch is absent from `patch`; null when it is included. */
+  omitted: Schema.NullOr(Schema.Literal("lines", "bytes"))
+})
+export type SessionReviewFile = Schema.Schema.Type<typeof SessionReviewFile>
+
+/**
+ * Every changed file with counts, plus a patch that carries ONLY the files
+ * within the per-file and whole-review limits. Oversized files are listed,
+ * never transported.
+ */
+export const SessionReviewDiff = Schema.Struct({
+  files: Schema.Array(SessionReviewFile),
+  patch: Schema.String,
+  lineLimit: Schema.Number,
+  byteLimit: Schema.Number
+})
+export type SessionReviewDiff = Schema.Schema.Type<typeof SessionReviewDiff>
+
 /**
  * Kept as a small group so the renderer can construct this client separately
  * from the long-lived core client. Mapping the entire application RPC union to
@@ -811,9 +834,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { chatId: Schema.String, attachmentId: Schema.String }
   }),
 
-  /** The session worktree's unified working diff, used by full code review. */
+  /** The session worktree's bounded working diff, used by full code review. */
   Rpc.make("Sessions.diff", {
-    success: Schema.String,
+    success: SessionReviewDiff,
     error: GitError,
     payload: { id: Schema.String }
   }),

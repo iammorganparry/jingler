@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
 import {
+  EMPTY_REVIEW_DIFF,
   FILE_DIFF_BYTE_LIMIT,
   FILE_DIFF_LINE_LIMIT,
   WorkspaceService,
@@ -174,8 +175,8 @@ describe("WorkspaceService", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") {
-      expect(exit.value).toContain("+changed line")
-      expect(exit.value).toContain("README.md")
+      expect(exit.value.patch).toContain("+changed line")
+      expect(exit.value.patch).toContain("README.md")
     }
   })
 
@@ -192,11 +193,11 @@ describe("WorkspaceService", () => {
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
     // New file shows as an addition…
-    expect(exit.value).toContain("brand-new.ts")
-    expect(exit.value).toContain("+export const hi = 1")
+    expect(exit.value.patch).toContain("brand-new.ts")
+    expect(exit.value.patch).toContain("+export const hi = 1")
     // …and the deletion shows too.
-    expect(exit.value).toContain("README.md")
-    expect(exit.value).toContain("deleted file")
+    expect(exit.value.patch).toContain("README.md")
+    expect(exit.value.patch).toContain("deleted file")
     // The untracked file is left UNtracked afterwards (intent-to-add was reset).
     const stillUntracked = execFileSync("git", ["status", "--porcelain", "--", "brand-new.ts"], {
       cwd: repoPath,
@@ -218,10 +219,10 @@ describe("WorkspaceService", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value).toContain("rename from README.md")
-    expect(exit.value).toContain("rename to docs/README.md")
-    expect(exit.value).not.toContain("deleted file mode")
-    expect(exit.value).not.toContain("new file mode")
+    expect(exit.value.patch).toContain("rename from README.md")
+    expect(exit.value.patch).toContain("rename to docs/README.md")
+    expect(exit.value.patch).not.toContain("deleted file mode")
+    expect(exit.value.patch).not.toContain("new file mode")
 
     const selected = await runExit(
       WorkspaceService.boundedFileDiff(repoPath, "docs/README.md").pipe(
@@ -284,7 +285,7 @@ describe("WorkspaceService", () => {
 
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value).toContain("agent-new.ts")
+    expect(exit.value.patch).toContain("agent-new.ts")
     expect(
       execFileSync("git", ["status", "--porcelain=v1"], {
         cwd: repoPath,
@@ -334,7 +335,73 @@ describe("WorkspaceService", () => {
       temp.layer
     )
     expect(exit._tag).toBe("Success")
-    if (exit._tag === "Success") expect(exit.value).toBe("")
+    if (exit._tag === "Success") expect(exit.value).toEqual(EMPTY_REVIEW_DIFF)
+  })
+
+  it("diff() lists an oversized file with its counts but keeps its patch out", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "review-bounded-lines"))
+    writeFileSync(join(repoPath, "README.md"), "# dirty repo\nchanged line\n")
+    writeFileSync(join(repoPath, "generated.txt"), "generated\n".repeat(FILE_DIFF_LINE_LIMIT + 1))
+
+    const exit = await runExit(
+      WorkspaceService.diff(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.files.map((file) => [file.path, file.omitted])).toEqual([
+      ["README.md", null],
+      ["generated.txt", "lines"]
+    ])
+    expect(exit.value.files[1]).toMatchObject({ added: FILE_DIFF_LINE_LIMIT + 1, removed: 0 })
+    expect(exit.value.patch).toContain("+changed line")
+    expect(exit.value.patch).not.toContain("generated.txt")
+    expect(exit.value.lineLimit).toBe(FILE_DIFF_LINE_LIMIT)
+  })
+
+  it("diff() drops a file whose patch is over the byte limit even when its line count is not", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "review-bounded-bytes"))
+    writeFileSync(join(repoPath, "README.md"), "# dirty repo\nchanged line\n")
+    const wide = `${"x".repeat(1024)}\n`
+    writeFileSync(join(repoPath, "wide.txt"), wide.repeat(FILE_DIFF_BYTE_LIMIT / 1024))
+
+    const exit = await runExit(
+      WorkspaceService.diff(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.files.map((file) => [file.path, file.omitted])).toEqual([
+      ["README.md", null],
+      ["wide.txt", "bytes"]
+    ])
+    expect(exit.value.patch).toContain("+changed line")
+    expect(exit.value.patch).not.toContain("wide.txt")
+    expect(exit.value.patch.length).toBeLessThan(FILE_DIFF_BYTE_LIMIT)
+  })
+
+  it("diff() keeps a renamed file's patch when only an unrelated file is oversized", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "review-bounded-rename"))
+    mkdirSync(join(repoPath, "docs"), { recursive: true })
+    renameSync(join(repoPath, "README.md"), join(repoPath, "docs", "README.md"))
+    writeFileSync(join(repoPath, "generated.txt"), "generated\n".repeat(FILE_DIFF_LINE_LIMIT + 1))
+
+    const exit = await runExit(
+      WorkspaceService.diff(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.files.map((file) => [file.path, file.omitted])).toEqual([
+      ["docs/README.md", null],
+      ["generated.txt", "lines"]
+    ])
+    expect(exit.value.patch).toContain("rename from README.md")
+    expect(exit.value.patch).toContain("rename to docs/README.md")
+    expect(exit.value.patch).not.toContain("generated.txt")
   })
 
   it("diffStat counts huge untracked changes without returning their contents", async () => {

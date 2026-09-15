@@ -115,7 +115,8 @@ import {
   type SessionCreationPhase,
   type SessionCreationUpdate,
   type SessionDiffStat,
-  type SessionFileDiff
+  type SessionFileDiff,
+  type SessionReviewDiff
 } from "@jingler/contracts"
 import { RpcClient } from "@effect/rpc"
 import type {
@@ -602,7 +603,7 @@ export const rpc = {
     attachmentId: string
   ): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
-  sessionsDiff: (id: string): Promise<string> =>
+  sessionsDiff: (id: string): Promise<SessionReviewDiff> =>
     run((c) => c.Sessions.diff({ id })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),

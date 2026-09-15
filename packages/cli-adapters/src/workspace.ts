@@ -157,8 +157,167 @@ export type WorkspaceFileDiff =
 
 export const FILE_DIFF_LINE_LIMIT = 20_000
 export const FILE_DIFF_BYTE_LIMIT = 2 * 1024 * 1024
+/**
+ * Cap on the whole review patch. Every file is already bounded, but a session
+ * with thousands of changed files must still never hand the renderer an
+ * unbounded string: one 790k-line generated changeset took the renderer's V8
+ * heap from 300MB to the 4GB limit in eight minutes.
+ */
+export const REVIEW_DIFF_BYTE_LIMIT = 24 * 1024 * 1024
+
+/** One changed file in a review diff, counted by Git numstat. */
+export interface WorkspaceReviewFile {
+  readonly path: string
+  readonly added: number
+  readonly removed: number
+  /** Why the file's patch is absent from `patch`; null when it is included. */
+  readonly omitted: null | "lines" | "bytes"
+}
+
+/**
+ * The Code Review pane's worktree diff: every changed file with its counts,
+ * plus a unified patch that contains ONLY the files small enough to render.
+ */
+export interface WorkspaceReviewDiff {
+  readonly files: ReadonlyArray<WorkspaceReviewFile>
+  readonly patch: string
+  readonly lineLimit: number
+  readonly byteLimit: number
+}
+
+export const EMPTY_REVIEW_DIFF: WorkspaceReviewDiff = {
+  files: [],
+  patch: "",
+  lineLimit: FILE_DIFF_LINE_LIMIT,
+  byteLimit: FILE_DIFF_BYTE_LIMIT
+}
 
 const NUMSTAT_ENTRY = /^(\d+|-)\t(\d+|-)\t/
+const NUMSTAT_FILE_ENTRY = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/
+/** Lookahead, not a match: splitting on it keeps each `diff --git` header with its block. */
+const PATCH_BLOCK_BOUNDARY = /^(?=diff --git )/m
+
+interface NumstatFile {
+  readonly path: string
+  /** The source path of a rename, for pathspecs that must name both sides. */
+  readonly oldPath: string | null
+  readonly added: number
+  readonly removed: number
+}
+
+/**
+ * Parse `git diff --numstat -z`. Entries are `added\tremoved\tpath\0`; a
+ * rename leaves the path empty and follows with `old\0new\0`. Binary files
+ * count `-\t-` and contribute zero lines.
+ */
+const numstatFiles = (output: string): ReadonlyArray<NumstatFile> => {
+  const tokens = output.split("\0")
+  const files: Array<NumstatFile> = []
+  for (let index = 0; index < tokens.length; index++) {
+    const match = NUMSTAT_FILE_ENTRY.exec(tokens[index] ?? "")
+    if (match === null) continue
+    let path = match[3] ?? ""
+    let oldPath: string | null = null
+    if (path === "") {
+      oldPath = tokens[++index] ?? ""
+      path = tokens[++index] ?? ""
+    }
+    files.push({
+      path,
+      oldPath,
+      added: match[1] === "-" ? 0 : Number(match[1]),
+      removed: match[2] === "-" ? 0 : Number(match[2])
+    })
+  }
+  return files
+}
+
+/** Split a unified patch into its per-file `diff --git` blocks, in order. */
+const patchBlocks = (patch: string): ReadonlyArray<string> =>
+  patch.split(PATCH_BLOCK_BOUNDARY).filter((block) => block.length > 0)
+
+/**
+ * Bound a review patch after the per-file line gate: a block above the byte
+ * limit, or one that would push the whole patch past the review cap, is
+ * dropped and its file marked omitted. Blocks and `included` are both in Git's
+ * path order, so they align one-to-one; if they somehow do not, the patch is
+ * returned untouched rather than mislabelled.
+ */
+const boundReviewPatch = (
+  patch: string,
+  included: ReadonlyArray<WorkspaceReviewFile>
+): { readonly patch: string; readonly omittedPaths: ReadonlySet<string> } => {
+  const blocks = patchBlocks(patch)
+  if (blocks.length !== included.length) return { patch, omittedPaths: new Set() }
+  const kept: Array<string> = []
+  const omittedPaths = new Set<string>()
+  let total = 0
+  for (let index = 0; index < blocks.length; index++) {
+    const block = blocks[index]!
+    const file = included[index]!
+    if (block.length > FILE_DIFF_BYTE_LIMIT || total + block.length > REVIEW_DIFF_BYTE_LIMIT) {
+      omittedPaths.add(file.path)
+      continue
+    }
+    total += block.length
+    kept.push(block)
+  }
+  return { patch: kept.join(""), omittedPaths }
+}
+
+const reviewDiffFromIndex = (
+  worktreePath: string,
+  environment: Readonly<Record<string, string>>
+) =>
+  Effect.gen(function* () {
+    const counted = yield* runGitWithEnv(
+      worktreePath,
+      ["diff", "--cached", "--find-renames", "--numstat", "-z", "HEAD"],
+      environment
+    ).pipe(Effect.map(numstatFiles))
+    if (counted.length === 0) return EMPTY_REVIEW_DIFF
+    const files: ReadonlyArray<WorkspaceReviewFile & { readonly oldPath: string | null }> =
+      counted.map((file) => ({
+        path: file.path,
+        oldPath: file.oldPath,
+        added: file.added,
+        removed: file.removed,
+        omitted: file.added + file.removed > FILE_DIFF_LINE_LIMIT ? "lines" : null
+      }))
+    const included = files.filter((file) => file.omitted === null)
+    if (included.length === 0) {
+      return { ...EMPTY_REVIEW_DIFF, files: files.map(({ oldPath: _, ...file }) => file) }
+    }
+    // Pathspecs only when something is excluded: the common all-small case
+    // must not depend on argument-list limits for a repository with thousands
+    // of changed files.
+    const raw = yield* runGitWithEnv(
+      worktreePath,
+      included.length === files.length
+        ? ["diff", "--cached", "--find-renames", "HEAD"]
+        : [
+            "--literal-pathspecs",
+            "diff",
+            "--cached",
+            "--find-renames",
+            "HEAD",
+            "--",
+            ...included.flatMap((file) =>
+              file.oldPath === null ? [file.path] : [file.oldPath, file.path]
+            )
+          ],
+      environment
+    )
+    const bounded = boundReviewPatch(raw, included)
+    return {
+      files: files.map(({ oldPath: _, ...file }) =>
+        bounded.omittedPaths.has(file.path) ? { ...file, omitted: "bytes" as const } : file
+      ),
+      patch: bounded.patch,
+      lineLimit: FILE_DIFF_LINE_LIMIT,
+      byteLimit: FILE_DIFF_BYTE_LIMIT
+    }
+  })
 
 const numstat = (output: string): WorkspaceDiffStat => {
   let added = 0
@@ -403,24 +562,29 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()(
         }),
 
       /**
-       * The unified working diff for a worktree, including untracked files.
+       * The Code Review pane's working diff for a worktree, including untracked
+       * files, bounded per file and overall (`WorkspaceReviewDiff`).
        *
        * Git only detects a move when both sides are in the same index, but the
        * destination of an ordinary filesystem move is untracked. Build a
        * disposable index from HEAD, add the worktree to that isolated index,
        * then diff it. This lets Git correlate renames while never reading from
        * or writing to the developer's real staging area.
+       *
+       * Numstat runs first so a generated file with hundreds of thousands of
+       * changed lines is listed with its counts but never materialized, never
+       * crosses IPC, and never reaches the renderer's diff parser.
        */
       diff: (
         worktreePath: string
       ): Effect.Effect<
-        string,
+        WorkspaceReviewDiff,
         GitError,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor
-      > => stagedWorktreeGit(
-        worktreePath,
-        ["diff", "--cached", "--find-renames", "--binary", "HEAD"]
-      ),
+      > =>
+        withStagedWorktree(worktreePath, null, (environment) =>
+          reviewDiffFromIndex(worktreePath, environment)
+        ),
 
       /** Count a worktree diff without materializing or transporting its patch. */
       diffStat: (

@@ -10,6 +10,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  EMPTY_REVIEW_DIFF,
   AppPaths,
   AgentResourceService,
   AssetService,
@@ -911,7 +912,7 @@ describe("RPC handlers", () => {
           ),
         ),
       );
-      expect(patch).toBe("");
+      expect(patch).toEqual(EMPTY_REVIEW_DIFF);
     });
 
     it("surfaces git failures instead of reporting no changes", async () => {
