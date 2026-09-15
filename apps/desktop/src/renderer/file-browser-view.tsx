@@ -344,6 +344,19 @@ const selectedFileDiff = (
   }
 }
 
+const visibleOversizedDiff = (
+  browser: FileBrowserController
+): FileBrowserController["patchTooLarge"] =>
+  browser.viewMode === "diff" ? browser.patchTooLarge : null
+
+const visibleFileDiff = <T,>(browser: FileBrowserController, fileDiff: T | null): T | null =>
+  browser.viewMode === "diff" ? fileDiff : null
+
+const fileDiffIsLoading = (browser: FileBrowserController): boolean =>
+  browser.viewMode === "diff" &&
+  browser.patch === null &&
+  browser.patchError === null
+
 function FileCanvas({
   sessionId,
   browser,
@@ -427,8 +440,10 @@ function FileCanvas({
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
   }
-  if (browser.viewMode === "diff" && browser.patchTooLarge !== null) {
-    const { added, removed, reason, lineLimit, byteLimit } = browser.patchTooLarge
+  const oversizedDiff = visibleOversizedDiff(browser)
+  const shownFileDiff = visibleFileDiff(browser, fileDiff)
+  if (oversizedDiff !== null) {
+    const { added, removed, reason, lineLimit, byteLimit } = oversizedDiff
     return renderDiffContainer(
       browser,
       null,
@@ -443,9 +458,9 @@ function FileCanvas({
       </div>
     )
   }
-  if (browser.viewMode === "diff" && fileDiff !== null) {
+  if (shownFileDiff !== null) {
     return renderDiffContainer(browser, followedSelection, renderFileDiff({
-      fileDiff,
+      fileDiff: shownFileDiff,
       browser,
       selection,
       onSelectionChange,
@@ -456,11 +471,7 @@ function FileCanvas({
       followedSelection
     }))
   }
-  if (
-    browser.viewMode === "diff" &&
-    browser.patch === null &&
-    browser.patchError === null
-  ) {
+  if (fileDiffIsLoading(browser)) {
     return <AssetCanvas selectedPath={browser.selectedPath} loading />
   }
   const notice = fileStatusNotice(browser, sessionId)
