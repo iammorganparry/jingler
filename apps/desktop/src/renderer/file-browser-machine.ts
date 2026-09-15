@@ -4,6 +4,7 @@ import type {
   AssetTextPayload,
   AssetWriteResult
 } from "@jingler/core"
+import type { SessionFileDiff } from "@jingler/contracts"
 import { Cause, Option, Runtime } from "effect"
 import { assign, fromPromise, raise, setup } from "xstate"
 import { resolveAgentFollowPath } from "./file-diff-context.js"
@@ -13,7 +14,7 @@ export interface FileBrowserApi {
     sessionId: string,
     worktreePath?: string
   ) => Promise<ReadonlyArray<AssetFileEntry>>
-  readonly diff: (sessionId: string) => Promise<string>
+  readonly diff: (sessionId: string, path: string) => Promise<SessionFileDiff>
   readonly read: (sessionId: string, path: string) => Promise<AssetPayload>
   readonly write: (
     sessionId: string,
@@ -60,7 +61,10 @@ export interface FileBrowserContext {
   readonly treeError: string | null
   readonly treeRefreshQueued: boolean
   readonly patch: string | null
+  readonly patchTooLarge: Extract<SessionFileDiff, { kind: "too-large" }> | null
   readonly patchError: string | null
+  readonly diffPath: string | null
+  readonly diffCache: Readonly<Record<string, SessionFileDiff>>
   readonly openPaths: ReadonlyArray<string>
   readonly selectedPath: string | null
   readonly payload: AssetPayload | null
@@ -107,6 +111,7 @@ export type FileBrowserEvent =
       readonly completed: boolean
     }
   | { readonly type: "DIFF_LOADED"; readonly patch: string }
+  | { readonly type: "LOAD_DIFF"; readonly path: string }
   | { readonly type: "TRY_PENDING_AGENT_TARGET" }
 
 const isTextPayload = (payload: AssetPayload): payload is AssetTextPayload => "text" in payload
@@ -134,6 +139,17 @@ const refreshedEntries = (
 
 const appendOpenPath = (paths: ReadonlyArray<string>, path: string): ReadonlyArray<string> =>
   paths.includes(path) ? paths : [...paths, path]
+
+const MAX_CACHED_FILE_DIFFS = 4
+const cacheFileDiff = (
+  cache: Readonly<Record<string, SessionFileDiff>>,
+  path: string,
+  result: SessionFileDiff
+): Readonly<Record<string, SessionFileDiff>> =>
+  Object.fromEntries(
+    [...Object.entries(cache).filter(([candidate]) => candidate !== path), [path, result]]
+      .slice(-MAX_CACHED_FILE_DIFFS)
+  )
 
 const closeFallback = (
   paths: ReadonlyArray<string>,
@@ -216,8 +232,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           input: { readonly sessionId: string; readonly worktreePath?: string }
         }) => api.list(input.sessionId, input.worktreePath)
       ),
-      loadDiff: fromPromise(({ input }: { input: { readonly sessionId: string } }) =>
-        api.diff(input.sessionId)
+      loadDiff: fromPromise(
+        ({ input }: { input: { readonly sessionId: string; readonly path: string } }) =>
+          api.diff(input.sessionId, input.path)
       ),
       readFile: fromPromise(
         ({ input }: { input: { readonly sessionId: string; readonly path: string } }) =>
@@ -237,9 +254,41 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       )
     },
     actions: {
-      syncWorktree: assign(({ event }) =>
+      prepareDiff: assign(({ context, event }) => {
+        const path = event.type === "LOAD_DIFF" ? event.path : context.selectedPath
+        if (path === null) return {}
+        return {
+          diffPath: path,
+          patch: null,
+          patchTooLarge: null,
+          patchError: null,
+          ...(event.type === "REFRESH_DIFF" || event.type === "VIEW_ACTIVATED"
+            ? { diffCache: {} }
+            : {})
+        }
+      }),
+      activateCachedDiff: assign(({ context, event }) => {
+        const path = event.type === "LOAD_DIFF" ? event.path : context.selectedPath
+        const result = path === null ? undefined : context.diffCache[path]
+        if (path === null || result === undefined) return {}
+        return {
+          diffPath: path,
+          patch: result.kind === "patch" ? result.patch : null,
+          patchTooLarge: result.kind === "too-large" ? result : null,
+          patchError: null,
+          diffCache: cacheFileDiff(context.diffCache, path, result)
+        }
+      }),
+      syncWorktree: assign(({ context, event }) =>
         event.type === "SYNC_WORKTREE"
-          ? { worktreePath: event.worktreePath }
+          ? {
+              worktreePath: event.worktreePath,
+              patch: null,
+              patchTooLarge: null,
+              patchError: null,
+              diffPath: context.selectedPath,
+              diffCache: {}
+            }
           : {}
       ),
       selectPath: assign(({ context, event }) =>
@@ -351,6 +400,24 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         }
         return {}
       }),
+      loadNextDiff: raise(({ context, event }) => {
+        const pending = context.pendingDiscard
+        const closing =
+          event.type === "CLOSE"
+            ? event.path
+            : pending?.type === "close"
+              ? pending.path
+              : null
+        return {
+          type: "LOAD_DIFF" as const,
+          path:
+            closing !== null
+              ? (closeFallback(context.openPaths, closing).selectedPath ?? "")
+              : pending?.type === "open"
+                ? pending.path
+                : (context.selectedPath ?? "")
+        }
+      }),
       applyPendingDiscard: assign(({ context }) => {
         const closing =
           context.pendingDiscard?.type === "close"
@@ -409,8 +476,18 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
     },
     guards: {
       documentOnly: ({ context }) => context.documentOnly,
+      hasDiffPath: ({ context }) => context.selectedPath !== null,
+      hasCachedDiff: ({ context, event }) => {
+        const path = event.type === "LOAD_DIFF" ? event.path : context.selectedPath
+        return path !== null && Object.hasOwn(context.diffCache, path)
+      },
       worktreeChanged: ({ context, event }) =>
         event.type === "SYNC_WORKTREE" &&
+        context.worktreePath !== event.worktreePath,
+      selectedWorktreeChanged: ({ context, event }) =>
+        event.type === "SYNC_WORKTREE" &&
+        !context.documentOnly &&
+        context.selectedPath !== null &&
         context.worktreePath !== event.worktreePath,
       treeEmpty: ({ context }) => context.entries.length === 0,
       hasEditablePayload: ({ context }) =>
@@ -477,7 +554,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       treeError: null,
       treeRefreshQueued: false,
       patch: null,
+      patchTooLarge: null,
       patchError: null,
+      diffPath: null,
+      diffCache: {},
       openPaths: [],
       selectedPath: null,
       payload: null,
@@ -637,26 +717,43 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         }
       },
       changes: {
-        initial: "loading",
+        initial: "ready",
         states: {
           loading: {
-            always: { guard: "documentOnly", target: "ready" },
             on: {
-              REFRESH_DIFF: { target: "loading", reenter: true }
+              LOAD_DIFF: [
+                { guard: "hasCachedDiff", target: "ready", actions: "activateCachedDiff" },
+                { target: "loading", reenter: true, actions: "prepareDiff" }
+              ],
+              REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", reenter: true, actions: "prepareDiff" },
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", reenter: true, actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading",
+                reenter: true
+              }
             },
             invoke: {
               src: "loadDiff",
-              input: ({ context }) => ({ sessionId: context.sessionId }),
+              input: ({ context }) => ({
+                sessionId: context.sessionId,
+                path: context.diffPath ?? ""
+              }),
               onDone: {
                 target: "ready",
                 actions: [
-                  assign({
-                    patch: ({ event }) => event.output,
-                    patchError: null
-                  }),
+                  assign(({ context, event }) => ({
+                    patch: event.output.kind === "patch" ? event.output.patch : null,
+                    patchTooLarge: event.output.kind === "too-large" ? event.output : null,
+                    patchError: null,
+                    diffCache:
+                      context.diffPath === null
+                        ? context.diffCache
+                        : cacheFileDiff(context.diffCache, context.diffPath, event.output)
+                  })),
                   raise(({ event }) => ({
                     type: "DIFF_LOADED" as const,
-                    patch: event.output
+                    patch: event.output.kind === "patch" ? event.output.patch : ""
                   }))
                 ]
               },
@@ -668,8 +765,32 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               }
             }
           },
-          ready: { on: { REFRESH_DIFF: "loading" } },
-          error: { on: { REFRESH_DIFF: "loading" } }
+          ready: {
+            on: {
+              LOAD_DIFF: [
+                { guard: "documentOnly" },
+                { guard: "hasCachedDiff", actions: "activateCachedDiff" },
+                { target: "loading", actions: "prepareDiff" }
+              ],
+              REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading"
+              }
+            }
+          },
+          error: {
+            on: {
+              LOAD_DIFF: { target: "loading", actions: "prepareDiff" },
+              REFRESH_DIFF: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              VIEW_ACTIVATED: { guard: "hasDiffPath", target: "loading", actions: "prepareDiff" },
+              SYNC_WORKTREE: {
+                guard: "selectedWorktreeChanged",
+                target: "loading"
+              }
+            }
+          }
         }
       },
       document: {
@@ -687,7 +808,14 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             {
               target: ".loading",
               reenter: true,
-              actions: ["selectPath", raise({ type: "DISABLE_FOLLOW" })]
+              actions: [
+                "selectPath",
+                raise({ type: "DISABLE_FOLLOW" }),
+                raise(({ event }) => ({
+                  type: "LOAD_DIFF" as const,
+                  path: event.type === "OPEN" ? event.path : ""
+                }))
+              ]
             }
           ],
           CLOSE: [
@@ -697,7 +825,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               guard: "closeHasFallback",
               target: ".loading",
               reenter: true,
-              actions: "closeAndSelectFallback"
+              actions: ["loadNextDiff", "closeAndSelectFallback"]
             },
             {
               target: ".idle",
@@ -713,7 +841,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               guard: "pendingCloseHasFallback",
               target: ".loading",
               reenter: true,
-              actions: "applyPendingDiscard"
+              actions: ["loadNextDiff", "applyPendingDiscard"]
             },
             {
               guard: "pendingClose",
@@ -724,7 +852,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               guard: "hasPendingDiscard",
               target: ".loading",
               reenter: true,
-              actions: "applyPendingDiscard"
+              actions: ["loadNextDiff", "applyPendingDiscard"]
             }
           ],
           CANCEL_DISCARD: { actions: "cancelDiscard" },
@@ -952,7 +1080,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                       payload: ({ event }) => event.output,
                       failure: null
                     }),
-                    raise({ type: "REFRESH_TREE" })
+                    raise({ type: "REFRESH_TREE" }),
+                    raise({ type: "REFRESH_DIFF" })
                   ]
                 },
                 {
@@ -963,7 +1092,8 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                       draft: ({ event }) => event.output.text,
                       failure: null
                     }),
-                    raise({ type: "REFRESH_TREE" })
+                    raise({ type: "REFRESH_TREE" }),
+                    raise({ type: "REFRESH_DIFF" })
                   ]
                 }
               ],

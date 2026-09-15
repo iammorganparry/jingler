@@ -48,7 +48,7 @@ const h = vi.hoisted(() => ({
     images: unknown
     options: unknown
   }>,
-  diffValue: "diff-0",
+  diffValue: { added: 0, removed: 0, files: 0 },
   diffCalls: 0,
   // Lets a test hold `refreshingDiff` open, to observe what happens INSIDE the
   // settled-turn boundary (the entry trim) before the queued dequeue fires.
@@ -120,7 +120,7 @@ vi.mock("./rpc-client.js", () => ({
       await h.filesGate
       return h.filesValue
     },
-    sessionsDiff: async () => {
+    sessionsDiffStat: async () => {
       h.diffCalls += 1
       await h.diffGate
       return h.diffValue
@@ -242,7 +242,7 @@ const githubIdentity = {
 beforeEach(() => {
   h.streamCb = null
   h.agentRunCalls.length = 0
-  h.diffValue = "diff-0"
+  h.diffValue = { added: 0, removed: 0, files: 0 }
   h.diffCalls = 0
   h.diffGate = Promise.resolve()
   h.filesValue = []
@@ -1755,7 +1755,7 @@ describe("conversationMachine — realtime Changes rail", () => {
 
     const beforeDiff = h.diffCalls
     const beforeFiles = h.filesCalls
-    h.diffValue = "diff-after-generator"
+    h.diffValue = { added: 1, removed: 0, files: 1 }
     h.filesValue = ["src/generated.ts"]
     emit({ _tag: "ToolStart", id: "mcp-1", name: "mcp.generator", target: null })
     emit({
@@ -1775,7 +1775,7 @@ describe("conversationMachine — realtime Changes rail", () => {
       }
     })
 
-    await waitFor(actor, (s) => s.context.patch === "diff-after-generator", { timeout: 3000 })
+    await waitFor(actor, (s) => s.context.diffStat.added === 1, { timeout: 3000 })
     await waitFor(actor, (s) => s.context.files.includes("src/generated.ts"), { timeout: 3000 })
     expect(h.diffCalls).toBeGreaterThan(beforeDiff)
     expect(h.filesCalls).toBeGreaterThan(beforeFiles)
@@ -1789,11 +1789,11 @@ describe("conversationMachine — realtime Changes rail", () => {
     await waitFor(actor, (s) => s.matches("running"))
 
     const before = h.diffCalls
-    h.diffValue = "diff-after-edit"
+    h.diffValue = { added: 3, removed: 0, files: 1 }
     emit({ _tag: "ToolStart", id: "e1", name: "Write", target: "a.ts" })
     emit({ _tag: "ToolEnd", id: "e1", status: "success", meta: null, diff: { added: 3, removed: 0 }, preview: null })
 
-    await waitFor(actor, (s) => s.context.patch === "diff-after-edit", { timeout: 3000 })
+    await waitFor(actor, (s) => s.context.diffStat.added === 3, { timeout: 3000 })
     expect(h.diffCalls).toBeGreaterThan(before)
     // The turn is still live — the live refresh doesn't end it.
     expect(actor.getSnapshot().matches("running")).toBe(true)

@@ -6,8 +6,15 @@ import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AppPaths } from "./app-paths.js"
 import { ConfigService } from "./config.js"
-import { WorkspaceService, filterDiffHunks } from "./workspace.js"
+import {
+  FILE_DIFF_BYTE_LIMIT,
+  FILE_DIFF_LINE_LIMIT,
+  WorkspaceService,
+  filterDiffHunks
+} from "./workspace.js"
 import { failureOf, initGitRepo, mkTemp, runExit, withTempRoot } from "./test-support.js"
+
+const LOOSE_OBJECT_COUNT = /^count: (\d+)$/m
 
 /**
  * WorkspaceService scans a real directory of real git repos. We assert what the
@@ -215,12 +222,45 @@ describe("WorkspaceService", () => {
     expect(exit.value).toContain("rename to docs/README.md")
     expect(exit.value).not.toContain("deleted file mode")
     expect(exit.value).not.toContain("new file mode")
+
+    const selected = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "docs/README.md").pipe(
+        Effect.provide(services)
+      ),
+      temp.layer
+    )
+    expect(selected._tag).toBe("Success")
+    if (selected._tag === "Success" && selected.value.kind === "patch") {
+      expect(selected.value.patch).toContain("rename from README.md")
+      expect(selected.value.patch).toContain("rename to docs/README.md")
+    }
     expect(
       execFileSync("git", ["status", "--porcelain=v1"], {
         cwd: repoPath,
         encoding: "utf-8"
       })
     ).toContain("?? docs/")
+  })
+
+  it("boundedFileDiff preserves whitespace in a renamed source path", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "renamed-whitespace"))
+    writeFileSync(join(repoPath, " old.txt"), "renamed content\n")
+    execFileSync("git", ["add", "--", " old.txt"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "add spaced file", "--no-gpg-sign"], {
+      cwd: repoPath
+    })
+    renameSync(join(repoPath, " old.txt"), join(repoPath, " new.txt"))
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, " new.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success" && exit.value.kind === "patch") {
+      expect(exit.value.patch).toContain("rename from  old.txt")
+      expect(exit.value.patch).toContain("rename to  new.txt")
+    }
   })
 
   it("diff() never mutates the developer's staged index", async () => {
@@ -259,6 +299,34 @@ describe("WorkspaceService", () => {
     ).toBe(cachedBefore)
   })
 
+  it("diff inspection leaves generated blobs out of the repository object database", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "isolated-objects"))
+    writeFileSync(join(repoPath, "small.txt"), "small\n")
+    writeFileSync(join(repoPath, "unrelated.bin"), "x".repeat(FILE_DIFF_BYTE_LIMIT + 1))
+    const countObjects = () =>
+      execFileSync("git", ["count-objects", "-v"], {
+        cwd: repoPath,
+        encoding: "utf-8"
+      }).match(LOOSE_OBJECT_COUNT)?.[1]
+    const before = countObjects()
+
+    const selected = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "small.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(selected._tag).toBe("Success")
+    if (selected._tag === "Success" && selected.value.kind === "patch") {
+      expect(selected.value.patch).toContain("small.txt")
+      expect(selected.value.patch).not.toContain("unrelated.bin")
+    }
+    await runExit(
+      WorkspaceService.diffStat(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(countObjects()).toBe(before)
+  })
+
   it("diff() is empty for a clean worktree", async () => {
     const repoPath = initGitRepo(join(repos.dir, "clean"))
     const exit = await runExit(
@@ -267,6 +335,115 @@ describe("WorkspaceService", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag === "Success") expect(exit.value).toBe("")
+  })
+
+  it("diffStat counts huge untracked changes without returning their contents", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "diff-stat"))
+    writeFileSync(join(repoPath, "generated.txt"), "generated\n".repeat(FILE_DIFF_LINE_LIMIT + 1))
+
+    const exit = await runExit(
+      WorkspaceService.diffStat(repoPath).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value).toEqual({
+        added: FILE_DIFF_LINE_LIMIT + 1,
+        removed: 0,
+        files: 1
+      })
+    }
+  })
+
+  it("boundedFileDiff refuses an oversized file before producing its patch", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "bounded-file-diff"))
+    writeFileSync(join(repoPath, "generated.txt"), "generated\n".repeat(FILE_DIFF_LINE_LIMIT + 1))
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "generated.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value).toEqual({
+        kind: "too-large",
+        added: FILE_DIFF_LINE_LIMIT + 1,
+        removed: 0,
+        reason: "lines",
+        lineLimit: FILE_DIFF_LINE_LIMIT,
+        byteLimit: FILE_DIFF_BYTE_LIMIT
+      })
+    }
+  })
+
+  it("boundedFileDiff rejects a huge single-line file before producing its patch", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "bounded-file-diff-bytes"))
+    writeFileSync(join(repoPath, "minified.js"), "x".repeat(FILE_DIFF_BYTE_LIMIT + 1))
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "minified.js").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value).toMatchObject({ kind: "too-large", reason: "bytes" })
+    }
+  })
+
+  it("boundedFileDiff returns a normal selected file and includes untracked files", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "bounded-file-diff-small"))
+    writeFileSync(join(repoPath, "small.txt"), "small\n")
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "small.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value.kind).toBe("patch")
+      if (exit.value.kind === "patch") expect(exit.value.patch).toContain("+small")
+    }
+  })
+
+  it("boundedFileDiff returns an empty patch for a large unchanged file", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "bounded-file-diff-unchanged"))
+    writeFileSync(join(repoPath, "large.txt"), "x".repeat(FILE_DIFF_BYTE_LIMIT / 2 + 1))
+    execFileSync("git", ["add", "large.txt"], { cwd: repoPath })
+    execFileSync("git", ["commit", "-m", "add large file", "--no-gpg-sign"], {
+      cwd: repoPath
+    })
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "large.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value).toEqual({ kind: "patch", patch: "" })
+  })
+
+  it("treats selected filenames as literal Git paths", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "bounded-file-diff-literal"))
+    writeFileSync(join(repoPath, "literal*.txt"), "selected\n")
+    writeFileSync(join(repoPath, "literal-other.txt"), "unrelated\n")
+
+    const exit = await runExit(
+      WorkspaceService.boundedFileDiff(repoPath, "literal*.txt").pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") {
+      expect(exit.value.kind).toBe("patch")
+      if (exit.value.kind === "patch") {
+        expect(exit.value.patch).toContain("literal*.txt")
+        expect(exit.value.patch).not.toContain("literal-other.txt")
+      }
+    }
   })
 
   // Commit a fresh file to `repoPath`.

@@ -332,6 +332,31 @@ function fileBrowserShortcut(rootRef: import("react").RefObject<HTMLDivElement |
   }
 }
 
+const selectedFileDiff = (
+  patch: string | null,
+  path: string | null
+): ReturnType<typeof parsePierreFileDiffs>[number] | null => {
+  if (patch === null || path === null) return null
+  try {
+    return parsePierreFileDiffs(patch).find((candidate) => candidate.name === path) ?? null
+  } catch {
+    return null
+  }
+}
+
+const visibleOversizedDiff = (
+  browser: FileBrowserController
+): FileBrowserController["patchTooLarge"] =>
+  browser.viewMode === "diff" ? browser.patchTooLarge : null
+
+const visibleFileDiff = <T,>(browser: FileBrowserController, fileDiff: T | null): T | null =>
+  browser.viewMode === "diff" ? fileDiff : null
+
+const fileDiffIsLoading = (browser: FileBrowserController): boolean =>
+  browser.viewMode === "diff" &&
+  browser.patch === null &&
+  browser.patchError === null
+
 function FileCanvas({
   sessionId,
   browser,
@@ -362,18 +387,10 @@ function FileCanvas({
   readonly debugRevision: number
 }) {
   const payload = browser.payload
-  const fileDiff = useMemo(() => {
-    if (browser.patch === null || browser.selectedPath === null) return null
-    try {
-      return (
-        parsePierreFileDiffs(browser.patch).find(
-          (candidate) => candidate.name === browser.selectedPath
-        ) ?? null
-      )
-    } catch {
-      return null
-    }
-  }, [browser.patch, browser.selectedPath])
+  const fileDiff = useMemo(
+    () => selectedFileDiff(browser.patch, browser.selectedPath),
+    [browser.patch, browser.selectedPath]
+  )
   const followedSelection = useMemo(() => {
     if (
       !browser.followEnabled ||
@@ -423,23 +440,39 @@ function FileCanvas({
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
   }
-  if (browser.viewMode === "diff") {
-    if (fileDiff !== null) {
-      return renderDiffContainer(browser, followedSelection, renderFileDiff({
-        fileDiff,
-        browser,
-        selection,
-        onSelectionChange,
-        onSendReference,
-        onSendComment,
-        addDiffSelectionToChat,
-        commentOnDiffSelection,
-        followedSelection
-      }))
-    }
-    if (browser.patch === null && browser.patchError === null) {
-      return <AssetCanvas selectedPath={browser.selectedPath} loading />
-    }
+  const oversizedDiff = visibleOversizedDiff(browser)
+  const shownFileDiff = visibleFileDiff(browser, fileDiff)
+  if (oversizedDiff !== null) {
+    const { added, removed, reason, lineLimit, byteLimit } = oversizedDiff
+    return renderDiffContainer(
+      browser,
+      null,
+      <div className="flex h-full items-center justify-center p-6">
+        <Callout tone="yellow" className="max-w-lg">
+          Diff too large to display. This file changes {added + removed} lines
+          (+{added} −{removed}); the viewer limit is{" "}
+          {reason === "lines"
+            ? `${lineLimit.toLocaleString()} changed lines`
+            : `${(byteLimit / 1024 / 1024).toLocaleString()} MB of source`}.
+        </Callout>
+      </div>
+    )
+  }
+  if (shownFileDiff !== null) {
+    return renderDiffContainer(browser, followedSelection, renderFileDiff({
+      fileDiff: shownFileDiff,
+      browser,
+      selection,
+      onSelectionChange,
+      onSendReference,
+      onSendComment,
+      addDiffSelectionToChat,
+      commentOnDiffSelection,
+      followedSelection
+    }))
+  }
+  if (fileDiffIsLoading(browser)) {
+    return <AssetCanvas selectedPath={browser.selectedPath} loading />
   }
   const notice = fileStatusNotice(browser, sessionId)
   if (notice !== null) return notice

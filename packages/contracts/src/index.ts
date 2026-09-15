@@ -159,6 +159,26 @@ export const SessionCreationUpdate = Schema.Union(
 )
 export type SessionCreationUpdate = Schema.Schema.Type<typeof SessionCreationUpdate>
 
+export const SessionDiffStat = Schema.Struct({
+  added: Schema.Number,
+  removed: Schema.Number,
+  files: Schema.Number
+})
+export type SessionDiffStat = Schema.Schema.Type<typeof SessionDiffStat>
+
+export const SessionFileDiff = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("patch"), patch: Schema.String }),
+  Schema.Struct({
+    kind: Schema.Literal("too-large"),
+    added: Schema.Number,
+    removed: Schema.Number,
+    reason: Schema.Literal("lines", "bytes"),
+    lineLimit: Schema.Number,
+    byteLimit: Schema.Number
+  })
+)
+export type SessionFileDiff = Schema.Schema.Type<typeof SessionFileDiff>
+
 /**
  * Kept as a small group so the renderer can construct this client separately
  * from the long-lived core client. Mapping the entire application RPC union to
@@ -791,11 +811,25 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { chatId: Schema.String, attachmentId: Schema.String }
   }),
 
-  /** The session worktree's unified working diff, for the Changes rail. */
+  /** The session worktree's unified working diff, used by full code review. */
   Rpc.make("Sessions.diff", {
     success: Schema.String,
     error: GitError,
     payload: { id: Schema.String }
+  }),
+
+  /** Lightweight totals for badges and the Changes tab. */
+  Rpc.make("Sessions.diffStat", {
+    success: SessionDiffStat,
+    error: GitError,
+    payload: { id: Schema.String }
+  }),
+
+  /** One bounded file patch, loaded only when that file is opened. */
+  Rpc.make("Sessions.fileDiff", {
+    success: SessionFileDiff,
+    error: GitError,
+    payload: { id: Schema.String, path: Schema.String }
   }),
 
   /**

@@ -86,6 +86,8 @@ const services = (): DeviceExecutorServices => ({
   })),
   transcriptPage: vi.fn(async () => ({ messages: [], hasMore: false })),
   diff: vi.fn(async () => "diff --git"),
+  diffStat: vi.fn(async () => ({ added: 1, removed: 1, files: 1 })),
+  fileDiff: vi.fn(async () => ({ kind: "patch" as const, patch: "diff --git" })),
   files: vi.fn(async () => ["src/index.ts"]),
   branches: vi.fn(async () => ["main"]),
   exportHandoff: vi.fn(async () => ({ version: 1 })),
@@ -333,6 +335,11 @@ describe("device session command executor", () => {
       async () => undefined
     )
     await executor.execute(command("Sessions.diff", {}), async () => undefined)
+    await executor.execute(command("Sessions.diffStat", {}), async () => undefined)
+    await executor.execute(
+      command("Sessions.fileDiff", { path: "src/app.ts" }),
+      async () => undefined
+    )
     await executor.execute(command("Workspace.files", {}), async () => undefined)
     await executor.execute(
       command("Workspace.branches", { repoPath: "/repos/jingler" }),
@@ -345,6 +352,8 @@ describe("device session command executor", () => {
     await executor.execute(command("Sessions.delete", {}), async () => undefined)
     expect(dependencies.transcriptPage).toHaveBeenCalledWith({ chatId: "chat_1", limit: 50 })
     expect(dependencies.diff).toHaveBeenCalledWith("session_1")
+    expect(dependencies.diffStat).toHaveBeenCalledWith("session_1")
+    expect(dependencies.fileDiff).toHaveBeenCalledWith("session_1", "src/app.ts")
     expect(dependencies.files).toHaveBeenCalledWith("session_1", undefined)
     expect(dependencies.branches).toHaveBeenCalledWith("session_1", "/repos/jingler")
     expect(dependencies.archive).toHaveBeenCalledWith("session_1", "merged")

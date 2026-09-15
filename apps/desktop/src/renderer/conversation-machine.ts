@@ -55,6 +55,7 @@ import {
   STOPPED_NOTE,
   userMessage
 } from "@jingler/core"
+import type { SessionDiffStat } from "@jingler/contracts"
 import {
   assign,
   fromCallback,
@@ -271,10 +272,10 @@ export interface ConversationContext {
   readonly connectionId: ProviderConnectionId | null
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
-  /** The worktree's current unified diff, for the Changes rail. */
-  readonly patch: string
+  /** Lightweight worktree totals for the Changes rail. */
+  readonly diffStat: SessionDiffStat
   /**
-   * When `patch` was last read (epoch ms; 0 = never). Chats in one session
+   * When `diffStat` was last read (epoch ms; 0 = never). Chats in one session
    * each hold their own snapshot of the SAME worktree's diff, taken at
    * different times — the session-level diff chip must follow the freshest
    * one, not whichever chat happened to publish last (that alternated the
@@ -454,7 +455,7 @@ type ConversationEvent =
   | { type: "STREAM_EVENT"; event: StreamEvent }
   | { type: "RECOVER_SUBAGENT_FLEET"; events: ReadonlyArray<SubagentFleetEvent> }
   | { type: "SESSION_EVENT_ENVELOPE"; envelope: SessionEventEnvelope }
-  | { type: "PATCH_UPDATED"; patch: string }
+  | { type: "DIFF_STAT_UPDATED"; diffStat: SessionDiffStat }
   | { type: "FILES_UPDATED"; files: ReadonlyArray<string> }
   | { type: "DECIDE_GATE"; gateId: string; decision: GateDecision }
   | { type: "ANSWER_QUESTION"; requestId: string; answers: ReadonlyArray<QuestionAnswer> }
@@ -470,7 +471,7 @@ type ConversationEvent =
   | {
       type: "WORKSPACE_META_LOADED"
       files: ReadonlyArray<string>
-      patch: string
+      diffStat: SessionDiffStat
     }
   | { type: "SHARED_PLAN_UPDATED"; plan: Plan; producingChatId: string }
   | { type: "SKILLS_LOADED"; skills: ReadonlyArray<Skill> }
@@ -720,9 +721,9 @@ const loadConversation = fromPromise<
   }
 })
 
-/** Re-read the worktree diff after a turn completes (edits may have landed). */
-const refreshDiff = fromPromise<string, { session: Session }>(({ input }) =>
-  rpc.sessionsDiff(input.session.id)
+/** Re-read worktree totals after a turn completes (edits may have landed). */
+const refreshDiff = fromPromise<SessionDiffStat, { session: Session }>(({ input }) =>
+  rpc.sessionsDiffStat(input.session.id)
 )
 
 /**
@@ -1667,8 +1668,8 @@ export const conversationMachine = setup({
         (toolName === null || !isFileMutationTool(toolName))
       ) return
       void rpc
-        .sessionsDiff(context.session.id)
-        .then((patch) => self.send({ type: "PATCH_UPDATED", patch }))
+        .sessionsDiffStat(context.session.id)
+        .then((diffStat) => self.send({ type: "DIFF_STAT_UPDATED", diffStat }))
         .catch(() => {})
       // The same signal re-reads the worktree's file list. Without this, a file
       // the agent creates mid-turn is missing from `files` until the whole
@@ -1689,8 +1690,8 @@ export const conversationMachine = setup({
       }
     },
     applyLivePatch: assign(({ event }) =>
-      event.type === "PATCH_UPDATED"
-        ? { patch: event.patch, patchAt: Date.now() }
+      event.type === "DIFF_STAT_UPDATED"
+        ? { diffStat: event.diffStat, patchAt: Date.now() }
         : {}
     ),
     applyLiveFiles: assign(({ event }) =>
@@ -1864,10 +1865,10 @@ export const conversationMachine = setup({
               session.id
             )
           : Promise.resolve([] as ReadonlyArray<string>),
-        rpc.sessionsDiff(session.id)
+        rpc.sessionsDiffStat(session.id)
       ])
-        .then(([files, patch]) =>
-          self.send({ type: "WORKSPACE_META_LOADED", files, patch })
+        .then(([files, diffStat]) =>
+          self.send({ type: "WORKSPACE_META_LOADED", files, diffStat })
         )
         .catch(() => {})
     },
@@ -1877,9 +1878,9 @@ export const conversationMachine = setup({
       // refreshed the diff with something newer — don't clobber it.
       return {
         files: event.files,
-        ...(context.patch.length > 0
+        ...(context.patchAt > 0
           ? {}
-          : { patch: event.patch, patchAt: Date.now() })
+          : { diffStat: event.diffStat, patchAt: Date.now() })
       }
     }),
     /** Fold one reviewer event into its tab + the PR button's phase/timer. */
@@ -2051,7 +2052,7 @@ export const conversationMachine = setup({
       connectionId: chat.connectionId ?? input.session.connectionId ?? null,
       providerId,
       modelId: chat.modelId ?? input.session.modelId ?? null,
-      patch: "",
+      diffStat: { added: 0, removed: 0, files: 0 },
       patchAt: 0,
       pendingText: "",
       pendingAgentContext: "",
@@ -2274,7 +2275,7 @@ export const conversationMachine = setup({
           { actions: ["foldEvent", "liveRefreshDiff"] }
         ],
         // A live diff read resolved — reflect it in the Changes rail.
-        PATCH_UPDATED: { actions: "applyLivePatch" },
+        DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         // Sent mid-run: queued, then flushed into this turn at the next tool
         // boundary where the harness can take it (see `canAutoFlush`).
@@ -2359,7 +2360,7 @@ export const conversationMachine = setup({
         // machine while the RPC was in flight). Unhandled, `steeringId` latches
         // forever — see `settleLateSteer`.
         STEER_RESULT: { actions: "settleLateSteer" },
-        PATCH_UPDATED: { actions: "applyLivePatch" },
+        DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
       }
@@ -2402,7 +2403,7 @@ export const conversationMachine = setup({
         STEER_RESULT: { actions: "settleLateSteer" },
         // The run is already being halted; a second STOP only parks the queue.
         STOP: { actions: ["parkQueue", "clearSubagents"] },
-        PATCH_UPDATED: { actions: "applyLivePatch" },
+        DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
       }
@@ -2431,13 +2432,13 @@ export const conversationMachine = setup({
             guard: "hasSettledQueue",
             target: "running",
             actions: [
-              assign(({ event }) => ({ patch: event.output, patchAt: Date.now() })),
+              assign(({ event }) => ({ diffStat: event.output, patchAt: Date.now() })),
               "dequeueTurn"
             ]
           },
           {
             target: "awaitingInput",
-            actions: assign(({ event }) => ({ patch: event.output, patchAt: Date.now() }))
+            actions: assign(({ event }) => ({ diffStat: event.output, patchAt: Date.now() }))
           }
         ],
         onError: [
@@ -2466,7 +2467,7 @@ export const conversationMachine = setup({
         STEER_RESULT: { actions: "settleLateSteer" },
         // A late live diff read may still resolve here — apply it (the authoritative
         // refresh's onDone runs last, so it wins).
-        PATCH_UPDATED: { actions: "applyLivePatch" },
+        DIFF_STAT_UPDATED: { actions: "applyLivePatch" },
         FILES_UPDATED: { actions: "applyLiveFiles" },
         SET_MODE: { actions: "persistMode" },
       }

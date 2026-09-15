@@ -29,7 +29,11 @@ import { PluginRegistry } from "@jingler/cli-adapters/plugins"
 import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
-import { WorkspaceService } from "@jingler/cli-adapters/workspace"
+import {
+  WorkspaceService,
+  type WorkspaceDiffStat,
+  type WorkspaceFileDiff
+} from "@jingler/cli-adapters/workspace"
 import {
   checkoutWorkspaceHandoffBase,
   exportWorkspaceHandoff,
@@ -185,6 +189,7 @@ const stripTranscriptAttachmentData = (
 })
 const ArchivePayload = Schema.Struct({ reason: ArchiveReason })
 const RepoPathPayload = Schema.Struct({ repoPath: Schema.optional(Schema.String) })
+const FilePathPayload = Schema.Struct({ path: Schema.String })
 const ContinuationPayload = Schema.Struct({
   sourceSession: Session,
   requestedSessionId: Schema.optional(Schema.String)
@@ -261,6 +266,8 @@ export interface DeviceExecutorServices {
     input: Schema.Schema.Type<typeof TranscriptPagePayload>
   ) => Promise<unknown>
   readonly diff: (sessionId: string) => Promise<string>
+  readonly diffStat: (sessionId: string) => Promise<WorkspaceDiffStat>
+  readonly fileDiff: (sessionId: string, path: string) => Promise<WorkspaceFileDiff>
   readonly files: (sessionId: string, repoPath?: string) => Promise<ReadonlyArray<string>>
   readonly branches: (sessionId: string, repoPath?: string) => Promise<ReadonlyArray<string>>
   readonly exportHandoff: (sessionId: string, eventCursor: number) => Promise<unknown>
@@ -367,6 +374,14 @@ export const makeDeviceSessionCommandExecutor = (
         case "Sessions.diff":
           payloadRecord(command)
           return services.diff(command.sessionId)
+        case "Sessions.diffStat":
+          payloadRecord(command)
+          return services.diffStat(command.sessionId)
+        case "Sessions.fileDiff":
+          return services.fileDiff(
+            command.sessionId,
+            decodePayload(command, FilePathPayload).path
+          )
         case "Workspace.files": {
           const input = decodePayload(command, RepoPathPayload)
           return services.files(command.sessionId, input.repoPath)
@@ -672,6 +687,14 @@ export const makeLiveDeviceSessionCommandExecutor = (
     })),
     diff: (sessionId) => run(
       repoPath(sessionId).pipe(Effect.flatMap((path) => WorkspaceService.diff(path)))
+    ),
+    diffStat: (sessionId) => run(
+      repoPath(sessionId).pipe(Effect.flatMap((path) => WorkspaceService.diffStat(path)))
+    ),
+    fileDiff: (sessionId, filePath) => run(
+      repoPath(sessionId).pipe(
+        Effect.flatMap((path) => WorkspaceService.boundedFileDiff(path, filePath))
+      )
     ),
     files: (sessionId, explicit) => run(
       repoPath(sessionId, explicit).pipe(Effect.flatMap((path) => WorkspaceService.files(path)))

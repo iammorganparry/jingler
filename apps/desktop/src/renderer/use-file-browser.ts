@@ -18,7 +18,7 @@ export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 const api: FileBrowserApi = {
   list: (sessionId, worktreePath) =>
     listRepositoryFiles(rpc, sessionId, worktreePath),
-  diff: rpc.sessionsDiff,
+  diff: rpc.sessionsFileDiff,
   read: rpc.assetRead,
   write: rpc.assetWrite
 }
@@ -172,6 +172,7 @@ export interface FileBrowserController {
   readonly treeLoading: boolean
   readonly treeError: string | null
   readonly patch: string | null
+  readonly patchTooLarge: ReturnType<FileBrowserActor["getSnapshot"]>["context"]["patchTooLarge"]
   readonly patchError: string | null
   readonly selectedPath: string | null
   readonly payload: AssetPayload | null
@@ -278,6 +279,7 @@ export function useFileBrowser(
     treeLoading: snapshot.matches({ tree: "loading" }),
     treeError: snapshot.context.treeError,
     patch: snapshot.context.patch,
+    patchTooLarge: snapshot.context.patchTooLarge,
     patchError: snapshot.context.patchError,
     selectedPath: snapshot.context.selectedPath,
     payload,

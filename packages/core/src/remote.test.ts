@@ -41,6 +41,8 @@ describe("managed runtime actions", () => {
     expect(managedRuntimeActionForOperation("Agent.stop")).toBe("session.cancel")
     expect(managedRuntimeActionForOperation("Sessions.transcriptPage")).toBe("session.observe")
     expect(managedRuntimeActionForOperation("Sessions.diff")).toBe("session.observe")
+    expect(managedRuntimeActionForOperation("Sessions.diffStat")).toBe("session.observe")
+    expect(managedRuntimeActionForOperation("Sessions.fileDiff")).toBe("session.observe")
     expect(managedRuntimeActionForOperation("Workspace.files")).toBe("session.observe")
     expect(managedRuntimeActionForOperation("Workspace.importHandoff")).toBe("session.input")
     expect(managedRuntimeActionForOperation("Agent.run")).toBe("session.input")
