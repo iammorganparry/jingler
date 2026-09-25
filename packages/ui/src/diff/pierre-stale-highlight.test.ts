@@ -39,7 +39,7 @@ it("keeps edited rows when a stale local highlight resolves mid edit session", a
 
   const file = { name: "grow.ts", contents: "const line0 = 0\n", cacheKey: "rev-1" }
   const renderer = new FileRenderer()
-  renderer.beginEditSession()
+  renderer.beginEditSession(file)
   const initial = renderer.renderFile(file, {
     ...DEFAULT_RENDER_RANGE,
     startingLine: 0,

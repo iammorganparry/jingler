@@ -32,6 +32,7 @@
     "./runtime/certification/pi-scenario-runner": "./src/runtime/certification/pi-scenario-runner.ts",
     "./runtime/certification/pi-scenario-fixture": "./src/runtime/certification/pi-scenario-fixture.ts",
     "./runtime/diagnostics/runtime-diagnostics": "./src/runtime/diagnostics/runtime-diagnostics.ts",
+    "./runtime/tools/language-intelligence": "./src/runtime/tools/language-intelligence.ts",
     "./runtime/providers/provider-catalog": "./src/runtime/providers/provider-catalog.ts",
     "./runtime/providers/provider-connections": "./src/runtime/providers/provider-connections.ts",
     "./runtime/providers/pi-provider-access": "./src/runtime/providers/pi-provider-access.ts",
@@ -72,6 +73,8 @@
     "proper-lockfile": "4.1.2",
     "smol-toml": "^1.8.0",
     "typescript": "^7.0.2",
+    "vscode-jsonrpc": "8.2.0",
+    "vscode-languageserver-protocol": "3.17.5",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",
     "zod": "^4.0.0"

@@ -35,6 +35,7 @@ import {
   PierreFileDiffView,
   PierreProvider,
   type PierreCodeViewProps,
+  type PierreFileDiffViewProps,
   type PierreRenderOptions
 } from "./pierre-provider.js"
 import type { JinglerLineSelection } from "./pierre-selection.js"
@@ -80,6 +81,8 @@ export interface DiffViewProps {
   onSelectionChange?: (selection: JinglerLineSelection | null) => void
   /** Navigate a virtualized diff to an exact caller-owned range. */
   scrollRequest?: PierreCodeViewProps["scrollRequest"]
+  onTokenEnter?: PierreFileDiffViewProps["onTokenEnter"]
+  onTokenLeave?: PierreFileDiffViewProps["onTokenLeave"]
 }
 
 const inputFileDiffs = ({
@@ -158,7 +161,9 @@ export function DiffView({
   actions,
   selection,
   onSelectionChange,
-  scrollRequest
+  scrollRequest,
+  onTokenEnter,
+  onTokenLeave
 }: DiffViewProps) {
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
@@ -192,6 +197,8 @@ export function DiffView({
         selection={selection}
         onSelectionChange={onSelectionChange}
         scrollRequest={scrollRequest}
+        onTokenEnter={onTokenEnter}
+        onTokenLeave={onTokenLeave}
       />
     </PierreProvider>
   )
@@ -303,7 +310,9 @@ function DiffViewContent({
   actions,
   selection,
   onSelectionChange,
-  scrollRequest
+  scrollRequest,
+  onTokenEnter,
+  onTokenLeave
 }: {
   readonly revision: number
   readonly fileDiffs: readonly FileDiffMetadata[]
@@ -315,6 +324,8 @@ function DiffViewContent({
   readonly selection: JinglerLineSelection | null | undefined
   readonly onSelectionChange: ((selection: JinglerLineSelection | null) => void) | undefined
   readonly scrollRequest: PierreCodeViewProps["scrollRequest"]
+  readonly onTokenEnter: PierreFileDiffViewProps["onTokenEnter"]
+  readonly onTokenLeave: PierreFileDiffViewProps["onTokenLeave"]
 }) {
   const state = useDiffSelectionState()
   useEffect(() => state.clear(), [revision, state.clear])
@@ -356,6 +367,8 @@ function DiffViewContent({
         renderAnnotation={actions === undefined ? undefined : renderAnnotation}
         options={options}
         scrollRequest={scrollRequest}
+        onTokenEnter={onTokenEnter}
+        onTokenLeave={onTokenLeave}
       />
     </div>
   )
@@ -406,7 +419,9 @@ function PierreDiffRenderer({
   onSelectionChange,
   renderAnnotation,
   options,
-  scrollRequest
+  scrollRequest,
+  onTokenEnter,
+  onTokenLeave
 }: {
   readonly label: string
   readonly fill: boolean
@@ -418,6 +433,8 @@ function PierreDiffRenderer({
   readonly renderAnnotation: ((payload: PierreAnnotationPayload) => ReactNode) | undefined
   readonly options: PierreRenderOptions
   readonly scrollRequest: PierreCodeViewProps["scrollRequest"]
+  readonly onTokenEnter: PierreFileDiffViewProps["onTokenEnter"]
+  readonly onTokenLeave: PierreFileDiffViewProps["onTokenLeave"]
 }) {
   if (fileDiffs.length === 0) {
     return (
@@ -429,6 +446,16 @@ function PierreDiffRenderer({
     )
   }
   const className = cn("min-h-0 min-w-0 flex-1", !fill && "h-auto")
+  const codeViewTokenEnter: PierreCodeViewProps["onTokenEnter"] = onTokenEnter === undefined
+    ? undefined
+    : (token, event) => {
+        if ("side" in token) onTokenEnter(token, event)
+      }
+  const codeViewTokenLeave: PierreCodeViewProps["onTokenLeave"] = onTokenLeave === undefined
+    ? undefined
+    : (token, event) => {
+        if ("side" in token) onTokenLeave(token, event)
+      }
   if (fileDiffs.length === 1 && scrollRequest === undefined) {
     return (
       <PierreFileDiffView
@@ -440,6 +467,8 @@ function PierreDiffRenderer({
         selection={selection}
         onSelectionChange={onSelectionChange}
         renderAnnotation={renderAnnotation}
+        onTokenEnter={onTokenEnter}
+        onTokenLeave={onTokenLeave}
         options={options}
       />
     )
@@ -454,6 +483,8 @@ function PierreDiffRenderer({
       renderAnnotation={renderAnnotation}
       options={options}
       scrollRequest={scrollRequest}
+      onTokenEnter={codeViewTokenEnter}
+      onTokenLeave={codeViewTokenLeave}
     />
   )
 }

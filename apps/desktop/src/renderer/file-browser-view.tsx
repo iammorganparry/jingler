@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, DebugViewSnapshot, Session } from "@jingler/core"
+import type { TokenEventBase } from "@pierre/diffs"
+import { isLanguageHoverPath } from "@jingler/contracts"
 import {
   AssetBrowser,
   AssetRepositoryTree,
@@ -36,6 +38,113 @@ import {
 } from "./file-diff-context.js"
 
 const DEBUG_HOVER_IDENTIFIER = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
+type BrowserToken = TokenEventBase & { readonly side?: "additions" | "deletions" }
+interface TokenHoverContent {
+  readonly heading: string
+  readonly body: string
+  readonly detail?: string
+}
+interface TokenHover extends TokenHoverContent {
+  readonly x: number
+  readonly y: number
+}
+
+function useDelayedTokenHover(
+  query: (token: BrowserToken, signal: AbortSignal) => Promise<TokenHoverContent | null>
+) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const controller = useRef<AbortController | null>(null)
+  const generation = useRef(0)
+  const [hover, setHover] = useState<TokenHover | null>(null)
+  const leave = useCallback(() => {
+    generation.current += 1
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = null
+    controller.current?.abort()
+    controller.current = null
+    setHover(null)
+  }, [])
+  useEffect(() => {
+    leave()
+    return leave
+  }, [leave, query])
+  const enter = useCallback((token: BrowserToken) => {
+    leave()
+    const current = ++generation.current
+    timer.current = setTimeout(() => {
+      controller.current = new AbortController()
+      query(token, controller.current.signal).then((content) => {
+        if (generation.current !== current || content === null || !token.tokenElement.isConnected) return
+        const bounds = token.tokenElement.getBoundingClientRect()
+        const x = Math.max(8, Math.min(bounds.left, window.innerWidth - 392))
+        const y = bounds.bottom + 126 > window.innerHeight
+          ? Math.max(8, bounds.top - 126)
+          : bounds.bottom + 6
+        setHover({ x, y, ...content })
+      }).catch(() => {
+        if (generation.current === current) setHover(null)
+      })
+    }, 250)
+  }, [leave, query])
+  return { hover, enter, leave }
+}
+
+const debugTokenHover = async (
+  debug: DebugSessionModel,
+  symbol: string
+): Promise<TokenHoverContent> => {
+  const result = await debug.hover({
+    expression: symbol,
+    frameId: debug.snapshot.session?.frame?.id
+  })
+  return {
+    heading: symbol,
+    body: result.result ?? "No value",
+    ...(result.type === undefined ? {} : { detail: result.type })
+  }
+}
+
+const semanticTokenHover = async (
+  sessionId: string,
+  path: string,
+  symbol: string,
+  token: BrowserToken,
+  text: string | undefined,
+  signal: AbortSignal
+): Promise<TokenHoverContent | null> => {
+  if (!isLanguageHoverPath(path)) return null
+  const result = await rpc.assetHover(
+    sessionId,
+    path,
+    symbol,
+    token.lineNumber,
+    token.lineCharStart + token.tokenText.indexOf(symbol) + 1,
+    text,
+    signal
+  )
+  if (result === null) return null
+  if ("unavailable" in result) return { heading: "Hover unavailable", body: result.unavailable }
+  return {
+    heading: symbol,
+    body: result.type,
+    ...(result.documentation === undefined ? {} : { detail: result.documentation })
+  }
+}
+
+function TokenHoverTooltip({ hover }: { readonly hover: TokenHover | null }) {
+  if (hover === null) return null
+  return (
+    <div
+      role="tooltip"
+      className="fixed z-50 max-w-96 rounded border border-line bg-panel px-2.5 py-2 font-mono text-[11px] text-text shadow-lg"
+      style={{ left: hover.x, top: hover.y }}
+    >
+      <div className="font-semibold text-text-bright">{hover.heading}</div>
+      <div className="mt-1 whitespace-pre-wrap break-words">{hover.body}</div>
+      {hover.detail ? <div className="mt-1 text-dim">{hover.detail}</div> : null}
+    </div>
+  )
+}
 
 export interface FileBrowserViewProps {
   readonly session: Session
@@ -459,17 +568,22 @@ function FileCanvas({
     )
   }
   if (shownFileDiff !== null) {
-    return renderDiffContainer(browser, followedSelection, renderFileDiff({
-      fileDiff: shownFileDiff,
+    return renderDiffContainer(
       browser,
-      selection,
-      onSelectionChange,
-      onSendReference,
-      onSendComment,
-      addDiffSelectionToChat,
-      commentOnDiffSelection,
-      followedSelection
-    }))
+      followedSelection,
+      <FileDiffCanvas
+        sessionId={sessionId}
+        fileDiff={shownFileDiff}
+        browser={browser}
+        selection={selection}
+        onSelectionChange={onSelectionChange}
+        onSendReference={onSendReference}
+        onSendComment={onSendComment}
+        addDiffSelectionToChat={addDiffSelectionToChat}
+        commentOnDiffSelection={commentOnDiffSelection}
+        followedSelection={followedSelection}
+      />
+    )
   }
   if (fileDiffIsLoading(browser)) {
     return <AssetCanvas selectedPath={browser.selectedPath} loading />
@@ -500,6 +614,7 @@ function FileCanvas({
   const editor = (
     <SelectionContextMenu enabled={canSendSelection} onSelect={onSendSelection}>
       <TextFileEditor
+        sessionId={sessionId}
         key={`${payload.path}:${payload.revision}:${conflictRevision}`}
         payload={payload}
         initialDraft={browser.draft}
@@ -546,7 +661,8 @@ function FileCanvas({
   )
 }
 
-function renderFileDiff({
+function FileDiffCanvas({
+  sessionId,
   fileDiff,
   browser,
   selection,
@@ -557,6 +673,7 @@ function renderFileDiff({
   commentOnDiffSelection,
   followedSelection
 }: {
+  sessionId: string;
   fileDiff: ReturnType<typeof parsePierreFileDiffs>[number];
   browser: FileBrowserController;
   selection: JinglerLineSelection | null;
@@ -567,8 +684,17 @@ function renderFileDiff({
   commentOnDiffSelection: (next: JinglerLineSelection, body: string) => void;
   followedSelection: JinglerLineSelection | null;
 }) {
-  return <DiffView
-    fileDiff={fileDiff}
+  const path = browser.selectedPath!
+  const query = useCallback(async (token: BrowserToken, signal: AbortSignal): Promise<TokenHoverContent | null> => {
+    const symbol = token.tokenText.trim()
+    if (token.side === "deletions" || !DEBUG_HOVER_IDENTIFIER.test(symbol)) return null
+    return semanticTokenHover(sessionId, path, symbol, token, undefined, signal)
+  }, [path, sessionId])
+  const tokenHover = useDelayedTokenHover(query)
+  return (
+    <div className="relative h-full min-h-0">
+      <DiffView
+        fileDiff={fileDiff}
     label={`${browser.selectedPath} changes`}
     className="h-full min-h-0"
     selection={selection}
@@ -590,11 +716,17 @@ function renderFileDiff({
         ),
         behavior: "smooth"
       }}
-    options={{
-      diffStyle: "unified",
-      stickyHeader: false,
-      disableFileHeader: true
-    }} />
+        onTokenEnter={tokenHover.enter}
+        onTokenLeave={tokenHover.leave}
+        options={{
+          diffStyle: "unified",
+          stickyHeader: false,
+          disableFileHeader: true
+        }}
+      />
+      <TokenHoverTooltip hover={tokenHover.hover} />
+    </div>
+  )
 }
 
 function SelectionContextMenu({
@@ -668,6 +800,7 @@ function FileModeBar({
  * cannot repaint the last saved item when the conflict notice changes layout.
  */
 function TextFileEditor({
+  sessionId,
   payload,
   initialDraft,
   browser,
@@ -677,6 +810,7 @@ function TextFileEditor({
   debugLine,
   debugRevision
 }: {
+  readonly sessionId: string
   readonly payload: Extract<AssetPayload, { readonly text: string }>
   readonly initialDraft: string
   readonly browser: FileBrowserController
@@ -687,9 +821,6 @@ function TextFileEditor({
   readonly debugRevision: number
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
-  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const hoverGeneration = useRef(0)
-  const [hover, setHover] = useState<{ x: number; y: number; expression: string; value?: string; type?: string } | null>(null)
   const [items] = useState(() => {
     const file = createPierreFileContents({
       path: payload.path,
@@ -725,35 +856,21 @@ function TextFileEditor({
     return () => observer.disconnect()
   }, [debugLine])
 
-  const leaveToken = useCallback(() => {
-    hoverGeneration.current += 1
-    if (hoverTimer.current) clearTimeout(hoverTimer.current)
-    hoverTimer.current = null
-    setHover(null)
-  }, [])
-  useEffect(() => () => {
-    hoverGeneration.current += 1
-    if (hoverTimer.current) clearTimeout(hoverTimer.current)
-  }, [])
-  useEffect(() => {
-    if (debugLine === null) leaveToken()
-  }, [debugLine, leaveToken])
-  const enterToken = useCallback((token: { tokenText: string; tokenElement: HTMLElement }) => {
-    leaveToken()
-    const expression = token.tokenText.trim()
-    if (!DEBUG_HOVER_IDENTIFIER.test(expression) || debugLine === null) return
-    const generation = ++hoverGeneration.current
-    const bounds = token.tokenElement.getBoundingClientRect()
-    setHover({ x: bounds.left, y: bounds.bottom + 6, expression })
-    hoverTimer.current = setTimeout(() => {
-      debug.hover({ expression, frameId: debug.snapshot.session?.frame?.id }).then((result) => {
-        if (hoverGeneration.current !== generation) return
-        setHover({ x: bounds.left, y: bounds.bottom + 6, expression, value: result.result, type: result.type })
-      }).catch(() => {
-        if (hoverGeneration.current === generation) setHover(null)
-      })
-    }, 250)
-  }, [debug, debugLine, leaveToken])
+  const query = useCallback(async (token: BrowserToken, signal: AbortSignal): Promise<TokenHoverContent | null> => {
+    const symbol = token.tokenText.trim()
+    if (!DEBUG_HOVER_IDENTIFIER.test(symbol)) return null
+    if (debugLine !== null) return debugTokenHover(debug, symbol)
+    if (browser.dirty && !payload.path.endsWith(".java")) return null
+    return semanticTokenHover(
+      sessionId,
+      payload.path,
+      symbol,
+      token,
+      browser.draft ?? initialDraft,
+      signal
+    )
+  }, [browser.dirty, browser.draft, debug, debugLine, initialDraft, payload.path, sessionId])
+  const tokenHover = useDelayedTokenHover(query)
 
   return (
     <div ref={rootRef} className="relative flex h-full min-h-0 flex-col bg-canvas [&_[data-debug-current-line]]:bg-yellow/15 [&_[data-debug-current-line]]:shadow-[inset_3px_0_var(--sb-yellow)]">
@@ -790,25 +907,15 @@ function TextFileEditor({
           range: { path: payload.path, side: "new", endSide: "new", startLine: debugLine, endLine: debugLine },
           behavior: "smooth-auto"
         }}
-        onTokenEnter={enterToken}
-        onTokenLeave={leaveToken}
+        onTokenEnter={tokenHover.enter}
+        onTokenLeave={tokenHover.leave}
         options={{
           lineNumbers: true,
           stickyHeader: false,
           disableFileHeader: true
         }}
       />
-      {hover ? (
-        <div
-          role="tooltip"
-          className="fixed z-50 max-w-80 rounded border border-line bg-panel px-2.5 py-2 font-mono text-[11px] text-text shadow-lg"
-          style={{ left: hover.x, top: hover.y }}
-        >
-          <div className="font-semibold text-text-bright">{hover.expression}</div>
-          <div className="mt-1 break-all">{hover.value ?? "Evaluating…"}</div>
-          {hover.type ? <div className="mt-1 text-dim">{hover.type}</div> : null}
-        </div>
-      ) : null}
+      <TokenHoverTooltip hover={tokenHover.hover} />
     </div>
   )
 }

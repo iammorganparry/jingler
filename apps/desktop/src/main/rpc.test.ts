@@ -69,6 +69,7 @@ import {
   awaitRelayAcknowledgement,
   completeDurableGitHubFeedbackReplay,
   assetList,
+  assetHover,
   assetRead,
   assetWrite,
   createTerminal,
@@ -1017,6 +1018,8 @@ describe("RPC handlers", () => {
       const worktreePath = join(dir, "editable-asset-worktree");
       mkdirSync(worktreePath, { recursive: true });
       writeFileSync(join(worktreePath, "config.custom"), "before\n");
+      writeFileSync(join(worktreePath, "tsconfig.json"), JSON.stringify({ include: ["*.ts"] }));
+      writeFileSync(join(worktreePath, "value.ts"), "export const answer = 42\n");
       mkdirSync(root, { recursive: true });
       writeFileSync(
         join(root, "sessions.json"),
@@ -1055,6 +1058,37 @@ describe("RPC handlers", () => {
         revision: expect.stringMatching(/^sha256:/),
       });
       if (loaded.kind === "image" || loaded.kind === "pdf") return;
+
+      await expect(
+        Effect.runPromise(
+          assetHover({
+            sessionId: "editable-asset-session",
+            path: "value.ts",
+            symbol: "answer",
+            line: 1,
+            column: 14,
+          }).pipe(Effect.provide(layer)),
+        ),
+      ).resolves.toMatchObject({ engine: "typescript-7-native", type: "42" });
+
+      writeFileSync(join(worktreePath, "Value.java"), "class Value {}\n");
+      const previousPath = process.env.PATH;
+      process.env.PATH = "";
+      try {
+        await expect(
+          Effect.runPromise(
+            assetHover({
+              sessionId: "editable-asset-session",
+              path: "Value.java",
+              symbol: "Value",
+              line: 1,
+              column: 7,
+            }).pipe(Effect.provide(layer)),
+          ),
+        ).resolves.toMatchObject({ unavailable: expect.stringContaining("JDT.LS could not start") });
+      } finally {
+        process.env.PATH = previousPath;
+      }
 
       const saved = await Effect.runPromise(
         assetWrite({

@@ -415,7 +415,7 @@ export const createPierreCodeViewItems = <TAnnotation,>(
 /** Parse a multi-file patch directly into CodeView's controlled item model. */
 export const createPierreCodeViewItemsFromPatch = (
   patch: string
-): CodeViewItem[] =>
+): CodeViewItem<undefined>[] =>
   patchFiles(patch).map((fileDiff) =>
     createPierreCodeViewItem({ type: "diff", fileDiff })
   )

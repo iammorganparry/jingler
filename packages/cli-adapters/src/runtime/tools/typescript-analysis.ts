@@ -66,6 +66,61 @@ const fallbackWorkspacePaths = async (root: string, signal?: AbortSignal): Promi
 
 const SOURCE_IMPORT = /(?:\bfrom\s*|\bimport\s*\(|\bimport\s*|\brequire\s*\(|<reference\s+path=)\s*["']([^"']+)["']/gu
 const preflightCache = new Map<string, { readonly expiresAt: number; readonly value: Promise<void> }>()
+interface CachedProjectApi {
+  readonly api: API
+  readonly openProjects: Set<string>
+}
+const projectApis = new Map<string, CachedProjectApi>()
+const projectEpochs = new Map<string, number>()
+const MAX_PROJECT_APIS = 3
+
+const projectApi = (root: string): CachedProjectApi => {
+  const existing = projectApis.get(root)
+  if (existing !== undefined) {
+    projectApis.delete(root)
+    projectApis.set(root, existing)
+    return existing
+  }
+  if (projectApis.size >= MAX_PROJECT_APIS) {
+    const oldest = projectApis.entries().next().value as [string, CachedProjectApi] | undefined
+    if (oldest !== undefined) {
+      projectApis.delete(oldest[0])
+      oldest[1].api.close()
+    }
+  }
+  const cached = {
+    api: new API({ cwd: root, collectTiming: true }),
+    openProjects: new Set<string>()
+  }
+  projectApis.set(root, cached)
+  return cached
+}
+
+const assertCurrentProjectEpoch = (
+  rootKey: string,
+  startEpoch: number,
+  reuseApi: boolean
+): void => {
+  if (reuseApi && (projectEpochs.get(rootKey) ?? 0) !== startEpoch) {
+    throw fail("TypeScript analysis was disposed while hover setup was in progress")
+  }
+}
+
+export const disposeTypeScriptAnalysis = async (cwd: string): Promise<void> => {
+  const rootKey = resolve(cwd)
+  projectEpochs.set(rootKey, (projectEpochs.get(rootKey) ?? 0) + 1)
+  const root = await realpath(rootKey).catch(() => rootKey)
+  const cached = projectApis.get(root)
+  if (cached === undefined) return
+  projectApis.delete(root)
+  cached.api.close()
+}
+
+export const shutdownTypeScriptAnalysis = (): void => {
+  for (const cached of projectApis.values()) cached.api.close()
+  projectApis.clear()
+  projectEpochs.clear()
+}
 
 const inspectBoundedSourceTree = async (root: string, signal?: AbortSignal): Promise<void> => {
   let workspaceFiles = 0
@@ -183,26 +238,52 @@ const validateProjectConfigs = async (
   }
 }
 
+const refreshProjects = (
+  api: API,
+  cached: CachedProjectApi | undefined,
+  configs: ReadonlyArray<string>
+) => {
+  if (cached === undefined) return api.updateSnapshot({ openProjects: [...configs] })
+  const selectedConfigs = new Set(configs)
+  const snapshot = api.updateSnapshot({
+    openProjects: configs.filter((config) => !cached.openProjects.has(config)),
+    closeProjects: [...cached.openProjects].filter((config) => !selectedConfigs.has(config)),
+    fileChanges: { invalidateAll: true as const }
+  })
+  cached.openProjects.clear()
+  for (const config of configs) cached.openProjects.add(config)
+  return snapshot
+}
+
 const withProjects = async <Value>(
   cwd: string,
   file: string | undefined,
   run: (projects: ReadonlyArray<NativeProject>) => Value,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  reuseApi = false
 ): Promise<AnalysisResult<Value>> => {
-  const root = await realpath(cwd)
+  const rootKey = resolve(cwd)
+  const startEpoch = projectEpochs.get(rootKey) ?? 0
+  const root = await realpath(rootKey)
   await assertBoundedSourceTree(root, signal)
   const configs = await configPaths(root, file, signal)
   await validateProjectConfigs(root, configs, signal)
-  const api = new API({ cwd: root, collectTiming: true })
+  assertCurrentProjectEpoch(rootKey, startEpoch, reuseApi)
+  const cached = reuseApi ? projectApi(root) : undefined
+  const api = cached?.api ?? new API({ cwd: root, collectTiming: true })
   try {
-    const snapshot = api.updateSnapshot({ openProjects: [...configs] })
+    const snapshot = refreshProjects(api, cached, configs)
     const allowedPaths = file === undefined ? new Set(await workspacePaths(root, signal)) : null
     const projects = snapshot.getProjects().map((project) => ({ api, project, root, allowedPaths }))
     if (projects.length === 0) throw fail(`No TypeScript project found under ${root}`)
     const value = run(projects)
     return { engine: "typescript-7-native", value, timing: api.getTimingInfo().totals }
+  } catch (cause) {
+    if (cached !== undefined && projectApis.get(root) === cached) projectApis.delete(root)
+    if (reuseApi) api.close()
+    throw cause
   } finally {
-    api.close()
+    if (!reuseApi) api.close()
   }
 }
 
@@ -210,11 +291,12 @@ const withProject = <Value>(
   cwd: string,
   file: string,
   run: (project: NativeProject) => Value,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  reuseApi = false
 ): Promise<AnalysisResult<Value>> => withProjects(cwd, file, (projects) => {
   const project = projects.find((candidate) => candidate.project.program.getSourceFile(resolve(cwd, file))) ?? projects[0]!
   return run(project)
-}, signal)
+}, signal, reuseApi)
 
 const location = (project: NativeProject, node: Node): CodeLocation => {
   const source = node.getSourceFile()
@@ -341,7 +423,7 @@ export const codeHover = (
     const type = native.project.checker.getTypeAtLocation(target)
     if (!type) throw fail(`TypeScript could not resolve type: ${symbol}`)
     return { type: native.project.checker.typeToString(type, target) }
-  }, signal)
+  }, signal, true)
 
 export const codeDiagnostics = (
   cwd: string,

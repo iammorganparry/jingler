@@ -9,8 +9,11 @@ import {
   useWorkerPool,
   type CodeViewHandle,
   type CodeViewItem,
+  type CodeViewItemEditCompleteHandler,
+  type EditorFactory,
   type TokenEventBase,
   type DiffLineAnnotation,
+  type DiffTokenEventBaseProps,
   type FileContents,
   type FileDiffMetadata,
   type LineAnnotation,
@@ -19,7 +22,8 @@ import {
 } from "@pierre/diffs/react"
 import {
   Editor as PierreEditorPrimitive,
-  type EditorOptions as PierreEditorOptions
+  type EditorChangeEvent,
+  type EditorType
 } from "@pierre/diffs/edit"
 import {
   createContext,
@@ -343,6 +347,8 @@ export interface PierreFileDiffViewProps
   readonly scrollable?: boolean
   readonly annotations?: DiffLineAnnotation<PierreAnnotationMetadata>[]
   readonly renderAnnotation?: (payload: PierreAnnotationPayload) => ReactNode
+  readonly onTokenEnter?: (token: DiffTokenEventBaseProps, event: PointerEvent) => void
+  readonly onTokenLeave?: (token: DiffTokenEventBaseProps, event: PointerEvent) => void
   readonly options?: PierreRenderOptions
 }
 
@@ -356,7 +362,9 @@ export function PierreFileDiffView({
   renderAnnotation,
   options,
   selection,
-  onSelectionChange
+  onSelectionChange,
+  onTokenEnter,
+  onTokenLeave
 }: PierreFileDiffViewProps) {
   const renderer = usePierreRenderer()
   const onSelectionEnd = useCallback(
@@ -384,7 +392,9 @@ export function PierreFileDiffView({
         hunkSeparators: options?.hunkSeparators ?? "line-info",
         enableLineSelection: onSelectionChange !== undefined,
         controlledSelection: true,
-        onLineSelectionEnd: onSelectionEnd
+        onLineSelectionEnd: onSelectionEnd,
+        onTokenEnter,
+        onTokenLeave
       }}
       renderAnnotation={
         renderAnnotation === undefined
@@ -435,8 +445,8 @@ export interface PierreCodeViewProps extends PierreAccessibleViewProps {
     payload: PierreAnnotationPayload,
     item: CodeViewItem<PierreAnnotationMetadata>
   ) => ReactNode
-  readonly onTokenEnter?: (token: TokenEventBase, event: PointerEvent) => void
-  readonly onTokenLeave?: (token: TokenEventBase, event: PointerEvent) => void
+  readonly onTokenEnter?: (token: TokenEventBase | DiffTokenEventBaseProps, event: PointerEvent) => void
+  readonly onTokenLeave?: (token: TokenEventBase | DiffTokenEventBaseProps, event: PointerEvent) => void
   readonly options?: PierreRenderOptions
 }
 
@@ -462,17 +472,12 @@ export interface PierreEditorProps extends PierreCodeViewProps {
 }
 
 interface PierreCodeViewEditorCallbacks {
-  readonly create: (
-    options: PierreEditorOptions<PierreAnnotationMetadata>
-  ) => PierreEditorPrimitive<PierreAnnotationMetadata>
+  readonly create: EditorFactory<PierreAnnotationMetadata, undefined>
   readonly onChange: (
-    item: CodeViewItem<PierreAnnotationMetadata>,
-    file: FileContents
+    event: EditorChangeEvent<EditorType, PierreAnnotationMetadata, undefined>,
+    item: CodeViewItem<PierreAnnotationMetadata>
   ) => void
-  readonly onComplete: (
-    item: CodeViewItem<PierreAnnotationMetadata>,
-    file: FileContents
-  ) => void
+  readonly onComplete: CodeViewItemEditCompleteHandler<PierreAnnotationMetadata, undefined>
 }
 
 const codeItemPath = (
@@ -587,8 +592,11 @@ export function PierreEditor({
     [activeItemId, items]
   )
   const create = useCallback(
-    (options: PierreEditorOptions<PierreAnnotationMetadata>) =>
-      new PierreEditorPrimitive<PierreAnnotationMetadata>(options),
+    <EType extends EditorType,>(
+      editorType: EType,
+      options: import("@pierre/diffs/edit").EditorOptions<EType, PierreAnnotationMetadata, undefined>,
+      editStateKey?: string
+    ) => new PierreEditorPrimitive<EType, PierreAnnotationMetadata, undefined>(editorType, options, editStateKey),
     []
   )
   const toChange = useCallback(
@@ -603,21 +611,26 @@ export function PierreEditor({
     []
   )
   const handleChange = useCallback(
-    (item: CodeViewItem<PierreAnnotationMetadata>, file: FileContents) => {
+    (
+      event: EditorChangeEvent<EditorType, PierreAnnotationMetadata, undefined>,
+      item: CodeViewItem<PierreAnnotationMetadata>
+    ) => {
       if (!dirtyItems.current.has(item.id)) {
         dirtyItems.current.add(item.id)
         onDirtyChange?.(item.id, true)
       }
-      onChange?.(toChange(item, file))
+      onChange?.(toChange(item, event.file))
     },
     [onChange, onDirtyChange, toChange]
   )
-  const handleComplete = useCallback(
-    (item: CodeViewItem<PierreAnnotationMetadata>, file: FileContents) => {
-      onComplete?.(toChange(item, file))
+  const handleComplete: CodeViewItemEditCompleteHandler<PierreAnnotationMetadata, undefined> = useCallback(
+    (event, item) => {
+      const file = "file" in event ? event.file : event.newFile
+      if (file !== null) onComplete?.(toChange(item, file))
       if (dirtyItems.current.delete(item.id)) {
         onDirtyChange?.(item.id, false)
       }
+      return "accept"
     },
     [onComplete, onDirtyChange, toChange]
   )
@@ -656,7 +669,7 @@ function PierreCodeViewContent({
   editor
 }: PierreCodeViewContentProps) {
   const renderer = usePierreRenderer()
-  const viewRef = useRef<CodeViewHandle<PierreAnnotationMetadata> | null>(null)
+  const viewRef = useRef<CodeViewHandle<PierreAnnotationMetadata, undefined> | null>(null)
   const lastActivePath = useRef<string | null>(null)
   const lastScrollRevision = useRef<number | null>(null)
   const { handleSelectionChange, upstreamSelection } = useCodeViewSelection(
@@ -720,7 +733,7 @@ function PierreCodeViewContent({
   // edit: true" the first time the file editor opened). The factory must
   // arrive via EditProvider.
   const view = (
-      <PierreCodeViewPrimitive<PierreAnnotationMetadata>
+      <PierreCodeViewPrimitive<PierreAnnotationMetadata, undefined>
         ref={viewRef}
         items={items}
         onItemEditChange={editor?.onChange}

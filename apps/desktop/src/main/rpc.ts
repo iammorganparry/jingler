@@ -72,6 +72,8 @@ import {
   WorkspaceService,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
+  disposeLanguageIntelligence,
+  languageHover,
   ProviderConnections,
   type ProviderConnectionsShape,
   AgentResourceService,
@@ -93,6 +95,7 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import {
+  AssetUnsupportedError,
   AuthError,
   ConfigError,
   GitHubApiError,
@@ -164,6 +167,7 @@ import {
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   JinglerRpcs,
+  isLanguageHoverPath,
   SessionDiffStat,
   SessionFileDiff,
   SessionReviewDiff,
@@ -1332,6 +1336,44 @@ export const assetRead = (input: { sessionId: string; path: string }) =>
     AssetService.read(worktree, input.path),
   );
 
+/** `Asset.hover` handler — semantic hover scoped to one validated worktree file. */
+export const assetHover = (input: {
+  sessionId: string;
+  path: string;
+  symbol: string;
+  line: number;
+  column: number;
+  text?: string;
+}) =>
+  Effect.gen(function* () {
+    const worktree = yield* assetWorktree(input.sessionId);
+    const payload = yield* AssetService.read(worktree, input.path);
+    if (!("text" in payload) || !isLanguageHoverPath(input.path)) {
+      return yield* new AssetUnsupportedError({ path: input.path });
+    }
+    return yield* Effect.tryPromise({
+      try: (signal) => languageHover(
+        worktree,
+        input.path,
+        input.symbol,
+        input.line,
+        input.column,
+        input.text ?? payload.text,
+        signal
+      ),
+      catch: (cause) => cause
+    }).pipe(
+      Effect.map((result) => result === null ? null : ({
+        engine: result.engine,
+        type: result.value.type,
+        ...(result.value.documentation === undefined ? {} : { documentation: result.value.documentation })
+      })),
+      Effect.catchAll((cause) => Effect.succeed({
+        unavailable: cause instanceof Error ? cause.message : String(cause)
+      }))
+    );
+  });
+
 /** `Asset.write` handler — revision-guarded replacement in the session worktree. */
 export const assetWrite = (input: {
   sessionId: string;
@@ -1487,7 +1529,12 @@ export const archiveSession = (
   reason: "merged" | "closed",
 ) =>
   Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
     yield* SessionStore.archive(sessionId, reason);
+    const worktreePath = session.worktreePath;
+    if (worktreePath) {
+      yield* Effect.tryPromise(() => disposeLanguageIntelligence(worktreePath)).pipe(Effect.ignore);
+    }
     const offload = yield* makeOffloadCommandRouter
     yield* offload.destroySession(sessionId).pipe(Effect.ignore)
     const route = yield* GitHubAuth.sessionRoutes().pipe(
@@ -4263,6 +4310,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* BackgroundTaskStore.clear(sessionId);
       const offload = yield* makeOffloadCommandRouter
       yield* offload.destroySession(sessionId).pipe(Effect.ignore)
+      if (session?.worktreePath) {
+        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
+      }
       yield* SessionStore.remove(sessionId);
       if (relayRoute) {
         yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
@@ -5217,6 +5267,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       b.controlWaitForSelector(sessionId, chatId, selector, timeoutMs),
     ),
 
+  "Asset.hover": (input) => assetHover(input),
   "Asset.read": (input) => assetRead(input),
   "Asset.write": (input) => assetWrite(input),
   "Asset.reveal": (input) => assetReveal(input),
