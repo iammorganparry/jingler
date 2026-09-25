@@ -14,6 +14,7 @@ import {
   type AgentRuntimeShape
 } from "./agent-runtime.js"
 
+import { trackChild } from "../../child-registry.js"
 import { startClaudeCliToolRelay, type ClaudeCliToolRelay } from "../providers/claude-cli-tool-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
@@ -290,11 +291,11 @@ async function* runClaude(
     )
     relay = await startClaudeCliToolRelay({ registry, spec, context })
     signal.throwIfAborted()
-    child = (options.spawnProcess ?? spawn)(
+    child = trackChild((options.spawnProcess ?? spawn)(
       binary,
       [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath)],
       { cwd: spec.cwd, env: { ...environment, ...relay.environment }, stdio: ["pipe", "pipe", "pipe"] }
-    )
+    ))
     const spawned = child
     onAbort = () => { void stopProcess(spawned) }
     signal.addEventListener("abort", onAbort, { once: true })

@@ -1,4 +1,4 @@
-import type { ChildProcess } from "node:child_process"
+import { execFile, type ChildProcess, type ExecFileOptionsWithStringEncoding } from "node:child_process"
 
 /**
  * Every harness subprocess Jingler spawns, so all of them can be killed when the
@@ -85,6 +85,16 @@ export const killAllChildren = (): number => {
   live.clear()
   return killed
 }
+
+/** Run a bounded text command that remains visible to the app shutdown path. */
+export const execFileText = (
+  file: string,
+  args: readonly string[],
+  options: Omit<ExecFileOptionsWithStringEncoding, "encoding"> = {}
+): Promise<string> => new Promise((resolve, reject) => {
+  trackChild(execFile(file, [...args], { ...options, encoding: "utf8" }, (error, stdout) =>
+    error ? reject(error) : resolve(stdout)))
+})
 
 /** How many spawned children are currently tracked. For tests and diagnostics. */
 export const liveChildCount = (): number => live.size

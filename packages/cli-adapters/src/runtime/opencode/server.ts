@@ -1,9 +1,8 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process"
+import { spawn, type ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer } from "node:net"
-import { promisify } from "node:util"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { stopChild, trackChild } from "../../child-registry.js"
+import { execFileText, stopChild, trackChild } from "../../child-registry.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 
 /** Minimum and maximum tested server are deliberately the same release. */
@@ -28,7 +27,7 @@ export const supportedPlatform = () => {
 }
 export const readOpenCodeVersion = async (options: OpenCodeOptions = {}) => {
   supportedPlatform()
-  const { stdout } = await promisify(execFile)(options.binary ?? process.env.JINGLER_OPENCODE_BINARY ?? "opencode", ["--version"], {
+  const stdout = await execFileText(options.binary ?? process.env.JINGLER_OPENCODE_BINARY ?? "opencode", ["--version"], {
     env: openCodeEnvironment(options.environment ?? process.env), timeout: 5_000, maxBuffer: 64_000
   })
   return stdout.trim()

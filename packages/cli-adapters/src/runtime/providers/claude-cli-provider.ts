@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import { createInterface } from "node:readline"
 import { setTimeout as delay } from "node:timers/promises"
@@ -16,6 +16,7 @@ import type {
 } from "@earendil-works/pi-ai"
 import { lazyStream } from "@earendil-works/pi-ai/api/lazy"
 import { Option, Schema } from "effect"
+import { execFileText, trackChild } from "../../child-registry.js"
 import {
   startClaudeCliToolRelay,
   type ClaudeCliToolRelay,
@@ -81,36 +82,26 @@ const subscriptionEnvironment = (
   return sanitized
 }
 
-export const checkClaudeSubscription = (
+export const checkClaudeSubscription = async (
   binary: string,
   environment: NodeJS.ProcessEnv,
   signal?: AbortSignal
-): Promise<void> =>
-  new Promise((resolve, reject) => {
-    execFile(
-      binary,
-      ["auth", "status"],
-      { env: environment, timeout: 5_000, signal },
-      (error, stdout) => {
-      if (error) {
-        reject(new Error("Claude CLI is not authenticated with a subscription"))
-        return
-      }
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(stdout)
-      } catch {
-        reject(new Error("Claude CLI returned an invalid authentication status"))
-        return
-      }
-      const status = Option.getOrNull(decodeAuthStatus(parsed))
-      if (status === null || !status.loggedIn) {
-        reject(new Error("Claude CLI is not authenticated with a subscription"))
-        return
-      }
-      resolve()
-    })
-  })
+): Promise<void> => {
+  let stdout: string
+  try {
+    stdout = await execFileText(binary, ["auth", "status"], { env: environment, timeout: 5_000, signal })
+  } catch {
+    throw new Error("Claude CLI is not authenticated with a subscription")
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stdout)
+  } catch {
+    throw new Error("Claude CLI returned an invalid authentication status")
+  }
+  const status = Option.getOrNull(decodeAuthStatus(parsed))
+  if (status === null || !status.loggedIn) throw new Error("Claude CLI is not authenticated with a subscription")
+}
 
 export const verifyLocalClaudeSubscription = (
   options: Pick<ClaudeCliProviderOptions, "binary" | "environment"> & {
@@ -476,11 +467,11 @@ async function* runClaudeCli(
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
     relay = await (providerOptions.startToolRelay ?? startClaudeCliToolRelay)(context.tools ?? [])
     if (options.signal?.aborted) throw new Error("Claude CLI request was aborted")
-    child = (providerOptions.spawnProcess ?? spawn)(
+    child = trackChild((providerOptions.spawnProcess ?? spawn)(
       binary,
       [...claudeCliArguments(model, context, options, relay.mcpConfigPath)],
       { cwd: providerOptions.cwd, env: environment, stdio: ["pipe", "pipe", "pipe"] }
-    )
+    ))
     const processClosed = new Promise<void>((resolve, reject) => {
       child?.once("close", () => resolve())
       child?.once("error", reject)

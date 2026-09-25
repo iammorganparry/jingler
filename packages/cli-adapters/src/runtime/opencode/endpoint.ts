@@ -1,6 +1,6 @@
 import { nativeCliEndpointId, ProviderId, ProviderModelId, type AgentEndpointCatalogEntry, type AgentEndpointStatus } from "@jingler/core"
 import type { ConfigProvidersResponse, ProviderListResponse } from "@opencode-ai/sdk/v2/client"
-import { acquireOpenCode, makeOpenCodePool, OPENCODE_VERSION, readOpenCodeVersion, UnsupportedOpenCode, type OpenCodeOptions, type OpenCodeServer } from "./server.js"
+import { acquireOpenCode, makeOpenCodePool, OPENCODE_VERSION, UnsupportedOpenCode, type OpenCodeOptions, type OpenCodeServer } from "./server.js"
 
 export const openCodeFeatures = { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } as const
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates bounded provider and model identities in one catalog pass.
@@ -29,10 +29,11 @@ export const catalogModels = (providers: ProviderListResponse, config: ConfigPro
   }
   return models
 }
-export const readOpenCodeModels = async (server: OpenCodeServer, directory?: string) => {
+export const readOpenCodeModels = async (server: OpenCodeServer, directory?: string, signal?: AbortSignal) => {
+  const request = { throwOnError: true as const, ...(signal ? { signal } : {}) }
   const [providers, config] = await Promise.all([
-    server.client.provider.list({ directory }, { throwOnError: true }),
-    server.client.config.providers({ directory }, { throwOnError: true })
+    server.client.provider.list({ directory }, request),
+    server.client.config.providers({ directory }, request)
   ])
   return catalogModels(providers.data, config.data)
 }
@@ -42,10 +43,9 @@ export const probeOpenCodeEndpoint = async (options: OpenCodeOptions & { targetI
   let status: AgentEndpointStatus = "error"
   let models: AgentEndpointCatalogEntry["models"] = []
   try {
-    version = await readOpenCodeVersion(options)
-    if (version !== OPENCODE_VERSION) throw new UnsupportedOpenCode("Unsupported OpenCode version")
     const lease = await (Object.keys(options).some((key) => key !== "targetId") ? makeOpenCodePool(options) : acquireOpenCode)(targetId)
     try {
+      version = OPENCODE_VERSION
       models = await readOpenCodeModels(lease.server)
       status = models.some((model) => model.selectable) ? "ready" : "signed-out"
     } finally { await lease.release() }

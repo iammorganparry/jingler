@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process"
-import { promisify } from "node:util"
+import { execFileText } from "../../child-registry.js"
 import {
   nativeCliEndpointId,
   ProviderId,
@@ -8,8 +7,6 @@ import {
   type AgentEndpointStatus
 } from "@jingler/core"
 import { nativeCliEnvironment } from "./native-cli-environment.js"
-
-const execFileAsync = promisify(execFile)
 
 interface ClaudeAuthStatus {
   readonly loggedIn?: boolean
@@ -28,12 +25,11 @@ const run = async (
   args: ReadonlyArray<string>,
   environment: NodeJS.ProcessEnv
 ): Promise<string> => {
-  const result = await execFileAsync(binary, [...args], {
+  return (await execFileText(binary, args, {
     env: environment,
     timeout: 5_000,
     maxBuffer: 256_000
-  })
-  return result.stdout.trim()
+  })).trim()
 }
 
 const semanticVersion = /(\d+)\.(\d+)\.(\d+)/u

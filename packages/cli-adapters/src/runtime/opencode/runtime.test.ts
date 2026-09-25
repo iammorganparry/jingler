@@ -95,6 +95,30 @@ describe("native OpenCode 1.18.14", () => {
     await expect(collect(spec({ prompt: 'disconnect' }))).rejects.toThrow()
     expect(liveChildCount()).toBe(0)
   })
+  it("reaps a session that finishes initializing after cancellation", async () => {
+    let releaseResponse = () => {}
+    let createdId = ""
+    let resolveCreated = () => {}
+    const created = new Promise<void>((resolve) => { resolveCreated = resolve })
+    const delayed = makeOpenCodeAgentRuntime({ ...options, fetch: async input => {
+      const request = input as Request
+      const response = await transport.fetch(input)
+      if (request.method === "POST" && new URL(request.url).pathname === "/session") {
+        createdId = ((await response.clone().json()) as { id: string }).id
+        resolveCreated()
+        await new Promise<void>((resolve) => { releaseResponse = resolve })
+      }
+      return response
+    } })
+    const controller = new AbortController()
+    const running = Effect.runPromise(delayed.run(spec(), context).pipe(Stream.runCollect), { signal: controller.signal })
+    await created
+    controller.abort()
+    releaseResponse()
+    await expect(running).rejects.toThrow()
+    expect(transport.requests.some((request) => new URL(request.url).pathname === `/session/${createdId}/abort`)).toBe(true)
+    expect(liveChildCount()).toBe(0)
+  })
   it("interrupts the whole turn and rejects a foreign endpoint", async () => {
     const instance = runtime()
     await expect(Effect.runPromise(instance.run(spec({ prompt: 'wait' }), context).pipe(Stream.tap(event => event._tag === 'Started' ? instance.interrupt({ runtimeId: 'opencode', endpointId, id: event.sessionId }, 'desktop') : Effect.void), Stream.runDrain))).rejects.toThrow('interrupted')

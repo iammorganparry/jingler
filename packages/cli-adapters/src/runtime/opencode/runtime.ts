@@ -22,26 +22,31 @@ export const openCodePermissions = (mode: AgentRunSpec["mode"]): PermissionRules
 ]
 
 /** Missing sessions alone recover by seeding. Auth, corruption and path mismatches fail. */
-export const openOpenCodeSession = async (server: OpenCodeServer, spec: AgentRunSpec, directory: string) => {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: continuation recovery stays visible beside the vendor calls it governs.
+export const openOpenCodeSession = async (server: OpenCodeServer, spec: AgentRunSpec, directory: string, signal?: AbortSignal) => {
   const permission = openCodePermissions(spec.mode)
+  const request = { throwOnError: true as const, ...(signal ? { signal } : {}) }
+  const sessionRequest = { throwOnError: true as const }
   if (spec.continuation) {
-    const existing = await server.client.session.get({ sessionID: spec.continuation.id, directory })
+    const existing = await server.client.session.get({ sessionID: spec.continuation.id, directory }, signal ? { signal } : undefined)
     if (existing.data) {
       let session = existing.data
+      let forked = false
       if (session.directory !== directory) {
         // A continuation moved to another verified workspace becomes an explicit
         // OpenCode fork instead of reusing history under the wrong filesystem.
-        session = (await server.client.session.fork({ sessionID: session.id, directory }, { throwOnError: true })).data
+        session = (await server.client.session.fork({ sessionID: session.id, directory }, sessionRequest)).data
+        forked = true
       } else {
-        const status = await server.client.session.status({ directory }, { throwOnError: true })
+        const status = await server.client.session.status({ directory }, request)
         if (status.data[session.id]?.type !== undefined && status.data[session.id]?.type !== "idle") throw new Error("OpenCode session is already active")
       }
-      await server.client.session.update({ sessionID: session.id, directory, permission }, { throwOnError: true })
+      await server.client.session.update({ sessionID: session.id, directory, permission }, forked ? sessionRequest : request)
       return { session, fresh: false }
     }
     if (existing.response.status !== 404) throw new Error("OpenCode continuation lookup failed")
   }
-  return { session: (await server.client.session.create({ directory, permission }, { throwOnError: true })).data, fresh: true }
+  return { session: (await server.client.session.create({ directory, permission }, sessionRequest)).data, fresh: true }
 }
 const seedPrompt = (spec: AgentRunSpec) => [...(spec.seed?.messages ?? spec.priorMessages).map((message) => JSON.stringify({ role: message.role, text: message.parts.flatMap((part) => part._tag === "Text" ? [part.text] : []).join("\n") })), spec.prompt].join("\n")
 const replyPermission = async (request: PermissionRequest, spec: AgentRunSpec, context: AgentRuntimeContext, server: OpenCodeServer, directory: string, signal: AbortSignal) => {
@@ -110,15 +115,19 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
     let id: string | undefined
     let inbox: OpenCodeInbox | undefined
     let completed = false
-    let cleaned = false
+    let cleanedId: string | undefined
+    let inboxClosed = false
     let directory = spec.cwd
-    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: idempotent cleanup handles partially initialized turns.
+    // Resources can finish initializing after cancellation; each cleanup pass reaps anything published since the last pass.
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: cleanup handles each partially initialized resource independently.
     const cleanup = async () => {
-      if (cleaned) return
-      cleaned = true
       abort.abort()
-      inbox?.close()
-      if (id) {
+      if (inbox && !inboxClosed) {
+        inboxClosed = true
+        inbox.close()
+      }
+      if (id && cleanedId !== id) {
+        cleanedId = id
         active.delete(ownerKey(spec.endpointId, id))
         if (!completed) {
           try { await server.client.session.abort({ sessionID: id, directory }, { throwOnError: true, signal: AbortSignal.timeout(2000) }) }
@@ -131,20 +140,24 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
     const timeout = setTimeout(() => { inbox?.fail(new Error("OpenCode turn timed out")); abort.abort() }, 30 * 60_000)
     try {
       directory = await realpath(spec.cwd)
-      const models = await readOpenCodeModels(server, directory)
+      abort.signal.throwIfAborted()
+      const models = await readOpenCodeModels(server, directory, abort.signal)
       if (!models.some((model) => model.providerId === spec.providerId && model.id === spec.modelId && model.selectable)) throw new Error("OpenCode model is unavailable")
-      const { session, fresh } = await openOpenCodeSession(server, spec, directory)
+      const { session, fresh } = await openOpenCodeSession(server, spec, directory, abort.signal)
       id = session.id
+      abort.signal.throwIfAborted()
       const key = ownerKey(spec.endpointId, id)
       if (active.has(key)) throw new Error("OpenCode session already active")
       inbox = new OpenCodeInbox(server, directory, id)
       active.set(key, { server, directory, inbox })
       await inbox.connectedBeforePrompt()
+      abort.signal.throwIfAborted()
       const messageID = `msg_${Date.now().toString(16)}${randomBytes(12).toString("hex")}`
       const events = new OpenCodeEvents(id, messageID)
       const permissions = new Set<string>()
       const questions = new Set<string>()
-      await server.client.session.promptAsync({ sessionID: id, directory, messageID, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true })
+      await server.client.session.promptAsync({ sessionID: id, directory, messageID, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true, signal: abort.signal })
+      abort.signal.throwIfAborted()
       yield { _tag: "Started", sessionId: id, model: spec.modelId }
       for (;;) {
         const event = await inbox.next()

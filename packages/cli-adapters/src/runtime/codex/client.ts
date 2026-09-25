@@ -1,7 +1,6 @@
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
-import { promisify } from "node:util"
-import { stopChild, trackChild } from "../../child-registry.js"
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { execFileText, stopChild, trackChild } from "../../child-registry.js"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import type { InitializeParams } from "./generated/InitializeParams.js"
 
 /** Explicit system allowlist: native credentials come from Codex's own home. */
@@ -28,7 +27,7 @@ export const readCodexVersion = async (
   options: CodexClientOptions = {}
 ): Promise<string | null> => {
   assertSupportedPlatform()
-  const { stdout } = await promisify(execFile)(
+  const stdout = await execFileText(
     options.binary ?? process.env.JINGLER_CODEX_BINARY ?? "codex",
     ["--version"],
     {
