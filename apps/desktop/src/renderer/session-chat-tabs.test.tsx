@@ -76,7 +76,7 @@ const subagentNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode 
   childSequence: 1,
   runId: "worker-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "worker",
   task: "Implement tabs",
   model: null,

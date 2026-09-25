@@ -27,7 +27,7 @@ describe("Jingler child tools extension", () => {
       version: 1,
       endpoint: "http://127.0.0.1:1/v1/subagent-tool",
       token: "token",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       tools: [
         {
           id: "workspace_read_file",

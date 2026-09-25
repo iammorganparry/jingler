@@ -16,7 +16,7 @@ const node: SubagentFleetNode = {
   childSequence: 1,
   runId: "run-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "worker",
   task: "Review polling",
   model: null,
@@ -79,7 +79,7 @@ describe("useSubagentFleet reconciliation", () => {
     const { result } = renderHook(() => useSubagentFleet({
       sessionId: "session-1",
       chatId: "chat-1",
-      piSessionId: "parent",
+      continuation: "parent",
       events
     }))
 
@@ -115,7 +115,7 @@ describe("useSubagentFleet reconciliation", () => {
     const { result } = renderHook(() => useSubagentFleet({
       sessionId: "session-1",
       chatId: "chat-1",
-      piSessionId: "parent",
+      continuation: "parent",
       events
     }))
 
@@ -144,7 +144,7 @@ describe("useSubagentFleet reconciliation", () => {
     const { result } = renderHook(() => useSubagentFleet({
       sessionId: "session-1",
       chatId: "chat-1",
-      piSessionId: "parent",
+      continuation: "parent",
       events
     }))
 

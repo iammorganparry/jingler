@@ -59,7 +59,7 @@ describe("readDurablePiSubagentNodes", () => {
 
     const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       parentPiSessionAliases: new Set(["parent", "/sessions/parent.jsonl"]),
       now: 30
     }))
@@ -122,7 +122,7 @@ describe("readDurablePiSubagentNodes", () => {
 
     const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       now: 50
     }))
@@ -169,7 +169,7 @@ describe("readDurablePiSubagentNodes", () => {
 
     const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       registryRevision: 2
     }))
@@ -197,7 +197,7 @@ describe("readDurablePiSubagentNodes", () => {
 
     const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       maxNodes: 2
     }))
@@ -229,7 +229,7 @@ describe("readDurablePiSubagentNodes", () => {
 
     const projection = await Effect.runPromise(readDurablePiSubagentNodes({
       asyncDir: root,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       parentPiSessionAliases: new Set(["parent"]),
       registryRevision: 7,
       maxNodes: 2

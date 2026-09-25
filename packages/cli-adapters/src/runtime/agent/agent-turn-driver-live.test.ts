@@ -2,6 +2,7 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnectionId,
   ProviderModelId,
+  piEndpointId,
   type StreamEvent
 } from "@jingler/core"
 import { Effect, Fiber, Layer, Schema, Stream } from "effect"
@@ -15,14 +16,18 @@ import {
 import { AgentRuntime, type AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentTurnDriverLive } from "./agent-turn-driver-live.js"
 
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+
 const spec = (): AgentTurnSpec => ({
   sessionId: "session-1",
   chatId: "chat-1",
-  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
+  runtimeId: "pi",
+  endpointId: piEndpointId("desktop", connectionId),
+  connectionId,
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test"),
   role: "conversation",
   priorMessages: [],
-  piSessionId: null,
+  continuation: null,
   seed: null,
   targetCapabilities: {
     versions: CURRENT_RUNTIME_CONTRACTS,
@@ -150,7 +155,11 @@ describe("AgentRuntimeAdapter", () => {
     expect(steer).not.toHaveBeenCalled()
 
     await expect(handle!("plain text", [])).resolves.toBe("accepted")
-    expect(steer).toHaveBeenCalledWith("pi-session", "plain text")
+    expect(steer).toHaveBeenCalledWith(
+      { runtimeId: "pi", endpointId: spec().endpointId, id: "pi-session" },
+      "desktop",
+      "plain text"
+    )
   })
 
   it("interrupts the active pi session when the run fiber is interrupted", async () => {
@@ -193,6 +202,9 @@ describe("AgentRuntimeAdapter", () => {
     }).pipe(Effect.provide(layer))
 
     await Effect.runPromise(program)
-    expect(interrupt).toHaveBeenCalledWith("pi-session")
+    expect(interrupt).toHaveBeenCalledWith(
+      { runtimeId: "pi", endpointId: spec().endpointId, id: "pi-session" },
+      "desktop"
+    )
   })
 })

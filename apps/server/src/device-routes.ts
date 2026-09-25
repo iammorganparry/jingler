@@ -148,6 +148,46 @@ const defaultDependencies = (): DeviceRoutesDependencies => ({
   relayFetch: (input, init) => fetch(input, init)
 })
 
+const discoveryResponse = (value: unknown, deviceId: string, targetId?: string): Response => {
+  const discovery = Schema.decodeUnknownSync(EnvironmentDiscovery)(value, { onExcessProperty: "error" })
+  const capabilities = discovery.discovery?.capabilities
+  if (discovery.deviceId !== deviceId || (targetId && (
+    capabilities?.runtime?.targetId !== targetId ||
+    capabilities?.endpointCatalog?.endpoints.some(({ endpoint }) => endpoint.targetId !== targetId)
+  ))) return json({ error: "Device discovery target mismatch" }, 502)
+  return json(discovery)
+}
+
+const requestDiscovery = async (
+  request: Request,
+  dependencies: DeviceRoutesDependencies,
+  subject: string,
+  clientInstanceId: string,
+  deviceId: string
+): Promise<Response> => {
+  const input = request.method === "POST"
+    ? await decodeBoundedJson(request, Schema.Struct({
+        targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+        action: Schema.Literal("list", "refresh", "auth-status")
+      }))
+    : undefined
+  if (input === null) return json({ error: "Invalid endpoint catalog request" }, 400)
+  const response = await relayRequest(
+    dependencies,
+    `/v1/devices/${encodeURIComponent(deviceId)}/discovery`,
+    controlGrant(dependencies, subject, clientInstanceId, deviceId).grant,
+    input ? "POST" : "GET",
+    input
+  ).catch(() => null)
+  if (!response) return json({ error: "Device relay unavailable" }, 502)
+  if (!response.ok) return forward(response)
+  try {
+    return discoveryResponse(await response.json(), deviceId, input?.targetId)
+  } catch {
+    return json({ error: "Invalid device discovery response" }, 502)
+  }
+}
+
 const relayUrl = (base: string, path: string): string =>
   `${base.replace(/\/$/u, "")}${path}`
 
@@ -557,7 +597,7 @@ export const createDeviceRoutes = (
     return device ? json({ version: 1, device }) : json({ error: "Device not found" }, 404)
   })
 
-  routes.get("/:deviceId/discovery", async (context) => {
+  routes.on(["GET", "POST"], "/:deviceId/discovery", async (context) => {
     const dependencies = dependenciesFactory()
     const unavailable = configured(dependencies)
     if (unavailable) return unavailable
@@ -569,21 +609,7 @@ export const createDeviceRoutes = (
       .findForUser(subject, deviceId)
       .catch(() => null)
     if (!owned || owned.state !== "active") return json({ error: "Device not found" }, 404)
-    const response = await relayRequest(
-      dependencies,
-      `/v1/devices/${encodeURIComponent(deviceId)}/discovery`,
-      controlGrant(dependencies, subject, clientInstanceId, deviceId).grant,
-      "GET"
-    ).catch(() => null)
-    if (!response) return json({ error: "Device relay unavailable" }, 502)
-    if (!response.ok) return forward(response)
-    try {
-      return json(Schema.decodeUnknownSync(EnvironmentDiscovery)(await response.json(), {
-        onExcessProperty: "error"
-      }))
-    } catch {
-      return json({ error: "Invalid device discovery response" }, 502)
-    }
+    return requestDiscovery(context.req.raw, dependencies, subject, clientInstanceId, deviceId)
   })
 
   routes.post("/challenges", async (context) => {

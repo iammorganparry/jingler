@@ -333,6 +333,12 @@ export const makeDeviceProviderLayers = (
               new ProviderConnectionsError({ message: cause.message, cause }),
           ),
         ),
+        refreshCatalog: catalog.refresh.pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderConnectionsError({ message: cause.message, cause }),
+          ),
+        ),
         status: Effect.succeed(state.connections),
         resolveCredential: () =>
           unsupported(

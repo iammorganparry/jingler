@@ -1,6 +1,7 @@
 import { Spin } from "../components/spin.js"
 import * as React from "react";
 import type {
+  AgentEndpointCatalog,
   Environment,
   PermissionMode,
   ProviderCatalog,
@@ -302,6 +303,7 @@ export interface NewWorkspaceViewProps {
   projects: ReadonlyArray<Project>;
   environments?: ReadonlyArray<Environment>;
   providerCatalog?: ProviderCatalog | null;
+  agentEndpointCatalog?: AgentEndpointCatalog | null;
   defaultConnectionId?: ProviderConnectionId | null;
   defaultModelId?: ProviderModelId | null;
   defaultMode?: PermissionMode | null;
@@ -338,9 +340,9 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
   }
 
          function getModelSelectionError() {
-           return (connectionId === null || providerId === null || modelId === null
+           return (runtimeId === null || endpointId === null || providerId === null || modelId === null
       ? hasSelectableModel
-        ? "Choose a provider connection and model."
+        ? "Choose an agent runtime and model."
         : "Connect a provider in Settings › Provider connections to choose a model."
       : undefined)
          }
@@ -382,15 +384,21 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
                 })
               }
               providerCatalog={props.providerCatalog}
+              agentEndpointCatalog={agentEndpointCatalog}
+              endpointId={state.context.endpointId}
               connectionId={connectionId}
               modelId={modelId}
               onSetModel={({
+                runtimeId: nextRuntime,
+                endpointId: nextEndpoint,
                 connectionId: nextConnection,
                 providerId: nextProvider,
                 modelId: nextModel,
               }) =>
                 send({
                   type: "SET_MODEL",
+                  runtimeId: nextRuntime,
+                  endpointId: nextEndpoint,
                   connectionId: nextConnection,
                   providerId: nextProvider,
                   modelId: nextModel,
@@ -611,6 +619,7 @@ function getContent() {
   }, [
     props.open,
     props.providerCatalog,
+    props.agentEndpointCatalog,
     props.defaultConnectionId,
     props.defaultModelId,
     send,
@@ -633,6 +642,8 @@ function getContent() {
     attachments,
     mode,
     reasoning,
+    runtimeId,
+    endpointId,
     connectionId,
     providerId,
     modelId,
@@ -645,6 +656,17 @@ function getContent() {
   const selectedEnvironment = props.environments?.find(
     (environment) => environment.id === environmentId,
   );
+  const targetId = environmentId === "local"
+    ? "desktop"
+    : (selectedEnvironment?.capabilities.runtime?.targetId ?? environmentId)
+  const targetEndpoints = props.agentEndpointCatalog?.endpoints.filter(
+    ({ endpoint }) => endpoint.targetId === targetId
+  ) ?? []
+  const agentEndpointCatalog = selectedEnvironment?.kind === "managed" && targetEndpoints.length === 0
+    ? null
+    : props.agentEndpointCatalog == null
+      ? props.agentEndpointCatalog
+      : { ...props.agentEndpointCatalog, endpoints: targetEndpoints }
   const submitting = state.matches("submitting");
   const loading = state.matches("loading");
   const sourceLoading = state.matches("sourceLoading");

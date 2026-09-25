@@ -96,6 +96,8 @@ import {
   RuntimeDiagnosticSnapshot,
   RuntimeRecoveryError,
   ModelCertification,
+  AgentEndpointCatalog,
+  SetSessionAgentModelInput,
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionError,
@@ -241,6 +243,34 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { runId: Schema.String }
   }),
 
+  Rpc.make("AgentEndpoint.list", {
+    success: AgentEndpointCatalog,
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("AgentEndpoint.refresh", {
+    success: AgentEndpointCatalog,
+    error: ProviderConnectionError
+  }),
+
+  Rpc.make("AgentEndpoint.startLogin", {
+    success: Schema.Struct({ loginId: Schema.String, verificationUrl: Schema.String, userCode: Schema.String }),
+    error: ProviderConnectionError,
+    payload: { endpointId: Schema.String, targetId: Schema.String }
+  }),
+
+  Rpc.make("AgentEndpoint.cancelLogin", {
+    success: Schema.Void,
+    error: ProviderConnectionError,
+    payload: { endpointId: Schema.String, targetId: Schema.String, loginId: Schema.String }
+  }),
+
+  Rpc.make("AgentEndpoint.setModel", {
+    success: Session,
+    error: Schema.Union(GitError, SessionNotFoundError, ProviderConnectionError),
+    payload: SetSessionAgentModelInput
+  }),
+
   Rpc.make("Provider.list", {
     success: ProviderCatalog,
     error: ProviderConnectionError
@@ -369,7 +399,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Environment.discovery", {
     success: EnvironmentDiscovery,
     error: EnvironmentError,
-    payload: { deviceId: Schema.String }
+    payload: {
+      deviceId: Schema.String,
+      endpointRequest: Schema.optional(Schema.Struct({
+        targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
+        action: Schema.Literal("list", "refresh", "auth-status")
+      }))
+    }
   }),
 
   Rpc.make("Environment.watch", {
@@ -979,7 +1015,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      parentPiSessionId: Schema.String
+      parentRuntimeSessionId: Schema.String
     }
   }),
 
@@ -990,7 +1026,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      parentPiSessionId: Schema.String,
+      parentRuntimeSessionId: Schema.String,
       runId: Schema.String
     }
   }),

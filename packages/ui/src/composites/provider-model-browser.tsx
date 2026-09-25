@@ -1,23 +1,31 @@
 import type {
+  AgentEndpointCatalog,
+  AgentEndpointId,
+  AgentRuntimeId,
   ProviderCatalog,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
+import { piEndpointId } from "@jingler/core"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger, type SelectPlacement } from "../components/beui/select.js"
 import { cn } from "../lib/cn.js"
 
 export interface ProviderModelSelection {
-  readonly connectionId: ProviderConnectionId
+  readonly runtimeId: AgentRuntimeId
+  readonly endpointId: AgentEndpointId
+  readonly connectionId?: ProviderConnectionId
   readonly providerId: ProviderId
   readonly modelId: ProviderModelId
 }
 
-const selectionKey = (selection: Pick<ProviderModelSelection, "connectionId" | "modelId">): string =>
-  `${encodeURIComponent(selection.connectionId)}:${encodeURIComponent(selection.modelId)}`
+const selectionKey = (selection: Pick<ProviderModelSelection, "endpointId" | "modelId">): string =>
+  `${encodeURIComponent(selection.endpointId)}:${encodeURIComponent(selection.modelId)}`
 
 interface BrowsableModel extends ProviderModelSelection {
+  readonly groupId: string
+  readonly groupLabel: string
   readonly label: string
   readonly searchText: string
   readonly contextWindow: number | null
@@ -39,7 +47,24 @@ const formatContextSize = (size: number | null): string =>
  * each model appears once, bound to the healthiest (authenticated, most
  * recently updated) connection that offers it.
  */
-const browsableModels = (catalog: ProviderCatalog): ReadonlyArray<BrowsableModel> => {
+const browsableModels = (
+  catalog: ProviderCatalog | AgentEndpointCatalog
+): ReadonlyArray<BrowsableModel> => {
+  if ("endpoints" in catalog) {
+    return catalog.endpoints.flatMap(({ endpoint, models }) =>
+      models.filter(({ selectable }) => selectable).map((model) => ({
+        runtimeId: endpoint.runtimeId,
+        endpointId: endpoint.id,
+        providerId: model.providerId,
+        modelId: model.id,
+        groupId: endpoint.id,
+        groupLabel: endpoint.label,
+        label: model.label,
+        searchText: `${endpoint.label} ${model.label} ${model.id} ${endpoint.targetId}`,
+        contextWindow: model.capabilities.contextWindow
+      }))
+    )
+  }
   const ordered = [...catalog.connections].sort((a, b) => {
     const authenticated =
       Number(b.connection.status === "authenticated") -
@@ -55,22 +80,25 @@ const browsableModels = (catalog: ProviderCatalog): ReadonlyArray<BrowsableModel
         const identity = `${model.providerId}:${model.id}`
         if (seen.has(identity)) return []
         seen.add(identity)
-        return [
-          {
-            connectionId: connection.id,
-            providerId: model.providerId,
-            modelId: model.id,
-            label: model.label,
-            searchText: `${model.label} ${model.id} ${connection.targetId}`,
-            contextWindow: model.capabilities.contextWindow
-          }
-        ]
+        return [{
+          runtimeId: "pi",
+          endpointId: piEndpointId(connection.targetId, connection.id),
+          connectionId: connection.id,
+          providerId: model.providerId,
+          modelId: model.id,
+          groupId: model.providerId,
+          groupLabel: providerLabel(model.providerId),
+          label: model.label,
+          searchText: `${model.label} ${model.id} ${connection.targetId}`,
+          contextWindow: model.capabilities.contextWindow
+        }]
       })
   )
 }
 
 export function ProviderModelBrowser({
   catalog,
+  endpointId,
   connectionId,
   modelId,
   onSelect,
@@ -78,7 +106,8 @@ export function ProviderModelBrowser({
   inlineContent = false,
   placement
 }: {
-  catalog: ProviderCatalog
+  catalog: ProviderCatalog | AgentEndpointCatalog
+  endpointId?: AgentEndpointId | null
   connectionId: ProviderConnectionId | null
   modelId: ProviderModelId | null
   onSelect?: (selection: ProviderModelSelection) => void
@@ -87,33 +116,40 @@ export function ProviderModelBrowser({
   placement?: SelectPlacement
 }) {
   const selections = browsableModels(catalog)
-  const providerOrder: ProviderId[] = []
-  const byProvider = new Map<ProviderId, BrowsableModel[]>()
+  const groupOrder: string[] = []
+  const byGroup = new Map<string, BrowsableModel[]>()
   for (const selection of selections) {
-    const existing = byProvider.get(selection.providerId)
+    const existing = byGroup.get(selection.groupId)
     if (existing === undefined) {
-      providerOrder.push(selection.providerId)
-      byProvider.set(selection.providerId, [selection])
+      groupOrder.push(selection.groupId)
+      byGroup.set(selection.groupId, [selection])
     } else {
       existing.push(selection)
     }
   }
-  const groups = providerOrder.map((providerId) => ({
-    providerId,
-    label: providerLabel(providerId),
-    options: (byProvider.get(providerId) ?? []).map((model) => ({
+  const groups = groupOrder.map((groupId) => ({
+    groupId,
+    providerId: byGroup.get(groupId)![0]!.providerId,
+    label: byGroup.get(groupId)?.[0]?.groupLabel ?? groupId,
+    options: (byGroup.get(groupId) ?? []).map((model) => ({
       value: selectionKey(model),
       label: model.label,
       searchText: model.searchText,
       contextSize: formatContextSize(model.contextWindow)
     }))
   }))
-  const value =
-    connectionId === null || modelId === null
-      ? ""
-      : selectionKey({ connectionId, modelId })
+  const current = modelId === null
+    ? undefined
+    : selections.find((selection) =>
+        selection.modelId === modelId && (
+          endpointId != null
+            ? selection.endpointId === endpointId
+            : selection.connectionId === connectionId
+        )
+      )
+  const value = current === undefined ? "" : selectionKey(current)
   const selected =
-    selections.find((selection) => selectionKey(selection) === value) ??
+    current ??
     // A selection pinned to a deduped-away duplicate connection still names
     // the same model; represent it by the surviving row.
     (modelId === null
@@ -129,7 +165,11 @@ export function ProviderModelBrowser({
         const selection = selections.find((candidate) => selectionKey(candidate) === key)
         if (selection)
           onSelect?.({
-            connectionId: selection.connectionId,
+            runtimeId: selection.runtimeId,
+            endpointId: selection.endpointId,
+            ...(selection.connectionId === undefined
+              ? {}
+              : { connectionId: selection.connectionId }),
             providerId: selection.providerId,
             modelId: selection.modelId
           })

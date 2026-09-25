@@ -81,6 +81,69 @@ describe("device control connection", () => {
     await expect(running).resolves.toBe("stopped")
   })
 
+  it.each(["refresh", "auth-status"])("answers a correlated endpoint catalog %s for its own target", async (action) => {
+    const controller = new AbortController()
+    let deliver: ((message: unknown) => void) | null = null
+    const sent: string[] = []
+    const endpointDiscovery: RemoteDeviceDiscovery = {
+      ...discovery,
+      capabilities: {
+        ...discovery.capabilities,
+        runtime: {
+          versions: {
+            behavior: "1", authentication: "1", prompt: "1", tools: "1",
+            diff: "1", policy: "1", capabilities: "1", piSdk: "1"
+          },
+          toolIds: [],
+          resourceIds: [],
+          targetId: "device-1"
+        },
+        endpointCatalog: {
+          endpoints: [],
+          refreshedAt: "2026-09-25T00:00:00.000Z",
+          stale: false
+        }
+      }
+    }
+    const running = runControlConnection({
+      refreshGrant: async () => grant(1),
+      discover: async () => endpointDiscovery,
+      connect: async () => ({
+        send: (message) => sent.push(message),
+        close: () => undefined,
+        onMessage: (handler) => {
+          deliver = handler
+          return () => undefined
+        },
+        waitForClose: (signal) => new Promise((resolve) => {
+          signal.addEventListener("abort", () => resolve({ code: 1000, reason: "stopped" }), { once: true })
+        })
+      }),
+      sleep: async () => undefined
+    }, controller.signal)
+
+    await vi.waitFor(() => expect(deliver).not.toBeNull())
+    deliver!({ type: "endpoint-catalog-request", version: 1, requestId: "wrong-target", targetId: "other-device", action })
+    await Promise.resolve()
+    expect(sent).toHaveLength(1)
+    deliver!({
+      type: "endpoint-catalog-request",
+      version: 1,
+      requestId: "request-1",
+      targetId: "device-1",
+      action
+    })
+    await vi.waitFor(() => expect(sent).toHaveLength(2))
+    expect(JSON.parse(sent[1]!)).toMatchObject({
+      type: "endpoint-catalog-update",
+      requestId: "request-1",
+      targetId: "device-1",
+      catalog: endpointDiscovery.capabilities.endpointCatalog
+    })
+    controller.abort()
+    await expect(running).resolves.toBe("stopped")
+  })
+
   it("refreshes the device grant before reconnect", async () => {
     const controller = new AbortController()
     let refreshes = 0

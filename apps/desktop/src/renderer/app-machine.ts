@@ -5,6 +5,7 @@
  * data-fetching `useEffect`s, minimal `useState`.
  */
 import type {
+  AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
   DetectedResourceCandidate,
@@ -27,6 +28,7 @@ export interface AppContext {
   readonly repos: ReadonlyArray<Repo>;
   readonly sessions: ReadonlyArray<Session>;
   readonly providerCatalog: ProviderCatalog | null;
+  readonly agentEndpointCatalog: AgentEndpointCatalog | null;
   readonly providerLoginEvent: ProviderLoginEvent | null;
   readonly providerPendingAuthKind: AuthKind | null;
   readonly resourceDetection: ResourceDetectionResult | null;
@@ -41,6 +43,7 @@ export interface InitialData {
   readonly repos: ReadonlyArray<Repo>;
   readonly sessions: ReadonlyArray<Session>;
   readonly providerCatalog: ProviderCatalog;
+  readonly agentEndpointCatalog?: AgentEndpointCatalog;
 }
 
 const hasSelectableDefault = (
@@ -76,9 +79,10 @@ export interface ChosenRepositoryDirectory {
  * has its own machine; first-run coordinates with it through explicit events.
  */
 const initialLoad = fromPromise<InitialData>(async () => {
-  const [config, providerCatalog] = await Promise.all([
+  const [config, providerCatalog, agentEndpointCatalog] = await Promise.all([
     rpc.configGet(),
     rpc.providerList(),
+    rpc.agentEndpointList(),
   ]);
   if (config?.reposDir) {
     const [repos, sessions] = await Promise.all([
@@ -89,11 +93,15 @@ const initialLoad = fromPromise<InitialData>(async () => {
       configured: true,
       providerReady:
         config.providerSetupCompleted === true ||
-        hasSelectableDefault(config, providerCatalog),
+        hasSelectableDefault(config, providerCatalog) ||
+        agentEndpointCatalog.endpoints.some(({ endpoint, models }) =>
+          endpoint.status === "ready" && models.some(({ selectable }) => selectable)
+        ),
       reposDir: config.reposDir,
       repos,
       sessions,
       providerCatalog,
+      agentEndpointCatalog,
     };
   }
   return {
@@ -103,6 +111,7 @@ const initialLoad = fromPromise<InitialData>(async () => {
     repos: [],
     sessions: [],
     providerCatalog,
+    agentEndpointCatalog,
   };
 });
 
@@ -261,6 +270,7 @@ export const appMachine = setup({
     repos: [],
     sessions: [],
     providerCatalog: null,
+    agentEndpointCatalog: null,
     providerLoginEvent: null,
     providerPendingAuthKind: null,
     resourceDetection: null,
@@ -281,6 +291,7 @@ export const appMachine = setup({
               repos: event.output.repos,
               sessions: event.output.sessions,
               providerCatalog: event.output.providerCatalog,
+              agentEndpointCatalog: event.output.agentEndpointCatalog ?? null,
             })),
           },
           {
@@ -291,12 +302,14 @@ export const appMachine = setup({
               repos: event.output.repos,
               sessions: event.output.sessions,
               providerCatalog: event.output.providerCatalog,
+              agentEndpointCatalog: event.output.agentEndpointCatalog ?? null,
             })),
           },
           {
             target: "setup",
             actions: assign(({ event }) => ({
               providerCatalog: event.output.providerCatalog,
+              agentEndpointCatalog: event.output.agentEndpointCatalog ?? null,
             })),
           },
         ],
@@ -388,6 +401,10 @@ export const appMachine = setup({
                   guard: ({ context }) =>
                     context.providerCatalog?.connections.some(
                       ({ connection }) => connection.status === "authenticated",
+                    ) === true ||
+                    context.agentEndpointCatalog?.endpoints.some(
+                      ({ endpoint, models }) =>
+                        endpoint.status === "ready" && models.some(({ selectable }) => selectable)
                     ) === true,
                 },
                 SKIP_PROVIDER: "completing",

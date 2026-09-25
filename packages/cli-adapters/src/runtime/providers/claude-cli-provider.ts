@@ -20,7 +20,7 @@ import {
   startClaudeCliToolRelay,
   type ClaudeCliToolRelay,
   type RelayedToolCall
-} from "./claude-cli-tool-relay.js"
+} from "./claude-cli-sampling-relay.js"
 
 const ClaudeAuthStatus = Schema.Struct({
   loggedIn: Schema.Boolean,

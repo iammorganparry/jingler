@@ -1,5 +1,5 @@
 import type { AgentRole, Session } from "@jingler/core"
-import { CURRENT_RUNTIME_CONTRACTS } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, piEndpointId } from "@jingler/core"
 import { Duration, Effect, Stream } from "effect"
 import {
   AgentRuntimeError,
@@ -9,8 +9,15 @@ import {
 
 const canonicalIdentity = (session: Session) => {
   const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
+  const connectionId = chat?.connectionId ?? session.connectionId
   return {
-    connectionId: chat?.connectionId ?? session.connectionId,
+    runtimeId: chat?.runtimeId ?? session.runtimeId ?? "pi",
+    endpointId: chat?.endpointId ?? session.endpointId ?? (
+      connectionId === undefined
+        ? undefined
+        : piEndpointId(session.environmentId ?? "desktop", connectionId)
+    ),
+    connectionId,
     modelId: chat?.modelId ?? session.modelId
   }
 }
@@ -24,7 +31,11 @@ export const runReadOnlyRoleText = (
   timeout: Duration.DurationInput
 ) => {
   const identity = canonicalIdentity(session)
-  if (identity.connectionId === undefined || identity.modelId === undefined) {
+  if (
+    identity.endpointId === undefined ||
+    identity.modelId === undefined ||
+    (identity.runtimeId === "pi" && identity.connectionId === undefined)
+  ) {
     return Effect.fail(
       new AgentRuntimeError({
         reason: "authentication",
@@ -39,6 +50,8 @@ export const runReadOnlyRoleText = (
         runId: randomUUID(),
         sessionId: session.id,
         chatId: session.activeChatId,
+        runtimeId: identity.runtimeId,
+        endpointId: identity.endpointId,
         connectionId: identity.connectionId,
         modelId: identity.modelId,
         role,
@@ -46,7 +59,7 @@ export const runReadOnlyRoleText = (
         cwd: session.worktreePath ?? process.cwd(),
         prompt,
         priorMessages: [],
-        piSessionId: null,
+        continuation: null,
         seed: null,
         targetCapabilities: {
           versions: CURRENT_RUNTIME_CONTRACTS,

@@ -1,4 +1,5 @@
 import type {
+  AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
   ProviderCatalog,
@@ -18,6 +19,7 @@ import {
 
 export interface ProviderSetupStepProps {
   catalog: ProviderCatalog | null;
+  endpointCatalog?: AgentEndpointCatalog | null;
   loginEvent: ProviderLoginEvent | null;
   busy: boolean;
   pendingAuthKind?: AuthKind | null;
@@ -33,6 +35,7 @@ export interface ProviderSetupStepProps {
 
 export function ProviderSetupStep({
   catalog,
+  endpointCatalog = null,
   loginEvent,
   busy,
   pendingAuthKind = null,
@@ -45,7 +48,13 @@ export function ProviderSetupStep({
   onCancel,
   onRetry,
 }: ProviderSetupStepProps) {
+  const detectedEndpoints = endpointCatalog?.endpoints ?? []
+  const readyEndpoints = detectedEndpoints.filter(
+    ({ endpoint, models }) =>
+      endpoint.status === "ready" && models.some(({ selectable }) => selectable)
+  ) ?? []
   const canContinue =
+    readyEndpoints.length > 0 ||
     catalog?.connections.some(
       ({ connection }) => connection.status === "authenticated",
     ) === true;
@@ -105,6 +114,24 @@ export function ProviderSetupStep({
           subscription connection never falls back to an API key.
         </p>
       </div>
+
+      {detectedEndpoints.length > 0 && (
+        <div aria-label="Detected agent runtimes" className="rounded-xl border border-line bg-sunken p-3">
+          <div className="text-xs font-semibold text-text-bright">Detected agent runtimes</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {detectedEndpoints.map(({ endpoint }) => (
+              <span
+                key={endpoint.id}
+                className={endpoint.status === "ready"
+                  ? "rounded-full border border-green/30 bg-green/10 px-2.5 py-1 text-xs text-green"
+                  : "rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-muted-foreground"}
+              >
+                {endpoint.label} · {endpoint.status}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && (
         <Callout tone="red">

@@ -16,7 +16,7 @@ const node: SubagentFleetNode = {
   childSequence: 1,
   runId: "run-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "worker",
   task: "Implement the drawer",
   model: null,
@@ -67,7 +67,7 @@ describe("subagentFleetMachine", () => {
 
   it("projects lifecycle events and falls back to Main when a selected child disappears", () => {
     const actor = createActor(subagentFleetMachine, {
-      input: { parentPiSessionId: "fallback" }
+      input: { parentRuntimeSessionId: "fallback" }
     }).start()
     actor.send({
       type: "SYNC",
@@ -81,7 +81,7 @@ describe("subagentFleetMachine", () => {
     })
     actor.send({ type: "SELECT", id: node.id })
     expect(actor.getSnapshot().context.selectedId).toBe(node.id)
-    expect(actor.getSnapshot().context.tree.parentPiSessionId).toBe("parent")
+    expect(actor.getSnapshot().context.tree.parentRuntimeSessionId).toBe("parent")
 
     actor.send({
       type: "SYNC",
@@ -100,7 +100,7 @@ describe("subagentFleetMachine", () => {
 
   it("selects the newest parent and partitions retained history on rollover", () => {
     const actor = createActor(subagentFleetMachine, {
-      input: { parentPiSessionId: "fallback" }
+      input: { parentRuntimeSessionId: "fallback" }
     }).start()
     const newer = {
       ...node,
@@ -109,7 +109,7 @@ describe("subagentFleetMachine", () => {
       orchestrationRunId: "run-2",
       registryRevision: 30,
       runId: "run-2",
-      parentPiSessionId: "new-parent",
+      parentRuntimeSessionId: "new-parent",
       updatedAt: 30
     }
     actor.send({
@@ -140,7 +140,7 @@ describe("subagentFleetMachine", () => {
       ]
     })
 
-    expect(actor.getSnapshot().context.tree.parentPiSessionId).toBe("new-parent")
+    expect(actor.getSnapshot().context.tree.parentRuntimeSessionId).toBe("new-parent")
     expect(actor.getSnapshot().context.tree.nodes.map(({ id }) => id))
       .toEqual([newer.id])
     expect(actor.getSnapshot().context.selectedId).toBe("main")
@@ -172,7 +172,7 @@ describe("subagentFleetMachine", () => {
       message: { ...message, id: "message-2" }
     }
     const actor = createActor(subagentFleetMachine, {
-      input: { parentPiSessionId: "parent" }
+      input: { parentRuntimeSessionId: "parent" }
     }).start()
     actor.send({
       type: "SYNC",

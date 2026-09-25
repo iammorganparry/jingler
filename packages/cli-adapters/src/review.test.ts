@@ -241,7 +241,7 @@ describe("ReviewService — spec", () => {
     )
     await runReview(adapter)
     expect(spec?.cwd).toBe("/wt")
-    expect(spec?.piSessionId).toBeNull()
+    expect(spec?.continuation).toBeNull()
   })
 
   it("enforces read-only mode in the pi run contract", async () => {

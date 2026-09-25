@@ -15,7 +15,8 @@ import {
   contextWindowFor,
   reconcileWindow,
   shouldHoldSwap,
-  triggerAt
+  triggerAt,
+  piEndpointId
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Fiber, Ref } from "effect"
@@ -265,11 +266,13 @@ export class ContextManager extends Effect.Service<ContextManager>()(
 
           const adapter = yield* AgentTurnDriver
           const collected = yield* Ref.make<ReadonlyArray<string>>([])
+          const runtimeId = settings.chat.runtimeId ?? settings.session.runtimeId ?? "pi"
           if (
-            settings.chat.connectionId === undefined ||
-            settings.chat.modelId === undefined
+            settings.chat.endpointId === undefined ||
+            settings.chat.modelId === undefined ||
+            (runtimeId === "pi" && settings.chat.connectionId === undefined)
           ) {
-            return yield* fail(sessionId, "provider connection unavailable")
+            return yield* fail(sessionId, "agent endpoint unavailable")
           }
 
         return yield* runDigestTurn(
@@ -733,7 +736,7 @@ function* runDigestTurn(
   sessionId: string,
   messages: ReadonlyArray<Message>,
   settings: DigestSettings,
-  connectionId: ProviderConnectionId,
+  connectionId: ProviderConnectionId | undefined,
   modelId: ProviderModelId,
   collected: Ref.Ref<readonly string[]>,
   adapter: AgentTurnDriverShape,
@@ -745,11 +748,16 @@ function* runDigestTurn(
   const spec: AgentTurnSpec = {
     sessionId: settings.session.id,
     chatId: settings.chat.id,
-    connectionId,
+    runtimeId: settings.chat.runtimeId ?? "pi",
+    endpointId: settings.chat.endpointId ?? settings.session.endpointId ?? piEndpointId(
+      settings.session.environmentId ?? "desktop",
+      connectionId!
+    ),
+    ...(connectionId === undefined ? {} : { connectionId }),
     modelId,
     role: "context-digest",
     priorMessages: [],
-    piSessionId: null,
+    continuation: null,
     seed: null,
     targetCapabilities: {
       versions: CURRENT_RUNTIME_CONTRACTS,

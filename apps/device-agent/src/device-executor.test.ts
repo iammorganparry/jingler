@@ -62,7 +62,7 @@ const services = (): DeviceExecutorServices => ({
   stop: vi.fn(async () => undefined),
   subagentFleetSnapshot: vi.fn(async () => ({
     version: 2 as const,
-    parentPiSessionId: "pi-session",
+    parentRuntimeSessionId: "pi-session",
     registryRevision: 0,
     generatedAt: 1,
     totalActive: 0,
@@ -280,7 +280,7 @@ describe("device session command executor", () => {
     const control = {
       version: 2 as const,
       requestId: "control-1",
-      parentPiSessionId: "parent-pi",
+      parentRuntimeSessionId: "parent-pi",
       runId: "child-run",
       action: "stop" as const,
       message: null,
@@ -293,14 +293,14 @@ describe("device session command executor", () => {
     await executor.execute(
       command("Agent.subagentFleetSnapshot", {
         chatId: "chat_1",
-        parentPiSessionId: "parent-pi"
+        parentRuntimeSessionId: "parent-pi"
       }),
       async () => undefined
     )
     await executor.execute(
       command("Agent.subagentTranscript", {
         chatId: "chat_1",
-        parentPiSessionId: "parent-pi",
+        parentRuntimeSessionId: "parent-pi",
         runId: "child-run"
       }),
       async () => undefined

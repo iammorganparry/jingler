@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
-import { AgentRuntime } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
+import {
+  AgentRuntime,
+  AgentRuntimeRegistry,
+  AgentRuntimeRouterLive,
+  makeAgentRuntimeRegistry,
+  runtimeOwnerForSession
+} from "@jingler/cli-adapters/runtime/agent/agent-runtime"
 import { AgentTurnDriverLive } from "@jingler/cli-adapters/runtime/agent/agent-turn-driver-live"
 import {
   makePiAgentRuntimeLive
@@ -130,11 +136,11 @@ const decodePayload = <A, I>(
 const ChatIdPayload = Schema.Struct({ chatId: Schema.String })
 const SubagentFleetSnapshotPayload = Schema.Struct({
   chatId: Schema.String,
-  parentPiSessionId: Schema.String
+  parentRuntimeSessionId: Schema.String
 })
 const SubagentTranscriptPayload = Schema.Struct({
   chatId: Schema.String,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   runId: Schema.String
 })
 const SubagentControlPayload = Schema.Struct({
@@ -250,12 +256,12 @@ export interface DeviceExecutorServices {
   readonly subagentFleetSnapshot: (
     sessionId: string,
     chatId: string,
-    parentPiSessionId: string
+    parentRuntimeSessionId: string
   ) => Promise<SubagentFleetSnapshotValue>
   readonly subagentTranscript: (
     sessionId: string,
     chatId: string,
-    parentPiSessionId: string,
+    parentRuntimeSessionId: string,
     runId: string
   ) => Promise<ReadonlyArray<MessageValue>>
   readonly controlSubagent: (
@@ -338,7 +344,7 @@ export const makeDeviceSessionCommandExecutor = (
         return services.subagentFleetSnapshot(
           command.sessionId,
           input.chatId,
-          input.parentPiSessionId
+          input.parentRuntimeSessionId
         )
       }
       case "Agent.subagentTranscript": {
@@ -346,7 +352,7 @@ export const makeDeviceSessionCommandExecutor = (
         return services.subagentTranscript(
           command.sessionId,
           input.chatId,
-          input.parentPiSessionId,
+          input.parentRuntimeSessionId,
           input.runId
         )
       }
@@ -490,8 +496,15 @@ const deviceRuntime = (root: string, targetId: string) => {
     Layer.provide(providers.ProviderConnectionsLive),
     Layer.provide(providers.SecretStoreLive)
   )
+  const runtimeRegistry = Layer.effect(
+    AgentRuntimeRegistry,
+    Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
+      ...pi.registrations.values()
+    ]))
+  ).pipe(Layer.provide(piRuntime))
+  const agentRuntime = AgentRuntimeRouterLive.pipe(Layer.provide(runtimeRegistry))
   const agentExecution = AgentTurnDriverLive.pipe(
-    Layer.provideMerge(piRuntime)
+    Layer.provideMerge(agentRuntime)
   )
   const services = Layer.mergeAll(
     AgentRunner.Default,
@@ -650,37 +663,48 @@ export const makeLiveDeviceSessionCommandExecutor = (
     stop: (sessionId, chatId) => run(
       Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId))
     ),
-    subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) => run(
-      Effect.flatMap(
-        AgentRuntime,
-        (runtime) => runtime.subagentFleetSnapshot(
+    subagentFleetSnapshot: (sessionId, chatId, parentRuntimeSessionId) => run(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId)
+        const owner = runtimeOwnerForSession(session, chatId)
+        if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
+        const runtime = yield* AgentRuntime
+        return yield* runtime.subagentFleetSnapshot(
+          owner,
           sessionId,
           chatId,
-          parentPiSessionId
+          parentRuntimeSessionId
         )
-      )
+      })
     ),
     subagentTranscript: (
       sessionId,
       chatId,
-      parentPiSessionId,
+      parentRuntimeSessionId,
       runId
     ) => run(
-      Effect.flatMap(
-        AgentRuntime,
-        (runtime) => runtime.subagentTranscript(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId)
+        const owner = runtimeOwnerForSession(session, chatId)
+        if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
+        const runtime = yield* AgentRuntime
+        return yield* runtime.subagentTranscript(
+          owner,
           sessionId,
           chatId,
-          parentPiSessionId,
+          parentRuntimeSessionId,
           runId
         )
-      )
+      })
     ),
     controlSubagent: (sessionId, chatId, input) => run(
-      Effect.flatMap(
-        AgentRuntime,
-        (runtime) => runtime.controlSubagent(sessionId, chatId, input)
-      )
+      Effect.gen(function* () {
+        const session = yield* SessionStore.get(sessionId)
+        const owner = runtimeOwnerForSession(session, chatId)
+        if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
+        const runtime = yield* AgentRuntime
+        return yield* runtime.controlSubagent(owner, sessionId, chatId, input)
+      })
     ),
     transcriptPage: (input) => run(TranscriptStore.listPage(input.chatId, {
       ...(input.before === undefined ? {} : { before: input.before }),

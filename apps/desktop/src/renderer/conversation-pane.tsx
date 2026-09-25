@@ -8,6 +8,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
+  AgentEndpointCatalog,
   Environment,
   McpConfigEntry,
   McpRemoteAuth,
@@ -22,6 +23,7 @@ import type {
 import {
   agentFileActivityOf,
   clampFontScale,
+  piEndpointId,
   plannotatorProjectionToPlanDocument
 } from "@jingler/core"
 import {
@@ -166,6 +168,7 @@ export function ConversationPane({
   onOpenFile,
   environments,
   providerCatalog,
+  agentEndpointCatalog,
   onSelectFiles,
   onSelectChanges,
   onOpenProviderSettings,
@@ -179,8 +182,10 @@ export function ConversationPane({
   session: Session
   /** Live paired-device catalogue owned by the app-level environment controller. */
   environments: ReadonlyArray<Environment>
-  /** Certified provider connections available on this execution target. */
+  /** PI provider settings and recovery state. */
   providerCatalog?: ProviderCatalog | null
+  /** Selectable runtime endpoints and their models. */
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   /**
    * Which face of the session to show: the transcript, the Plan Review, or both
    * side by side. `split` renders the SAME Plan Review beside the transcript
@@ -371,14 +376,41 @@ export function ConversationPane({
   }, [])
 
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  const sessionTargetId = session.environmentId === undefined
+    ? "desktop"
+    : (environments.find(({ id }) => id === session.environmentId)
+        ?.capabilities.runtime?.targetId ?? session.environmentId)
+  const sessionEndpointCatalog = agentEndpointCatalog == null
+    ? agentEndpointCatalog
+    : {
+        ...agentEndpointCatalog,
+        endpoints: agentEndpointCatalog.endpoints.filter(
+          ({ endpoint }) => endpoint.targetId === sessionTargetId
+        )
+      }
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(session, convo, providerCatalog, environments)
+  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(
+    session,
+    convo,
+    providerCatalog,
+    sessionEndpointCatalog,
+    environments
+  )
+  const effectiveComposerDisabledReason = convo.modelPending
+    ? "Saving the selected agent runtime…"
+    : composerDisabledReason
   const { providerId: convoProviderId, modelId: convoModelId, setModel } = convo
   useEffect(() => {
     if (rebindConnectionId === undefined) return
     if (convoProviderId == null || convoModelId == null) return
-    setModel(rebindConnectionId, convoProviderId, convoModelId)
+    setModel(
+      "pi",
+      piEndpointId(session.environmentId ?? "desktop", rebindConnectionId),
+      rebindConnectionId,
+      convoProviderId,
+      convoModelId
+    )
   }, [rebindConnectionId, convoProviderId, convoModelId, setModel])
 
   const mutationRecovery = useMutation({
@@ -640,7 +672,7 @@ export function ConversationPane({
   const fleet = useSubagentFleet({
     sessionId: session.id,
     chatId: activeChat.id,
-    piSessionId: activeChat.piSessionId ?? null,
+    continuation: activeChat.continuation?.id ?? null,
     events: convo.subagentFleetEvents,
     legacyAgents: legacyFleetAgents
   })
@@ -907,7 +939,8 @@ export function ConversationPane({
                 handoffQueued,
                 handoffModel,
                 providerCatalog,
-                composerDisabledReason,
+                agentEndpointCatalog: sessionEndpointCatalog,
+                composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
                 onOpenPlanReview,
                 onForkOntoBranchStable,
@@ -1099,6 +1132,7 @@ function renderMainConversation({
   handoffQueued,
   handoffModel,
   providerCatalog,
+  agentEndpointCatalog,
   composerDisabledReason,
   sendPrompt,
   onOpenPlanReview,
@@ -1133,6 +1167,7 @@ function renderMainConversation({
   handoffQueued: (id: string) => void;
   handoffModel: string | null;
   providerCatalog: ProviderCatalog | null | undefined;
+  agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
   composerDisabledReason: string | undefined;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
@@ -1206,11 +1241,14 @@ function renderMainConversation({
       ? `Hand off — run this in a new chat on ${handoffModel}`
       : "Hand off — run this in a new chat"}
     providerCatalog={providerCatalog}
+    agentEndpointCatalog={agentEndpointCatalog}
+    endpointId={convo.endpointId}
     connectionId={convo.connectionId}
     providerId={convo.providerId}
     modelId={convo.modelId}
     composerDisabledReason={composerDisabledReason}
-    onSetModel={({ connectionId, providerId, modelId }) => convo.setModel(connectionId, providerId, modelId)}
+    onSetModel={({ runtimeId, endpointId, connectionId, providerId, modelId }) =>
+      convo.setModel(runtimeId, endpointId, connectionId, providerId, modelId)}
     onSend={sendPrompt}
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
@@ -1404,13 +1442,13 @@ function useFleetChildTranscript(session: Session, fleet: SubagentFleetControlle
       "subagent-transcript",
       session.id,
       chatId,
-      fleet.selectedNode?.parentPiSessionId,
+      fleet.selectedNode?.parentRuntimeSessionId,
       fleet.selectedNode?.runId
     ],
     queryFn: () => rpc.agentSubagentTranscript(
       session.id,
       chatId,
-      fleet.selectedNode!.parentPiSessionId,
+      fleet.selectedNode!.parentRuntimeSessionId,
       fleet.selectedNode!.runId
     ),
     enabled:
@@ -1442,7 +1480,22 @@ function plannotatorReviewId(projection: Conversation["plannotator"]): string | 
   return projection?.review?.reviewId ?? null
 }
 
-function conversationProviderRecovery(session: Session, convo: Conversation, providerCatalog: ProviderCatalog | undefined | null, environments: ReadonlyArray<Environment>) {
+function conversationProviderRecovery(
+  session: Session,
+  convo: Conversation,
+  providerCatalog: ProviderCatalog | undefined | null,
+  endpointCatalog: AgentEndpointCatalog | undefined | null,
+  environments: ReadonlyArray<Environment>
+) {
+  const nativeReady = convo.runtimeId !== "pi" && endpointCatalog?.endpoints.some(
+    ({ endpoint, models }) =>
+      endpoint.id === convo.endpointId &&
+      endpoint.status === "ready" &&
+      models.some((model) => model.id === convo.modelId && model.selectable)
+  ) === true
+  if (nativeReady) {
+    return { providerRecovery: undefined, rebindConnectionId: undefined, composerDisabledReason: undefined }
+  }
   const providerSelection = {
     ...convo,
     connectionSelectionRequired: session.connectionSelectionRequired,

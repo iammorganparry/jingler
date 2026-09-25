@@ -48,7 +48,7 @@ import {
 } from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import { conversationMachine } from "./conversation-machine.js"
 import {
-  parentPiSessionIdFromFleetEvents,
+  parentRuntimeSessionIdFromFleetEvents,
   projectSubagentFleetEvents
 } from "./subagent-fleet-machine.js"
 import { setSessionActivity } from "./session-activity.js"
@@ -91,7 +91,7 @@ const ACTIVE_FLEET_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set(
 ])
 
 interface FleetReconciler {
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
   timer: ReturnType<typeof setTimeout> | null
   inFlight: boolean
   retryAttempt: number
@@ -105,7 +105,7 @@ const snapshots = new Map<string, ConversationSnapshot>()
 const fleetReconcilers = new Map<string, FleetReconciler>()
 const fleetTreeCache = new WeakMap<
   ReadonlyArray<SubagentFleetEvent>,
-  { readonly parentPiSessionId: string; readonly tree: SubagentRunTreeContext }
+  { readonly parentRuntimeSessionId: string; readonly tree: SubagentRunTreeContext }
 >()
 let chatActivities: Record<string, Record<string, SessionActivity>> = {}
 const EMPTY_CHAT_ACTIVITIES: Readonly<Record<string, SessionActivity>> = {}
@@ -131,24 +131,24 @@ const inactivePiSession = (cause: unknown): boolean =>
 const fleetProjection = (snapshot: ConversationSnapshot) => {
   const session = snapshot.context.session
   const chatId = snapshot.context.chatId
-  const piSessionId = session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null
+  const continuation = session.chats.find(({ id }) => id === chatId)?.continuation?.id ?? null
   const events = snapshot.context.subagentFleetEvents
-  if (piSessionId === null && events.length === 0) return null
-  const parentPiSessionId = parentPiSessionIdFromFleetEvents(
+  if (continuation === null && events.length === 0) return null
+  const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(
     events,
-    piSessionId ?? `${session.id}:${chatId}`
+    continuation ?? `${session.id}:${chatId}`
   )
   const cached = fleetTreeCache.get(events)
-  const tree = cached?.parentPiSessionId === parentPiSessionId
+  const tree = cached?.parentRuntimeSessionId === parentRuntimeSessionId
     ? cached.tree
-    : projectSubagentFleetEvents(parentPiSessionId, events)
-  if (cached?.parentPiSessionId !== parentPiSessionId) {
-    fleetTreeCache.set(events, { parentPiSessionId, tree })
+    : projectSubagentFleetEvents(parentRuntimeSessionId, events)
+  if (cached?.parentRuntimeSessionId !== parentRuntimeSessionId) {
+    fleetTreeCache.set(events, { parentRuntimeSessionId, tree })
   }
   return {
     sessionId: session.id,
     chatId,
-    parentPiSessionId,
+    parentRuntimeSessionId,
     tree,
     active: tree.nodes.filter((node) => ACTIVE_FLEET_STATUSES.has(node.status)),
     mainRunning: snapshot.matches("running") || snapshot.matches("remoteRunning")
@@ -188,7 +188,7 @@ export const fleetRecoveryEvents = (
   remote: SubagentFleetSnapshot
 ): ReadonlyArray<SubagentFleetEvent> => {
   if (
-    remote.parentPiSessionId !== tree.parentPiSessionId ||
+    remote.parentRuntimeSessionId !== tree.parentRuntimeSessionId ||
     remote.registryRevision < tree.registryRevision
   ) return []
   const currentById = new Map(tree.nodes.map((node) => [node.id, node]))
@@ -265,7 +265,7 @@ const recoverInactiveFleet = (
   state.dormant = current?.mainRunning !== true
   if (
     !current?.mainRunning &&
-    current?.parentPiSessionId === state.parentPiSessionId &&
+    current?.parentRuntimeSessionId === state.parentRuntimeSessionId &&
     current.active.length > 0
   ) {
     actor.send({
@@ -290,7 +290,7 @@ const reconcileFleet = async (key: string, state: FleetReconciler): Promise<void
   const projection = snapshots.get(key)
   if (!actor || !projection || fleetReconcilers.get(key) !== state) return
   const before = fleetProjection(projection)
-  if (before === null || before.parentPiSessionId !== state.parentPiSessionId) return
+  if (before === null || before.parentRuntimeSessionId !== state.parentRuntimeSessionId) return
 
   state.inFlight = true
   let nextDelay = FLEET_POLL_MS
@@ -298,11 +298,11 @@ const reconcileFleet = async (key: string, state: FleetReconciler): Promise<void
     const remote = await rpc.agentSubagentFleetSnapshot(
       before.sessionId,
       before.chatId,
-      before.parentPiSessionId
+      before.parentRuntimeSessionId
     )
     const latest = snapshots.get(key)
     const current = latest === undefined ? null : fleetProjection(latest)
-    if (!registry.has(key) || current?.parentPiSessionId !== state.parentPiSessionId) return
+    if (!registry.has(key) || current?.parentRuntimeSessionId !== state.parentRuntimeSessionId) return
     const recovered = fleetRecoveryEvents(current.tree, remote)
     if (recovered.length > 0) {
       actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: recovered })
@@ -361,13 +361,13 @@ const ensureFleetReconciliation = (
     fleetReconcilers.delete(key)
     return
   }
-  if (current?.parentPiSessionId === projection.parentPiSessionId) {
+  if (current?.parentRuntimeSessionId === projection.parentRuntimeSessionId) {
     refreshFleetReconciliation(key, current, projection)
     return
   }
   if (current?.timer !== null && current?.timer !== undefined) clearTimeout(current.timer)
   const state: FleetReconciler = {
-    parentPiSessionId: projection.parentPiSessionId,
+    parentRuntimeSessionId: projection.parentRuntimeSessionId,
     timer: null,
     inFlight: false,
     retryAttempt: 0,
@@ -508,7 +508,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
     projectSubagentTabs({
       sessionId: session.id,
       chatId,
-      piSessionId: session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null,
+      continuation: session.chats.find(({ id }) => id === chatId)?.continuation?.id ?? null,
       events: snap.context.subagentFleetEvents,
       legacyAgents,
       canonicalNodes: fleet?.tree.nodes

@@ -248,3 +248,19 @@ test("revokes an account-owned environment while preserving local sessions", asy
   await app.window.getByRole("button", { name: "Execution environment" }).click()
   await expect(app.window.getByRole("option", { name: /buildbox/ })).toHaveCount(0)
 })
+
+
+test("refreshes the paired device endpoint catalog and checks remote auth status", async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true, withRepo: true, remoteEnvironment: true,
+    piFixture: { scenarioId: "composer-capabilities", authRoute: "openai-codex-oauth" }
+  })
+  await enrollBuildbox(app)
+  await expect.poll(() => app.deviceRelay?.endpointRequests()).toContain("auth-status")
+  await app.window.getByRole("button", { name: "Account menu" }).click()
+  await app.window.getByRole("menuitem", { name: "Settings" }).click()
+  await app.window.getByRole("button", { name: /Providers/ }).click()
+  await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect.poll(() => app.deviceRelay?.endpointRequests()).toContain("refresh")
+  await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
+})

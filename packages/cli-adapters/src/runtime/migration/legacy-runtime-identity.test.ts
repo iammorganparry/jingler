@@ -78,6 +78,45 @@ describe("legacy runtime identity migration", () => {
     })
   })
 
+  it("tags legacy PI continuations with their target-scoped endpoint", () => {
+    const result = migrateLegacyRuntimeIdentity({
+      id: "session-1",
+      environmentId: "device-1",
+      activeChatId: "chat-1",
+      connectionId: "connection-1",
+      providerId: "anthropic",
+      modelId: "anthropic/claude-sonnet",
+      piSessionId: "session.jsonl",
+      chats: [{
+        id: "chat-1",
+        connectionId: "connection-1",
+        providerId: "anthropic",
+        modelId: "anthropic/claude-sonnet",
+        piSessionId: "chat.jsonl"
+      }]
+    }) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      runtimeId: "pi",
+      endpointId: "device-1:pi:connection-1",
+      continuation: {
+        runtimeId: "pi",
+        endpointId: "device-1:pi:connection-1",
+        id: "chat.jsonl"
+      },
+      chats: [{
+        runtimeId: "pi",
+        endpointId: "device-1:pi:connection-1",
+        continuation: {
+          runtimeId: "pi",
+          endpointId: "device-1:pi:connection-1",
+          id: "chat.jsonl"
+        }
+      }]
+    })
+    expect(result).not.toHaveProperty("piSessionId")
+  })
+
   it("migrates config defaults without inventing a credential connection", () => {
     expect(migrateLegacyConfigIdentity({
       defaultCli: "claude",

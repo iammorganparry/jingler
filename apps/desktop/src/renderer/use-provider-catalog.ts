@@ -1,20 +1,27 @@
 import type {
   AuthKind,
+  Environment,
   CodexLoginMethod,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId
 } from "@jingler/core"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { rpc } from "./rpc-client.js"
 
 const CATALOG_KEY = ["provider-catalog"] as const
+const ENDPOINT_CATALOG_KEY = ["agent-endpoint-catalog"] as const
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
+const catalogError = (errors: readonly unknown[]): string | null => {
+  const error = errors.find(Boolean)
+  return error ? messageOf(error) : null
+}
+
 /** Canonical provider catalog mutations; every success refreshes the one shared query. */
-export function useProviderCatalog() {
+export function useProviderCatalog(environments: readonly Environment[] = []) {
   const queryClient = useQueryClient()
   // Reconnects can finish while the window is unfocused (browser OAuth, a CLI
   // login): unlike the client-wide default, re-check on focus so provider
@@ -24,10 +31,39 @@ export function useProviderCatalog() {
     queryFn: rpc.providerList,
     refetchOnWindowFocus: true
   })
-  const refreshCatalog = () => queryClient.invalidateQueries({ queryKey: CATALOG_KEY })
+  const endpointCatalog = useQuery({
+    queryKey: ENDPOINT_CATALOG_KEY,
+    queryFn: rpc.agentEndpointList,
+    refetchOnWindowFocus: true
+  })
+  const remoteTargets = environments.flatMap((environment) => {
+    const targetId = environment.capabilities?.runtime?.targetId
+    return targetId && environment.kind === "owned" && environment.state === "online" ? [{ deviceId: environment.id, targetId }] : []
+  })
+  const remoteCatalogs = useQueries({
+    queries: remoteTargets.map(({ deviceId, targetId }) => ({
+      queryKey: ["remote-endpoint-catalog", deviceId, targetId],
+      queryFn: () => rpc.environmentsDiscovery(deviceId, { targetId, action: "auth-status" }),
+      refetchOnWindowFocus: true,
+      retry: false
+    }))
+  })
+  const refreshCatalog = () => Promise.all([
+    queryClient.invalidateQueries({ queryKey: CATALOG_KEY }),
+    queryClient.invalidateQueries({ queryKey: ENDPOINT_CATALOG_KEY })
+  ])
 
   const refresh = useMutation({
-    mutationFn: rpc.providerRefresh,
+    mutationFn: async (connectionId: ProviderConnectionId) => {
+      await Promise.all([
+        rpc.providerRefresh(connectionId),
+        rpc.agentEndpointRefresh(),
+        ...remoteTargets.map(async ({ deviceId, targetId }) => {
+          const discovery = await rpc.environmentsDiscovery(deviceId, { targetId, action: "refresh" })
+          queryClient.setQueryData(["remote-endpoint-catalog", deviceId, targetId], discovery)
+        })
+      ])
+    },
     onSuccess: refreshCatalog
   })
   const verify = useMutation({
@@ -112,8 +148,14 @@ export function useProviderCatalog() {
 
   return {
     catalog: catalog.data ?? null,
+    endpointCatalog: endpointCatalog.data ?? null,
+    remoteCatalogs: remoteTargets.map(({ deviceId }, index) => ({
+      deviceId,
+      catalog: remoteCatalogs[index]?.data?.discovery?.capabilities.endpointCatalog
+    })),
     busy:
       catalog.isLoading ||
+      endpointCatalog.isLoading ||
       refresh.isPending ||
       verify.isPending ||
       logout.isPending ||
@@ -123,11 +165,7 @@ export function useProviderCatalog() {
       setApiKey.isPending ||
       makeDefault.isPending,
     pendingAuthKind,
-    error: catalog.error
-      ? messageOf(catalog.error)
-      : activeMutation?.error
-        ? messageOf(activeMutation.error)
-        : null,
+    error: catalogError([catalog.error, endpointCatalog.error, activeMutation?.error, ...remoteCatalogs.map(({ error }) => error)]),
     reload: refreshCatalog,
     refresh: refresh.mutate,
     verify: (connectionId: ProviderConnectionId, modelId: ProviderModelId) =>

@@ -14,7 +14,8 @@ import {
   ProviderConnection,
   ProviderConnectionId,
   ProviderModelId,
-  type PiRunSpec
+  piEndpointId,
+  type AgentRunSpec
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -103,10 +104,12 @@ const message = {
   createdAt: "2026-08-10T00:00:00.000Z"
 }
 
-const makeSpec = (cwd: string): PiRunSpec => ({
+const makeSpec = (cwd: string): AgentRunSpec => ({
   runId: "run-1",
   sessionId: "session-1",
   chatId: "chat-1",
+  runtimeId: "pi",
+  endpointId: piEndpointId("desktop", connection.id),
   connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-api"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-haiku-4-5"),
   role: "conversation",
@@ -114,7 +117,7 @@ const makeSpec = (cwd: string): PiRunSpec => ({
   cwd,
   prompt: "continue",
   priorMessages: [message],
-  piSessionId: null,
+  continuation: null,
   seed: { reason: "migration", messages: [message] },
   targetCapabilities: {
     versions: CURRENT_RUNTIME_CONTRACTS,
@@ -293,7 +296,7 @@ describe("pi session creation", () => {
     const handle = await Effect.runPromise(factory.create(makeSpec(root), {} as never))
     const received = captured[0]
     expect(handle.id).toBe("/tmp/pi-session.jsonl")
-    expect(handle.parentPiSessionId).toBe("pi-session")
+    expect(handle.parentRuntimeSessionId).toBe("pi-session")
     expect(handle.contextWindow).toBe(200_000)
     expect(received?.tools).toEqual(expect.arrayContaining([
       "jingler_ask_question",

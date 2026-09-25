@@ -9,6 +9,7 @@ const DISCOVERY_IMPORT = /(?:from|import\()\s*["'][^"']*\/discovery(?:\.js)?["']
 const LEGACY_HARNESS_RPC = /Agent\.setHarness|Discovery\.list|Models\.(?:list|catalog|capabilities)/
 const LEGACY_HARNESS_IDENTITY = /\b(?:CliKind|CliInfo|binPath|setHarness)\b/
 const LEGACY_IDENTITY_MIGRATION = /runtime\/migration\/legacy-runtime-identity/
+const PI_IDENTITY = /\bPiRunSpec\b|\bpiSessionId\b|\bparentPiSessionId\b/
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
 const sourceRoots = [
@@ -36,7 +37,7 @@ const offenders = (pattern: RegExp): ReadonlyArray<string> =>
     .map((path) => relative(root, path))
 
 describe("production runtime architecture", () => {
-  it("contains no provider-owned harness implementation", () => {
+  it("does not restore legacy orchestration or SDK fallbacks", () => {
     for (const path of [
       "packages/cli-adapters/src/harness-adapter.ts",
       "packages/cli-adapters/src/claude-adapter.ts",
@@ -49,6 +50,13 @@ describe("production runtime architecture", () => {
     ]) {
       expect(existsSync(resolve(root, path)), path).toBe(false)
     }
+  })
+
+  it("keeps PI identity out of generic production contracts", () => {
+    const allowed = new Set([
+      "packages/cli-adapters/src/runtime/migration/legacy-runtime-identity.ts"
+    ])
+    expect(offenders(PI_IDENTITY).filter((path) => !allowed.has(path))).toStrictEqual([])
   })
 
   it("does not import provider harness SDKs or discovery", () => {

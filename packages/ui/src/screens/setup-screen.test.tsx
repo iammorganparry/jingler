@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
+  AgentEndpointCatalog,
   ProviderCatalog,
   ResourceDetectionResult,
   type GitHubConnection,
@@ -49,6 +50,37 @@ const authenticatedCatalog = Schema.decodeSync(ProviderCatalog)({
   refreshedAt: "2026-08-12T08:00:00.000Z",
   stale: false,
 });
+
+const endpointCatalog = Schema.decodeSync(AgentEndpointCatalog)({
+  refreshedAt: "2026-08-12T08:00:00.000Z",
+  stale: false,
+  endpoints: [
+    {
+      endpoint: {
+        id: "desktop:pi:connection-1",
+        runtimeId: "pi",
+        targetId: "desktop",
+        label: "PI · Claude Max",
+        status: "ready",
+        version: "0.84.1",
+        features: { steer: "text", planReview: true, subagentFleet: true, backgroundTasks: true }
+      },
+      models: []
+    },
+    {
+      endpoint: {
+        id: "desktop:claude",
+        runtimeId: "claude",
+        targetId: "desktop",
+        label: "Claude Code",
+        status: "signed-out",
+        version: "2.1.282",
+        features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false }
+      },
+      models: []
+    }
+  ]
+})
 
 const unconfirmedConnection = (id: string) => ({
   connection: {
@@ -145,10 +177,17 @@ describe("SetupScreen", () => {
     expect(screen.queryByText(/Claude Code|Codex CLI|opencode/u)).toBeNull();
   });
 
-  it("connects the authenticated Claude CLI without collecting credentials", () => {
+  it("distinguishes PI connections from the native Claude CLI", () => {
+    render(<SetupScreen {...props({ step: "provider", agentEndpointCatalog: endpointCatalog })} />)
+    expect(screen.getByText("PI · Claude Max · ready")).toBeTruthy()
+    expect(screen.getByText("Claude Code · signed-out")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy()
+  })
+
+  it("connects Claude through PI without collecting credentials", () => {
     const onConnectClaude = vi.fn();
     render(<SetupScreen {...props({ step: "provider", onConnectClaude })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Use Claude CLI" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Claude through PI" }));
 
     expect(onConnectClaude).toHaveBeenCalledWith("claude-cli");
     expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull();
@@ -204,7 +243,7 @@ describe("SetupScreen", () => {
     );
 
     const accountDetails = screen
-      .getByRole("button", { name: "Use Claude CLI" })
+      .getByRole("button", { name: "Connect Claude through PI" })
       .closest("details");
     expect(accountDetails?.open).toBe(false);
     fireEvent.click(screen.getByText("Add another account"));
@@ -250,7 +289,7 @@ describe("SetupScreen", () => {
       screen.getAllByText("Claude CLI subscription needs attention"),
     ).toHaveLength(1);
     expect(screen.getByText(/billed as API credits/u)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Use Claude CLI" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect Claude through PI" })).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement)
         .disabled,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "./fixtures.js"
 
-const piSessionId = "01a009ff-0000-7000-8000-000000000001"
+const continuation = "01a009ff-0000-7000-8000-000000000001"
 const runId = "fleet-durable-dom-qa"
 const asyncRoot = join(
   tmpdir(),
@@ -66,14 +66,14 @@ test("durable native status appears as a live subagent tab", async ({
         updatedAt: "2026-08-16T10:30:00.000Z",
         worktreePath: repoPath,
         mode: "auto",
-        piSessionId: piSessionFile,
+        continuation: piSessionFile,
         chats: [{
           id: "c_s_fleet_durable_qa_1",
           title: "Fleet DOM QA",
           createdAt: "2026-08-16T10:30:00.000Z",
           updatedAt: "2026-08-16T10:30:00.000Z",
           mode: "auto",
-          piSessionId: piSessionFile,
+          continuation: piSessionFile,
           connectionId: "jingler-e2e-connection",
           providerId: "jingler-e2e",
           modelId: "jingler-e2e/eval-model"
@@ -85,7 +85,7 @@ test("durable native status appears as a live subagent tab", async ({
         writeFileSync(piSessionFile, `${JSON.stringify({
           type: "session",
           version: 3,
-          id: piSessionId,
+          id: continuation,
           timestamp: "2026-08-16T10:30:00.000Z",
           cwd: repoPath
         })}\n`)

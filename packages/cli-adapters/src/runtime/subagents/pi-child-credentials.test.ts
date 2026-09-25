@@ -62,11 +62,11 @@ const claudeCliConnection = Schema.decodeUnknownSync(ProviderConnection)({
   }
 })
 
-const capability = (parentPiSessionId: string, agent = "worker") => ({
+const capability = (parentRuntimeSessionId: string, agent = "worker") => ({
   version: 1 as const,
   endpoint: "http://127.0.0.1:1234/v1/subagent-tool",
   token: `token-${agent}`,
-  parentPiSessionId,
+  parentRuntimeSessionId,
   agent,
   targetId: "desktop",
   role: "conversation" as const,

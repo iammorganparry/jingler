@@ -18,7 +18,7 @@ export const sessionContainsWork = (
   session.costUsd > 0 ||
   session.status !== "idle" ||
   session.semanticBranchPending === false ||
-  session.chats.some((chat) => chat.piSessionId !== undefined)
+  session.chats.some((chat) => chat.continuation !== undefined)
 
 /** A remote target may execute this build only when its pi contracts match exactly. */
 export const environmentRuntimeIsCurrent = (environment: Environment): boolean => {

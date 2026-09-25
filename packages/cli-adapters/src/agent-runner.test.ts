@@ -9,6 +9,8 @@ import type {
 } from "@jingler/core"
 import {
   AgentRunError,
+  nativeCliEndpointId,
+  piEndpointId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -56,6 +58,8 @@ const TEST_RUNTIME = {
   providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-test")
 } as const
+const endpointId = piEndpointId("desktop", TEST_RUNTIME.connectionId)
+const piContinuation = (id: string) => ({ runtimeId: "pi" as const, endpointId, id })
 
 /** Main-only Preview attachment normally owned by the app-scoped listener. */
 const BrowserControlMcpServiceTest = Layer.succeed(
@@ -758,7 +762,7 @@ describe("AgentRunner model", () => {
     })
   )
 
-  it("uses a switched model on the next turn without dropping continuation", async () => {
+  it("uses a switched endpoint on the next turn without reusing its continuation", async () => {
     const selected = {
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("openai-connection"),
       providerId: Schema.decodeUnknownSync(ProviderId)("openai-codex"),
@@ -801,7 +805,7 @@ describe("AgentRunner model", () => {
             Effect.zipRight(setProviderModel(...args))
           )
         )
-        yield* SessionStore.setPiSessionId(SESSION, SESSION, "pi-existing")
+        yield* SessionStore.setContinuation(SESSION, SESSION, piContinuation("pi-existing"))
 
         const switchFiber = yield* Effect.fork(
           runner.setModel(
@@ -828,7 +832,7 @@ describe("AgentRunner model", () => {
     expect(captured[0]).toMatchObject({
       connectionId: selected.connectionId,
       modelId: selected.modelId,
-      piSessionId: "pi-existing"
+      continuation: null
     })
   })
 
@@ -899,7 +903,7 @@ describe("AgentRunner resume across restarts", () => {
   // A driver that records the pi session id it was handed and reports the next
   // persistent pi identity on Started.
   const resumeAdapter = (
-    captured: { piSessionId: string | null },
+    captured: { continuation: string | null },
     nextPiSessionId: string
   ): Layer.Layer<AgentTurnDriver> =>
     Layer.succeed(
@@ -907,7 +911,7 @@ describe("AgentRunner resume across restarts", () => {
       AgentTurnDriver.of({
         run: (_sessionId, spec, ctx) =>
           Effect.gen(function* () {
-            captured.piSessionId = spec.piSessionId
+            captured.continuation = spec.continuation?.id ?? null
             yield* ctx.emit({ _tag: "Started", sessionId: nextPiSessionId })
             yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
           }) as ReturnType<AgentTurnDriverShape["run"]>,
@@ -915,9 +919,74 @@ describe("AgentRunner resume across restarts", () => {
       })
     )
 
+  it.each(["throws", "failed-event", "started", "empty-started"] as const)(
+    "keeps the first cross-runtime rollback boundary through repeated switches: %s", async (outcome) => {
+      seedBareSession()
+      let attempt = 0
+      const starts = outcome === "started" || outcome === "empty-started"
+      const startedId = outcome === "started" ? "native-resume" : ""
+      const native = nativeCliEndpointId("desktop", "claude")
+      const adapter = Layer.succeed(AgentTurnDriver, AgentTurnDriver.of({
+        run: (_id, spec, ctx) => Effect.gen(function* () {
+          expect(spec.continuation).toBeNull()
+          if (attempt++ === 0 && starts) {
+            yield* ctx.emit({ _tag: "Started", sessionId: startedId })
+          }
+          if (outcome === "failed-event") {
+            yield* ctx.emit({ _tag: "Failed", message: "startup failed" })
+          } else {
+            yield* Effect.fail(new AgentRunError({ kind: "claude", message: "startup failed" }))
+          }
+        }),
+        stop: () => Effect.void
+      }))
+      const base = Layer.mergeAll(
+        AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
+        ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
+        BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+      )
+      await Effect.runPromise(Effect.gen(function* () {
+        yield* SessionStore.setContinuation(SESSION, SESSION, piContinuation("prior-resume"))
+        const prior = yield* SessionStore.get(SESSION)
+        // Multiple unstarted choices still roll back to the last proven owner.
+        yield* SessionStore.setAgentModel(SESSION, SESSION, "claude", native, TEST_RUNTIME.providerId, TEST_RUNTIME.modelId)
+        yield* SessionStore.setAgentModel(SESSION, SESSION, "claude", native, TEST_RUNTIME.providerId, ProviderModelId.make("another-model"))
+        const staged = yield* SessionStore.get(SESSION)
+        expect(staged.chats[0]?.continuation).toBeUndefined()
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, "first switch").pipe(Stream.runDrain)
+        const after = yield* SessionStore.get(SESSION)
+        const identity = (session: Session) => ({
+          runtimeId: session.chats[0]?.runtimeId,
+          endpointId: session.chats[0]?.endpointId,
+          modelId: session.chats[0]?.modelId,
+          continuation: session.chats[0]?.continuation,
+          connectionId: session.chats[0]?.connectionId
+        })
+        if (outcome === "started" || outcome === "empty-started") {
+          expect(identity(after)).toEqual({
+            runtimeId: "claude", endpointId: native, modelId: "another-model",
+            continuation: outcome === "started" ? { runtimeId: "claude", endpointId: native, id: "native-resume" } : undefined,
+            connectionId: undefined
+          })
+          // Switching back via the PI selection path must capture the newly committed owner.
+          yield* SessionStore.setProviderModel(SESSION, SESSION, TEST_RUNTIME.connectionId, TEST_RUNTIME.providerId, TEST_RUNTIME.modelId)
+          yield* runner.prompt(SESSION, SESSION, "second switch").pipe(Stream.runDrain)
+          expect(identity(yield* SessionStore.get(SESSION))).toEqual(identity(after))
+        } else {
+          expect(identity(after)).toEqual(identity(prior))
+          expect(after.continuation).toEqual(prior.continuation)
+          expect(after.runtimeId).toEqual(prior.runtimeId)
+          expect(after.endpointId).toEqual(prior.endpointId)
+          expect(after.modelId).toEqual(prior.modelId)
+        }
+      }).pipe(Effect.provide(base)))
+    }
+  )
+
   it("persists the pi session id and resumes it after restart", async () => {
     seedBareSession()
-    const captured: { piSessionId: string | null } = { piSessionId: null }
+    const captured: { continuation: string | null } = { continuation: null }
     const base = Layer.mergeAll(
       AgentRunner.Default,
     BrowserControlMcpServiceTest,
@@ -940,26 +1009,26 @@ describe("AgentRunner resume across restarts", () => {
         yield* runner.prompt(SESSION, SESSION, "start").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
-    expect(captured.piSessionId).toBeNull()
+    expect(captured.continuation).toBeNull()
 
     // It was persisted on the session (survives an app restart).
     const persisted = await Effect.runPromise(
       SessionStore.get(SESSION).pipe(Effect.provide(Layer.merge(SessionStore.Default, temp.layer)))
     )
     expect(
-      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.piSessionId
+      persisted.chats.find((chat) => chat.id === persisted.activeChatId)?.continuation?.id
     ).toBe("sdk-123")
 
     // A SECOND run through a FRESH runner (= a restart, empty in-memory map) picks
     // the id up from persistence and hands it to pi.
-    captured.piSessionId = null
+    captured.continuation = null
     await Effect.runPromise(
       Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.prompt(SESSION, SESSION, "continue").pipe(Stream.runDrain)
       }).pipe(Effect.provide(base))
     )
-    expect(captured.piSessionId).toBe("sdk-123")
+    expect(captured.continuation).toBe("sdk-123")
   })
 })
 

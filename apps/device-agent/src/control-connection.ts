@@ -198,6 +198,18 @@ export const abortableSleep = (milliseconds: number, signal: AbortSignal): Promi
     signal.addEventListener("abort", done, { once: true })
   })
 
+const isEndpointRequest = (request: Record<string, unknown>, targetId: string | undefined): boolean =>
+  request.type === "endpoint-catalog-request" &&
+  request.version === 1 &&
+  typeof request.requestId === "string" &&
+  request.requestId.length > 0 &&
+  request.requestId.length <= 128 &&
+  typeof request.targetId === "string" &&
+  request.targetId === targetId &&
+  (request.action === "list" ||
+    request.action === "refresh" ||
+    request.action === "auth-status")
+
 export type ControlConnectionResult = "stopped" | "revoked"
 
 export const runControlConnection = async (
@@ -216,8 +228,25 @@ export const runControlConnection = async (
       if (signal.aborted) break
       socket = await dependencies.connect(refreshed.relayUrl, refreshed.grant, signal)
       const stopMessages = socket.onMessage((message) => {
-        if (!dependencies.handleSessionRequest || !message || typeof message !== "object") return
+        if (!message || typeof message !== "object") return
         const request = message as Record<string, unknown>
+        if (isEndpointRequest(request, discovery.capabilities.runtime?.targetId)) {
+          void dependencies.discover().then((updated) => {
+            const catalog = updated.capabilities.endpointCatalog
+            if (signal.aborted || catalog === undefined ||
+                updated.capabilities.runtime?.targetId !== request.targetId ||
+                catalog.endpoints.some(({ endpoint }) => endpoint.targetId !== request.targetId)) return
+            socket?.send(JSON.stringify({
+              type: "endpoint-catalog-update",
+              version: 1,
+              requestId: request.requestId,
+              targetId: request.targetId,
+              catalog
+            }))
+          }).catch(() => undefined)
+          return
+        }
+        if (!dependencies.handleSessionRequest) return
         if (
           request.type !== "session-request" ||
           typeof request.sessionId !== "string" ||

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto"
 import type {
+  AgentEndpointId,
+  AgentRuntimeId,
   Chat,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -14,6 +16,7 @@ import type {
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
+  RuntimeContinuation,
   Session,
   SettledSessionStatus,
   WorkspaceMode
@@ -22,6 +25,7 @@ import {
   type GitHubApiError,
   GitError,
   issueReferenceOf,
+  piEndpointId,
   issueReferencesOf,
   sameIssueIdentity,
   ReasoningSetting,
@@ -104,6 +108,8 @@ const initialChat = (
   now: string,
   legacy: JsonRecord = {},
   runtime: {
+    readonly runtimeId?: AgentRuntimeId
+    readonly endpointId?: AgentEndpointId
     readonly connectionId?: ProviderConnectionId
     readonly providerId?: ProviderId
     readonly modelId?: ProviderModelId
@@ -141,14 +147,28 @@ const legacyInitialChat = (sessionId: string, now: string, legacy: JsonRecord): 
 })
 
 const runtimeSelection = (input: {
+  readonly environmentId?: string
+  readonly runtimeId?: AgentRuntimeId
+  readonly endpointId?: AgentEndpointId
   readonly connectionId?: ProviderConnectionId
   readonly providerId?: ProviderId
   readonly modelId?: ProviderModelId
-}) => ({
-  ...propertiesWhen(input.connectionId !== undefined, { connectionId: input.connectionId }),
-  ...propertiesWhen(input.providerId !== undefined, { providerId: input.providerId }),
-  ...propertiesWhen(input.modelId !== undefined, { modelId: input.modelId })
-})
+}) => {
+  const connectionId = input.connectionId
+  const runtimeId = input.runtimeId ?? "pi"
+  const endpointId = input.endpointId ?? (
+    runtimeId === "pi" && connectionId !== undefined
+      ? piEndpointId(input.environmentId ?? "desktop", connectionId)
+      : undefined
+  )
+  return {
+    runtimeId,
+    ...(endpointId === undefined ? {} : { endpointId }),
+    ...(connectionId === undefined ? {} : { connectionId }),
+    ...propertiesWhen(input.providerId !== undefined, { providerId: input.providerId }),
+    ...propertiesWhen(input.modelId !== undefined, { modelId: input.modelId })
+  }
+}
 
 const migrateReasoning = (value: unknown): ReasoningSetting | undefined => {
   switch (value) {
@@ -467,6 +487,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
      * today; it would not order a second Jingler process against this one.
      */
     const lock = Effect.unsafeMakeSemaphore(1)
+    const pendingAgentModels = new Map<string, {
+      readonly session: Pick<Session, "runtimeId" | "endpointId" | "connectionId" | "providerId" | "modelId" | "continuation">
+      readonly chat: Chat
+    }>()
+    const pendingAgentModelKey = (sessionId: string, chatId: string) => `${sessionId}:${chatId}`
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
@@ -1169,7 +1194,85 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
-      /** Persist one exact provider connection/model and force a fresh pi seed boundary. */
+      const setAgentModel = (
+        id: string,
+        chatId: string,
+        runtimeId: AgentRuntimeId,
+        endpointId: AgentEndpointId,
+        providerId: ProviderId,
+        modelId: ProviderModelId
+      ) =>
+        update(id, (session) => {
+          const target = session.chats.find((chat) => chat.id === chatId)
+          if (target === undefined) return session
+          const endpointChanged =
+            target.runtimeId !== runtimeId || target.endpointId !== endpointId
+          const changed =
+            endpointChanged ||
+            target.providerId !== providerId ||
+            target.modelId !== modelId
+          if (endpointChanged && !pendingAgentModels.has(pendingAgentModelKey(id, chatId))) {
+            pendingAgentModels.set(pendingAgentModelKey(id, chatId), {
+              session: {
+                runtimeId: session.runtimeId,
+                endpointId: session.endpointId,
+                connectionId: session.connectionId,
+                providerId: session.providerId,
+                modelId: session.modelId,
+                continuation: session.continuation
+              },
+              chat: target
+            })
+          }
+          return {
+            ...session,
+            runtimeId,
+            endpointId,
+            connectionId: runtimeId === "pi" ? session.connectionId : undefined,
+            providerId,
+            modelId,
+            ...propertiesWhen(endpointChanged, { continuation: undefined }),
+            connectionSelectionRequired: false,
+            modelSelectionRequired: false,
+            chats: session.chats.map((chat) =>
+              chat.id !== chatId
+                ? chat
+                : {
+                    ...chat,
+                    runtimeId,
+                    endpointId,
+                    connectionId: runtimeId === "pi" ? chat.connectionId : undefined,
+                    providerId,
+                    modelId,
+                    connectionSelectionRequired: false,
+                    modelSelectionRequired: false,
+                    ...propertiesWhen(endpointChanged, { continuation: undefined }),
+                    ...propertiesWhen(changed, { reasoning: undefined })
+                  }
+            )
+          }
+        })
+
+      const confirmAgentModel = (id: string, chatId: string) =>
+        Effect.sync(() => pendingAgentModels.delete(pendingAgentModelKey(id, chatId))).pipe(
+          Effect.asVoid
+        )
+
+      const rollbackAgentModel = (id: string, chatId: string) => Effect.suspend(() => {
+        const key = pendingAgentModelKey(id, chatId)
+        const pending = pendingAgentModels.get(key)
+        if (pending === undefined) return Effect.void
+        return update(id, (session) => ({
+          ...session,
+          ...pending.session,
+          chats: session.chats.map((chat) => chat.id === chatId ? pending.chat : chat)
+        })).pipe(
+          Effect.tap(() => Effect.sync(() => pendingAgentModels.delete(key))),
+          Effect.asVoid
+        )
+      })
+
+      /** Persist one exact PI endpoint/model and clear foreign continuation ownership. */
       const setProviderModel = (
         id: string,
         chatId: string,
@@ -1180,31 +1283,50 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         update(id, (session) => {
           const target = session.chats.find((chat) => chat.id === chatId)
           if (target === undefined) return session
+          const endpointId = piEndpointId(session.environmentId ?? "desktop", connectionId)
+          const endpointChanged = target.runtimeId !== "pi" || target.endpointId !== endpointId
           const changed =
-            target.connectionId !== connectionId ||
+            endpointChanged ||
             target.providerId !== providerId ||
             target.modelId !== modelId
+          if (endpointChanged && !pendingAgentModels.has(pendingAgentModelKey(id, chatId))) {
+            pendingAgentModels.set(pendingAgentModelKey(id, chatId), {
+              session: {
+                runtimeId: session.runtimeId,
+                endpointId: session.endpointId,
+                connectionId: session.connectionId,
+                providerId: session.providerId,
+                modelId: session.modelId,
+                continuation: session.continuation
+              },
+              chat: target
+            })
+          }
           return {
             ...session,
+            runtimeId: "pi",
+            endpointId,
             connectionId,
             providerId,
             modelId,
+            ...propertiesWhen(endpointChanged, { continuation: undefined }),
             connectionSelectionRequired: false,
             modelSelectionRequired: false,
-            // The pi session is provider-neutral and survives a model switch:
-            // the model binds per run, so keeping piSessionId is what lets a
-            // conversation continue seamlessly on the new model. Only the
-            // reasoning setting resets — capabilities differ per model.
+            // A model change inside one endpoint keeps its continuation. An
+            // endpoint change cannot: continuation ownership is endpoint-bound.
             chats: session.chats.map((chat) =>
               chat.id !== chatId
                 ? chat
                 : {
                     ...chat,
+                    runtimeId: "pi",
+                    endpointId,
                     connectionId,
                     providerId,
                     modelId,
                     connectionSelectionRequired: false,
                     modelSelectionRequired: false,
+                    ...propertiesWhen(endpointChanged, { continuation: undefined }),
                     ...propertiesWhen(changed, { reasoning: undefined })
                   }
             )
@@ -1259,25 +1381,29 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           tokens: s.tokens + (Number.isFinite(usage.tokens) ? usage.tokens : 0)
         }))
 
-      /** Persist one chat's canonical pi continuation identity. */
-      const setPiSessionId = (id: string, chatId: string, piSessionId: string) =>
+      /** Persist one chat's runtime-owned continuation identity. */
+      const setContinuation = (
+        id: string,
+        chatId: string,
+        continuation: RuntimeContinuation
+      ) =>
         update(id, (session) => ({
           ...session,
-          piSessionId,
+          continuation,
           chats: session.chats.map((chat) =>
-            chat.id === chatId ? { ...chat, piSessionId } : chat
+            chat.id === chatId ? { ...chat, continuation } : chat
           )
         }))
 
       /** Clear one chat's pi continuation before a deliberate context reseed. */
-      const clearPiSessionId = (id: string, chatId?: string) =>
+      const clearContinuation = (id: string, chatId?: string) =>
         update(id, (session) => {
           const target = chatId ?? session.activeChatId
           return {
             ...session,
-            piSessionId: undefined,
+            continuation: undefined,
             chats: session.chats.map((chat) =>
-              chat.id === target ? { ...chat, piSessionId: undefined } : chat
+              chat.id === target ? { ...chat, continuation: undefined } : chat
             )
           }
         })
@@ -1793,13 +1919,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         closeChat,
         reopenChat,
         setMode,
+        setAgentModel,
+        confirmAgentModel,
+        rollbackAgentModel,
         setProviderModel,
         setRuntimeRecovery,
         resolveRuntimeRecovery,
         setReasoning,
         addUsage,
-        setPiSessionId,
-        clearPiSessionId,
+        setContinuation,
+        clearContinuation,
         setContextTokens,
         setChatContextTokens,
         setAutoCompact,

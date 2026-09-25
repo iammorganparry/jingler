@@ -9,6 +9,8 @@ import type {
   Message,
   PeerAgentMessageResult,
   PermissionMode,
+  AgentEndpointId,
+  AgentRuntimeId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -27,6 +29,7 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   defaultModeFor,
   isFileMutationTool,
+  piEndpointId,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
@@ -777,9 +780,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   // the runtime's in-memory resume map. `event.sessionId` is the
                   // pi session id, not our `sessionId` (the Jingler session key).
                   yield* persistTurnSessionId(
-                  sessionId,
-                  chatId,
-                  event)
+                    sessionId,
+                    chatId,
+                    spec.runtimeId,
+                    spec.endpointId,
+                    event
+                  )
                   // Remember an edit's target path so its ToolEnd can tie back to a step.
                   yield* rememberTurnFile(touchedFiles, chatId, worktreePath, event)
                   // Canonical plan writes must land BEFORE the event is offered.
@@ -980,7 +986,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             registerBackgroundStop,
             registerTurnSteer
           })
-          const guardedRun = guardWorkspaceBranch(session, worktreePath, adapterRun)
+          const guardedRun = guardWorkspaceBranch(session, worktreePath, adapterRun).pipe(
+            // Started commits the selection. Any exit before it (including a
+            // Failed event followed by normal return) restores the prior owner.
+            Effect.ensuring(SessionStore.rollbackAgentModel(sessionId, chatId).pipe(Effect.ignore))
+          )
           const run = guardedRun.pipe(
             // An operator stop arrives as an interruption. Record it as the turn's
             // terminal event so the message settles (and the transcript says why)
@@ -1287,6 +1297,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 externalInstruction,
                 displayText
               ).pipe(
+                Effect.onError(() => SessionStore.rollbackAgentModel(sessionId, chatId).pipe(Effect.ignore)),
                 Effect.catchAll((error) =>
                   Effect.succeed(
                     Stream.fromIterable<StreamEvent>([
@@ -1387,10 +1398,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
         const chat = session?.chats.find((candidate) => candidate.id === chatId)
-        if (!chat?.piSessionId) return false
+        if (chat?.continuation?.runtimeId !== "pi") return false
+        const continuationId = chat.continuation.id
         const paths = yield* AppPaths
         return yield* Effect.promise(() =>
-          plannotatorReviewPending(chat.piSessionId, paths.piSessionsDir)
+          plannotatorReviewPending(continuationId, paths.piSessionsDir)
         )
       })
 
@@ -1423,7 +1435,7 @@ function prepareTurnSpec(
   chatId: string,
   browserAttachment: BrowserControlMcpAttachment | null,
   chat: Session["chats"][number],
-  connectionId: ProviderConnectionId,
+  connectionId: ProviderConnectionId | undefined,
   modelId: ProviderModelId,
   mode: PermissionMode,
   activePlanExecutionId: null,
@@ -1456,13 +1468,18 @@ function prepareTurnSpec(
   const spec: AgentTurnSpec = {
     sessionId,
     chatId,
-    connectionId,
+    runtimeId: chat.runtimeId ?? "pi",
+    endpointId: chat.endpointId ?? session.endpointId ?? piEndpointId(
+      session.environmentId ?? "desktop",
+      connectionId!
+    ),
+    ...(connectionId === undefined ? {} : { connectionId }),
     modelId,
     role: mode === "plan" ? "plan" : activePlanExecutionId ? "plan-execution" : "conversation",
     priorMessages,
-    piSessionId: digest === null ? (chat.piSessionId ?? null) : null,
+    continuation: digest === null ? (chat.continuation ?? null) : null,
     seed:
-      digest === null && chat.piSessionId === undefined && priorMessages.length > 0
+      digest === null && chat.continuation === undefined && priorMessages.length > 0
         ? { reason: "migration", messages: priorMessages }
         : null,
     targetCapabilities: {
@@ -1541,18 +1558,29 @@ const resolveTurnChat = (sessionId: string, chatId: string) =>
         })
       )
     }
-    if (chat.connectionId === undefined || chat.modelId === undefined) {
+    const runtimeId = chat.runtimeId ?? session.runtimeId ?? "pi"
+    const connectionId = chat.connectionId ?? session.connectionId
+    const endpointId = chat.endpointId ?? session.endpointId ?? (
+      runtimeId === "pi" && connectionId !== undefined
+        ? piEndpointId(session.environmentId ?? "desktop", connectionId)
+        : undefined
+    )
+    if (
+      chat.modelId === undefined ||
+      endpointId === undefined ||
+      (runtimeId === "pi" && connectionId === undefined)
+    ) {
       return yield* Effect.fail(
         new AgentRunError({
-          kind: session.providerId ?? "provider",
-          message: "Choose a certified provider connection before continuing."
+          kind: session.providerId ?? runtimeId,
+          message: "Choose an available agent endpoint and model before continuing."
         })
       )
     }
     return {
       session,
-      chat,
-      connectionId: chat.connectionId,
+      chat: { ...chat, runtimeId, endpointId },
+      connectionId,
       modelId: chat.modelId
     }
   })
@@ -1597,10 +1625,22 @@ const resolveTurnWorktree = (sessionId: string, session: Session) =>
     return worktreePath
   })
 
-const persistTurnSessionId = (sessionId: string, chatId: string, event: StreamEvent) =>
+const persistTurnSessionId = (
+  sessionId: string,
+  chatId: string,
+  runtimeId: AgentRuntimeId,
+  endpointId: AgentEndpointId,
+  event: StreamEvent
+) =>
   Effect.gen(function* () {
-    if (event._tag === "Started" && event.sessionId.length > 0) {
-      yield* SessionStore.setPiSessionId(sessionId, chatId, event.sessionId).pipe(Effect.ignore)
+    if (event._tag === "Started") {
+      yield* SessionStore.confirmAgentModel(sessionId, chatId).pipe(Effect.ignore)
+      if (event.sessionId.length === 0) return
+      yield* SessionStore.setContinuation(sessionId, chatId, {
+        runtimeId,
+        endpointId,
+        id: event.sessionId
+      }).pipe(Effect.ignore)
     }
   })
 
@@ -1832,7 +1872,7 @@ const acknowledgeExternalInstruction = (
 
 const clearCompactedSessionId = (sessionId: string, chatId: string, digest: ContextDigest | null) =>
   Effect.gen(function* () {
-    if (digest !== null) yield* SessionStore.clearPiSessionId(sessionId, chatId).pipe(Effect.ignore)
+    if (digest !== null) yield* SessionStore.clearContinuation(sessionId, chatId).pipe(Effect.ignore)
   })
 
 const emitCompactedContext = (

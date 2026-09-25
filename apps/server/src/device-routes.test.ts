@@ -387,6 +387,40 @@ describe("device server routes", () => {
       deviceId: device.deviceId
     })
   })
+  it.each(["refresh", "auth-status"])("proxies target-scoped %s and returns updated discovery", async (action) => {
+    const discovery = { version: 1, deviceId: device.deviceId, updatedAt: 200, discovery: { version: 1, agentVersion: "2.0.3", platform: device.platform, capabilities: { ...device.capabilities, runtime: {
+      targetId: "remote-target", toolIds: [], resourceIds: [],
+      versions: { behavior: "1", authentication: "1", prompt: "1", tools: "1", diff: "1", policy: "1", capabilities: "1", piSdk: "1" }
+    } }, repositories: [] } }
+    const value = harness(async () => Response.json(discovery))
+    const body = { targetId: "remote-target", action }
+    const response = await value.app.fetch(authenticated(`/api/devices/${device.deviceId}/discovery`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
+    }))
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual(discovery)
+    expect(value.calls[0]?.method).toBe("POST")
+    expect(JSON.parse(value.calls[0]!.body!)).toEqual(body)
+    expect(verifyDeviceGrant(relayGrant(value.calls[0]!), signingSecret, "device-control", 100)).toMatchObject({ subject: "user-one", deviceId: device.deviceId })
+  })
+
+  it("rejects discovery returned for another device", async () => {
+    const value = harness(async () => Response.json({
+      version: 1, deviceId: "device_wrong_abcdefgh", updatedAt: null, discovery: null
+    }))
+    const response = await value.app.fetch(authenticated(`/api/devices/${device.deviceId}/discovery`))
+    expect(response.status).toBe(502)
+  })
+
+  it("rejects malformed refresh without contacting the relay", async () => {
+    const value = harness()
+    const response = await value.app.fetch(authenticated(`/api/devices/${device.deviceId}/discovery`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "refresh" })
+    }))
+    expect(response.status).toBe(400)
+    expect(value.calls).toHaveLength(0)
+  })
+
   it("keeps the relay off by default and rejects unsafe grant configuration", () => {
     expect(loadEnv({ NODE_ENV: "test" })).toMatchObject({
       deviceRelayEnabled: false,

@@ -13,7 +13,7 @@ import { completedSubagentNodes } from "./subagent-tab-store.js"
 import {
   MAIN_FLEET_AGENT,
   legacySubagentNodeId,
-  parentPiSessionIdFromFleetEvents,
+  parentRuntimeSessionIdFromFleetEvents,
   projectLegacySubagents,
   subagentFleetMachine
 } from "./subagent-fleet-machine.js"
@@ -39,25 +39,25 @@ export interface SubagentFleetController {
 export function useSubagentFleet(input: {
   readonly sessionId: string
   readonly chatId: string
-  readonly piSessionId: string | null
+  readonly continuation: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
   readonly legacyAgents?: ReadonlyArray<Subagent>
 }): SubagentFleetController {
-  const parentPiSessionId = parentPiSessionIdFromFleetEvents(
+  const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(
     input.events,
-    input.piSessionId ?? `${input.sessionId}:${input.chatId}`
+    input.continuation ?? `${input.sessionId}:${input.chatId}`
   )
   const legacyAgents = input.legacyAgents ?? EMPTY_LEGACY_AGENTS
   const projectedLegacy = useMemo(
-    () => projectLegacySubagents(parentPiSessionId, legacyAgents),
-    [parentPiSessionId, legacyAgents]
+    () => projectLegacySubagents(parentRuntimeSessionId, legacyAgents),
+    [parentRuntimeSessionId, legacyAgents]
   )
   const events = useMemo(
     () => [...input.events, ...projectedLegacy],
     [input.events, projectedLegacy]
   )
   const actor = useActorRef(subagentFleetMachine, {
-    input: { parentPiSessionId }
+    input: { parentRuntimeSessionId }
   })
   useEffect(() => {
     actor.send({ type: "SYNC", events })
@@ -96,10 +96,10 @@ export function useSubagentFleet(input: {
   }, [completedById, context.tree.nodes, selectedId])
   const legacyByNodeId = useMemo(
     () => new Map(legacyAgents.map((agent) => [
-      legacySubagentNodeId(parentPiSessionId, agent.id),
+      legacySubagentNodeId(parentRuntimeSessionId, agent.id),
       agent
     ])),
-    [legacyAgents, parentPiSessionId]
+    [legacyAgents, parentRuntimeSessionId]
   )
   const legacyAgentFor = (node: SubagentFleetNode): Subagent | null =>
     legacyByNodeId.get(node.id) ?? null
@@ -126,7 +126,7 @@ export function useSubagentFleet(input: {
         const outcome = await rpc.agentControlSubagent(input.sessionId, input.chatId, {
           version: SUBAGENT_FLEET_PROTOCOL_VERSION,
           requestId,
-          parentPiSessionId: context.tree.parentPiSessionId,
+          parentRuntimeSessionId: context.tree.parentRuntimeSessionId,
           runId: node.runId,
           action,
           message: message ?? null,

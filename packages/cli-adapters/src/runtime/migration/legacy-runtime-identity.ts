@@ -1,7 +1,11 @@
-import type {
-  ProviderConnectionId,
-  ProviderId,
-  ProviderModelId
+import {
+  AgentEndpointId,
+  AgentRuntimeId,
+  piEndpointId,
+  RuntimeContinuation,
+  type ProviderConnectionId,
+  type ProviderId,
+  type ProviderModelId
 } from "@jingler/core"
 import { Schema } from "effect"
 
@@ -9,9 +13,12 @@ const LegacyChatObject = Schema.Struct({
   id: Schema.optional(Schema.Unknown),
   model: Schema.optional(Schema.Unknown),
   resumeId: Schema.optional(Schema.Unknown),
+  runtimeId: Schema.optional(Schema.Unknown),
+  endpointId: Schema.optional(Schema.Unknown),
   connectionId: Schema.optional(Schema.Unknown),
   providerId: Schema.optional(Schema.Unknown),
   modelId: Schema.optional(Schema.Unknown),
+  continuation: Schema.optional(Schema.Unknown),
   piSessionId: Schema.optional(Schema.Unknown),
   legacyModel: Schema.optional(Schema.Unknown),
   legacyResumeId: Schema.optional(Schema.Unknown)
@@ -20,12 +27,16 @@ const LegacyChatWithId = Schema.Struct({ id: Schema.Unknown })
 const LegacySessionObject = Schema.Struct({
   chats: Schema.optional(Schema.Unknown),
   activeChatId: Schema.optional(Schema.Unknown),
+  environmentId: Schema.optional(Schema.Unknown),
   model: Schema.optional(Schema.Unknown),
   resumeId: Schema.optional(Schema.Unknown),
   cli: Schema.optional(Schema.Unknown),
+  runtimeId: Schema.optional(Schema.Unknown),
+  endpointId: Schema.optional(Schema.Unknown),
   connectionId: Schema.optional(Schema.Unknown),
   providerId: Schema.optional(Schema.Unknown),
   modelId: Schema.optional(Schema.Unknown),
+  continuation: Schema.optional(Schema.Unknown),
   piSessionId: Schema.optional(Schema.Unknown)
 })
 const LegacyConfigObject = Schema.Struct({
@@ -58,11 +69,7 @@ export const providerFromLegacy = (
 ): string | null => {
   if (cli === "claude") return "anthropic"
   if (cli === "codex") return "openai-codex"
-  if (
-    cli === "opencode" &&
-    typeof model === "string" &&
-    model.includes("/")
-  ) {
+  if (cli === "opencode" && typeof model === "string" && model.includes("/")) {
     return model.slice(0, model.indexOf("/")) || null
   }
   return null
@@ -70,7 +77,8 @@ export const providerFromLegacy = (
 
 type ExistingRuntime = Pick<typeof LegacyChatObject.Type, "connectionId" | "providerId" | "modelId">
 
-const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null)
+const stringOrNull = (value: unknown): string | null =>
+  typeof value === "string" ? value : null
 
 const resolvedFields = (
   existing: ExistingRuntime,
@@ -107,47 +115,82 @@ const resolveLegacyCandidate = (
   return { providerId, resolved }
 }
 
+const endpointFor = (
+  endpoint: unknown,
+  connection: unknown,
+  resolved: ResolvedRuntimeIdentity | null,
+  targetId: string
+): AgentEndpointId | undefined => {
+  if (typeof endpoint === "string" && endpoint.length > 0) return AgentEndpointId.make(endpoint)
+  const connectionId = typeof connection === "string"
+    ? connection as ProviderConnectionId
+    : resolved?.connectionId
+  return connectionId === undefined ? undefined : piEndpointId(targetId, connectionId)
+}
+
+const continuationFor = (
+  continuation: unknown,
+  legacyPiSessionId: unknown,
+  endpointId: AgentEndpointId | undefined
+): RuntimeContinuation | undefined => {
+  if (Schema.is(RuntimeContinuation)(continuation)) return continuation
+  const id = stringOrNull(continuation) ?? stringOrNull(legacyPiSessionId)
+  return id === null || endpointId === undefined
+    ? undefined
+    : { runtimeId: "pi", endpointId, id }
+}
+
 const migrateChat = (
   chat: unknown,
   legacyCli: unknown,
+  targetId: string,
   resolve?: LegacyRuntimeResolver
 ): unknown => {
   if (!Schema.is(LegacyChatObject)(chat)) return chat
   const legacyModel = stringOrNull(chat.model)
   const legacyResumeId = stringOrNull(chat.resumeId)
   const { providerId, resolved } = resolveLegacyCandidate(legacyCli, legacyModel, resolve)
+  const endpointId = endpointFor(chat.endpointId, chat.connectionId, resolved, targetId)
+  const continuation = continuationFor(chat.continuation, chat.piSessionId, endpointId)
   const {
     resumeId: _resumeId,
     model: _model,
+    runtimeId: _runtimeId,
+    endpointId: _endpointId,
     connectionId: existingConnection,
     providerId: existingProvider,
     modelId: existingModel,
+    continuation: _continuation,
+    piSessionId: _piSessionId,
     ...rest
   } = chat
 
   return {
     ...rest,
-    ...preservedRuntimeFields({ connectionId: existingConnection,
+    runtimeId: Schema.is(AgentRuntimeId)(chat.runtimeId) ? chat.runtimeId : "pi",
+    ...(endpointId === undefined ? {} : { endpointId }),
+    ...preservedRuntimeFields({
+      connectionId: existingConnection,
       providerId: existingProvider,
       modelId: existingModel
     }),
     ...resolvedFields(chat, resolved, providerId),
-    piSessionId: typeof chat.piSessionId === "string" ? chat.piSessionId : undefined,
-    connectionSelectionRequired:
-      existingConnection === undefined && resolved === null,
+    ...(continuation === undefined ? {} : { continuation }),
+    connectionSelectionRequired: existingConnection === undefined && resolved === null,
     modelSelectionRequired: existingModel === undefined && resolved === null,
     ...legacyHistory(legacyModel, legacyResumeId)
   }
 }
 
-/** Lossless decoder migration: clear native continuation and require exact certified recovery. */
+/** Lossless decoder migration from legacy CLI/provider/PI identity to owned endpoints. */
 export const migrateLegacyRuntimeIdentity = (
   value: unknown,
   resolve?: LegacyRuntimeResolver
 ): unknown => {
   if (!Schema.is(LegacySessionObject)(value)) return value
+  const targetId = stringOrNull(value.environmentId) ?? "desktop"
   const chats = Array.isArray(value.chats)
-    ? value.chats.map((chat) => migrateChat(chat, value.cli, resolve))
+    ? value.chats.map((chat) => migrateChat(chat, value.cli, targetId, resolve))
     : value.chats
   const active = Array.isArray(chats)
     ? chats.find(
@@ -158,22 +201,34 @@ export const migrateLegacyRuntimeIdentity = (
   const legacyModel = stringOrNull(activeRecord?.legacyModel) ?? stringOrNull(value.model)
   const legacyResumeId = stringOrNull(activeRecord?.legacyResumeId) ?? stringOrNull(value.resumeId)
   const { providerId, resolved } = resolveLegacyCandidate(value.cli, legacyModel, resolve)
-
+  const endpointId = endpointFor(
+    activeRecord?.endpointId ?? value.endpointId,
+    activeRecord?.connectionId ?? value.connectionId,
+    resolved,
+    targetId
+  )
+  const continuation = Schema.is(RuntimeContinuation)(activeRecord?.continuation)
+    ? activeRecord.continuation
+    : continuationFor(value.continuation, value.piSessionId, endpointId)
   const {
     cli: _cli,
     resumeId: _resumeId,
     model: _model,
+    runtimeId: _runtimeId,
+    endpointId: _endpointId,
+    continuation: _continuation,
+    piSessionId: _piSessionId,
     ...session
   } = value
 
   return {
     ...session,
     ...(chats === undefined ? {} : { chats }),
+    runtimeId: Schema.is(AgentRuntimeId)(value.runtimeId) ? value.runtimeId : "pi",
+    ...(endpointId === undefined ? {} : { endpointId }),
     ...resolvedFields(value, resolved, providerId),
-    piSessionId:
-      typeof value.piSessionId === "string" ? value.piSessionId : undefined,
-    connectionSelectionRequired:
-      value.connectionId === undefined && resolved === null,
+    ...(continuation === undefined ? {} : { continuation }),
+    connectionSelectionRequired: value.connectionId === undefined && resolved === null,
     modelSelectionRequired: value.modelId === undefined && resolved === null,
     ...(typeof value.cli === "string" ? { legacyCli: value.cli } : {}),
     ...legacyHistory(legacyModel, legacyResumeId)

@@ -20,6 +20,7 @@ import {
   GitHubApiError,
   issueReferenceOf,
   issueReferencesOf,
+  piEndpointId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -47,6 +48,8 @@ const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
 
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const endpointId = piEndpointId("desktop", connectionId)
+const piContinuation = (id: string) => ({ runtimeId: "pi" as const, endpointId, id })
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 
@@ -713,7 +716,7 @@ describe("SessionStore", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Two threads" }))
-        yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+        yield* SessionStore.setContinuation(created.id, created.activeChatId, piContinuation("pi-session.jsonl"))
         yield* SessionStore.setReasoning(created.id, created.activeChatId, {
           enabled: true,
           effort: "xhigh"
@@ -727,12 +730,12 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(activeChat(exit.value.configured).piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value.configured).continuation?.id).toBe("pi-session.jsonl")
     expect(activeChat(exit.value.configured).reasoning).toStrictEqual({
       enabled: true,
       effort: "xhigh"
     })
-    expect(activeChat(exit.value.cleared).piSessionId).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value.cleared).continuation?.id).toBe("pi-session.jsonl")
     expect(activeChat(exit.value.cleared).reasoning).toBeUndefined()
   })
 
@@ -740,10 +743,10 @@ describe("SessionStore", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const created = yield* SessionStore.create(input({ title: "Pi thread" }))
-        yield* SessionStore.setPiSessionId(
+        yield* SessionStore.setContinuation(
           created.id,
           created.activeChatId,
-          "pi-session.jsonl"
+          piContinuation("pi-session.jsonl")
         )
         return yield* SessionStore.get(created.id)
       }).pipe(Effect.provide(services)),
@@ -751,8 +754,8 @@ describe("SessionStore", () => {
     )
     expect(exit._tag).toBe("Success")
     if (exit._tag !== "Success") return
-    expect(exit.value.piSessionId).toBe("pi-session.jsonl")
-    expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
+    expect(exit.value.continuation?.id).toBe("pi-session.jsonl")
+    expect(activeChat(exit.value).continuation?.id).toBe("pi-session.jsonl")
   })
 
   it("falls back to the 'session' slug when the title has no alphanumerics", async () => {
@@ -1256,15 +1259,15 @@ describe("SessionStore", () => {
       const exit = await runExit(
         Effect.gen(function* () {
           const created = yield* SessionStore.create(input({ title: "Reseeded" }))
-          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
-          yield* SessionStore.clearPiSessionId(created.id)
+          yield* SessionStore.setContinuation(created.id, created.activeChatId, piContinuation("pi-session.jsonl"))
+          yield* SessionStore.clearContinuation(created.id)
           return yield* SessionStore.get(created.id)
         }).pipe(Effect.provide(services)),
         temp.layer
       )
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).piSessionId).toBeUndefined()
+      expect(activeChat(exit.value).continuation).toBeUndefined()
       // The session itself is otherwise intact — only the thread pointer went.
       expect(exit.value.title).toBe("Reseeded")
       expect(exit.value.providerId).toBe(providerId)
@@ -1272,7 +1275,7 @@ describe("SessionStore", () => {
   })
 
   describe("setProviderModel", () => {
-    it("switches identity atomically, keeps the pi session, and resets reasoning", async () => {
+    it("switches identity atomically, clears the foreign continuation, and resets reasoning", async () => {
       const nextConnection = Schema.decodeUnknownSync(ProviderConnectionId)("codex-pro")
       const nextProvider = Schema.decodeUnknownSync(ProviderId)("openai-codex")
       const nextModel = Schema.decodeUnknownSync(ProviderModelId)("openai-codex/gpt-5")
@@ -1284,7 +1287,7 @@ describe("SessionStore", () => {
             providerId,
             modelId
           }))
-          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setContinuation(created.id, created.activeChatId, piContinuation("pi-session.jsonl"))
           yield* SessionStore.setReasoning(created.id, created.activeChatId, {
             enabled: true,
             effort: "max"
@@ -1310,15 +1313,13 @@ describe("SessionStore", () => {
         connectionSelectionRequired: false,
         modelSelectionRequired: false
       })
-      // The pi session is provider-neutral: it survives the switch so the
-      // conversation continues seamlessly on the new model.
-      expect(exit.value.piSessionId).toBe("pi-session.jsonl")
+      expect(exit.value.continuation).toBeUndefined()
       expect(activeChat(exit.value)).toMatchObject({
         connectionId: nextConnection,
         providerId: nextProvider,
         modelId: nextModel
       })
-      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
+      expect(activeChat(exit.value).continuation).toBeUndefined()
       expect(activeChat(exit.value).reasoning).toBeUndefined()
     })
 
@@ -1331,7 +1332,7 @@ describe("SessionStore", () => {
             providerId,
             modelId
           }))
-          yield* SessionStore.setPiSessionId(created.id, created.activeChatId, "pi-session.jsonl")
+          yield* SessionStore.setContinuation(created.id, created.activeChatId, piContinuation("pi-session.jsonl"))
           yield* SessionStore.setProviderModel(
             created.id,
             created.activeChatId,
@@ -1346,7 +1347,7 @@ describe("SessionStore", () => {
 
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
-      expect(activeChat(exit.value).piSessionId).toBe("pi-session.jsonl")
+      expect(activeChat(exit.value).continuation?.id).toBe("pi-session.jsonl")
     })
   })
 

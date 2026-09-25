@@ -100,6 +100,7 @@ const enrollmentCredential: DeviceEnrollmentCredentialResponse = {
 const ProviderConnectionsTest = Layer.succeed(ProviderConnections, {
   loginEvents: Stream.empty,
   list: Effect.dieMessage("Provider catalog is not used by environment tests"),
+  refreshCatalog: Effect.dieMessage("Provider catalog is not used by environment tests"),
   status: Effect.succeed([]),
   resolveCredential: () => Effect.dieMessage("Credential export is not used by this test"),
   connectClaudeToken: () => Effect.dieMessage("Provider login is not used by environment tests"),

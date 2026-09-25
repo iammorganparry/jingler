@@ -9,6 +9,7 @@ import type {
 import {
   applyStreamEvent,
   assistantMessage,
+  piEndpointId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -76,6 +77,7 @@ const h = vi.hoisted(() => ({
   filesGate: Promise.resolve() as Promise<void>,
   transcript: [] as ReadonlyArray<Message>,
   transcriptPageCalls: [] as Array<{ before: string | undefined; limit: number }>,
+  endpointModelFails: false,
   setModelCalls: [] as Array<{
     sessionId: string
     connectionId: string
@@ -161,6 +163,18 @@ vi.mock("./rpc-client.js", () => ({
     ) => {
       h.setModelCalls.push({ sessionId, connectionId, providerId, modelId })
     },
+    agentEndpointSetModel: async (
+      sessionId: string,
+      _chatId: string,
+      _runtimeId: string,
+      _endpointId: string,
+      providerId: string,
+      modelId: string
+    ) => {
+      if (h.endpointModelFails) throw new Error("endpoint unavailable")
+      h.setModelCalls.push({ sessionId, connectionId, providerId, modelId })
+      return session
+    },
     agentCommentPlanStep: async () => {},
     agentRevisePlan: async () => {},
     agentApprovePlan: async () => ({ status: "refused", message: "Plannotator owns approval", latestRevision: 0 }),
@@ -209,6 +223,8 @@ const session = {
 const emit = (event: StreamEvent) => h.streamCb?.(event)
 const start = () => createActor(conversationMachine, { input: { session } }).start()
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const endpointId = piEndpointId("desktop", connectionId)
+const piContinuation = (id: string) => ({ runtimeId: "pi" as const, endpointId, id })
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 const remoteEnvelope = (
@@ -256,6 +272,7 @@ beforeEach(() => {
   h.steerGate = Promise.resolve()
   h.stopFails = false
   h.chatBusy = false
+  h.endpointModelFails = false
   h.setModelCalls.length = 0
   h.skillsGate = Promise.resolve()
   h.transcriptGate = Promise.resolve()
@@ -1378,7 +1395,7 @@ describe("conversationMachine — talking to the main agent while sub-agents run
         node: {
           id: `pi-parent-1/${subagentId}`,
           subagentId,
-          parentPiSessionId: "pi-parent-1",
+          parentRuntimeSessionId: "pi-parent-1",
           parentId: null,
           registryRevision: 15,
           childSequence: 1,
@@ -1420,7 +1437,7 @@ describe("conversationMachine — talking to the main agent while sub-agents run
       node: {
         id: "pi-parent-1/live",
         subagentId: "live",
-        parentPiSessionId: "pi-parent-1",
+        parentRuntimeSessionId: "pi-parent-1",
         parentId: null,
         registryRevision: 30,
         childSequence: 1,
@@ -1451,7 +1468,7 @@ describe("conversationMachine — talking to the main agent while sub-agents run
         subagentId: `terminal-${index}`,
         orchestrationRunId: `terminal-${index}`,
         runId: `terminal-${index}`,
-        parentPiSessionId: "pi-parent-1",
+        parentRuntimeSessionId: "pi-parent-1",
         parentId: null,
         nodeKind: "agent",
         status: "completed",
@@ -1487,7 +1504,7 @@ describe("conversationMachine — talking to the main agent while sub-agents run
       occurredAt: 30,
       snapshot: {
         version: 2,
-        parentPiSessionId: "pi-parent-1",
+        parentRuntimeSessionId: "pi-parent-1",
         registryRevision: 30,
         generatedAt: 30,
         totalActive: 0,
@@ -1518,7 +1535,7 @@ describe("conversationMachine — talking to the main agent while sub-agents run
       node: {
         id: `parent/history-${index}`,
         subagentId: `history-${index}`,
-        parentPiSessionId: "parent",
+        parentRuntimeSessionId: "parent",
         parentId: null,
         nodeKind: "agent",
         status: "completed",
@@ -1559,14 +1576,14 @@ describe("conversationMachine — talking to the main agent while sub-agents run
       occurredAt: 200,
       snapshot: {
         ...snapshotTerminal.snapshot,
-        parentPiSessionId: "new-parent",
+        parentRuntimeSessionId: "new-parent",
         registryRevision: 1,
         generatedAt: 200,
         nodes: []
       }
     }
     const rollover = boundedFleetEvents([oldSnapshot, newSnapshot, ...tombstones])
-    expect(rollover.find((event) => event._tag === "Snapshot")?.snapshot.parentPiSessionId)
+    expect(rollover.find((event) => event._tag === "Snapshot")?.snapshot.parentRuntimeSessionId)
       .toBe("new-parent")
   })
 
@@ -1868,11 +1885,15 @@ describe("conversationMachine — image attachments", () => {
     it("updates canonical identity without dropping conversation continuity", async () => {
       const continued = {
         ...session,
-        piSessionId: "pi-session",
+        runtimeId: "pi",
+        endpointId,
+        continuation: piContinuation("pi-session"),
         legacyResumeId: "resume-session",
         chats: [{
           ...session.chats[0]!,
-          piSessionId: "pi-chat",
+          runtimeId: "pi",
+          endpointId,
+          continuation: piContinuation("pi-chat"),
           legacyResumeId: "resume-chat"
         }]
       } as Session
@@ -1880,7 +1901,7 @@ describe("conversationMachine — image attachments", () => {
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
       actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "max" } })
 
-      actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
+      actor.send({ type: "SET_MODEL", runtimeId: "pi", endpointId, connectionId, providerId, modelId })
 
       expect(actor.getSnapshot().context).toMatchObject({
         connectionId,
@@ -1892,14 +1913,14 @@ describe("conversationMachine — image attachments", () => {
         connectionId,
         providerId,
         modelId,
-        piSessionId: "pi-session",
+        continuation: piContinuation("pi-session"),
         legacyResumeId: "resume-session",
         chats: [{
           id: "s1",
           connectionId,
           providerId,
           modelId,
-          piSessionId: "pi-chat",
+          continuation: piContinuation("pi-chat"),
           legacyResumeId: "resume-chat"
         }]
       })
@@ -1909,10 +1930,22 @@ describe("conversationMachine — image attachments", () => {
       actor.stop()
     })
 
+    it("rolls back an endpoint switch when persistence rejects it", async () => {
+      const actor = start()
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      h.endpointModelFails = true
+
+      actor.send({ type: "SET_MODEL", runtimeId: "pi", endpointId, connectionId, providerId, modelId })
+
+      await waitFor(actor, (snapshot) => snapshot.context.endpointId === null)
+      expect(actor.getSnapshot().context.session.endpointId).toBeUndefined()
+      actor.stop()
+    })
+
     it("stamps new assistant turns with the selected provider", async () => {
       const actor = start()
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
-      actor.send({ type: "SET_MODEL", connectionId, providerId, modelId })
+      actor.send({ type: "SET_MODEL", runtimeId: "pi", endpointId, connectionId, providerId, modelId })
 
       actor.send({ type: "SEND", text: "continue with Claude" })
 

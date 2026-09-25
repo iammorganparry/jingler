@@ -187,7 +187,7 @@ export interface SeedSession {
   readonly connectionId?: string;
   readonly providerId?: string;
   readonly modelId?: string;
-  readonly piSessionId?: string;
+  readonly continuation?: string;
   readonly modelSelectionRequired?: boolean;
   readonly connectionSelectionRequired?: boolean;
   readonly runtimeRecovery?: RuntimeRecoveryState;

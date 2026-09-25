@@ -9,7 +9,7 @@ const capability = {
   version: 1,
   endpoint: "http://127.0.0.1:43123/v1/subagent-tool",
   token: "capability-token",
-  parentPiSessionId: "parent-session",
+  parentRuntimeSessionId: "parent-session",
   agent: "worker",
   targetId: "desktop",
   role: "conversation",
@@ -34,7 +34,7 @@ describe("subagent capability contracts", () => {
       Schema.decodeUnknownSync(SubagentToolRequest)({
         version: 2,
         token: "token",
-        parentPiSessionId: "parent",
+        parentRuntimeSessionId: "parent",
         callId: "call",
         toolId: "workspace_read_file",
         arguments: {}

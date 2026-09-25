@@ -36,7 +36,7 @@ describe("SubagentSupervisionService", () => {
           ...identity,
           runId: "run-1",
           parentId: null,
-          parentPiSessionId: "parent",
+          parentRuntimeSessionId: "parent",
           agent: "worker",
           task: "Inspect",
           model: null,
@@ -74,7 +74,7 @@ describe("SubagentSupervisionService", () => {
     const request = (requestId: string) => ({
       version: 2 as const,
       requestId,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: "run-1",
       action: "steer" as const,
       message: "Continue",
@@ -133,7 +133,7 @@ describe("SubagentSupervisionService", () => {
     const original = {
       version: 2 as const,
       requestId: "same-id",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: "run-1",
       action: "steer" as const,
       message: "Continue",
@@ -165,7 +165,7 @@ describe("SubagentSupervisionService", () => {
       {
         load: Effect.succeed({
           version: 2 as const,
-          parentPiSessionId: "parent",
+          parentRuntimeSessionId: "parent",
           sequence: 0,
           pending: [],
           outcomes: [],
@@ -185,7 +185,7 @@ describe("SubagentSupervisionService", () => {
     const request = (requestId: string) => ({
       version: 2 as const,
       requestId,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: requestId,
       action: "stop" as const,
       message: null,
@@ -231,7 +231,7 @@ describe("SubagentSupervisionService", () => {
     const outcome = await Effect.runPromise(service.submitControl({
       version: 2,
       requestId: "closed-request",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: "run-1",
       action: "stop",
       message: null,
@@ -255,7 +255,7 @@ describe("SubagentSupervisionService", () => {
       {
         load: Effect.succeed({
           version: 2 as const,
-          parentPiSessionId: "parent",
+          parentRuntimeSessionId: "parent",
           sequence: 1,
           pending: [],
           outcomes: [{
@@ -280,7 +280,7 @@ describe("SubagentSupervisionService", () => {
     const outcome = await Effect.runPromise(service.submitControl({
       version: 2,
       requestId: "legacy-cache",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: "run-1",
       action: "stop",
       message: null,
@@ -300,12 +300,12 @@ describe("SubagentSupervisionService", () => {
     roots.push(root)
     const journal = makeSubagentControlJournal({
       asyncDir: root,
-      parentPiSessionId: "parent"
+      parentRuntimeSessionId: "parent"
     })
     const request = {
       version: 2 as const,
       requestId: "durable-request",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       runId: "run-1",
       action: "steer" as const,
       message: "Continue",

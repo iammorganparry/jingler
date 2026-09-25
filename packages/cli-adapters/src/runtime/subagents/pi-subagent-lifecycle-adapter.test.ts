@@ -70,7 +70,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     let now = 10
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       controlJournal: null,
       emit: (event) => emitted.push(event),
@@ -150,7 +150,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 10
@@ -209,7 +209,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       trustedSessionRoots: [root],
       controlJournal: null,
       emit: (event) => emitted.push(event),
@@ -267,7 +267,7 @@ describe("PiSubagentLifecycleAdapter", () => {
       await expect(adapter.control({
         version: 2,
         requestId: "direct-steer",
-        parentPiSessionId: parent,
+        parentRuntimeSessionId: parent,
         runId: "child-run",
         action: "steer",
         message: "Check the edge case",
@@ -325,7 +325,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 50
@@ -383,7 +383,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 50
@@ -467,7 +467,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: () => undefined,
       now: () => 60
@@ -501,7 +501,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: () => undefined,
       now: () => 50
@@ -584,7 +584,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 30
@@ -626,7 +626,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const requestIds: string[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: () => undefined,
       now: () => 30
@@ -664,7 +664,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     })
     const base = {
       version: 2 as const,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       runId: "run-1",
       replyTo: null
     }
@@ -734,7 +734,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: () => undefined,
       now: () => 40
@@ -753,7 +753,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const control = adapter.control({
       version: 2,
       requestId: "race-control",
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       runId: "race-run",
       action: "steer",
       message: "Finish safely",
@@ -808,7 +808,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
       controlJournal: null,
@@ -838,7 +838,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 20
@@ -894,7 +894,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
       controlJournal: null,
@@ -931,7 +931,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const emitted: SubagentFleetEvent[] = []
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       controlJournal: null,
       emit: (event) => emitted.push(event),
       now: () => 20
@@ -987,7 +987,7 @@ describe("PiSubagentLifecycleAdapter", () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
       events,
-      parentPiSessionId: parent,
+      parentRuntimeSessionId: parent,
       parentPiSessionAliases: [parentSessionFile],
       asyncRunsDir: root,
       controlJournal: null,

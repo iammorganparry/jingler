@@ -30,7 +30,7 @@ export default function jinglerChildTools(pi) {
           body: JSON.stringify({
             version: 1,
             token: capability.token,
-            parentPiSessionId: capability.parentPiSessionId,
+            parentRuntimeSessionId: capability.parentRuntimeSessionId,
             callId,
             toolId: tool.id,
             arguments: parameters

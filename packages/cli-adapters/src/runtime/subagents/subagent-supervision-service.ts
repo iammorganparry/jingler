@@ -29,7 +29,7 @@ const MAX_REPLAY_EVENTS = 256
 const MAX_TRANSCRIPT_FILES = 32
 const ControlJournal = Schema.Struct({
   version: Schema.Literal(2),
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   sequence: Schema.Number,
   pending: Schema.Array(Schema.Struct({
     request: SubagentFleetControlRequest,
@@ -47,14 +47,14 @@ export interface SubagentControlJournal {
 
 export const makeSubagentControlJournal = (input: {
   readonly asyncDir: string
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
 }): SubagentControlJournal => {
-  const key = createHash("sha256").update(input.parentPiSessionId).digest("hex")
+  const key = createHash("sha256").update(input.parentRuntimeSessionId).digest("hex")
   const directory = join(input.asyncDir, ".jingler-supervision")
   const path = join(directory, `${key}.json`)
   const empty = {
     version: 2 as const,
-    parentPiSessionId: input.parentPiSessionId,
+    parentRuntimeSessionId: input.parentRuntimeSessionId,
     sequence: 0,
     pending: [],
     outcomes: [],
@@ -68,7 +68,7 @@ export const makeSubagentControlJournal = (input: {
           const decoded = await Schema.decodeUnknownPromise(
             Schema.parseJson(ControlJournal)
           )(await readFile(path, "utf8"), { onExcessProperty: "error" })
-          if (decoded.parentPiSessionId !== input.parentPiSessionId) {
+          if (decoded.parentRuntimeSessionId !== input.parentRuntimeSessionId) {
             throw new Error("Subagent control journal belongs to another parent session")
           }
           return decoded
@@ -183,19 +183,19 @@ const sameControlRequest = (
 ): boolean =>
   left.version === right.version &&
   left.requestId === right.requestId &&
-  left.parentPiSessionId === right.parentPiSessionId &&
+  left.parentRuntimeSessionId === right.parentRuntimeSessionId &&
   left.runId === right.runId &&
   left.action === right.action &&
   left.message === right.message &&
   left.replyTo === right.replyTo
 
 export const makeSubagentSupervisionService = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   now: () => number = Date.now,
   journal?: SubagentControlJournal
 ): Effect.Effect<SubagentSupervisionServiceShape> => Effect.gen(function* () {
   const ref = yield* SynchronizedRef.make<SupervisionState>({
-    tree: emptySubagentRunTree(parentPiSessionId),
+    tree: emptySubagentRunTree(parentRuntimeSessionId),
     eventLog: [],
     registryRevision: 0,
     childSequences: new Map(),
@@ -221,7 +221,7 @@ export const makeSubagentSupervisionService = (
   const persistControls = (state: SupervisionState): Effect.Effect<void, Error> =>
     journal?.save({
       version: 2,
-      parentPiSessionId,
+      parentRuntimeSessionId,
       sequence: state.controlSequence,
       pending: [...state.pendingControlRequests.values()].slice(-MAX_REPLAY_EVENTS),
       outcomes: [...state.controlOutcomes.values()].slice(-MAX_REPLAY_EVENTS),
@@ -284,7 +284,7 @@ export const makeSubagentSupervisionService = (
         const childSequences = new Map(state.childSequences)
         childSequences.set(subagentId, childSequence)
         return [{
-          id: subagentFleetNodeId(parentPiSessionId, subagentId),
+          id: subagentFleetNodeId(parentRuntimeSessionId, subagentId),
           subagentId,
           orchestrationRunId,
           nodeKind,
@@ -383,7 +383,7 @@ export const makeSubagentSupervisionService = (
         const queued: SubagentControlReceipt = {
           version: 2,
           messageId: request.requestId,
-          parentPiSessionId,
+          parentRuntimeSessionId,
           subagentId: request.runId,
           sequence,
           status: "queued",
@@ -411,7 +411,7 @@ export const makeSubagentSupervisionService = (
             ref,
             controlGate,
             execute,
-            parentPiSessionId
+            parentRuntimeSessionId
           )
         }),
       controlReceipts: Ref.get(ref).pipe(Effect.map(({ controlReceipts }) => controlReceipts)),
@@ -437,7 +437,7 @@ export const makeSubagentSupervisionService = (
             state.unsubscribes,
             {
               ...state,
-              tree: emptySubagentRunTree(parentPiSessionId),
+              tree: emptySubagentRunTree(parentRuntimeSessionId),
               eventLog: [],
               registryRevision: 0,
               childSequences: new Map<string, number>(),
@@ -465,14 +465,14 @@ export const makeSubagentSupervisionService = (
   })
 
 export const SubagentSupervisionServiceLive = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   now: () => number = Date.now,
   journal?: SubagentControlJournal
 ) =>
   Layer.scoped(
     SubagentSupervisionService,
     Effect.acquireRelease(
-      makeSubagentSupervisionService(parentPiSessionId, now, journal),
+      makeSubagentSupervisionService(parentRuntimeSessionId, now, journal),
       (service) => service.stop
     )
   )
@@ -485,7 +485,7 @@ function* persistQueuedControl(
   ref: SynchronizedRef.SynchronizedRef<SupervisionState>,
   controlGate: Effect.Semaphore,
   execute: (sequence: number) => Effect.Effect<SubagentFleetControlOutcome>,
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
 ) {
   if (registration._tag === "Cached" || registration._tag === "Conflict") {
         return registration.outcome
@@ -530,7 +530,7 @@ function* persistQueuedControl(
     request,
     now,
     ref,
-    parentPiSessionId,
+    parentRuntimeSessionId,
     persistCurrentControls
   )
 }
@@ -546,7 +546,7 @@ function* executeRegisteredControl(
   request: SubagentFleetControlRequest,
   now: () => number,
   ref: SynchronizedRef.SynchronizedRef<SupervisionState>,
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   persistCurrentControls: Effect.Effect<void, Error, never>
 ) {
   const outcome = yield* controlGate.withPermits(1)(
@@ -576,7 +576,7 @@ function* executeRegisteredControl(
         const receipt: SubagentControlReceipt = {
           version: 2,
           messageId: request.requestId,
-          parentPiSessionId,
+          parentRuntimeSessionId,
           subagentId: request.runId,
           sequence: registration.sequence,
           status: outcome.deliveryStatus,

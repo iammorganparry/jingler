@@ -571,10 +571,23 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const discovery = (
         deviceId: string,
+        endpointRequest?: { readonly targetId: string; readonly action: "list" | "refresh" | "auth-status" },
       ): Effect.Effect<EnvironmentDiscovery, EnvironmentError> =>
         request(
           `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/discovery`,
           EnvironmentDiscoverySchema,
+          endpointRequest ? { method: "POST", body: JSON.stringify(endpointRequest) } : undefined,
+        ).pipe(
+          Effect.tap((response) => Effect.sync(() => {
+            const current = environmentsById.get(deviceId);
+            if (current?.kind === "owned" && response.discovery !== null) {
+              environmentsById.set(deviceId, {
+                ...current,
+                capabilities: response.discovery.capabilities,
+                agentVersion: response.discovery.agentVersion,
+              });
+            }
+          })),
         );
 
       return {

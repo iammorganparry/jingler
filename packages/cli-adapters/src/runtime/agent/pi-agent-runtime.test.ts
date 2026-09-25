@@ -2,7 +2,8 @@ import {
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnectionId,
   ProviderModelId,
-  type PiRunSpec
+  piEndpointId,
+  type AgentRunSpec
 } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
@@ -17,18 +18,25 @@ import {
   type PiSessionHandle
 } from "./pi-agent-runtime.js"
 
-const spec: PiRunSpec = {
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("connection-1")
+const endpointId = piEndpointId("desktop", connectionId)
+const piContinuation = (id: string) => ({ runtimeId: "pi" as const, endpointId, id })
+const owner = { runtimeId: "pi" as const, endpointId, targetId: "desktop" }
+
+const spec: AgentRunSpec = {
   runId: "run-1",
   sessionId: "session-1",
   chatId: "chat-1",
-  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("connection-1"),
+  runtimeId: "pi",
+  endpointId,
+  connectionId,
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
   role: "conversation",
   mode: "ask",
   cwd: "/workspace",
   prompt: "hello",
   priorMessages: [],
-  piSessionId: null,
+  continuation: null,
   seed: null,
   targetCapabilities: {
     versions: CURRENT_RUNTIME_CONTRACTS,
@@ -40,13 +48,13 @@ const spec: PiRunSpec = {
 
 const fleetSeams: Pick<
   PiSessionHandle,
-  "parentPiSessionId" | "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
+  "parentRuntimeSessionId" | "subscribeFleet" | "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
 > = {
-  parentPiSessionId: "pi-session-internal",
+  parentRuntimeSessionId: "pi-session-internal",
   subscribeFleet: () => () => undefined,
   subagentFleetSnapshot: async () => ({
     version: 2,
-    parentPiSessionId: "pi-session",
+    parentRuntimeSessionId: "pi-session",
     registryRevision: 0,
     generatedAt: 1,
     totalActive: 0,
@@ -80,7 +88,7 @@ const context: AgentRuntimeContext = {
 const settlingHandle = (fleet: { childActive: boolean }): PiSessionHandle => ({
   ...fleetSeams,
   id: "/sessions/parent.jsonl",
-  parentPiSessionId: "pi-parent-internal",
+  parentRuntimeSessionId: "pi-parent-internal",
   modelId: "anthropic/claude-sonnet",
   contextWindow: 200_000,
   subscribe: (next) => {
@@ -93,7 +101,7 @@ const settlingHandle = (fleet: { childActive: boolean }): PiSessionHandle => ({
   dispose: vi.fn(),
   subagentFleetSnapshot: async () => ({
     version: 2,
-    parentPiSessionId: "pi-parent-internal",
+    parentRuntimeSessionId: "pi-parent-internal",
     registryRevision: 0,
     generatedAt: 1,
     totalActive: fleet.childActive ? 1 : 0,
@@ -392,7 +400,7 @@ describe("PiAgentRuntime", () => {
     const handle: PiSessionHandle = {
       ...fleetSeams,
       id: "/sessions/parent.jsonl",
-      parentPiSessionId: "pi-parent-internal",
+      parentRuntimeSessionId: "pi-parent-internal",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
       subscribe: (next) => {
@@ -405,7 +413,7 @@ describe("PiAgentRuntime", () => {
       dispose,
       subagentFleetSnapshot: async () => ({
         version: 2,
-        parentPiSessionId: "pi-parent-internal",
+        parentRuntimeSessionId: "pi-parent-internal",
         registryRevision: 0,
         generatedAt: Date.now(),
         totalActive: childActive ? 1 : 0,
@@ -430,12 +438,12 @@ describe("PiAgentRuntime", () => {
 
     await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
     expect(dispose).not.toHaveBeenCalled()
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot(owner, "session-1", "chat-1", "/sessions/parent.jsonl")))
       .resolves.toMatchObject({ totalActive: 1 })
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot(owner, "session-1", "chat-1", "pi-parent-internal")))
       .resolves.toMatchObject({ totalActive: 1 })
     await expect(Effect.runPromise(
-      runtime.subagentTranscript(
+      runtime.subagentTranscript(owner,
         "session-1",
         "chat-1",
         "pi-parent-internal",
@@ -443,7 +451,7 @@ describe("PiAgentRuntime", () => {
       )
     )).resolves.toHaveLength(1)
     const foreignChat = await Effect.runPromise(Effect.either(
-      runtime.subagentTranscript(
+      runtime.subagentTranscript(owner,
         "session-1",
         "another-chat",
         "pi-parent-internal",
@@ -451,10 +459,10 @@ describe("PiAgentRuntime", () => {
       )
     ))
     expect(foreignChat._tag).toBe("Left")
-    await Effect.runPromise(runtime.controlSubagent("session-1", "chat-1", {
+    await Effect.runPromise(runtime.controlSubagent(owner, "session-1", "chat-1", {
       version: 2,
       requestId: "control-1",
-      parentPiSessionId: "pi-parent-internal",
+      parentRuntimeSessionId: "pi-parent-internal",
       runId: "child-1",
       action: "stop",
       message: null,
@@ -466,7 +474,7 @@ describe("PiAgentRuntime", () => {
       ...spec,
       runId: "run-2",
       prompt: "continue",
-      piSessionId: "/sessions/parent.jsonl"
+      continuation: piContinuation("/sessions/parent.jsonl")
     }, context)))
     expect(create).toHaveBeenCalledOnce()
     expect(prompt).toHaveBeenCalledTimes(2)
@@ -475,12 +483,12 @@ describe("PiAgentRuntime", () => {
     childActive = false
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
     const missing = await Effect.runPromise(
-      Effect.either(runtime.subagentFleetSnapshot("session-1", "chat-1", "pi-parent-internal"))
+      Effect.either(runtime.subagentFleetSnapshot(owner, "session-1", "chat-1", "pi-parent-internal"))
     )
     expect(missing._tag).toBe("Left")
-    await expect(Effect.runPromise(runtime.subagentFleetSnapshot("session-1", "chat-1", "/sessions/parent.jsonl")))
+    await expect(Effect.runPromise(runtime.subagentFleetSnapshot(owner, "session-1", "chat-1", "/sessions/parent.jsonl")))
       .rejects.toMatchObject({ message: "pi session is not active: /sessions/parent.jsonl" })
-    await expect(Effect.runPromise(runtime.subagentTranscript(
+    await expect(Effect.runPromise(runtime.subagentTranscript(owner,
       "session-1",
       "chat-1",
       "pi-parent-internal",
@@ -498,7 +506,7 @@ describe("PiAgentRuntime", () => {
     const handle: PiSessionHandle = {
       ...fleetSeams,
       id: "/sessions/parent.jsonl",
-      parentPiSessionId: "pi-parent-internal",
+      parentRuntimeSessionId: "pi-parent-internal",
       modelId: "anthropic/claude-sonnet",
       contextWindow: 200_000,
       subscribe: (next) => {
@@ -523,7 +531,7 @@ describe("PiAgentRuntime", () => {
       dispose: vi.fn(),
       subagentFleetSnapshot: async () => ({
         version: 2,
-        parentPiSessionId: "pi-parent-internal",
+        parentRuntimeSessionId: "pi-parent-internal",
         registryRevision: 0,
         generatedAt: 1,
         totalActive: childActive ? 1 : 0,
@@ -533,7 +541,7 @@ describe("PiAgentRuntime", () => {
       }),
       usage: () => ({ costUsd: 0, tokens: 1 })
     }
-    const create = vi.fn((_spec: PiRunSpec, created: AgentRuntimeContext) => {
+    const create = vi.fn((_spec: AgentRunSpec, created: AgentRuntimeContext) => {
       toolContext = created
       return Effect.succeed(handle)
     })
@@ -563,7 +571,7 @@ describe("PiAgentRuntime", () => {
     await Effect.runPromise(
       Stream.runCollect(
         runtime.run(
-          { ...spec, runId: "run-2", prompt: "continue", piSessionId: "/sessions/parent.jsonl" },
+          { ...spec, runId: "run-2", prompt: "continue", continuation: piContinuation("/sessions/parent.jsonl") },
           {
             ...context,
             askQuestion: secondAsk,
@@ -594,7 +602,7 @@ describe("PiAgentRuntime", () => {
   ])("rebuilds a retained session when its %s changes", async (_name, changed) => {
     const fleet = { childActive: true }
     const handles: PiSessionHandle[] = []
-    const create = vi.fn((createdSpec: PiRunSpec) => {
+    const create = vi.fn((createdSpec: AgentRunSpec) => {
       const handle = {
         ...settlingHandle(fleet),
         modelId: String(createdSpec.modelId)
@@ -612,7 +620,7 @@ describe("PiAgentRuntime", () => {
         ...spec,
         ...changed,
         runId: "run-switched",
-        piSessionId: "/sessions/parent.jsonl"
+        continuation: piContinuation("/sessions/parent.jsonl")
       },
       context
     )))
@@ -621,7 +629,7 @@ describe("PiAgentRuntime", () => {
     expect(handles[0]?.dispose).toHaveBeenCalledOnce()
     expect(create.mock.calls[1]?.[0]).toMatchObject({
       ...changed,
-      piSessionId: "/sessions/parent.jsonl"
+      continuation: piContinuation("/sessions/parent.jsonl")
     })
     fleet.childActive = false
   })
@@ -645,14 +653,14 @@ describe("PiAgentRuntime", () => {
 
     await Effect.runPromise(Stream.runCollect(runtime.run(spec, context)))
     await Effect.runPromise(Stream.runCollect(runtime.run(
-      { ...spec, runId: "run-2", prompt: "unchanged", piSessionId: "/sessions/parent.jsonl" },
+      { ...spec, runId: "run-2", prompt: "unchanged", continuation: piContinuation("/sessions/parent.jsonl") },
       context
     )))
     expect(create).toHaveBeenCalledOnce()
 
     catalog = "managed-mcp:replacement"
     await Effect.runPromise(Stream.runCollect(runtime.run(
-      { ...spec, runId: "run-3", prompt: "catalog changed", piSessionId: "/sessions/parent.jsonl" },
+      { ...spec, runId: "run-3", prompt: "catalog changed", continuation: piContinuation("/sessions/parent.jsonl") },
       context
     )))
 
@@ -670,7 +678,7 @@ describe("PiAgentRuntime", () => {
     // factory reopens the same pi session file so model context carries over.
     const fleet = { childActive: true }
     const handles: PiSessionHandle[] = []
-    const create = vi.fn((_spec: PiRunSpec, _context: AgentRuntimeContext) => {
+    const create = vi.fn((_spec: AgentRunSpec, _context: AgentRuntimeContext) => {
       const handle = settlingHandle(fleet)
       handles.push(handle)
       return Effect.succeed(handle)
@@ -693,7 +701,7 @@ describe("PiAgentRuntime", () => {
             prompt: "execute the plan",
             role: "plan-execution",
             mode: "auto",
-            piSessionId: "/sessions/parent.jsonl"
+            continuation: piContinuation("/sessions/parent.jsonl")
           },
           context
         )
@@ -703,10 +711,10 @@ describe("PiAgentRuntime", () => {
     // The stale plan-role session was disposed, not leaked.
     expect(handles[0]?.dispose).toHaveBeenCalled()
     // The recreation resumes the SAME session file with the new role: the
-    // factory reopens it because piSessionId is set and seed stays null.
+    // factory reopens it because continuation is set and seed stays null.
     const recreation = create.mock.calls[1]?.[0]
     expect(recreation?.role).toBe("plan-execution")
-    expect(recreation?.piSessionId).toBe("/sessions/parent.jsonl")
+    expect(recreation?.continuation?.id).toBe("/sessions/parent.jsonl")
     expect(recreation?.seed).toBeNull()
     fleet.childActive = false
   })

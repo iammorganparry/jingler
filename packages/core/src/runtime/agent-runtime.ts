@@ -6,6 +6,11 @@ import {
   ProviderModelId
 } from "./provider-connection.js"
 import { RuntimeCapabilityManifest } from "./capability-manifest.js"
+import {
+  AgentEndpointId,
+  AgentRuntimeId,
+  RuntimeContinuation
+} from "./agent-endpoint.js"
 export {
   RuntimeCapabilityManifest,
   runtimeCapabilitiesMatch
@@ -44,13 +49,15 @@ export const TranscriptSeed = Schema.Struct({
 })
 export type TranscriptSeed = Schema.Schema.Type<typeof TranscriptSeed>
 
-export const PiRunSpec = Schema.Struct({
+export const AgentRunSpec = Schema.Struct({
   /** One runtime attempt; stable across its journal, diagnostics, and normalized events. */
   runId: Schema.String,
   /** Jingler-owned identity used for journals and restart recovery. */
   sessionId: Schema.String,
   chatId: Schema.String,
-  connectionId: ProviderConnectionId,
+  runtimeId: AgentRuntimeId,
+  endpointId: AgentEndpointId,
+  connectionId: Schema.optional(ProviderConnectionId),
   modelId: ProviderModelId,
   role: AgentRole,
   mode: RuntimeMode,
@@ -60,8 +67,8 @@ export const PiRunSpec = Schema.Struct({
   prompt: Schema.String,
   images: Schema.optional(Schema.Array(Attachment)),
   priorMessages: Schema.Array(Message),
-  piSessionId: Schema.NullOr(Schema.String),
+  continuation: Schema.NullOr(RuntimeContinuation),
   seed: Schema.NullOr(TranscriptSeed),
   targetCapabilities: RuntimeCapabilityManifest
 })
-export type PiRunSpec = Schema.Schema.Type<typeof PiRunSpec>
+export type AgentRunSpec = Schema.Schema.Type<typeof AgentRunSpec>

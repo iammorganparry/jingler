@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
+import { AgentEndpointCatalog } from "./runtime/agent-endpoint-catalog.js"
 import {
   AuthKind,
   AuthStatus,
@@ -210,8 +211,9 @@ export const RemoteDeviceCapabilities = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   capabilities: Schema.Array(RemoteDeviceCapability).pipe(Schema.maxItems(16)),
   maxConcurrentSessions: Schema.Int.pipe(Schema.between(1, 64)),
-  /** Present on pi-capable agents; absent only on legacy device records. */
+  /** Target-wide compatibility; runtime-specific versions live on endpoints. */
   runtime: Schema.optional(RuntimeCapabilityManifest),
+  endpointCatalog: Schema.optional(AgentEndpointCatalog),
   providerConnections: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -480,12 +482,31 @@ export const EnvironmentDiscovery = Schema.Struct({
 })
 export type EnvironmentDiscovery = Schema.Schema.Type<typeof EnvironmentDiscovery>
 
+export const EndpointCatalogRequest = Schema.Struct({
+  type: Schema.Literal("endpoint-catalog-request"),
+  version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
+  requestId: OpaqueId,
+  targetId: Identity,
+  action: Schema.Literal("list", "refresh", "auth-status")
+})
+export type EndpointCatalogRequest = Schema.Schema.Type<typeof EndpointCatalogRequest>
+
+export const EndpointCatalogUpdate = Schema.Struct({
+  type: Schema.Literal("endpoint-catalog-update"),
+  version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
+  requestId: OpaqueId,
+  targetId: Identity,
+  catalog: AgentEndpointCatalog
+})
+export type EndpointCatalogUpdate = Schema.Schema.Type<typeof EndpointCatalogUpdate>
+
 export const DeviceControlClientMessage = Schema.Union(
   Schema.Struct({ type: Schema.Literal("ping") }),
   Schema.Struct({
     type: Schema.Literal("announce"),
     discovery: RemoteDeviceDiscovery
-  })
+  }),
+  EndpointCatalogUpdate
 )
 export type DeviceControlClientMessage = Schema.Schema.Type<
   typeof DeviceControlClientMessage

@@ -1,4 +1,4 @@
-import { AgentRunError } from "@jingler/core"
+import { AgentRunError, type RuntimeContinuation } from "@jingler/core"
 import { Effect, Layer, Ref, Stream } from "effect"
 import {
   type AgentContext,
@@ -8,7 +8,7 @@ import {
 import { AgentRuntime } from "./agent-runtime.js"
 
 const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
-  new AgentRunError({ kind: spec.connectionId, message })
+  new AgentRunError({ kind: spec.connectionId ?? spec.runtimeId, message })
 
 const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   ...(spec.mcp === undefined ? {} : { mcp: spec.mcp }),
@@ -47,12 +47,17 @@ export const AgentTurnDriverLive = Layer.effect(
   AgentTurnDriver,
   Effect.gen(function* () {
     const runtime = yield* AgentRuntime
-    const active = yield* Ref.make(new Map<string, string>())
+    const active = yield* Ref.make(new Map<
+      string,
+      { readonly continuation: RuntimeContinuation; readonly targetId: string }
+    >())
     const interruptRun = (runId: string) =>
       Ref.get(active).pipe(
         Effect.flatMap((current) => {
-          const piSessionId = current.get(runId)
-          return piSessionId === undefined ? Effect.void : runtime.interrupt(piSessionId)
+          const activeRun = current.get(runId)
+          return activeRun === undefined
+            ? Effect.void
+            : runtime.interrupt(activeRun.continuation, activeRun.targetId)
         }),
         Effect.mapError(
           (error) => new AgentRunError({ kind: "runtime", message: error.message })
@@ -66,7 +71,15 @@ export const AgentTurnDriverLive = Layer.effect(
           Stream.runForEach((event) =>
             Effect.gen(function* () {
               if (event._tag === "Started") {
-                yield* Ref.update(active, (current) => new Map(current).set(runId, event.sessionId))
+                const continuation: RuntimeContinuation = {
+                  runtimeId: canonical.runtimeId,
+                  endpointId: canonical.endpointId,
+                  id: event.sessionId
+                }
+                const targetId = canonical.targetCapabilities.targetId
+                yield* Ref.update(active, (current) =>
+                  new Map(current).set(runId, { continuation, targetId })
+                )
                 // Pi's steer channel is text-only, and that will not change
                 // mid-run: `deferred` here left an image-bearing "Send now"
                 // silently retrying forever. `unsupported` hands it to the
@@ -74,7 +87,7 @@ export const AgentTurnDriverLive = Layer.effect(
                 yield* context.registerTurnSteer?.((text, images) =>
                   images.length > 0
                     ? Promise.resolve("unsupported")
-                    : Effect.runPromise(runtime.steer(event.sessionId, text)).then(
+                    : Effect.runPromise(runtime.steer(continuation, targetId, text)).then(
                         () => "accepted" as const,
                         () => "deferred" as const
                       )

@@ -2,10 +2,11 @@ import { createHash } from "node:crypto"
 import { isAbsolute, join, resolve } from "node:path"
 import type {
   ManagedResource,
-  PiRunSpec,
+  AgentRunSpec,
   ProviderConnection,
   WorkspaceConfig
 } from "@jingler/core"
+import { piEndpointTargets } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
@@ -54,8 +55,13 @@ import {
   makeWorkspaceMutationPort,
   registerWorkspaceMutationTools
 } from "../tools/workspace-mutation-tools.js"
-import { AgentRuntime, AgentRuntimeError } from "./agent-runtime.js"
+import {
+  AgentRuntimeError,
+  AgentRuntimeRegistry,
+  makeAgentRuntimeRegistry
+} from "./agent-runtime.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
+import { makeClaudeRuntimeRegistration } from "./claude-agent-runtime.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
@@ -116,7 +122,7 @@ export interface PiAgentRuntimeLiveOptions {
   /** Explicit test tool seam. Production must leave this unset. */
   readonly configureToolRegistry?: (input: {
     readonly registry: ToolRegistry
-    readonly spec: PiRunSpec
+    readonly spec: AgentRunSpec
     readonly context: AgentRuntimeContext
   }) => Effect.Effect<void>
 }
@@ -130,11 +136,12 @@ interface PreparedLockedCatalog {
   } | null
 }
 
-/** Composition for the embedded pi runtime and Jingler-owned tools. */
+/** Shared Jingler tool composition for PI and native Claude. PI alone owns
+ * the session/model factory; both adapters use the same registry constructor. */
 export const makePiAgentRuntimeLive = (
   options: PiAgentRuntimeLiveOptions = {}
 ) => Layer.scoped(
-  AgentRuntime,
+  AgentRuntimeRegistry,
   Effect.gen(function* () {
     const paths = yield* AppPaths
     const fs = yield* FileSystem.FileSystem
@@ -189,7 +196,7 @@ export const makePiAgentRuntimeLive = (
     )
 
     const preparedCatalogs = new Map<string, PreparedLockedCatalog>()
-    const factory = makePiSessionFactory({
+    const factoryOptions = {
       agentDir: paths.managedResourcesDir,
       sessionsDir: paths.piSessionsDir,
       credentials,
@@ -210,7 +217,7 @@ export const makePiAgentRuntimeLive = (
       ),
       terminalTracker: (spec) => new FileChangeTracker({
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
-        sessionId: spec.piSessionId ?? spec.runId
+        sessionId: spec.continuation?.id ?? spec.runId
       }),
       lockedCapabilityFingerprint: (spec) => Effect.gen(function* () {
         const runtimeConfig = yield* config.get().pipe(
@@ -470,16 +477,27 @@ export const makePiAgentRuntimeLive = (
       ...(options.configureModelRuntime
         ? { configureModelRuntime: options.configureModelRuntime }
         : {})
-    })
+    } satisfies PiSessionFactoryOptions
 
-    return yield* makePiAgentRuntime(factory)
+    const factory = makePiSessionFactory(factoryOptions)
+    const runtime = yield* makePiAgentRuntime(factory)
+    return makeAgentRuntimeRegistry([{
+      runtimeId: "pi",
+      runtime,
+      ownsEndpoint: piEndpointTargets
+    }, makeClaudeRuntimeRegistration({
+      createToolRegistry: (spec, context) => Effect.acquireRelease(
+        Effect.sync(() => factoryOptions.terminalTracker(spec)),
+        (tracker) => tracker.dispose().pipe(Effect.orDie)
+      ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
+    })])
   })
 )
 
 /** Production composition: no alternate provider transport is installed. */
 export const PiAgentRuntimeLive = makePiAgentRuntimeLive()
 
-function validateProviderConnection(providers: ProviderConnectionsShape, spec: PiRunSpec) {
+function validateProviderConnection(providers: ProviderConnectionsShape, spec: AgentRunSpec) {
   return Effect.gen(function* () {
     const connections = yield* providers.status.pipe(
       Effect.mapError((cause) => connectionFailure("Could not read provider connections", cause))
@@ -559,7 +577,7 @@ const selectRunWebSearch = (
   webSearch: Option.Option<WebSearchServiceShape>,
   browserControl: Option.Option<BrowserControlPortShape>,
   context: AgentRuntimeContext,
-  spec: PiRunSpec
+  spec: AgentRunSpec
 ) =>
   Option.isSome(webSearch)
     ? Option.isSome(browserControl) && context.mcp?.browser != null

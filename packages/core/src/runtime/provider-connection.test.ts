@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest"
 import {
   authStatusForObservedBillingRoute,
   expectedBillingRouteForAuthKind,
-  ProviderConnection,
-  SessionRuntimeIdentity
+  ProviderConnection
 } from "./provider-connection.js"
+import { SessionRuntimeIdentity } from "./agent-endpoint.js"
 
 describe("provider connection identity", () => {
   it("keeps provider, authentication, target, and billing route explicit", () => {
@@ -33,10 +33,12 @@ describe("provider connection identity", () => {
 
   it("represents unresolved migrated auth and model identity without guessing", () => {
     const identity = Schema.decodeUnknownSync(SessionRuntimeIdentity)({
+      runtimeId: null,
+      endpointId: null,
       connectionId: null,
       providerId: "openai",
       modelId: null,
-      piSessionId: null,
+      continuation: null,
       modelSelectionRequired: true,
       connectionSelectionRequired: true,
       legacyCli: "codex",

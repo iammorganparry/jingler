@@ -24,7 +24,7 @@ import {
 } from "@jingler/core"
 import type {
   Message,
-  PiRunSpec,
+  AgentRunSpec,
   ProviderConnection,
   RuntimeDiagnosticSnapshot,
   StreamEvent,
@@ -214,7 +214,7 @@ export interface PiSessionFactoryOptions {
   readonly sessionsDir: string
   readonly credentials: ProviderCredentialStore
   readonly resolveConnection: (
-    spec: PiRunSpec
+    spec: AgentRunSpec
   ) => Effect.Effect<ProviderConnection, AgentRuntimeError>
   readonly resolveSubagentConfig?: () => Effect.Effect<{
     readonly models: SubagentModelAssignments
@@ -223,13 +223,13 @@ export interface PiSessionFactoryOptions {
   readonly promptCompiler?: PromptCompiler
   readonly toolRegistry?: ToolRegistry | ((context: AgentRuntimeContext) => ToolRegistry)
   readonly createToolRegistry?: (
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext,
     tracker: FileChangeTracker | undefined
   ) => Effect.Effect<ToolRegistry, AgentRuntimeError>
   readonly lockedCapabilityFingerprint?: PiSessionFactory["lockedCapabilityFingerprint"]
   readonly promptTokenBudget?: number
-  readonly terminalTracker?: FileChangeTracker | ((spec: PiRunSpec) => FileChangeTracker)
+  readonly terminalTracker?: FileChangeTracker | ((spec: AgentRunSpec) => FileChangeTracker)
   /** Internal extension points for deterministic tests; production leaves them unset. */
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
@@ -246,14 +246,14 @@ const usesClaudeCli = (connection: ProviderConnection): boolean =>
   connection.authKind === "claude-setup-token" &&
   connection.subscription.observedRoute === "claude-cli:subscription"
 
-const modelIdForProvider = (spec: PiRunSpec, connection: ProviderConnection) => {
+const modelIdForProvider = (spec: AgentRunSpec, connection: ProviderConnection) => {
   const qualified = String(spec.modelId)
   const prefix = `${connection.providerId}/`
   return qualified.startsWith(prefix) ? qualified.slice(prefix.length) : qualified
 }
 
 const thinkingLevelFor = (
-  reasoning: PiRunSpec["reasoning"]
+  reasoning: AgentRunSpec["reasoning"]
 ): "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | undefined =>
   reasoning === null || reasoning === undefined
     ? undefined
@@ -274,7 +274,7 @@ const transcriptText = (messages: ReadonlyArray<Message>): string =>
     .filter((line): line is string => line !== null)
     .join("\n\n")
 
-const seedTranscript = (manager: SessionManager, spec: PiRunSpec): void => {
+const seedTranscript = (manager: SessionManager, spec: AgentRunSpec): void => {
   if (spec.seed === null) return
   const content = transcriptText(spec.seed.messages)
   if (content.length === 0) return
@@ -303,9 +303,9 @@ const plannotatorPhase = (manager: SessionManager): PlannotatorPhase => {
   return phase === "planning" || phase === "executing" ? phase : "idle"
 }
 
-const sessionManagerFor = (spec: PiRunSpec, sessionsDir: string): SessionManager => {
-  if (spec.piSessionId !== null && spec.seed === null) {
-    return SessionManager.open(spec.piSessionId, sessionsDir, spec.cwd)
+const sessionManagerFor = (spec: AgentRunSpec, sessionsDir: string): SessionManager => {
+  if (spec.continuation !== null && spec.seed === null) {
+    return SessionManager.open(spec.continuation.id, sessionsDir, spec.cwd)
   }
   const manager = SessionManager.create(spec.cwd, sessionsDir)
   seedTranscript(manager, spec)
@@ -313,7 +313,7 @@ const sessionManagerFor = (spec: PiRunSpec, sessionsDir: string): SessionManager
 }
 
 const validateConnection = (
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   connection: ProviderConnection
 ): Effect.Effect<void, AgentRuntimeError> =>
   connection.id === spec.connectionId
@@ -332,14 +332,14 @@ const validateConnection = (
  */
 const DEFAULT_PROMPT_TOKEN_BUDGET = 8_000
 
-const effectiveRuntimeSpec = (spec: PiRunSpec): PiRunSpec =>
+const effectiveRuntimeSpec = (spec: AgentRunSpec): AgentRunSpec =>
   spec.mode === "plan"
     ? { ...spec, role: "conversation", mode: "auto" }
     : spec
 
 const createResources = (
   options: PiSessionFactoryOptions,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   registry: ToolRegistry | undefined,
   nativeSubagentsEnabled: boolean
 ) => {
@@ -407,7 +407,7 @@ const createResources = (
 
 interface EmbeddedSessionInput {
   readonly options: PiSessionFactoryOptions
-  readonly spec: PiRunSpec
+  readonly spec: AgentRunSpec
   readonly connection: ProviderConnection
   readonly resources: ResourceLoader
   readonly events: EventBus
@@ -504,7 +504,7 @@ const createEmbeddedSession = (
 
 interface SessionHandleInput {
   readonly embedded: EmbeddedSession
-  readonly spec: PiRunSpec
+  readonly spec: AgentRunSpec
   readonly tracker: FileChangeTracker | undefined
   readonly snapshot: WorktreeSnapshot | null
   readonly observe?: (event: StreamEvent) => void
@@ -532,7 +532,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
   const subagentTasks = new Map<string, string>()
   return {
     id: session.sessionFile ?? session.sessionId,
-    parentPiSessionId: session.sessionId,
+    parentRuntimeSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
     plannotatorPhase: embedded.plannotatorPhase,
@@ -617,7 +617,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
 
 const createSessionHandle = (
   options: PiSessionFactoryOptions,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   context: AgentRuntimeContext,
   tracker: FileChangeTracker | undefined
 ): Effect.Effect<PiSessionHandle, AgentRuntimeError> =>
@@ -693,7 +693,7 @@ const createSessionHandle = (
     const fleetEvents = yield* makeSubagentFleetEventHub()
     const lifecycle = new PiSubagentLifecycleAdapter({
       events: prepared.eventBus,
-      parentPiSessionId: embedded.result.session.sessionId,
+      parentRuntimeSessionId: embedded.result.session.sessionId,
       parentPiSessionAliases: embedded.result.session.sessionFile
         ? [embedded.result.session.sessionFile]
         : [],
@@ -741,7 +741,7 @@ function* bindSubagentCapabilities(
   lifecycle: PiSubagentLifecycleAdapter,
   options: PiSessionFactoryOptions,
   embedded: EmbeddedSession,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   registry: ToolRegistry,
   context: AgentRuntimeContext,
   connection: ProviderConnection,
@@ -764,9 +764,9 @@ function* bindSubagentCapabilities(
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
     if (options.childCredentials && options.subagentBroker) {
-      const parentPiSessionId = embedded.result.session.sessionId
+      const parentRuntimeSessionId = embedded.result.session.sessionId
       const capability = yield* options.subagentBroker.register({
-        parentPiSessionId,
+        parentRuntimeSessionId,
         agents: JINGLER_SUBAGENT_NAMES,
         spec,
         registry,
@@ -791,7 +791,7 @@ function* bindSubagentCapabilities(
           cause
         })
       }).pipe(
-        Effect.onError(() => options.subagentBroker!.unregister(parentPiSessionId).pipe(
+        Effect.onError(() => options.subagentBroker!.unregister(parentRuntimeSessionId).pipe(
           Effect.andThen(Effect.sync(() => {
             lifecycle.stop()
             embedded.result.session.dispose()
@@ -799,7 +799,7 @@ function* bindSubagentCapabilities(
         ))
       )
       subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
-        sessionId: parentPiSessionId,
+        sessionId: parentRuntimeSessionId,
         source: "jingler-runtime",
         ceiling: {
           allowedTools: [
@@ -816,7 +816,7 @@ function* bindSubagentCapabilities(
         assignedConnections
       )
       yield* options.childCredentials
-        .materialize(parentPiSessionId, childConnections, capability)
+        .materialize(parentRuntimeSessionId, childConnections, capability)
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -826,7 +826,7 @@ function* bindSubagentCapabilities(
                 cause
               })
           ),
-          Effect.onError(() => options.subagentBroker!.unregister(parentPiSessionId).pipe(
+          Effect.onError(() => options.subagentBroker!.unregister(parentRuntimeSessionId).pipe(
             Effect.andThen(Effect.sync(() => {
               subagentCeiling?.dispose()
               lifecycle.stop()
@@ -851,7 +851,7 @@ function* bindSubagentCapabilities(
 }
 
 function* observeSessionDiagnostics(
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   connection: ProviderConnection,
   prepared: Effect.Effect.Success<ReturnType<typeof createResources>>,
   registry: ToolRegistry,
@@ -910,7 +910,7 @@ function publishSubagentProgress(
 }
 
 async function createConfiguredPiSession(
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   nativeSubagentsEnabled: boolean,
   customTools: NonNullable<CreateAgentSessionOptions["customTools"]>,
   options: PiSessionFactoryOptions,
@@ -1003,7 +1003,7 @@ async function createConfiguredPiSession(
 
 const resolveSessionToolRegistry = (
   options: PiSessionFactoryOptions,
-  spec: PiRunSpec, context: AgentRuntimeContext,
+  spec: AgentRunSpec, context: AgentRuntimeContext,
   tracker: FileChangeTracker | undefined
 ) =>
   Effect.gen(function* () {

@@ -7,6 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type {
+  AgentEndpointCatalog,
   Attachment,
   ContextConfig,
   VsCodeTheme,
@@ -306,10 +307,39 @@ function AuthedApp({
   );
   const { activeId: activeThemeId, catalog: themeCatalog } = useThemeCatalog();
   const mcp = useMcpSettings();
-  const providerCatalog = useProviderCatalog();
+  const environmentController = useEnvironments();
+  const providerCatalog = useProviderCatalog(environmentController.environments);
   const agentsSettings = useAgentsSettings();
   const runtimeInspector = useRuntimeInspector();
-  const environmentController = useEnvironments();
+  const agentEndpointCatalog = useMemo<AgentEndpointCatalog | null>(() => {
+    const catalogs = [
+      ...(providerCatalog.endpointCatalog ? [providerCatalog.endpointCatalog] : []),
+      ...environmentController.environments.flatMap((environment) => {
+        const catalog = providerCatalog.remoteCatalogs.find(({ deviceId }) => deviceId === environment.id)?.catalog
+          ?? environment.capabilities?.endpointCatalog
+        if (!catalog) return []
+        if (environment.state === "online") return [catalog]
+        return [{
+          ...catalog,
+          stale: true,
+          endpoints: catalog.endpoints.map(({ endpoint, models }) => ({
+            endpoint: { ...endpoint, status: "stale-agent" as const },
+            models: models.map((model) => ({
+              ...model,
+              status: "unavailable" as const,
+              selectable: false
+            }))
+          }))
+        }]
+      })
+    ]
+    if (catalogs.length === 0) return null
+    return {
+      endpoints: catalogs.flatMap(({ endpoints }) => endpoints),
+      refreshedAt: new Date().toISOString(),
+      stale: catalogs.some(({ stale }) => stale)
+    }
+  }, [environmentController.environments, providerCatalog.endpointCatalog, providerCatalog.remoteCatalogs])
   const projectController = useProjects();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
 
@@ -1353,8 +1383,10 @@ function AuthedApp({
             onRetry: () => environmentController.send({ type: "RETRY" }),
           },
         }}
+        agentEndpointCatalog={agentEndpointCatalog}
         providerConnections={{
           catalog: providerCatalog.catalog,
+          endpointCatalog: agentEndpointCatalog,
           defaultConnectionId,
           defaultModelId,
           busy: providerCatalog.busy,
@@ -1470,6 +1502,7 @@ function AuthedApp({
             session={session}
             environments={environmentController.environments}
             providerCatalog={providerCatalog.catalog}
+            agentEndpointCatalog={agentEndpointCatalog}
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
@@ -1988,6 +2021,7 @@ function renderAppSetup(
       step={setupStep}
       github={github.connection}
       providerCatalog={state.context.providerCatalog}
+      agentEndpointCatalog={state.context.agentEndpointCatalog}
       providerLoginEvent={state.context.providerLoginEvent}
       providerPendingAuthKind={state.context.providerPendingAuthKind}
       resourceDetection={state.context.resourceDetection}

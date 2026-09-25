@@ -161,6 +161,7 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       return { from: source.relative, to: destination.relative }
     }).pipe(mapFailure("Could not rename workspace file"))
 
+  const maxCommandOutput = 32_000
   const collect = (
     stream: Stream.Stream<Uint8Array, unknown>,
     context: ToolExecutionContext
@@ -169,12 +170,14 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       Stream.decodeText(),
       Stream.tap((chunk) =>
         Effect.sync(() => context.progress({
-          message: chunk,
+          message: chunk.slice(-maxCommandOutput),
           completed: null,
           total: null
         }))
       ),
-      Stream.runFold("", (output, chunk) => output + chunk)
+      Stream.runFold("", (output, chunk) =>
+        `${output}${chunk}`.slice(-maxCommandOutput)
+      )
     )
 
   const execute: WorkspaceMutationPort["execute"] = (cwd, source, context) => {

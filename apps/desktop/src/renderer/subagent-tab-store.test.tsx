@@ -22,7 +22,7 @@ const node = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   childSequence: 1,
   runId: "worker-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "worker",
   task: "Implement tabs",
   model: null,
@@ -199,7 +199,7 @@ describe("subagent tab store", () => {
       occurredAt: 20,
       snapshot: {
         version: 2,
-        parentPiSessionId: "parent",
+        parentRuntimeSessionId: "parent",
         registryRevision: 20,
         generatedAt: 20,
         totalActive: 0,

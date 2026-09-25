@@ -60,7 +60,7 @@ export function ProviderAuthForms({
                 ? "Checking Claude CLI…"
                 : mode === "reconnect"
                   ? "Reconnect Claude CLI"
-                  : "Use Claude CLI"}
+                  : "Connect Claude through PI"}
             </Button>
           </div>
         </div>

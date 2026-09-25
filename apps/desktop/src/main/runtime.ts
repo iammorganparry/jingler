@@ -9,6 +9,9 @@
 import {
   AgentRunner,
   AgentResourcesLive,
+  AgentRuntimeRegistry,
+  AgentRuntimeRouterLive,
+  makeAgentRuntimeRegistry,
   AgentTurnDriverLive,
   AssetService,
   AuthService,
@@ -47,7 +50,7 @@ import {
   RuntimeRecoveryService
 } from "@jingler/cli-adapters"
 import { NodeContext } from "@effect/platform-node"
-import { Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { AppPathsLive } from "./app-paths.js"
 import { PreviewViewServiceLive } from "./preview-view.js"
 import { BrowserControlPortLive } from "./browser-control-port-live.js"
@@ -147,8 +150,19 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(SecretStoreLayer)
 )
 
+const RuntimeRegistryLayer = Layer.effect(
+  AgentRuntimeRegistry,
+  Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
+    ...pi.registrations.values()
+  ]))
+).pipe(Layer.provide(PiRuntimeLayer))
+
+const AgentRuntimeLayer = AgentRuntimeRouterLive.pipe(
+  Layer.provide(RuntimeRegistryLayer)
+)
+
 const AgentExecutionLayer = AgentTurnDriverLive.pipe(
-  Layer.provideMerge(PiRuntimeLayer)
+  Layer.provideMerge(AgentRuntimeLayer)
 )
 
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf

@@ -87,6 +87,9 @@ import type {
   WorkspaceConfig,
   RuntimeDiagnosticSnapshot,
   ModelCertification,
+  AgentEndpointCatalog,
+  AgentEndpointId,
+  AgentRuntimeId,
   ProviderCatalog,
   ProviderConnection,
   ProviderConnectionId,
@@ -284,6 +287,29 @@ export const rpc = {
     run((c) => c.RuntimeDiagnostics.latest()),
   runtimeDiagnosticsExport: (runId: string): Promise<string> =>
     run((c) => c.RuntimeDiagnostics.export({ runId })),
+  agentEndpointList: (): Promise<AgentEndpointCatalog> =>
+    run((c) => c.AgentEndpoint.list()),
+  agentEndpointStartLogin: (endpointId: string, targetId: string) =>
+    run((c) => c.AgentEndpoint.startLogin({ endpointId, targetId })),
+  agentEndpointCancelLogin: (endpointId: string, targetId: string, loginId: string) =>
+    run((c) => c.AgentEndpoint.cancelLogin({ endpointId, targetId, loginId })),
+  agentEndpointRefresh: (): Promise<AgentEndpointCatalog> =>
+    run((c) => c.AgentEndpoint.refresh()),
+  agentEndpointSetModel: (
+    sessionId: string,
+    chatId: string,
+    runtimeId: AgentRuntimeId,
+    endpointId: AgentEndpointId,
+    providerId: ProviderId,
+    modelId: ProviderModelId
+  ): Promise<Session> => run((c) => c.AgentEndpoint.setModel({
+    sessionId,
+    chatId,
+    runtimeId,
+    endpointId,
+    providerId,
+    modelId
+  })),
   providerList: (): Promise<ProviderCatalog> => run((c) => c.Provider.list()),
   providerStatus: (): Promise<ReadonlyArray<ProviderConnection>> =>
     run((c) => c.Provider.status()),
@@ -460,8 +486,8 @@ export const rpc = {
     run((c) => c.Environment.list()),
   environmentsRefresh: (): Promise<ReadonlyArray<Environment>> =>
     run((c) => c.Environment.refresh()),
-  environmentsDiscovery: (deviceId: string) =>
-    run((c) => c.Environment.discovery({ deviceId })),
+  environmentsDiscovery: (deviceId: string, endpointRequest?: { targetId: string; action: "list" | "refresh" | "auth-status" }) =>
+    run((c) => c.Environment.discovery({ deviceId, endpointRequest })),
   environmentsWatch: (
     onEnvironments: (environments: ReadonlyArray<Environment>) => void,
     onFailure: (error: unknown) => void
@@ -736,19 +762,19 @@ export const rpc = {
   agentSubagentFleetSnapshot: (
     sessionId: string,
     chatId: string,
-    parentPiSessionId: string
+    parentRuntimeSessionId: string
   ): Promise<SubagentFleetSnapshot> =>
-    run((c) => c.Agent.subagentFleetSnapshot({ sessionId, chatId, parentPiSessionId })),
+    run((c) => c.Agent.subagentFleetSnapshot({ sessionId, chatId, parentRuntimeSessionId })),
   agentSubagentTranscript: (
     sessionId: string,
     chatId: string,
-    parentPiSessionId: string,
+    parentRuntimeSessionId: string,
     runId: string
   ): Promise<ReadonlyArray<Message>> =>
     run((c) => c.Agent.subagentTranscript({
       sessionId,
       chatId,
-      parentPiSessionId,
+      parentRuntimeSessionId,
       runId
     })),
   agentControlSubagent: (

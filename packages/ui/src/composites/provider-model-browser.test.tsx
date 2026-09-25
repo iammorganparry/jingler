@@ -1,4 +1,4 @@
-import type { ProviderCatalog } from "@jingler/core"
+import type { AgentEndpointCatalog, ProviderCatalog } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Schema } from "effect"
@@ -78,6 +78,59 @@ describe("ProviderModelBrowser", () => {
     expect(screen.queryByText("anthropic/claude-sonnet · local")).toBeNull()
     expect(screen.queryByText("Claude Opus stale")).toBeNull()
     fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
-    expect(onSelect).toHaveBeenCalledWith({ connectionId, providerId, modelId })
+    expect(onSelect).toHaveBeenCalledWith({
+      runtimeId: "pi",
+      endpointId: "local:pi:claude-max",
+      connectionId,
+      providerId,
+      modelId
+    })
+  })
+
+  it("groups endpoint models by their visible runtime route", () => {
+    const endpointCatalog: AgentEndpointCatalog = {
+      refreshedAt: "2026-08-10T00:00:00.000Z",
+      stale: false,
+      endpoints: [{
+        endpoint: {
+          id: "local:pi:claude-max" as AgentEndpointCatalog["endpoints"][number]["endpoint"]["id"],
+          runtimeId: "pi",
+          targetId: "local",
+          label: "PI · Max account",
+          status: "ready",
+          version: null,
+          features: {
+            steer: "text",
+            planReview: true,
+            subagentFleet: true,
+            backgroundTasks: true
+          }
+        },
+        models: [{
+          ...catalog.connections[0]!.models[0]!,
+          status: "ready"
+        }]
+      }]
+    }
+    const onSelect = vi.fn()
+    render(
+      <ProviderModelBrowser
+        catalog={endpointCatalog}
+        endpointId={null}
+        connectionId={null}
+        modelId={null}
+        onSelect={onSelect}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+    expect(screen.getByRole("group", { name: "PI · Max account" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
+    expect(onSelect).toHaveBeenCalledWith({
+      runtimeId: "pi",
+      endpointId: "local:pi:claude-max",
+      providerId,
+      modelId
+    })
   })
 })

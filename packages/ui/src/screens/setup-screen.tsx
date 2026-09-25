@@ -1,4 +1,5 @@
 import type {
+  AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
   DetectedResourceCandidate,
@@ -23,6 +24,7 @@ export interface SetupScreenProps {
   step: "workspace" | "github" | "provider" | "resources"
   github: GitHubConnection
   providerCatalog?: ProviderCatalog | null
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   providerLoginEvent?: ProviderLoginEvent | null
   providerPendingAuthKind?: AuthKind | null
   resourceDetection?: ResourceDetectionResult | null
@@ -69,6 +71,7 @@ export function SetupScreen({
   step,
   github,
   providerCatalog = null,
+  agentEndpointCatalog = null,
   providerLoginEvent = null,
   providerPendingAuthKind = null,
   resourceDetection = null,
@@ -205,6 +208,7 @@ return (renderGithubSetup())
 case "provider": {
 return (<ProviderSetupStep
             catalog={providerCatalog}
+            endpointCatalog={agentEndpointCatalog}
             loginEvent={providerLoginEvent}
             busy={busy}
             pendingAuthKind={providerPendingAuthKind}

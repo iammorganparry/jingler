@@ -3,7 +3,7 @@ import {
   type ContextBreakdown,
   type FileChangeSet,
   type Message,
-  type PiRunSpec,
+  type AgentRunSpec,
   type PlannotatorProjection,
   type PlannotatorReviewDecision,
   type StreamEvent,
@@ -21,7 +21,7 @@ export interface PiSessionHandle {
   /** Resumable Pi session file/id persisted by Jingler. */
   readonly id: string
   /** Internal Pi session identity used by pi-subagents lifecycle events. */
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly modelId: string
   readonly contextWindow: number | null
   readonly plannotatorPhase?: () => "idle" | "planning" | "executing"
@@ -38,7 +38,7 @@ export interface PiSessionHandle {
   ) => Promise<SubagentFleetControlOutcome>
   readonly subagentFleetSnapshot: () => Promise<SubagentFleetSnapshot>
   readonly subagentTranscript: (runId: string) => Promise<ReadonlyArray<Message>>
-  readonly prompt: (text: string, images?: PiRunSpec["images"]) => Promise<void>
+  readonly prompt: (text: string, images?: AgentRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
   readonly dispose: () => void | Promise<void>
@@ -50,12 +50,12 @@ export interface PiSessionHandle {
 
 export interface PiSessionFactory {
   readonly create: (
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext
   ) => Effect.Effect<PiSessionHandle, AgentRuntimeError>
   /** Secret-free identity for catalogs resolved outside the static run spec. */
   readonly lockedCapabilityFingerprint?: (
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext
   ) => Effect.Effect<string, AgentRuntimeError>
 }
@@ -186,7 +186,7 @@ const subscribeToSession = (
 const startPrompt = (
   handle: PiSessionHandle,
   prompt: string,
-  images: PiRunSpec["images"],
+  images: AgentRunSpec["images"],
   sink: EventSink
 ): void => {
   Effect.runFork(
@@ -217,7 +217,7 @@ interface ArchivedPiTranscript {
 }
 
 const lockedCapabilityFingerprint = (
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   context: AgentRuntimeContext,
   dynamicCatalog = ""
 ): string => JSON.stringify({
@@ -234,8 +234,8 @@ interface RetainedPiSession {
   readonly handle: PiSessionHandle
   readonly sessionId: string
   readonly chatId: string
-  readonly connectionId: PiRunSpec["connectionId"]
-  readonly modelId: PiRunSpec["modelId"]
+  readonly connectionId: AgentRunSpec["connectionId"]
+  readonly modelId: AgentRunSpec["modelId"]
   /** Tool and prompt capability shape locked when this PI session was built. */
   readonly capabilityFingerprint: string
   readonly aliases: ReadonlySet<string>
@@ -292,7 +292,7 @@ class PiSessionRegistry {
   ) {}
 
   acquire(
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const dynamicCatalog = this.factory.lockedCapabilityFingerprint?.(spec, context) ??
@@ -307,13 +307,13 @@ class PiSessionRegistry {
   }
 
   #acquire(
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext,
     capabilityFingerprint: string
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
-    const retained = spec.piSessionId === null
+    const retained = spec.continuation === null
       ? undefined
-      : this.#aliases.get(spec.piSessionId)
+      : this.#aliases.get(spec.continuation.id)
     if (retained) {
       if (retained.sessionId !== spec.sessionId || retained.chatId !== spec.chatId) {
         return Effect.fail(new AgentRuntimeError({
@@ -324,7 +324,7 @@ class PiSessionRegistry {
       if (retained.disposing || retained.activeTurns !== 0) {
         return Effect.fail(new AgentRuntimeError({
           reason: "runtime",
-          message: `pi session is already active: ${spec.piSessionId}`
+          message: `pi session is already active: ${spec.continuation?.id}`
         }))
       }
       // PI locks the model, credentials, tools, and prompt resources when the
@@ -352,14 +352,14 @@ class PiSessionRegistry {
   }
 
   #create(
-    spec: PiRunSpec,
+    spec: AgentRunSpec,
     context: AgentRuntimeContext,
     capabilityFingerprint: string
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const contextHolder = { current: context }
     return this.factory.create(spec, rebindableContext(contextHolder)).pipe(
       Effect.map((handle) => {
-        const aliases = new Set([handle.id, handle.parentPiSessionId])
+        const aliases = new Set([handle.id, handle.parentRuntimeSessionId])
         const record: RetainedPiSession = {
           handle,
           sessionId: spec.sessionId,
@@ -481,7 +481,7 @@ class PiSessionRegistry {
 
 const runSession = (
   sessions: PiSessionRegistry,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   context: AgentRuntimeContext
 ): Stream.Stream<StreamEvent, AgentRuntimeError> =>
   Stream.unwrap(
@@ -560,22 +560,22 @@ export const makePiAgentRuntime = (
 
     return {
       run: (spec, context) => runSession(sessions, spec, context),
-      steer: (id, text) => sessionOperation(
-        sessions.lookup(id),
-        id,
+      steer: (continuation, _targetId, text) => sessionOperation(
+        sessions.lookup(continuation.id),
+        continuation.id,
         (session) => session.steer(text)
       ),
-      interrupt: (id) => sessionOperation(
-        sessions.lookup(id),
-        id,
+      interrupt: (continuation, _targetId) => sessionOperation(
+        sessions.lookup(continuation.id),
+        continuation.id,
         (session) => session.interrupt()
       ),
-      controlSubagent: (sessionId, chatId, request) => sessionOperation(
-        sessions.lookupOwned(sessionId, chatId, request.parentPiSessionId),
-        request.parentPiSessionId,
+      controlSubagent: (_owner, sessionId, chatId, request) => sessionOperation(
+        sessions.lookupOwned(sessionId, chatId, request.parentRuntimeSessionId),
+        request.parentRuntimeSessionId,
         (session) => session.controlSubagent(request)
       ),
-      decidePlanReview: (sessionId, chatId, decision) => sessionOperation(
+      decidePlanReview: (_owner, sessionId, chatId, decision) => sessionOperation(
         sessions.lookupByChat(sessionId, chatId),
         `${sessionId}/${chatId}`,
         (session) => {
@@ -588,22 +588,23 @@ export const makePiAgentRuntime = (
           return Promise.resolve()
         }
       ),
-      subagentFleetSnapshot: (sessionId, chatId, parentPiSessionId) =>
+      subagentFleetSnapshot: (_owner, sessionId, chatId, parentRuntimeSessionId) =>
         sessionOperation(
-          sessions.lookupOwned(sessionId, chatId, parentPiSessionId),
-          parentPiSessionId,
+          sessions.lookupOwned(sessionId, chatId, parentRuntimeSessionId),
+          parentRuntimeSessionId,
           (session) => session.subagentFleetSnapshot()
         ),
       subagentTranscript: (
+        _owner,
         sessionId,
         chatId,
-        parentPiSessionId,
+        parentRuntimeSessionId,
         runId
       ) => {
         const read = sessions.lookupTranscriptOwned(
           sessionId,
           chatId,
-          parentPiSessionId
+          parentRuntimeSessionId
         )
         return read
           ? Effect.tryPromise({
@@ -616,7 +617,7 @@ export const makePiAgentRuntime = (
             })
           : Effect.fail(new AgentRuntimeError({
               reason: "runtime",
-              message: `pi session is not active: ${parentPiSessionId}`
+              message: `pi session is not active: ${parentRuntimeSessionId}`
             }))
       }
     }
