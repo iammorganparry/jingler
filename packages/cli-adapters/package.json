@@ -46,7 +46,10 @@
     "./transcripts": "./src/transcripts.ts",
     "./workspace-handoff": "./src/workspace-handoff.ts",
     "./web-search": "./src/web-search.ts",
-    "./test-support": "./src/test-support.ts"
+    "./test-support": "./src/test-support.ts",
+    "./runtime/codex/runtime": "./src/runtime/codex/runtime.ts",
+    "./runtime/codex/endpoint": "./src/runtime/codex/endpoint.ts",
+    "./runtime/codex/login": "./src/runtime/codex/login.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

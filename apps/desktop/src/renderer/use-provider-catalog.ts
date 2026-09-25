@@ -147,6 +147,19 @@ export function useProviderCatalog(environments: readonly Environment[] = []) {
         : null
 
   return {
+    nativeEndpointLogin: {
+      start: rpc.agentEndpointStartLogin,
+      cancel: rpc.agentEndpointCancelLogin,
+      refresh: async (endpointId: string, targetId: string) => {
+        const remote = remoteTargets.find((entry) => entry.targetId === targetId)
+        const discovery = remote ? await rpc.environmentsDiscovery(remote.deviceId, { targetId, action: "auth-status" }) : null
+        if (targetId !== "desktop" && !remote) throw new Error("Native target unavailable")
+        const updated = discovery?.discovery?.capabilities.endpointCatalog ?? (targetId === "desktop" ? await rpc.agentEndpointRefresh() : null)
+        if (remote && discovery) queryClient.setQueryData(["remote-endpoint-catalog", remote.deviceId, targetId], discovery)
+        else if (updated) queryClient.setQueryData(ENDPOINT_CATALOG_KEY, updated)
+        return updated?.endpoints.some(({ endpoint }) => endpoint.id === endpointId && endpoint.status === "ready") ?? false
+      }
+    },
     catalog: catalog.data ?? null,
     endpointCatalog: endpointCatalog.data ?? null,
     remoteCatalogs: remoteTargets.map(({ deviceId }, index) => ({

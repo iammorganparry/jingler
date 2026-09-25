@@ -1387,6 +1387,7 @@ function AuthedApp({
         providerConnections={{
           catalog: providerCatalog.catalog,
           endpointCatalog: agentEndpointCatalog,
+          nativeEndpointLogin: providerCatalog.nativeEndpointLogin,
           defaultConnectionId,
           defaultModelId,
           busy: providerCatalog.busy,
@@ -2022,6 +2023,15 @@ function renderAppSetup(
       github={github.connection}
       providerCatalog={state.context.providerCatalog}
       agentEndpointCatalog={state.context.agentEndpointCatalog}
+      nativeEndpointLogin={{
+        start: rpc.agentEndpointStartLogin,
+        cancel: rpc.agentEndpointCancelLogin,
+        refresh: async (endpointId) => {
+          const catalog = await rpc.agentEndpointRefresh()
+          send({ type: "ENDPOINT_CATALOG", catalog })
+          return catalog.endpoints.some(({ endpoint }) => endpoint.id === endpointId && endpoint.status === "ready")
+        }
+      }}
       providerLoginEvent={state.context.providerLoginEvent}
       providerPendingAuthKind={state.context.providerPendingAuthKind}
       resourceDetection={state.context.resourceDetection}

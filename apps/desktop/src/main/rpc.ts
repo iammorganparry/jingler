@@ -1,3 +1,4 @@
+import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 /**
  * RPC transport — the crux of the app.
  *
@@ -3751,8 +3752,27 @@ const providerOperation = <A, E extends { readonly message: string }>(
     ),
   );
 
-const nativeEndpointLoginError = () =>
-  new ProviderConnectionError({ message: "Native endpoint login is unavailable" })
+const nativeEndpointLogin = (input: { endpointId: string; targetId: string; loginId?: string }, cancel = false) =>
+  Effect.gen(function* () {
+    if (input.targetId === "desktop") {
+      return yield* Effect.tryPromise({
+        try: () => cancel
+          ? codexEndpointLogin.cancel(input.endpointId, input.targetId, input.loginId ?? "").then(() => undefined)
+          : codexEndpointLogin.start(input.endpointId, input.targetId),
+        catch: () => new ProviderConnectionError({ message: "Native Codex login failed" })
+      })
+    }
+    const environments = yield* EnvironmentService
+    const targets = yield* environments.list
+    const target = targets.find((entry) => entry.kind === "owned" && entry.capabilities?.runtime?.targetId === input.targetId)
+    if (!target) return yield* Effect.fail(new ProviderConnectionError({ message: "Native login target is unavailable" }))
+    const response = yield* environments.discovery(target.id, {
+      ...input, action: cancel ? "login-cancel" : "login-start"
+    })
+    if (response.loginError || (!cancel && !response.login))
+      return yield* Effect.fail(new ProviderConnectionError({ message: response.loginError ?? "Native login returned no device code" }))
+    return response.login
+  }).pipe(Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message })))
 
 const localAgentEndpointCatalog = (refresh: boolean) =>
   Effect.gen(function* () {
@@ -3772,7 +3792,7 @@ const localAgentEndpointCatalog = (refresh: boolean) =>
     return {
       refreshedAt: new Date().toISOString(),
       stale: pi.stale,
-      endpoints: [...pi.endpoints, claude]
+      endpoints: [...pi.endpoints.slice(0, 62), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId: "desktop" }))]
     }
   })
 
@@ -3886,8 +3906,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
   "AgentEndpoint.list": () => localAgentEndpointCatalog(false),
   "AgentEndpoint.refresh": () => localAgentEndpointCatalog(true),
-  "AgentEndpoint.startLogin": () => Effect.fail(nativeEndpointLoginError()),
-  "AgentEndpoint.cancelLogin": () => Effect.fail(nativeEndpointLoginError()),
+  "AgentEndpoint.startLogin": (input) => nativeEndpointLogin(input).pipe(Effect.flatMap((login) =>
+    login ? Effect.succeed(login) : Effect.fail(new ProviderConnectionError({ message: "Native login returned no device code" })))),
+  "AgentEndpoint.cancelLogin": (input) => nativeEndpointLogin(input, true).pipe(Effect.asVoid),
   "AgentEndpoint.setModel": ({
     sessionId,
     chatId,

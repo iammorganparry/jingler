@@ -1,3 +1,4 @@
+import { EndpointControlInput } from "@jingler/core"
 import type {
   DeviceRelayGrantAudience,
   DeviceRelayGrantClaims
@@ -316,13 +317,10 @@ const handleDiscovery = async (
   if (!scopedDevice(claims, deviceId)) return json({ error: "Grant resource mismatch" }, 403)
   const registry = env.DEVICE_REGISTRY.getByName(claims.subject)
   if (request.method === "POST") {
-    const input = await decodedBody(request, Schema.Struct({
-      targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-      action: Schema.Literal("list", "refresh", "auth-status")
-    }))
+    const input = await decodedBody(request, EndpointControlInput)
     if (!input) return json({ error: "Invalid endpoint catalog request" }, 400)
     const updated = await registry.requestEndpointCatalog(
-      deviceId, input.targetId, crypto.randomUUID(), input.action
+      deviceId, input.targetId, crypto.randomUUID(), input.action, undefined, input
     )
     return updated ? json(updated) : json({ error: "Endpoint catalog unavailable or timed out" }, 504)
   }

@@ -1,3 +1,4 @@
+import type { NativeEndpointLoginActions } from "../composites/native-endpoint-login.js"
 import type {
   AgentEndpointCatalog,
   AuthKind,
@@ -24,6 +25,7 @@ export interface SetupScreenProps {
   step: "workspace" | "github" | "provider" | "resources"
   github: GitHubConnection
   providerCatalog?: ProviderCatalog | null
+  nativeEndpointLogin?: NativeEndpointLoginActions
   agentEndpointCatalog?: AgentEndpointCatalog | null
   providerLoginEvent?: ProviderLoginEvent | null
   providerPendingAuthKind?: AuthKind | null
@@ -72,6 +74,7 @@ export function SetupScreen({
   github,
   providerCatalog = null,
   agentEndpointCatalog = null,
+  nativeEndpointLogin,
   providerLoginEvent = null,
   providerPendingAuthKind = null,
   resourceDetection = null,
@@ -209,6 +212,7 @@ case "provider": {
 return (<ProviderSetupStep
             catalog={providerCatalog}
             endpointCatalog={agentEndpointCatalog}
+            nativeEndpointLogin={nativeEndpointLogin}
             loginEvent={providerLoginEvent}
             busy={busy}
             pendingAuthKind={providerPendingAuthKind}

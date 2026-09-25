@@ -148,3 +148,32 @@ describe("killAllChildren", () => {
     expect(alive).toBe(false)
   }, 10_000)
 })
+
+// Exercise a real detached POSIX group, including a grandchild holding stdout open.
+it.skipIf(process.platform === "win32")("reaps descendants when an owned process-group leader exits", async () => {
+  const before = liveChildCount()
+  const child = trackChild(spawn(process.execPath, ["-e", `
+    const { spawn } = require("node:child_process")
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] })
+    console.log(descendant.pid)
+    process.stdin.once("data", () => process.exit(0))
+  `], { detached: true, stdio: ["pipe", "pipe", "pipe"] }), true)
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
+  let descendantPid: number | undefined
+  try {
+    descendantPid = await new Promise<number>((resolve) => child.stdout.once("data", (data) => resolve(Number(String(data).trim()))))
+    expect(descendantPid).toBeGreaterThan(0)
+    process.kill(descendantPid, 0)
+    child.stdin.write("exit")
+    await closed
+    await expect.poll(() => {
+      try { process.kill(descendantPid!, 0); return true } catch { return false }
+    }).toBe(false)
+    expect(liveChildCount()).toBe(before)
+  } finally {
+    stopChild(child, 0)
+    if (descendantPid) {
+      try { process.kill(descendantPid, "SIGKILL") } catch { /* already reaped */ }
+    }
+  }
+})

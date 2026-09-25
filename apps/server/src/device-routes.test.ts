@@ -387,13 +387,13 @@ describe("device server routes", () => {
       deviceId: device.deviceId
     })
   })
-  it.each(["refresh", "auth-status"])("proxies target-scoped %s and returns updated discovery", async (action) => {
+  it.each(["refresh", "auth-status", "login-start", "login-cancel"])("proxies target-scoped %s and returns updated discovery", async (action) => {
     const discovery = { version: 1, deviceId: device.deviceId, updatedAt: 200, discovery: { version: 1, agentVersion: "2.0.3", platform: device.platform, capabilities: { ...device.capabilities, runtime: {
       targetId: "remote-target", toolIds: [], resourceIds: [],
       versions: { behavior: "1", authentication: "1", prompt: "1", tools: "1", diff: "1", policy: "1", capabilities: "1", piSdk: "1" }
     } }, repositories: [] } }
     const value = harness(async () => Response.json(discovery))
-    const body = { targetId: "remote-target", action }
+    const body = { targetId: "remote-target", action, endpointId: "remote-target:codex:default", loginId: "login" }
     const response = await value.app.fetch(authenticated(`/api/devices/${device.deviceId}/discovery`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
     }))

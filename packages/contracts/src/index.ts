@@ -1,3 +1,4 @@
+import { NativeEndpointLogin } from "@jingler/core"
 import {
   AdversarialReview,
   ArchiveReason,
@@ -254,7 +255,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   }),
 
   Rpc.make("AgentEndpoint.startLogin", {
-    success: Schema.Struct({ loginId: Schema.String, verificationUrl: Schema.String, userCode: Schema.String }),
+    success: NativeEndpointLogin,
     error: ProviderConnectionError,
     payload: { endpointId: Schema.String, targetId: Schema.String }
   }),

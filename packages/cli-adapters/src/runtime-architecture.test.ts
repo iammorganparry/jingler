@@ -12,19 +12,17 @@ const LEGACY_IDENTITY_MIGRATION = /runtime\/migration\/legacy-runtime-identity/
 const PI_IDENTITY = /\bPiRunSpec\b|\bpiSessionId\b|\bparentPiSessionId\b/
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")
-const sourceRoots = [
-  "packages/cli-adapters/src",
-  "packages/core/src",
-  "packages/contracts/src",
-  "apps/desktop/src",
-  "apps/device-agent/src"
-]
+const sourceRoots = ["packages", "apps", "plugins"].flatMap((group) =>
+  readdirSync(resolve(root, group), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(resolve(root, group, entry.name, "src")))
+    .map((entry) => `${group}/${entry.name}/src`)
+)
 
 const sourceFiles = (directory: string): ReadonlyArray<string> =>
   readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name)
     if (entry.isDirectory()) return sourceFiles(path)
-    if (extname(path) !== ".ts" && extname(path) !== ".tsx") return []
+    if (![".ts", ".tsx", ".js", ".mjs", ".cjs", ".mts", ".cts"].includes(extname(path))) return []
     if (TEST_SOURCE.test(path)) return []
     return [path]
   })
@@ -37,6 +35,13 @@ const offenders = (pattern: RegExp): ReadonlyArray<string> =>
     .map((path) => relative(root, path))
 
 describe("production runtime architecture", () => {
+  it("isolates Codex protocol and implementation details behind adapter facades", () => {
+    const protocol = /["'](?:thread\/(?:start|resume|fork)|turn\/(?:start|steer|interrupt)|account\/(?:read|login\/start|login\/cancel)|model\/list|app-server)["']|codex\/(?:generated|client|events|inbox)(?:\/|\.|["'])/u
+    expect(offenders(protocol).filter((path) => !path.startsWith("packages/cli-adapters/src/runtime/codex/"))).toEqual([])
+    const piImport = /(?:from|import\()\s*["'][^"']*(?:pi-ai|pi-coding-agent|pi-session|pi-runtime|pi-model|providers\/pi-)/u
+    expect(offenders(piImport).filter((path) => path.startsWith("packages/cli-adapters/src/runtime/codex/"))).toEqual([])
+  })
+
   it("does not restore legacy orchestration or SDK fallbacks", () => {
     for (const path of [
       "packages/cli-adapters/src/harness-adapter.ts",
@@ -79,9 +84,12 @@ describe("production runtime architecture", () => {
   })
 
   it("keeps provider harness SDKs out of production dependencies", () => {
-    const manifest = readFileSync(resolve(root, "packages/cli-adapters/package.json"), "utf8")
-    expect(manifest).not.toContain("@anthropic-ai/claude-agent-sdk")
-    expect(manifest).not.toContain("@openai/codex-sdk")
-    expect(manifest).not.toContain("@opencode-ai/sdk")
+    for (const source of sourceRoots) {
+      const path = resolve(root, source, "../package.json")
+      if (!existsSync(path)) continue
+      const manifest = JSON.parse(readFileSync(path, "utf8"))
+      const dependencies = { ...manifest.dependencies, ...manifest.optionalDependencies }
+      expect(Object.keys(dependencies).filter((name) => PROVIDER_HARNESS_SDK.test(name)), path).toEqual([])
+    }
   })
 })

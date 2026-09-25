@@ -1,3 +1,4 @@
+import type { EndpointControlInput } from "@jingler/core"
 import type {
   AccountDevice,
   DeviceEnrollmentCredentialResponse,
@@ -571,7 +572,7 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const discovery = (
         deviceId: string,
-        endpointRequest?: { readonly targetId: string; readonly action: "list" | "refresh" | "auth-status" },
+        endpointRequest?: EndpointControlInput,
       ): Effect.Effect<EnvironmentDiscovery, EnvironmentError> =>
         request(
           `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/discovery`,

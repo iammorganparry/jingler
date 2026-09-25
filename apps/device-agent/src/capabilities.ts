@@ -1,3 +1,4 @@
+import { probeCodexEndpoint } from "@jingler/cli-adapters/runtime/codex/endpoint"
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, arch, platform } from "node:os"
 import { join } from "node:path"
@@ -182,7 +183,7 @@ export const discoverLiveDeviceCapabilities = (
             return {
               ...pi,
               refreshedAt: new Date().toISOString(),
-              endpoints: [...pi.endpoints, claude]
+              endpoints: [...pi.endpoints.slice(0, 62), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId }))]
             }
           }),
           platform: () => ({ os: platform(), arch: arch() })

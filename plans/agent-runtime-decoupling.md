@@ -248,15 +248,15 @@ Stage 1 exit gate:
 
 **Estimate: 5–8 engineering days after Stage 1.**
 
-- [ ] Add target-local Codex binary/version/auth probing. Use app-server `account/read` and native endpoint login RPCs; do not parse `auth.json` or reuse PI's `Provider.startCodexLogin`.
-- [ ] Implement a stdio `codex app-server` client with initialize/initialized negotiation, bounded JSONL framing, request timeouts, process cleanup, and version-matched generated schemas.
-- [ ] Build the Codex endpoint catalog from paginated `model/list` and capability responses.
-- [ ] Implement thread start/resume/fork recovery, turn start, streaming event normalization, resident context usage, interruption, and steering where supported.
-- [ ] Correlate every JSON-RPC request, notification, and server request to its endpoint/process/thread so concurrent native Codex sessions cannot consume each other's events.
-- [ ] Map approval and user-input server requests into Jingler permissions and structured questions; inject run-scoped MCP attachments without exposing secrets.
-- [ ] Reuse the deleted adapter's protocol fixtures and event-mapping tests selectively. Do not restore its SDK fallback, duplicated plan loop, or old session orchestration wholesale.
-- [ ] Keep PI-backed Codex endpoints selectable and label native Codex separately. Existing sessions remain on their persisted runtime.
-- [ ] Replace the old architecture guard prohibition with a Codex adapter isolation rule.
+- [x] Add target-local Codex binary/version/auth probing. Use app-server `account/read` and native endpoint login RPCs; do not parse `auth.json` or reuse PI's `Provider.startCodexLogin`.
+- [x] Implement a stdio `codex app-server` client with initialize/initialized negotiation, bounded JSONL framing, request timeouts, process cleanup, and version-matched generated schemas.
+- [x] Build the Codex endpoint catalog from paginated `model/list` and capability responses.
+- [x] Implement thread start/resume recovery (same-endpoint model switches resume; endpoint changes seed a new thread; native fork is not advertised), turn start, streaming event normalization, resident context usage, interruption, and steering where supported.
+- [x] Correlate every JSON-RPC request, notification, and server request to its endpoint/process/thread so concurrent native Codex sessions cannot consume each other's events.
+- [x] Map approval and user-input server requests into Jingler permissions and structured questions; inject run-scoped MCP attachments without exposing secrets.
+- [x] Reuse the deleted adapter's protocol fixtures and event-mapping tests selectively. Do not restore its SDK fallback, duplicated plan loop, or old session orchestration wholesale.
+- [x] Keep PI-backed Codex endpoints selectable and label native Codex separately. Existing sessions remain on their persisted runtime.
+- [x] Replace the old architecture guard prohibition with a Codex adapter isolation rule.
 
 Acceptance:
 
@@ -264,6 +264,21 @@ Acceptance:
 - Native Codex supports prompt, resume, interrupt, permission decisions, tools/diffs, MCP, usage, and restart recovery.
 - A user can run native Codex and PI-backed Codex side by side without sharing continuation IDs or billing identity.
 - Fake app-server protocol tests are deterministic; a real-provider smoke test remains opt-in.
+
+Stage 2 validation (workspace sandbox, September 25, 2026):
+
+- 225 focused tests pass across 19 files, including native protocol/security,
+  login lifecycle/control, PI routing, desktop RPCs and device execution.
+- All eight affected package typechecks pass; desktop and device builds pass.
+- Regenerated 111 unmodified protocol types from installed `codex-cli 0.153.2`.
+- Native Electron specs now check tagged resume, a completed PI turn in a separate
+  chat, settings cancellation and onboarding sign-in. Execution remains blocked
+  by sandbox `listen EPERM` in the bundled-plugin `tsx` build. The relay Workers
+  tests likewise cannot bind loopback in this sandbox.
+- Repository lint reports five unchanged Stage 1 cognitive-complexity failures
+  (reproduced from `25d5c12c`): `rpc.ts`, `agent-runner.ts`,
+  `legacy-runtime-identity.ts`, `composer.tsx`, and `new-workspace-view.tsx`.
+  Stage 2 adds no lint errors. No commit created; full gates remain for main.
 
 Official integration contract:
 

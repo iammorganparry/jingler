@@ -474,7 +474,22 @@ export type RemoteDeviceDiscovery = Schema.Schema.Type<
   typeof RemoteDeviceDiscovery
 >
 
+export const NativeEndpointLogin = Schema.Struct({
+  loginId: Schema.String.pipe(Schema.maxLength(256)),
+  verificationUrl: Schema.String.pipe(Schema.maxLength(2048)),
+  userCode: Schema.String.pipe(Schema.maxLength(256))
+})
+export const EndpointControlInput = Schema.Struct({
+  targetId: Identity,
+  action: Schema.Literal("list", "refresh", "auth-status", "login-start", "login-cancel"),
+  endpointId: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  loginId: Schema.optional(Schema.String.pipe(Schema.maxLength(256)))
+})
+export type EndpointControlInput = Schema.Schema.Type<typeof EndpointControlInput>
+
 export const EnvironmentDiscovery = Schema.Struct({
+  login: Schema.optional(NativeEndpointLogin),
+  loginError: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   deviceId: RemoteDeviceId,
   discovery: Schema.NullOr(RemoteDeviceDiscovery),
@@ -486,8 +501,7 @@ export const EndpointCatalogRequest = Schema.Struct({
   type: Schema.Literal("endpoint-catalog-request"),
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   requestId: OpaqueId,
-  targetId: Identity,
-  action: Schema.Literal("list", "refresh", "auth-status")
+  ...EndpointControlInput.fields
 })
 export type EndpointCatalogRequest = Schema.Schema.Type<typeof EndpointCatalogRequest>
 
@@ -496,7 +510,9 @@ export const EndpointCatalogUpdate = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   requestId: OpaqueId,
   targetId: Identity,
-  catalog: AgentEndpointCatalog
+  catalog: AgentEndpointCatalog,
+  login: Schema.optional(NativeEndpointLogin),
+  loginError: Schema.optional(Schema.String.pipe(Schema.maxLength(256)))
 })
 export type EndpointCatalogUpdate = Schema.Schema.Type<typeof EndpointCatalogUpdate>
 

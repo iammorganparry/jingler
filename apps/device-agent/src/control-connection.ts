@@ -1,3 +1,5 @@
+import { codexEndpointLogin } from "@jingler/cli-adapters/runtime/codex/login"
+import { EndpointCatalogRequest } from "@jingler/core"
 import type { DeviceChallenge, DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
 import {
   DeviceChallenge as DeviceChallengeSchema,
@@ -199,16 +201,15 @@ export const abortableSleep = (milliseconds: number, signal: AbortSignal): Promi
   })
 
 const isEndpointRequest = (request: Record<string, unknown>, targetId: string | undefined): boolean =>
-  request.type === "endpoint-catalog-request" &&
-  request.version === 1 &&
-  typeof request.requestId === "string" &&
-  request.requestId.length > 0 &&
-  request.requestId.length <= 128 &&
-  typeof request.targetId === "string" &&
-  request.targetId === targetId &&
-  (request.action === "list" ||
-    request.action === "refresh" ||
-    request.action === "auth-status")
+  Schema.is(EndpointCatalogRequest)(request) && request.targetId === targetId
+
+const handleEndpointLogin = async (input: EndpointCatalogRequest) => {
+  try {
+    if (input.action === "login-start") return { login: await codexEndpointLogin.start(input.endpointId ?? "", input.targetId) }
+    if (input.action === "login-cancel") await codexEndpointLogin.cancel(input.endpointId ?? "", input.targetId, input.loginId ?? "")
+    return { login: undefined }
+  } catch { return { loginError: "Native Codex login failed on this target", login: undefined } }
+}
 
 export type ControlConnectionResult = "stopped" | "revoked"
 
@@ -231,7 +232,12 @@ export const runControlConnection = async (
         if (!message || typeof message !== "object") return
         const request = message as Record<string, unknown>
         if (isEndpointRequest(request, discovery.capabilities.runtime?.targetId)) {
-          void dependencies.discover().then((updated) => {
+          void (async () => {
+            const input = Schema.decodeUnknownSync(EndpointCatalogRequest)(request)
+            const { login, loginError } = await handleEndpointLogin(input)
+            const updated = await dependencies.discover()
+            return { updated, login, loginError }
+          })().then(({ updated, login, loginError }) => {
             const catalog = updated.capabilities.endpointCatalog
             if (signal.aborted || catalog === undefined ||
                 updated.capabilities.runtime?.targetId !== request.targetId ||
@@ -241,7 +247,7 @@ export const runControlConnection = async (
               version: 1,
               requestId: request.requestId,
               targetId: request.targetId,
-              catalog
+              catalog, login, loginError
             }))
           }).catch(() => undefined)
           return

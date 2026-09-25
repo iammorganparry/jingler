@@ -42,3 +42,5 @@ export * from "./runtime/managed-resource.js"
 export * from "./workspace-provisioning.js"
 export * from "./offload-compute.js"
 export * from "./web-search.js"
+
+export { EndpointControlInput, NativeEndpointLogin } from "./remote.js"

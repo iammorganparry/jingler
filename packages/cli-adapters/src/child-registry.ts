@@ -20,7 +20,7 @@ import type { ChildProcess } from "node:child_process"
  * the process knows these children exist.
  */
 
-const live = new Set<ChildProcess>()
+const live = new Map<ChildProcess, boolean>()
 
 /** How long a child gets to honour SIGTERM before it is killed outright. */
 const GRACE_MS = 2_000
@@ -29,9 +29,9 @@ const isAlive = (proc: ChildProcess): boolean =>
   proc.pid !== undefined && proc.exitCode === null && proc.signalCode === null
 
 const signal = (proc: ChildProcess, sig: NodeJS.Signals): void => {
-  if (!isAlive(proc)) return
   try {
-    proc.kill(sig)
+    if (live.get(proc) && proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig)
+    else if (isAlive(proc)) proc.kill(sig)
   } catch {
     /* already gone — the pid may have been reaped between the check and here */
   }
@@ -41,10 +41,14 @@ const signal = (proc: ChildProcess, sig: NodeJS.Signals): void => {
  * Register a freshly-spawned child so the quit path can reach it. Returns the same
  * child, so it can wrap a `spawn(...)` call directly. Deregisters itself on exit.
  */
-export const trackChild = <P extends ChildProcess>(proc: P): P => {
-  live.add(proc)
+export const trackChild = <P extends ChildProcess>(proc: P, processGroup = false): P => {
+  live.set(proc, processGroup)
   const forget = () => live.delete(proc)
-  proc.once("exit", forget)
+  if (processGroup) {
+    // A server can exit before a grandchild; reap the remaining owned group.
+    proc.once("exit", () => signal(proc, "SIGKILL"))
+    proc.once("close", forget)
+  } else proc.once("exit", forget)
   proc.once("error", forget)
   return proc
 }
@@ -74,7 +78,7 @@ export const stopChild = (proc: ChildProcess, graceMs: number = GRACE_MS): void 
  */
 export const killAllChildren = (): number => {
   let killed = 0
-  for (const proc of live) {
+  for (const proc of live.keys()) {
     if (isAlive(proc)) killed += 1
     signal(proc, "SIGKILL")
   }

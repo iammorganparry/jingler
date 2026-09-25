@@ -1,3 +1,4 @@
+import { EndpointControlInput } from "@jingler/core"
 import type {
   AccountDevice,
   DeviceRecord,
@@ -166,10 +167,7 @@ const requestDiscovery = async (
   deviceId: string
 ): Promise<Response> => {
   const input = request.method === "POST"
-    ? await decodeBoundedJson(request, Schema.Struct({
-        targetId: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128)),
-        action: Schema.Literal("list", "refresh", "auth-status")
-      }))
+    ? await decodeBoundedJson(request, EndpointControlInput)
     : undefined
   if (input === null) return json({ error: "Invalid endpoint catalog request" }, 400)
   const response = await relayRequest(

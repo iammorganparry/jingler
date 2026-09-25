@@ -1,3 +1,4 @@
+import { NativeEndpointLogin, type NativeEndpointLoginActions } from "./native-endpoint-login.js"
 import {
   type AgentEndpointCatalog,
   type AuthKind,
@@ -82,6 +83,7 @@ const ModelChip = ({
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
+  nativeEndpointLogin?: NativeEndpointLoginActions
   endpointCatalog?: AgentEndpointCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
@@ -114,6 +116,7 @@ export interface ProviderConnectionsSettingsProps {
 export function ProviderConnectionsSettings({
   catalog,
   endpointCatalog = null,
+  nativeEndpointLogin,
   defaultConnectionId = null,
   defaultModelId = null,
   busy = false,
@@ -192,12 +195,12 @@ export function ProviderConnectionsSettings({
           {endpointCatalog && (
             <div aria-label="Agent runtime endpoints" className="flex flex-wrap gap-1.5">
               {endpointCatalog.endpoints.map(({ endpoint }) => (
-                <span
+                <div
                   key={endpoint.id}
                   className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted-foreground"
                 >
-                  {endpoint.label} · {endpoint.status}
-                </span>
+                  <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
+                </div>
               ))}
             </div>
           )}

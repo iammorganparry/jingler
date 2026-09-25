@@ -273,8 +273,8 @@ export type DiffStat = Schema.Schema.Type<typeof DiffStat>;
  * - `ask` — pause for approval before every edit and command,
  * - `accept-edits` — auto-apply file edits, still pause for shell commands,
  * - `auto` — auto-apply edits and run allowlisted commands without prompting,
- * - `plan` — read-only planning: the agent designs a plan for review and cannot
- *   edit or run commands until the operator approves it (see `supportsPlanMode`).
+ * - `plan` — planning with auto permissions; Plannotator controls when a plan
+ *   needs operator review, not workspace access.
  */
 export const PermissionMode = Schema.Literal(
   "ask",
@@ -995,8 +995,7 @@ export const WorkspaceConfig = Schema.Struct({
 });
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>;
 
-/** Plan mode runs its (read-only) commands unattended unless told otherwise. */
-/** @deprecated Plan mode now always uses Auto permissions. */
+/** @deprecated Plan mode always uses Auto permissions. */
 export const PLAN_AUTO_RUN_DEFAULT = true;
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */

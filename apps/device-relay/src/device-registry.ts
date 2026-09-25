@@ -1,3 +1,4 @@
+import type { EndpointControlInput, NativeEndpointLogin } from "@jingler/core"
 import type {
   DeviceClaim,
   DeviceChallenge,
@@ -242,7 +243,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   private scheduledAlarmAt: number | null | undefined
   private readonly pendingEndpointRequests = new Map<
     string,
-    { readonly deviceId: string; readonly targetId: string; readonly createdAt: number; readonly socket: WebSocket; readonly finish: (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => void }
+    { readonly deviceId: string; readonly action: EndpointControlInput["action"]; readonly targetId: string; readonly createdAt: number; readonly socket: WebSocket; readonly finish: (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => void }
   >()
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -560,7 +561,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       attachment.deviceId,
       attachment.generation
     )
-    pending.finish(await this.getDiscovery(attachment.deviceId))
+    const result = await this.getDiscovery(attachment.deviceId)
+    pending.finish(result ? { ...result, ...(message.login ? { login: message.login } : {}), ...(message.loginError ? { loginError: message.loginError } : {}) } : null)
     socket.send(JSON.stringify({
       type: "endpoint-catalog-updated",
       requestId: message.requestId,
@@ -912,6 +914,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   }
 
   async getDiscovery(deviceId: string): Promise<{
+    login?: typeof NativeEndpointLogin.Type
+    loginError?: string
     readonly version: 1
     readonly deviceId: string
     readonly discovery: RemoteDeviceDiscovery | null
@@ -986,10 +990,11 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     deviceId: string,
     targetId: string,
     requestId: string,
-    action: "list" | "refresh" | "auth-status",
-    nowSeconds = Math.floor(Date.now() / 1_000)
+    action: EndpointControlInput["action"],
+    nowSeconds = Math.floor(Date.now() / 1_000),
+    input?: EndpointControlInput
   ): Promise<Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>> {
-    if (requestId.length === 0 || requestId.length > 128 || this.pendingEndpointRequests.has(requestId)) return null
+    if (requestId.length === 0 || requestId.length > 128 || this.pendingEndpointRequests.size >= 64 || this.pendingEndpointRequests.has(requestId)) return null
     const discovery = await this.getDiscovery(deviceId)
     if (discovery?.discovery?.capabilities.runtime?.targetId !== targetId) return null
     const sockets = this.ctx.getWebSockets(`device:${deviceId}`)
@@ -999,10 +1004,10 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       return attachment && device?.state === "active" &&
         attachment.generation === device.generation && attachment.expiresAt > nowSeconds
     })
-    if (!socket) return null
+    if (!socket || this.pendingEndpointRequests.size >= 64 || this.pendingEndpointRequests.has(requestId)) return null
     // Superseded responses must never overwrite a newer request's discovery.
     for (const pending of this.pendingEndpointRequests.values()) {
-      if (pending.deviceId === deviceId) pending.finish(null)
+      if (pending.deviceId === deviceId && !pending.action.startsWith("login-") && !action.startsWith("login-")) pending.finish(null)
     }
     return new Promise((resolve) => {
       const finish = (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => {
@@ -1011,9 +1016,9 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         resolve(value)
       }
       const timer = setTimeout(() => finish(null), 10_000)
-      this.pendingEndpointRequests.set(requestId, { deviceId, targetId, createdAt: nowSeconds, socket, finish })
+      this.pendingEndpointRequests.set(requestId, { deviceId, action, targetId, createdAt: nowSeconds, socket, finish })
       try {
-        socket.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, targetId, action }))
+        socket.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, targetId, action, endpointId: input?.endpointId, loginId: input?.loginId }))
       } catch {
         finish(null)
       }

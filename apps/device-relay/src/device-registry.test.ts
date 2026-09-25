@@ -313,6 +313,13 @@ describe("pending device pairing", () => {
       expect((await instance.getDiscovery(deviceId))?.discovery?.capabilities.endpointCatalog).toBeUndefined()
       await reply("request-new")
       expect(await current).toMatchObject({ deviceId, discovery: { capabilities: { endpointCatalog: catalog } } })
+      const login = { loginId: "login", verificationUrl: "https://example.com", userCode: "CODE" }
+      const loginPending = instance.requestEndpointCatalog(deviceId, targetId, "login-request", "login-start", undefined, { targetId, action: "login-start", endpointId: `${targetId}:codex:default` })
+      await tick()
+      await instance.webSocketMessage(pair[1], JSON.stringify({ type: "endpoint-catalog-update", version: 1, requestId: "login-request", targetId, catalog, login }))
+      expect(await loginPending).toMatchObject({ login })
+      expect(await instance.getDiscovery(deviceId)).not.toHaveProperty("login")
+      expect(JSON.stringify(state.storage.sql.exec("SELECT discovery_json FROM device_discovery WHERE device_id = ?", deviceId).toArray())).not.toContain("CODE")
       // A late duplicate cannot replace accepted discovery.
       await reply("request-new")
       const start = Date.now()

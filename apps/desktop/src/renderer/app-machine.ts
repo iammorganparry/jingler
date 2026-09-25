@@ -231,6 +231,7 @@ export const appMachine = setup({
       | { type: "SKIP_PROVIDER" }
       | { type: "CANCEL_AUTH" }
       | { type: "RETRY_AUTH" }
+      | { type: "ENDPOINT_CATALOG"; catalog: AgentEndpointCatalog }
       | { type: "RETRY_PROVIDER" }
       | { type: "PROVIDER_LOGIN_EVENT"; event: ProviderLoginEvent }
       | {
@@ -368,6 +369,7 @@ export const appMachine = setup({
           initial: "refreshing",
           invoke: { src: "watchProviderLoginEvents" },
           on: {
+            ENDPOINT_CATALOG: { actions: assign({ agentEndpointCatalog: ({ event }) => event.catalog }) },
             PROVIDER_LOGIN_EVENT: {
               actions: assign(({ event }) => ({
                 providerLoginEvent: event.event,

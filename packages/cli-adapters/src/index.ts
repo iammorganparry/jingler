@@ -103,3 +103,7 @@ export * from "./runtime/tools/tool-registry.js"
 export * from "./runtime/tools/plugin-agent-tools.js"
 export * from "./runtime/tools/workspace-tools.js"
 export * from "./runtime/tools/workspace-mutation-tools.js"
+
+export { makeCodexRuntimeRegistration } from "./runtime/codex/runtime.js"
+export { probeCodexEndpoint } from "./runtime/codex/endpoint.js"
+export { codexEndpointLogin } from "./runtime/codex/login.js"

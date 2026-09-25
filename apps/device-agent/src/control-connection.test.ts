@@ -1,3 +1,4 @@
+import { codexEndpointLogin } from "@jingler/cli-adapters/runtime/codex/login"
 import type { DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
 import { describe, expect, it, vi } from "vitest"
 import { type ControlConnectionDependencies, type ControlSocket, runControlConnection } from "./control-connection.js"
@@ -81,10 +82,13 @@ describe("device control connection", () => {
     await expect(running).resolves.toBe("stopped")
   })
 
-  it.each(["refresh", "auth-status"])("answers a correlated endpoint catalog %s for its own target", async (action) => {
+  it.each(["refresh", "auth-status", "login-start", "login-cancel"])("answers a correlated endpoint catalog %s for its own target", async (action) => {
     const controller = new AbortController()
     let deliver: ((message: unknown) => void) | null = null
     const sent: string[] = []
+    const code = { loginId: "login", verificationUrl: "https://example.com", userCode: "TEST" }
+    const start = vi.spyOn(codexEndpointLogin, "start").mockResolvedValue(code)
+    const cancel = vi.spyOn(codexEndpointLogin, "cancel").mockResolvedValue(undefined)
     const endpointDiscovery: RemoteDeviceDiscovery = {
       ...discovery,
       capabilities: {
@@ -131,6 +135,7 @@ describe("device control connection", () => {
       version: 1,
       requestId: "request-1",
       targetId: "device-1",
+      endpointId: "device-1:codex:default", loginId: "login",
       action
     })
     await vi.waitFor(() => expect(sent).toHaveLength(2))
@@ -140,6 +145,13 @@ describe("device control connection", () => {
       targetId: "device-1",
       catalog: endpointDiscovery.capabilities.endpointCatalog
     })
+    if (action === "login-start") {
+      expect(start).toHaveBeenCalledWith("device-1:codex:default", "device-1")
+      expect(JSON.parse(sent[1]!).login).toEqual(code)
+    }
+    if (action === "login-cancel") expect(cancel).toHaveBeenCalledWith("device-1:codex:default", "device-1", "login")
+    start.mockRestore()
+    cancel.mockRestore()
     controller.abort()
     await expect(running).resolves.toBe("stopped")
   })
