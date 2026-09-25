@@ -55,6 +55,34 @@ describe("pi credential store", () => {
     })
   })
 
+  it("keeps Claude API and subscription credentials pinned without fallback", async () => {
+    const subscription = connection("claude-setup-token")
+    const api = Schema.decodeUnknownSync(ProviderConnection)({
+      ...subscription,
+      id: "claude-api",
+      authKind: "api-key",
+      subscription: { ...subscription.subscription, confirmedBillingRoute: "api", observedRoute: "" }
+    })
+    const credentials = new InMemoryProviderCredentialStore()
+    for (const route of [api, subscription]) {
+      await Effect.runPromise(credentials.write({
+        connectionId: route.id,
+        authKind: route.authKind,
+        access: route.authKind === "api-key" ? "test-api-key" : "claude-cli",
+        refresh: null,
+        expiresAt: null
+      }))
+    }
+    const apiStore = makePiCredentialStore(api, credentials)
+    const subscriptionStore = makePiCredentialStore(subscription, credentials)
+
+    expect(await apiStore.read("anthropic")).toEqual({ type: "api_key", key: "test-api-key" })
+    expect(await subscriptionStore.read("anthropic")).toMatchObject({ type: "oauth", access: "claude-cli" })
+    await apiStore.delete("anthropic")
+    expect(await apiStore.read("anthropic")).toBeUndefined()
+    expect(await subscriptionStore.read("anthropic")).toMatchObject({ access: "claude-cli" })
+  })
+
   it("exposes only the current Claude CLI marker as non-refreshing OAuth", async () => {
     const claude = connection("claude-setup-token")
     const credentials = new InMemoryProviderCredentialStore()

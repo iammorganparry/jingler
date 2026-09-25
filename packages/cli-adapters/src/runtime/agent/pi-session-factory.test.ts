@@ -257,6 +257,56 @@ describe("pi session creation", () => {
     expect(await readPlannotatorConfig(agentDir)).toMatchObject({ executionMode: "automatic" })
   })
 
+  it.each(["api-key", "claude-setup-token"] as const)(
+    "selects the %s Claude route when both connections exist",
+    async (authKind) => {
+      const root = await mkdtemp(join(tmpdir(), "jingler-claude-routes-"))
+      roots.push(root)
+      const subscription = Schema.decodeUnknownSync(ProviderConnection)({
+        ...connection,
+        id: "claude-subscription",
+        authKind: "claude-setup-token",
+        subscription: {
+          ...connection.subscription,
+          confirmedBillingRoute: "subscription",
+          observedRoute: "claude-cli:subscription"
+        }
+      })
+      const credentials = new InMemoryProviderCredentialStore()
+      for (const route of [connection, subscription]) {
+        await Effect.runPromise(credentials.write({
+          connectionId: route.id,
+          authKind: route.authKind,
+          access: route.authKind === "api-key" ? "test-api-key" : "claude-cli",
+          refresh: null,
+          expiresAt: null
+        }))
+      }
+      const selected = authKind === "api-key" ? connection : subscription
+      const captured: CreateAgentSessionOptions[] = []
+      const factory = makePiSessionFactory({
+        agentDir: join(root, "agent"),
+        sessionsDir: join(root, "sessions"),
+        credentials,
+        resolveConnection: () => Effect.succeed(selected),
+        createSession: async (options) => {
+          captured.push(options)
+          return { session: fakeSession(), extensionsResult: {} as never }
+        }
+      })
+
+      await Effect.runPromise(factory.create({
+        ...makeSpec(root), connectionId: selected.id
+      }, {} as never))
+
+      const stream = captured[0]?.modelRuntime
+        ?.getRegisteredProviderConfig("anthropic")?.streamSimple
+      if (authKind === "api-key") expect(stream).toBeUndefined()
+      else expect(stream).toBeTypeOf("function")
+      expect(captured[0]?.model?.provider).toBe("anthropic")
+    }
+  )
+
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
