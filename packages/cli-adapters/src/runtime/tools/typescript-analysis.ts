@@ -96,6 +96,16 @@ const projectApi = (root: string): CachedProjectApi => {
   return cached
 }
 
+const assertCurrentProjectEpoch = (
+  rootKey: string,
+  startEpoch: number,
+  reuseApi: boolean
+): void => {
+  if (reuseApi && (projectEpochs.get(rootKey) ?? 0) !== startEpoch) {
+    throw fail("TypeScript analysis was disposed while hover setup was in progress")
+  }
+}
+
 export const disposeTypeScriptAnalysis = async (cwd: string): Promise<void> => {
   const rootKey = resolve(cwd)
   projectEpochs.set(rootKey, (projectEpochs.get(rootKey) ?? 0) + 1)
@@ -258,9 +268,7 @@ const withProjects = async <Value>(
   await assertBoundedSourceTree(root, signal)
   const configs = await configPaths(root, file, signal)
   await validateProjectConfigs(root, configs, signal)
-  if (reuseApi && (projectEpochs.get(rootKey) ?? 0) !== startEpoch) {
-    throw fail("TypeScript analysis was disposed while hover setup was in progress")
-  }
+  assertCurrentProjectEpoch(rootKey, startEpoch, reuseApi)
   const cached = reuseApi ? projectApi(root) : undefined
   const api = cached?.api ?? new API({ cwd: root, collectTiming: true })
   try {
