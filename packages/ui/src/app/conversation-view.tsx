@@ -467,6 +467,7 @@ function renderSessionAnalytics() {
                 agentEndpointCatalog={agentEndpointCatalog}
                 endpointId={endpointId}
                 connectionId={connectionId}
+                providerId={providerId}
                 modelId={modelId}
                 onSetModel={onSetModel}
                 mode={mode}

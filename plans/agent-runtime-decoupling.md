@@ -292,15 +292,19 @@ Official integration contract:
 
 **Estimate: 6–9 engineering days after Stage 2.**
 
-- [ ] Add target-local OpenCode discovery, minimum-version checks, and authenticated-provider probing without reading `auth.json`.
-- [ ] Start the user's own `opencode serve` on loopback with an ephemeral port and generated Basic-auth password; track the spawned process and reap its owned process tree without pattern-based kills.
-- [ ] Use the official generated SDK/HTTP API pinned to a tested server range; verify `/global/health` before enabling the endpoint.
-- [ ] Build models from OpenCode provider/config endpoints, preserving each model's provider ID under one OpenCode endpoint.
-- [ ] Implement session create/resume/fork, SSE event consumption, prompt, whole-turn abort, usage, tool/diff normalization, and restart recovery.
-- [ ] Correlate the global SSE stream by endpoint and session so concurrent OpenCode sessions cannot consume each other's events.
-- [ ] Map OpenCode permission requests into Jingler's permission gate. Advertise whole-turn abort honestly if per-task cancellation is unavailable.
-- [ ] Reuse historical OpenCode protocol fixtures and event tests only after validating them against the current server API.
-- [ ] Support multiple OpenCode config profiles as separate endpoints only when a real user configuration requires it; do not add speculative profile management.
+- [x] Add target-local OpenCode discovery, minimum-version checks, and authenticated-provider probing without reading `auth.json`.
+- [x] Start the user's own `opencode serve` on loopback with an ephemeral port and generated Basic-auth password; track the spawned process and reap its owned process tree without pattern-based kills.
+- [x] Use the official generated SDK/HTTP API pinned to a tested server range; verify `/global/health` before enabling the endpoint.
+- [x] Build models from OpenCode provider/config endpoints, preserving each model's provider ID under one OpenCode endpoint.
+- [x] Implement session create/resume/fork, SSE event consumption, prompt, whole-turn abort, usage, tool/diff normalization, and restart recovery.
+- [x] Correlate the global SSE stream by endpoint and session so concurrent OpenCode sessions cannot consume each other's events.
+- [x] Map OpenCode permission requests into Jingler's permission gate. Advertise whole-turn abort honestly if per-task cancellation is unavailable.
+- [x] Reuse historical OpenCode protocol fixtures and event tests only after validating them against the current server API.
+- [x] Support multiple OpenCode config profiles as separate endpoints only when a real user configuration requires it; do not add speculative profile management.
+
+The SDK and supported server are pinned to 1.18.14 and only the default user
+profile is exposed. Deterministic fixtures use the pinned SDK's event and endpoint
+shapes; full tests, affected typechecks, desktop/device builds, and P0/P1 review pass.
 
 Acceptance:
 

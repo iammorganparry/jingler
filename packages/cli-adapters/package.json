@@ -13,6 +13,7 @@
     "./browser-control-mcp-service": "./src/browser-control-mcp-service.ts",
     "./config": "./src/config.ts",
     "./context-manager": "./src/context-manager.ts",
+    "./child-registry": "./src/child-registry.ts",
     "./git": "./src/git.ts",
     "./github-api": "./src/github-api.ts",
     "./github-auth": "./src/github-auth.ts",
@@ -49,7 +50,9 @@
     "./test-support": "./src/test-support.ts",
     "./runtime/codex/runtime": "./src/runtime/codex/runtime.ts",
     "./runtime/codex/endpoint": "./src/runtime/codex/endpoint.ts",
-    "./runtime/codex/login": "./src/runtime/codex/login.ts"
+    "./runtime/codex/login": "./src/runtime/codex/login.ts",
+    "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
+    "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -80,7 +83,8 @@
     "typescript": "^7.0.2",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "@opencode-ai/sdk": "1.18.14"
   },
   "devDependencies": {
     "@effect/platform-node": "^0.107.0",

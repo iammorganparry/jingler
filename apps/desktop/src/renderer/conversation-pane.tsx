@@ -1491,7 +1491,7 @@ function conversationProviderRecovery(
     ({ endpoint, models }) =>
       endpoint.id === convo.endpointId &&
       endpoint.status === "ready" &&
-      models.some((model) => model.id === convo.modelId && model.selectable)
+      models.some((model) => model.id === convo.modelId && model.providerId === convo.providerId && model.selectable)
   ) === true
   if (nativeReady) {
     return { providerRecovery: undefined, rebindConnectionId: undefined, composerDisabledReason: undefined }

@@ -14,6 +14,7 @@ import type {
   ProviderCatalog,
   ProviderCatalogModel,
   ProviderConnectionId,
+  ProviderId,
   ProviderModelId,
   ReasoningEffort,
   ReasoningSetting,
@@ -291,6 +292,7 @@ type ComposerProps =  {
   agentEndpointCatalog?: AgentEndpointCatalog | null;
   endpointId?: AgentEndpointId | null;
   connectionId?: ProviderConnectionId | null;
+  providerId?: ProviderId | null;
   modelId?: ProviderModelId | null;
   onSetModel?: (selection: ProviderModelSelection) => void;
   /** Current HITL mode (shown in the mode chip; Shift+Tab cycles it). */
@@ -671,7 +673,7 @@ export function Composer(props: ComposerProps) {
   function renderInlineSettings() {
     return (<>
               {onSetEnvironment && <ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" className="max-w-[150px]" />}
-              {modelCatalog && <ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
+              {modelCatalog && <ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} placement="top" className={roomy ? "max-w-[190px]" : "max-w-[112px]"} />}
               <ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} className="max-w-[104px]" />
               {(!selectedModel || reasoningEfforts.length > 0) && <ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" icon={<SignalBars level={reasoningLevel(reasoningEfforts, reasoningChoice)} total={reasoningEfforts.length} slashed={thinkingEnabled === false} />} className="max-w-[132px]" />}
             </>)
@@ -687,7 +689,7 @@ export function Composer(props: ComposerProps) {
               </MorphPopoverTrigger>
               <MorphPopoverContent side="top" align="start" sideOffset={8} radius={12} className="w-72 max-w-[calc(100vw-24px)] p-2">
                 <div className="space-y-1.5">
-                  {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
+                  {modelCatalog && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Model</div><ProviderModelBrowser catalog={modelCatalog} endpointId={endpointId} providerId={providerId} connectionId={connectionId} modelId={modelId} onSelect={onSetModel} inlineContent className="w-full" /></div>}
                   {onSetEnvironment && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Environment</div><ComposerSelect<string> value={environmentId ?? "__local__"} options={environmentOptions} onSelect={(next) => onSetEnvironment(next === "__local__" ? undefined : next)} disabled={environmentPending} ariaLabel="Execution environment" inlineContent className="w-full max-w-none" /></div>}
                   <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Permission</div><ComposerSelect value={mode} options={modeOptions} onSelect={onSetMode} inlineContent className="w-full max-w-none" /></div>
                   {(!selectedModel || reasoningEfforts.length > 0) && <div><div className="px-1 pb-1 text-[11px] font-medium text-muted-foreground">Reasoning</div><ComposerSelect value={reasoningChoice} options={reasoningOptions} onSelect={setReasoningChoice} ariaLabel="Thinking strength" inlineContent className="w-full max-w-none" /></div>}
@@ -696,7 +698,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+  const { skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -835,11 +837,12 @@ export function Composer(props: ComposerProps) {
   const modelCatalog = agentEndpointCatalog ?? providerCatalog
   const selectedModel = agentEndpointCatalog
     ? agentEndpointCatalog.endpoints
+        .filter(({ endpoint }) => endpoint.id === endpointId)
         .flatMap(({ models }) => models)
-        .find((candidate) => candidate.id === modelId)
+        .find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
     : providerCatalog?.connections
         .flatMap(({ models }) => models)
-        .find((candidate) => candidate.id === modelId)
+        .find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
   const canonicalModes: ReadonlyArray<{
     readonly id: PermissionMode;
     readonly label: string;

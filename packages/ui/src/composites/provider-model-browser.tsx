@@ -20,8 +20,8 @@ export interface ProviderModelSelection {
   readonly modelId: ProviderModelId
 }
 
-const selectionKey = (selection: Pick<ProviderModelSelection, "endpointId" | "modelId">): string =>
-  `${encodeURIComponent(selection.endpointId)}:${encodeURIComponent(selection.modelId)}`
+const selectionKey = (selection: Pick<ProviderModelSelection, "endpointId" | "providerId" | "modelId">): string =>
+  `${encodeURIComponent(selection.endpointId)}:${encodeURIComponent(selection.providerId)}:${encodeURIComponent(selection.modelId)}`
 
 interface BrowsableModel extends ProviderModelSelection {
   readonly groupId: string
@@ -60,7 +60,7 @@ const browsableModels = (
         groupId: endpoint.id,
         groupLabel: endpoint.label,
         label: model.label,
-        searchText: `${endpoint.label} ${model.label} ${model.id} ${endpoint.targetId}`,
+        searchText: `${endpoint.label} ${model.providerId} ${model.label} ${model.id} ${endpoint.targetId}`,
         contextWindow: model.capabilities.contextWindow
       }))
     )
@@ -100,6 +100,7 @@ export function ProviderModelBrowser({
   catalog,
   endpointId,
   connectionId,
+  providerId,
   modelId,
   onSelect,
   className,
@@ -109,6 +110,7 @@ export function ProviderModelBrowser({
   catalog: ProviderCatalog | AgentEndpointCatalog
   endpointId?: AgentEndpointId | null
   connectionId: ProviderConnectionId | null
+  providerId?: ProviderId | null
   modelId: ProviderModelId | null
   onSelect?: (selection: ProviderModelSelection) => void
   className?: string
@@ -133,6 +135,7 @@ export function ProviderModelBrowser({
     label: byGroup.get(groupId)?.[0]?.groupLabel ?? groupId,
     options: (byGroup.get(groupId) ?? []).map((model) => ({
       value: selectionKey(model),
+      providerId: model.providerId,
       label: model.label,
       searchText: model.searchText,
       contextSize: formatContextSize(model.contextWindow)
@@ -141,7 +144,7 @@ export function ProviderModelBrowser({
   const current = modelId === null
     ? undefined
     : selections.find((selection) =>
-        selection.modelId === modelId && (
+        selection.modelId === modelId && (providerId == null || selection.providerId === providerId) && (
           endpointId != null
             ? selection.endpointId === endpointId
             : selection.connectionId === connectionId
@@ -152,9 +155,9 @@ export function ProviderModelBrowser({
     current ??
     // A selection pinned to a deduped-away duplicate connection still names
     // the same model; represent it by the surviving row.
-    (modelId === null
+    (modelId === null || "endpoints" in catalog
       ? undefined
-      : selections.find((selection) => selection.modelId === modelId))
+      : selections.find((selection) => selection.modelId === modelId && (providerId == null || selection.providerId === providerId)))
 
   return (
     <Select
@@ -188,7 +191,7 @@ export function ProviderModelBrowser({
         search={<SelectSearch autoFocus aria-label="Search models" placeholder="Search models…" />}
       >
         {groups.map((group) => (
-          <div key={group.label} role="group" aria-label={group.label} className="py-0.5">
+          <div key={group.groupId} role="group" aria-label={group.label} className="py-0.5">
             <div className="px-2.5 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
               {group.label}
             </div>
@@ -201,10 +204,10 @@ export function ProviderModelBrowser({
               >
                 <span className="flex min-w-0 flex-1 items-center gap-2">
                   <span data-provider-logo className="grid size-5 shrink-0 place-items-center">
-                    <ProviderIcon providerId={group.providerId} size={16} />
+                    <ProviderIcon providerId={option.providerId} size={16} />
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-text-bright">{option.label}</span>
-                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{option.contextSize}</span>
+                  <span className="shrink-0 text-xs tabular-nums text-muted-foreground"><span>{providerLabel(option.providerId)}</span> · <span>{option.contextSize}</span></span>
                 </span>
               </SelectItem>
             ))}

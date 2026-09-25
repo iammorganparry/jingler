@@ -1,3 +1,4 @@
+import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 /**
  * RPC transport — the crux of the app.
@@ -3792,7 +3793,7 @@ const localAgentEndpointCatalog = (refresh: boolean) =>
     return {
       refreshedAt: new Date().toISOString(),
       stale: pi.stale,
-      endpoints: [...pi.endpoints.slice(0, 62), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId: "desktop" }))]
+      endpoints: [...pi.endpoints.slice(0, 61), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId: "desktop" })), yield* Effect.promise(() => probeOpenCodeEndpoint({ targetId: "desktop" }))]
     }
   })
 

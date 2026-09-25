@@ -538,3 +538,20 @@ describe("newWorkspaceMachine", () => {
     }), [], expect.any(Function))
   })
 })
+
+it("retains the selected provider when overlapping native models refresh", async () => {
+  const endpointId = nativeCliEndpointId("desktop", "opencode")
+  const beta = ProviderId.make("beta")
+  const endpointCatalog: AgentEndpointCatalog = {
+    refreshedAt: "2026-09-25T00:00:00.000Z", stale: false,
+    endpoints: [{ endpoint: { id: endpointId, runtimeId: "opencode", targetId: "desktop", label: "OpenCode CLI", status: "ready", version: "1.18.14", features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } }, models: [ProviderId.make("alpha"), beta].map(providerId => ({ ...providerCatalog.connections[0]!.models[0]!, providerId, status: "ready" as const })) }]
+  }
+  const actor = actorFor(undefined, { agentEndpointCatalog: endpointCatalog }).start()
+  try {
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, snapshot => snapshot.matches("editing"))
+    actor.send({ type: "SET_MODEL", runtimeId: "opencode", endpointId, providerId: beta, modelId })
+    actor.send({ type: "SYNC_MODELS" })
+    expect(actor.getSnapshot().context).toMatchObject({ endpointId, providerId: beta, modelId })
+  } finally { actor.stop() }
+})

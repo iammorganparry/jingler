@@ -3,6 +3,7 @@ import { Attachment, Message } from "../conversation.js"
 import { ReasoningSetting } from "../domain.js"
 import {
   ProviderConnectionId,
+  ProviderId,
   ProviderModelId
 } from "./provider-connection.js"
 import { RuntimeCapabilityManifest } from "./capability-manifest.js"
@@ -58,6 +59,7 @@ export const AgentRunSpec = Schema.Struct({
   runtimeId: AgentRuntimeId,
   endpointId: AgentEndpointId,
   connectionId: Schema.optional(ProviderConnectionId),
+  providerId: Schema.optional(ProviderId),
   modelId: ProviderModelId,
   role: AgentRole,
   mode: RuntimeMode,

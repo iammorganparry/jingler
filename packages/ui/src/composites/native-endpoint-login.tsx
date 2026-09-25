@@ -8,6 +8,7 @@ export type { NativeEndpointLoginActions } from "./native-endpoint-login-machine
 const SECURE_URL = /^https:\/\//u
 
 export function NativeEndpointLogin({ endpoint, actions }: { endpoint: AgentEndpoint; actions?: NativeEndpointLoginActions }) {
+  if (endpoint.runtimeId === "opencode") return <span>{endpoint.label} · {endpoint.status} · {endpoint.targetId}{endpoint.status === "signed-out" && <span> · Run <code>opencode auth login</code> on this device, then refresh runtimes.</span>}{endpoint.status === "unsupported" && <span> · Install the supported OpenCode version on this device.</span>}</span>
   if (endpoint.runtimeId !== "codex" || !actions) return <span>{endpoint.label} · {endpoint.status}</span>
   return <Login endpoint={endpoint} actions={actions} />
 }

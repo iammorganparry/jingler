@@ -65,7 +65,8 @@ describe("production runtime architecture", () => {
   })
 
   it("does not import provider harness SDKs or discovery", () => {
-    expect(offenders(PROVIDER_HARNESS_SDK)).toStrictEqual([])
+    expect(offenders(/@anthropic-ai\/claude-agent-sdk|@openai\/codex-sdk/)).toStrictEqual([])
+    expect(offenders(/@opencode-ai\/sdk/).filter((path) => !path.startsWith("packages/cli-adapters/src/runtime/opencode/"))).toStrictEqual([])
     expect(offenders(DISCOVERY_IMPORT)).toStrictEqual([])
   })
 
@@ -89,7 +90,7 @@ describe("production runtime architecture", () => {
       if (!existsSync(path)) continue
       const manifest = JSON.parse(readFileSync(path, "utf8"))
       const dependencies = { ...manifest.dependencies, ...manifest.optionalDependencies }
-      expect(Object.keys(dependencies).filter((name) => PROVIDER_HARNESS_SDK.test(name)), path).toEqual([])
+      expect(Object.keys(dependencies).filter((name) => PROVIDER_HARNESS_SDK.test(name) && !(source === "packages/cli-adapters/src" && name === "@opencode-ai/sdk")), path).toEqual([])
     }
   })
 })

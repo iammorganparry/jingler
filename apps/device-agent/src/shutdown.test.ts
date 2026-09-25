@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { once } from "node:events"
-import { trackChild } from "@jingler/cli-adapters"
+import { trackChild } from "@jingler/cli-adapters/child-registry"
 import { describe, expect, it, vi } from "vitest"
 import { shutdownDeviceAgent } from "./shutdown.js"
 

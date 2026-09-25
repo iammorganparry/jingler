@@ -754,6 +754,7 @@ function* runDigestTurn(
       connectionId!
     ),
     ...(connectionId === undefined ? {} : { connectionId }),
+    providerId: settings.chat.providerId ?? settings.session.providerId,
     modelId,
     role: "context-digest",
     priorMessages: [],

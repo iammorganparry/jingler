@@ -18,6 +18,7 @@ const canonicalIdentity = (session: Session) => {
         : piEndpointId(session.environmentId ?? "desktop", connectionId)
     ),
     connectionId,
+    providerId: chat?.providerId ?? session.providerId,
     modelId: chat?.modelId ?? session.modelId
   }
 }
@@ -53,6 +54,7 @@ export const runReadOnlyRoleText = (
         runtimeId: identity.runtimeId,
         endpointId: identity.endpointId,
         connectionId: identity.connectionId,
+        providerId: identity.providerId,
         modelId: identity.modelId,
         role,
         mode: "read-only",

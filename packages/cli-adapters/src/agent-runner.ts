@@ -560,9 +560,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           // Browser control is exclusive within one repository session but
           // independent sessions receive isolated native views and may QA in
           // parallel. The scoped lease revokes its bearer when the run ends.
-          const browserAttachment = yield* (
-            yield* BrowserControlMcpService
-          ).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
+          const browserAttachment = yield* acquireRuntimeBrowser(chat.runtimeId, sessionId, chatId)
           const spec = prepareTurnSpec(
             session,
             priorMessages,
@@ -1428,6 +1426,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
   })
 }) {}
 
+/** Native runtimes without run-scoped MCP support must not receive browser leases. */
+const acquireRuntimeBrowser = (runtimeId: string | undefined, sessionId: string, chatId: string) =>
+  runtimeId === "opencode" ? Effect.succeed(null) : Effect.gen(function* () {
+    return yield* (yield* BrowserControlMcpService).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
+  })
+
 function prepareTurnSpec(
   session: Session,
   priorMessages: ReadonlyArray<Message>,
@@ -1474,6 +1478,7 @@ function prepareTurnSpec(
       connectionId!
     ),
     ...(connectionId === undefined ? {} : { connectionId }),
+    providerId: chat.providerId ?? session.providerId,
     modelId,
     role: mode === "plan" ? "plan" : activePlanExecutionId ? "plan-execution" : "conversation",
     priorMessages,

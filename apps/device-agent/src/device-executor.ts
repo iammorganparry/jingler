@@ -1,3 +1,4 @@
+import { makeOpenCodeRuntimeRegistration } from "@jingler/cli-adapters/runtime/opencode/runtime"
 import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/codex/runtime"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
@@ -500,7 +501,7 @@ const deviceRuntime = (root: string, targetId: string) => {
   const runtimeRegistry = Layer.effect(
     AgentRuntimeRegistry,
     Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
-      ...pi.registrations.values(), makeCodexRuntimeRegistration()
+      ...pi.registrations.values(), makeCodexRuntimeRegistration(), makeOpenCodeRuntimeRegistration()
     ]))
   ).pipe(Layer.provide(piRuntime))
   const agentRuntime = AgentRuntimeRouterLive.pipe(Layer.provide(runtimeRegistry))

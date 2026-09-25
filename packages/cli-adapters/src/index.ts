@@ -107,3 +107,6 @@ export * from "./runtime/tools/workspace-mutation-tools.js"
 export { makeCodexRuntimeRegistration } from "./runtime/codex/runtime.js"
 export { probeCodexEndpoint } from "./runtime/codex/endpoint.js"
 export { codexEndpointLogin } from "./runtime/codex/login.js"
+
+export { makeOpenCodeRuntimeRegistration } from "./runtime/opencode/runtime.js"
+export { probeOpenCodeEndpoint } from "./runtime/opencode/endpoint.js"

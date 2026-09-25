@@ -387,6 +387,7 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
               agentEndpointCatalog={agentEndpointCatalog}
               endpointId={state.context.endpointId}
               connectionId={connectionId}
+                providerId={providerId}
               modelId={modelId}
               onSetModel={({
                 runtimeId: nextRuntime,

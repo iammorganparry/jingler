@@ -1,5 +1,5 @@
 import type { AgentEndpointCatalog, ProviderCatalog } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { nativeCliEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -133,4 +133,22 @@ describe("ProviderModelBrowser", () => {
       modelId
     })
   })
+})
+
+
+it("selects and displays distinct providers sharing one endpoint and model ID", () => {
+  const endpointId = nativeCliEndpointId("desktop", "opencode")
+  const alpha = ProviderId.make("alpha")
+  const beta = ProviderId.make("beta")
+  const sharedId = ProviderModelId.make("shared")
+  const models = [alpha, beta].map(providerId => ({ ...catalog.connections[0]!.models[0]!, providerId, id: sharedId, label: `Model ${providerId}`, status: "ready" as const }))
+  const endpointCatalog: AgentEndpointCatalog = { refreshedAt: catalog.refreshedAt, stale: false, endpoints: [{ endpoint: { id: endpointId, runtimeId: "opencode", targetId: "desktop", label: "OpenCode CLI", status: "ready", version: "1.18.14", features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } }, models }] }
+  const onSelect = vi.fn()
+  render(<ProviderModelBrowser catalog={endpointCatalog} endpointId={endpointId} connectionId={null} providerId={beta} modelId={sharedId} onSelect={onSelect} />)
+  fireEvent.click(screen.getByRole("button", { name: "Model: Model beta" }))
+  fireEvent.click(screen.getByRole("option", { name: /Model beta/ }))
+  expect(onSelect).toHaveBeenLastCalledWith({ runtimeId: "opencode", endpointId, providerId: beta, modelId: sharedId })
+  fireEvent.click(screen.getByRole("button", { name: "Model: Model beta" }))
+  fireEvent.click(screen.getByRole("option", { name: /Model alpha/ }))
+  expect(onSelect).toHaveBeenLastCalledWith({ runtimeId: "opencode", endpointId, providerId: alpha, modelId: sharedId })
 })

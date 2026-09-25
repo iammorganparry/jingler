@@ -421,6 +421,9 @@ importers:
 
   packages/cli-adapters:
     dependencies:
+      '@opencode-ai/sdk':
+        specifier: 1.18.14
+        version: 1.18.14
       '@dietrichgebert/ponytail':
         specifier: 4.9.0
         version: 4.9.0
@@ -934,6 +937,9 @@ importers:
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(jiti@2.7.0)(jsdom@29.1.1(@noble/hashes@2.2.0))(lightningcss@1.33.0)(tsx@4.23.1)(yaml@2.9.0)
 
 packages:
+
+  '@opencode-ai/sdk@1.18.14':
+    resolution: {integrity: sha512-Yd8vPDT5DW++Hs2904Q/Vvk/m1U79aKFSRusgAfBQ+AGhfoT40LdeL5eiJtVy0xBUIZF/8DEZjkWaeof9Y59PA==}
 
   7zip-bin@5.2.0:
     resolution: {integrity: sha512-ukTPVhqG4jNzMro2qA9HSCSSVJN3aN7tlb+hfqYCt3ER0yWroeA2VR38MNrOHLQ/cVj+DaIMad0kFCtWWowh/A==}
@@ -9659,6 +9665,10 @@ packages:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
 snapshots:
+
+  '@opencode-ai/sdk@1.18.14':
+    dependencies:
+      cross-spawn: 7.0.6
 
   7zip-bin@5.2.0: {}
 

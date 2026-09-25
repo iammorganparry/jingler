@@ -172,7 +172,8 @@ const providerSelection = (
   environmentId = "local",
   currentEndpointId: AgentEndpointId | null = null,
   currentConnectionId: ProviderConnectionId | null = null,
-  currentModelId: ProviderModelId | null = null
+  currentModelId: ProviderModelId | null = null,
+  currentProviderId: ProviderId | null = null
 ): {
   runtimeId: AgentRuntimeId | null
   endpointId: AgentEndpointId | null
@@ -211,10 +212,12 @@ const providerSelection = (
     : endpointChoices
   const selected =
     choices.find((choice) =>
-      choice.endpointId === currentEndpointId && choice.modelId === currentModelId
+      choice.endpointId === currentEndpointId && choice.modelId === currentModelId &&
+      (currentProviderId === null || choice.providerId === currentProviderId)
     ) ??
     choices.find((choice) =>
-      choice.connectionId === currentConnectionId && choice.modelId === currentModelId
+      choice.connectionId === currentConnectionId && choice.modelId === currentModelId &&
+      (currentProviderId === null || choice.providerId === currentProviderId)
     ) ??
     choices.find((choice) =>
       choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId
@@ -366,7 +369,8 @@ export const newWorkspaceMachine = setup({
         context.environmentId,
         context.endpointId,
         context.connectionId,
-        context.modelId
+        context.modelId,
+        context.providerId
       )
     ),
     setProviderModel: assign(({ event }) =>
