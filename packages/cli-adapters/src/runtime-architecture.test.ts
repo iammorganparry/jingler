@@ -94,3 +94,16 @@ describe("production runtime architecture", () => {
     }
   })
 })
+
+it("never parses native CLI credential files in production", () => {
+  // Covers literal paths and join(home, vendor, filename) construction.
+  const credentialPath = /\.credentials\.json|(?:\.codex|CODEX_HOME|opencode)[\s\S]{0,160}auth\.json|auth\.json[\s\S]{0,160}(?:\.codex|CODEX_HOME|opencode)/u
+  expect(productionSources.filter(path => {
+    const source = readFileSync(path, "utf8")
+    // The sandbox denies access to these files; only its literal denylist is exempt.
+    const checked = relative(root, path) === "packages/cli-adapters/src/sandbox.ts"
+      ? source.replace(/^  "(?:\.local\/share\/opencode\/auth\.json|\.claude\/\.credentials\.json|\.codex\/auth\.json)",?$/gmu, "")
+      : source
+    return credentialPath.test(checked)
+  }).map(path => relative(root, path))).toEqual([])
+})

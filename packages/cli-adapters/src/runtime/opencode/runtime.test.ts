@@ -142,3 +142,37 @@ describe("native OpenCode 1.18.14", () => {
     expect(liveChildCount()).toBe(0)
   })
 })
+
+it.each(["data: {broken\n\n", "data: null\n\n", 'data: {"directory":"/tmp"}\n\n'])("rejects malformed SSE/envelopes and releases the server (%#)", async (frame) => {
+  const instance = makeOpenCodeAgentRuntime({ ...options, fetch: async input => {
+    if ((input as Request).url.includes("/global/event")) return new Response(frame, { headers: { "content-type": "text/event-stream" } })
+    return transport.fetch(input)
+  } })
+  await expect(collect(spec(), instance)).rejects.toThrow()
+  expect(liveChildCount()).toBe(0)
+})
+
+it("rejects malformed endpoint JSON and reaps the probe process", async () => {
+  const entry = await probeOpenCodeEndpoint({ ...options, fetch: async input => {
+    if ((input as Request).url.endsWith("/provider")) return new Response("{broken", { headers: { "content-type": "application/json" } })
+    return transport.fetch(input)
+  } })
+  expect(entry.endpoint.status).toBe("error")
+  expect(liveChildCount()).toBe(0)
+})
+
+it("keeps one completion when interrupt arrives at the terminal event", async () => {
+  const instance = runtime()
+  let id = ""
+  const events = [...await Effect.runPromise(instance.run(spec(), context).pipe(
+    Stream.tap(event => {
+      if (event._tag === "Started") id = event.sessionId
+      return event._tag === "Done"
+        ? instance.interrupt({ runtimeId: "opencode", endpointId, id }, "desktop").pipe(Effect.ignore)
+        : Effect.void
+    }), Stream.runCollect
+  ))]
+  expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
+  expect(events.some(event => event._tag === "Failed")).toBe(false)
+  expect(liveChildCount()).toBe(0)
+})

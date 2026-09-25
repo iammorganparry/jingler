@@ -248,7 +248,8 @@ async function* claudeOutput(
   child: ChildProcessWithoutNullStreams,
   secret: string,
   state: { terminal: boolean; started: boolean },
-  started: StreamEvent
+  started: StreamEvent,
+  onTerminal: () => void
 ): AsyncGenerator<StreamEvent> {
   for await (const raw of boundedLines(child)) {
     const line = raw.replaceAll(secret, "[redacted]")
@@ -261,6 +262,7 @@ async function* claudeOutput(
     if (state.terminal) throw new Error("Claude CLI emitted output after its result")
     for (const event of events) {
       trackTerminal(state, event)
+      if (state.terminal) onTerminal()
       yield event
     }
   }
@@ -313,7 +315,9 @@ async function* runClaude(
       child,
       relay.environment.JINGLER_CLAUDE_MCP_TOKEN!,
       output,
-      { _tag: "Started", sessionId, model: spec.modelId }
+      { _tag: "Started", sessionId, model: spec.modelId },
+      // A terminal event wins over an interrupt delivered by its consumer.
+      () => { active.delete(sessionId) }
     )
     const exitCode = await waitForExit(spawned)
     if (exitCode !== 0) {

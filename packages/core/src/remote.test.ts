@@ -1,6 +1,10 @@
 import { Either, Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  EndpointCatalogRequest,
+  EndpointCatalogUpdate,
+  NativeEndpointLogin,
+  REMOTE_PROTOCOL_VERSION,
   ClientAttachment,
   AccountDeviceListResponse,
   ControllerLease,
@@ -333,4 +337,21 @@ describe("encrypted tunnel contracts", () => {
     ).toBe(true)
   })
 
+})
+
+it("pins exact public endpoint/login fields and rejects token-bearing messages", () => {
+  expect(Object.keys(NativeEndpointLogin.fields).sort()).toEqual(["loginId", "userCode", "verificationUrl"])
+  expect(Object.keys(EndpointCatalogRequest.fields).sort()).toEqual(["action", "endpointId", "loginId", "requestId", "targetId", "type", "version"])
+  expect(Object.keys(EndpointCatalogUpdate.fields).sort()).toEqual(["catalog", "login", "loginError", "requestId", "targetId", "type", "version"])
+  const login = { loginId: "login", verificationUrl: "https://example.com/device", userCode: "ABCD" }
+  const request = { type: "endpoint-catalog-request", version: REMOTE_PROTOCOL_VERSION, requestId: "request-1", targetId: "device-1", action: "auth-status" }
+  const update = { type: "endpoint-catalog-update", version: REMOTE_PROTOCOL_VERSION, requestId: "request-1", targetId: "device-1", catalog: { endpoints: [], stale: false, refreshedAt: "2026-09-25T00:00:00Z" }, login }
+  expect(Either.isRight(decode(EndpointCatalogRequest, request))).toBe(true)
+  expect(Either.isRight(decode(EndpointCatalogUpdate, update))).toBe(true)
+  for (const key of ["accessToken", "refreshToken", "token", "credentials", "authorization"]) {
+    expect(Either.isLeft(decode(NativeEndpointLogin, { ...login, [key]: "secret" }))).toBe(true)
+    expect(Either.isLeft(decode(EndpointCatalogRequest, { ...request, [key]: "secret" }))).toBe(true)
+    expect(Either.isLeft(decode(EndpointCatalogUpdate, { ...update, [key]: "secret" }))).toBe(true)
+    expect(Either.isLeft(decode(EndpointCatalogUpdate, { ...update, login: { ...login, [key]: "secret" } }))).toBe(true)
+  }
 })

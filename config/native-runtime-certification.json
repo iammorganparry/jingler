@@ -1,0 +1,5 @@
+{
+  "claude": { "package": "@anthropic-ai/claude-code", "minimum": "2.1.282", "current": "latest" },
+  "codex": { "package": "@openai/codex", "minimum": "0.153.2", "current": "latest" },
+  "opencode": { "package": "opencode-ai", "minimum": "1.18.14", "current": "latest" }
+}

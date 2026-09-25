@@ -1,3 +1,4 @@
+import { Server } from "node:http"
 import { readFile, stat } from "node:fs/promises"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -133,4 +134,16 @@ describe("native Claude registry MCP relay", () => {
     } finally { await client.close(); await relay.close() }
   })
 
+})
+
+it("binds the actual MCP listener exclusively to IPv4 loopback", async () => {
+  const listen = vi.spyOn(Server.prototype, "listen")
+  try {
+    const relay = await startClaudeCliToolRelay({ registry: new ToolRegistry(), spec, context })
+    try {
+      expect(listen).toHaveBeenCalledWith(0, "127.0.0.1", expect.any(Function))
+      const server = listen.mock.instances[0]!
+      expect(server.address()).toMatchObject({ address: "127.0.0.1", family: "IPv4" })
+    } finally { await relay.close() }
+  } finally { listen.mockRestore() }
 })

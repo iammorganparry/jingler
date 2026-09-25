@@ -324,11 +324,16 @@ Official integration contract:
 
 # Shared test and rollout gates
 
-- [ ] Contract tests: runtime/endpoint identity, tagged continuations, capability decoding, and backward migrations.
-- [ ] Adapter tests: vendor events to `StreamEvent`, process cleanup, abort races, malformed protocol data, and unsupported versions.
-- [ ] Product tests: onboarding detection, mixed-runtime picker, explicit switching, reload/resume, remote target discovery, and unavailable CLI recovery.
-- [ ] Security tests: no credential-file parsing, no credential events, environment sanitization, loopback-only servers, bounded output, and owned process-tree cleanup.
-- [ ] Release gates: fake-protocol CI for every runtime plus opt-in live certification against documented minimum and current CLI versions.
+- [x] Contract tests: runtime/endpoint identity, tagged continuations, capability decoding, and backward migrations.
+- [x] Adapter tests: vendor events to `StreamEvent`, process cleanup, abort races, malformed protocol data, and unsupported versions.
+- [x] Product tests: onboarding detection, mixed-runtime picker, explicit switching, reload/resume, remote target discovery, and unavailable CLI recovery.
+- [x] Security tests: no credential-file parsing, no credential events, environment sanitization, loopback-only servers, bounded output, and owned process-tree cleanup.
+- [x] Release gates: fake-protocol CI for every runtime plus opt-in live certification against documented minimum and current CLI versions.
+
+Deterministic native protocol suites remain in normal CI. Live certification is an
+opt-in six-cell minimum/current matrix on protected credential-owning runners; the
+release gate verifies complete, bounded, same-commit artifacts. Workspace tests,
+affected typechecks, workflow parsing, product test discovery, and P0/P1 review pass.
 
 ## Explicit non-goals
 

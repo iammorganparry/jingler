@@ -152,3 +152,24 @@ it("selects and displays distinct providers sharing one endpoint and model ID", 
   fireEvent.click(screen.getByRole("option", { name: /Model alpha/ }))
   expect(onSelect).toHaveBeenLastCalledWith({ runtimeId: "opencode", endpointId, providerId: alpha, modelId: sharedId })
 })
+
+it.each(["missing", "unsupported"] as const)("makes a remote-only endpoint selectable after %s refresh recovery", (status) => {
+  const endpointId = nativeCliEndpointId("device-only", "claude")
+  const entry: AgentEndpointCatalog["endpoints"][number] = {
+    endpoint: { id: endpointId, runtimeId: "claude", targetId: "device-only", label: "Remote Claude", status, version: null,
+      features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } },
+    models: [{ ...catalog.connections[0]!.models[0]!, status: "unavailable", selectable: false }]
+  }
+  const onSelect = vi.fn()
+  const props = { endpointId: null, connectionId: null, modelId: null, onSelect }
+  const view = render(<ProviderModelBrowser {...props} catalog={{ refreshedAt: "2026-09-24T00:00:00Z", stale: false, endpoints: [entry] }} />)
+  fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+  const option = screen.queryByRole("option", { name: /Claude Sonnet/i })
+  if (option) fireEvent.click(option)
+  expect(onSelect).not.toHaveBeenCalled()
+  view.rerender(<ProviderModelBrowser {...props} catalog={{ refreshedAt: "2026-09-25T00:00:00.000Z", stale: false,
+    endpoints: [{ ...entry, endpoint: { ...entry.endpoint, status: "ready" }, models: entry.models.map(model => ({ ...model, status: "ready", selectable: true })) }] }} />)
+  if (screen.getByRole("button", { name: "Model: Choose model" }).getAttribute("aria-expanded") !== "true") fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+  fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
+  expect(onSelect).toHaveBeenCalledWith({ runtimeId: "claude", endpointId, providerId, modelId })
+})

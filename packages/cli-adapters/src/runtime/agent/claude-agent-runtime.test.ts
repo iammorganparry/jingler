@@ -14,6 +14,8 @@ import {
   claudeAgentArguments,
   makeClaudeAgentRuntime
 } from "./claude-agent-runtime.js"
+import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
+import * as toolRelay from "../providers/claude-cli-tool-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
@@ -43,7 +45,7 @@ const spec = (over: Partial<AgentRunSpec> = {}): AgentRunSpec => ({
 })
 
 const directories: string[] = []
-afterEach(async () => { await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))) })
+afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))) })
 
 const executable = async (body: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), "jingler-claude-runtime-"))
@@ -208,4 +210,101 @@ it("releases scoped registry resources if preparation fails", async () => {
   }) })
   await expect(Effect.runPromise(runtime.run(spec(), context).pipe(Stream.runCollect))).rejects.toThrow("registry preparation failed")
   expect(release).toHaveBeenCalledOnce()
+})
+
+// Parser/process tests use a socket-free relay; the real two-round MCP test above
+// retains end-to-end relay coverage.
+const stubRelay = () => vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValueOnce({
+  mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
+  environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+  close: async () => {}
+})
+
+it("maps thinking, external tools and failure without a success terminal", async () => {
+  stubRelay()
+  const records = [
+    { type: "stream_event", event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "consider" } } },
+    { type: "assistant", message: { content: [
+      { type: "thinking", thinking: "consider" },
+      { type: "tool_use", id: "tool", name: "Read" },
+      { type: "tool_use", id: "bridge", name: "mcp__jingler__echo" }
+    ] } },
+    { type: "result", is_error: true, result: "fixture failure" }
+  ]
+  const binary = await executable(`process.stdin.resume(); for (const record of ${JSON.stringify(records)}) console.log(JSON.stringify(record))`)
+  const events = [...await Effect.runPromise(makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect))]
+  expect(events.slice(1)).toEqual([
+    { _tag: "Thinking", text: "consider", seconds: null, done: false },
+    { _tag: "Thinking", text: "consider", seconds: null, done: true },
+    { _tag: "ToolStart", id: "tool", name: "Read", target: null },
+    { _tag: "Failed", message: "fixture failure" }
+  ])
+})
+
+it.each([
+  ["{broken", "invalid protocol"],
+  ["[]", "invalid protocol"],
+  [JSON.stringify({ type: "result" }), "malformed result"],
+  ["x".repeat(4_194_305), "output bound"]
+])("rejects malformed or oversized output (case %#)", async (line, error) => {
+  stubRelay()
+  const binary = await executable(`process.stdin.resume(); console.log(${JSON.stringify(line)})`)
+  await expect(Effect.runPromise(makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect))).rejects.toThrow(error)
+})
+
+it("cancels a stream and reaps the owned process", async () => {
+  stubRelay()
+  const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)
+  const children: ReturnType<typeof spawn>[] = []
+  const spawnProcess = (command: string, args: string[], options: SpawnOptionsWithoutStdio) => {
+    const child = spawn(command, args, options)
+    children.push(child)
+    return child
+  }
+  await Effect.runPromise(makeClaudeAgentRuntime({ binary, spawnProcess }).run(spec(), context).pipe(Stream.take(1), Stream.runDrain))
+  expect(children).toHaveLength(1)
+  expect(children[0]!.exitCode !== null || children[0]!.signalCode !== null).toBe(true)
+})
+
+it.each([
+  ["2.1.281", {}, "unsupported"],
+  ["not-a-version", {}, "unsupported"],
+  ["2.1.282", { loggedIn: false }, "signed-out"],
+  ["2.1.282", { loggedIn: true, authMethod: "apiKey", apiProvider: "firstParty" }, "signed-out"],
+  ["2.1.282", { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }, "ready"]
+])("probes version %s and auth case %#", async (version, auth, status) => {
+  const binary = await executable(`console.log(process.argv.includes("--version") ? ${JSON.stringify(version)} : ${JSON.stringify(JSON.stringify(auth))})`)
+  const entry = await probeClaudeEndpoint({ binary, targetId: "device" })
+  expect(entry.endpoint).toMatchObject({ status, targetId: "device", id: "device:claude:default" })
+  expect(entry.models.every(model => model.selectable === (status === "ready"))).toBe(true)
+})
+
+it("reports missing Claude and malformed auth status", async () => {
+  expect((await probeClaudeEndpoint({ binary: "/nonexistent/claude" })).endpoint.status).toBe("missing")
+  const binary = await executable(`console.log(process.argv.includes("--version") ? "2.1.282" : "not-json")`)
+  expect((await probeClaudeEndpoint({ binary })).endpoint.status).toBe("error")
+})
+
+it("keeps one result when completion races an interrupt", async () => {
+  stubRelay()
+  const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"result",is_error:false,usage:{}}))`)
+  const instance = makeClaudeAgentRuntime({ binary })
+  let id = ""
+  const events = [...await Effect.runPromise(instance.run(spec(), context).pipe(Stream.tap(event => {
+    if (event._tag === "Started") id = event.sessionId
+    return event._tag === "Done" ? instance.interrupt({ runtimeId: "claude", endpointId, id }, "desktop").pipe(Effect.ignore) : Effect.void
+  }), Stream.runCollect))]
+  expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
+})
+
+it("lets interruption win before a result and reaps the process", async () => {
+  stubRelay()
+  const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)
+  const instance = makeClaudeAgentRuntime({ binary })
+  const seen: string[] = []
+  await expect(Effect.runPromise(instance.run(spec(), context).pipe(Stream.tap(event => {
+    seen.push(event._tag)
+    return event._tag === "Started" ? instance.interrupt({ runtimeId: "claude", endpointId, id: event.sessionId }, "desktop") : Effect.void
+  }), Stream.runDrain))).rejects.toThrow()
+  expect(seen).toEqual(["Started"])
 })

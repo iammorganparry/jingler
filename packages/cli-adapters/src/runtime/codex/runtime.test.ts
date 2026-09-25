@@ -317,3 +317,19 @@ describe("native Codex protocol", () => {
     ).toMatchObject({ _tag: "ToolEnd", diff: { added: 1, removed: 1 } })
   })
 })
+
+it("keeps one completion when interrupt arrives at the terminal event", async () => {
+  const instance = makeCodexAgentRuntime({ binary })
+  let id = ""
+  const events = [...await Effect.runPromise(instance.run(spec(), context).pipe(
+    Stream.tap(event => {
+      if (event._tag === "Started") id = event.sessionId
+      return event._tag === "Done"
+        ? instance.interrupt({ runtimeId: "codex", endpointId, id }, "desktop").pipe(Effect.ignore)
+        : Effect.void
+    }), Stream.runCollect
+  ))]
+  expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
+  expect(events.some(event => event._tag === "Failed")).toBe(false)
+  expect(liveChildCount()).toBe(0)
+})

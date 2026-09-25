@@ -1,0 +1,57 @@
+name: Native runtime certification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certify:
+    # Defense in depth with the environment's required default-branch deployment policy.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, linux, native-runtime-certification]
+    environment: native-runtime-certification
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [claude, codex, opencode]
+        version: [minimum, current]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+        with:
+          version: 10.7.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install isolated CLI version
+        env:
+          NATIVE_RUNTIME: ${{ matrix.runtime }}
+          NATIVE_VERSION: ${{ matrix.version }}
+        run: |
+          package=$(node -e 'const m=require("./config/native-runtime-certification.json"); process.stdout.write(m[process.env.NATIVE_RUNTIME].package)')
+          requested=$(node -e 'const m=require("./config/native-runtime-certification.json"); process.stdout.write(m[process.env.NATIVE_RUNTIME][process.env.NATIVE_VERSION])')
+          resolved=$(npm view "$package@$requested" version --json | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{const v=JSON.parse(s);if(typeof v!=="string"||!/^\d+\.\d+\.\d+$/.test(v))process.exit(1);process.stdout.write(v)})')
+          npm install --prefix "$RUNNER_TEMP/native-cli" --no-save "$package@$resolved"
+          echo "$RUNNER_TEMP/native-cli/node_modules/.bin" >> "$GITHUB_PATH"
+          echo "JINGLER_NATIVE_EXPECTED_VERSION=$resolved" >> "$GITHUB_ENV"
+      - name: Certify discovery, prompt and native resume
+        env:
+          JINGLER_NATIVE_CERTIFY: "1"
+          NATIVE_RUNTIME: ${{ matrix.runtime }}
+          NATIVE_VERSION: ${{ matrix.version }}
+          JINGLER_NATIVE_ARTIFACT: ${{ runner.temp }}/native-evidence/${{ matrix.runtime }}-${{ matrix.version }}.json
+        run: pnpm certify:native "$NATIVE_RUNTIME" "$NATIVE_VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: native-${{ matrix.runtime }}-${{ matrix.version }}
+          path: ${{ runner.temp }}/native-evidence/${{ matrix.runtime }}-${{ matrix.version }}.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove installed CLI and evidence
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/native-cli" "$RUNNER_TEMP/native-evidence"

@@ -129,3 +129,24 @@ describe("legacy runtime identity migration", () => {
     })
   })
 })
+
+it("preserves canonical identity and unrelated data alongside a legacy chat", () => {
+  const canonical = {
+    id: "native", runtimeId: "claude", endpointId: "desktop:claude:default",
+    providerId: "anthropic", modelId: "anthropic/opus",
+    continuation: { runtimeId: "claude", endpointId: "desktop:claude:default", id: "native-thread" },
+    transcriptMarker: "native-history"
+  }
+  const source = {
+    ...canonical, id: "session", activeChatId: "native", cli: "claude",
+    worktreePath: "/existing/tree", branch: "existing-branch",
+    chats: [canonical, { id: "legacy", model: "sonnet", resumeId: "old-thread", transcriptMarker: "old-history" }]
+  }
+  const migrated = migrateLegacyRuntimeIdentity(source)
+  expect(migrated).toMatchObject({
+    ...canonical, id: "session", worktreePath: source.worktreePath, branch: source.branch,
+    chats: [canonical, { id: "legacy", legacyModel: "sonnet", legacyResumeId: "old-thread", transcriptMarker: "old-history" }]
+  })
+  expect(migrateLegacyRuntimeIdentity(migrated)).toEqual(migrated)
+  expect(source.chats[1]).toHaveProperty("resumeId", "old-thread")
+})

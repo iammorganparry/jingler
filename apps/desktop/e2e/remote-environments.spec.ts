@@ -1,3 +1,4 @@
+import { nativeCliEndpointId, ProviderId, ProviderModelId, type AgentEndpointCatalog } from "@jingler/core"
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -264,3 +265,40 @@ test("refreshes the paired device endpoint catalog and checks remote auth status
   await expect.poll(() => app.deviceRelay?.endpointRequests()).toContain("refresh")
   await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
 })
+
+for (const status of ["missing", "unsupported"] as const) {
+test(`refreshes a ${status} remote-only endpoint and selects it on its target`, async ({ launchApp }) => {
+  const app = await launchApp({
+    configured: true, withRepo: true, remoteEnvironment: true,
+    sessions: ({ repoPath }) => [localSession(repoPath)],
+    e2eEnv: { JINGLER_CLAUDE_BINARY: "/nonexistent/local-claude" }
+  })
+  const endpointId = nativeCliEndpointId("device_buildbox_abcdefgh", "claude")
+  const catalog: AgentEndpointCatalog = { refreshedAt: "2026-09-25T00:00:00Z", stale: false, endpoints: [{
+    endpoint: { id: endpointId, runtimeId: "claude", targetId: "device_buildbox_abcdefgh", label: "Remote-only Claude", status, version: "2.1.282",
+      features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } },
+    models: [{ providerId: ProviderId.make("anthropic"), id: ProviderModelId.make("anthropic/opus"), label: "Remote-only Opus",
+      capabilities: { contextWindow: 200000, reasoning: [], vision: false }, verification: "unverified", status: "unavailable", selectable: false, certificationKey: null }]
+  }] }
+  app.deviceRelay!.setEndpointCatalog(catalog)
+  await enrollBuildbox(app)
+  await selectComposerEnvironment(app.window)
+  await app.window.getByRole("button", { name: /^Model:/ }).click()
+  await expect(app.window.getByRole("option", { name: /^Remote-only Opus/ })).toHaveCount(0)
+  await app.window.keyboard.press("Escape")
+  app.deviceRelay!.setEndpointCatalog({ ...catalog, endpoints: catalog.endpoints.map(entry => ({
+    endpoint: { ...entry.endpoint, status: "ready" }, models: entry.models.map(model => ({ ...model, status: "ready", selectable: true }))
+  })) })
+  await app.window.getByRole("button", { name: "Account menu" }).click()
+  await app.window.getByRole("menuitem", { name: "Settings" }).click()
+  await app.window.getByRole("button", { name: /Providers/ }).click()
+  await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
+  await app.window.getByRole("button", { name: "Close settings" }).click()
+  await app.window.getByRole("button", { name: /^Model:/ }).click()
+  await expect(app.window.getByText("Remote-only Claude", { exact: true })).toBeVisible()
+  await app.window.getByRole("option", { name: /^Remote-only Opus/ }).click()
+  await expect.poll(() => JSON.parse(readFileSync(join(app.home, "jingler", "sessions.json"), "utf8"))
+    .find((session: { id: string }) => session.id === "session_local_abcdefgh").endpointId).toBe(endpointId)
+})
+}

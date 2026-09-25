@@ -146,3 +146,12 @@ describe("AgentRuntime router", () => {
     expect(adapter.interrupt).not.toHaveBeenCalled()
   })
 })
+
+it("rejects a continuation from another runtime even when its endpoint matches", async () => {
+  const adapter = runtime()
+  const exit = await Effect.runPromiseExit(routerFor(adapter).run(spec({
+    continuation: continuation({ runtimeId: "claude" })
+  }), context).pipe(Stream.runDrain))
+  expect(exit._tag).toBe("Failure")
+  expect(adapter.run).not.toHaveBeenCalled()
+})

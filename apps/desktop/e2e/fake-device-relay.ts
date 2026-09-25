@@ -1,3 +1,4 @@
+import type { AgentEndpointCatalog } from "@jingler/core"
 import { spawn, type ChildProcess } from "node:child_process"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
@@ -49,6 +50,7 @@ export interface FakeDeviceRelay {
   readonly url: string
   readonly token: string
   readonly deviceHome: string
+  readonly setEndpointCatalog: (catalog: AgentEndpointCatalog) => void
   readonly endpointRequests: () => readonly string[]
   readonly sshClaims: () => number
   readonly desktopBearerForwarded: () => boolean
@@ -110,6 +112,7 @@ export const startFakeDeviceRelay = async (
   let paired = false
   let state: "online" | "offline" | "incompatible" = "offline"
   let forcedState: "offline" | "incompatible" | null = null
+  let catalogOverride: AgentEndpointCatalog | undefined
   let discovery: Record<string, unknown> | null = null
   const endpointRequests: string[] = []
   const pendingCatalogs = new Map<string, { targetId: string; finish: (catalog: unknown) => void }>()
@@ -431,7 +434,7 @@ if (route) return route.handle();
     }
     if (message.type === "endpoint-catalog-update" && typeof message.requestId === "string") {
       const pending = pendingCatalogs.get(message.requestId)
-      if (pending?.targetId === message.targetId) pending.finish(message.catalog)
+      if (pending?.targetId === message.targetId) pending.finish(catalogOverride ?? message.catalog)
     }
     if (
       message.type === "announce" &&
@@ -469,6 +472,7 @@ if (route) return route.handle();
     url: baseUrl,
     token: TOKEN,
     deviceHome: options.deviceHome,
+    setEndpointCatalog: (catalog) => { catalogOverride = catalog },
     endpointRequests: () => [...endpointRequests],
     sshClaims: () => claimCount,
     desktopBearerForwarded: () => bearerForwarded,

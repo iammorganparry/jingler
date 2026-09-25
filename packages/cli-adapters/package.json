@@ -57,6 +57,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "eval:native:live": "node --import tsx evals/native/certify.ts",
     "eval:pi:deterministic": "tsx evals/run-eval.ts deterministic",
     "eval:pi:live": "tsx evals/run-eval.ts live",
     "eval:pi:replay": "tsx evals/run-eval.ts replay",

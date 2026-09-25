@@ -13,6 +13,7 @@
     "build": "turbo run build",
     "typecheck": "pnpm version:check && pnpm runtime-contracts:check && turbo run typecheck",
     "test": "vitest run && pnpm --filter @jingler/github-relay test && pnpm --filter @jingler/device-relay test && pnpm --filter @jingler/auth-state test && pnpm --filter @jingler/managed-runtime test",
+    "certify:native": "pnpm --filter @jingler/cli-adapters eval:native:live",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "biome lint . && pnpm lint:complexity",
