@@ -92,6 +92,42 @@ export interface CodeReviewViewProps {
   onDeslopFile?: (path: string) => void
 }
 
+function OmittedFilesNotice({
+  files,
+  diffLineLimit
+}: {
+  readonly files: readonly ReviewOmittedFile[]
+  readonly diffLineLimit: number
+}) {
+  if (files.length === 0) return null
+
+  return (
+    <div
+      data-testid="review-omitted-files"
+      className="flex-none border-b border-hairline bg-panel/40 p-3"
+    >
+      <Callout tone="yellow">
+        {files.length === 1
+          ? "One file is too large to show inline"
+          : `${count.format(files.length)} files are too large to show inline`}
+        {diffLineLimit > 0
+          ? ` (over ${count.format(diffLineLimit)} changed lines or the size cap). `
+          : ". "}
+        {files
+          .slice(0, OMITTED_PREVIEW)
+          .map(
+            (file) =>
+              `${file.path} (+${count.format(file.added)} −${count.format(file.removed)})`
+          )
+          .join(", ")}
+        {files.length > OMITTED_PREVIEW
+          ? ` and ${count.format(files.length - OMITTED_PREVIEW)} more.`
+          : "."}
+      </Callout>
+    </div>
+  )
+}
+
 /**
  * The complete review workflow: one controlled Pierre CodeView, one stable
  * Pierre tree model, and Jingler-owned review actions/persistence around them.
@@ -102,7 +138,7 @@ export function CodeReviewView({
   activePath,
   fileDiffs,
   omittedFiles = [],
-  diffLineLimit = 0,
+  diffLineLimit,
   drafts,
   routeTargetSession,
   connected,
@@ -160,31 +196,10 @@ export function CodeReviewView({
                 ))}
               </div>
             )}
-            {omittedFiles.length > 0 && (
-              <div
-                data-testid="review-omitted-files"
-                className="flex-none border-b border-hairline bg-panel/40 p-3"
-              >
-                <Callout tone="yellow">
-                  {omittedFiles.length === 1
-                    ? "One file is too large to show inline"
-                    : `${count.format(omittedFiles.length)} files are too large to show inline`}
-                  {diffLineLimit > 0
-                    ? ` (over ${count.format(diffLineLimit)} changed lines or the size cap). `
-                    : ". "}
-                  {omittedFiles
-                    .slice(0, OMITTED_PREVIEW)
-                    .map(
-                      (file) =>
-                        `${file.path} (+${count.format(file.added)} −${count.format(file.removed)})`
-                    )
-                    .join(", ")}
-                  {omittedFiles.length > OMITTED_PREVIEW
-                    ? ` and ${count.format(omittedFiles.length - OMITTED_PREVIEW)} more.`
-                    : "."}
-                </Callout>
-              </div>
-            )}
+            <OmittedFilesNotice
+              files={omittedFiles}
+              diffLineLimit={diffLineLimit ?? 0}
+            />
             {files.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center text-[13px] text-dim">
                 <span>

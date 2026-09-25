@@ -1,8 +1,8 @@
 name: Release
 
-# Cut a release from main, by hand. Gate → version+tag → per-platform build &
-# publish to a draft GitHub Release → un-draft. Mirrors gtm-grid's flow, adapted
-# for electron-vite. Requires at least one pending changeset (pnpm changeset).
+# Cut a release from main, by hand. Gate → version+tag → per-platform build →
+# one GitHub Release. Requires at least one pending changeset (pnpm changeset)
+# and a reviewed provider-certification run for the exact commit.
 on:
   workflow_dispatch:
     inputs:
@@ -101,30 +101,39 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-  # Build the installers on each native platform and publish them (plus the
-  # electron-updater latest*.yml channel files) to a DRAFT GitHub Release.
+  # Build native installers without requiring signing credentials. When the
+  # complete Apple secret set exists, macOS builds are signed and notarized;
+  # otherwise they remain installable through macOS's normal manual override.
   build:
-    name: Build ${{ matrix.os }}
+    name: Build ${{ matrix.label }}
     needs: version
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - label: macOS arm64
+            os: macos-14
             args: "--mac --arm64"
-          - os: ubuntu-22.04
+            artifact: desktop-mac-arm64
+          - label: macOS x64
+            os: macos-15-intel
+            args: "--mac --x64"
+            artifact: desktop-mac-x64
+          - label: Linux x64
+            os: ubuntu-22.04
             args: "--linux --x64"
-          - os: windows-latest
+            artifact: desktop-linux-x64
+          - label: Windows x64
+            os: windows-latest
             args: "--win --x64"
+            artifact: desktop-win-x64
     runs-on: ${{ matrix.os }}
-    # Lifted to job level so the step below can test it in `if:`. The `secrets`
-    # context is NOT available to `if:` (only to `env:`/`with:`/`run:`), and
-    # referencing it there is a workflow VALIDATION error — which GitHub reports
-    # by failing this workflow on every push to every branch, even though it only
-    # ever runs on workflow_dispatch. Step-level `env:` isn't visible to its own
-    # step's `if:` either, hence job level.
     env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+      APPLE_API_KEY_ID_SECRET: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_SECRET: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,58 +158,35 @@ jobs:
           cp .artifacts/pi-certification/release-manifest.json packages/core/src/runtime/release-certification-manifest.json
           node -e 'const manifest = require("./packages/core/src/runtime/release-certification-manifest.json"); if (!Array.isArray(manifest.models) || manifest.models.length === 0) throw new Error("Release certification manifest has no selectable models")'
 
-      # macOS notarization: stage the App Store Connect API key from a base64
-      # secret. Skipped (and the build stays unsigned) when the secret is absent.
-      - name: Stage Apple API key (macOS)
-        id: asc
-        if: runner.os == 'macOS' && env.APPLE_API_KEY_P8 != ''
+      - name: Build bundled resources
         run: |
-          mkdir -p "$RUNNER_TEMP/asc"
-          echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
-          echo "path=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_OUTPUT"
+          pnpm --filter @jingler/desktop run build:bundled-plugins
+          pnpm --filter @jingler/desktop run build:device-agent
+          node apps/desktop/scripts/materialize-plannotator-ext.mjs
+          pnpm --filter @jingler/desktop run build
 
-      # The plugins that ship inside the app. Separate from the electron-vite
-      # build because `--filter @jingler/desktop` cannot reach them: the desktop
-      # app does not depend on any plugin, and `plugins/*/dist` is git-ignored, so
-      # a fresh checkout has nothing to stage. Without this the `extraResources`
-      # block in electron-builder.yml copies a manifest with no entry files and
-      # the release ships with its official plugins silently missing.
-      #
-      # The script verifies the built entries exist and exits non-zero if not, so
-      # this step failing is the intended outcome rather than a quiet bad build.
-      - name: Build bundled plugins
-        run: pnpm --filter @jingler/desktop run build:bundled-plugins
-
-      - name: Build device agent
-        run: pnpm --filter @jingler/desktop run build:device-agent
-
-      - name: Materialize bundled Plannotator extension
-        run: node apps/desktop/scripts/materialize-plannotator-ext.mjs
-
-      - name: Build (electron-vite)
-        run: pnpm --filter @jingler/desktop run build
-
-      - name: Package & publish
+      - name: Package desktop installers
         shell: bash
         run: |
-          # An empty CSC_LINK is not equivalent to an absent CSC_LINK for
-          # electron-builder: on macOS it resolves "" to the working directory
-          # and then tries to import that directory as a certificate. Remove the
-          # optional signing variables entirely until signing secrets exist.
-          if [ -z "${CSC_LINK:-}" ]; then
-            unset CSC_LINK CSC_KEY_PASSWORD
+          if [[ "$RUNNER_OS" == "macOS" ]] &&
+             [[ -n "$APPLE_CERTIFICATE" ]] &&
+             [[ -n "$APPLE_CERTIFICATE_PASSWORD" ]] &&
+             [[ -n "$APPLE_API_KEY_P8" ]] &&
+             [[ -n "$APPLE_API_KEY_ID_SECRET" ]] &&
+             [[ -n "$APPLE_API_ISSUER_SECRET" ]]; then
+            mkdir -p "$RUNNER_TEMP/asc"
+            printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/asc/AuthKey.p8"
+            export CSC_LINK="$APPLE_CERTIFICATE"
+            export CSC_KEY_PASSWORD="$APPLE_CERTIFICATE_PASSWORD"
+            export APPLE_API_KEY="$RUNNER_TEMP/asc/AuthKey.p8"
+            export APPLE_API_KEY_ID="$APPLE_API_KEY_ID_SECRET"
+            export APPLE_API_ISSUER="$APPLE_API_ISSUER_SECRET"
+            echo "macOS signing and notarization enabled."
+          else
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
+            echo "Building unsigned installers."
           fi
-          pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish always
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Apple signing/notarization — gated to macOS so the Apple cert is never
-          # applied to the Windows installer (which would break its auto-update).
-          # All empty until the secrets exist → builds stay unsigned but succeed.
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_API_KEY: ${{ steps.asc.outputs.path }}
-          APPLE_API_KEY_ID: ${{ runner.os == 'macOS' && secrets.APPLE_API_KEY_ID || '' }}
-          APPLE_API_ISSUER: ${{ runner.os == 'macOS' && secrets.APPLE_API_ISSUER || '' }}
+          pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish never
 
       - name: Inspect desktop and device artifacts
         shell: bash
@@ -212,14 +198,64 @@ jobs:
           JINGLER_DEVICE_BUNDLE="$RESOURCES_PATH/device-agent/jingler-device-runtime.tgz" \
           pnpm artifacts:check
 
-  # Flip the draft release electron-builder created to public + latest.
+      - name: Collect release files
+        shell: bash
+        run: |
+          mkdir -p .artifacts/release
+          find apps/desktop/release -maxdepth 1 -type f \
+            ! -name 'builder-debug.yml' \
+            -exec cp {} .artifacts/release/ \;
+          test -n "$(find .artifacts/release -type f -print -quit)"
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: .artifacts/release/*
+          if-no-files-found: error
+
+  # Publish only after every native installer passed the packaged-artifact check.
   publish:
     name: Publish release
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Un-draft
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-assets
+
+      - name: Assemble release assets
+        shell: bash
+        run: |
+          mkdir publish-assets
+          find release-assets -type f ! -name 'latest-mac.yml' -exec cp {} publish-assets/ \;
+
+          arm=release-assets/desktop-mac-arm64/latest-mac.yml
+          intel=release-assets/desktop-mac-x64/latest-mac.yml
+          test "$(sed -n 's/^version: //p' "$arm")" = "$(sed -n 's/^version: //p' "$intel")"
+          {
+            sed -n '1,/^files:/p' "$arm"
+            sed -n '/^files:/,/^path:/p' "$arm" | sed '1d;$d'
+            sed -n '/^files:/,/^path:/p' "$intel" | sed '1d;$d'
+            sed -n '/^path:/,$p' "$arm"
+          } > publish-assets/latest-mac.yml
+          test "$(grep -c '^  - url:' publish-assets/latest-mac.yml)" -ge 4
+
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "${{ needs.version.outputs.tag }}" --draft=false --latest
+          TAG: ${{ needs.version.outputs.tag }}
+        shell: bash
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --generate-notes \
+              --title "Jingler $TAG" \
+              --draft
+          fi
+          gh release upload "$TAG" publish-assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
