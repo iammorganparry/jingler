@@ -154,6 +154,21 @@ describe("SetupScreen", () => {
     expect(screen.queryByPlaceholderText("Claude setup-token")).toBeNull();
   });
 
+  it("submits a trimmed Claude API key without connecting the local subscription", () => {
+    const onConnectApi = vi.fn();
+    const onConnectClaude = vi.fn();
+    render(<SetupScreen {...props({ step: "provider", onConnectApi, onConnectClaude })} />);
+    fireEvent.click(screen.getByText("Use an API key instead"));
+    const input = screen.getByPlaceholderText("Provider API key");
+    expect(input.getAttribute("type")).toBe("password");
+    fireEvent.change(input, { target: { value: "  test-claude-key  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save API key" }));
+
+    expect(onConnectApi).toHaveBeenCalledWith("anthropic", "test-claude-key");
+    expect(onConnectClaude).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe("");
+  });
+
   it("submits an API key for the selected BeUI provider", () => {
     const onConnectApi = vi.fn();
     render(<SetupScreen {...props({ step: "provider", onConnectApi })} />);
