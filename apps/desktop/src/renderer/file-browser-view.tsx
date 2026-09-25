@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, DebugViewSnapshot, Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
+import { isLanguageHoverPath } from "@jingler/contracts"
 import {
   AssetBrowser,
   AssetRepositoryTree,
@@ -37,8 +38,6 @@ import {
 } from "./file-diff-context.js"
 
 const DEBUG_HOVER_IDENTIFIER = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
-const LANGUAGE_HOVER_FILE = /\.(?:[cm]?[jt]sx?|java)$/u
-
 type BrowserToken = TokenEventBase & { readonly side?: "additions" | "deletions" }
 interface TokenHoverContent {
   readonly heading: string
@@ -51,15 +50,18 @@ interface TokenHover extends TokenHoverContent {
 }
 
 function useDelayedTokenHover(
-  query: (token: BrowserToken) => Promise<TokenHoverContent | null>
+  query: (token: BrowserToken, signal: AbortSignal) => Promise<TokenHoverContent | null>
 ) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const controller = useRef<AbortController | null>(null)
   const generation = useRef(0)
   const [hover, setHover] = useState<TokenHover | null>(null)
   const leave = useCallback(() => {
     generation.current += 1
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
+    controller.current?.abort()
+    controller.current = null
     setHover(null)
   }, [])
   useEffect(() => {
@@ -70,7 +72,8 @@ function useDelayedTokenHover(
     leave()
     const current = ++generation.current
     timer.current = setTimeout(() => {
-      query(token).then((content) => {
+      controller.current = new AbortController()
+      query(token, controller.current.signal).then((content) => {
         if (generation.current !== current || content === null || !token.tokenElement.isConnected) return
         const bounds = token.tokenElement.getBoundingClientRect()
         const x = Math.max(8, Math.min(bounds.left, window.innerWidth - 392))
@@ -106,24 +109,26 @@ const semanticTokenHover = async (
   path: string,
   symbol: string,
   token: BrowserToken,
-  text?: string
+  text: string | undefined,
+  signal: AbortSignal
 ): Promise<TokenHoverContent | null> => {
-  if (!LANGUAGE_HOVER_FILE.test(path)) return null
+  if (!isLanguageHoverPath(path)) return null
   const result = await rpc.assetHover(
     sessionId,
     path,
     symbol,
     token.lineNumber,
     token.lineCharStart + token.tokenText.indexOf(symbol) + 1,
-    text
+    text,
+    signal
   )
-  return result === null
-    ? null
-    : {
-        heading: symbol,
-        body: result.type,
-        ...(result.documentation === undefined ? {} : { detail: result.documentation })
-      }
+  if (result === null) return null
+  if ("unavailable" in result) return { heading: "Hover unavailable", body: result.unavailable }
+  return {
+    heading: symbol,
+    body: result.type,
+    ...(result.documentation === undefined ? {} : { detail: result.documentation })
+  }
 }
 
 function TokenHoverTooltip({ hover }: { readonly hover: TokenHover | null }) {
@@ -680,10 +685,10 @@ function FileDiffCanvas({
   followedSelection: JinglerLineSelection | null;
 }) {
   const path = browser.selectedPath!
-  const query = useCallback(async (token: BrowserToken): Promise<TokenHoverContent | null> => {
+  const query = useCallback(async (token: BrowserToken, signal: AbortSignal): Promise<TokenHoverContent | null> => {
     const symbol = token.tokenText.trim()
     if (token.side === "deletions" || !DEBUG_HOVER_IDENTIFIER.test(symbol)) return null
-    return semanticTokenHover(sessionId, path, symbol, token)
+    return semanticTokenHover(sessionId, path, symbol, token, undefined, signal)
   }, [path, sessionId])
   const tokenHover = useDelayedTokenHover(query)
   return (
@@ -851,7 +856,7 @@ function TextFileEditor({
     return () => observer.disconnect()
   }, [debugLine])
 
-  const query = useCallback(async (token: BrowserToken): Promise<TokenHoverContent | null> => {
+  const query = useCallback(async (token: BrowserToken, signal: AbortSignal): Promise<TokenHoverContent | null> => {
     const symbol = token.tokenText.trim()
     if (!DEBUG_HOVER_IDENTIFIER.test(symbol)) return null
     if (debugLine !== null) return debugTokenHover(debug, symbol)
@@ -861,7 +866,8 @@ function TextFileEditor({
       payload.path,
       symbol,
       token,
-      browser.draft ?? initialDraft
+      browser.draft ?? initialDraft,
+      signal
     )
   }, [browser.dirty, browser.draft, debug, debugLine, initialDraft, payload.path, sessionId])
   const tokenHover = useDelayedTokenHover(query)

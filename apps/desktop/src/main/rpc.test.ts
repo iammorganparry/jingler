@@ -1071,6 +1071,25 @@ describe("RPC handlers", () => {
         ),
       ).resolves.toMatchObject({ engine: "typescript-7-native", type: "42" });
 
+      writeFileSync(join(worktreePath, "Value.java"), "class Value {}\n");
+      const previousPath = process.env.PATH;
+      process.env.PATH = "";
+      try {
+        await expect(
+          Effect.runPromise(
+            assetHover({
+              sessionId: "editable-asset-session",
+              path: "Value.java",
+              symbol: "Value",
+              line: 1,
+              column: 7,
+            }).pipe(Effect.provide(layer)),
+          ),
+        ).resolves.toMatchObject({ unavailable: expect.stringContaining("JDT.LS could not start") });
+      } finally {
+        process.env.PATH = previousPath;
+      }
+
       const saved = await Effect.runPromise(
         assetWrite({
           sessionId: "editable-asset-session",

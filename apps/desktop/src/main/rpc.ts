@@ -72,6 +72,7 @@ import {
   WorkspaceService,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
+  disposeLanguageIntelligence,
   languageHover,
   ProviderConnections,
   type ProviderConnectionsShape,
@@ -92,7 +93,7 @@ import { appendFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, extname, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import {
   AssetUnsupportedError,
   AuthError,
@@ -166,6 +167,7 @@ import {
   JinglerCoreRpcs,
   JinglerReviewRpcs,
   JinglerRpcs,
+  isLanguageHoverPath,
   SessionDiffStat,
   SessionFileDiff,
   SessionReviewDiff,
@@ -1346,25 +1348,29 @@ export const assetHover = (input: {
   Effect.gen(function* () {
     const worktree = yield* assetWorktree(input.sessionId);
     const payload = yield* AssetService.read(worktree, input.path);
-    if (!("text" in payload) || ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".java"].includes(extname(input.path).toLowerCase())) {
+    if (!("text" in payload) || !isLanguageHoverPath(input.path)) {
       return yield* new AssetUnsupportedError({ path: input.path });
     }
-    return yield* Effect.tryPromise(() =>
-      languageHover(
+    return yield* Effect.tryPromise({
+      try: (signal) => languageHover(
         worktree,
         input.path,
         input.symbol,
         input.line,
         input.column,
-        input.text ?? payload.text
-      )
-    ).pipe(
-      Effect.map((result) => ({
+        input.text ?? payload.text,
+        signal
+      ),
+      catch: (cause) => cause
+    }).pipe(
+      Effect.map((result) => result === null ? null : ({
         engine: result.engine,
         type: result.value.type,
         ...(result.value.documentation === undefined ? {} : { documentation: result.value.documentation })
       })),
-      Effect.catchAll(() => Effect.succeed(null))
+      Effect.catchAll((cause) => Effect.succeed({
+        unavailable: cause instanceof Error ? cause.message : String(cause)
+      }))
     );
   });
 
@@ -1523,7 +1529,12 @@ export const archiveSession = (
   reason: "merged" | "closed",
 ) =>
   Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
     yield* SessionStore.archive(sessionId, reason);
+    const worktreePath = session.worktreePath;
+    if (worktreePath) {
+      yield* Effect.tryPromise(() => disposeLanguageIntelligence(worktreePath)).pipe(Effect.ignore);
+    }
     const offload = yield* makeOffloadCommandRouter
     yield* offload.destroySession(sessionId).pipe(Effect.ignore)
     const route = yield* GitHubAuth.sessionRoutes().pipe(
@@ -4299,6 +4310,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* BackgroundTaskStore.clear(sessionId);
       const offload = yield* makeOffloadCommandRouter
       yield* offload.destroySession(sessionId).pipe(Effect.ignore)
+      if (session?.worktreePath) {
+        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
+      }
       yield* SessionStore.remove(sessionId);
       if (relayRoute) {
         yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(

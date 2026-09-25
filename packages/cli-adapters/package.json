@@ -73,7 +73,7 @@
     "proper-lockfile": "4.1.2",
     "smol-toml": "^1.8.0",
     "typescript": "^7.0.2",
-    "vscode-jsonrpc": "8.2.1",
+    "vscode-jsonrpc": "8.2.0",
     "vscode-languageserver-protocol": "3.17.5",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",

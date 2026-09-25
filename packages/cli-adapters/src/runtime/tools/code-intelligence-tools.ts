@@ -22,7 +22,7 @@ const readTool = <Input, Encoded>(definition: Pick<ToolDefinition<Input, Encoded
   risk: "read",
   roles: codeReadRoles,
   modes: codeReadModes,
-  timeoutMs: 30_000,
+  timeoutMs: 75_000,
   outputBudget: 32_000,
   cancellable: false,
   idempotency: "safe"

@@ -226,11 +226,17 @@ export class AssetListRpcs extends RpcGroup.make(
  * renderer (which calls them through a typed `RpcClient`). Transport is Electron
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
-export const AssetHover = Schema.Struct({
-  engine: Schema.Literal("typescript-7-native", "eclipse-jdtls"),
-  type: Schema.String,
-  documentation: Schema.optional(Schema.String)
-})
+const LANGUAGE_HOVER_PATH = /\.(?:[cm]?[jt]s|[jt]sx|java)$/iu
+export const isLanguageHoverPath = (path: string): boolean => LANGUAGE_HOVER_PATH.test(path)
+
+export const AssetHover = Schema.Union(
+  Schema.Struct({
+    engine: Schema.Literal("typescript-7-native", "eclipse-jdtls"),
+    type: Schema.String,
+    documentation: Schema.optional(Schema.String)
+  }),
+  Schema.Struct({ unavailable: Schema.String })
+)
 export type AssetHover = Schema.Schema.Type<typeof AssetHover>
 
 export class JinglerCoreRpcs extends RpcGroup.make(
