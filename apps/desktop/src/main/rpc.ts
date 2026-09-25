@@ -72,6 +72,7 @@ import {
   WorkspaceService,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
+  languageHover,
   ProviderConnections,
   type ProviderConnectionsShape,
   AgentResourceService,
@@ -91,8 +92,9 @@ import { appendFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import {
+  AssetUnsupportedError,
   AuthError,
   ConfigError,
   GitHubApiError,
@@ -1331,6 +1333,40 @@ export const assetRead = (input: { sessionId: string; path: string }) =>
   Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
     AssetService.read(worktree, input.path),
   );
+
+/** `Asset.hover` handler — semantic hover scoped to one validated worktree file. */
+export const assetHover = (input: {
+  sessionId: string;
+  path: string;
+  symbol: string;
+  line: number;
+  column: number;
+  text?: string;
+}) =>
+  Effect.gen(function* () {
+    const worktree = yield* assetWorktree(input.sessionId);
+    const payload = yield* AssetService.read(worktree, input.path);
+    if (!("text" in payload) || ![".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs", ".java"].includes(extname(input.path).toLowerCase())) {
+      return yield* new AssetUnsupportedError({ path: input.path });
+    }
+    return yield* Effect.tryPromise(() =>
+      languageHover(
+        worktree,
+        input.path,
+        input.symbol,
+        input.line,
+        input.column,
+        input.text ?? payload.text
+      )
+    ).pipe(
+      Effect.map((result) => ({
+        engine: result.engine,
+        type: result.value.type,
+        ...(result.value.documentation === undefined ? {} : { documentation: result.value.documentation })
+      })),
+      Effect.catchAll(() => Effect.succeed(null))
+    );
+  });
 
 /** `Asset.write` handler — revision-guarded replacement in the session worktree. */
 export const assetWrite = (input: {
@@ -5217,6 +5253,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       b.controlWaitForSelector(sessionId, chatId, selector, timeoutMs),
     ),
 
+  "Asset.hover": (input) => assetHover(input),
   "Asset.read": (input) => assetRead(input),
   "Asset.write": (input) => assetWrite(input),
   "Asset.reveal": (input) => assetReveal(input),

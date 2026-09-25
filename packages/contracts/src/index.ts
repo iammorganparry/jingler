@@ -226,6 +226,13 @@ export class AssetListRpcs extends RpcGroup.make(
  * renderer (which calls them through a typed `RpcClient`). Transport is Electron
  * IPC; serialization is JSON. See `apps/desktop/src/main/rpc` for the wiring.
  */
+export const AssetHover = Schema.Struct({
+  engine: Schema.Literal("typescript-7-native", "eclipse-jdtls"),
+  type: Schema.String,
+  documentation: Schema.optional(Schema.String)
+})
+export type AssetHover = Schema.Schema.Type<typeof AssetHover>
+
 export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("RuntimeDiagnostics.get", {
     success: Schema.NullOr(RuntimeDiagnosticSnapshot),
@@ -2042,6 +2049,25 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * for markdown/code/text/csv, base64 for images, and metadata only for PDFs
    * (whose bytes never cross this boundary — Chromium loads them off disk).
    */
+  Rpc.make("Asset.hover", {
+    success: Schema.NullOr(AssetHover),
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      AssetBinaryError,
+      AssetTooLargeError,
+      AssetUnsupportedError,
+      SessionNotFoundError
+    ),
+    payload: {
+      sessionId: Schema.String,
+      path: Schema.String,
+      symbol: Schema.String,
+      line: Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+      column: Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
+      text: Schema.optional(Schema.String)
+    }
+  }),
+
   Rpc.make("Asset.read", {
     success: AssetPayload,
     error: Schema.Union(

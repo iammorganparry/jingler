@@ -12,15 +12,16 @@ interface MockEditorOptions {
 
 interface MockCodeViewProps {
   readonly items: readonly CodeViewItem<PierreAnnotationMetadata>[]
-  readonly createEditor?: (options: MockEditorOptions) => unknown
+  readonly createEditor?: (type: "file", options: MockEditorOptions) => unknown
   readonly onItemEditChange?: (
-    item: CodeViewItem<PierreAnnotationMetadata>,
-    file: FileContents
+    event: { readonly file: FileContents },
+    item: CodeViewItem<PierreAnnotationMetadata>
   ) => void
   readonly onItemEditComplete?: (
+    event: { readonly file: FileContents },
     item: CodeViewItem<PierreAnnotationMetadata>,
-    file: FileContents
-  ) => void
+    nextItem: CodeViewItem<PierreAnnotationMetadata>
+  ) => "accept" | "reject"
   readonly selectedLines?: {
     readonly id: string
     readonly range: {
@@ -53,7 +54,7 @@ interface MockCodeViewProps {
 
 const pierre = vi.hoisted<{
   codeViewProps?: MockCodeViewProps
-  editProviderCreateEditor?: (options: MockEditorOptions) => unknown
+  editProviderCreateEditor?: (type: "file", options: MockEditorOptions) => unknown
   editorOptions: MockEditorOptions[]
 }>(() => ({ editorOptions: [] }))
 
@@ -76,7 +77,7 @@ vi.mock("@pierre/diffs/react", () => ({
     createEditor
   }: {
     readonly children: ReactNode
-    readonly createEditor: (options: MockEditorOptions) => unknown
+    readonly createEditor: (type: "file", options: MockEditorOptions) => unknown
   }) => {
     pierre.editProviderCreateEditor = createEditor
     return children
@@ -94,7 +95,7 @@ vi.mock("@pierre/diffs/react", () => ({
 
 vi.mock("@pierre/diffs/edit", () => ({
   Editor: class {
-    constructor(options: MockEditorOptions) {
+    constructor(_type: "file", options: MockEditorOptions) {
       pierre.editorOptions.push(options)
     }
   }
@@ -185,15 +186,15 @@ describe("PierreEditor", () => {
     // edit: true" the first time an item was marked editable.
     expect(props.createEditor).toBeUndefined()
     const editorChange = vi.fn()
-    expect(pierre.editProviderCreateEditor?.({ onChange: editorChange })).toBeTruthy()
+    expect(pierre.editProviderCreateEditor?.("file", { onChange: editorChange })).toBeTruthy()
     expect(pierre.editorOptions).toEqual([{ onChange: editorChange }])
 
     const first = { ...item.file, contents: "first edit\n" }
     const final = { ...item.file, contents: "final edit\n" }
     act(() => {
-      props.onItemEditChange?.(item, first)
-      props.onItemEditChange?.(item, final)
-      props.onItemEditComplete?.(item, final)
+      props.onItemEditChange?.({ file: first }, item)
+      props.onItemEditChange?.({ file: final }, item)
+      props.onItemEditComplete?.({ file: final }, item, { ...item, file: final })
     })
 
     expect(onDirtyChange.mock.calls).toEqual([

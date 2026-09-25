@@ -109,6 +109,7 @@ import type {
   WebSearchSettingsStatus
 } from "@jingler/core"
 import {
+  type AssetHover,
   AssetListRpcs,
   JinglerCoreRpcs,
   JinglerReviewRpcs,
@@ -627,6 +628,22 @@ export const rpc = {
    * is re-validated in main — the renderer never gets to say where on disk a
    * read lands.
    */
+  assetHover: (
+    sessionId: string,
+    path: string,
+    symbol: string,
+    line: number,
+    column: number,
+    text?: string
+  ): Promise<AssetHover | null> =>
+    run((c) => c.Asset.hover({
+      sessionId,
+      path,
+      symbol,
+      line,
+      column,
+      ...(text === undefined ? {} : { text })
+    })),
   assetRead: (sessionId: string, path: string): Promise<AssetPayload> =>
     run((c) => c.Asset.read({ sessionId, path })),
   /** Save one existing text asset only if its loaded revision is still current. */
