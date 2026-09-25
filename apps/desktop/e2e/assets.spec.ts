@@ -314,6 +314,45 @@ test("keeps the repository tree visible while opening focusing and closing file 
   await showTree(window)
 })
 
+test("places the editable file caret where the user clicks", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: seedAssets,
+    sessions: ({ repoPath }) => [session(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await filesTab(window).click()
+  await window.keyboard.press("Meta+Shift+p")
+  await window.getByPlaceholder("Open a file in Edit repository files…").fill("edit.ts")
+  await window.getByTestId("palette-item-file:src/edit.ts").click()
+
+  const editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  await expect(editor).toBeVisible({ timeout: 15_000 })
+  const token = editor.getByText("editable", { exact: true })
+  const box = await token.boundingBox()
+  if (box === null) throw new Error("editable token has no layout box")
+  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await window.waitForTimeout(800)
+  await window.mouse.click(box.x + box.width - 1, box.y + box.height / 2)
+
+  await expect.poll(() => editor.evaluate((element) => {
+    const selection = element.getRootNode().getSelection()
+    return selection?.focusNode?.textContent === "editable"
+      ? selection.focusOffset
+      : -1
+  })).toBe("editable".length)
+
+  await window.mouse.move(box.x + 1, box.y + box.height / 2)
+  await window.mouse.down()
+  await window.mouse.move(box.x + box.width - 1, box.y + box.height / 2, { steps: 4 })
+  await window.mouse.up()
+  await expect.poll(() => editor.evaluate((element) =>
+    element.getRootNode().getSelection()?.toString()
+  )).toBe("editable")
+})
+
 test("switches a changed file between diff and edit and saves the edited revision", async ({
   launchApp
 }) => {

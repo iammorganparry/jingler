@@ -118,6 +118,22 @@ describe("debug polling lifecycle", () => {
 })
 
 describe("debug session model", () => {
+  it("keeps the model stable across unrelated rerenders", () => {
+    const initialProps: { snapshot: DebugViewSnapshot | undefined } = { snapshot: stopped }
+    const hook = renderHook(
+      ({ snapshot }: { snapshot: DebugViewSnapshot | undefined }) =>
+        useDebugSessionModel("session-1", snapshot),
+      { initialProps }
+    )
+    const first = hook.result.current
+
+    hook.rerender({ snapshot: stopped })
+    expect(hook.result.current).toBe(first)
+
+    hook.rerender({ snapshot: inactive })
+    expect(hook.result.current).not.toBe(first)
+  })
+
   it("routes controls and hover evaluation through the selected session", async () => {
     invoke.mockResolvedValue({ result: "4", type: "number" })
     const { result } = renderHook(() => useDebugSessionModel("session-1", stopped))

@@ -73,12 +73,10 @@ export const useDebugSessionModel = (
   snapshot: DebugViewSnapshot | undefined
 ): DebugSessionModel => {
   const bridge = useMemo(() => pluginBridge("debug"), [])
-  const latest = useRef(snapshot ?? EMPTY)
-  latest.current = snapshot ?? EMPTY
   const control = useCallback(async (action: DebugControlAction) => {
     await bridge.invoke("debug.control", { sessionId, action })
   }, [bridge, sessionId])
   const hover = useCallback(async (input: DebugHover) =>
     bridge.invoke<{ result?: string; type?: string; variablesReference?: number }>("debug.hover", { sessionId, ...input }), [bridge, sessionId])
-  return { snapshot: latest.current, control, hover }
+  return useMemo(() => ({ snapshot: snapshot ?? EMPTY, control, hover }), [control, hover, snapshot])
 }
