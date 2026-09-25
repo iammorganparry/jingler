@@ -1,7 +1,6 @@
-# electron-builder — packages the electron-vite `out/` build into distributables
-# and publishes them (+ the electron-updater `latest*.yml` channel files) to
-# GitHub Releases. Run via `pnpm electron:pack` (local) / `pnpm electron:publish`
-# (CI). See .github/workflows/release.yml for the release flow.
+# electron-builder — packages the electron-vite `out/` build into distributables.
+# CI builds each architecture on its matching native runner, then publishes the
+# installers to GitHub Releases. See .github/workflows/release.yml.
 appId: app.jingler.desktop
 productName: Jingler
 copyright: Copyright © Jingler
@@ -120,11 +119,8 @@ mac:
   icon: build-resources/icon.icns
   category: public.app-category.developer-tools
   target:
-    - target: dmg
-      arch: [arm64, x64]
-    # zip is required by electron-updater on macOS (dmg is first-install only).
-    - target: zip
-      arch: [arm64, x64]
+    - dmg
+    - zip
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build-resources/entitlements.mac.plist
@@ -133,8 +129,7 @@ mac:
 win:
   icon: build-resources/icon.ico
   target:
-    - target: nsis
-      arch: [x64]
+    - nsis
   # No Authenticode cert yet; without this electron-updater would reject the
   # unsigned installer and silently break Windows auto-update. Remove once signed.
   verifyUpdateCodeSignature: false
@@ -148,8 +143,6 @@ linux:
   icon: build-resources/icon.png
   category: Development
   target:
-    - target: AppImage
-      arch: [x64]
-    - target: deb
-      arch: [x64]
+    - AppImage
+    - deb
   artifactName: ${productName}-${version}-${arch}.${ext}
