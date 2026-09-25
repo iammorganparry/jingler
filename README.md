@@ -164,6 +164,25 @@ documented in [apps/server/README.md](apps/server/README.md#github-app-registrat
 Webhook relay deployment, replay, and incident recovery are documented in
 [apps/github-relay/README.md](apps/github-relay/README.md).
 
+## Desktop releases
+
+Run the **Release** workflow from GitHub Actions to build downloadable desktop installers. The
+selected commit must be on `main`, have at least one pending Changeset, and have a successful
+`pi-provider-evals` run for that exact commit; paste that run ID into `certification_run_id`.
+
+A successful run creates a GitHub Release and also keeps four downloadable workflow artifacts:
+
+- `desktop-mac-arm64` — Apple Silicon DMG and ZIP
+- `desktop-mac-x64` — Intel DMG and ZIP
+- `desktop-linux-x64` — AppImage and Debian package
+- `desktop-win-x64` — NSIS installer
+
+Signing is optional. If all five Apple secrets (`APPLE_CERTIFICATE`,
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`) are
+configured, macOS builds are signed and notarized. Otherwise every platform still builds and
+publishes unsigned installers. On macOS, open an unsigned app once by right-clicking **Jingler** and
+choosing **Open**, or approve it under **System Settings → Privacy & Security**.
+
 ## Continuous deployment
 
 Every successful `CI` run for a push to `main` deploys the exact tested commit
