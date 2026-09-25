@@ -34,6 +34,11 @@ describe("Jingler model additions", () => {
     registerClaudeCliProvider(subscriptionRuntime, { cwd: "/tmp" })
     expect(subscriptionRuntime.getRegisteredProviderConfig("anthropic")?.streamSimple)
       .toBeTypeOf("function")
+    expect(subscriptionRuntime.getModel("anthropic", "claude-opus-5-5")).toMatchObject({
+      name: "Claude Opus 5.5",
+      contextWindow: 1_000_000,
+      maxTokens: 128_000
+    })
   })
 })
 

@@ -99,10 +99,16 @@ export const registerClaudeCliProvider = (
 ): void => {
   const anthropic = runtime.getProvider("anthropic")
   if (!anthropic?.getModels().every(({ api }) => api === "anthropic-messages")) return
+  const models = anthropic.getModels()
+  // Claude CLI ships this id before pi's catalogue; inherit metadata until pi catches up.
+  const opus5 = runtime.getModel("anthropic", "claude-opus-5")
   runtime.registerProvider("anthropic", {
     ...runtime.getRegisteredProviderConfig("anthropic"),
     api: "anthropic-messages",
-    streamSimple: createClaudeCliStreamSimple(options)
+    streamSimple: createClaudeCliStreamSimple(options),
+    models: opus5 === undefined || models.some(({ id }) => id === "claude-opus-5-5")
+      ? [...models]
+      : [...models, { ...opus5, id: "claude-opus-5-5", name: "Claude Opus 5.5" }]
   })
 }
 
@@ -262,6 +268,9 @@ export const discoverPiModels = (
         signal
       })
       registerJinglerModels(runtime)
+      if (connection.authKind === "claude-setup-token") {
+        registerClaudeCliProvider(runtime, {})
+      }
       return (await runtime.getAvailable(connection.providerId, { signal })).map(
         (model) => ({
           providerId: Schema.decodeUnknownSync(ProviderId)(model.provider),
