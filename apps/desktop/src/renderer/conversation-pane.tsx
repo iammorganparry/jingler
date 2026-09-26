@@ -110,6 +110,17 @@ const localMcp = (
   ? { servers: servers ?? [], add, setApiKey, setAuth, authorize }
   : { servers: [], add: undefined, setApiKey: undefined, setAuth: undefined, authorize: undefined }
 
+/**
+ * MCP recovery cards the operator has dismissed, for the life of the app run.
+ * Module scope rather than component state: the pane remounts on every session
+ * switch, and a dismissed "Reconnect runpod" reappearing on each one is the
+ * nagging this exists to stop. A restart shows it again — the server still
+ * needs auth, and that should not be silently forgotten forever.
+ */
+const dismissedMcpRecovery = new Set<string>()
+
+const mcpRecoveryKey = (server: McpServer) => `${server.name}:${server.authKind}`
+
 function McpRecoveryCards({
   servers,
   setApiKey,
@@ -121,7 +132,10 @@ function McpRecoveryCards({
 }) {
   const [apiKeyServer, setApiKeyServer] = useState<McpServer | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const needsAuth = servers.filter((server) => server.enabled && server.authState === "needs-auth")
+  const [, setDismissed] = useState(0)
+  const needsAuth = servers.filter((server) =>
+    server.enabled && server.authState === "needs-auth" && !dismissedMcpRecovery.has(mcpRecoveryKey(server))
+  )
   return (
     <>
       {error !== null && (
@@ -131,8 +145,14 @@ function McpRecoveryCards({
         <RuntimeRecoveryCard
           key={server.name}
           icon={<McpBrand server={server} />}
+          label="MCP server recovery"
+          kind="MCP server"
           title={`Reconnect ${server.displayName}`}
-          message={`${server.displayName} needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run.`}
+          message={`The ${server.displayName} MCP server needs ${server.authKind === "oauth" ? "authorization" : "a new API key"} before its tools can run. Other tools keep working.`}
+          onDismiss={() => {
+            dismissedMcpRecovery.add(mcpRecoveryKey(server))
+            setDismissed((count) => count + 1)
+          }}
           actionLabel={server.authKind === "oauth" ? "Authorize" : "Add API key"}
           actionDisabled={server.authKind === "oauth" ? authorize === undefined : setApiKey === undefined}
           onAction={() => {
