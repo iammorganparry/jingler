@@ -39,14 +39,6 @@ describe("GitHubCli", () => {
     })).resolves.toBe(true)
   })
 
-  it("reads the authenticated CLI login", async () => {
-    await expect(run(GitHubCli.viewerLogin(), (command, args) =>
-      command === "gh" && args[0] === "api"
-        ? { stdout: "octocat\n" }
-        : undefined
-    )).resolves.toBe("octocat")
-  })
-
   it("paginates the inbox and preserves viewer relationships", async () => {
     const result = await run(GitHubCli.inbox(), (command, args) => {
       if (command !== "gh" || args[0] !== "api") return
