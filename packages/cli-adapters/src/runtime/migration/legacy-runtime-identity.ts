@@ -20,6 +20,8 @@ const LegacyChatObject = Schema.Struct({
   modelId: Schema.optional(Schema.Unknown),
   continuation: Schema.optional(Schema.Unknown),
   piSessionId: Schema.optional(Schema.Unknown),
+  connectionSelectionRequired: Schema.optional(Schema.Unknown),
+  modelSelectionRequired: Schema.optional(Schema.Unknown),
   legacyModel: Schema.optional(Schema.Unknown),
   legacyResumeId: Schema.optional(Schema.Unknown)
 })
@@ -37,7 +39,9 @@ const LegacySessionObject = Schema.Struct({
   providerId: Schema.optional(Schema.Unknown),
   modelId: Schema.optional(Schema.Unknown),
   continuation: Schema.optional(Schema.Unknown),
-  piSessionId: Schema.optional(Schema.Unknown)
+  piSessionId: Schema.optional(Schema.Unknown),
+  connectionSelectionRequired: Schema.optional(Schema.Unknown),
+  modelSelectionRequired: Schema.optional(Schema.Unknown)
 })
 const LegacyConfigObject = Schema.Struct({
   defaultConnectionId: Schema.optional(Schema.Unknown),
@@ -140,6 +144,16 @@ const continuationFor = (
     : { runtimeId: "pi", endpointId, id }
 }
 
+const selectionFlags = (runtimeId: AgentRuntimeId, connection: unknown, model: unknown, resolved: ResolvedRuntimeIdentity | null, existingConnectionFlag: unknown, existingModelFlag: unknown) => runtimeId === "pi"
+  ? {
+      connectionSelectionRequired: connection === undefined && resolved === null,
+      modelSelectionRequired: model === undefined && resolved === null
+    }
+  : {
+      ...(typeof existingConnectionFlag === "boolean" ? { connectionSelectionRequired: existingConnectionFlag } : {}),
+      ...(typeof existingModelFlag === "boolean" ? { modelSelectionRequired: existingModelFlag } : {})
+    }
+
 const migrateChat = (
   chat: unknown,
   legacyCli: unknown,
@@ -164,10 +178,11 @@ const migrateChat = (
     piSessionId: _piSessionId,
     ...rest
   } = chat
+  const runtimeId = Schema.is(AgentRuntimeId)(chat.runtimeId) ? chat.runtimeId : "pi"
 
   return {
     ...rest,
-    runtimeId: Schema.is(AgentRuntimeId)(chat.runtimeId) ? chat.runtimeId : "pi",
+    runtimeId,
     ...(endpointId === undefined ? {} : { endpointId }),
     ...preservedRuntimeFields({
       connectionId: existingConnection,
@@ -176,8 +191,7 @@ const migrateChat = (
     }),
     ...resolvedFields(chat, resolved, providerId),
     ...(continuation === undefined ? {} : { continuation }),
-    connectionSelectionRequired: existingConnection === undefined && resolved === null,
-    modelSelectionRequired: existingModel === undefined && resolved === null,
+    ...selectionFlags(runtimeId, existingConnection, existingModel, resolved, chat.connectionSelectionRequired, chat.modelSelectionRequired),
     ...legacyHistory(legacyModel, legacyResumeId)
   }
 }
@@ -221,16 +235,16 @@ export function migrateLegacyRuntimeIdentity(
     piSessionId: _piSessionId,
     ...session
   } = value
+  const runtimeId = Schema.is(AgentRuntimeId)(value.runtimeId) ? value.runtimeId : "pi"
 
   return {
     ...session,
     ...(chats === undefined ? {} : { chats }),
-    runtimeId: Schema.is(AgentRuntimeId)(value.runtimeId) ? value.runtimeId : "pi",
+    runtimeId,
     ...(endpointId === undefined ? {} : { endpointId }),
     ...resolvedFields(value, resolved, providerId),
     ...(continuation === undefined ? {} : { continuation }),
-    connectionSelectionRequired: value.connectionId === undefined && resolved === null,
-    modelSelectionRequired: value.modelId === undefined && resolved === null,
+    ...selectionFlags(runtimeId, value.connectionId, value.modelId, resolved, value.connectionSelectionRequired, value.modelSelectionRequired),
     ...(typeof value.cli === "string" ? { legacyCli: value.cli } : {}),
     ...legacyHistory(legacyModel, legacyResumeId)
   }

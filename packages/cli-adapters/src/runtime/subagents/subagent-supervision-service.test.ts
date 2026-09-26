@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
@@ -293,6 +294,24 @@ describe("SubagentSupervisionService", () => {
       message: "Control request ID cannot be verified against the original payload"
     })
     expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("migrates persisted version-2 parentPiSessionId journals", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-control-journal-"))
+    roots.push(root)
+    const directory = join(root, ".jingler-supervision")
+    await mkdir(directory, { recursive: true })
+    const request = { version: 2, requestId: "legacy-request", parentPiSessionId: "parent", runId: "run-1", action: "stop", message: null, replyTo: null }
+    await writeFile(join(directory, `${createHash("sha256").update("parent").digest("hex")}.json`), JSON.stringify({
+      version: 2, parentPiSessionId: "parent", sequence: 1,
+      pending: [{ request, sequence: 1 }], outcomes: [], requests: [request],
+      receipts: [{ version: 2, messageId: "legacy-receipt", parentPiSessionId: "parent", subagentId: "worker", sequence: 1, status: "delivered", occurredAt: 1, message: null }]
+    }))
+    const loaded = await Effect.runPromise(makeSubagentControlJournal({ asyncDir: root, parentRuntimeSessionId: "parent" }).load)
+    expect(loaded.parentRuntimeSessionId).toBe("parent")
+    expect(loaded.pending[0]?.request.parentRuntimeSessionId).toBe("parent")
+    expect(loaded.requests?.[0]?.parentRuntimeSessionId).toBe("parent")
+    expect(loaded.receipts[0]?.parentRuntimeSessionId).toBe("parent")
   })
 
   it("restores accepted outcomes without reapplying native controls", async () => {

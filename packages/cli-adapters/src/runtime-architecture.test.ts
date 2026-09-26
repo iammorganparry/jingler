@@ -59,7 +59,8 @@ describe("production runtime architecture", () => {
 
   it("keeps PI identity out of generic production contracts", () => {
     const allowed = new Set([
-      "packages/cli-adapters/src/runtime/migration/legacy-runtime-identity.ts"
+      "packages/cli-adapters/src/runtime/migration/legacy-runtime-identity.ts",
+      "packages/cli-adapters/src/runtime/migration/legacy-subagent-control-journal.ts"
     ])
     expect(offenders(PI_IDENTITY).filter((path) => !allowed.has(path))).toStrictEqual([])
   })

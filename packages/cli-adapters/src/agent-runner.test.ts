@@ -984,6 +984,45 @@ describe("AgentRunner resume across restarts", () => {
     }
   )
 
+  it("ignores a late Started and rollback from an endpoint superseded mid-startup", async () => {
+    seedBareSession()
+    let markReady = () => {}
+    let releaseStart = () => {}
+    const ready = new Promise<void>((resolve) => { markReady = resolve })
+    const release = new Promise<void>((resolve) => { releaseStart = resolve })
+    const adapter = Layer.succeed(AgentTurnDriver, AgentTurnDriver.of({
+      run: (_id, _spec, ctx) => Effect.gen(function* () {
+        yield* Effect.sync(markReady)
+        yield* Effect.promise(() => release)
+        yield* ctx.emit({ _tag: "Started", sessionId: "old-owner" })
+        yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+      }),
+      stop: () => Effect.void
+    }))
+    const base = Layer.mergeAll(
+      AgentRunner.Default, BrowserControlMcpServiceTest, InMemorySecretStoreLive,
+      ConfigService.Default, SessionStore.Default, TranscriptStore.Default,
+      BackgroundTaskStore.Default, adapter, ContextManager.Default, temp.layer
+    )
+    await Effect.runPromise(Effect.gen(function* () {
+      const claude = nativeCliEndpointId("desktop", "claude")
+      const codex = nativeCliEndpointId("desktop", "codex")
+      yield* SessionStore.setAgentModel(SESSION, SESSION, "claude", claude, TEST_RUNTIME.providerId, ProviderModelId.make("anthropic/opus"))
+      const runner = yield* AgentRunner
+      const fiber = yield* Effect.fork(runner.prompt(SESSION, SESSION, "old run").pipe(Stream.runDrain))
+      yield* Effect.promise(() => ready)
+      yield* SessionStore.setAgentModel(SESSION, SESSION, "codex", codex, TEST_RUNTIME.providerId, ProviderModelId.make("openai/gpt"))
+      yield* Effect.sync(releaseStart)
+      yield* Fiber.join(fiber)
+      const selected = yield* SessionStore.get(SESSION)
+      expect(selected.chats[0]).toMatchObject({ runtimeId: "codex", endpointId: codex, modelId: "openai/gpt" })
+      expect(selected.chats[0]?.continuation).toBeUndefined()
+      yield* SessionStore.rollbackAgentModel(SESSION, SESSION)
+      const rolledBack = yield* SessionStore.get(SESSION)
+      expect(rolledBack.chats[0]?.runtimeId ?? rolledBack.runtimeId).toBe("pi")
+    }).pipe(Effect.provide(base)))
+  })
+
   it("persists the pi session id and resumes it after restart", async () => {
     seedBareSession()
     const captured: { continuation: string | null } = { continuation: null }

@@ -147,6 +147,8 @@ it("preserves canonical identity and unrelated data alongside a legacy chat", ()
     ...canonical, id: "session", worktreePath: source.worktreePath, branch: source.branch,
     chats: [canonical, { id: "legacy", legacyModel: "sonnet", legacyResumeId: "old-thread", transcriptMarker: "old-history" }]
   })
+  expect(migrated).not.toHaveProperty("connectionSelectionRequired")
+  expect((migrated as { chats: unknown[] }).chats[0]).not.toHaveProperty("connectionSelectionRequired")
   expect(migrateLegacyRuntimeIdentity(migrated)).toEqual(migrated)
   expect(source.chats[1]).toHaveProperty("resumeId", "old-thread")
 })

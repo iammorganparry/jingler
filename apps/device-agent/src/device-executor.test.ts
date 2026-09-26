@@ -14,16 +14,21 @@ import type {
   Session
 } from "@jingler/core"
 import {
+  AgentEndpointCatalogEntry,
+  ProviderCatalog,
   ProviderConnectionId,
   ProviderId,
-  ProviderModelId
+  ProviderModelId,
+  SetSessionAgentModelInput
 } from "@jingler/core"
 import { Effect, Layer, Schema } from "effect"
 import { describe, expect, it, vi } from "vitest"
 import {
   DeviceOperationError,
+  endpointSelectionAvailable,
   ensureDeviceProject,
   makeDeviceSessionCommandExecutor,
+  piConnectionForSelection,
   type DeviceExecutorServices
 } from "./device-executor.js"
 import { SessionCommandHandler } from "./session-handler.js"
@@ -60,6 +65,7 @@ const services = (): DeviceExecutorServices => ({
   answerQuestion: vi.fn(async () => undefined),
   steer: vi.fn(async () => ({ status: "accepted" })),
   stop: vi.fn(async () => undefined),
+  setAgentModel: vi.fn(async () => resultSession),
   subagentFleetSnapshot: vi.fn(async () => ({
     version: 2 as const,
     parentRuntimeSessionId: "pi-session",
@@ -181,6 +187,39 @@ describe("device session command executor", () => {
     )
     expect(dependencies.create).toHaveBeenCalledWith(input)
     expect(result).toBe(resultSession)
+  })
+
+  it("persists endpoint model changes on the device session store", async () => {
+    const dependencies = services()
+    const input = {
+      sessionId: "session_1",
+      chatId: "chat_1",
+      runtimeId: "claude" as const,
+      endpointId: "device:claude:default",
+      providerId: "anthropic",
+      modelId: "anthropic/opus"
+    }
+    const result = await makeDeviceSessionCommandExecutor(dependencies).execute(
+      command("AgentEndpoint.setModel", input),
+      async () => undefined
+    )
+    expect(dependencies.setAgentModel).toHaveBeenCalledWith(input)
+    expect(result).toBe(resultSession)
+  })
+
+  it("rejects a native model that the device no longer exposes as selectable", () => {
+    const input = Schema.decodeUnknownSync(SetSessionAgentModelInput)({ sessionId: "session_1", chatId: "chat_1", runtimeId: "claude", endpointId: "device:claude:default", providerId: "anthropic", modelId: "anthropic/opus" })
+    const endpoint = Schema.decodeUnknownSync(AgentEndpointCatalogEntry)({
+      endpoint: { id: input.endpointId, runtimeId: "claude", targetId: "device", label: "Claude", status: "ready", version: "2.1.282", features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } },
+      models: [{ providerId: input.providerId, id: input.modelId, label: "Opus", capabilities: { contextWindow: null, reasoning: [], reasoningCanDisable: false, vision: false, nativeWebSearch: false }, verification: "unverified", certificationKey: null, status: "unavailable", selectable: false }]
+    })
+    expect(endpointSelectionAvailable(endpoint, input)).toBe(false)
+  })
+
+  it("rejects stale PI catalog state before persisting a remote model", () => {
+    const input = Schema.decodeUnknownSync(SetSessionAgentModelInput)({ sessionId: "session_1", chatId: "chat_1", runtimeId: "pi", endpointId: "device:pi:connection", providerId: "openai", modelId: "openai/model" })
+    const catalog = Schema.decodeUnknownSync(ProviderCatalog)({ refreshedAt: "2026-01-01T00:00:00.000Z", stale: true, connections: [] })
+    expect(piConnectionForSelection(catalog, input)).toBeUndefined()
   })
 
   it("streams Agent.run events before returning command completion", async () => {

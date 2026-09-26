@@ -1,5 +1,8 @@
+import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { makeOpenCodeRuntimeRegistration } from "@jingler/cli-adapters/runtime/opencode/runtime"
+import { probeCodexEndpoint } from "@jingler/cli-adapters/runtime/codex/endpoint"
 import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/codex/runtime"
+import { probeClaudeEndpoint } from "@jingler/cli-adapters/runtime/providers/claude-endpoint"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
@@ -36,6 +39,7 @@ import { PluginHost } from "@jingler/cli-adapters/plugin-host"
 import { PluginRegistry } from "@jingler/cli-adapters/plugins"
 import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
+import { ProviderConnections } from "@jingler/cli-adapters/runtime/providers/provider-connections"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import {
   WorkspaceService,
@@ -67,6 +71,8 @@ import {
   OwnedDeviceOffloadExecute as OwnedOffloadExecute,
   QuestionAnswer,
   ReasoningSetting,
+  SetSessionAgentModelInput,
+  piEndpointId,
   Project,
   RemotePublishCompleteInput,
   RemotePublishPrepared,
@@ -77,6 +83,8 @@ import {
   WorkspaceTransferCheckpoint
 } from "@jingler/core"
 import type {
+  AgentEndpointCatalogEntry,
+  ProviderCatalog,
   CreateSessionFromIssueInput as CreateSessionFromIssueInputValue,
   CreateSessionFromPrInput as CreateSessionFromPrInputValue,
   CreateSessionInput as CreateSessionInputValue,
@@ -255,6 +263,7 @@ export interface DeviceExecutorServices {
     input: Schema.Schema.Type<typeof SteerPayload>
   ) => Promise<unknown>
   readonly stop: (sessionId: string, chatId: string) => Promise<void>
+  readonly setAgentModel: (input: Schema.Schema.Type<typeof SetSessionAgentModelInput>) => Promise<SessionValue>
   readonly subagentFleetSnapshot: (
     sessionId: string,
     chatId: string,
@@ -372,6 +381,11 @@ export const makeDeviceSessionCommandExecutor = (
 
     async function executeWorkspaceOperation() {
       switch (command.operation) {
+        case "AgentEndpoint.setModel": {
+          const input = decodePayload(command, SetSessionAgentModelInput)
+          if (input.sessionId !== command.sessionId) throw new DeviceOperationError({ reason: "invalid-payload", operation: command.operation, message: "Remote model selection session mismatch" })
+          return services.setAgentModel(input)
+        }
         case "Sessions.transcriptPage": {
           const page = await services.transcriptPage(
             decodePayload(command, TranscriptPagePayload)
@@ -516,6 +530,7 @@ const deviceRuntime = (root: string, targetId: string) => {
     ProjectService.Default,
     ContextManager.Default,
     ConfigService.Default,
+    providers.ProviderConnectionsLive,
     GitHubApi.Default.pipe(
       Layer.provide(GitHubCli.Default),
       Layer.provideMerge(GitHubAuth.Default)
@@ -575,6 +590,23 @@ export const ensureDeviceProject = (input: { url: string; name: string }) => Eff
     name: input.name
   })
 })
+
+export const endpointSelectionAvailable = (entry: AgentEndpointCatalogEntry, input: Schema.Schema.Type<typeof SetSessionAgentModelInput>) =>
+  entry.endpoint.id === input.endpointId && entry.endpoint.runtimeId === input.runtimeId && entry.endpoint.status === "ready" &&
+  entry.models.some((model) => model.providerId === input.providerId && model.id === input.modelId && model.selectable)
+
+export const piConnectionForSelection = (catalog: ProviderCatalog, input: Schema.Schema.Type<typeof SetSessionAgentModelInput>) => catalog.stale
+  ? undefined
+  : catalog.connections.find(({ connection, models }) =>
+      piEndpointId(connection.targetId, connection.id) === input.endpointId &&
+      models.some((model) => model.providerId === input.providerId && model.id === input.modelId && model.selectable)
+    )?.connection
+
+const probeNativeEndpoint = (runtimeId: "claude" | "codex" | "opencode", targetId: string) => {
+  if (runtimeId === "claude") return probeClaudeEndpoint({ targetId })
+  if (runtimeId === "codex") return probeCodexEndpoint({ targetId })
+  return probeOpenCodeEndpoint({ targetId })
+}
 
 /** Install the real cli-adapters runtime used by the `serve` command. */
 export const makeLiveDeviceSessionCommandExecutor = (
@@ -665,6 +697,21 @@ export const makeLiveDeviceSessionCommandExecutor = (
     stop: (sessionId, chatId) => run(
       Effect.flatMap(AgentRunner, (runner) => runner.stop(sessionId, chatId))
     ),
+    setAgentModel: (input) => run(Effect.gen(function* () {
+      if (input.runtimeId !== "pi") {
+        const nativeRuntime = input.runtimeId
+        const endpoint = yield* Effect.tryPromise(() => probeNativeEndpoint(nativeRuntime, targetId))
+        if (!endpointSelectionAvailable(endpoint, input)) return yield* Effect.fail(new Error("Agent endpoint model is unavailable"))
+        yield* SessionStore.setAgentModel(input.sessionId, input.chatId, input.runtimeId, input.endpointId, input.providerId, input.modelId)
+        return yield* SessionStore.get(input.sessionId)
+      }
+      const providers = yield* ProviderConnections
+      const catalog = yield* providers.refreshCatalog
+      const connection = piConnectionForSelection(catalog, input)
+      if (connection === undefined) return yield* Effect.fail(new Error("Agent endpoint model is unavailable"))
+      const runner = yield* AgentRunner
+      return yield* runner.setModel(input.sessionId, input.chatId, connection.id, input.providerId, input.modelId)
+    })),
     subagentFleetSnapshot: (sessionId, chatId, parentRuntimeSessionId) => run(
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId)

@@ -341,7 +341,7 @@ describe("encrypted tunnel contracts", () => {
 
 it("pins exact public endpoint/login fields and rejects token-bearing messages", () => {
   expect(Object.keys(NativeEndpointLogin.fields).sort()).toEqual(["loginId", "userCode", "verificationUrl"])
-  expect(Object.keys(EndpointCatalogRequest.fields).sort()).toEqual(["action", "endpointId", "loginId", "requestId", "targetId", "type", "version"])
+  expect(Object.keys(EndpointCatalogRequest.fields).sort()).toEqual(["action", "deadlineAt", "endpointId", "loginId", "requestId", "targetId", "type", "version"])
   expect(Object.keys(EndpointCatalogUpdate.fields).sort()).toEqual(["catalog", "login", "loginError", "requestId", "targetId", "type", "version"])
   const login = { loginId: "login", verificationUrl: "https://example.com/device", userCode: "ABCD" }
   const request = { type: "endpoint-catalog-request", version: REMOTE_PROTOCOL_VERSION, requestId: "request-1", targetId: "device-1", action: "auth-status" }

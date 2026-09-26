@@ -14,6 +14,7 @@ import type {
 } from "@jingler/core"
 import {
   DeviceControlClientMessage,
+  ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS,
   DevicePublicKey as DevicePublicKeySchema,
   DeviceEncryptionPublicKey as DeviceEncryptionPublicKeySchema,
   RemoteDeviceCapabilities as RemoteDeviceCapabilitiesSchema,
@@ -243,7 +244,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   private scheduledAlarmAt: number | null | undefined
   private readonly pendingEndpointRequests = new Map<
     string,
-    { readonly deviceId: string; readonly action: EndpointControlInput["action"]; readonly targetId: string; readonly createdAt: number; readonly socket: WebSocket; readonly finish: (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => void }
+    { readonly deviceId: string; readonly action: EndpointControlInput["action"]; readonly targetId: string; readonly deadlineAt: number; readonly socket: WebSocket; readonly finish: (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => void }
   >()
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -522,7 +523,7 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       pending.socket !== socket ||
       pending.deviceId !== attachment.deviceId ||
       pending.targetId !== message.targetId ||
-      nowSeconds - pending.createdAt >= 10
+      Date.now() >= pending.deadlineAt
     ) {
       socket.send(JSON.stringify({ type: "error", code: "stale-endpoint-catalog" }))
       return
@@ -992,7 +993,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     requestId: string,
     action: EndpointControlInput["action"],
     nowSeconds = Math.floor(Date.now() / 1_000),
-    input?: EndpointControlInput
+    input?: EndpointControlInput,
+    timeoutMs = ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS
   ): Promise<Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>> {
     if (requestId.length === 0 || requestId.length > 128 || this.pendingEndpointRequests.size >= 64 || this.pendingEndpointRequests.has(requestId)) return null
     const discovery = await this.getDiscovery(deviceId)
@@ -1015,10 +1017,11 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         this.pendingEndpointRequests.delete(requestId)
         resolve(value)
       }
-      const timer = setTimeout(() => finish(null), 10_000)
-      this.pendingEndpointRequests.set(requestId, { deviceId, action, targetId, createdAt: nowSeconds, socket, finish })
+      const deadlineAt = Date.now() + timeoutMs
+      const timer = setTimeout(() => finish(null), timeoutMs)
+      this.pendingEndpointRequests.set(requestId, { deviceId, action, targetId, deadlineAt, socket, finish })
       try {
-        socket.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, targetId, action, endpointId: input?.endpointId, loginId: input?.loginId }))
+        socket.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, deadlineAt, targetId, action, endpointId: input?.endpointId, loginId: input?.loginId }))
       } catch {
         finish(null)
       }

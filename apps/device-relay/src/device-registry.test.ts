@@ -298,8 +298,8 @@ describe("pending device pairing", () => {
       pair[0].accept()
       pair[1].serializeAttachment({ deviceId, generation: 1, expiresAt: Math.floor(Date.now() / 1000) + 120 })
       const catalog = { endpoints: [], refreshedAt: "2026-09-25T00:00:00.000Z", stale: false }
-      const reply = (requestId: string, target = targetId) => instance.webSocketMessage(pair[1], JSON.stringify({
-        type: "endpoint-catalog-update", version: 1, requestId, targetId: target, catalog
+      const reply = (requestId: string, target = targetId, responseCatalog = catalog) => instance.webSocketMessage(pair[1], JSON.stringify({
+        type: "endpoint-catalog-update", version: 1, requestId, targetId: target, catalog: responseCatalog
       }))
       const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
       expect(await instance.requestEndpointCatalog(deviceId, "wrong", "wrong-request", "refresh")).toBeNull()
@@ -320,12 +320,17 @@ describe("pending device pairing", () => {
       expect(await loginPending).toMatchObject({ login })
       expect(await instance.getDiscovery(deviceId)).not.toHaveProperty("login")
       expect(JSON.stringify(state.storage.sql.exec("SELECT discovery_json FROM device_discovery WHERE device_id = ?", deviceId).toArray())).not.toContain("CODE")
+      // Valid probes may exceed the relay's former ten-second window.
+      const slow = instance.requestEndpointCatalog(deviceId, targetId, "request-slow", "refresh", undefined, undefined, 30)
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      await reply("request-slow")
+      expect(await slow).toMatchObject({ deviceId })
       // A late duplicate cannot replace accepted discovery.
       await reply("request-new")
       const start = Date.now()
-      expect(await instance.requestEndpointCatalog(deviceId, targetId, "request-timeout", "refresh")).toBeNull()
-      expect(Date.now() - start).toBeGreaterThanOrEqual(10_000)
-      await reply("request-timeout")
+      expect(await instance.requestEndpointCatalog(deviceId, targetId, "request-timeout", "refresh", undefined, undefined, 20)).toBeNull()
+      expect(Date.now() - start).toBeGreaterThanOrEqual(20)
+      await reply("request-timeout", targetId, { ...catalog, refreshedAt: "stale-response" })
       expect((await instance.getDiscovery(deviceId))?.discovery?.capabilities.endpointCatalog).toEqual(catalog)
       pair[0].close()
     })

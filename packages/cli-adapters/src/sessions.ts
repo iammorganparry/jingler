@@ -1253,24 +1253,51 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           }
         })
 
+      const agentModelMatches = (session: Session, chatId: string, expected: { runtimeId: AgentRuntimeId; endpointId: AgentEndpointId; providerId: ProviderId | undefined; modelId: ProviderModelId }) => {
+        const chat = session.chats.find((candidate) => candidate.id === chatId)
+        return (chat?.runtimeId ?? session.runtimeId) === expected.runtimeId &&
+          (chat?.endpointId ?? session.endpointId) === expected.endpointId &&
+          (chat?.providerId ?? session.providerId) === expected.providerId &&
+          (chat?.modelId ?? session.modelId) === expected.modelId
+      }
+
+      const confirmAgentStart = (
+        id: string,
+        chatId: string,
+        expected: { runtimeId: AgentRuntimeId; endpointId: AgentEndpointId; providerId: ProviderId | undefined; modelId: ProviderModelId },
+        continuation?: RuntimeContinuation
+      ) => update(id, (session) => {
+        if (!agentModelMatches(session, chatId, expected)) return session
+        pendingAgentModels.delete(pendingAgentModelKey(id, chatId))
+        if (continuation === undefined) return session
+        return {
+          ...session,
+          continuation,
+          chats: session.chats.map((candidate) => candidate.id === chatId ? { ...candidate, continuation } : candidate)
+        }
+      })
+
       const confirmAgentModel = (id: string, chatId: string) =>
         Effect.sync(() => pendingAgentModels.delete(pendingAgentModelKey(id, chatId))).pipe(
           Effect.asVoid
         )
 
-      const rollbackAgentModel = (id: string, chatId: string) => Effect.suspend(() => {
+      const rollbackAgentModel = (
+        id: string,
+        chatId: string,
+        expected?: { runtimeId: AgentRuntimeId; endpointId: AgentEndpointId; providerId: ProviderId | undefined; modelId: ProviderModelId }
+      ) => update(id, (session) => {
+        if (expected !== undefined && !agentModelMatches(session, chatId, expected)) return session
         const key = pendingAgentModelKey(id, chatId)
         const pending = pendingAgentModels.get(key)
-        if (pending === undefined) return Effect.void
-        return update(id, (session) => ({
+        if (pending === undefined) return session
+        pendingAgentModels.delete(key)
+        return {
           ...session,
           ...pending.session,
           chats: session.chats.map((chat) => chat.id === chatId ? pending.chat : chat)
-        })).pipe(
-          Effect.tap(() => Effect.sync(() => pendingAgentModels.delete(key))),
-          Effect.asVoid
-        )
-      })
+        }
+      }).pipe(Effect.asVoid)
 
       /** Persist one exact PI endpoint/model and clear foreign continuation ownership. */
       const setProviderModel = (
@@ -1920,6 +1947,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         reopenChat,
         setMode,
         setAgentModel,
+        confirmAgentStart,
         confirmAgentModel,
         rollbackAgentModel,
         setProviderModel,

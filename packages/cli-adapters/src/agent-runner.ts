@@ -782,6 +782,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     chatId,
                     spec.runtimeId,
                     spec.endpointId,
+                    spec.providerId,
+                    spec.modelId,
                     event
                   )
                   // Remember an edit's target path so its ToolEnd can tie back to a step.
@@ -987,7 +989,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const guardedRun = guardWorkspaceBranch(session, worktreePath, adapterRun).pipe(
             // Started commits the selection. Any exit before it (including a
             // Failed event followed by normal return) restores the prior owner.
-            Effect.ensuring(SessionStore.rollbackAgentModel(sessionId, chatId).pipe(Effect.ignore))
+            Effect.ensuring(SessionStore.rollbackAgentModel(sessionId, chatId, {
+              runtimeId: spec.runtimeId,
+              endpointId: spec.endpointId,
+              providerId: spec.providerId,
+              modelId: spec.modelId
+            }).pipe(Effect.ignore))
           )
           const run = guardedRun.pipe(
             // An operator stop arrives as an interruption. Record it as the turn's
@@ -1209,6 +1216,16 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         })
       )
 
+    const reservePromptSlot = (sessionId: string, chatId: string, holder: RunHolder) => Effect.gen(function* () {
+      const admitted = yield* reserveSessionRun(sessionId, chatId, holder)
+      if (admitted) return true
+      const running = (yield* Ref.get(fibers)).get(chatId)
+      const stale = running === undefined || Option.isSome(yield* Fiber.poll(running.fiber)) || (yield* Ref.get(running.settled))
+      if (!stale) return false
+      yield* reclaimSessionRun(sessionId, chatId, holder)
+      return true
+    })
+
     function prompt(
       sessionId: string,
       chatId: string,
@@ -1246,45 +1263,15 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               // (and its token) exists — and because a reclaim must be able to
               // supersede a holder that is still unwinding.
               const holder: RunHolder = {}
-              const admitted = yield* reserveSessionRun(sessionId, chatId, holder)
-              if (!admitted) {
-                // A refusal is only legitimate while a run is actually live.
-                // The reservation is released by a finalizer on the STREAM's
-                // scope, and a renderer that abandons the stream without
-                // interrupting it — a window reload, an HMR full reload, a
-                // renderer crash — never closes that scope. The main process
-                // (and this module-level map) outlives the renderer, so the
-                // chat is refused forever, and the operator has no stop button
-                // to press because their reloaded renderer shows the chat idle.
-                //
-                // `fibers` is the authoritative record of a live run, and it is
-                // written under this same chat lock immediately after the
-                // reservation (and cleared in the run's `ensuring`), so
-                // "reserved but no live fiber" is not a race — it is proof the
-                // reservation outlived its run. Reclaim it rather than making
-                // the operator restart the app.
-                const running = (yield* Ref.get(fibers)).get(chatId)
-                // A run whose turn has SETTLED holds nothing worth protecting.
-                // Single-flight exists so two turns can't race one chat's
-                // transcript and `fibers` slot; once the terminal event is out,
-                // that turn is over and the next prompt is not a race with it.
-                // Reading fiber liveness alone made a backgrounded task — which
-                // deliberately keeps the harness consuming long past `Done` —
-                // refuse its own chat for as long as the task ran, with the
-                // composer showing an idle send button and nothing to stop.
-                const stale =
-                  running === undefined ||
-                  Option.isSome(yield* Fiber.poll(running.fiber)) ||
-                  (yield* Ref.get(running.settled))
-                if (!stale) {
-                  return Stream.fromIterable<StreamEvent>([{
-                    _tag: "Failed",
-                    message: "This chat is already running. Wait for it to finish or stop it before sending again."
-                  }])
-                }
-                yield* reclaimSessionRun(sessionId, chatId, holder)
+              if (!(yield* reservePromptSlot(sessionId, chatId, holder))) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: "This chat is already running. Wait for it to finish or stop it before sending again."
+                }])
               }
               yield* Effect.addFinalizer(() => releaseSessionRun(sessionId, chatId, holder))
+              const selectedSession = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+              const expectedModel = selectedSession === null ? null : selectedAgentModel(selectedSession, chatId)
               return yield* promptSetup(
                 sessionId,
                 chatId,
@@ -1295,7 +1282,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 externalInstruction,
                 displayText
               ).pipe(
-                Effect.onError(() => SessionStore.rollbackAgentModel(sessionId, chatId).pipe(Effect.ignore)),
+                Effect.onError(() => expectedModel === null
+                  ? Effect.void
+                  : SessionStore.rollbackAgentModel(sessionId, chatId, expectedModel).pipe(Effect.ignore)),
                 Effect.catchAll((error) =>
                   Effect.succeed(
                     Stream.fromIterable<StreamEvent>([
@@ -1551,6 +1540,17 @@ const selectedTurnChat = (session: Session | null, chatId: string) =>
     ? (session.chats.find((candidate) => candidate.id === session.activeChatId) ?? null)
     : null)
 
+const selectedAgentModel = (session: Session, chatId: string) => {
+  const chat = session.chats.find((candidate) => candidate.id === chatId)
+  const runtimeId = chat?.runtimeId ?? session.runtimeId
+  const endpointId = chat?.endpointId ?? session.endpointId
+  const providerId = chat?.providerId ?? session.providerId
+  const modelId = chat?.modelId ?? session.modelId
+  return runtimeId && endpointId && providerId && modelId
+    ? { runtimeId, endpointId, providerId, modelId }
+    : null
+}
+
 const resolveTurnChat = (sessionId: string, chatId: string) =>
   Effect.gen(function* () {
     const session: Session | null = yield* SessionStore.get(sessionId).pipe(
@@ -1637,17 +1637,18 @@ const persistTurnSessionId = (
   chatId: string,
   runtimeId: AgentRuntimeId,
   endpointId: AgentEndpointId,
+  providerId: ProviderId | undefined,
+  modelId: ProviderModelId,
   event: StreamEvent
 ) =>
   Effect.gen(function* () {
     if (event._tag === "Started") {
-      yield* SessionStore.confirmAgentModel(sessionId, chatId).pipe(Effect.ignore)
-      if (event.sessionId.length === 0) return
-      yield* SessionStore.setContinuation(sessionId, chatId, {
-        runtimeId,
-        endpointId,
-        id: event.sessionId
-      }).pipe(Effect.ignore)
+      yield* SessionStore.confirmAgentStart(
+        sessionId,
+        chatId,
+        { runtimeId, endpointId, providerId, modelId },
+        event.sessionId.length === 0 ? undefined : { runtimeId, endpointId, id: event.sessionId }
+      ).pipe(Effect.ignore)
     }
   })
 

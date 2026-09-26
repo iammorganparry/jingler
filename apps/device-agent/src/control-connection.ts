@@ -1,5 +1,5 @@
 import { codexEndpointLogin } from "@jingler/cli-adapters/runtime/codex/login"
-import { EndpointCatalogRequest } from "@jingler/core"
+import { ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS, EndpointCatalogRequest } from "@jingler/core"
 import type { DeviceChallenge, DeviceRelayGrantResponse, RemoteDeviceDiscovery } from "@jingler/core"
 import {
   DeviceChallenge as DeviceChallengeSchema,
@@ -34,7 +34,7 @@ export interface ControlSocket {
 export interface ControlConnectionDependencies {
   readonly refreshGrant: (signal: AbortSignal) => Promise<DeviceRelayGrantResponse>
   readonly connect: (url: string, grant: string, signal: AbortSignal) => Promise<ControlSocket>
-  readonly discover: () => Promise<RemoteDeviceDiscovery>
+  readonly discover: (signal?: AbortSignal) => Promise<RemoteDeviceDiscovery>
   readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>
   readonly handleSessionRequest?: (request: {
     readonly relayUrl: string
@@ -203,12 +203,34 @@ export const abortableSleep = (milliseconds: number, signal: AbortSignal): Promi
 const isEndpointRequest = (request: Record<string, unknown>, targetId: string | undefined): boolean =>
   Schema.is(EndpointCatalogRequest)(request) && request.targetId === targetId
 
-const handleEndpointLogin = async (input: EndpointCatalogRequest) => {
+const endpointDeadline = (input: EndpointCatalogRequest) => input.deadlineAt ?? Date.now() + ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS
+const handleEndpointLogin = async (input: EndpointCatalogRequest, deadlineAt: number) => {
   try {
-    if (input.action === "login-start") return { login: await codexEndpointLogin.start(input.endpointId ?? "", input.targetId) }
+    if (Date.now() >= deadlineAt) return { loginError: "Native Codex login request timed out", login: undefined }
+    if (input.action === "login-start") {
+      const login = await codexEndpointLogin.start(input.endpointId ?? "", input.targetId)
+      if (Date.now() < deadlineAt) return { login }
+      await codexEndpointLogin.cancel(input.endpointId ?? "", input.targetId, login.loginId)
+      return { loginError: "Native Codex login request timed out", login: undefined }
+    }
     if (input.action === "login-cancel") await codexEndpointLogin.cancel(input.endpointId ?? "", input.targetId, input.loginId ?? "")
     return { login: undefined }
   } catch { return { loginError: "Native Codex login failed on this target", login: undefined } }
+}
+
+const endpointCatalogResponse = async (input: EndpointCatalogRequest, dependencies: ControlConnectionDependencies, signal: AbortSignal) => {
+  const deadlineAt = endpointDeadline(input)
+  const { login, loginError } = await handleEndpointLogin(input, deadlineAt)
+  const remaining = Math.max(1, deadlineAt - Date.now())
+  try {
+    const updated = await dependencies.discover(AbortSignal.any([signal, AbortSignal.timeout(remaining)]))
+    if (Date.now() < deadlineAt || !login) return { updated, login, loginError }
+    await codexEndpointLogin.cancel(input.endpointId ?? "", input.targetId, login.loginId).catch(() => undefined)
+    return { updated, login: undefined, loginError: "Native Codex login request timed out" }
+  } catch (cause) {
+    if (login) await codexEndpointLogin.cancel(input.endpointId ?? "", input.targetId, login.loginId).catch(() => undefined)
+    throw cause
+  }
 }
 
 export type ControlConnectionResult = "stopped" | "revoked"
@@ -225,19 +247,15 @@ export const runControlConnection = async (
       // possession again and receives a fresh, short-lived device-only grant.
       const refreshed = await dependencies.refreshGrant(signal)
       if (signal.aborted) break
-      const discovery = await dependencies.discover()
+      const discovery = await dependencies.discover(signal)
       if (signal.aborted) break
       socket = await dependencies.connect(refreshed.relayUrl, refreshed.grant, signal)
       const stopMessages = socket.onMessage((message) => {
         if (!message || typeof message !== "object") return
         const request = message as Record<string, unknown>
         if (isEndpointRequest(request, discovery.capabilities.runtime?.targetId)) {
-          void (async () => {
-            const input = Schema.decodeUnknownSync(EndpointCatalogRequest)(request)
-            const { login, loginError } = await handleEndpointLogin(input)
-            const updated = await dependencies.discover()
-            return { updated, login, loginError }
-          })().then(({ updated, login, loginError }) => {
+          const input = Schema.decodeUnknownSync(EndpointCatalogRequest)(request)
+          void endpointCatalogResponse(input, dependencies, signal).then(({ updated, login, loginError }) => {
             const catalog = updated.capabilities.endpointCatalog
             if (signal.aborted || catalog === undefined ||
                 updated.capabilities.runtime?.targetId !== request.targetId ||

@@ -156,6 +156,34 @@ describe("device control connection", () => {
     await expect(running).resolves.toBe("stopped")
   })
 
+  it("cancels a device-code login when endpoint discovery misses its deadline", async () => {
+    const controller = new AbortController()
+    let deliver: ((message: unknown) => void) | null = null
+    let discoveries = 0
+    const code = { loginId: "late-login", verificationUrl: "https://example.com", userCode: "TEST" }
+    const start = vi.spyOn(codexEndpointLogin, "start").mockResolvedValue(code)
+    const cancel = vi.spyOn(codexEndpointLogin, "cancel").mockResolvedValue(undefined)
+    const endpointDiscovery: RemoteDeviceDiscovery = {
+      ...discovery,
+      capabilities: { ...discovery.capabilities, runtime: { versions: { behavior: "1", authentication: "1", prompt: "1", tools: "1", diff: "1", policy: "1", capabilities: "1", piSdk: "1" }, toolIds: [], resourceIds: [], targetId: "device-1" }, endpointCatalog: { endpoints: [], refreshedAt: "2026-09-25T00:00:00.000Z", stale: false } }
+    }
+    const running = runControlConnection({
+      refreshGrant: async () => grant(1),
+      discover: async (signal) => {
+        if (++discoveries === 1) return endpointDiscovery
+        return new Promise<RemoteDeviceDiscovery>((_, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }))
+      },
+      connect: async () => ({ send: () => undefined, close: () => undefined, onMessage: (handler) => { deliver = handler; return () => undefined }, waitForClose: (signal) => new Promise((resolve) => signal.addEventListener("abort", () => resolve({ code: 1000, reason: "stopped" }), { once: true })) }),
+      sleep: async () => undefined
+    }, controller.signal)
+    await vi.waitFor(() => expect(deliver).not.toBeNull())
+    deliver!({ type: "endpoint-catalog-request", version: 1, requestId: "request-late", deadlineAt: Date.now() + 20, targetId: "device-1", endpointId: "device-1:codex:default", action: "login-start" })
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledWith("device-1:codex:default", "device-1", "late-login"))
+    expect(start).toHaveBeenCalledOnce()
+    controller.abort()
+    await expect(running).resolves.toBe("stopped")
+  })
+
   it("refreshes the device grant before reconnect", async () => {
     const controller = new AbortController()
     let refreshes = 0

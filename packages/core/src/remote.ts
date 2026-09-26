@@ -18,6 +18,7 @@ export const DEVICE_GRANT_VERSION = 1 as const
 export const CLIENT_ATTACHMENT_VERSION = 1 as const
 export const REMOTE_SESSION_INVENTORY_VERSION = 1 as const
 export const CONTROLLER_LEASE_VERSION = 1 as const
+export const ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS = 120_000
 /** Upper bound enforced independently by the issuer and relay verifier. */
 export const REMOTE_GRANT_MAX_TTL_SECONDS = 15 * 60
 export const MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS = 5 * 60
@@ -501,6 +502,7 @@ export const EndpointCatalogRequest = Schema.Struct({
   type: Schema.Literal("endpoint-catalog-request"),
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   requestId: OpaqueId,
+  deadlineAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   ...EndpointControlInput.fields
 })
 export type EndpointCatalogRequest = Schema.Schema.Type<typeof EndpointCatalogRequest>

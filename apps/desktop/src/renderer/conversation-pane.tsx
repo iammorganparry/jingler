@@ -42,6 +42,7 @@ import {
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
+import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
   publishFleetAgentFileActivity,
   releaseFleetAgentFileActivityPublisher,
@@ -158,12 +159,6 @@ function McpRecoveryCards({
 }
 
 const activeChatFor = (session: Session) => session.chats.find((chat) => chat.id === session.activeChatId) ?? session.chats[0]!
-const endpointCatalogForSession = (session: Session, environments: ReadonlyArray<Environment>, catalog: AgentEndpointCatalog | null | undefined) => {
-  const targetId = session.environmentId === undefined
-    ? "desktop"
-    : (environments.find(({ id }) => id === session.environmentId)?.capabilities.runtime?.targetId ?? session.environmentId)
-  return catalog == null ? catalog : { ...catalog, endpoints: catalog.endpoints.filter(({ endpoint }) => endpoint.targetId === targetId) }
-}
 
 const usePlanSplit = () => {
   const [rowRef, rowWidth] = useContainerWidth()
@@ -360,6 +355,7 @@ export function ConversationPane({
   } = usePlanSplit()
 
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  const sessionTargetId = runtimeTargetForSession(session, environments)
   const sessionEndpointCatalog = endpointCatalogForSession(session, environments, agentEndpointCatalog)
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
@@ -379,12 +375,12 @@ export function ConversationPane({
     if (convoProviderId == null || convoModelId == null) return
     setModel(
       "pi",
-      piEndpointId(session.environmentId ?? "desktop", rebindConnectionId),
+      piEndpointId(sessionTargetId, rebindConnectionId),
       rebindConnectionId,
       convoProviderId,
       convoModelId
     )
-  }, [rebindConnectionId, convoProviderId, convoModelId, setModel])
+  }, [rebindConnectionId, convoProviderId, convoModelId, sessionTargetId, setModel])
 
   const mutationRecovery = useMutation({
     mutationFn: (input: { readonly runId: string; readonly callId: string }) =>
@@ -1473,7 +1469,7 @@ function conversationProviderRecovery(
     ...convo,
     connectionSelectionRequired: session.connectionSelectionRequired,
     modelSelectionRequired: session.modelSelectionRequired,
-    targetId: session.environmentId ?? "desktop",
+    targetId: runtimeTargetForSession(session, environments),
     target: environments.find((environment) => environment.id === session.environmentId)
   }
   const providerRecovery = providerCatalog

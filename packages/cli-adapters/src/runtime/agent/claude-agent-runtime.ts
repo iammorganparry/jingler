@@ -269,22 +269,32 @@ async function* claudeOutput(
   }
 }
 
+const reserveClaudeSession = async (reserved: Set<string>, sessionId: string, scope: Scope.CloseableScope) => {
+  if (reserved.has(sessionId)) {
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+    throw new Error("Claude session is already active")
+  }
+  reserved.add(sessionId)
+}
+
 async function* runClaude(
   spec: AgentRunSpec,
   options: ClaudeAgentRuntimeOptions,
   active: Map<string, ChildProcessWithoutNullStreams>,
+  reserved: Set<string>,
   context: AgentRuntimeContext,
   signal: AbortSignal
 ): AsyncGenerator<StreamEvent> {
   const sessionId = spec.continuation?.id ?? randomUUID()
   const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
   const environment = nativeCliEnvironment(options.environment ?? process.env)
-  await options.checkAuth?.(signal)
   const scope = await Effect.runPromise(Scope.make())
+  await reserveClaudeSession(reserved, sessionId, scope)
   let relay: ClaudeCliToolRelay | undefined
   let child: ChildProcessWithoutNullStreams | undefined
   let onAbort = () => {}
   try {
+    await options.checkAuth?.(signal)
     const registry = await Effect.runPromise(
       (options.createToolRegistry?.(spec, context) ?? createJinglerTools({ context, cwd: spec.cwd, mcp: context.mcp }).pipe(Effect.mapError(runtimeError))).pipe(Scope.extend(scope)),
       { signal }
@@ -318,7 +328,7 @@ async function* runClaude(
       output,
       { _tag: "Started", sessionId, model: spec.modelId },
       // A terminal event wins over an interrupt delivered by its consumer.
-      () => { active.delete(sessionId) }
+      () => { if (active.get(sessionId) === child) active.delete(sessionId) }
     )
     const exitCode = await waitForExit(spawned)
     if (exitCode !== 0) {
@@ -327,14 +337,15 @@ async function* runClaude(
         spec.continuation !== null &&
         invalidContinuation.test(message)
       ) {
-        yield* runClaude({ ...spec, continuation: null }, options, active, context, signal)
+        yield* runClaude({ ...spec, continuation: null }, options, active, reserved, context, signal)
         return
       }
       throw new Error(message)
     }
     if (!output.terminal) throw new Error("Claude CLI exited without a result")
   } finally {
-    active.delete(sessionId)
+    if (active.get(sessionId) === child) active.delete(sessionId)
+    reserved.delete(sessionId)
     signal.removeEventListener("abort", onAbort)
     if (child !== undefined) await stopProcess(child)
     try { await relay?.close() } finally { await Effect.runPromise(Scope.close(scope, Exit.void)) }
@@ -357,12 +368,13 @@ const claudeStream = (
   spec: AgentRunSpec,
   context: AgentRuntimeContext,
   options: ClaudeAgentRuntimeOptions,
-  active: Map<string, ChildProcessWithoutNullStreams>
+  active: Map<string, ChildProcessWithoutNullStreams>,
+  reserved: Set<string>
 ) => Stream.async<StreamEvent, AgentRuntimeError>((emit) => {
   const controller = new AbortController()
   const completion = (async () => {
     try {
-      for await (const event of runClaude(spec, options, active, context, controller.signal)) {
+      for await (const event of runClaude(spec, options, active, reserved, context, controller.signal)) {
         await emit.single(event)
       }
       if (!controller.signal.aborted) await emit.end()
@@ -380,8 +392,9 @@ export const makeClaudeAgentRuntime = (
   options: ClaudeAgentRuntimeOptions = {}
 ): AgentRuntimeShape => {
   const active = new Map<string, ChildProcessWithoutNullStreams>()
+  const reserved = new Set<string>()
   return {
-    run: (spec, context) => claudeStream(spec, context, options, active),
+    run: (spec, context) => claudeStream(spec, context, options, active, reserved),
     steer: () => unsupported("steering"),
     interrupt: (continuation) => {
       const child = active.get(continuation.id)

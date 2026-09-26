@@ -3902,14 +3902,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "AgentEndpoint.startLogin": (input) => nativeEndpointLogin(input).pipe(Effect.flatMap((login) =>
     login ? Effect.succeed(login) : Effect.fail(new ProviderConnectionError({ message: "Native login returned no device code" })))),
   "AgentEndpoint.cancelLogin": (input) => nativeEndpointLogin(input, true).pipe(Effect.asVoid),
-  "AgentEndpoint.setModel": ({
-    sessionId,
-    chatId,
-    runtimeId,
-    endpointId,
-    providerId,
-    modelId
-  }) => Effect.gen(function* () {
+  "AgentEndpoint.setModel": (input) => Effect.gen(function* () {
+    const { sessionId, chatId, runtimeId, endpointId, providerId, modelId } = input
     const session = yield* SessionStore.get(sessionId)
     const endpointCatalog = session.environmentId === undefined
       ? yield* localAgentEndpointCatalog(false)
@@ -3928,6 +3922,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       return yield* Effect.fail(new ProviderConnectionError({
         message: "Agent endpoint model is unavailable"
       }))
+    }
+    if (session.environmentId !== undefined) {
+      const remote = yield* RemoteSessionService
+      const value = yield* remote.request(session, "AgentEndpoint.setModel", input).pipe(
+        Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message }))
+      )
+      const updated = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
+        Effect.mapError((cause) => new ProviderConnectionError({ message: `The remote device returned invalid session metadata: ${String(cause)}` }))
+      )
+      if (updated.id !== sessionId || updated.environmentId !== session.environmentId) {
+        return yield* Effect.fail(new ProviderConnectionError({ message: "The remote device returned model state for another session" }))
+      }
+      return yield* SessionStore.upsertRemote(updated)
     }
     if (runtimeId !== "pi") {
       yield* SessionStore.setAgentModel(

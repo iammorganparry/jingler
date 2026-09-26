@@ -19,6 +19,7 @@ import {
   Schema,
   SynchronizedRef
 } from "effect"
+import { migrateLegacySubagentControlJournal } from "../migration/legacy-subagent-control-journal.js"
 import {
   emptySubagentRunTree,
   reduceSubagentFleetEvent,
@@ -27,9 +28,8 @@ import {
 
 const MAX_REPLAY_EVENTS = 256
 const MAX_TRANSCRIPT_FILES = 32
-const ControlJournal = Schema.Struct({
+const ControlJournalFields = {
   version: Schema.Literal(2),
-  parentRuntimeSessionId: Schema.String,
   sequence: Schema.Number,
   pending: Schema.Array(Schema.Struct({
     request: SubagentFleetControlRequest,
@@ -38,7 +38,8 @@ const ControlJournal = Schema.Struct({
   outcomes: Schema.Array(SubagentFleetControlOutcome),
   requests: Schema.optional(Schema.Array(SubagentFleetControlRequest)),
   receipts: Schema.Array(SubagentControlReceipt)
-})
+}
+const ControlJournal = Schema.Struct({ ...ControlJournalFields, parentRuntimeSessionId: Schema.String })
 
 export interface SubagentControlJournal {
   readonly load: Effect.Effect<typeof ControlJournal.Type, Error>
@@ -65,9 +66,10 @@ export const makeSubagentControlJournal = (input: {
     load: Effect.tryPromise({
       try: async () => {
         try {
-          const decoded = await Schema.decodeUnknownPromise(
-            Schema.parseJson(ControlJournal)
-          )(await readFile(path, "utf8"), { onExcessProperty: "error" })
+          const decoded = await Schema.decodeUnknownPromise(ControlJournal)(
+            migrateLegacySubagentControlJournal(JSON.parse(await readFile(path, "utf8"))),
+            { onExcessProperty: "error" }
+          )
           if (decoded.parentRuntimeSessionId !== input.parentRuntimeSessionId) {
             throw new Error("Subagent control journal belongs to another parent session")
           }

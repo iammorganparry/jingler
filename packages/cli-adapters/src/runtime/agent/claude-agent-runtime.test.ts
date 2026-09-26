@@ -297,6 +297,27 @@ it("keeps one result when completion races an interrupt", async () => {
   expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
 })
 
+it("rejects concurrent runs for one resumed Claude session", async () => {
+  vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValue({
+    mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
+    environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+    close: async () => {}
+  })
+  const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)
+  const instance = makeClaudeAgentRuntime({ binary })
+  const continuation = { runtimeId: "claude" as const, endpointId, id: "shared-session" }
+  let releaseStarted = () => {}
+  const started = new Promise<void>((resolve) => { releaseStarted = resolve })
+  const first = Effect.runPromise(instance.run(spec({ continuation }), context).pipe(Stream.tap(event => {
+    if (event._tag === "Started") releaseStarted()
+    return Effect.void
+  }), Stream.runDrain))
+  await started
+  await expect(Effect.runPromise(instance.run(spec({ runId: "run-2", continuation }), context).pipe(Stream.runDrain))).rejects.toThrow("already active")
+  await Effect.runPromise(instance.interrupt(continuation, "desktop"))
+  await expect(first).rejects.toThrow()
+})
+
 it("lets interruption win before a result and reaps the process", async () => {
   stubRelay()
   const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)
