@@ -57,6 +57,8 @@ test("native Codex login can be canceled in settings", async ({ launchApp }) => 
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await window.getByRole("button", { name: /Providers/ }).click()
+  await window.getByRole("button", { name: "Add runtime" }).click()
+  await window.getByRole("button", { name: "Codex CLI: Sign in required" }).click()
   await window.getByRole("button", { name: "Sign in to Codex CLI", exact: true }).click()
   await expect(window.getByText("Device code:")).toContainText("TEST")
   await window.getByRole("button", { name: "Cancel Codex sign-in" }).click()

@@ -224,7 +224,7 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
   await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
   await expect(
-    launched.window.getByText("Add a provider connection"),
+    launched.window.getByText("Add an agent runtime"),
   ).toBeVisible();
 
   await launched.window.getByRole("button", { name: "Open browser" }).click();
@@ -251,7 +251,7 @@ test("adds a second provider connection from settings", async ({ launchApp }) =>
   await launched.window.getByRole("button", { name: "Account menu" }).click();
   await launched.window.getByRole("menuitem", { name: "Settings" }).click();
   await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
-  await launched.window.getByRole("button", { name: "Add account" }).click();
+  await launched.window.getByRole("button", { name: "Add runtime" }).click();
   await launched.window.getByRole("button", { name: "Open browser" }).click();
 
   await expect(

@@ -1,6 +1,7 @@
 import { NativeEndpointLogin, type NativeEndpointLoginActions } from "./native-endpoint-login.js"
 import {
   type AgentEndpointCatalog,
+  type AgentRuntimeId,
   type AuthKind,
   type CodexLoginMethod,
   ProviderConnectionId,
@@ -11,7 +12,7 @@ import {
 } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { Check, LogOut, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react"
-import { useEffect, useMemo } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
@@ -80,6 +81,111 @@ const ModelChip = ({
     </span>
   </button>
 )
+
+const RUNTIMES: ReadonlyArray<{ id: AgentRuntimeId; label: string; description: string }> = [
+  { id: "pi", label: "PI", description: "Run models through connected provider accounts." },
+  { id: "claude", label: "Claude Code", description: "Use the Claude Code CLI installed on this target." },
+  { id: "codex", label: "Codex CLI", description: "Use the Codex CLI and its target-local login." },
+  { id: "opencode", label: "OpenCode CLI", description: "Use the OpenCode CLI installed on this target." }
+]
+
+const runtimeStatus = (
+  runtimeId: AgentRuntimeId,
+  endpoints: AgentEndpointCatalog["endpoints"]
+): string => {
+  if (runtimeId === "pi" && endpoints.length === 0) return "Needs provider"
+  if (endpoints.length === 0) return "Not detected"
+  const installed = endpoints.filter(({ endpoint }) => endpoint.status !== "missing")
+  if (installed.length === 0) return "Not installed"
+  const ready = endpoints.filter(({ endpoint }) => endpoint.status === "ready").length
+  if (ready === endpoints.length) return "Ready"
+  if (installed.every(({ endpoint }) => endpoint.status === "signed-out")) return "Sign in required"
+  if (installed.every(({ endpoint }) => endpoint.status === "unsupported")) return "Unsupported"
+  if (installed.every(({ endpoint }) => endpoint.status === "stale-agent")) return "Update required"
+  if (installed.every(({ endpoint }) => endpoint.status === "error")) return "Unavailable"
+  return `${ready}/${endpoints.length} ready`
+}
+
+function AgentRuntimeSetup({
+  endpointCatalog,
+  nativeEndpointLogin,
+  piSetup
+}: {
+  readonly endpointCatalog: AgentEndpointCatalog | null
+  readonly nativeEndpointLogin?: NativeEndpointLoginActions
+  readonly piSetup: ReactNode
+}) {
+  const [selectedRuntime, setSelectedRuntime] = useState<AgentRuntimeId>("pi")
+  const selectedEndpoints = endpointCatalog?.endpoints.filter(
+    ({ endpoint }) => endpoint.runtimeId === selectedRuntime
+  ) ?? []
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+        {RUNTIMES.map((runtime) => {
+          const endpoints = endpointCatalog?.endpoints.filter(
+            ({ endpoint }) => endpoint.runtimeId === runtime.id
+          ) ?? []
+          const status = runtimeStatus(runtime.id, endpoints)
+          return (
+            <button
+              key={runtime.id}
+              type="button"
+              aria-label={`${runtime.label}: ${status}`}
+              aria-pressed={selectedRuntime === runtime.id}
+              onClick={() => setSelectedRuntime(runtime.id)}
+              className={cn(
+                "flex min-h-24 flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors",
+                selectedRuntime === runtime.id
+                  ? "border-blue/50 bg-blue/10"
+                  : "border-line bg-sunken hover:bg-hover"
+              )}
+            >
+              <span className="text-[12.5px] font-semibold text-text-bright">{runtime.label}</span>
+              <span className="text-[10px] font-medium uppercase tracking-wide text-dim">{status}</span>
+              <span className="text-[10.5px] leading-relaxed text-muted-foreground">{runtime.description}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      <div className="rounded-lg border border-line bg-sunken p-3">
+        {selectedRuntime === "pi" ? (
+          <div className="flex flex-col gap-3">
+            <div>
+              <div className="text-[12.5px] font-semibold text-text-bright">Provider accounts for PI</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                Each account keeps its own target and billing route.
+              </div>
+            </div>
+            {piSetup}
+          </div>
+        ) : selectedEndpoints.length > 0 ? (
+          <div className="flex flex-col gap-2">
+            {selectedEndpoints.map(({ endpoint }) => (
+              <div key={endpoint.id} className="rounded-md border border-line bg-canvas p-3 text-muted-foreground">
+                {endpoint.runtimeId === "claude" ? (
+                  <span>
+                    {endpoint.label} · {endpoint.status} · {endpoint.targetId}
+                    {endpoint.status === "signed-out" && <span> · Run <code>claude auth login</code> on this target, then refresh runtimes.</span>}
+                    {endpoint.status === "unsupported" && <span> · Install the supported Claude Code version on this target.</span>}
+                  </span>
+                ) : (
+                  <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-[11.5px] text-muted-foreground">
+            This CLI was not detected on the current target. Install or configure it there, then refresh runtimes.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
@@ -186,7 +292,7 @@ export function ProviderConnectionsSettings({
               disabled={busy}
               onClick={() => sendSelection({ type: "ADD" })}
             >
-              <Plus size={12} /> Add account
+              <Plus size={12} /> Add runtime
             </Button>
           </div>
           <span className="text-[11.5px] leading-relaxed text-muted-foreground">
@@ -199,7 +305,7 @@ export function ProviderConnectionsSettings({
                   key={endpoint.id}
                   className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted-foreground"
                 >
-                  <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
+                  {endpoint.label} · {endpoint.status} · {endpoint.targetId}
                 </div>
               ))}
             </div>
@@ -317,29 +423,35 @@ export function ProviderConnectionsSettings({
               </div>
             </>
           ) : (
-            <div className="flex max-w-2xl flex-col gap-4">
+            <div className="flex flex-col gap-4">
               <div>
-                <div className="text-[15px] font-semibold text-text-bright">Add a provider connection</div>
+                <div className="text-[15px] font-semibold text-text-bright">Add an agent runtime</div>
                 <div className="mt-1 text-[12px] text-muted-foreground">
-                  Authenticate an account now; model availability is checked automatically when selected.
+                  Choose PI or a target-local CLI. Authentication stays owned by the selected runtime.
                 </div>
               </div>
-              <ProviderAuthForms
-                busy={busy}
-                pendingAuthKind={pendingAuthKind}
-                onConnectClaude={(token) =>
-                  onConnectClaude(newConnectionId(), token)
-                }
-                onStartCodex={(method) =>
-                  onStartCodex(newConnectionId(), method)
-                }
-                onConnectApi={(providerId, apiKey) =>
-                  onSetApiKey(
-                    newConnectionId(),
-                    ProviderId.make(providerId),
-                    apiKey
-                  )
-                }
+              <AgentRuntimeSetup
+                endpointCatalog={endpointCatalog}
+                nativeEndpointLogin={nativeEndpointLogin}
+                piSetup={(
+                  <ProviderAuthForms
+                    busy={busy}
+                    pendingAuthKind={pendingAuthKind}
+                    onConnectClaude={(token) =>
+                      onConnectClaude(newConnectionId(), token)
+                    }
+                    onStartCodex={(method) =>
+                      onStartCodex(newConnectionId(), method)
+                    }
+                    onConnectApi={(providerId, apiKey) =>
+                      onSetApiKey(
+                        newConnectionId(),
+                        ProviderId.make(providerId),
+                        apiKey
+                      )
+                    }
+                  />
+                )}
               />
             </div>
           )}

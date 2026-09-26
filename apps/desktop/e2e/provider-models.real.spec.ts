@@ -165,7 +165,7 @@ const selectConnection = async (
     .getByRole("button")
     .filter({ hasText: model.connectionLabel });
   if (!(await connection.count())) {
-    await window.getByRole("button", { name: "Add account" }).click();
+    await window.getByRole("button", { name: "Add runtime" }).click();
     await startProviderAuthentication(window, model);
   }
   await expect(connection).toBeVisible();
