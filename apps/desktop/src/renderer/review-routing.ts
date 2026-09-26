@@ -92,7 +92,7 @@ const findingBlock = (finding: ReviewFinding, index: number): string => {
 export const agentBatchPrompt = (findings: ReadonlyArray<ReviewFinding>): string =>
   [
     `An adversarial code review of this pull request raised ${findings.length} ` +
-      `${findings.length === 1 ? "issue" : "issues"} it rated critical or major.`,
+      `${findings.length === 1 ? "issue" : "issues"}.`,
     "",
     "For each one: assess whether it is a real problem, and fix it if so. If you believe the",
     "reviewer is wrong, say why rather than changing the code — it was asked to argue against",

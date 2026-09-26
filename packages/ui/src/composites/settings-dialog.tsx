@@ -15,11 +15,19 @@ import {
   DialogTitle
 } from "../components/dialog.js"
 
-const DEFAULT_GITHUB: GithubConfig = { enabled: false, autoCreatePr: false, autoDetectPr: true }
+const DEFAULT_GITHUB: GithubConfig = {
+  enabled: false,
+  autoCreatePr: false,
+  autoDetectPr: true,
+  postAdversarialReviewComments: true
+}
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
 
 const sameGithub = (a: GithubConfig, b: GithubConfig): boolean =>
-  a.enabled === b.enabled && a.autoCreatePr === b.autoCreatePr && a.autoDetectPr === b.autoDetectPr
+  a.enabled === b.enabled &&
+  a.autoCreatePr === b.autoCreatePr &&
+  a.autoDetectPr === b.autoDetectPr &&
+  (a.postAdversarialReviewComments ?? true) === (b.postAdversarialReviewComments ?? true)
 
 const sameGit = (a: GitConfig, b: GitConfig): boolean =>
   a.shareCheckedOutBranches === b.shareCheckedOutBranches
@@ -163,6 +171,15 @@ export function SettingsDialog({
               checked={draft.autoCreatePr}
               disabled={!draft.enabled}
               onChange={(autoCreatePr) => setDraft((d) => ({ ...d, autoCreatePr }))}
+            />
+            <ToggleRow
+              label="Post adversarial review comments"
+              description="Turn off to keep review feedback local and send every finding to the session agent."
+              checked={draft.postAdversarialReviewComments ?? true}
+              disabled={!draft.enabled}
+              onChange={(postAdversarialReviewComments) =>
+                setDraft((d) => ({ ...d, postAdversarialReviewComments }))
+              }
             />
           </div>
 

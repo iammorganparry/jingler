@@ -174,7 +174,9 @@ function AuthedApp({
 }) {
   const [state, send] = useMachine(appMachine);
   const github = useGitHubConnection();
-  const pullRequestInbox = usePullRequestInbox(github.connection.connected);
+  const pullRequestInbox = usePullRequestInbox(
+    github.connection.connected || github.connection.cliAvailable === true,
+  );
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
     new Map<string, { mode: string; error: string | null }>(),
@@ -640,7 +642,7 @@ function AuthedApp({
       const repo = repos.find(
         (candidate) =>
           candidate.path === session.repoPath ||
-          candidate.name === session.repo,
+          (session.repoPath === undefined && candidate.name === session.repo),
       );
       return repositoryAccess(
         github.connection,
@@ -651,14 +653,25 @@ function AuthedApp({
     [github.connection, repos],
   );
   const canUseGitHubForSession = useCallback(
-    (session: Session) => accessForSession(session).status === "accessible",
-    [accessForSession],
+    (session: Session) => {
+      const repo = repos.find(
+        (candidate) =>
+          candidate.path === session.repoPath ||
+          (session.repoPath === undefined && candidate.name === session.repo),
+      );
+      return (
+        (github.connection.cliAvailable === true && repo?.githubSlug != null) ||
+        accessForSession(session).status === "accessible"
+      );
+    },
+    [accessForSession, github.connection.cliAvailable, repos],
   );
-  const connected =
+  const appConnected =
     github.connection.connected &&
     github.connection.installations.some(
       (installation) => installation.status === "active",
     );
+  const connected = github.connection.cliAvailable === true || appConnected;
   // A manual GitHub refresh can revoke one repository while leaving the overall
   // account connected. Restart the main-process relay stream whenever that
   // authorization topology changes so its supervisor immediately closes routes
@@ -802,7 +815,7 @@ function AuthedApp({
   );
 
   useEffect(() => {
-    if (!connected) return;
+    if (!appConnected) return;
     const cancelEvents = rpc.githubEvents(
       (delivery) => {
         const resolveTarget = () => {
@@ -921,7 +934,7 @@ function AuthedApp({
       }
       cancelEvents();
     };
-  }, [connected, feedbackRouter, githubRelayAuthorizationVersion]);
+  }, [appConnected, feedbackRouter, githubRelayAuthorizationVersion]);
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the
@@ -1584,8 +1597,7 @@ function AuthedApp({
         )}
         renderPullRequest={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <PullRequestPane
               session={session}
@@ -1613,8 +1625,7 @@ function AuthedApp({
         }}
         renderReview={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <ReviewPane
               key={`${session.id}:${session.prNumber ?? "none"}`}
@@ -1634,8 +1645,7 @@ function AuthedApp({
         }}
         renderCode={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <ReviewPane
               key={`${session.id}:${session.prNumber ?? "none"}`}

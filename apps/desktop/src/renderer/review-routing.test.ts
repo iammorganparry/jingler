@@ -117,8 +117,8 @@ describe("agentBatchPrompt", () => {
   })
 
   it("counts the findings, in the plural or not", () => {
-    expect(agentBatchPrompt([at({})])).toContain("raised 1 issue it rated")
-    expect(agentBatchPrompt([at({ id: "f1" }), at({ id: "f2" })])).toContain("raised 2 issues it rated")
+    expect(agentBatchPrompt([at({})])).toContain("raised 1 issue.")
+    expect(agentBatchPrompt([at({ id: "f1" }), at({ id: "f2" })])).toContain("raised 2 issues.")
   })
 
   it("includes a suggestion when the reviewer gave one, and omits it otherwise", () => {

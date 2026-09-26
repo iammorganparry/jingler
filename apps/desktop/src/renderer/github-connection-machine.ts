@@ -10,6 +10,7 @@ export const EMPTY_GITHUB_CONNECTION: GitHubConnection = {
   mode: "disconnected",
   enabled: true,
   connected: false,
+  cliAvailable: false,
   user: null,
   installations: [],
   lastRefreshedAt: null,
@@ -22,11 +23,13 @@ const messageOf = (error: unknown): string =>
 /** Fold server facts into the six user-facing installation modes. */
 export const connectionFromStatus = (status: GitHubAppConnectionStatus): GitHubConnection => {
   if (!status.enabled) {
-    return {
-      ...status,
-      mode: "error",
-      error: "GitHub App connections are not available on this Jingler server."
-    }
+    return status.cliAvailable
+      ? { ...status, mode: "disconnected", error: null }
+      : {
+          ...status,
+          mode: "error",
+          error: "GitHub App connections are not available on this Jingler server."
+        }
   }
   if (!status.connected || status.user === null) {
     return { ...status, mode: "disconnected", error: null }

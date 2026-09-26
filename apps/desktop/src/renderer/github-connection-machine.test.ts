@@ -46,6 +46,10 @@ describe("connectionFromStatus", () => {
       ).mode
     ).toBe("suspended")
     expect(connectionFromStatus(status({ enabled: false })).mode).toBe("error")
+    expect(connectionFromStatus(status({ enabled: false, cliAvailable: true }))).toMatchObject({
+      mode: "disconnected",
+      error: null
+    })
   })
 })
 

@@ -266,20 +266,42 @@ export const githubAckEvent = (
     pending.resolve();
   });
 
-export const githubConnectionStatus = (): Effect.Effect<
+const githubConnectionWithCli = (
+  appStatus: Effect.Effect<GitHubAppConnectionStatus, GitHubApiError, GitHubAuth>,
+): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
-  GitHubAuth
-> => GitHubAuth.status().pipe(Effect.mapError(githubConnectionError));
+  GitHubAuth | GitHubApi | CommandExecutor.CommandExecutor
+> =>
+  Effect.gen(function* () {
+    const cliAvailable = yield* GitHubApi.cliAvailable().pipe(
+      Effect.mapError(githubConnectionError),
+    );
+    const status = yield* appStatus.pipe(
+      Effect.mapError(githubConnectionError),
+      Effect.catchAll((error) =>
+        cliAvailable
+          ? Effect.succeed({
+              enabled: false,
+              connected: false,
+              user: null,
+              installations: [],
+              lastRefreshedAt: null,
+            })
+          : Effect.fail(error),
+      ),
+    );
+    return { ...status, cliAvailable };
+  });
+
+export const githubConnectionStatus = () =>
+  githubConnectionWithCli(GitHubAuth.status());
 
 export const githubRepositories = () =>
-  GitHubAuth.repositories().pipe(Effect.mapError(githubConnectionError));
+  GitHubApi.repositories().pipe(Effect.mapError(githubConnectionError));
 
-export const githubConnectionRefresh = (): Effect.Effect<
-  GitHubAppConnectionStatus,
-  AuthError,
-  GitHubAuth
-> => GitHubAuth.refresh().pipe(Effect.mapError(githubConnectionError));
+export const githubConnectionRefresh = () =>
+  githubConnectionWithCli(GitHubAuth.refresh());
 
 export const githubConnectionInstall = (): Effect.Effect<
   string,
@@ -1886,19 +1908,26 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       diff,
     });
 
-    // Post the minor/nit half to the PR as inline comments. The critical/major
-    // half is NOT posted — it goes to the session's agent, which the renderer
-    // does (it owns the conversation actor; this process has no way to reach it).
+    const postToPr = yield* ConfigService.get().pipe(
+      Effect.map((config) => config?.github?.postAdversarialReviewComments ?? true),
+      Effect.orElseSucceed(() => false),
+    );
+    const routedReview = { ...review, postToPr };
+
+    // Post the minor/nit half to the PR as inline comments when enabled. The
+    // renderer routes everything locally when posting is disabled.
     //
     // Deliberately below the de-dupe: only a FRESH run posts. The short-circuit
     // above returns `prior` untouched, so a poll tick on an unchanged head can
     // never re-post the same nits.
-    const posted = yield* postReviewToPr(
-      session.worktreePath,
-      session.prNumber,
-      review,
-      diff,
-    );
+    const posted = postToPr
+      ? yield* postReviewToPr(
+          session.worktreePath,
+          session.prNumber,
+          routedReview,
+          diff,
+        )
+      : routedReview;
 
     // Persist best-effort: a review the user can see now matters more than one
     // we can re-read later, and a failed write must not fail the run.
@@ -1960,9 +1989,17 @@ export const githubDetectPr = (sessionId: string) =>
     if (!session?.worktreePath) return null;
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
-    const n = yield* GitHubApi.prForWorktree(session.worktreePath);
+    const [n, liveBranch] = yield* Effect.all([
+      GitHubApi.prForWorktree(session.worktreePath),
+      GitService.branchAt(session.worktreePath),
+    ]);
     if (n === null) return null;
-    yield* SessionStore.setPrNumber(session.id, n).pipe(
+    const persistLink = SessionStore.setPrNumber(session.id, n).pipe(
+      Effect.zipRight(
+        liveBranch === null ? Effect.void : SessionStore.setBranch(session.id, liveBranch),
+      ),
+    );
+    yield* persistLink.pipe(
       Effect.mapError((error) => new GitHubApiError({
         reason: "unavailable",
         message: error.message,
@@ -1973,15 +2010,12 @@ export const githubDetectPr = (sessionId: string) =>
     // App identity is optional for CLI-linked PRs. Hydrate it only when this
     // repository is installed, which is what makes realtime routing available.
     yield* Effect.gen(function* () {
-      const [repository, liveBranch] = yield* Effect.all([
-        GitHubApi.repository(session.worktreePath!),
-        GitService.branchAt(session.worktreePath!),
-      ]);
+      const repository = yield* GitHubApi.repository(session.worktreePath!);
+      if (repository.installationId === undefined) return;
       yield* SessionStore.setGitHubLink(session.id, {
         installationId: repository.installationId,
         repositoryId: repository.id,
         prNumber: n,
-        ...(liveBranch === null ? {} : { branch: liveBranch }),
       });
       yield* GitHubAuth.upsertSessionRoute({
         sessionId: session.id,
@@ -2017,11 +2051,13 @@ const hydrateGitHubSessionLinks = (
       }
       try {
         const resolved = await repository(session.worktreePath);
-        await link(session.id, {
-          installationId: resolved.installationId,
-          repositoryId: resolved.id,
-          prNumber: session.prNumber,
-        });
+        if (resolved.installationId !== undefined) {
+          await link(session.id, {
+            installationId: resolved.installationId,
+            repositoryId: resolved.id,
+            prNumber: session.prNumber,
+          });
+        }
       } catch {
         // A stale/inaccessible legacy session remains safely unlinked.
       }
@@ -2450,7 +2486,7 @@ export const githubPublish = (sessionId: string) =>
             const cwd = session.worktreePath;
             let repositoryIdentity: {
               readonly id: string;
-              readonly installationId: string;
+              readonly installationId?: string;
               readonly fullName: string;
             } | null = null;
             let pushCredential: { readonly token: string } | null = null;
@@ -2515,22 +2551,23 @@ export const githubPublish = (sessionId: string) =>
                   authenticate: async () => {
                     const repository = await run(GitHubApi.repository(cwd));
                     repositoryIdentity = repository;
-                    pushCredential = await run(
-                      GitHubAuth.credentialsForInstallation(
-                        repository.installationId,
-                        repository.fullName,
-                        pushPermissions,
-                      ),
-                    );
+                    if (repository.installationId !== undefined) {
+                      pushCredential = await run(
+                        GitHubAuth.credentialsForInstallation(
+                          repository.installationId,
+                          repository.fullName,
+                          pushPermissions,
+                        ),
+                      );
+                    }
                   },
                   push: async (branch) => {
                     const repository =
                       repositoryIdentity ??
                       (await run(GitHubApi.repository(cwd)));
                     if (!pushCredential) {
-                      throw new Error(
-                        "The short-lived GitHub push credential is unavailable. Retry publishing.",
-                      );
+                      await run(GitService.pushConfigured(cwd, branch));
+                      return;
                     }
                     try {
                       await run(
@@ -2548,16 +2585,10 @@ export const githubPublish = (sessionId: string) =>
                   resolvePr: (branch) =>
                     run(GitHubApi.prForBranch(cwd, branch)),
                   createPr: async (metadata) => {
-                    const repository =
-                      repositoryIdentity ??
-                      (await run(GitHubApi.repository(cwd)));
                     return run(
-                      GitHubAuth.createPullRequest({
-                        installationId: repository.installationId,
-                        repository: repository.fullName,
+                      GitHubApi.prCreate(cwd, {
                         title: metadata.prTitle,
                         body: metadata.prBody,
-                        head: `${repository.fullName.split("/")[0]}:${session.branch}`,
                         base: session.baseBranch ?? "main",
                         draft: false,
                       }),
@@ -2574,21 +2605,24 @@ export const githubPublish = (sessionId: string) =>
                     const repository =
                       repositoryIdentity ??
                       (await run(GitHubApi.repository(cwd)));
-                    await run(
-                      SessionStore.setGitHubLink(session.id, {
-                        installationId: repository.installationId,
-                        repositoryId: repository.id,
-                        prNumber: number,
-                      }),
-                    );
-                    await run(
-                      GitHubAuth.upsertSessionRoute({
-                        sessionId: session.id,
-                        installationId: repository.installationId,
-                        repositoryId: repository.id,
-                        pullRequestNumber: number,
-                      }),
-                    );
+                    await run(SessionStore.setPrNumber(session.id, number));
+                    if (repository.installationId !== undefined) {
+                      await run(
+                        SessionStore.setGitHubLink(session.id, {
+                          installationId: repository.installationId,
+                          repositoryId: repository.id,
+                          prNumber: number,
+                        }),
+                      );
+                      await run(
+                        GitHubAuth.upsertSessionRoute({
+                          sessionId: session.id,
+                          installationId: repository.installationId,
+                          repositoryId: repository.id,
+                          pullRequestNumber: number,
+                        }),
+                      );
+                    }
                   },
                 },
                 async (checkpoint) => {
@@ -4285,16 +4319,22 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ),
   "Projects.cloneFromGitHub": (input) =>
     Effect.gen(function* () {
-      const credential = yield* GitHubAuth.credentialsForInstallation(
-        input.installationId,
-        input.repository,
-        ["contents:read"],
-      );
-      yield* GitService.cloneWithInstallationToken(
-        input.destination,
-        input.repository,
-        credential.token,
-      );
+      const clone = input.installationId === undefined
+        ? GitHubApi.cloneRepository(input.repository, input.destination)
+        : GitHubAuth.credentialsForInstallation(
+            input.installationId,
+            input.repository,
+            ["contents:read"],
+          ).pipe(
+            Effect.flatMap((credential) =>
+              GitService.cloneWithInstallationToken(
+                input.destination,
+                input.repository,
+                credential.token,
+              ),
+            ),
+          );
+      yield* clone;
       return yield* ProjectService.register({
         path: input.destination,
         ...(input.name === undefined ? {} : { name: input.name }),

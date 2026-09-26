@@ -79,7 +79,7 @@ export const outcomeOf = (
     return { kind: "resolved", sha: finding.resolvedBy.sha, subject: finding.resolvedBy.subject }
   }
   if (review === null) return opts.sent ? { kind: "routed" } : { kind: "manual" }
-  const destination = destinationOf(finding.severity)
+  const destination = review.postToPr === false ? "agent" : destinationOf(finding.severity)
   if (destination === "agent") {
     return review.routedAt !== null || opts.sent ? { kind: "routed" } : { kind: "manual" }
   }
@@ -389,7 +389,11 @@ export function ReviewFindings({
 
   const findings = review === null ? [] : rankFindings(review.findings)
   const elapsed = useTicker(running && startedAt !== null, startedAt)
-  const split = review === null ? null : partitionFindings(review.findings)
+  const split = review === null
+    ? null
+    : review.postToPr === false
+      ? { toAgent: review.findings, toPr: [] }
+      : partitionFindings(review.findings)
   const resolved = review === null ? 0 : resolvedCount(review.findings)
 
   return (

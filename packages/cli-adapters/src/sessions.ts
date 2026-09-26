@@ -889,7 +889,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             diff: { added: 0, removed: 0 },
             prNumber: input.pr.number,
-            githubInstallationId: repository.installationId,
+            ...propertiesWhen(repository.installationId !== undefined, {
+              githubInstallationId: repository.installationId
+            }),
             githubRepositoryId: repository.id,
             costUsd: 0,
             tokens: 0,

@@ -156,7 +156,7 @@ export interface JinglerAppProps {
   onRegisterProject?: (input: { path: string; name?: string }) => Promise<Project>
   onCreateProjectDirectory?: (input: { path: string; name?: string }) => Promise<Project>
   onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
-  onCloneProjectFromGitHub?: (input: { installationId: string; repository: string; destination: string; name?: string }) => Promise<Project>
+  onCloneProjectFromGitHub?: (input: { installationId?: string; repository: string; destination: string; name?: string }) => Promise<Project>
   onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
   /** Absolute paths of starred repos — surfaced first in the picker + sidebar. */
   starredRepos?: ReadonlyArray<string>

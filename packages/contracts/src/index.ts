@@ -516,12 +516,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Clone through the GitHub App without exposing its short-lived credential to the renderer. */
+  /** Clone with an App credential when present, otherwise with configured Git credentials. */
   Rpc.make("Projects.cloneFromGitHub", {
     success: Project,
     error: Schema.Union(GitError, GitHubApiError),
     payload: {
-      installationId: Schema.String,
+      installationId: Schema.optional(Schema.String),
       repository: Schema.String,
       destination: Schema.String,
       name: Schema.optional(Schema.String)
@@ -1237,7 +1237,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: AuthError
   }),
 
-  /** Fetch repositories visible to every active GitHub App installation. */
+  /** Fetch repositories visible through the GitHub App or authenticated CLI. */
   Rpc.make("GitHub.repositories", {
     success: Schema.Array(GitHubCloneRepository),
     error: AuthError

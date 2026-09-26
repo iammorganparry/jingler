@@ -34,7 +34,7 @@ export function useProjects(environmentId?: string) {
     clone: (input: { url: string; destination: string; name?: string }) =>
       rpc.projectsClone({ ...input, ...(environmentId === undefined ? {} : { environmentId }) }).then(publish),
     cloneFromGitHub: (input: {
-      installationId: string
+      installationId?: string
       repository: string
       destination: string
       name?: string

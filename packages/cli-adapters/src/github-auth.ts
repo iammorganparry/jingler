@@ -228,7 +228,9 @@ const parseRepositories = (value: unknown): ReadonlyArray<GitHubCloneRepository>
   })
   return repositories.some((repository) => repository === null)
     ? null
-    : repositories.filter((repository): repository is GitHubCloneRepository => repository !== null)
+    : repositories.filter(
+        (repository): repository is NonNullable<(typeof repositories)[number]> => repository !== null
+      )
 }
 
 const parseSessionRoute = (value: unknown): GitHubSessionRoute | null => {

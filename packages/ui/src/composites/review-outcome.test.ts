@@ -93,6 +93,14 @@ describe("outcomeOf — PR-destined (minor/nit)", () => {
   })
 })
 
+describe("outcomeOf — local-only reviews", () => {
+  it("keeps low-severity findings marked as routed after reload", () => {
+    const r = review({ postToPr: false, routedAt: "2026-07-17T10:00:01.000Z" })
+    expect(outcomeOf(finding("minor"), r, opts).kind).toBe("routed")
+    expect(outcomeOf(finding("nit"), r, opts).kind).toBe("routed")
+  })
+})
+
 describe("outcomeOf — manual sends", () => {
   it("reports routed for anything the operator sent by hand", () => {
     const sent = { sent: true }

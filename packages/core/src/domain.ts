@@ -456,9 +456,9 @@ export type ProjectDirectoryListing = Schema.Schema.Type<
   typeof ProjectDirectoryListing
 >;
 
-/** A repository the signed-in user can clone through an active GitHub App installation. */
+/** A repository the signed-in user can clone through the GitHub App or CLI. */
 export const GitHubCloneRepository = Schema.Struct({
-  installationId: Schema.String,
+  installationId: Schema.optional(Schema.String),
   repositoryId: Schema.String,
   fullName: Schema.String,
 });
@@ -792,6 +792,8 @@ export const GithubConfig = Schema.Struct({
    * PR head SHA so a poll loop can fire it safely. Absent on older configs.
    */
   autoAdversarialReview: Schema.optional(Schema.Boolean),
+  /** Post minor/nit adversarial findings to the PR. Off keeps every finding local. */
+  postAdversarialReviewComments: Schema.optional(Schema.Boolean),
 });
 export type GithubConfig = Schema.Schema.Type<typeof GithubConfig>;
 
@@ -1168,6 +1170,8 @@ export type GitHubAppInstallation = Schema.Schema.Type<
 export const GitHubAppConnectionStatus = Schema.Struct({
   enabled: Schema.Boolean,
   connected: Schema.Boolean,
+  /** Authenticated host GitHub CLI; supports product operations but not realtime webhooks. */
+  cliAvailable: Schema.optional(Schema.Boolean),
   user: Schema.NullOr(GitHubAppUser),
   installations: Schema.Array(GitHubAppInstallation),
   lastRefreshedAt: Schema.NullOr(Schema.String),
@@ -1197,6 +1201,7 @@ export const GitHubConnection = Schema.Struct({
   mode: GitHubConnectionMode,
   enabled: Schema.Boolean,
   connected: Schema.Boolean,
+  cliAvailable: Schema.optional(Schema.Boolean),
   user: Schema.NullOr(GitHubAppUser),
   installations: Schema.Array(GitHubAppInstallation),
   lastRefreshedAt: Schema.NullOr(Schema.String),
@@ -1811,6 +1816,8 @@ export const AdversarialReview = Schema.Struct({
   /** ISO-8601 timestamp of the run. */
   createdAt: Schema.String,
   findings: Schema.Array(ReviewFinding),
+  /** Whether low-severity findings from this run may be published to GitHub. */
+  postToPr: Schema.optional(Schema.Boolean),
   /**
    * Set when the reviewer ran but emitted no parseable findings block — a
    * refusal, a "looks good to me", or malformed output. Carries the raw text so

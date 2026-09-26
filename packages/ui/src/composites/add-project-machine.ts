@@ -12,7 +12,7 @@ export interface AddProjectDeps {
   createDirectory: (input: { path: string; name?: string }) => Promise<Project>
   clone: (input: { url: string; destination: string; name?: string }) => Promise<Project>
   cloneFromGitHub: (input: {
-    installationId: string
+    installationId?: string
     repository: string
     destination: string
     name?: string

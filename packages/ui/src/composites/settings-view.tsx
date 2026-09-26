@@ -821,7 +821,8 @@ function ContextSection({
 const DEFAULT_GITHUB: GithubConfig = {
   enabled: false,
   autoCreatePr: false,
-  autoDetectPr: true
+  autoDetectPr: true,
+  postAdversarialReviewComments: true
 }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
 
@@ -1312,6 +1313,11 @@ return ("bg-line-strong")
 
         {renderConnectionStatus()}
 
+        {connection.cliAvailable && !connected && (
+          <Callout tone="blue">
+            GitHub CLI authenticated. Pull-request features work locally; install the GitHub App only for realtime feedback.
+          </Callout>
+        )}
         {connection.error && <Callout tone="red">{connection.error}</Callout>}
         {connection.mode === "partial-access" && (
           <Callout tone="blue">
@@ -1446,6 +1452,15 @@ return ("bg-line-strong")
             disabled={!draft.enabled}
             onChange={(autoAdversarialReview) =>
               setGithub({ ...draft, autoAdversarialReview })
+            }
+          />
+          <ToggleRow
+            label="Post low-severity findings to the pull request"
+            description="Turn off to keep adversarial feedback local and send every finding to the session agent instead."
+            checked={draft.postAdversarialReviewComments ?? true}
+            disabled={!draft.enabled}
+            onChange={(postAdversarialReviewComments) =>
+              setGithub({ ...draft, postAdversarialReviewComments })
             }
           />
         </div>
