@@ -44,6 +44,8 @@ import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 import { installPlannotatorView, registerPlannotatorScheme } from "./plannotator-view.js"
 
+app.setName("Jingler")
+
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
 let quitPending = false
