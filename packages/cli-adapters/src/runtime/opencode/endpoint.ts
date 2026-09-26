@@ -31,6 +31,9 @@ export const catalogModels = (providers: ProviderListResponse, config: ConfigPro
 }
 export const readOpenCodeModels = async (server: OpenCodeServer, directory?: string, signal?: AbortSignal) => {
   const request = { throwOnError: true as const, ...(signal ? { signal } : {}) }
+  // Remote/account/managed config can survive filesystem isolation. Never start its MCPs.
+  const resolved = (await server.client.config.get({ directory }, request)).data
+  if (Object.keys(resolved.mcp ?? {}).length) throw new Error("Ambient OpenCode MCP configuration is unavailable in Jingler")
   const [providers, config] = await Promise.all([
     server.client.provider.list({ directory }, request),
     server.client.config.providers({ directory }, request)

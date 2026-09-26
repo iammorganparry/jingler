@@ -42,6 +42,7 @@ import {
   PromptCompiler,
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
+import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
 import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
@@ -371,7 +372,7 @@ const createResources = (
   // operator would see a bare "The agent run failed." with the reason lost.
   return Effect.try({
     try: () => (options.promptCompiler ?? new PromptCompiler()).compile({
-      layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+      layers: [...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode), ...ponytailPromptLayers(spec.ponytailMode)],
       tools,
       tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
     }),

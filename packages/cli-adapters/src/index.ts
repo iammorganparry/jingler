@@ -111,3 +111,5 @@ export { codexEndpointLogin } from "./runtime/codex/login.js"
 
 export { makeOpenCodeRuntimeRegistration } from "./runtime/opencode/runtime.js"
 export { probeOpenCodeEndpoint } from "./runtime/opencode/endpoint.js"
+
+export { BUILTIN_SKILLS } from "./runtime/resources/portable-skills.js"

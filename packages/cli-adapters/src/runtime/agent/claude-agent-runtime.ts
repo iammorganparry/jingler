@@ -15,13 +15,11 @@ import {
 } from "./agent-runtime.js"
 
 import { trackChild } from "../../child-registry.js"
-import { startClaudeCliToolRelay, type ClaudeCliToolRelay } from "../providers/claude-cli-tool-relay.js"
+import { type RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
-import type { ToolRegistry } from "../tools/tool-registry.js"
-import { createJinglerTools } from "./pi-jingler-tools.js"
+import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 
-export interface ClaudeAgentRuntimeOptions {
-  readonly createToolRegistry?: (spec: AgentRunSpec, context: AgentRuntimeContext) => Effect.Effect<ToolRegistry, AgentRuntimeError, Scope.Scope>
+export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
   readonly binary?: string
   readonly environment?: NodeJS.ProcessEnv
   readonly spawnProcess?: (binary: string, args: string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams
@@ -58,7 +56,8 @@ const permissionArgs = (mode: AgentRunSpec["mode"]): ReadonlyArray<string> => {
 export const claudeAgentArguments = (
   spec: AgentRunSpec,
   sessionId: string,
-  mcpConfigPath?: string
+  mcpConfigPath?: string,
+  systemPrompt?: string
 ): ReadonlyArray<string> => [
   "-p",
   "--output-format", "stream-json",
@@ -66,7 +65,10 @@ export const claudeAgentArguments = (
   "--include-partial-messages",
   "--verbose",
   "--model", modelName(spec.modelId),
-  "--safe-mode",
+  "--setting-sources", "",
+  "--disable-slash-commands",
+  "--system-prompt-snapshot", "off",
+  ...(systemPrompt === undefined ? [] : ["--system-prompt", systemPrompt]),
   "--no-chrome",
   "--tools", "",
   "--allowedTools", "mcp__jingler__*",
@@ -233,7 +235,7 @@ const protocolLine = (line: string): boolean => {
   try {
     const value: unknown = JSON.parse(line)
     return isRecord(value) &&
-      ["assistant", "result", "stream_event", "system", "user"].includes(String(value.type))
+      ["assistant", "result", "stream_event", "system", "user", "rate_limit_event", "tool_progress", "tool_use_summary"].includes(String(value.type))
   } catch {
     return false
   }
@@ -290,20 +292,20 @@ async function* runClaude(
   const environment = nativeCliEnvironment(options.environment ?? process.env)
   const scope = await Effect.runPromise(Scope.make())
   await reserveClaudeSession(reserved, sessionId, scope)
-  let relay: ClaudeCliToolRelay | undefined
+  let relay: RegistryMcpRelay | undefined
   let child: ChildProcessWithoutNullStreams | undefined
   let onAbort = () => {}
   try {
     await options.checkAuth?.(signal)
-    const registry = await Effect.runPromise(
-      (options.createToolRegistry?.(spec, context) ?? createJinglerTools({ context, cwd: spec.cwd, mcp: context.mcp }).pipe(Effect.mapError(runtimeError))).pipe(Scope.extend(scope)),
+    const prepared = await Effect.runPromise(
+      prepareNativeRuntimeTools(spec, context, options).pipe(Scope.extend(scope)),
       { signal }
     )
-    relay = await startClaudeCliToolRelay({ registry, spec, context })
+    relay = prepared.relay
     signal.throwIfAborted()
     child = trackChild((options.spawnProcess ?? spawn)(
       binary,
-      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath)],
+      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prepared.systemPrompt)],
       { cwd: spec.cwd, env: { ...environment, ...relay.environment }, stdio: ["pipe", "pipe", "pipe"] }
     ))
     const spawned = child
@@ -324,7 +326,7 @@ async function* runClaude(
     const output = { terminal: false, started: false }
     yield* claudeOutput(
       child,
-      relay.environment.JINGLER_CLAUDE_MCP_TOKEN!,
+      relay.environment.JINGLER_TOOL_RELAY_TOKEN!,
       output,
       { _tag: "Started", sessionId, model: spec.modelId },
       // A terminal event wins over an interrupt delivered by its consumer.
@@ -332,7 +334,7 @@ async function* runClaude(
     )
     const exitCode = await waitForExit(spawned)
     if (exitCode !== 0) {
-      const message = stderr.trim().replaceAll(relay.environment.JINGLER_CLAUDE_MCP_TOKEN!, "[redacted]") || `Claude CLI exited with ${exitCode}`
+      const message = stderr.trim().replaceAll(relay.environment.JINGLER_TOOL_RELAY_TOKEN!, "[redacted]") || `Claude CLI exited with ${exitCode}`
       if (
         spec.continuation !== null &&
         invalidContinuation.test(message)
@@ -348,7 +350,7 @@ async function* runClaude(
     reserved.delete(sessionId)
     signal.removeEventListener("abort", onAbort)
     if (child !== undefined) await stopProcess(child)
-    try { await relay?.close() } finally { await Effect.runPromise(Scope.close(scope, Exit.void)) }
+    await Effect.runPromise(Scope.close(scope, Exit.void))
   }
 }
 

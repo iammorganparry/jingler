@@ -1,4 +1,7 @@
 import { CodexInbox } from "./inbox.js"
+import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
+
+export type CodexRuntimeOptions = CodexClientOptions & NativeRuntimeToolsOptions
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import type { PermissionsRequestApprovalParams } from "./generated/v2/PermissionsRequestApprovalParams.js"
 import type { PermissionsRequestApprovalResponse } from "./generated/v2/PermissionsRequestApprovalResponse.js"
@@ -48,7 +51,7 @@ const mcpServerConfig = (
   server: RuntimeMcpServer,
   index: number,
   env: NodeJS.ProcessEnv
-): JsonValue => {
+): Record<string, JsonValue> => {
   if (server.transport === "stdio") {
     // Config env_vars forwards named inherited values; no credentials in config.
     const names = Object.keys(server.env)
@@ -78,7 +81,7 @@ const mcpServerConfig = (
 
 /** Secrets go only into the child's environment, never argv/config/journal. */
 export const codexMcpConfig = (context: AgentRuntimeContext, environment: NodeJS.ProcessEnv) => {
-  const servers: Record<string, JsonValue> = {}
+  const servers: Record<string, Record<string, JsonValue>> = {}
   const env = codexEnvironment(environment)
   const attachments = [
     ...(context.mcp?.configured ?? []),
@@ -227,7 +230,8 @@ const answerRequest = async (
 const openThread = async (
   client: CodexClient,
   spec: AgentRunSpec,
-  config: ThreadStartParams["config"]
+  config: ThreadStartParams["config"],
+  systemPrompt: string
 ) => {
   await client.initialize()
   const account = await client.request<GetAccountResponse>("account/read", { refreshToken: false })
@@ -240,6 +244,7 @@ const openThread = async (
     cwd: spec.cwd,
     model: spec.modelId,
     config,
+    developerInstructions: systemPrompt,
     approvalPolicy: spec.mode === "read-only" ? "never" : "on-request",
     approvalsReviewer: "user",
     sandbox: spec.mode === "read-only" ? "read-only" : "workspace-write"
@@ -331,7 +336,7 @@ interface ActiveTurn {
   client: CodexClient
   turnId: string
 }
-export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRuntimeShape => {
+export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentRuntimeShape => {
   const active = new Map<string, ActiveTurn>()
   const reserved = new Set<string>()
   const control = (continuation: RuntimeContinuation, targetId: string, text?: string) =>
@@ -364,8 +369,14 @@ export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRu
               reason: "runtime",
               message: `${spec.mode} mode is unsupported in native Codex: required approvals cannot be guaranteed`
             }))
+          const prepared = yield* prepareNativeRuntimeTools(spec, context, options)
           const attachment = yield* Effect.try({
-            try: () => codexMcpConfig(context, options.environment ?? process.env),
+            try: () => {
+              const attachment = codexMcpConfig({ ...context, mcp: { configured: [prepared.relay.attachment] } }, options.environment ?? process.env)
+              // Only our authenticated relay bypasses the vendor prompt; the registry still owns every permission decision.
+              attachment.config.mcp_servers.jingler!.default_tools_approval_mode = "approve"
+              return attachment
+            },
             catch: failure
           })
           const client = yield* Effect.acquireRelease(
@@ -381,7 +392,7 @@ export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRu
             }),
             (owned) => Effect.promise(() => owned.close())
           )
-          const iterator = run(spec, context, client, attachment.config)
+          const iterator = run(spec, context, client, attachment.config, prepared.systemPrompt)
           // Close before iterator.return(undefined): an async generator may be blocked waiting
           // for its next notification, so waiting for return first would deadlock.
           const iterable: AsyncIterable<StreamEvent> = {
@@ -408,7 +419,8 @@ export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRu
     spec: AgentRunSpec,
     context: AgentRuntimeContext,
     client: CodexClient,
-    config: ThreadStartParams["config"]
+    config: ThreadStartParams["config"],
+    systemPrompt: string
   ): AsyncGenerator<StreamEvent> {
     const pendingKey = spec.continuation
       ? key(spec.continuation, spec.targetCapabilities.targetId)
@@ -420,7 +432,7 @@ export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRu
     const abort = new AbortController()
     let activeKey: string | undefined
     try {
-      const { response, fresh } = await openThread(client, spec, config)
+      const { response, fresh } = await openThread(client, spec, config, systemPrompt)
       const threadId = response.thread.id
       inbox.threadId = threadId
       const ownerKey = key(
@@ -447,7 +459,7 @@ export const makeCodexAgentRuntime = (options: CodexClientOptions = {}): AgentRu
 }
 
 export const makeCodexRuntimeRegistration = (
-  options: CodexClientOptions = {}
+  options: CodexRuntimeOptions = {}
 ): AgentRuntimeRegistration => ({
   runtimeId: "codex",
   runtime: makeCodexAgentRuntime(options),

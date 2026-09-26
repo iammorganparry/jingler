@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
 
@@ -163,7 +163,15 @@ test("configures canonical model, mode, and reasoning before creating a session"
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    piFixture: PI_FIXTURE
+    piFixture: PI_FIXTURE,
+    seed: ({ home, repoPath }) => {
+      const root = join(home, "jingler")
+      mkdirSync(root, { recursive: true })
+      writeFileSync(join(root, "projects.json"), JSON.stringify([{
+        id: "capability-project", name: "widget", path: repoPath, imported: true,
+        availability: "available", createdAt: "2026-08-11T00:00:00.000Z", updatedAt: "2026-08-11T00:00:00.000Z"
+      }]))
+    }
   })
   await expect(appShell(launched.window)).toBeVisible()
   await launched.window.getByTestId("new-session").click()
@@ -188,7 +196,10 @@ test("configures canonical model, mode, and reasoning before creating a session"
   await launched.window.getByRole("option", { name: "High", exact: true }).click()
   await launched.window.getByRole("button", { name: "Checkout" }).click()
   await launched.window.getByRole("option", { name: "Local" }).click()
-  await launched.window.getByRole("button", { name: "Create workspace" }).click()
+  const composer = launched.window.getByTestId("new-session-view").getByRole("textbox")
+  await expect(composer).toBeEnabled()
+  await composer.fill("Check the configured runtime capabilities.")
+  await composer.press("Enter")
 
   await expect.poll(() => {
     const sessionsPath = join(launched.home, "jingler", "sessions.json")

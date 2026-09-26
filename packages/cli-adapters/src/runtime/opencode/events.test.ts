@@ -7,6 +7,23 @@ const message = (over = {}) => ({ id: 'assistant', sessionID: 'session', parentI
 const text = (value: string) => event('message.part.updated', { part: { id: 'text', type: 'text', sessionID: 'session', messageID: 'assistant', text: value } })
 
 describe('OpenCode event normalization', () => {
+  it('correlates a server-generated user ID and ignores later user snapshots and relay echoes', () => {
+    const events = new OpenCodeEvents('session', undefined, new Set(['jingler_probe_echo']))
+    expect(events.map(event('message.updated', { info: message() }))).toEqual([])
+    events.map(event('message.updated', { info: { id: 'server-prompt', sessionID: 'session', role: 'user' } }))
+    events.map(event('message.updated', { info: { id: 'older-prompt', sessionID: 'session', role: 'user' } }))
+    events.map(event('message.updated', { info: message({ parentID: 'server-prompt' }) }))
+    expect(events.map(text('reply'))).toEqual([{ _tag: 'Assistant', text: 'reply' }])
+    expect(events.map(event('message.part.updated', { part: {
+      id: 'tool', type: 'tool', tool: 'jingler_probe_echo', callID: 'vendor-id', sessionID: 'session', messageID: 'assistant',
+      state: { status: 'completed', input: {}, output: 'owned by the relay', metadata: {} }
+    } }))).toEqual([])
+    expect(events.map(event('message.part.updated', { part: {
+      id: 'other-tool', type: 'tool', tool: 'jingler_extra_probe_echo', callID: 'other-id', sessionID: 'session', messageID: 'assistant',
+      state: { status: 'completed', input: {}, output: 'not the relay', metadata: {} }
+    } }))).toMatchObject([{ _tag: 'ToolStart', name: 'jingler_extra_probe_echo' }, { _tag: 'ToolEnd' }])
+  })
+
   it('ignores foreign sessions and prior turns, then deduplicates snapshots after deltas', () => {
     const events = new OpenCodeEvents('session', 'prompt')
     events.map(event('message.updated', { info: message({ sessionID: 'other' }) }))

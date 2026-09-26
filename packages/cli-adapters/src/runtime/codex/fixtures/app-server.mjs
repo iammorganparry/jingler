@@ -1,20 +1,39 @@
 #!/usr/bin/env node
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 if (process.argv.includes('--version')) { console.log('codex-cli ' + ((process.env.CODEX_HOME === '0.152.0' ? '0.152.0' : '0.153.2'))); process.exit(0) }
 const send = value => process.stdout.write(JSON.stringify(value) + '\n')
 let initialized = false
-let thread = 'thread-1'
+let thread = process.env.CODEX_HOME === 'unique-threads' ? `thread-${process.pid}` : 'thread-1'
 let resumed = false
 let policy
+let toolConfig
+let systemPrompt
 let pending
 const note = (method, params) => send({ method, params: { threadId: thread, turnId: 'turn-1', ...params } })
 const done = (status = 'completed') => note('turn/completed', { turn: { id: 'turn-1', status, error: null } })
 const reply = (id, result) => send({ id, result })
-const handleTurnStart = (id, p) => {
+const probeRegistry = async () => {
+  if (toolConfig.default_tools_approval_mode !== 'approve') { done('failed'); return }
+  const client = new Client({ name: 'codex-fixture', version: '1' })
+  const headers = Object.fromEntries(Object.entries(toolConfig.env_http_headers).map(([header, variable]) => [header, process.env[variable]]))
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(toolConfig.url), { requestInit: { headers } }))
+    const listed = await client.listTools()
+    const output = await client.callTool({ name: 'probe_echo', arguments: {} })
+    const item = { type: 'mcpToolCall', id: 'vendor-echo', server: 'jingler', tool: 'probe_echo', status: 'completed' }
+    note('item/started', { item }); note('item/completed', { item })
+    note('item/agentMessage/delta', { itemId: 'probe', delta: JSON.stringify({ names: listed.tools.map(t => t.name), output: output.content, inherited: systemPrompt.includes('jingler.identity-and-safety') }) })
+    done()
+  } finally { await client.close() }
+}
+const handleTurnStart = async (id, p) => {
   const prompt = p.input[0].text
   reply(id, { turn: { id: 'turn-1' } })
+  if (prompt === 'registry-probe') { await probeRegistry(); return }
   if (prompt === 'policy') { note('item/agentMessage/delta', { itemId: 'policy', delta: JSON.stringify(policy) }); done(); return }
   if (prompt === 'wait') { note('item/agentMessage/delta', { itemId: 'ready', delta: 'ready' }); return }
   if (['approval', 'file-approval', 'question', 'permissions'].includes(prompt)) {
@@ -48,7 +67,7 @@ const handleThread = (method, id, p) => {
   return false
 }
 const handleTurn = (method, id, p) => {
-  if (method === 'turn/start') { handleTurnStart(id, p); return true }
+  if (method === 'turn/start') { handleTurnStart(id, p).catch(() => done('failed')); return true }
   if (method === 'turn/steer') { reply(id, { turnId: 'turn-1' }); note('item/agentMessage/delta', { itemId: 'a1', delta: p.input[0].text }); return true }
   if (method === 'turn/interrupt') { reply(id, {}); done('interrupted'); return true }
   return false
@@ -62,6 +81,7 @@ const handleFailure = (method) => {
 }
 const handleMessage = (message) => {
   const { id, method, params: p } = message
+  if (method === 'thread/start' || method === 'thread/resume') { toolConfig = p.config?.mcp_servers?.jingler; systemPrompt = p.developerInstructions }
   if (method === 'thread/start' || method === 'thread/resume') policy = { approvalPolicy: p.approvalPolicy, sandbox: p.sandbox, approvalsReviewer: p.approvalsReviewer }
   if (method === 'initialize') { reply(id, { userAgent: 'fake', platformFamily: 'unix', platformOs: 'linux' }); return }
   if (method === 'initialized') { initialized = true; return }

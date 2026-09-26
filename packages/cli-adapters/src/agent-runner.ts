@@ -1417,7 +1417,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
 /** Native runtimes without run-scoped MCP support must not receive browser leases. */
 const acquireRuntimeBrowser = (runtimeId: string | undefined, sessionId: string, chatId: string) =>
-  runtimeId === "opencode" ? Effect.succeed(null) : Effect.gen(function* () {
+  Effect.gen(function* () {
     return yield* (yield* BrowserControlMcpService).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
   })
 
@@ -1483,6 +1483,7 @@ function prepareTurnSpec(
       targetId: session.environmentId ?? "desktop"
     },
     cwd: worktreePath,
+    operatorPrompt: promptText,
     // A slash command is only expanded by the harness when it is the FIRST
     // thing in the message. Prefixing a compaction primer or a plan pointer
     // turned `/babysit-pr …` into prose, and the turn came back instantly

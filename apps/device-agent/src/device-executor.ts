@@ -1,16 +1,12 @@
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
-import { makeOpenCodeRuntimeRegistration } from "@jingler/cli-adapters/runtime/opencode/runtime"
 import { probeCodexEndpoint } from "@jingler/cli-adapters/runtime/codex/endpoint"
-import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/codex/runtime"
 import { probeClaudeEndpoint } from "@jingler/cli-adapters/runtime/providers/claude-endpoint"
 import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import {
   AgentRuntime,
-  AgentRuntimeRegistry,
   AgentRuntimeRouterLive,
-  makeAgentRuntimeRegistry,
   runtimeOwnerForSession
 } from "@jingler/cli-adapters/runtime/agent/agent-runtime"
 import { AgentTurnDriverLive } from "@jingler/cli-adapters/runtime/agent/agent-turn-driver-live"
@@ -512,13 +508,7 @@ const deviceRuntime = (root: string, targetId: string) => {
     Layer.provide(providers.ProviderConnectionsLive),
     Layer.provide(providers.SecretStoreLive)
   )
-  const runtimeRegistry = Layer.effect(
-    AgentRuntimeRegistry,
-    Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
-      ...pi.registrations.values(), makeCodexRuntimeRegistration(), makeOpenCodeRuntimeRegistration()
-    ]))
-  ).pipe(Layer.provide(piRuntime))
-  const agentRuntime = AgentRuntimeRouterLive.pipe(Layer.provide(runtimeRegistry))
+  const agentRuntime = AgentRuntimeRouterLive.pipe(Layer.provide(piRuntime))
   const agentExecution = AgentTurnDriverLive.pipe(
     Layer.provideMerge(agentRuntime)
   )

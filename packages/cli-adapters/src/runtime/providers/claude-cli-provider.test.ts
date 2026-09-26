@@ -35,6 +35,27 @@ const collect = async (stream: AsyncIterable<AssistantMessageEvent>) => {
 }
 
 describe("Claude CLI provider relay", () => {
+  it.runIf(process.env.JINGLER_CLAUDE_LIVE === "1")("returns a live tool selection to Pi and consumes Pi's result on the next turn", async () => {
+    const liveModel = { ...model, id: "haiku" }
+    const liveContext: Context = {
+      systemPrompt: "Use only the supplied tools. Call probe_echo once, then reply with its returned word.",
+      tools: [{ name: "probe_echo", description: "Return a secret test word.", parameters: Type.Object({}) }],
+      messages: [{ role: "user", content: "Call probe_echo and reply with its word.", timestamp: 1 }]
+    }
+    const stream = createClaudeCliStreamSimple()
+    const first = await stream(liveModel, liveContext, { signal: AbortSignal.timeout(60_000) }).result()
+    expect(first.stopReason).toBe("toolUse")
+    const call = first.content.find((part) => part.type === "toolCall")!
+    expect(call?.name).toBe("probe_echo")
+    const second = await stream(liveModel, { ...liveContext, messages: [
+      ...liveContext.messages, first,
+      { role: "toolResult", toolCallId: call.id, toolName: call.name, content: [{ type: "text", text: "JINGLER_TOOL_RESULT_73" }], isError: false, timestamp: 2 }
+    ] }, { signal: AbortSignal.timeout(60_000) }).result()
+    expect(second.stopReason).toBe("stop")
+    expect(second.content.filter((part) => part.type === "text").map((part) => part.text).join(""))
+      .toContain("JINGLER_TOOL_RESULT_73")
+  }, 130_000)
+
   it("uses stream-json with only the authenticated Jingler MCP tools", () => {
     const args = claudeCliArguments(model, context, { reasoning: "high" }, "/tmp/mcp.json")
     expect(args).toContain("stream-json")

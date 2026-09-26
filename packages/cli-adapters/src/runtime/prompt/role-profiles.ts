@@ -1,3 +1,4 @@
+import type { AgentRuntimeId } from "@jingler/core"
 import type { AgentRole, PromptLayer, RuntimeMode } from "./prompt-compiler.js"
 
 const rolePolicy: Readonly<Record<AgentRole, string>> = {
@@ -66,7 +67,13 @@ const COLLABORATION_CONTRACT = [
   "- When no operator is in the loop to answer (unattended or autonomous runs), take ownership: proceed on your best judgment and record what you chose and why. The moment an operator is present, their word wins."
 ].join("\n")
 
-export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): ReadonlyArray<PromptLayer> => [
+const nativeRolePolicy: Partial<Record<AgentRole, string>> = {
+  conversation: "Help the operator complete the requested engineering work and report observable results.",
+  plan: "Inspect the project and propose a concrete implementation plan. Use only the active Jingler tools.",
+  "plan-execution": "Implement the approved plan, test the changes, and report verified progress. Use only the active Jingler tools."
+}
+
+export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode, runtimeId: AgentRuntimeId = "pi"): ReadonlyArray<PromptLayer> => [
   {
     id: "jingler.identity-and-safety",
     kind: "safety",
@@ -86,7 +93,7 @@ export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): Read
     trust: "trusted",
     required: true,
     version: "5",
-    content: [`Role: ${role}.`, `Execution mode: ${mode}.`, rolePolicy[role]].join("\n")
+    content: [`Role: ${role}.`, `Execution mode: ${mode}.`, runtimeId === "pi" ? rolePolicy[role] : (nativeRolePolicy[role] ?? rolePolicy[role])].join("\n")
   },
   ...(ENGINEERING_ROLES.has(role)
     ? [{

@@ -67,6 +67,10 @@ export const AgentRunSpec = Schema.Struct({
   reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
   cwd: Schema.String,
   prompt: Schema.String,
+  /** Operator text before Jingler adds turn instructions; portable commands use this only. */
+  operatorPrompt: Schema.optional(Schema.String),
+  /** Prepared by Jingler, never by a harness plugin. */
+  ponytailMode: Schema.optional(Schema.Literal("off", "lite", "full", "ultra", "review")),
   images: Schema.optional(Schema.Array(Attachment)),
   priorMessages: Schema.Array(Message),
   continuation: Schema.NullOr(RuntimeContinuation),

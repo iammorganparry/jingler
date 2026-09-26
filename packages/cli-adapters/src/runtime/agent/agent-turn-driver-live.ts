@@ -5,6 +5,7 @@ import {
   AgentTurnDriver,
   type AgentTurnSpec
 } from "../../agent-turn-driver.js"
+import { requiresPreparedTurn } from "../resources/portable-runtime.js"
 import { AgentRuntime } from "./agent-runtime.js"
 
 const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
@@ -85,7 +86,7 @@ export const AgentTurnDriverLive = Layer.effect(
                 // silently retrying forever. `unsupported` hands it to the
                 // stop-and-replay fallback, whose fresh turn carries images.
                 yield* context.registerTurnSteer?.((text, images) =>
-                  images.length > 0
+                  images.length > 0 || requiresPreparedTurn(text)
                     ? Promise.resolve("unsupported")
                     : Effect.runPromise(runtime.steer(continuation, targetId, text)).then(
                         () => "accepted" as const,

@@ -128,10 +128,8 @@ type ToolResultEvent = Extract<
   { readonly type: "tool_execution_update" | "tool_execution_end" }
 >
 
-const toolTarget = (
-  event: Extract<AgentSessionEvent, { readonly type: "tool_execution_start" }>
-): string | null => {
-  const target = Option.getOrUndefined(decodeTarget(event.args))
+export const toolTarget = (args: unknown): string | null => {
+  const target = Option.getOrUndefined(decodeTarget(args))
   if (target?.path !== undefined) return target.path
   if (target?.command !== undefined) return target.command
   if (target?.url !== undefined) return target.url
@@ -322,7 +320,7 @@ export const normalizePiEvent = (
         _tag: "ToolStart",
         id: event.toolCallId,
         name: event.toolName,
-        target: toolTarget(event)
+        target: toolTarget(event.args)
       }
     case "tool_execution_update":
       return {
