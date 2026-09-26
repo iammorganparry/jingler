@@ -15,7 +15,8 @@ test("a native Better Auth test account enters the real app without email", asyn
 
     // Sign-in is optional: the app boots signed out, offering it in the sidebar.
     await expect(appShell(window)).toBeVisible()
-    await window.getByRole("button", { name: "Sign in", exact: true }).click()
+    await window.getByRole("button", { name: "Account menu" }).click()
+    await window.getByRole("menuitem", { name: "Sign in" }).click()
     await expect(
       window.getByRole("heading", { name: "Sign in to Jingler" })
     ).toBeVisible()

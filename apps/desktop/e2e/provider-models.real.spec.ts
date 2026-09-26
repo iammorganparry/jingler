@@ -209,10 +209,11 @@ const signInToProduct = async (
   window: Page,
   token: string,
 ): Promise<void> => {
-  // Sign-in is optional, so a signed-out boot shows the sidebar's Sign in button.
-  const signIn = window.getByRole("button", { name: "Sign in", exact: true });
+  // Sign-in is optional: the account menu always renders, and reads
+  // "Not signed in" until a session exists.
   const accountMenu = window.getByRole("button", { name: "Account menu" });
-  await expect(signIn.or(accountMenu)).toBeVisible({ timeout: 30_000 });
+  const signIn = accountMenu.getByText("Not signed in");
+  await expect(accountMenu).toBeVisible({ timeout: 30_000 });
   if (!(await signIn.isVisible())) return;
   await app.evaluate(({ app: electronApp }, value) => {
     electronApp.emit(

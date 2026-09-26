@@ -28,19 +28,25 @@ const signedOutApp = { signedIn: false, configured: true, withRepo: true, sessio
 
 const signInHeading = (window: Page) => window.getByRole("heading", { name: "Sign in to Jingler" })
 
-/** Open the sign-in dialog from the sidebar footer. */
+/** Open the sign-in dialog from the sidebar account menu. */
 async function openSignIn(window: Page) {
   await expect(appShell(window)).toBeVisible()
-  await window.getByRole("button", { name: "Sign in", exact: true }).click()
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Sign in" }).click()
   await expect(signInHeading(window)).toBeVisible()
 }
 
-test("signed out boots into the app with Sign in in the sidebar", async ({ launchApp }) => {
+test("signed out boots into the app with Settings and Sign in in the account menu", async ({ launchApp }) => {
   const { window } = await launchApp(signedOutApp)
   await expect(appShell(window)).toBeVisible()
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
   await expect(signInHeading(window)).toHaveCount(0)
-  await expect(window.getByRole("button", { name: "Account menu" })).toHaveCount(0)
+  const account = window.getByRole("button", { name: "Account menu" })
+  await expect(account.getByText("Not signed in")).toBeVisible()
+  await account.click()
+  await expect(window.getByRole("menuitem", { name: "Settings" })).toBeVisible()
+  await expect(window.getByRole("menuitem", { name: "Sign out" })).toHaveCount(0)
+  await window.keyboard.press("Escape")
 
   await openSignIn(window)
   await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
@@ -131,8 +137,7 @@ test("a deep-link callback signs in and shows the account menu", async ({ launch
 test("a stored token boots signed in", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: [seeded] })
   await expect(appShell(window)).toBeVisible()
-  await expect(window.getByRole("button", { name: "Account menu" })).toBeVisible()
-  await expect(window.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Account menu" }).getByText("E2E User")).toBeVisible()
 })
 
 test("the account menu shows the user and signs out", async ({ launchApp }) => {
@@ -147,7 +152,9 @@ test("the account menu shows the user and signs out", async ({ launchApp }) => {
   // Open it and sign out → still in the app, now offering Sign in.
   await account.click()
   await window.getByRole("menuitem", { name: /sign out/i }).click()
-  await expect(window.getByRole("button", { name: "Sign in", exact: true })).toBeVisible()
+  await expect(account.getByText("Not signed in")).toBeVisible()
+  await account.click()
+  await expect(window.getByRole("menuitem", { name: "Sign in" })).toBeVisible()
   await expect(appShell(window)).toBeVisible()
   await expect(signInHeading(window)).toHaveCount(0)
 })

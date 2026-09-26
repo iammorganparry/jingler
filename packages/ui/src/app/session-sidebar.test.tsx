@@ -455,27 +455,39 @@ describe("SessionSidebar split placement", () => {
 })
 
 describe("SessionSidebar optional sign-in", () => {
-  it("offers Sign in in the footer while signed out", () => {
+  const openAccountMenu = () =>
+    fireEvent.keyDown(screen.getByRole("button", { name: "Account menu" }), { key: "Enter" })
+
+  it("keeps Settings reachable and offers Sign in from the menu while signed out", () => {
     const signIn = vi.fn()
+    const settings = vi.fn()
     render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-      defaultFilters={DEFAULT_FILTERS} onSignIn={signIn} version="1.2.3" />)
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }))
+      defaultFilters={DEFAULT_FILTERS} onSignIn={signIn} onOpenSettings={settings} version="1.2.3" />)
+    expect(screen.getByRole("button", { name: "Account menu" }).textContent).toContain("Not signed in")
+    openAccountMenu()
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull()
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sign in" }))
     expect(signIn).toHaveBeenCalledOnce()
-    expect(screen.getByText("Jingler v1.2.3")).toBeTruthy()
   })
 
-  it("shows the account menu instead once a user is signed in", () => {
+  it("offers Sign out, not Sign in, once a user is signed in", () => {
     render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-      defaultFilters={DEFAULT_FILTERS} onSignIn={() => {}}
+      defaultFilters={DEFAULT_FILTERS} onSignIn={() => {}} onSignOut={() => {}}
       user={{ id: "u1", name: "Ada", email: "ada@example.com", image: null }} />)
-    expect(screen.getByRole("button", { name: "Account menu" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Account menu" }).textContent).toContain("Ada")
+    openAccountMenu()
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull()
   })
 
   it("offers neither while the stored session is still being checked", () => {
     render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-      defaultFilters={DEFAULT_FILTERS} />)
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull()
+      defaultFilters={DEFAULT_FILTERS} onOpenSettings={() => {}} />)
+    expect(screen.getByRole("button", { name: "Account menu" }).textContent).not.toContain("Not signed in")
+    openAccountMenu()
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy()
+    expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull()
   })
 })

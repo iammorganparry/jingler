@@ -266,18 +266,18 @@ const authenticateProvider = async (
   config: ManagedQaConfig,
 ): Promise<void> => {
   if (config.providerHome) {
-    // Sign-in is optional: the shell renders either way, so the account menu is
-    // the signed-in signal and the sidebar's Sign in button the signed-out one.
-    const signIn = window.getByRole("button", { name: "Sign in", exact: true });
+    // Sign-in is optional: the account menu always renders, and reads
+    // "Not signed in" until a session exists.
     const accountMenu = window.getByRole("button", { name: "Account menu" });
-    await expect(accountMenu.or(signIn)).toBeVisible({ timeout: 30_000 });
+    const signIn = accountMenu.getByText("Not signed in");
+    await expect(accountMenu).toBeVisible({ timeout: 30_000 });
     if (await signIn.isVisible()) {
       if (process.env.JINGLER_E2E_HEADED !== "1") {
         throw new Error(
           "Cloud QA product authentication is missing or expired. Provide a current JINGLER_REAL_AUTH_TOKEN or encrypted auth document.",
         );
       }
-      await expect(accountMenu).toBeVisible({ timeout: 5 * 60_000 });
+      await expect(signIn).toHaveCount(0, { timeout: 5 * 60_000 });
     }
     return;
   }

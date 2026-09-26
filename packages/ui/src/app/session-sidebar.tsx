@@ -709,10 +709,10 @@ return (renderExpandedGroupHeading())
         </>
       )}
 
-      {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out),
-          or an optional Sign in while signed out. */}
+      {/* Footer: account menu (→ Settings, Usage, and Sign out — or, signed
+          out, Sign in). Always present: Settings never depends on an account. */}
       <div className="flex-none border-t border-hairline p-1.5">
-        <SidebarAccountFooter
+        <UserMenu
           user={user}
           onOpenSettings={onOpenSettings}
           onOpenUsage={onOpenUsage}
@@ -723,56 +723,6 @@ return (renderExpandedGroupHeading())
         />
       </div>
     </AISidebarSurface>
-  )
-}
-
-/**
- * Signed in → the account menu. Signed out → the version and a Sign in button.
- * Neither (the stored session is still being checked, or a host without auth)
- * → just the version, so a signed-in boot never flashes "Sign in".
- */
-function SidebarAccountFooter({
-  user,
-  onOpenSettings,
-  onOpenUsage,
-  onSignOut,
-  onSignIn,
-  ghConnected,
-  version
-}: Pick<
-  SessionSidebarProps,
-  "user" | "onOpenSettings" | "onOpenUsage" | "onSignOut" | "onSignIn" | "ghConnected" | "version"
->) {
-  const label = version ? `Jingler v${version}` : "Jingler"
-  if (user) {
-    return (
-      <UserMenu
-        user={user}
-        onOpenSettings={onOpenSettings}
-        onOpenUsage={onOpenUsage}
-        onSignOut={onSignOut}
-        ghConnected={ghConnected}
-        version={version}
-      />
-    )
-  }
-  if (onSignIn) {
-    return (
-      <div className="flex h-9 items-center justify-between gap-2 px-2">
-        <span className="font-mono text-[11px] text-dim">{label}</span>
-        <Button size="sm" variant="outline" onClick={onSignIn}>
-          Sign in
-        </Button>
-      </div>
-    )
-  }
-  return (
-    <span
-      className="flex h-9 items-center px-2 font-mono text-[11px] text-dim"
-      title={version ? "App version" : undefined}
-    >
-      {label}
-    </span>
   )
 }
 
