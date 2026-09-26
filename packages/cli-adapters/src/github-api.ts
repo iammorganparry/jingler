@@ -1165,10 +1165,13 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         wrap(() => run(cli.cloneRepository(repository, destination))),
       repositories: () =>
         wrap(async () => {
-          const installed = await run(auth.repositories()).catch(() => [])
-          if (installed.length > 0) return installed
-          if (await run(cli.available())) return run(cli.repositories())
-          return installed
+          try {
+            const installed = await run(auth.repositories())
+            if (installed.length > 0 || !(await run(cli.available()))) return installed
+          } catch (appError) {
+            if (!(await run(cli.available()))) throw appError
+          }
+          return run(cli.repositories())
         }),
       inbox: () => preferCli(cli.inbox(), async () => {
         const repositories = await run(auth.repositories())

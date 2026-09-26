@@ -173,7 +173,9 @@ function AuthedApp({
 }) {
   const [state, send] = useMachine(appMachine);
   const github = useGitHubConnection();
-  const pullRequestInbox = usePullRequestInbox(github.connection.connected);
+  const pullRequestInbox = usePullRequestInbox(
+    github.connection.connected || github.connection.cliAvailable === true,
+  );
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
     new Map<string, { mode: string; error: string | null }>(),
@@ -610,7 +612,7 @@ function AuthedApp({
       const repo = repos.find(
         (candidate) =>
           candidate.path === session.repoPath ||
-          candidate.name === session.repo,
+          (session.repoPath === undefined && candidate.name === session.repo),
       );
       return repositoryAccess(
         github.connection,
@@ -621,10 +623,18 @@ function AuthedApp({
     [github.connection, repos],
   );
   const canUseGitHubForSession = useCallback(
-    (session: Session) =>
-      github.connection.cliAvailable === true ||
-      accessForSession(session).status === "accessible",
-    [accessForSession, github.connection.cliAvailable],
+    (session: Session) => {
+      const repo = repos.find(
+        (candidate) =>
+          candidate.path === session.repoPath ||
+          (session.repoPath === undefined && candidate.name === session.repo),
+      );
+      return (
+        (github.connection.cliAvailable === true && repo?.githubSlug != null) ||
+        accessForSession(session).status === "accessible"
+      );
+    },
+    [accessForSession, github.connection.cliAvailable, repos],
   );
   const appConnected =
     github.connection.connected &&
@@ -1553,8 +1563,7 @@ function AuthedApp({
         )}
         renderPullRequest={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <PullRequestPane
               session={session}
@@ -1582,8 +1591,7 @@ function AuthedApp({
         }}
         renderReview={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <ReviewPane
               key={`${session.id}:${session.prNumber ?? "none"}`}
@@ -1603,8 +1611,7 @@ function AuthedApp({
         }}
         renderCode={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected =
-            github.connection.connected && access.status === "accessible";
+          const sessionConnected = canUseGitHubForSession(session);
           return (
             <ReviewPane
               key={`${session.id}:${session.prNumber ?? "none"}`}
