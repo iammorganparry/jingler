@@ -24,8 +24,9 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - [Docker](https://www.docker.com/) for the local PostgreSQL auth database
 - Git and at least one supported coding CLI, already installed and signed in
 
-Pull-request and issue features use the Jingler GitHub App. Connect it during
-onboarding or from **Settings → GitHub**; the GitHub CLI is not required.
+Pull-request and issue features use an authenticated [GitHub CLI](https://cli.github.com/)
+when available, with the Jingler GitHub App as fallback. Install the App only when you want
+realtime review feedback.
 
 Jingler currently requires Codex CLI 0.144 or newer. The app reports an upgrade command if it
 finds an older version.
@@ -218,10 +219,10 @@ developer's checked-out branch, sessions opened from a PR keep its head ref,
 and established historical sessions — including persisted `jingler/*` branches
 from older releases — remain publishable without automatic rename.
 
-Built-in GitHub reads, writes, checkout, authenticated push, plugin grants, and
-realtime feedback use the shared GitHub App. Installation credentials live only
-in the Electron main process and are never persisted or returned to the
-renderer. A clean machine needs `git`, not the GitHub CLI.
+Built-in GitHub reads and writes prefer the authenticated `gh` CLI. The GitHub App remains the
+fallback and supplies realtime feedback; its installation credentials stay in the Electron main
+process and are never persisted or returned to the renderer. Publishing without the App uses the
+machine's configured Git credentials.
 
 ## Troubleshooting
 
@@ -243,9 +244,9 @@ terminal.
 
 **GitHub features are unavailable**
 
-Open **Settings → GitHub**, then install or reconnect the Jingler GitHub App. If Jingler is
-connected but a repository is unavailable, use **Manage repositories** to add it to the
-installation, or ask the installation owner to restore access if the installation is suspended.
+Run `gh auth login`, or open **Settings → GitHub** to install/reconnect the Jingler GitHub App.
+If an App-connected repository is unavailable, use **Manage repositories** to add it to the
+installation, or ask the installation owner to restore access if it is suspended.
 
 **The auth server cannot connect to PostgreSQL**
 

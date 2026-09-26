@@ -1,10 +1,28 @@
-import type { PullRequest, PullRequestListItem } from "@jingler/core"
+import type {
+  Issue,
+  PrFileChange,
+  PrMergeMethod,
+  PullRequest,
+  PullRequestListItem,
+  ReviewSubmitKind,
+  SessionPrStatus
+} from "@jingler/core"
 import { GitHubApiError } from "@jingler/core"
 import { Command } from "@effect/platform"
 import type { CommandExecutor } from "@effect/platform"
 import type { PlatformError } from "@effect/platform/Error"
 import { Effect, Stream } from "effect"
-import { jsonRecord, mapPrView, mapPullRequestListItem, mapReviewThreads } from "./github-mappers.js"
+import {
+  jsonRecord,
+  mapApiFiles,
+  mapIssue,
+  mapIssueSummary,
+  mapPrState,
+  mapPrSummary,
+  mapPrView,
+  mapPullRequestListItem,
+  mapReviewThreads
+} from "./github-mappers.js"
 import { which } from "./command.js"
 
 const PR_FIELDS = [
@@ -49,6 +67,9 @@ const REVIEW_THREAD_COMMENTS_QUERY = `query($id:ID!,$endCursor:String){
   }}
 }`
 
+const RESOLVE_THREAD_MUTATION = `mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
+const UNRESOLVE_THREAD_MUTATION = `mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}`
+
 const COMMITS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$endCursor:String){
   repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(first:100,after:$endCursor){
     nodes{commit{
@@ -61,21 +82,41 @@ const COMMITS_QUERY = `query($owner:String!,$repo:String!,$number:Int!,$endCurso
 }`
 
 const NO_PULL_REQUEST = /no pull requests found|could not find(?: a)? pull request/i
+const NOT_FOUND = /not found|HTTP 404/i
+const PR_LIST_FIELDS = "number,title,headRefName,baseRefName,author,state,isDraft,additions,deletions,updatedAt"
+const ISSUE_FIELDS = "number,title,body,state,url,author,assignees,labels,updatedAt,createdAt,comments"
+const ISSUE_LIST_FIELDS = "number,title,body,state,url,author,assignees,labels,updatedAt"
+const PR_NUMBER = /\/pull\/(\d+)(?:\D|$)/
+
+const repoArgs = (repository: string | null): ReadonlyArray<string> =>
+  repository === null ? [] : ["--repo", repository]
+
+const submitFlag = (kind: ReviewSubmitKind): string =>
+  kind === "approve" ? "--approve" : kind === "request-changes" ? "--request-changes" : "--comment"
+
+const mergeFlag = (method: PrMergeMethod): string =>
+  method === "squash" ? "--squash" : method === "rebase" ? "--rebase" : "--merge"
 
 const decode = (stream: Stream.Stream<Uint8Array, PlatformError>) =>
   stream.pipe(Stream.decodeText(), Stream.runFold("", (output, chunk) => output + chunk))
 
 const execute = (
   cwd: string | null,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  stdin?: string,
+  environment?: Readonly<Record<string, string>>
 ): Effect.Effect<string, GitHubApiError, CommandExecutor.CommandExecutor> =>
   Effect.scoped(
     Effect.gen(function* () {
       const base = Command.make("gh", ...args)
-      const command = cwd === null ? base : base.pipe(Command.workingDirectory(cwd))
-      const process = yield* command.pipe(Command.start)
+      const located = cwd === null ? base : base.pipe(Command.workingDirectory(cwd))
+      const fed = stdin === undefined ? located : located.pipe(Command.feed(stdin))
+      const command = environment === undefined
+        ? fed
+        : fed.pipe(Command.env({ ...process.env, ...environment }))
+      const child = yield* command.pipe(Command.start)
       const [stdout, stderr, exitCode] = yield* Effect.all(
-        [decode(process.stdout), decode(process.stderr), process.exitCode],
+        [decode(child.stdout), decode(child.stderr), child.exitCode],
         { concurrency: 3 }
       )
       if (exitCode !== 0) {
@@ -96,9 +137,10 @@ const execute = (
 
 const json = (
   cwd: string | null,
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  stdin?: string
 ): Effect.Effect<unknown, GitHubApiError, CommandExecutor.CommandExecutor> =>
-  execute(cwd, args).pipe(
+  execute(cwd, args, stdin).pipe(
     Effect.flatMap((output) =>
       Effect.try({
         try: () => JSON.parse(output) as unknown,
@@ -241,8 +283,8 @@ const prView = (
   number: number
 ): Effect.Effect<PullRequest, GitHubApiError, CommandExecutor.CommandExecutor> =>
   Effect.gen(function* () {
-    const repoArgs = repository ? ["--repo", repository] : []
-    const raw = yield* json(cwd, ["pr", "view", String(number), ...repoArgs, "--json", PR_FIELDS])
+    const repositoryArgs = repoArgs(repository)
+    const raw = yield* json(cwd, ["pr", "view", String(number), ...repositoryArgs, "--json", PR_FIELDS])
     const [owner, repo] = repository
       ? slugParts(repository)
       : yield* execute(cwd, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).pipe(
@@ -252,6 +294,96 @@ const prView = (
     const commits = yield* commitEvidence(cwd, owner, repo, number)
     return { ...mapPrView({ ...jsonRecord(raw), commits }), reviewThreads: threads }
   })
+
+const list = <A>(
+  cwd: string | null,
+  kind: "pr" | "issue",
+  repository: string | null,
+  fields: string,
+  options: { readonly mine: boolean; readonly search: string },
+  map: (value: unknown) => A
+): Effect.Effect<ReadonlyArray<A>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, [
+    kind, "list", ...repoArgs(repository), "--state", "open", "--limit", "1000",
+    ...(options.mine ? [kind === "pr" ? "--author" : "--assignee", "@me"] : []),
+    ...(options.search.trim() ? ["--search", options.search.trim()] : []),
+    "--json", fields
+  ]).pipe(Effect.map((raw) => records(raw).map(map)))
+
+const prForBranch = (
+  cwd: string | null,
+  repository: string,
+  branch: string
+): Effect.Effect<number | null, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, [
+    "pr", "list", ...repoArgs(cwd === null ? repository : null), "--state", "open",
+    "--head", branch, "--limit", "100", "--json", "number,headRefName,headRepository"
+  ]).pipe(
+    Effect.map((raw) => records(raw).find((value) => {
+      const head = jsonRecord(value.headRepository)
+      return value.headRefName === branch && head.nameWithOwner === repository
+    })?.number),
+    Effect.map((number) => typeof number === "number" ? number : null)
+  )
+
+const issueView = (
+  cwd: string | null,
+  repository: string | null,
+  number: number
+): Effect.Effect<Issue, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, ["issue", "view", String(number), ...repoArgs(repository), "--json", ISSUE_FIELDS]).pipe(
+    Effect.map(mapIssue)
+  )
+
+const writeJson = (
+  cwd: string | null,
+  args: ReadonlyArray<string>,
+  body: unknown
+): Effect.Effect<void, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  execute(cwd, args, JSON.stringify(body)).pipe(Effect.asVoid)
+
+const slugAt = (cwd: string): Effect.Effect<string, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  execute(cwd, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
+
+const repositoryMetadata = (
+  cwd: string | null,
+  repository: string
+): Effect.Effect<Record<string, unknown>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, ["api", `repos/${repository}`]).pipe(Effect.map(jsonRecord))
+
+const nullable = <A>(effect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>) =>
+  effect.pipe(
+    Effect.map((value): A | null => value),
+    Effect.catchTag("GitHubApiError", (error) =>
+      NO_PULL_REQUEST.test(error.message) || NOT_FOUND.test(error.message)
+        ? Effect.succeed(null)
+        : Effect.fail(error)
+    )
+  )
+
+const reviewPayload = (input: {
+  readonly commitSha: string
+  readonly body: string
+  readonly comments: ReadonlyArray<{
+    readonly path: string
+    readonly line: number
+    readonly startLine: number | null
+    readonly body: string
+  }>
+}) => ({
+  commit_id: input.commitSha,
+  body: input.body,
+  event: "COMMENT",
+  comments: input.comments.map((comment) => ({
+    path: comment.path,
+    line: comment.line,
+    ...(comment.startLine === null || comment.startLine >= comment.line
+      ? {}
+      : { start_line: comment.startLine, start_side: "RIGHT" }),
+    side: "RIGHT",
+    body: comment.body
+  }))
+})
 
 export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli", {
   accessors: true,
@@ -267,6 +399,42 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
               )
         )
       ),
+    cloneRepository: (repository: string, destination: string) =>
+      execute(null, ["repo", "clone", repository, destination], undefined, {
+        GIT_TERMINAL_PROMPT: "0",
+        GCM_INTERACTIVE: "Never",
+        SSH_ASKPASS_REQUIRE: "never",
+        GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=10"
+      }).pipe(Effect.asVoid),
+    repositories: () =>
+      json(null, ["api", "user/repos", "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp"]).pipe(
+        Effect.map((raw) => (Array.isArray(raw) ? raw.flat() : []).flatMap((value) => {
+          const repository = jsonRecord(value)
+          return typeof repository.id === "number" && typeof repository.full_name === "string"
+            ? [{ repositoryId: String(repository.id), fullName: repository.full_name }]
+            : []
+        }))
+      ),
+    repository: (cwd: string) =>
+      Effect.gen(function* () {
+        const repository = yield* slugAt(cwd)
+        const raw = yield* repositoryMetadata(cwd, repository)
+        const [owner, name] = slugParts(repository)
+        if (typeof raw.id !== "number" || typeof raw.node_id !== "string") {
+          return yield* Effect.fail(new GitHubApiError({
+            reason: "unavailable",
+            message: "GitHub CLI returned invalid repository metadata."
+          }))
+        }
+        return {
+          id: String(raw.id), nodeId: raw.node_id, owner, name, fullName: repository,
+          installationId: undefined
+        }
+      }),
+    prForBranch: (cwd: string, branch: string) =>
+      Effect.flatMap(slugAt(cwd), (repository) => prForBranch(cwd, repository, branch)),
+    prForBranchBySlug: (repository: string, branch: string) =>
+      prForBranch(null, repository, branch),
     prForWorktree: (cwd: string) =>
       json(cwd, ["pr", "view", "--json", "number,state"]).pipe(
         Effect.map((raw) => {
@@ -279,8 +447,122 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
           NO_PULL_REQUEST.test(error.message) ? Effect.succeed(null) : Effect.fail(error)
         )
       ),
-    prView: (cwd: string, number: number) => prView(cwd, null, number),
-    prViewBySlug: (repository: string, number: number) => prView(null, repository, number),
+    listPrs: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
+      list(cwd, "pr", null, PR_LIST_FIELDS, options, mapPrSummary),
+    listPrsBySlug: (repository: string, options: { readonly mine: boolean; readonly search: string }) =>
+      list(null, "pr", repository, PR_LIST_FIELDS, options, mapPrSummary),
+    listInboxPrsBySlug: (repository: string) =>
+      Effect.gen(function* () {
+        const viewer = yield* execute(null, ["api", "user", "--jq", ".login"])
+        const raw = yield* json(null, [
+          "pr", "list", "--repo", repository, "--state", "open", "--limit", "1000",
+          "--json", `${PR_LIST_FIELDS},labels,comments,assignees,reviewRequests`
+        ])
+        return records(raw).map((value) => mapPullRequestListItem(value, repository, viewer))
+      }),
+    listIssues: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
+      list(cwd, "issue", null, ISSUE_LIST_FIELDS, options, mapIssueSummary),
+    listIssuesBySlug: (repository: string, options: { readonly mine: boolean; readonly search: string }) =>
+      list(null, "issue", repository, ISSUE_LIST_FIELDS, options, mapIssueSummary),
+    issueView: (cwd: string, number: number) => nullable(issueView(cwd, null, number)),
+    prState: (cwd: string, number: number): Effect.Effect<SessionPrStatus | null, GitHubApiError, CommandExecutor.CommandExecutor> =>
+      nullable(json(cwd, [
+        "pr", "view", String(number), "--json", "state,isDraft,mergedAt,statusCheckRollup"
+      ]).pipe(Effect.map((raw) => mapPrState(raw, mapPrView(raw).checks)))),
+    prHeadSha: (cwd: string, number: number) =>
+      nullable(execute(cwd, ["pr", "view", String(number), "--json", "headRefOid", "--jq", ".headRefOid"])),
+    prView: (cwd: string, number: number) => nullable(prView(cwd, null, number)),
+    prViewBySlug: (repository: string, number: number) => nullable(prView(null, repository, number)),
+    prFiles: (cwd: string, number: number): Effect.Effect<ReadonlyArray<PrFileChange>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+      Effect.gen(function* () {
+        const repository = yield* slugAt(cwd)
+        const raw = yield* json(cwd, [
+          "api", `repos/${repository}/pulls/${number}/files`, "--paginate", "--slurp"
+        ])
+        return mapApiFiles(Array.isArray(raw) ? raw.flat() : [])
+      }),
+    prDiff: (cwd: string, number: number) => execute(cwd, ["pr", "diff", String(number)]),
+    prCheckout: (cwd: string, number: number) =>
+      Effect.gen(function* () {
+        const raw = jsonRecord(yield* json(cwd, [
+          "pr", "view", String(number), "--json", "headRefName,headRefOid,headRepository"
+        ]))
+        const headRepository = jsonRecord(raw.headRepository)
+        const fullName = headRepository.nameWithOwner
+        if (typeof fullName !== "string" || typeof raw.headRefName !== "string" || typeof raw.headRefOid !== "string") {
+          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request head." }))
+        }
+        const metadata = yield* repositoryMetadata(cwd, fullName)
+        if (typeof metadata.id !== "number" || typeof metadata.clone_url !== "string") {
+          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request repository." }))
+        }
+        return {
+          repositoryId: String(metadata.id), fullName, ref: raw.headRefName, sha: raw.headRefOid,
+          cloneUrl: metadata.clone_url, sshUrl: typeof metadata.ssh_url === "string" ? metadata.ssh_url : null
+        }
+      }),
+    prCreate: (cwd: string, input: { readonly title: string; readonly body: string; readonly base: string; readonly draft: boolean }) =>
+      execute(cwd, [
+        "pr", "create",
+        ...(input.title.trim() === "" && input.body.trim() === ""
+          ? ["--fill"]
+          : ["--title", input.title, "--body-file", "-"]),
+        "--base", input.base,
+        ...(input.draft ? ["--draft"] : [])
+      ], input.title.trim() === "" && input.body.trim() === "" ? undefined : input.body).pipe(Effect.flatMap((output) => {
+        const number = Number(PR_NUMBER.exec(output)?.[1])
+        return Number.isSafeInteger(number) && number > 0
+          ? Effect.succeed(number)
+          : Effect.fail(new GitHubApiError({ reason: "unavailable", message: "The pull request was created but GitHub CLI did not return its number." }))
+      })),
+    prCreateBySlug: (repository: string, branch: string, input: { readonly title: string; readonly body: string; readonly base: string; readonly draft: boolean }) =>
+      json(null, ["api", "-X", "POST", `repos/${repository}/pulls`, "--input", "-"], JSON.stringify({
+        title: input.title, body: input.body, head: `${slugParts(repository)[0]}:${branch}`, base: input.base, draft: input.draft
+      })).pipe(Effect.flatMap((raw) => {
+        const number = jsonRecord(raw).number
+        return typeof number === "number"
+          ? Effect.succeed(number)
+          : Effect.fail(new GitHubApiError({ reason: "unavailable", message: "The pull request was created but GitHub CLI did not return its number." }))
+      })),
+    prUpdate: (cwd: string, number: number, input: { readonly title: string; readonly body: string }) =>
+      execute(cwd, ["pr", "edit", String(number), "--title", input.title, "--body-file", "-"], input.body).pipe(Effect.asVoid),
+    prUpdateBySlug: (repository: string, number: number, input: { readonly title: string; readonly body: string }) =>
+      execute(null, ["pr", "edit", String(number), "--repo", repository, "--title", input.title, "--body-file", "-"], input.body).pipe(Effect.asVoid),
+    prComment: (cwd: string, number: number, body: string) =>
+      execute(cwd, ["pr", "comment", String(number), "--body-file", "-"], body).pipe(Effect.asVoid),
+    prCommentBySlug: (repository: string, number: number, body: string) =>
+      execute(null, ["pr", "comment", String(number), "--repo", repository, "--body-file", "-"], body).pipe(Effect.asVoid),
+    prCloseBySlug: (repository: string, number: number) =>
+      execute(null, ["pr", "close", String(number), "--repo", repository]).pipe(Effect.asVoid),
+    prReviewComments: (cwd: string, number: number, input: Parameters<typeof reviewPayload>[0]) =>
+      Effect.gen(function* () {
+        const repository = yield* slugAt(cwd)
+        yield* writeJson(cwd, ["api", "-X", "POST", `repos/${repository}/pulls/${number}/reviews`, "--input", "-"], reviewPayload(input))
+      }),
+    prReview: (cwd: string, number: number, kind: ReviewSubmitKind, body: string) =>
+      execute(cwd, ["pr", "review", String(number), submitFlag(kind), "--body-file", "-"], body).pipe(Effect.asVoid),
+    resolveThread: (cwd: string, threadId: string, resolved: boolean) =>
+      execute(cwd, [
+        "api", "graphql", "-f", `query=${resolved ? RESOLVE_THREAD_MUTATION : UNRESOLVE_THREAD_MUTATION}`,
+        "-F", `id=${threadId}`
+      ]).pipe(Effect.asVoid),
+    replyToThread: (cwd: string, number: number, commentId: number, body: string) =>
+      Effect.gen(function* () {
+        const repository = yield* slugAt(cwd)
+        yield* writeJson(cwd, ["api", "-X", "POST", `repos/${repository}/pulls/${number}/comments/${commentId}/replies`, "--input", "-"], { body })
+      }),
+    prMerge: (cwd: string, number: number, method: PrMergeMethod = "merge") =>
+      execute(cwd, ["pr", "merge", String(number), mergeFlag(method)]).pipe(Effect.asVoid),
+    prMergeBySlug: (repository: string, number: number, method: PrMergeMethod = "merge") =>
+      execute(null, ["pr", "merge", String(number), "--repo", repository, mergeFlag(method)]).pipe(Effect.asVoid),
+    prUpdateBranch: (cwd: string, number: number) =>
+      execute(cwd, ["pr", "update-branch", String(number)]).pipe(Effect.asVoid),
+    prReady: (cwd: string, number: number) =>
+      execute(cwd, ["pr", "ready", String(number)]).pipe(Effect.asVoid),
+    issueComment: (cwd: string, number: number, body: string) =>
+      execute(cwd, ["issue", "comment", String(number), "--body-file", "-"], body).pipe(Effect.asVoid),
+    closeIssue: (cwd: string, number: number) =>
+      execute(cwd, ["issue", "close", String(number)]).pipe(Effect.asVoid),
     inbox: () =>
       Effect.gen(function* () {
         const raw = yield* json(null, [

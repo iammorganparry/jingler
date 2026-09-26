@@ -261,11 +261,31 @@ export const githubAckEvent = (
 export const githubConnectionStatus = (): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
-  GitHubAuth
-> => GitHubAuth.status().pipe(Effect.mapError(githubConnectionError));
+  GitHubAuth | GitHubApi | CommandExecutor.CommandExecutor
+> =>
+  Effect.gen(function* () {
+    const cliAvailable = yield* GitHubApi.cliAvailable().pipe(
+      Effect.mapError(githubConnectionError),
+    );
+    const status = yield* GitHubAuth.status().pipe(
+      Effect.mapError(githubConnectionError),
+      Effect.catchAll((error) =>
+        cliAvailable
+          ? Effect.succeed({
+              enabled: false,
+              connected: false,
+              user: null,
+              installations: [],
+              lastRefreshedAt: null,
+            })
+          : Effect.fail(error),
+      ),
+    );
+    return { ...status, cliAvailable };
+  });
 
 export const githubRepositories = () =>
-  GitHubAuth.repositories().pipe(Effect.mapError(githubConnectionError));
+  GitHubApi.repositories().pipe(Effect.mapError(githubConnectionError));
 
 export const githubConnectionRefresh = (): Effect.Effect<
   GitHubAppConnectionStatus,
@@ -1837,19 +1857,24 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       diff,
     });
 
-    // Post the minor/nit half to the PR as inline comments. The critical/major
-    // half is NOT posted — it goes to the session's agent, which the renderer
-    // does (it owns the conversation actor; this process has no way to reach it).
+    const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
+    const postToPr = config?.github?.postAdversarialReviewComments ?? true;
+    const routedReview = { ...review, postToPr };
+
+    // Post the minor/nit half to the PR as inline comments when enabled. The
+    // renderer routes everything locally when posting is disabled.
     //
     // Deliberately below the de-dupe: only a FRESH run posts. The short-circuit
     // above returns `prior` untouched, so a poll tick on an unchanged head can
     // never re-post the same nits.
-    const posted = yield* postReviewToPr(
-      session.worktreePath,
-      session.prNumber,
-      review,
-      diff,
-    );
+    const posted = postToPr
+      ? yield* postReviewToPr(
+          session.worktreePath,
+          session.prNumber,
+          routedReview,
+          diff,
+        )
+      : routedReview;
 
     // Persist best-effort: a review the user can see now matters more than one
     // we can re-read later, and a failed write must not fail the run.
@@ -1928,6 +1953,7 @@ export const githubDetectPr = (sessionId: string) =>
         GitHubApi.repository(session.worktreePath!),
         GitService.branchAt(session.worktreePath!),
       ]);
+      if (repository.installationId === undefined) return;
       yield* SessionStore.setGitHubLink(session.id, {
         installationId: repository.installationId,
         repositoryId: repository.id,
@@ -1968,11 +1994,13 @@ const hydrateGitHubSessionLinks = (
       }
       try {
         const resolved = await repository(session.worktreePath);
-        await link(session.id, {
-          installationId: resolved.installationId,
-          repositoryId: resolved.id,
-          prNumber: session.prNumber,
-        });
+        if (resolved.installationId !== undefined) {
+          await link(session.id, {
+            installationId: resolved.installationId,
+            repositoryId: resolved.id,
+            prNumber: session.prNumber,
+          });
+        }
       } catch {
         // A stale/inaccessible legacy session remains safely unlinked.
       }
@@ -2401,7 +2429,7 @@ export const githubPublish = (sessionId: string) =>
             const cwd = session.worktreePath;
             let repositoryIdentity: {
               readonly id: string;
-              readonly installationId: string;
+              readonly installationId?: string;
               readonly fullName: string;
             } | null = null;
             let pushCredential: { readonly token: string } | null = null;
@@ -2466,22 +2494,23 @@ export const githubPublish = (sessionId: string) =>
                   authenticate: async () => {
                     const repository = await run(GitHubApi.repository(cwd));
                     repositoryIdentity = repository;
-                    pushCredential = await run(
-                      GitHubAuth.credentialsForInstallation(
-                        repository.installationId,
-                        repository.fullName,
-                        pushPermissions,
-                      ),
-                    );
+                    if (repository.installationId !== undefined) {
+                      pushCredential = await run(
+                        GitHubAuth.credentialsForInstallation(
+                          repository.installationId,
+                          repository.fullName,
+                          pushPermissions,
+                        ),
+                      );
+                    }
                   },
                   push: async (branch) => {
                     const repository =
                       repositoryIdentity ??
                       (await run(GitHubApi.repository(cwd)));
                     if (!pushCredential) {
-                      throw new Error(
-                        "The short-lived GitHub push credential is unavailable. Retry publishing.",
-                      );
+                      await run(GitService.pushConfigured(cwd, branch));
+                      return;
                     }
                     try {
                       await run(
@@ -2499,16 +2528,10 @@ export const githubPublish = (sessionId: string) =>
                   resolvePr: (branch) =>
                     run(GitHubApi.prForBranch(cwd, branch)),
                   createPr: async (metadata) => {
-                    const repository =
-                      repositoryIdentity ??
-                      (await run(GitHubApi.repository(cwd)));
                     return run(
-                      GitHubAuth.createPullRequest({
-                        installationId: repository.installationId,
-                        repository: repository.fullName,
+                      GitHubApi.prCreate(cwd, {
                         title: metadata.prTitle,
                         body: metadata.prBody,
-                        head: `${repository.fullName.split("/")[0]}:${session.branch}`,
                         base: session.baseBranch ?? "main",
                         draft: false,
                       }),
@@ -2525,21 +2548,24 @@ export const githubPublish = (sessionId: string) =>
                     const repository =
                       repositoryIdentity ??
                       (await run(GitHubApi.repository(cwd)));
-                    await run(
-                      SessionStore.setGitHubLink(session.id, {
-                        installationId: repository.installationId,
-                        repositoryId: repository.id,
-                        prNumber: number,
-                      }),
-                    );
-                    await run(
-                      GitHubAuth.upsertSessionRoute({
-                        sessionId: session.id,
-                        installationId: repository.installationId,
-                        repositoryId: repository.id,
-                        pullRequestNumber: number,
-                      }),
-                    );
+                    await run(SessionStore.setPrNumber(session.id, number));
+                    if (repository.installationId !== undefined) {
+                      await run(
+                        SessionStore.setGitHubLink(session.id, {
+                          installationId: repository.installationId,
+                          repositoryId: repository.id,
+                          prNumber: number,
+                        }),
+                      );
+                      await run(
+                        GitHubAuth.upsertSessionRoute({
+                          sessionId: session.id,
+                          installationId: repository.installationId,
+                          repositoryId: repository.id,
+                          pullRequestNumber: number,
+                        }),
+                      );
+                    }
                   },
                 },
                 async (checkpoint) => {
@@ -4117,22 +4143,30 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           ),
         ),
   "Projects.cloneFromGitHub": (input) =>
-    Effect.gen(function* () {
-      const credential = yield* GitHubAuth.credentialsForInstallation(
-        input.installationId,
-        input.repository,
-        ["contents:read"],
-      );
-      yield* GitService.cloneWithInstallationToken(
-        input.destination,
-        input.repository,
-        credential.token,
-      );
-      return yield* ProjectService.register({
-        path: input.destination,
-        ...(input.name === undefined ? {} : { name: input.name }),
-      });
-    }),
+    input.installationId === undefined
+      ? Effect.gen(function* () {
+          yield* GitHubApi.cloneRepository(input.repository, input.destination);
+          return yield* ProjectService.register({
+            path: input.destination,
+            ...(input.name === undefined ? {} : { name: input.name }),
+          });
+        })
+      : Effect.gen(function* () {
+          const credential = yield* GitHubAuth.credentialsForInstallation(
+            input.installationId!,
+            input.repository,
+            ["contents:read"],
+          );
+          yield* GitService.cloneWithInstallationToken(
+            input.destination,
+            input.repository,
+            credential.token,
+          );
+          return yield* ProjectService.register({
+            path: input.destination,
+            ...(input.name === undefined ? {} : { name: input.name }),
+          });
+        }),
   "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
     Effect.gen(function* () {
       const project = yield* ProjectService.get(projectId);

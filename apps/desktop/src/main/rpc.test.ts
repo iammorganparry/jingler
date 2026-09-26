@@ -1933,6 +1933,31 @@ describe("RPC handlers", () => {
         expect(review.postError).toBeNull();
       });
 
+      it("keeps low-severity findings local when PR posting is disabled", async () => {
+        withSession();
+        const { calls, layer: github } = recordingGithub("sha-local");
+        const env = envWith(
+          github,
+          adapterReporting([
+            { title: "Prefer const", severity: "nit", path: "a.ts", line: 2 },
+          ]),
+        );
+        const review = await Effect.runPromise(
+          Effect.gen(function* () {
+            yield* ConfigService.setGithub({
+              enabled: true,
+              autoCreatePr: false,
+              autoDetectPr: true,
+              postAdversarialReviewComments: false,
+            });
+            return yield* reviewRun("s1", false);
+          }).pipe(Effect.provide(env)),
+        );
+        expect(calls.filter(isReviewPost)).toHaveLength(0);
+        expect(review.postToPr).toBe(false);
+        expect(review.postedAt).toBeNull();
+      });
+
       // The critical/major half belongs to the agent. Posting it here would both
       // duplicate it and turn the reviewer into a PR spammer.
       it("posts nothing when every finding is critical or major", async () => {

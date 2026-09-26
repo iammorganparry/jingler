@@ -621,14 +621,17 @@ function AuthedApp({
     [github.connection, repos],
   );
   const canUseGitHubForSession = useCallback(
-    (session: Session) => accessForSession(session).status === "accessible",
-    [accessForSession],
+    (session: Session) =>
+      github.connection.cliAvailable === true ||
+      accessForSession(session).status === "accessible",
+    [accessForSession, github.connection.cliAvailable],
   );
-  const connected =
+  const appConnected =
     github.connection.connected &&
     github.connection.installations.some(
       (installation) => installation.status === "active",
     );
+  const connected = github.connection.cliAvailable === true || appConnected;
   // A manual GitHub refresh can revoke one repository while leaving the overall
   // account connected. Restart the main-process relay stream whenever that
   // authorization topology changes so its supervisor immediately closes routes
@@ -772,7 +775,7 @@ function AuthedApp({
   );
 
   useEffect(() => {
-    if (!connected) return;
+    if (!appConnected) return;
     const cancelEvents = rpc.githubEvents(
       (delivery) => {
         const resolveTarget = () => {
@@ -891,7 +894,7 @@ function AuthedApp({
       }
       cancelEvents();
     };
-  }, [connected, feedbackRouter, githubRelayAuthorizationVersion]);
+  }, [appConnected, feedbackRouter, githubRelayAuthorizationVersion]);
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the

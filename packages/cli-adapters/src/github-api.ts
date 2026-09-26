@@ -64,7 +64,7 @@ export interface GitHubRepository {
   readonly owner: string
   readonly name: string
   readonly fullName: string
-  readonly installationId: string
+  readonly installationId?: string
 }
 
 export interface GitHubPullRequestHead {
@@ -1152,80 +1152,116 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         () => run(cliEffect),
         app
       ))
+    // Writes choose one backend up front. Retrying through the App after an
+    // ambiguous CLI failure can duplicate a comment, review, merge, or PR.
+    const mutate = <A>(
+      cliEffect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>,
+      app: () => Promise<A>
+    ): Effect.Effect<A, GitHubApiError> =>
+      wrap(async () => (await run(cli.available())) ? run(cliEffect) : app())
     return {
       cliAvailable: () => wrap(() => run(cli.available())),
+      cloneRepository: (repository: string, destination: string) =>
+        wrap(() => run(cli.cloneRepository(repository, destination))),
+      repositories: () =>
+        wrap(async () => {
+          const installed = await run(auth.repositories()).catch(() => [])
+          if (installed.length > 0) return installed
+          if (await run(cli.available())) return run(cli.repositories())
+          return installed
+        }),
       inbox: () => preferCli(cli.inbox(), async () => {
         const repositories = await run(auth.repositories())
         const groups = await Promise.all(repositories.map((repository) => client.listInboxPrsBySlug(repository.fullName)))
         return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       }),
-      repository: (cwd: string) => wrap(() => client.repository(cwd)),
+      // Installation identity exists only through the App and enables realtime.
+      // Prefer it when present; fall back to CLI metadata for no-App operation.
+      repository: (cwd: string) =>
+        wrap(async () => {
+          try {
+            return await client.repository(cwd)
+          } catch (appError) {
+            if (await run(cli.available())) return run(cli.repository(cwd))
+            throw appError
+          }
+        }),
       rateLimit: () => Effect.sync(client.rateLimit),
-      prForBranch: (cwd: string, branch: string) => wrap(() => client.prForBranch(cwd, branch)),
+      prForBranch: (cwd: string, branch: string) =>
+        preferCli(cli.prForBranch(cwd, branch), () => client.prForBranch(cwd, branch)),
       prForBranchBySlug: (slug: string, branch: string) =>
-        wrap(() => client.prForBranchBySlug(slug, branch)),
+        preferCli(cli.prForBranchBySlug(slug, branch), () => client.prForBranchBySlug(slug, branch)),
       prForWorktree: (cwd: string) =>
         preferCli(cli.prForWorktree(cwd), () => client.prForWorktree(cwd)),
       listPrs: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
-        wrap(() => client.listPrs(cwd, options)),
+        preferCli(cli.listPrs(cwd, options), () => client.listPrs(cwd, options)),
       listPrsBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
-        wrap(() => client.listPrsBySlug(slug, options)),
-      listInboxPrsBySlug: (slug: string) => wrap(() => client.listInboxPrsBySlug(slug)),
+        preferCli(cli.listPrsBySlug(slug, options), () => client.listPrsBySlug(slug, options)),
+      listInboxPrsBySlug: (slug: string) =>
+        preferCli(cli.listInboxPrsBySlug(slug), () => client.listInboxPrsBySlug(slug)),
       listIssues: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
-        wrap(() => client.listIssues(cwd, options)),
+        preferCli(cli.listIssues(cwd, options), () => client.listIssues(cwd, options)),
       listIssuesBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
-        wrap(() => client.listIssuesBySlug(slug, options)),
-      issueView: (cwd: string, number: number) => wrap(() => client.issueView(cwd, number)),
-      prState: (cwd: string, number: number) => wrap(() => client.prState(cwd, number)),
-      prHeadSha: (cwd: string, number: number) => wrap(() => client.prHeadSha(cwd, number)),
+        preferCli(cli.listIssuesBySlug(slug, options), () => client.listIssuesBySlug(slug, options)),
+      issueView: (cwd: string, number: number) =>
+        preferCli(cli.issueView(cwd, number), () => client.issueView(cwd, number)),
+      prState: (cwd: string, number: number) =>
+        preferCli(cli.prState(cwd, number), () => client.prState(cwd, number)),
+      prHeadSha: (cwd: string, number: number) =>
+        preferCli(cli.prHeadSha(cwd, number), () => client.prHeadSha(cwd, number)),
       prView: (cwd: string, number: number) =>
         preferCli(cli.prView(cwd, number), () => client.prView(cwd, number)),
       prViewBySlug: (slug: string, number: number) =>
         preferCli(cli.prViewBySlug(slug, number), () => client.prViewBySlug(slug, number)),
-      prFiles: (cwd: string, number: number) => wrap(() => client.prFiles(cwd, number)),
-      prDiff: (cwd: string, number: number) => wrap(() => client.prDiff(cwd, number)),
-      prCheckout: (cwd: string, number: number) => wrap(() => client.prCheckout(cwd, number)),
+      prFiles: (cwd: string, number: number) =>
+        preferCli(cli.prFiles(cwd, number), () => client.prFiles(cwd, number)),
+      prDiff: (cwd: string, number: number) =>
+        preferCli(cli.prDiff(cwd, number), () => client.prDiff(cwd, number)),
+      prCheckout: (cwd: string, number: number) =>
+        preferCli(cli.prCheckout(cwd, number), () => client.prCheckout(cwd, number)),
       prCreate: (cwd: string, input: Parameters<GitHubApiClient["prCreate"]>[1]) =>
-        wrap(() => client.prCreate(cwd, input)),
+        mutate(cli.prCreate(cwd, input), () => client.prCreate(cwd, input)),
       prCreateBySlug: (
         slug: string,
         branch: string,
         input: Parameters<GitHubApiClient["prCreateBySlug"]>[2]
-      ) => wrap(() => client.prCreateBySlug(slug, branch, input)),
+      ) => mutate(cli.prCreateBySlug(slug, branch, input), () => client.prCreateBySlug(slug, branch, input)),
       prUpdate: (cwd: string, number: number, input: Parameters<GitHubApiClient["prUpdate"]>[2]) =>
-        wrap(() => client.prUpdate(cwd, number, input)),
+        mutate(cli.prUpdate(cwd, number, input), () => client.prUpdate(cwd, number, input)),
       prUpdateBySlug: (
         slug: string,
         number: number,
         input: Parameters<GitHubApiClient["prUpdateBySlug"]>[2]
-      ) => wrap(() => client.prUpdateBySlug(slug, number, input)),
+      ) => mutate(cli.prUpdateBySlug(slug, number, input), () => client.prUpdateBySlug(slug, number, input)),
       prComment: (cwd: string, number: number, body: string) =>
-        wrap(() => client.prComment(cwd, number, body)),
+        mutate(cli.prComment(cwd, number, body), () => client.prComment(cwd, number, body)),
       prCommentBySlug: (slug: string, number: number, body: string) =>
-        wrap(() => client.prCommentBySlug(slug, number, body)),
+        mutate(cli.prCommentBySlug(slug, number, body), () => client.prCommentBySlug(slug, number, body)),
       prCloseBySlug: (slug: string, number: number) =>
-        wrap(() => client.prCloseBySlug(slug, number)),
+        mutate(cli.prCloseBySlug(slug, number), () => client.prCloseBySlug(slug, number)),
       prReviewComments: (
         cwd: string,
         number: number,
         input: Parameters<GitHubApiClient["prReviewComments"]>[2]
-      ) => wrap(() => client.prReviewComments(cwd, number, input)),
+      ) => mutate(cli.prReviewComments(cwd, number, input), () => client.prReviewComments(cwd, number, input)),
       prReview: (cwd: string, number: number, kind: ReviewSubmitKind, body: string) =>
-        wrap(() => client.prReview(cwd, number, kind, body)),
+        mutate(cli.prReview(cwd, number, kind, body), () => client.prReview(cwd, number, kind, body)),
       resolveThread: (cwd: string, threadId: string, resolved: boolean) =>
-        wrap(() => client.resolveThread(cwd, threadId, resolved)),
+        mutate(cli.resolveThread(cwd, threadId, resolved), () => client.resolveThread(cwd, threadId, resolved)),
       replyToThread: (cwd: string, number: number, commentId: number, body: string) =>
-        wrap(() => client.replyToThread(cwd, number, commentId, body)),
+        mutate(cli.replyToThread(cwd, number, commentId, body), () => client.replyToThread(cwd, number, commentId, body)),
       prMerge: (cwd: string, number: number, method?: PrMergeMethod) =>
-        wrap(() => client.prMerge(cwd, number, method)),
+        mutate(cli.prMerge(cwd, number, method), () => client.prMerge(cwd, number, method)),
       prMergeBySlug: (slug: string, number: number, method?: PrMergeMethod) =>
-        wrap(() => client.prMergeBySlug(slug, number, method)),
+        mutate(cli.prMergeBySlug(slug, number, method), () => client.prMergeBySlug(slug, number, method)),
       prUpdateBranch: (cwd: string, number: number) =>
-        wrap(() => client.prUpdateBranch(cwd, number)),
-      prReady: (cwd: string, number: number) => wrap(() => client.prReady(cwd, number)),
+        mutate(cli.prUpdateBranch(cwd, number), () => client.prUpdateBranch(cwd, number)),
+      prReady: (cwd: string, number: number) =>
+        mutate(cli.prReady(cwd, number), () => client.prReady(cwd, number)),
       issueComment: (cwd: string, number: number, body: string) =>
-        wrap(() => client.issueComment(cwd, number, body)),
-      closeIssue: (cwd: string, number: number) => wrap(() => client.closeIssue(cwd, number))
+        mutate(cli.issueComment(cwd, number, body), () => client.issueComment(cwd, number, body)),
+      closeIssue: (cwd: string, number: number) =>
+        mutate(cli.closeIssue(cwd, number), () => client.closeIssue(cwd, number))
     } as const
   })
 }) {}

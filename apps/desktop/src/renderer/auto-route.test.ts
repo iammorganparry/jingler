@@ -107,6 +107,14 @@ describe("routeReviewToAgent", () => {
     expect(sent[0]!.text).not.toContain("nit finding")
   })
 
+  it("sends every finding locally when PR posting is disabled", async () => {
+    await routeReviewToAgent(session, review({ headSha: "h-local", postToPr: false }), qc)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.text).toContain("critical finding")
+    expect(sent[0]!.text).toContain("nit finding")
+    expect(markRoutedCalls).toHaveLength(2)
+  })
+
   it("does nothing for a review already stamped routed", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-two", routedAt: "2026-07-17T09:00:00.000Z" }), qc)
     expect(sent).toHaveLength(0)

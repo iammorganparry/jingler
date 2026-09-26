@@ -437,7 +437,7 @@ export const rpc = {
     environmentId?: string
   }): Promise<Project> => run((c) => c.Projects.clone(input)),
   projectsCloneFromGitHub: (input: {
-    installationId: string
+    installationId?: string
     repository: string
     destination: string
     name?: string

@@ -122,7 +122,9 @@ export const routeReviewToAgent = async (
   let sent = false
 
   try {
-    const { toAgent } = partitionFindings(review.findings)
+    const toAgent = review.postToPr === false
+      ? review.findings
+      : partitionFindings(review.findings).toAgent
 
     if (toAgent.length > 0) {
       getConversationActor(session).send({ type: "SEND", text: agentBatchPrompt(toAgent) })

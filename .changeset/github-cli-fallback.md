@@ -1,6 +1,11 @@
 ---
 "@jingler/cli-adapters": patch
+"@jingler/contracts": patch
+"@jingler/core": patch
 "@jingler/desktop": patch
+"@jingler/ui": patch
 ---
 
-Prefer an authenticated GitHub CLI in the trusted host for pull-request views and inbox reads, allow CLI-only PR linking without realtime, and keep unattended agent credentials sandboxed.
+Support GitHub without an App installation by routing every non-realtime pull-request and issue operation through an authenticated `gh` CLI, while retaining the App as fallback and for realtime webhooks.
+
+Add a GitHub setting that keeps adversarial review feedback local: low-severity findings are no longer posted to the pull request and every finding is sent to the session agent instead.
