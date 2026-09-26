@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { Effect, Schema } from "effect"
+import type { StreamEvent } from "@jingler/core"
 import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { createPiTools } from "../agent/pi-tool-bridge.js"
@@ -54,6 +55,42 @@ describe("native Claude registry MCP relay", () => {
     } finally { await client.close(); await relay.close() }
     await expect(stat(relay.mcpConfigPath)).rejects.toThrow()
     await relay.close()
+  })
+
+  it("publishes command targets and ordered output with the same ID as the final result", async () => {
+    const events: StreamEvent[] = []
+    const registry = new ToolRegistry({ observer: {
+      started: () => Effect.succeed({ cwd: "/workspace", tree: "before" }),
+      settled: (request) => Effect.succeed({
+        id: request.callId!, callId: request.callId!, changes: [], totals: { added: 0, removed: 0 },
+        authoritative: true, reconciledAt: "2026-09-25T00:00:00.000Z"
+      })
+    } })
+    registry.register({
+      ...definition(), id: "command_execute", input: Schema.Struct({ command: Schema.String }),
+      risk: "execute", outputBudget: 1000,
+      execute: async ({ command }, { progress }) => {
+        progress({ message: "hello", completed: 1, total: 1 })
+        return { command, exitCode: 0, stdout: "hello\n", stderr: "" }
+      }
+    })
+    const relay = await startClaudeCliToolRelay({ registry, spec, context: {
+      ...context, publishEvent: (event) => Effect.promise(async () => {
+        await Promise.resolve()
+        events.push(event)
+      })
+    } })
+    const { client } = await connect(relay)
+    try {
+      expect(await client.callTool({ name: "command_execute", arguments: { command: "echo hello" } }))
+        .toMatchObject({ content: [{ type: "text", text: "hello" }], isError: false })
+      const id = events[0]?._tag === "ToolStart" ? events[0].id : "missing"
+      expect(events).toEqual([
+        { _tag: "ToolStart", id, name: "command_execute", target: "echo hello" },
+        { _tag: "ToolDelta", id, output: "hello" },
+        expect.objectContaining({ _tag: "ToolEnd", id, status: "success", output: "hello" })
+      ])
+    } finally { await client.close(); await relay.close() }
   })
 
   it("denies permission, unknown and inactive tools, validates input and bounds output", async () => {

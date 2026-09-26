@@ -63,6 +63,27 @@ const context = {
 }
 
 describe("ClaudeAgentRuntime", () => {
+  it.runIf(process.env.JINGLER_CLAUDE_LIVE === "1")("executes a supplied tool and consumes its result through the installed CLI", async () => {
+    const registry = new ToolRegistry()
+    registry.register({
+      id: "probe_echo", version: "1", description: "Return the probe's secret test word.",
+      input: Schema.Struct({}), roles: ["conversation"], modes: ["auto"], risk: "read",
+      timeoutMs: 1000, outputBudget: 1000, cancellable: true, idempotency: "safe",
+      execute: async () => "JINGLER_TOOL_RESULT_73"
+    })
+    const tools: Array<{ _tag: string }> = []
+    const runtime = makeClaudeAgentRuntime({ createToolRegistry: () => Effect.succeed(registry) })
+    const events = [...await Effect.runPromise(runtime.run(spec({
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/haiku"),
+      prompt: "Call probe_echo exactly once and reply with only the word it returns. Do not guess the word."
+    }), { ...context, publishEvent: (event) => Effect.sync(() => { tools.push(event) }) }).pipe(
+      Stream.runCollect, Effect.timeout("90 seconds")
+    ))]
+    expect(tools.map(({ _tag }) => _tag)).toEqual(["ToolStart", "ToolEnd"])
+    expect(events.filter((event) => event._tag === "Assistant").map((event) => event.text).join(""))
+      .toContain("JINGLER_TOOL_RESULT_73")
+  }, 100_000)
+
   it("uses native session creation and resume flags", () => {
     expect(claudeAgentArguments(spec(), "new-session")).toContain("--session-id")
     const resumed = claudeAgentArguments(spec({
@@ -70,13 +91,30 @@ describe("ClaudeAgentRuntime", () => {
     }), "ignored")
     expect(resumed).toContain("--resume")
     expect(resumed).toContain("prior-session")
-    expect(resumed).toContain("--safe-mode")
-    expect(resumed).not.toContain("--setting-sources")
+    expect(resumed).not.toContain("--safe-mode")
+    expect(resumed).toContain("--setting-sources")
+    expect(resumed).toContain("--system-prompt-snapshot")
     const reasoned = claudeAgentArguments(spec({
       reasoning: { enabled: true, effort: "xhigh" }
     }), "new-session")
     expect(reasoned.slice(reasoned.indexOf("--effort"), reasoned.indexOf("--effort") + 2))
       .toEqual(["--effort", "max"])
+  })
+
+  it("passes Jingler rules and the actual active tool catalog on every turn", async () => {
+    const binary = await executable(`
+process.stdin.resume();
+const args=process.argv.slice(2); const prompt=args[args.indexOf("--system-prompt")+1];
+const valid=prompt?.includes("jingler.identity-and-safety") && prompt.includes("jingler.engineering-principles") && prompt.includes("jingler_ask_question") && !prompt.includes("plannotator_submit_plan:");
+console.log(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",delta:{type:"text_delta",text:valid?"inherited":"missing"}}}));
+console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
+`)
+    for (const continuation of [null, { runtimeId: "claude", endpointId, id: "prior-session" }] as const) {
+      const events = [...await Effect.runPromise(
+        makeClaudeAgentRuntime({ binary }).run(spec({ continuation }), context).pipe(Stream.runCollect)
+      )]
+      expect(events).toContainEqual({ _tag: "Assistant", text: "inherited" })
+    }
   })
 
   it("passes only non-secret operating environment variables", () => {

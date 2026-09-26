@@ -11,6 +11,7 @@ import type { AgentRunSpec } from "@jingler/core"
 import { Effect, JSONSchema } from "effect"
 import type { AgentRuntimeContext } from "../agent/agent-runtime.js"
 import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
+import { toolTarget } from "../agent/pi-events.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 
 const tokenVariable = "JINGLER_CLAUDE_MCP_TOKEN"
@@ -77,8 +78,9 @@ export const startClaudeCliToolRelay = async (
       const execute = async () => {
         const toolCallId = randomUUID()
         await Effect.runPromise(input.context.publishEvent({
-          _tag: "ToolStart", id: toolCallId, name: params.name, target: null
+          _tag: "ToolStart", id: toolCallId, name: params.name, target: toolTarget(params.arguments)
         }))
+        let updates = Promise.resolve()
         const result = await executeRegistryTool({
           ...input,
           id: params.name,
@@ -86,8 +88,14 @@ export const startClaudeCliToolRelay = async (
           parameters: params.arguments ?? {},
           signal: AbortSignal.any([controller.signal, extra.signal]),
           allowed: active.has(params.name),
-          onUpdate: undefined
+          onUpdate: (result) => {
+            updates = updates.then(() => Effect.runPromise(input.context.publishEvent({
+              _tag: "ToolDelta", id: toolCallId,
+              output: result.content.map(({ text }) => text).join("\n")
+            })))
+          }
         })
+        await updates
         await Effect.runPromise(input.context.publishEvent({
           _tag: "ToolEnd", id: toolCallId,
           status: result.details.status === "success" ? "success" : "error",

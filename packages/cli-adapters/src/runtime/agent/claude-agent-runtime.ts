@@ -18,6 +18,8 @@ import { trackChild } from "../../child-registry.js"
 import { startClaudeCliToolRelay, type ClaudeCliToolRelay } from "../providers/claude-cli-tool-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
+import { PromptCompiler } from "../prompt/prompt-compiler.js"
+import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 
 export interface ClaudeAgentRuntimeOptions {
@@ -58,7 +60,8 @@ const permissionArgs = (mode: AgentRunSpec["mode"]): ReadonlyArray<string> => {
 export const claudeAgentArguments = (
   spec: AgentRunSpec,
   sessionId: string,
-  mcpConfigPath?: string
+  mcpConfigPath?: string,
+  systemPrompt?: string
 ): ReadonlyArray<string> => [
   "-p",
   "--output-format", "stream-json",
@@ -66,7 +69,10 @@ export const claudeAgentArguments = (
   "--include-partial-messages",
   "--verbose",
   "--model", modelName(spec.modelId),
-  "--safe-mode",
+  "--setting-sources", "",
+  "--disable-slash-commands",
+  "--system-prompt-snapshot", "off",
+  ...(systemPrompt === undefined ? [] : ["--system-prompt", systemPrompt]),
   "--no-chrome",
   "--tools", "",
   "--allowedTools", "mcp__jingler__*",
@@ -233,7 +239,7 @@ const protocolLine = (line: string): boolean => {
   try {
     const value: unknown = JSON.parse(line)
     return isRecord(value) &&
-      ["assistant", "result", "stream_event", "system", "user"].includes(String(value.type))
+      ["assistant", "result", "stream_event", "system", "user", "rate_limit_event", "tool_progress", "tool_use_summary"].includes(String(value.type))
   } catch {
     return false
   }
@@ -299,11 +305,16 @@ async function* runClaude(
       (options.createToolRegistry?.(spec, context) ?? createJinglerTools({ context, cwd: spec.cwd, mcp: context.mcp }).pipe(Effect.mapError(runtimeError))).pipe(Scope.extend(scope)),
       { signal }
     )
+    const prompt = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers(spec.role, spec.mode),
+      tools: registry.capabilitiesFor(spec.role, spec.mode),
+      tokenBudget: 8_000
+    }).text
     relay = await startClaudeCliToolRelay({ registry, spec, context })
     signal.throwIfAborted()
     child = trackChild((options.spawnProcess ?? spawn)(
       binary,
-      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath)],
+      [...claudeAgentArguments(spec, sessionId, relay.mcpConfigPath, prompt)],
       { cwd: spec.cwd, env: { ...environment, ...relay.environment }, stdio: ["pipe", "pipe", "pipe"] }
     ))
     const spawned = child
