@@ -191,6 +191,7 @@ import type {
   FromServerEncoded,
 } from "@effect/rpc/RpcMessage";
 import {
+  Duration,
   Effect,
   Layer,
   Mailbox,
@@ -4009,12 +4010,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }))
     }
     const runner = yield* AgentRunner
+    // The write queues behind the chat lock, which a turn holds while it sets
+    // up or unwinds. Waiting forever there left the composer stuck on "Saving
+    // the selected agent runtime…" with no way out; give up and say why.
+    // Interrupting before the permit is granted writes nothing.
     return yield* runner.setModel(
       sessionId,
       chatId,
       entry.connection.id,
       providerId,
       modelId
+    ).pipe(
+      Effect.timeoutFail({
+        duration: Duration.seconds(10),
+        onTimeout: () => new ProviderConnectionError({
+          message: "This chat is still starting or stopping a turn. Try switching models again in a moment."
+        })
+      })
     )
   }),
   "Provider.list": () => providerOperation((service) => service.list),

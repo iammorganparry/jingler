@@ -71,17 +71,33 @@ import { rpc } from "./rpc-client.js"
 
 const modelMutations = new Map<string, { generation: number; tail: Promise<void> }>()
 
-const persistModelSelection = (
+/**
+ * How long the composer waits for a model switch to persist. Main gives up at
+ * 10s with a reason; this is the backstop for a reply that never arrives at
+ * all, which would otherwise leave "Saving the selected agent runtime…" up
+ * forever and every later switch queued behind it.
+ */
+export const MODEL_PERSIST_TIMEOUT_MS = 20_000
+
+const withTimeout = <A>(run: () => Promise<A>, ms: number) => (): Promise<A> =>
+  new Promise<A>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Model switch timed out")), ms)
+    run().then(resolve, reject).finally(() => clearTimeout(timer))
+  })
+
+export const persistModelSelection = (
   key: string,
   run: () => Promise<Session>,
   onSuccess: (session: Session) => void,
-  onLatestFailure: () => void
+  onLatestFailure: () => void,
+  timeoutMs = MODEL_PERSIST_TIMEOUT_MS
 ): void => {
   const current = modelMutations.get(key)
   const generation = (current?.generation ?? 0) + 1
+  const bounded = withTimeout(run, timeoutMs)
   const started = current === undefined
-    ? run()
-    : current.tail.catch(() => undefined).then(run)
+    ? bounded()
+    : current.tail.catch(() => undefined).then(bounded)
   const request = started.then((session) => {
     if (modelMutations.get(key)?.generation === generation) onSuccess(session)
   })
