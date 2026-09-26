@@ -29,7 +29,7 @@ export const prepareNativeRuntimeTools = (
   const systemPrompt = yield* Effect.try({
     try: () => new PromptCompiler().compile({
       layers: [
-        ...runtimeInvariantLayers(spec.role, spec.mode, spec.runtimeId),
+        ...runtimeInvariantLayers(spec.role, spec.mode),
         ...ponytailPromptLayers(spec.ponytailMode),
         {
           id: "runtime.tool-transport", kind: "tools", trust: "trusted", required: true, version: "1",

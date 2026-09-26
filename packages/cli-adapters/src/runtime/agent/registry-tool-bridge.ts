@@ -56,7 +56,7 @@ interface RegistryToolExecution {
     | undefined
 }
 
-export const executeRegistryTool = async (
+const execute = async (
   input: RegistryToolExecution
 ): Promise<RegistryToolResult> => {
   const { registry, spec, context, id, toolCallId, parameters, signal, allowed, onUpdate } =
@@ -99,4 +99,21 @@ export const executeRegistryTool = async (
   }
   const result = await Effect.runPromise(registry.execute(request))
   return { content: [{ type: "text", text: renderResult(result) }], details: result }
+}
+
+// A registry owns one mutation observer/journal; parallel snapshots would corrupt receipts.
+const mutations = new WeakMap<ToolRegistry, Promise<unknown>>()
+export const executeRegistryTool = (input: RegistryToolExecution): Promise<RegistryToolResult> => {
+  const risk = input.registry.riskFor(input.id)
+  if (risk !== "mutate" && risk !== "execute") return execute(input)
+  const previous = mutations.get(input.registry) ?? Promise.resolve()
+  const operation = previous.catch(() => undefined).then(() => {
+    input.signal?.throwIfAborted()
+    return execute(input)
+  })
+  // Store a handled tail immediately, even while callers are awaiting other work.
+  const tail = operation.catch(() => undefined)
+  mutations.set(input.registry, tail)
+  void tail.then(() => { if (mutations.get(input.registry) === tail) mutations.delete(input.registry) })
+  return operation
 }

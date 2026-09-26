@@ -1,7 +1,13 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { CURRENT_RUNTIME_CONTRACTS, nativeCliEndpointId, ProviderId, ProviderModelId, type AgentRunSpec, type StreamEvent } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
-import { expect, it } from "vitest"
+import { expect, it, vi } from "vitest"
+import { makeSharedPlanningRuntime } from "./shared-planning.js"
+import { createJinglerControlTools } from "./pi-jingler-tools.js"
+import { makeClaudeAgentRuntime } from "./claude-agent-runtime.js"
 import { probeCodexEndpoint } from "../codex/endpoint.js"
 import { probeOpenCodeEndpoint } from "../opencode/endpoint.js"
 import { makeCodexAgentRuntime } from "../codex/runtime.js"
@@ -81,3 +87,44 @@ it.runIf(process.env.JINGLER_NATIVE_CAPABILITIES_LIVE === "1").each(["codex", "o
   expect(stream.flatMap((event) => event._tag === "Assistant" ? [event.text] : []).join(""))
     .toContain("JINGLER_LIVE_RESULT_73")
 }, 150_000)
+
+
+it.each(["claude", "codex", "opencode"] as const)("%s transports plan tools and waits for the shared UI verdict", async (runtimeId) => {
+  const root = await mkdtemp(join(tmpdir(), "jingler-native-plan-"))
+  try {
+    await writeFile(join(root, "plan.md"), "# Shared plan\n- [ ] Verify the harness\n")
+    const options: NativeRuntimeToolsOptions = { createToolRegistry: (_spec, context) => Effect.succeed(createJinglerControlTools(context)) }
+    const harness = runtimeId === "claude"
+      ? makeClaudeAgentRuntime({ ...options, binary: fileURLToPath(new URL("./fixtures/claude-planning.mjs", import.meta.url)) })
+      : runtimeId === "codex"
+        ? makeCodexAgentRuntime({ ...options, binary: fileURLToPath(new URL("../codex/fixtures/app-server.mjs", import.meta.url)) })
+        : makeOpenCodeAgentRuntime({ ...options, ...fixtureTransport().options(fileURLToPath(new URL("../opencode/fixtures/server.mjs", import.meta.url))) })
+    const runtime = makeSharedPlanningRuntime(join(root, "state"), root)(harness)
+    const spec: AgentRunSpec = {
+      runId: "planning", sessionId: "session", chatId: "chat", runtimeId, endpointId: nativeCliEndpointId("desktop", runtimeId),
+      providerId: ProviderId.make(runtimeId === "opencode" ? "alpha" : runtimeId === "codex" ? "openai" : "anthropic"),
+      modelId: ProviderModelId.make(runtimeId === "opencode" ? "fixture-model" : runtimeId === "codex" ? "first" : "anthropic/haiku"),
+      cwd: root, role: "conversation", mode: "auto", prompt: "planning-probe", priorMessages: [], continuation: null, seed: null,
+      targetCapabilities: { versions: CURRENT_RUNTIME_CONTRACTS, targetId: "desktop", toolIds: [], resourceIds: [] }
+    }
+    const published: StreamEvent[] = []
+    let reviewId: string | undefined
+    const running = Effect.runPromise(Stream.runCollect(runtime.run(spec, { ...context,
+      publishEvent: (event) => Effect.sync(() => {
+        published.push(event)
+        if (event._tag === "PlannotatorStateChanged" && event.state.review) reviewId = event.state.review.reviewId
+      })
+    })).pipe(Effect.timeout("10 seconds")))
+    void running.catch(() => undefined)
+    await vi.waitFor(() => expect(reviewId).toBeDefined(), { timeout: 5000 })
+    expect(published.filter((event) => event._tag === "ToolEnd")).toHaveLength(1)
+    await Effect.runPromise(runtime.decidePlanReview({ runtimeId, endpointId: spec.endpointId, targetId: "desktop" }, "session", "chat", { reviewId: reviewId!, approved: true }))
+    const stream = [...await running]
+    const answer = stream.flatMap((event) => event._tag === "Assistant" ? [event.text] : []).join("")
+    expect(answer).toContain("plannotator_submit_plan")
+    expect(answer).toContain("Plan approved")
+    expect(answer).toContain('"inherited":true')
+    expect(published.filter((event) => event._tag === "ToolEnd" && event.status === "success")).toHaveLength(2)
+    expect(published).toContainEqual(expect.objectContaining({ _tag: "PlannotatorStateChanged", state: expect.objectContaining({ phase: "executing", review: null }) }))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

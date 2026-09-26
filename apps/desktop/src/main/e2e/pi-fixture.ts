@@ -50,7 +50,6 @@ export type E2ePiFixture = Schema.Schema.Type<typeof E2ePiFixture>
 
 const PROVIDER_ID = Schema.decodeUnknownSync(ProviderId)(E2E_PI_PROVIDER_ID)
 const SUBMIT_PLAN_TOOL = "plannotator_submit_plan"
-const PLAN_WRITE_TOOL = "write"
 const QUESTION_TOOL = "jingler_ask_question"
 const READ_TOOL = "workspace_read_file"
 const WRITE_TOOL = "workspace_write"
@@ -487,40 +486,35 @@ const STRUCTURED_REVIEW_PLAN = [
   "Run the focused auth checks."
 ].join("\n")
 
+const planExecutionResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  if (recentToolResultCount(context, E2E_PLAN_PROGRESS_TOOL) === 0) {
+    return fauxAssistantMessage([
+      fauxText("Implemented the first plan step. [DONE:1] [DONE:2]"),
+      fauxToolCall(E2E_PLAN_PROGRESS_TOOL, {}, { id: "plannotator-progress" })
+    ], { stopReason: "toolUse" })
+  }
+  return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:3] [DONE:4]")
+}
+
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
   const planStart = planMessages.findLastIndex((text) => text.includes("[[plan]]"))
   const currentPlanMessages = planStart < 0 ? planMessages : planMessages.slice(planStart)
-  // Post-approval, Plannotator nudges the SAME session to continue (and its
-  // executing-phase framing lands AFTER that nudge, so scan operator messages
-  // belonging to the current [[plan]] trigger). A real agent implements the
-  // approved plan here; re-submitting would open a second review — the submit
-  // tool stays active in every phase now, so the script must not lean on it
-  // being missing.
-  // Two approval deliveries exist: the live tool result nudges "Continue with
-  // the approved plan", while a review resumed after a restart sends the
-  // approved prompt ("Plan approved. You now have full tool access…") as a
-  // follow-up message instead.
-  if (currentPlanMessages.some((text) =>
-    text.includes("Continue with the approved plan") ||
-    text.includes("Plan approved. You now have full tool access")
-  )) {
-    if (recentToolResultCount(context, E2E_PLAN_PROGRESS_TOOL) === 0) {
-      return fauxAssistantMessage([
-        fauxText("Implemented the first plan step. [DONE:1] [DONE:2]"),
-        fauxToolCall(E2E_PLAN_PROGRESS_TOOL, {}, { id: "plannotator-progress" })
-      ], { stopReason: "toolUse" })
-    }
-    return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:2] [DONE:3] [DONE:4]")
+  // Restart recovery delivers the verdict before starting the harness; live
+  // review returns it through the shared tool in the same model loop.
+  if (currentPlanMessages.some((text) => text.includes("Plan approved.")) ||
+    (lastMessage?.role === "toolResult" && lastMessage.toolName === E2E_PLAN_PROGRESS_TOOL)) {
+    return planExecutionResponse(context)
   }
   const submitCount = context.messages.filter(
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
   ).length
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
-    if (toolResultText(lastMessage).includes("YOUR PLAN WAS NOT APPROVED")) {
+    const verdict = Schema.decodeUnknownSync(Schema.parseJson(Schema.Struct({ approved: Schema.Boolean })))(toolResultText(lastMessage))
+    if (!verdict.approved) {
       return callTool(
-        PLAN_WRITE_TOOL,
+        WRITE_TOOL,
         {
           path: "PLAN.md",
           content: STRUCTURED_REVIEW_PLAN.replace(
@@ -534,34 +528,12 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
         "plannotator-rewrite"
       )
     }
-    return fauxAssistantMessage(
-      "Implemented and verified the approved plan. [DONE:1] [DONE:2] [DONE:3] [DONE:4]"
-    )
+    return planExecutionResponse(context)
   }
-  if (
-    lastMessage?.role === "toolResult" &&
-    (lastMessage.toolName === PLAN_WRITE_TOOL || lastMessage.toolName === WRITE_TOOL)
-  ) {
-    // Outside plan mode pi's markdown-only `write` tool is absent — retry the
-    // plan write with the ordinary workspace tool, as a real agent would.
-    if (toolResultText(lastMessage).includes("not found")) {
-      return callTool(
-        WRITE_TOOL,
-        { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
-        "plannotator-write-fallback"
-      )
-    }
-    return callTool(
-      SUBMIT_PLAN_TOOL,
-      { filePath: "PLAN.md" },
-      `plannotator-submit-${submitCount + 1}`
-    )
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
   }
-  return callTool(
-    PLAN_WRITE_TOOL,
-    { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
-    "plannotator-write"
-  )
+  return callTool(WRITE_TOOL, { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN }, "plannotator-write")
 }
 
 const UPDATE_PLAN_TOOL = "plannotator_update_plan"

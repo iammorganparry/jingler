@@ -6,12 +6,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AgentEndpointCatalogEntry, CURRENT_RUNTIME_CONTRACTS, nativeCliEndpointId, ProviderId, ProviderModelId, type AgentRunSpec } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { liveChildCount } from "../../child-registry.js"
 import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { probeOpenCodeEndpoint } from "./endpoint.js"
 import { OpenCodeServer, boundedResponse, makeOpenCodePool, openCodeEnvironment } from "./server.js"
-import { makeOpenCodeAgentRuntime, openOpenCodeSession, openCodePermissions } from "./runtime.js"
+import { makeOpenCodeAgentRuntime, openOpenCodeSession, openCodePermissions, startOpenCodeTurnDeadline } from "./runtime.js"
 
 const binary = fileURLToPath(new URL("./fixtures/server.mjs", import.meta.url))
 const endpointId = nativeCliEndpointId("desktop", "opencode")
@@ -255,4 +255,21 @@ it("keeps one completion when interrupt arrives at the terminal event", async ()
   expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
   expect(events.some(event => event._tag === "Failed")).toBe(false)
   expect(liveChildCount()).toBe(0)
+})
+
+it("pauses only operator review time in the OpenCode active-turn deadline", () => {
+  vi.useFakeTimers()
+  const expire = vi.fn()
+  let pending = false
+  const timer = startOpenCodeTurnDeadline(() => pending, expire)
+  try {
+    vi.advanceTimersByTime(29 * 60_000)
+    expect(expire).not.toHaveBeenCalled()
+    pending = true
+    vi.advanceTimersByTime(2 * 60 * 60_000)
+    expect(expire).not.toHaveBeenCalled()
+    pending = false
+    vi.advanceTimersByTime(60_000)
+    expect(expire).toHaveBeenCalledOnce()
+  } finally { clearInterval(timer); vi.useRealTimers() }
 })

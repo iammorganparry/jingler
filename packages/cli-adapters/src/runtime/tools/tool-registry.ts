@@ -8,6 +8,8 @@ import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { Effect, Either, Schema } from "effect"
 
+export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
+
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
 export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 

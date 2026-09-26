@@ -1,6 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises"
-import { dirname, join } from "node:path"
-import { createRequire } from "node:module"
 import {
   DefaultResourceLoader,
   SettingsManager,
@@ -11,14 +8,8 @@ import { Data, Effect } from "effect"
 import { PI_SUBAGENTS_EXTENSION_PATH } from "../subagents/pi-subagents-bootstrap.js"
 export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/ponytail-resources.js"
 
-const require = createRequire(import.meta.url)
-export const PLANNOTATOR_EXTENSION_PATH = dirname(
-  require.resolve("@jingler/plannotator-ext/package.json")
-)
-
 const ALLOWED_EXTENSION_PATHS = new Set([
-  PI_SUBAGENTS_EXTENSION_PATH,
-  PLANNOTATOR_EXTENSION_PATH
+  PI_SUBAGENTS_EXTENSION_PATH
 ])
 
 export class PiResourceError extends Data.TaggedError("PiResourceError")<{
@@ -31,36 +22,7 @@ export interface LockedPiResourceInput {
   readonly agentDir: string
   readonly systemPrompt: string
   readonly eventBus?: EventBus
-  readonly plannotatorExecutionTools?: ReadonlyArray<string>
-  /**
-   * Tools stripped when a plan is approved and execution begins. Plan mode
-   * hands the agent pi's native `write`/`edit` for the markdown plan
-   * scratchpad only; letting them survive into execution would route real
-   * workspace edits around the registry's mutation tracking — no diff peek,
-   * no file-change set, no review evidence.
-   */
-  readonly plannotatorExecutionRemoveTools?: ReadonlyArray<string>
-}
 
-const writePlannotatorPhaseConfig = async (
-  input: LockedPiResourceInput
-): Promise<void> => {
-  if (input.plannotatorExecutionTools === undefined) return
-  await mkdir(input.agentDir, { recursive: true })
-  await writeFile(
-    join(input.agentDir, "plannotator.json"),
-    JSON.stringify({
-      executionMode: "automatic",
-      phases: {
-        executing: {
-          activeTools: input.plannotatorExecutionTools,
-          ...(input.plannotatorExecutionRemoveTools === undefined
-            ? {}
-            : { removeTools: input.plannotatorExecutionRemoveTools })
-        }
-      }
-    })
-  )
 }
 
 /** Build a pi loader whose only prompt/resource input is supplied by Jingler. */
@@ -69,8 +31,6 @@ export const createLockedPiResources = (
 ): Effect.Effect<ResourceLoader, PiResourceError> =>
   Effect.tryPromise({
     try: async () => {
-      process.env.PLANNOTATOR_EMBEDDED = "1"
-      await writePlannotatorPhaseConfig(input)
       const loader = new DefaultResourceLoader({
         cwd: input.cwd,
         agentDir: input.agentDir,
@@ -88,8 +48,7 @@ export const createLockedPiResources = (
         noThemes: true,
         noContextFiles: true,
         additionalExtensionPaths: [
-          PI_SUBAGENTS_EXTENSION_PATH,
-          PLANNOTATOR_EXTENSION_PATH
+          PI_SUBAGENTS_EXTENSION_PATH
         ],
         additionalSkillPaths: [],
         additionalPromptTemplatePaths: [],

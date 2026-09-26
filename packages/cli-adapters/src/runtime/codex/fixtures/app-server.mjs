@@ -16,14 +16,15 @@ let pending
 const note = (method, params) => send({ method, params: { threadId: thread, turnId: 'turn-1', ...params } })
 const done = (status = 'completed') => note('turn/completed', { turn: { id: 'turn-1', status, error: null } })
 const reply = (id, result) => send({ id, result })
-const probeRegistry = async () => {
-  if (toolConfig.default_tools_approval_mode !== 'approve') { done('failed'); return }
+const probeRegistry = async (planning = false) => {
+  if (toolConfig.default_tools_approval_mode !== 'approve' || toolConfig.tool_timeout_sec !== 86400) { done('failed'); return }
   const client = new Client({ name: 'codex-fixture', version: '1' })
   const headers = Object.fromEntries(Object.entries(toolConfig.env_http_headers).map(([header, variable]) => [header, process.env[variable]]))
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(toolConfig.url), { requestInit: { headers } }))
     const listed = await client.listTools()
-    const output = await client.callTool({ name: 'probe_echo', arguments: {} })
+    if (planning) await client.callTool({ name: 'plannotator_update_plan', arguments: { filePath: 'plan.md' } })
+    const output = await client.callTool(planning ? { name: 'plannotator_submit_plan', arguments: { filePath: 'plan.md' } } : { name: 'probe_echo', arguments: {} })
     const item = { type: 'mcpToolCall', id: 'vendor-echo', server: 'jingler', tool: 'probe_echo', status: 'completed' }
     note('item/started', { item }); note('item/completed', { item })
     note('item/agentMessage/delta', { itemId: 'probe', delta: JSON.stringify({ names: listed.tools.map(t => t.name), output: output.content, inherited: systemPrompt.includes('jingler.identity-and-safety') }) })
@@ -33,7 +34,7 @@ const probeRegistry = async () => {
 const handleTurnStart = async (id, p) => {
   const prompt = p.input[0].text
   reply(id, { turn: { id: 'turn-1' } })
-  if (prompt === 'registry-probe') { await probeRegistry(); return }
+  if (prompt === 'registry-probe' || prompt.startsWith('planning-probe')) { await probeRegistry(prompt.startsWith('planning-probe')); return }
   if (prompt === 'policy') { note('item/agentMessage/delta', { itemId: 'policy', delta: JSON.stringify(policy) }); done(); return }
   if (prompt === 'wait') { note('item/agentMessage/delta', { itemId: 'ready', delta: 'ready' }); return }
   if (['approval', 'file-approval', 'question', 'permissions'].includes(prompt)) {

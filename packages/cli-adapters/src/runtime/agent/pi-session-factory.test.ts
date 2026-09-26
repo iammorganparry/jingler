@@ -1,13 +1,11 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  createEventBus,
   type AgentSession,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
-  type EventBus
 } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
@@ -30,8 +28,6 @@ import {
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
 import {
-  deliverPlanReviewDecision,
-  enterPlannotatorPlanMode,
   makePiSessionFactory
 } from "./pi-session-factory.js"
 
@@ -55,26 +51,6 @@ afterEach(async () => {
     ...brokers.splice(0).map((broker) => Effect.runPromise(broker.close)),
     ...roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))
   ])
-})
-
-describe("deliverPlanReviewDecision", () => {
-  it("requires the waiting extension to acknowledge the review id", () => {
-    const events = createEventBus()
-    events.on("plannotator:review-decision", (payload) => {
-      events.emit("plannotator:review-decision-ack", {
-        reviewId: (payload as { reviewId: string }).reviewId
-      })
-    })
-
-    expect(() => deliverPlanReviewDecision(events, {
-      reviewId: "review-1",
-      approved: true
-    })).not.toThrow()
-    expect(() => deliverPlanReviewDecision(createEventBus(), {
-      reviewId: "review-1",
-      approved: true
-    })).toThrow("The plan review is no longer pending")
-  })
 })
 
 const connection = Schema.decodeUnknownSync(ProviderConnection)({
@@ -140,124 +116,23 @@ const fakeSession = (): AgentSession =>
     getSessionStats: () => ({ cost: 0, tokens: { total: 0 } })
   }) as unknown as AgentSession
 
-const readPlannotatorConfig = async (agentDir: string): Promise<unknown> =>
-  JSON.parse(await readFile(join(agentDir, "plannotator.json"), "utf8"))
-
 describe("pi session creation", () => {
-  it("enters Plannotator plan mode through its documented event contract", async () => {
-    const events: EventBus = {
-      emit: (channel, data) => {
-        expect(channel).toBe("plannotator:request")
-        const request = data as {
-          readonly action: string
-          readonly payload: { readonly mode: string }
-          readonly respond: (response: unknown) => void
-        }
-        expect(request.action).toBe("plan-mode")
-        expect(request.payload.mode).toBe("enter")
-        request.respond({ status: "handled", result: { phase: "planning" } })
-      },
-      on: () => () => {}
-    }
-
-    await expect(enterPlannotatorPlanMode(events)).resolves.toEqual({
-      phase: "planning"
-    })
-  })
-
-  it("configures a Plan session for Plannotator planning and automatic execution", async () => {
-    const root = await mkdtemp(join(tmpdir(), "jingler-plannotator-session-"))
-    roots.push(root)
-    const agentDir = join(root, "agent")
+  it("uses only registry-owned planning tools with tracked Auto tools in plan mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-planning-session-")); roots.push(root)
     const captured: CreateAgentSessionOptions[] = []
-    const projection = {
-      phase: "executing" as const,
-      planFilePath: "PLAN.md",
-      review: {
-        reviewId: "review-1",
-        url: "http://localhost:19432"
-      },
-      checklist: [{ step: 1, text: "Implement", completed: false }]
-    }
-    const planEvents: EventBus[] = []
-    const enterPlanMode = vi.fn(async (events: EventBus) => {
-      planEvents.push(events)
-      events.emit("plannotator:host-state", projection)
-      events.emit("plannotator:host-notice", { message: "Plan review failed closed." })
-      return { phase: "executing" as const }
-    })
     const registry = new ToolRegistry()
-    registry.register({
-      id: "auto_only",
-      version: "1",
-      description: "Available to Auto conversations.",
-      input: Schema.Struct({}),
-      risk: "read",
-      roles: ["conversation"],
-      modes: ["auto"],
-      timeoutMs: 1_000,
-      outputBudget: 1_000,
-      cancellable: true,
-      idempotency: "safe",
-      execute: async () => null
+    for (const id of ["auto_only", "plannotator_submit_plan", "plannotator_update_plan"]) registry.register({
+      id, version: "1", description: "Shared registry tool", input: Schema.Struct({}), risk: "read", roles: ["conversation"], modes: ["auto"],
+      timeoutMs: 1000, outputBudget: 1000, cancellable: true, idempotency: "safe", execute: async () => null
     })
-    const factory = makePiSessionFactory({
-      agentDir,
-      sessionsDir: join(root, "sessions"),
-      credentials: new InMemoryProviderCredentialStore(),
-      resolveConnection: () => Effect.succeed(connection),
-      toolRegistry: registry,
-      enterPlannotatorPlanMode: enterPlanMode,
-      createSession: async (options) => {
-        captured.push(options)
-        options.sessionManager?.appendCustomEntry("plannotator", {
-          phase: "executing"
-        })
-        return { session: fakeSession(), extensionsResult: {} as never }
-      }
+    const factory = makePiSessionFactory({ agentDir: join(root, "agent"), sessionsDir: join(root, "sessions"),
+      credentials: new InMemoryProviderCredentialStore(), resolveConnection: () => Effect.succeed(connection), toolRegistry: registry,
+      createSession: async (options) => { captured.push(options); return { session: fakeSession(), extensionsResult: {} as never } }
     })
-
-    const handle = await Effect.runPromise(factory.create({
-      ...makeSpec(root),
-      role: "plan",
-      mode: "plan"
-    }, {} as never))
-
-    expect(enterPlanMode).toHaveBeenCalledOnce()
-    expect(captured[0]?.tools).toEqual(expect.arrayContaining([
-      "auto_only",
-      "plannotator_submit_plan"
-    ]))
-    expect(captured[0]?.tools).not.toEqual(expect.arrayContaining(["write", "edit"]))
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("Role: plan.")
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("Execution mode: auto.")
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain(
-      "same execution freedom as Auto mode"
-    )
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain(
-      "- plannotator_submit_plan: Submit a Markdown plan for operator review."
-    )
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("- plannotator_update_plan:")
-    expect(captured[0]?.customTools?.map(({ name }) => name)).not.toContain(
-      "jingler_submit_plan"
-    )
-    expect(handle.plannotatorPhase?.()).toBe("executing")
-    const projected = vi.fn()
-    handle.subscribePlannotator?.(projected)
-    expect(projected).toHaveBeenCalledWith(projection)
-    const updatedProjection = {
-      ...projection,
-      checklist: [{ step: 1, text: "Implement", completed: true }]
-    }
-    planEvents[0]?.emit("plannotator:host-state", updatedProjection)
-    expect(projected).toHaveBeenLastCalledWith(updatedProjection)
-    const replayed = vi.fn()
-    handle.subscribePlannotator?.(replayed)
-    expect(replayed).toHaveBeenCalledWith(updatedProjection)
-    const notified = vi.fn()
-    handle.subscribePlannotatorNotice?.(notified)
-    expect(notified).toHaveBeenCalledWith("Plan review failed closed.")
-    expect(await readPlannotatorConfig(agentDir)).toMatchObject({ executionMode: "automatic" })
+    await Effect.runPromise(factory.create({ ...makeSpec(root), role: "plan", mode: "plan" }, {} as never))
+    expect(captured[0]?.tools).toEqual(["auto_only", "plannotator_submit_plan", "plannotator_update_plan"])
+    expect(captured[0]?.customTools?.map(({ name }) => name)).toEqual(captured[0]?.tools)
+    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("- plannotator_submit_plan: Shared registry tool")
   })
 
   it.each(["api-key", "claude-setup-token"] as const)(
@@ -351,7 +226,7 @@ describe("pi session creation", () => {
     expect(received?.tools).toEqual(expect.arrayContaining([
       "jingler_ask_question",
       "subagent",
-      "subagent_wait"
+      "bg_wait"
     ]))
     expect(received?.customTools?.map((tool) => tool.name)).toEqual([
       "jingler_ask_question",
@@ -359,8 +234,7 @@ describe("pi session creation", () => {
       "jingler_complete_session"
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
-      expect.objectContaining({ path: expect.stringContaining("plannotator") })
+      expect.objectContaining({ path: expect.stringContaining("pi-subagents") })
     ]))
     expect(session.bindExtensions).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "rpc", uiContext: expect.any(Object) })

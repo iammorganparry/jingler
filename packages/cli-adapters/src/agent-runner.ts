@@ -1,3 +1,5 @@
+import { join } from "node:path"
+import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
 import type {
   AgentRosterEntry,
@@ -1385,9 +1387,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
         const chat = session?.chats.find((candidate) => candidate.id === chatId)
+        const paths = yield* AppPaths
+        const pending = yield* Effect.promise(() => sharedPlanReviewPending(join(paths.managedResourcesDir, "plans"), sessionId, chatId))
+        if (pending !== null) return pending
         if (chat?.continuation?.runtimeId !== "pi") return false
         const continuationId = chat.continuation.id
-        const paths = yield* AppPaths
         return yield* Effect.promise(() =>
           plannotatorReviewPending(continuationId, paths.piSessionsDir)
         )

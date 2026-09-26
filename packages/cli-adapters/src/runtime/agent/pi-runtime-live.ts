@@ -1,3 +1,4 @@
+import { makeSharedPlanningRuntime } from "./shared-planning.js"
 import { createHash } from "node:crypto"
 import { isAbsolute, join, resolve } from "node:path"
 import type {
@@ -491,6 +492,7 @@ export const makePiAgentRuntimeLive = (
         (tracker) => tracker.dispose().pipe(Effect.orDie)
       ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
     }
+    const planning = makeSharedPlanningRuntime(join(paths.managedResourcesDir, "plans"), paths.piSessionsDir)
     const portable = makePortableRuntime(managedResources, join(paths.managedResourcesDir, "portable-modes.json"), paths.piSessionsDir)
     return makeAgentRuntimeRegistry([{
       runtimeId: "pi" as const,
@@ -498,7 +500,7 @@ export const makePiAgentRuntimeLive = (
       ownsEndpoint: piEndpointTargets
     }, makeClaudeRuntimeRegistration(nativeTools),
     makeCodexRuntimeRegistration(nativeTools),
-    makeOpenCodeRuntimeRegistration(nativeTools)].map((registration) => ({ ...registration, runtime: portable(registration.runtime) })))
+    makeOpenCodeRuntimeRegistration(nativeTools)].map((registration) => ({ ...registration, runtime: portable(planning(registration.runtime)) })))
   })
 )
 

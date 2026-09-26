@@ -25,11 +25,14 @@ import {
   SynchronizedRef
 } from "effect"
 import type { AgentRuntimeContext } from "../agent/agent-runtime.js"
+import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
 import type { ToolRegistry, ToolResultEnvelope, ToolRisk } from "../tools/tool-registry.js"
 
 const MAX_BODY_BYTES = 1024 * 1024
 const PARENT_ONLY_TOOLS = new Set([
   "jingler_ask_question",
+  "plannotator_submit_plan",
+  "plannotator_update_plan",
   "jingler_publish_explanation"
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
@@ -339,19 +342,16 @@ function* executeCapabilityRequest(
   }
   const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
   if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
-  const execution = {
+  const result = yield* Effect.tryPromise(() => executeRegistryTool({
+    registry: child.registry,
+    spec: child,
+    context: child.context,
     id: decoded.toolId,
-    arguments: decoded.arguments,
-    role: child.role,
-    mode: child.mode,
-    callId: decoded.callId,
-    idempotencyKey: decoded.callId
-  } as const
-  const permitted = risk === "read"
-    ? "allow"
-    : yield* child.context.canUseTool({ toolId: decoded.toolId, risk })
-  const result = yield* permitted === "allow"
-    ? child.registry.execute(execution)
-    : child.registry.deny(execution)
-  yield* writeJson(response, 200, responseFrom(result))
+    toolCallId: decoded.callId,
+    parameters: decoded.arguments,
+    signal: undefined,
+    allowed: true,
+    onUpdate: undefined
+  }))
+  yield* writeJson(response, 200, responseFrom(result.details))
 }

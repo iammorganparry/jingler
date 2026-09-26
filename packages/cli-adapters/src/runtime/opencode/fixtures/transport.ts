@@ -3,7 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { randomUUID } from "node:crypto"
 import type { OpenCodeOptions } from "../server.js"
 
-interface FixtureBody { config?: { url: string; headers: Record<string, string> }; system?: string; permission: unknown; parts: { text: string }[]; messageID: string; reply: string; answers: string[][] }
+interface FixtureBody { config?: { url: string; headers: Record<string, string>; timeout: number }; system?: string; permission: unknown; parts: { text: string }[]; messageID: string; reply: string; answers: string[][] }
 type FixtureSession = { id: string; directory: string; permission: unknown }
 
 /** Socket-free HTTP responses still exercise the real generated SDK and SSE parser. */
@@ -25,21 +25,27 @@ export const fixtureTransport = () => {
     emit(directory, "message.part.updated", { sessionID: id, part: { id: messageID, sessionID: id, messageID, type: "text", text: `OpenCode: ${prompt}${reply}`, time: { start: 1, end: 2 } } })
     emit(directory, "session.idle", { sessionID: id })
   }
+  const probeRelay = async (server: string, prompt: string, system: string | undefined, finish: (reply: string) => void) => {
+    const relay = relays.get(server)!
+    const client = new Client({ name: "opencode-fixture", version: "1" })
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(relay.url), { requestInit: { headers: relay.headers } }))
+      const listed = await client.listTools()
+      if (relay.timeout !== 86_400_000) throw new Error("Interactive relay timeout is missing")
+      const planning = prompt.startsWith("planning-probe")
+      if (planning) await client.callTool({ name: "plannotator_update_plan", arguments: { filePath: "plan.md" } })
+      const result = await client.callTool(planning ? { name: "plannotator_submit_plan", arguments: { filePath: "plan.md" } } : { name: "probe_echo", arguments: {} })
+      finish(JSON.stringify({ names: listed.tools.map(t => t.name), output: result.content, inherited: system?.includes("jingler.identity-and-safety") }))
+    } finally { await client.close() }
+  }
   const handlePrompt = async (directory: string, id: string, body: FixtureBody, server: string) => {
     body.messageID ??= `msg_${randomUUID()}`
     emit(directory, "message.updated", { info: { id: body.messageID, sessionID: id, role: "user" } })
     const prompt = body.parts[0]!.text
     const messageID = `msg_${randomUUID()}`
     const finish = (reply = "") => finishPrompt(directory, id, body.messageID, messageID, prompt, reply)
-    if (prompt === "registry-probe") {
-      const relay = relays.get(server)!
-      const client = new Client({ name: "opencode-fixture", version: "1" })
-      try {
-        await client.connect(new StreamableHTTPClientTransport(new URL(relay.url), { requestInit: { headers: relay.headers } }))
-        const listed = await client.listTools()
-        const result = await client.callTool({ name: "probe_echo", arguments: {} })
-        finish(JSON.stringify({ names: listed.tools.map(t => t.name), output: result.content, inherited: body.system?.includes("jingler.identity-and-safety") }))
-      } finally { await client.close() }
+    if (prompt === "registry-probe" || prompt.startsWith("planning-probe")) {
+      await probeRelay(server, prompt, body.system, finish)
     }
     else if (prompt === "disconnect") { for (const stream of streams) stream.close(); streams.clear() }
     else if (prompt === "permission") { pending.set(id, finish); emit(directory, "permission.asked", { id, sessionID: id, permission: "bash", patterns: [], always: [], metadata: {} }) }
