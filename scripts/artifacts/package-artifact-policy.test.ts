@@ -8,13 +8,14 @@ import {
 const piBundle = [
   "node_modules/@earendil-works/pi-ai/dist/index.js",
   "node_modules/@earendil-works/pi-coding-agent/dist/index.js",
+  "node_modules/@opencode-ai/sdk/dist/index.js",
   "jingler-release-certification-manifest-v1",
   "MIT License",
   "Copyright (c) 2025 Mario Zechner"
 ].join("\n")
 
 describe("package artifact policy", () => {
-  it("accepts Pi and Ponytail desktop and device runtime artifacts", () => {
+  it("accepts the required desktop and device runtime artifacts", () => {
     expect(auditDeviceBundle(piBundle)).toEqual([])
     expect(auditDesktopArchive([
       "/node_modules/@dietrichgebert/ponytail/package.json",
@@ -26,7 +27,9 @@ describe("package artifact policy", () => {
     ])).toEqual([])
   })
 
-  it("rejects deleted harness SDKs and plaintext pi auth files", () => {
+  it("rejects deleted harness SDKs, missing native SDKs, and plaintext pi auth files", () => {
+    expect(auditDeviceBundle(piBundle.replace("node_modules/@opencode-ai/sdk/dist/index.js", "")))
+      .toContain("device bundle is missing @opencode-ai/sdk")
     expect(auditDeviceBundle(`${piBundle}\nnode_modules/@openai/codex-sdk/index.js`))
       .toContain("device bundle contains @openai/codex-sdk")
     expect(auditDesktopArchive([

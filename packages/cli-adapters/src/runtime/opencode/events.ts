@@ -65,7 +65,25 @@ export class OpenCodeEvents {
     this.cost = [...this.usage.values()].reduce((sum, value) => sum + value.cost, 0)
     return [{ _tag: "Usage", tokens }]
   }
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: normalizes the vendor part union with shared deduplication state.
+  private textPart(part: Extract<Part, { type: "text" | "reasoning" }>, state: { text: string; done: boolean }): StreamEvent[] {
+    if (part.text.length > 1_048_576) throw new Error("OpenCode text bound exceeded")
+    if (!part.text.startsWith(state.text)) throw new Error("OpenCode text changed non-monotonically")
+    const delta = part.text.slice(state.text.length)
+    state.text = part.text
+    state.done = part.time?.end !== undefined
+    if (!delta && !state.done) return []
+    return [part.type === "text" ? { _tag: "Assistant", text: delta } : { _tag: "Thinking", text: delta, seconds: null, done: state.done }]
+  }
+  private toolPart(part: Extract<Part, { type: "tool" }>, state: { done: boolean }): StreamEvent[] {
+    if (part.state.status !== "completed" && part.state.status !== "error") return []
+    state.done = true
+    const output = part.state.status === "completed" ? part.state.output : part.state.error
+    const patch = part.state.metadata?.diff
+    const preview = typeof patch === "string" ? patch.slice(0, 16_000) : null
+    const lines = preview?.split("\n") ?? []
+    return [{ _tag: "ToolEnd", id: part.callID, status: part.state.status === "completed" ? "success" : "error", meta: null, preview,
+      diff: preview === null ? null : { added: lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length, removed: lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length }, output: output.slice(-16_000) }]
+  }
   private part(part: Part): StreamEvent[] {
     let state = this.parts.get(part.id)
     const events: StreamEvent[] = []
@@ -76,22 +94,8 @@ export class OpenCodeEvents {
       if (part.type === "tool") events.push({ _tag: "ToolStart", id: part.callID, name: part.tool, target: JSON.stringify(part.state.input).slice(0, 2000) })
     }
     if (state.done) return events
-    if (part.type === "text" || part.type === "reasoning") {
-      if (part.text.length > 1_048_576) throw new Error("OpenCode text bound exceeded")
-      if (!part.text.startsWith(state.text)) throw new Error("OpenCode text changed non-monotonically")
-      const delta = part.text.slice(state.text.length)
-      state.text = part.text
-      state.done = part.time?.end !== undefined
-      if (delta || state.done) events.push(part.type === "text" ? { _tag: "Assistant", text: delta } : { _tag: "Thinking", text: delta, seconds: null, done: state.done })
-    }
-    if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
-      state.done = true
-      const output = part.state.status === "completed" ? part.state.output : part.state.error
-      const patch = part.state.metadata?.diff
-      const preview = typeof patch === "string" ? patch.slice(0, 16_000) : null
-      events.push({ _tag: "ToolEnd", id: part.callID, status: part.state.status === "completed" ? "success" : "error", meta: null, preview,
-        diff: preview === null ? null : { added: preview.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++")).length, removed: preview.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---")).length }, output: output.slice(-16_000) })
-    }
+    if (part.type === "text" || part.type === "reasoning") events.push(...this.textPart(part, state))
+    if (part.type === "tool") events.push(...this.toolPart(part, state))
     return events
   }
 }

@@ -182,34 +182,35 @@ const migrateChat = (
   }
 }
 
+const activeLegacyChat = (chats: unknown, activeChatId: unknown) => {
+  if (!Array.isArray(chats)) return null
+  const active = chats.find((chat) => Schema.is(LegacyChatWithId)(chat) && chat.id === activeChatId)
+  return Schema.is(LegacyChatObject)(active) ? active : null
+}
+
+const legacySessionIdentity = (value: typeof LegacySessionObject.Type, active: typeof LegacyChatObject.Type | null, targetId: string, resolve?: LegacyRuntimeResolver) => {
+  const legacyModel = stringOrNull(active?.legacyModel) ?? stringOrNull(value.model)
+  const legacyResumeId = stringOrNull(active?.legacyResumeId) ?? stringOrNull(value.resumeId)
+  const { providerId, resolved } = resolveLegacyCandidate(value.cli, legacyModel, resolve)
+  const endpointId = endpointFor(active?.endpointId ?? value.endpointId, active?.connectionId ?? value.connectionId, resolved, targetId)
+  const continuation = Schema.is(RuntimeContinuation)(active?.continuation)
+    ? active.continuation
+    : continuationFor(value.continuation, value.piSessionId, endpointId)
+  return { legacyModel, legacyResumeId, providerId, resolved, endpointId, continuation }
+}
+
 /** Lossless decoder migration from legacy CLI/provider/PI identity to owned endpoints. */
-export const migrateLegacyRuntimeIdentity = (
+export function migrateLegacyRuntimeIdentity(
   value: unknown,
   resolve?: LegacyRuntimeResolver
-): unknown => {
+): unknown {
   if (!Schema.is(LegacySessionObject)(value)) return value
   const targetId = stringOrNull(value.environmentId) ?? "desktop"
   const chats = Array.isArray(value.chats)
     ? value.chats.map((chat) => migrateChat(chat, value.cli, targetId, resolve))
     : value.chats
-  const active = Array.isArray(chats)
-    ? chats.find(
-        (chat) => Schema.is(LegacyChatWithId)(chat) && chat.id === value.activeChatId
-      )
-    : null
-  const activeRecord = Schema.is(LegacyChatObject)(active) ? active : null
-  const legacyModel = stringOrNull(activeRecord?.legacyModel) ?? stringOrNull(value.model)
-  const legacyResumeId = stringOrNull(activeRecord?.legacyResumeId) ?? stringOrNull(value.resumeId)
-  const { providerId, resolved } = resolveLegacyCandidate(value.cli, legacyModel, resolve)
-  const endpointId = endpointFor(
-    activeRecord?.endpointId ?? value.endpointId,
-    activeRecord?.connectionId ?? value.connectionId,
-    resolved,
-    targetId
-  )
-  const continuation = Schema.is(RuntimeContinuation)(activeRecord?.continuation)
-    ? activeRecord.continuation
-    : continuationFor(value.continuation, value.piSessionId, endpointId)
+  const active = activeLegacyChat(chats, value.activeChatId)
+  const { legacyModel, legacyResumeId, providerId, resolved, endpointId, continuation } = legacySessionIdentity(value, active, targetId, resolve)
   const {
     cli: _cli,
     resumeId: _resumeId,

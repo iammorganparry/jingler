@@ -802,6 +802,14 @@ const ensureProjectOnOwnedEnvironment = (
   )
 })
 
+const decodeRemoteSession = (value: unknown, environmentId: string) =>
+  Schema.decodeUnknown(SessionSchema)(value).pipe(
+    Effect.mapError((cause) => new GitError({ message: "The remote device returned invalid session metadata", cause })),
+    Effect.flatMap((session) => session.environmentId === environmentId
+      ? Effect.succeed(session)
+      : Effect.fail(new GitError({ message: "The remote device returned a session for a different environment" })))
+  )
+
 const provisionRemoteSession = (
   environmentId: string,
   operation:
@@ -913,23 +921,7 @@ const provisionRemoteSession = (
         (cause) => new GitError({ message: cause.message, cause }),
       ),
     );
-    const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitError({
-            message: "The remote device returned invalid session metadata",
-            cause,
-          }),
-      ),
-    );
-    if (created.environmentId !== environmentId) {
-      return yield* Effect.fail(
-        new GitError({
-          message:
-            "The remote device returned a session for a different environment",
-        }),
-      );
-    }
+    const created = yield* decodeRemoteSession(value, environmentId);
     const persisted = yield* sessions.upsertRemote(created);
     yield* reportSessionCreation(progress, "ready");
     return persisted;

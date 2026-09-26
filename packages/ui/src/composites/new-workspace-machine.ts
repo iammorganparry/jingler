@@ -73,7 +73,7 @@ export interface NewWorkspaceContext {
   error: string | null
 }
 
-type NewWorkspaceEvent =
+export type NewWorkspaceEvent =
   | { type: "OPEN"; projectId?: string; pr?: PrSummary }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
@@ -167,6 +167,19 @@ const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "master") ??
   branches[0] ?? ""
 
+interface ProviderChoice {
+  runtimeId: AgentRuntimeId
+  endpointId: AgentEndpointId
+  connectionId: ProviderConnectionId | null
+  providerId: ProviderId
+  modelId: ProviderModelId
+}
+const preferredProviderChoice = (choices: ReadonlyArray<ProviderChoice>, deps: NewWorkspaceDeps, endpointId: AgentEndpointId | null, connectionId: ProviderConnectionId | null, modelId: ProviderModelId | null, providerId: ProviderId | null) =>
+  choices.find((choice) => choice.endpointId === endpointId && choice.modelId === modelId && (providerId === null || choice.providerId === providerId)) ??
+  choices.find((choice) => choice.connectionId === connectionId && choice.modelId === modelId && (providerId === null || choice.providerId === providerId)) ??
+  choices.find((choice) => choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId) ??
+  choices[0]
+
 const providerSelection = (
   deps: NewWorkspaceDeps,
   environmentId = "local",
@@ -210,19 +223,7 @@ const providerSelection = (
   const choices = deps.agentEndpointCatalog == null || (managed && endpointChoices.length === 0)
     ? providerChoices
     : endpointChoices
-  const selected =
-    choices.find((choice) =>
-      choice.endpointId === currentEndpointId && choice.modelId === currentModelId &&
-      (currentProviderId === null || choice.providerId === currentProviderId)
-    ) ??
-    choices.find((choice) =>
-      choice.connectionId === currentConnectionId && choice.modelId === currentModelId &&
-      (currentProviderId === null || choice.providerId === currentProviderId)
-    ) ??
-    choices.find((choice) =>
-      choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId
-    ) ??
-    choices[0]
+  const selected = preferredProviderChoice(choices, deps, currentEndpointId, currentConnectionId, currentModelId, currentProviderId)
   return selected ?? {
     runtimeId: null,
     endpointId: null,

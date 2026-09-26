@@ -67,6 +67,24 @@ export const boundedResponse = (response: Response): Response => {
   })), { status: response.status, statusText: response.statusText, headers: response.headers })
 }
 
+const waitUntilReady = async (client: ReturnType<typeof createOpencodeClient>, stopped: AbortSignal, spawned: Promise<void>, failed: () => boolean, timeoutMs: number) => {
+  await spawned
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline && !failed() && !stopped.aborted) {
+    try {
+      const result = await client.global.health({ signal: AbortSignal.timeout(500) })
+      if (result.data) {
+        if (!result.data.healthy || result.data.version !== OPENCODE_VERSION) throw new UnsupportedOpenCode("OpenCode health/version mismatch")
+        return
+      }
+    } catch (error) {
+      if (error instanceof UnsupportedOpenCode) throw error
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  throw new Error("OpenCode server failed readiness")
+}
+
 export class OpenCodeServer {
   readonly stopped = new AbortController()
   private closing?: Promise<void>
@@ -75,7 +93,6 @@ export class OpenCodeServer {
     private readonly child: ChildProcess,
     private readonly closed: Promise<void>
   ) {}
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: readiness and process ownership must share one failure cleanup path.
   static async start(options: OpenCodeOptions = {}) {
     if (await readOpenCodeVersion(options) !== OPENCODE_VERSION)
       throw new UnsupportedOpenCode(`OpenCode requires tested server ${OPENCODE_VERSION}`)
@@ -110,22 +127,8 @@ export class OpenCodeServer {
     server = new OpenCodeServer(client, child, closed)
     child.once("close", () => server.stopped.abort())
     try {
-      await spawned
-      const deadline = Date.now() + (options.timeoutMs ?? 15_000)
-      while (Date.now() < deadline && !failed && !server.stopped.signal.aborted) {
-        try {
-          const result = await client.global.health({ signal: AbortSignal.timeout(500) })
-          if (result.data) {
-            if (!result.data.healthy || result.data.version !== OPENCODE_VERSION)
-              throw new UnsupportedOpenCode("OpenCode health/version mismatch")
-            return server
-          }
-        } catch (error) {
-          if (error instanceof UnsupportedOpenCode) throw error
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50))
-      }
-      throw new Error("OpenCode server failed readiness")
+      await waitUntilReady(client, server.stopped.signal, spawned, () => failed, options.timeoutMs ?? 15_000)
+      return server
     } catch (error) {
       await server.close()
       throw error

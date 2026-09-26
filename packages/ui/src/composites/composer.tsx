@@ -500,6 +500,11 @@ function ComposerMcpDialogs({
   )
 }
 
+const selectedComposerModel = ({ agentEndpointCatalog, providerCatalog, endpointId, providerId, modelId }: Pick<ComposerProps, "agentEndpointCatalog" | "providerCatalog" | "endpointId" | "providerId" | "modelId">) =>
+  agentEndpointCatalog
+    ? agentEndpointCatalog.endpoints.filter(({ endpoint }) => endpoint.id === endpointId).flatMap(({ models }) => models).find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
+    : providerCatalog?.connections.flatMap(({ models }) => models).find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
+
 export function Composer(props: ComposerProps) {
          function renderAutocomplete() {
            return (menu && count > 0 && (
@@ -835,14 +840,7 @@ export function Composer(props: ComposerProps) {
          }
 
   const modelCatalog = agentEndpointCatalog ?? providerCatalog
-  const selectedModel = agentEndpointCatalog
-    ? agentEndpointCatalog.endpoints
-        .filter(({ endpoint }) => endpoint.id === endpointId)
-        .flatMap(({ models }) => models)
-        .find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
-    : providerCatalog?.connections
-        .flatMap(({ models }) => models)
-        .find((candidate) => candidate.id === modelId && (providerId == null || candidate.providerId === providerId))
+  const selectedModel = selectedComposerModel({ agentEndpointCatalog, providerCatalog, endpointId, providerId, modelId })
   const canonicalModes: ReadonlyArray<{
     readonly id: PermissionMode;
     readonly label: string;

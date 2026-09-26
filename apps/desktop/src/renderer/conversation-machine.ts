@@ -972,6 +972,54 @@ const foldUsage = (
   contextBreakdown: e.breakdown ?? null
 })
 
+const reconciledSession = (context: ConversationContext, session: Session, clearModelPending: boolean): Partial<ConversationContext> => {
+  const chat = session.chats.find((candidate) => candidate.id === context.chatId)
+  if (chat === undefined) return { session }
+  const persistedMode = chat.mode ?? session.mode ?? "accept-edits"
+  return {
+    session,
+    runtimeId: chat.runtimeId ?? session.runtimeId ?? null,
+    endpointId: chat.endpointId ?? session.endpointId ?? null,
+    connectionId: chat.connectionId ?? session.connectionId ?? null,
+    providerId: chat.providerId ?? session.providerId ?? null,
+    modelId: chat.modelId ?? session.modelId ?? null,
+    ...(clearModelPending ? { modelPending: false } : {}),
+    // Plan is a transient overlay; session updates only replace its restore-on-approval mode.
+    mode: isExecutionMode(context.mode) ? persistedMode : context.mode,
+    executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
+    reasoning: chat.reasoning,
+    tokens: chat.contextTokens ?? context.tokens,
+    persistedStatus: session.status
+  }
+}
+
+const initialConversationChat = (input: { session: Session; chatId?: string }) => {
+  const chats = input.session.chats ?? []
+  return chats.find((candidate) => candidate.id === (input.chatId ?? input.session.activeChatId)) ?? chats[0] ?? {
+    id: input.chatId ?? input.session.activeChatId ?? input.session.id,
+    title: null,
+    createdAt: input.session.updatedAt,
+    updatedAt: input.session.updatedAt,
+    mode: input.session.mode,
+    contextTokens: input.session.contextTokens
+  }
+}
+const initialConversationContext = (input: { session: Session; chatId?: string }): ConversationContext => {
+  const chat = initialConversationChat(input)
+  return {
+    session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
+    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
+    connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
+    modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
+    pendingText: "", pendingAgentContext: "", pendingImages: [], pendingExternalInstruction: null, pendingExternalAcceptances: [], reasoning: chat.reasoning,
+    queued: [], steeringId: null, queueParked: false, subagents: [], subagentFleetEvents: [], subagentControlOutcomes: [], foldsSinceCompaction: 0,
+    sharedPlanChatId: null, sharedPlan: null, tokens: chat.contextTokens ?? input.session.contextTokens ?? 0, contextBreakdown: null,
+    runStartedAt: null, lastOutcome: null, persistedStatus: input.session.status, loaded: false, hasMoreHistory: false, historyCursor: null,
+    loadingHistory: false, reviewer: null, reviewPhase: "starting", reviewStartedAt: null
+  }
+}
+
 export const conversationMachine = setup({
   types: {
     context: {} as ConversationContext,
@@ -1796,32 +1844,7 @@ export const conversationMachine = setup({
         event.type !== "MODEL_PERSISTED" &&
         event.type !== "MODEL_PERSIST_FAILED"
       ) return {}
-      const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
-      if (chat === undefined) return { session: event.session }
-      const providerId = chat.providerId ?? event.session.providerId ?? null
-      const persistedMode = chat.mode ?? event.session.mode ?? "accept-edits"
-      // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
-      // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
-      // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
-      // concrete exec mode, so adopting it blindly would yank a live plan
-      // selection back to auto the instant any session sync lands. Keep the
-      // operator's transient selection; still sync `executionMode` to whatever
-      // the backend now says the restore-on-approval mode is.
-      const mode = isExecutionMode(context.mode) ? persistedMode : context.mode
-      return {
-        session: event.session,
-        runtimeId: chat.runtimeId ?? event.session.runtimeId ?? null,
-        endpointId: chat.endpointId ?? event.session.endpointId ?? null,
-        connectionId: chat.connectionId ?? event.session.connectionId ?? null,
-        providerId,
-        modelId: chat.modelId ?? event.session.modelId ?? null,
-        ...(event.type === "SESSION_UPDATED" ? {} : { modelPending: false }),
-        mode,
-        executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
-        reasoning: chat.reasoning,
-        tokens: chat.contextTokens ?? context.tokens,
-        persistedStatus: event.session.status
-      }
+      return reconciledSession(context, event.session, event.type !== "SESSION_UPDATED")
     }),
     applySharedPlan: assign(({ context, event }) => {
       if (event.type !== "SHARED_PLAN_UPDATED") return {}
@@ -2092,75 +2115,7 @@ export const conversationMachine = setup({
       actions: ["applyHistory", stopChild("history-page")]
     }
   },
-  context: ({ input }) => {
-    const persistedChats = input.session.chats ?? []
-    const chat =
-      persistedChats.find(
-        (candidate) => candidate.id === (input.chatId ?? input.session.activeChatId)
-      ) ??
-      persistedChats[0] ?? {
-        id: input.chatId ?? input.session.activeChatId ?? input.session.id,
-        title: null,
-        createdAt: input.session.updatedAt,
-        updatedAt: input.session.updatedAt,
-        mode: input.session.mode,
-        contextTokens: input.session.contextTokens
-      }
-    const providerId = chat.providerId ?? input.session.providerId ?? null
-    return {
-      session: input.session,
-      chatId: chat.id,
-      messages: [],
-      sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
-      remotePublishProgress: null,
-      mode: chat.mode ?? input.session.mode ?? "accept-edits",
-      executionMode:
-        chat.mode && isExecutionMode(chat.mode)
-          ? chat.mode
-          : "accept-edits",
-      skills: [],
-      files: [],
-      runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null,
-      endpointId: chat.endpointId ?? input.session.endpointId ?? null,
-      connectionId: chat.connectionId ?? input.session.connectionId ?? null,
-      providerId,
-      modelId: chat.modelId ?? input.session.modelId ?? null,
-      modelPending: false,
-      diffStat: { added: 0, removed: 0, files: 0 },
-      patchAt: 0,
-      pendingText: "",
-      pendingAgentContext: "",
-      pendingImages: [],
-      pendingExternalInstruction: null,
-      pendingExternalAcceptances: [],
-      reasoning: chat.reasoning,
-      queued: [],
-      steeringId: null,
-      queueParked: false,
-      subagents: [],
-      subagentFleetEvents: [],
-      subagentControlOutcomes: [],
-      foldsSinceCompaction: 0,
-      sharedPlanChatId: null,
-      sharedPlan: null,
-      // Rehydrate the last measured working set immediately. ContextManager owns
-      // the trigger/phase snapshot, but the view reads this live field for the
-      // meter's numerator; starting at zero hid the whole component after every
-      // app restart until Codex happened to emit another Usage event.
-      tokens: chat.contextTokens ?? input.session.contextTokens ?? 0,
-      contextBreakdown: null,
-      runStartedAt: null,
-      lastOutcome: null,
-      persistedStatus: input.session.status,
-      loaded: false,
-      hasMoreHistory: false,
-      historyCursor: null,
-      loadingHistory: false,
-      reviewer: null,
-      reviewPhase: "starting",
-      reviewStartedAt: null
-    }
-  },
+  context: ({ input }) => initialConversationContext(input),
   states: {
     loading: {
       /**

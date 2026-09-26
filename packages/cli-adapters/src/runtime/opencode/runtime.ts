@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { realpath } from "node:fs/promises"
 import { nativeCliEndpointId, type AgentRunSpec, type StreamEvent } from "@jingler/core"
-import type { PermissionRuleset, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
+import type { Event, PermissionRuleset, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import { Effect, Stream } from "effect"
 import { AgentRuntimeError, type AgentRuntimeContext, type AgentRuntimeRegistration, type AgentRuntimeShape } from "../agent/agent-runtime.js"
 import { acquireOpenCode, makeOpenCodePool, type OpenCodeOptions, type OpenCodeServer } from "./server.js"
@@ -74,6 +74,19 @@ const replyQuestion = async (request: QuestionRequest, spec: AgentRunSpec, conte
     ])
   }, { throwOnError: true })
 }
+const handlePermission = (request: PermissionRequest, permissions: Set<string>, spec: AgentRunSpec, context: AgentRuntimeContext, server: OpenCodeServer, directory: string, signal: AbortSignal, inbox: OpenCodeInbox) => {
+  if (permissions.size >= 256 || permissions.has(request.id)) throw new Error("OpenCode permission bound exceeded")
+  permissions.add(request.id)
+  void replyPermission(request, spec, context, server, directory, signal).catch(() => inbox.fail(new Error("OpenCode permission reply failed")))
+}
+const handleQuestion = (request: QuestionRequest, questions: Set<string>, spec: AgentRunSpec, context: AgentRuntimeContext, server: OpenCodeServer, directory: string, signal: AbortSignal, inbox: OpenCodeInbox) => {
+  if (questions.size >= 32 || questions.has(request.id)) throw new Error("OpenCode question bound exceeded")
+  questions.add(request.id)
+  void replyQuestion(request, spec, context, server, directory, signal)
+    .catch(() => inbox.fail(new Error("OpenCode question reply failed")))
+    .finally(() => questions.delete(request.id))
+}
+const idleEvent = (event: Event) => event.type === "session.idle" || (event.type === "session.status" && event.properties.status.type === "idle")
 const assertOwner = (spec: AgentRunSpec) => {
   if (spec.runtimeId !== "opencode" || spec.endpointId !== nativeCliEndpointId(spec.targetCapabilities.targetId, "opencode") || (spec.continuation && (spec.continuation.runtimeId !== spec.runtimeId || spec.continuation.endpointId !== spec.endpointId))) throw new Error("Foreign OpenCode owner")
   if (!spec.providerId) throw new Error("OpenCode requires an explicit provider identity")
@@ -162,21 +175,9 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
       for (;;) {
         const event = await inbox.next()
         if (event.type === "session.error") throw new Error("OpenCode session failed")
-        if (event.type === "permission.asked") {
-          const request = event.properties
-          if (permissions.size >= 256 || permissions.has(request.id)) throw new Error("OpenCode permission bound exceeded")
-          permissions.add(request.id)
-          void replyPermission(request, spec, context, server, directory, abort.signal).catch(() => inbox?.fail(new Error("OpenCode permission reply failed")))
-        }
-        if (event.type === "question.asked") {
-          const request = event.properties
-          if (questions.size >= 32 || questions.has(request.id)) throw new Error("OpenCode question bound exceeded")
-          questions.add(request.id)
-          void replyQuestion(request, spec, context, server, directory, abort.signal)
-            .catch(() => inbox?.fail(new Error("OpenCode question reply failed")))
-            .finally(() => questions.delete(request.id))
-        }
-        if (event.type === "session.idle" || (event.type === "session.status" && event.properties.status.type === "idle")) {
+        if (event.type === "permission.asked") handlePermission(event.properties, permissions, spec, context, server, directory, abort.signal, inbox)
+        if (event.type === "question.asked") handleQuestion(event.properties, questions, spec, context, server, directory, abort.signal, inbox)
+        if (idleEvent(event)) {
           if (!events.hasResponse) continue
           completed = true
           yield { _tag: "Done", tokens: events.tokens, costUsd: events.cost }

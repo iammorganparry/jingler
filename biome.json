@@ -45,13 +45,13 @@
       "**/*.ts",
       "**/*.tsx",
       "**/*.mjs",
-      "!**/node_modules/**",
-      "!**/out/**",
-      "!**/dist/**",
-      "!**/.turbo/**",
-      "!**/storybook-static/**",
+      "!**/node_modules",
+      "!**/out",
+      "!**/dist",
+      "!**/.turbo",
+      "!**/storybook-static",
       "!tools/oxlint/anti-slop",
-      "!packages/plannotator-ext/**"
+      "!packages/plannotator-ext"
     ]
   }
 }

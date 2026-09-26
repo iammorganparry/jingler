@@ -1545,16 +1545,18 @@ const failureDetail = (value: unknown): string | null => {
   return null
 }
 
+const selectedTurnChat = (session: Session | null, chatId: string) =>
+  session?.chats.find((candidate) => candidate.id === chatId) ??
+  (chatId === session?.id
+    ? (session.chats.find((candidate) => candidate.id === session.activeChatId) ?? null)
+    : null)
+
 const resolveTurnChat = (sessionId: string, chatId: string) =>
   Effect.gen(function* () {
     const session: Session | null = yield* SessionStore.get(sessionId).pipe(
       Effect.orElseSucceed(() => null)
     )
-    const chat =
-      session?.chats.find((candidate) => candidate.id === chatId) ??
-      (chatId === sessionId
-        ? (session?.chats.find((candidate) => candidate.id === session.activeChatId) ?? null)
-        : null)
+    const chat = selectedTurnChat(session, chatId)
     if (session === null || chat === null) {
       return yield* Effect.fail(
         new AgentRunError({
