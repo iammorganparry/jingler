@@ -6,6 +6,30 @@ import { fakeCommandExecutor } from "./test-support.js"
 const run = <A>(effect: Effect.Effect<A, unknown, unknown>, handler: Parameters<typeof fakeCommandExecutor>[0]): Promise<A> =>
   Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(GitHubCli.Default, fakeCommandExecutor(handler))) as never)) as Promise<A>
 
+const commitPages = (args: ReadonlyArray<string>) => {
+  if (!args.join(" ").includes("commits(first:100")) return undefined
+  expect(args.join(" ")).toContain("authors(first:1){nodes{name user{login}}}")
+  expect(args.join(" ")).toContain("signature{isValid}")
+  const commit = (oid: string) => ({ commit: {
+    oid,
+    messageHeadline: oid === "abc" ? "ship it" : "ship more",
+    committedDate: "2026-08-26T08:00:00Z",
+    url: `https://github.com/acme/widget/commit/${oid}`,
+    authors: { nodes: [{ name: "Octo Cat", user: { login: "octocat" } }] },
+    signature: { isValid: true }
+  } })
+  return { stdout: JSON.stringify([
+    { data: { repository: { pullRequest: { commits: {
+      nodes: [commit("abc")],
+      pageInfo: { hasNextPage: true, endCursor: "commits-2" }
+    } } } } },
+    { data: { repository: { pullRequest: { commits: {
+      nodes: [commit("def")],
+      pageInfo: { hasNextPage: false, endCursor: null }
+    } } } } }
+  ]) }
+}
+
 describe("GitHubCli", () => {
   it("detects an authenticated CLI", async () => {
     await expect(run(GitHubCli.available(), (command, args) => {
@@ -13,6 +37,14 @@ describe("GitHubCli", () => {
       if (command === "gh" && args[0] === "auth") return { stdout: "github.com\n" }
       return
     })).resolves.toBe(true)
+  })
+
+  it("reads the authenticated CLI login", async () => {
+    await expect(run(GitHubCli.viewerLogin(), (command, args) =>
+      command === "gh" && args[0] === "api"
+        ? { stdout: "octocat\n" }
+        : undefined
+    )).resolves.toBe("octocat")
   })
 
   it("paginates the inbox and preserves viewer relationships", async () => {
@@ -45,6 +77,7 @@ describe("GitHubCli", () => {
 
   it("loads a PR and inline review threads through gh", async () => {
     const commands: Array<ReadonlyArray<string>> = []
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one fixture handles each gh subprocess in the PR read.
     const result = await run(GitHubCli.prView("/repo", 42), (command, args) => {
       if (command !== "gh") return
       commands.push(args)
@@ -57,28 +90,9 @@ describe("GitHubCli", () => {
         commits: [{ oid: "abc", messageHeadline: "ship it", authors: [{ login: "octocat" }] }]
       }) }
       if (args[0] === "repo") return { stdout: "acme/widget\n" }
-      if (args.join(" ").includes("commits(first:100")) {
-        expect(args.join(" ")).toContain("authors(first:1){nodes{name user{login}}}")
-        expect(args.join(" ")).toContain("signature{isValid}")
-        const commit = (oid: string) => ({ commit: {
-          oid,
-          messageHeadline: oid === "abc" ? "ship it" : "ship more",
-          committedDate: "2026-08-26T08:00:00Z",
-          url: `https://github.com/acme/widget/commit/${oid}`,
-          authors: { nodes: [{ name: "Octo Cat", user: { login: "octocat" } }] },
-          signature: { isValid: true }
-        } })
-        return { stdout: JSON.stringify([
-          { data: { repository: { pullRequest: { commits: {
-            nodes: [commit("abc")],
-            pageInfo: { hasNextPage: true, endCursor: "commits-2" }
-          } } } } },
-          { data: { repository: { pullRequest: { commits: {
-            nodes: [commit("def")],
-            pageInfo: { hasNextPage: false, endCursor: null }
-          } } } } }
-        ]) }
-      }
+      const commits = commitPages(args)
+      if (commits) return commits
+      if (args[1] === "repos/acme/widget/pulls/42/files") return { stdout: "[[]]" }
       if (args[0] === "api") return { stdout: JSON.stringify([{
         data: { repository: { pullRequest: { reviewThreads: {
           nodes: [],
@@ -105,7 +119,39 @@ describe("GitHubCli", () => {
         verified: true
       }
     ])
-    expect(commands.map((args) => args[0])).toEqual(["pr", "repo", "api", "api"])
+    expect(commands.map((args) => args[0])).toEqual(["pr", "repo", "api", "api", "api"])
+  })
+
+  it("counts every file from the paginated files endpoint", async () => {
+    const result = await run(GitHubCli.prViewBySlug("acme/widget", 42), (command, args) => {
+      if (command !== "gh") return
+      if (args[0] === "pr") {
+        expect(args.at(-1)?.split(",")).not.toContain("files")
+        return { stdout: JSON.stringify({ state: "OPEN", number: 42 }) }
+      }
+      if (args[1] === "repos/acme/widget/pulls/42/files") {
+        expect(args).toEqual([
+          "api", "repos/acme/widget/pulls/42/files", "--paginate", "--slurp"
+        ])
+        return { stdout: JSON.stringify([
+          [{ filename: "one.ts" }, { filename: "two.ts" }],
+          [{ filename: "three.ts" }]
+        ]) }
+      }
+      if (args.join(" ").includes("commits(first:100")) return { stdout: JSON.stringify([{
+        data: { repository: { pullRequest: { commits: {
+          nodes: [], pageInfo: { hasNextPage: false, endCursor: null }
+        } } } }
+      }]) }
+      if (args[0] === "api") return { stdout: JSON.stringify([{
+        data: { repository: { pullRequest: { reviewThreads: {
+          nodes: [], pageInfo: { hasNextPage: false, endCursor: null }
+        } } } }
+      }]) }
+      return
+    })
+
+    expect(result.changedFiles).toBe(3)
   })
 
   it("paginates review threads and every comment in each thread", async () => {
