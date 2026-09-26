@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { ProviderCatalog, type ProviderConnectionId, type ProviderModelId } from "@jingler/core"
+import { AgentEndpointCatalog, ProviderCatalog, type ProviderConnectionId, type ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ProviderConnectionsSettings } from "./provider-connections-settings.js"
@@ -58,7 +58,90 @@ const catalog = Schema.decodeSync(ProviderCatalog)({
   stale: false
 })
 
+const endpointCatalog = Schema.decodeUnknownSync(AgentEndpointCatalog)({
+  refreshedAt: "2026-08-10T08:00:00.000Z",
+  stale: false,
+  endpoints: [
+    ...(["claude", "codex", "opencode"] as const).map((runtimeId) => ({
+    endpoint: {
+      id: `desktop:${runtimeId}:default`,
+      runtimeId,
+      targetId: "desktop",
+      label: runtimeId === "claude" ? "Claude Code" : runtimeId === "codex" ? "Codex CLI" : "OpenCode CLI",
+      status: runtimeId === "codex" ? "signed-out" : runtimeId === "opencode" ? "missing" : "ready",
+      version: "1.0.0",
+      features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false }
+    },
+    models: []
+  })),
+    {
+      endpoint: {
+        id: "device:claude:default",
+        runtimeId: "claude",
+        targetId: "device",
+        label: "Claude Code",
+        status: "signed-out",
+        version: "1.0.0",
+        features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false }
+      },
+      models: []
+    },
+    {
+      endpoint: {
+        id: "device:opencode:default",
+        runtimeId: "opencode",
+        targetId: "device",
+        label: "OpenCode CLI",
+        status: "ready",
+        version: "1.0.0",
+        features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false }
+      },
+      models: []
+    }
+  ]
+})
+
 describe("ProviderConnectionsSettings", () => {
+  it("offers PI and every supported CLI from the add-account panel", () => {
+    const nativeEndpointLogin = {
+      start: vi.fn(async () => ({ loginId: "login-1", verificationUrl: "https://example.test", userCode: "CODE" })),
+      cancel: vi.fn(async () => undefined),
+      refresh: vi.fn(async () => false)
+    }
+    render(
+      <ProviderConnectionsSettings
+        catalog={Schema.decodeSync(ProviderCatalog)({ connections: [], refreshedAt: "2026-08-10T08:00:00.000Z", stale: false })}
+        endpointCatalog={endpointCatalog}
+        nativeEndpointLogin={nativeEndpointLogin}
+        onRefresh={vi.fn()}
+        onVerify={vi.fn()}
+        onMakeDefault={vi.fn()}
+        onLogout={vi.fn()}
+        onConnectClaude={vi.fn()}
+        onStartCodex={vi.fn()}
+        onSetApiKey={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "PI: Needs provider" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Claude Code: 1/2 ready" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Codex CLI: Sign in required" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "OpenCode CLI: 1/2 ready" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Sign in to Codex CLI" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Codex CLI: Sign in required" }))
+    expect(screen.getAllByText("Codex CLI · signed-out · desktop")).toHaveLength(2)
+    expect(screen.getAllByRole("button", { name: "Sign in to Codex CLI" })).toHaveLength(1)
+    expect(screen.queryByRole("button", { name: "Open browser" })).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Claude Code: 1/2 ready" }))
+    expect(screen.getByText("claude auth login")).toBeTruthy()
+    expect(screen.getAllByText(/Claude Code · .* · device/u).length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole("button", { name: "PI: Needs provider" }))
+    expect(screen.getByRole("button", { name: "Open browser" })).toBeTruthy()
+  })
+
   it("adds a provider from settings after onboarding was skipped", () => {
     const onStartCodex = vi.fn()
     render(
@@ -109,7 +192,7 @@ describe("ProviderConnectionsSettings", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Add account" }))
+    fireEvent.click(screen.getByRole("button", { name: "Add runtime" }))
     fireEvent.click(screen.getByRole("button", { name: "Open browser" }))
 
     expect(onStartCodex).toHaveBeenCalledWith(expect.any(String), "browser")
