@@ -1118,6 +1118,7 @@ export const preferGitHubCli = async <A>(
 
 export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi", {
   accessors: true,
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: backend selection stays beside its one-to-one GitHub operations.
   effect: Effect.gen(function* () {
     const auth = yield* GitHubAuth
     const cli = yield* GitHubCli
