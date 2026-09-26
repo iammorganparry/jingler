@@ -101,6 +101,8 @@ export interface SessionSidebarProps {
   onOpenSettings?: () => void
   /** Sign out (from the account menu). */
   onSignOut?: () => void
+  /** Open the optional sign-in dialog; the footer offers it while signed out. */
+  onSignIn?: () => void
   /** Whether GitHub is connected (green dot on the Settings item). */
   ghConnected?: boolean
   /** Repo names that are starred — their groups pin to the top (repo grouping). */
@@ -170,6 +172,7 @@ function SidebarBody({
   onOpenUsage,
   onOpenSettings,
   onSignOut,
+  onSignIn,
   ghConnected = false,
   starredRepoNames,
   onToggleStar,
@@ -706,27 +709,70 @@ return (renderExpandedGroupHeading())
         </>
       )}
 
-      {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out). */}
+      {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out),
+          or an optional Sign in while signed out. */}
       <div className="flex-none border-t border-hairline p-1.5">
-        {user ? (
-          <UserMenu
-            user={user}
-            onOpenSettings={onOpenSettings}
-            onOpenUsage={onOpenUsage}
-            onSignOut={onSignOut}
-            ghConnected={ghConnected}
-            version={version}
-          />
-        ) : (
-          <span
-            className="flex h-9 items-center px-2 font-mono text-[11px] text-dim"
-            title={version ? "App version" : undefined}
-          >
-            {version ? `Jingler v${version}` : "Jingler"}
-          </span>
-        )}
+        <SidebarAccountFooter
+          user={user}
+          onOpenSettings={onOpenSettings}
+          onOpenUsage={onOpenUsage}
+          onSignOut={onSignOut}
+          onSignIn={onSignIn}
+          ghConnected={ghConnected}
+          version={version}
+        />
       </div>
     </AISidebarSurface>
+  )
+}
+
+/**
+ * Signed in → the account menu. Signed out → the version and a Sign in button.
+ * Neither (the stored session is still being checked, or a host without auth)
+ * → just the version, so a signed-in boot never flashes "Sign in".
+ */
+function SidebarAccountFooter({
+  user,
+  onOpenSettings,
+  onOpenUsage,
+  onSignOut,
+  onSignIn,
+  ghConnected,
+  version
+}: Pick<
+  SessionSidebarProps,
+  "user" | "onOpenSettings" | "onOpenUsage" | "onSignOut" | "onSignIn" | "ghConnected" | "version"
+>) {
+  const label = version ? `Jingler v${version}` : "Jingler"
+  if (user) {
+    return (
+      <UserMenu
+        user={user}
+        onOpenSettings={onOpenSettings}
+        onOpenUsage={onOpenUsage}
+        onSignOut={onSignOut}
+        ghConnected={ghConnected}
+        version={version}
+      />
+    )
+  }
+  if (onSignIn) {
+    return (
+      <div className="flex h-9 items-center justify-between gap-2 px-2">
+        <span className="font-mono text-[11px] text-dim">{label}</span>
+        <Button size="sm" variant="outline" onClick={onSignIn}>
+          Sign in
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <span
+      className="flex h-9 items-center px-2 font-mono text-[11px] text-dim"
+      title={version ? "App version" : undefined}
+    >
+      {label}
+    </span>
   )
 }
 

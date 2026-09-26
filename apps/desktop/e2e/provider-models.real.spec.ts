@@ -209,7 +209,8 @@ const signInToProduct = async (
   window: Page,
   token: string,
 ): Promise<void> => {
-  const signIn = window.getByRole("heading", { name: "Sign in to Jingler" });
+  // Sign-in is optional, so a signed-out boot shows the sidebar's Sign in button.
+  const signIn = window.getByRole("button", { name: "Sign in", exact: true });
   const accountMenu = window.getByRole("button", { name: "Account menu" });
   await expect(signIn.or(accountMenu)).toBeVisible({ timeout: 30_000 });
   if (!(await signIn.isVisible())) return;

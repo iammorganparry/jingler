@@ -25,6 +25,12 @@ export interface LoginScreenProps {
   onSendMagicLink: (email: string, name?: string) => void
   /** Return from the `sent` state to enter different details. */
   onReset: () => void
+  /**
+   * Render inside a host surface (the sign-in dialog) rather than as the whole
+   * window: no titlebar, and the card sizes to its content instead of filling
+   * the screen.
+   */
+  embedded?: boolean
 }
 
 const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
@@ -33,7 +39,8 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
 }
 
 /**
- * The sign-in wall — the whole app is gated behind this. A macOS titlebar over
+ * The sign-in surface. Sign-in is optional — the app never gates on it — so this
+ * normally renders `embedded` in the sidebar's sign-in dialog. A macOS titlebar over
  * a flat canvas, with the auth card (GitHub + Google OAuth, a divider, and the email
  * magic-link form). The footer toggles between sign-in and sign-up: sign-up adds
  * a name field and a terms notice, and reframes the copy. Both modes share the
@@ -48,7 +55,8 @@ export function LoginScreen({
   onGithub,
   onGoogle,
   onSendMagicLink,
-  onReset
+  onReset,
+  embedded = false
 }: LoginScreenProps) {
   const [mode, setMode] = useState<AuthMode>("signin")
   const [email, setEmail] = useState("")
@@ -65,9 +73,15 @@ export function LoginScreen({
   }
 
   return (
-    <div className="flex h-full flex-col bg-canvas">
-      <TitleBar />
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden">
+    <div className={embedded ? "flex flex-col bg-canvas" : "flex h-full flex-col bg-canvas"}>
+      {embedded ? null : <TitleBar />}
+      <div
+        className={
+          embedded
+            ? "relative flex items-center justify-center px-10 pb-[74px] pt-10"
+            : "relative flex flex-1 items-center justify-center overflow-hidden"
+        }
+      >
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
           {state === "error" ? (
             <Callout tone="red" glyph={<AlertCircle className="size-3.5" />} className="w-full">

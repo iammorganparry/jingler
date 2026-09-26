@@ -171,6 +171,8 @@ export interface SessionConversationProps {
   onOpenGithubSettings?: () => void
   /** Sign out (from the sidebar account menu). */
   onSignOut?: () => void
+  /** Open the optional sign-in dialog (sidebar footer, while signed out). */
+  onSignIn?: () => void
   /**
    * When set, the Settings view is open: it replaces the main pane (tabs +
    * conversation) while the sidebar stays visible. `onOpenSettings` toggles it.
@@ -387,6 +389,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onOpenUsage={props.onOpenUsage}
         onOpenSettings={props.onOpenSettings}
         onSignOut={props.onSignOut}
+        onSignIn={props.onSignIn}
         ghConnected={props.ghConnected}
         starredRepoNames={props.starredRepoNames}
         onToggleStar={props.onToggleStar}

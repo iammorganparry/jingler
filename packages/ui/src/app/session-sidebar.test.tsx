@@ -453,3 +453,29 @@ describe("SessionSidebar split placement", () => {
     expect(screen.queryByText("Splits")).toBeNull()
   })
 })
+
+describe("SessionSidebar optional sign-in", () => {
+  it("offers Sign in in the footer while signed out", () => {
+    const signIn = vi.fn()
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+      defaultFilters={DEFAULT_FILTERS} onSignIn={signIn} version="1.2.3" />)
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(signIn).toHaveBeenCalledOnce()
+    expect(screen.getByText("Jingler v1.2.3")).toBeTruthy()
+  })
+
+  it("shows the account menu instead once a user is signed in", () => {
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+      defaultFilters={DEFAULT_FILTERS} onSignIn={() => {}}
+      user={{ id: "u1", name: "Ada", email: "ada@example.com", image: null }} />)
+    expect(screen.getByRole("button", { name: "Account menu" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull()
+  })
+
+  it("offers neither while the stored session is still being checked", () => {
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+      defaultFilters={DEFAULT_FILTERS} />)
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Account menu" })).toBeNull()
+  })
+})

@@ -117,6 +117,7 @@ export * from "./composites/plan-doc/plan-blocks.js"
 export * from "./composites/auth-card.js"
 export * from "./composites/magic-link-form.js"
 export * from "./composites/user-menu.js"
+export { SignInDialog, type SignInDialogProps } from "./composites/sign-in-dialog.js"
 
 // Diff engine (virtualized)
 export * from "./diff/parse.js"
