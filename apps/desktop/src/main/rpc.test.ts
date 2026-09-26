@@ -73,6 +73,7 @@ import {
   assetRead,
   assetWrite,
   createTerminal,
+  githubConnectionRefresh,
   githubDetectPr,
   githubSubmitReview,
   githubPr,
@@ -436,6 +437,27 @@ const fakeGithubApi = (overrides: Record<string, unknown> = {}) =>
  * must be a no-op. We run the real ConfigService against a temp root and fake
  * only the native dialog, asserting the outcomes the renderer depends on.
  */
+describe("GitHub connection status", () => {
+  it("preserves CLI availability after refreshing the App", async () => {
+    const layer = Layer.mergeAll(
+      fakeCommandExecutor(() => undefined),
+      fakeGithubApi({ cliAvailable: () => Effect.succeed(true) }),
+      Layer.succeed(GitHubAuth, {
+        refresh: () => Effect.succeed({
+          enabled: true,
+          connected: false,
+          user: null,
+          installations: [],
+          lastRefreshedAt: null,
+        }),
+      } as never),
+    );
+    await expect(
+      Effect.runPromise(githubConnectionRefresh().pipe(Effect.provide(layer))),
+    ).resolves.toMatchObject({ cliAvailable: true });
+  });
+});
+
 describe("RPC handlers", () => {
   let dir: string;
   let root: string;
@@ -1270,7 +1292,7 @@ describe("RPC handlers", () => {
       mkdirSync(root, { recursive: true });
       mkdirSync(worktreePath, { recursive: true });
       writeFileSync(join(root, "sessions.json"), JSON.stringify([{
-        id: "cli-only", repo: "widget", branch: "fix/cli", baseBranch: "main",
+        id: "cli-only", repo: "widget", branch: "fix/stale", baseBranch: "main",
         title: "CLI PR", status: "idle", cli: "claude", diff: { added: 0, removed: 0 },
         prNumber: 41, githubInstallationId: "old-installation", githubRepositoryId: "old-repository",
         costUsd: 0, tokens: 0, updatedAt: now, worktreePath,
@@ -1298,6 +1320,7 @@ describe("RPC handlers", () => {
         .resolves.toBe(44);
       const linked = await Effect.runPromise(SessionStore.get("cli-only").pipe(Effect.provide(github)));
       expect(linked.prNumber).toBe(44);
+      expect(linked.branch).toBe("fix/cli");
       expect(linked.githubInstallationId).toBeUndefined();
       expect(linked.githubRepositoryId).toBeUndefined();
       expect(upsertSessionRoute).not.toHaveBeenCalled();
@@ -1956,6 +1979,27 @@ describe("RPC handlers", () => {
         expect(calls.filter(isReviewPost)).toHaveLength(0);
         expect(review.postToPr).toBe(false);
         expect(review.postedAt).toBeNull();
+      });
+
+      it("keeps findings local when config cannot be read", async () => {
+        withSession();
+        mkdirSync(root, { recursive: true });
+        writeFileSync(appPathsFor(root).configFile, "{ invalid json");
+        const { calls, layer: github } = recordingGithub("sha-config-error");
+        const review = await Effect.runPromise(
+          reviewRun("s1", false).pipe(
+            Effect.provide(
+              envWith(
+                github,
+                adapterReporting([
+                  { title: "Prefer const", severity: "nit", path: "a.ts", line: 2 },
+                ]),
+              ),
+            ),
+          ),
+        );
+        expect(calls.filter(isReviewPost)).toHaveLength(0);
+        expect(review.postToPr).toBe(false);
       });
 
       // The critical/major half belongs to the agent. Posting it here would both

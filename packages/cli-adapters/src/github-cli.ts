@@ -27,7 +27,7 @@ import { which } from "./command.js"
 
 const PR_FIELDS = [
   "state", "number", "title", "body", "headRefName", "baseRefName", "headRefOid",
-  "isDraft", "commits", "files", "additions", "deletions", "author", "createdAt",
+  "isDraft", "commits", "additions", "deletions", "author", "createdAt",
   "labels", "reviews", "comments", "reviewRequests", "statusCheckRollup", "mergeable",
   "mergeStateStatus", "mergedAt", "url"
 ].join(",")
@@ -120,9 +120,12 @@ const execute = (
         { concurrency: 3 }
       )
       if (exitCode !== 0) {
+        const message = stderr.trim() || stdout.trim() || `gh exited ${exitCode}`
         return yield* Effect.fail(new GitHubApiError({
-          reason: "unavailable",
-          message: stderr.trim() || stdout.trim() || `gh exited ${exitCode}`
+          reason: NO_PULL_REQUEST.test(message) || NOT_FOUND.test(message)
+            ? "not-found"
+            : "unavailable",
+          message
         }))
       }
       return stdout.trim()
@@ -277,6 +280,15 @@ const commitEvidence = (
     ))
   )
 
+const pullRequestFiles = (
+  cwd: string | null,
+  repository: string,
+  number: number
+): Effect.Effect<ReadonlyArray<unknown>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  json(cwd, [
+    "api", `repos/${repository}/pulls/${number}/files`, "--paginate", "--slurp"
+  ]).pipe(Effect.map((raw) => Array.isArray(raw) ? raw.flat() : []))
+
 const prView = (
   cwd: string | null,
   repository: string | null,
@@ -292,7 +304,8 @@ const prView = (
         )
     const threads = yield* reviewThreads(cwd, owner, repo, number)
     const commits = yield* commitEvidence(cwd, owner, repo, number)
-    return { ...mapPrView({ ...jsonRecord(raw), commits }), reviewThreads: threads }
+    const files = yield* pullRequestFiles(cwd, `${owner}/${repo}`, number)
+    return { ...mapPrView({ ...jsonRecord(raw), commits, files }), reviewThreads: threads }
   })
 
 const list = <A>(
@@ -350,16 +363,6 @@ const repositoryMetadata = (
   repository: string
 ): Effect.Effect<Record<string, unknown>, GitHubApiError, CommandExecutor.CommandExecutor> =>
   json(cwd, ["api", `repos/${repository}`]).pipe(Effect.map(jsonRecord))
-
-const nullable = <A>(effect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>) =>
-  effect.pipe(
-    Effect.map((value): A | null => value),
-    Effect.catchTag("GitHubApiError", (error) =>
-      NO_PULL_REQUEST.test(error.message) || NOT_FOUND.test(error.message)
-        ? Effect.succeed(null)
-        : Effect.fail(error)
-    )
-  )
 
 const reviewPayload = (input: {
   readonly commitSha: string
@@ -464,22 +467,19 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
       list(cwd, "issue", null, ISSUE_LIST_FIELDS, options, mapIssueSummary),
     listIssuesBySlug: (repository: string, options: { readonly mine: boolean; readonly search: string }) =>
       list(null, "issue", repository, ISSUE_LIST_FIELDS, options, mapIssueSummary),
-    issueView: (cwd: string, number: number) => nullable(issueView(cwd, null, number)),
+    issueView: (cwd: string, number: number) => issueView(cwd, null, number),
     prState: (cwd: string, number: number): Effect.Effect<SessionPrStatus | null, GitHubApiError, CommandExecutor.CommandExecutor> =>
-      nullable(json(cwd, [
+      json(cwd, [
         "pr", "view", String(number), "--json", "state,isDraft,mergedAt,statusCheckRollup"
-      ]).pipe(Effect.map((raw) => mapPrState(raw, mapPrView(raw).checks)))),
+      ]).pipe(Effect.map((raw) => mapPrState(raw, mapPrView(raw).checks))),
     prHeadSha: (cwd: string, number: number) =>
-      nullable(execute(cwd, ["pr", "view", String(number), "--json", "headRefOid", "--jq", ".headRefOid"])),
-    prView: (cwd: string, number: number) => nullable(prView(cwd, null, number)),
-    prViewBySlug: (repository: string, number: number) => nullable(prView(null, repository, number)),
+      execute(cwd, ["pr", "view", String(number), "--json", "headRefOid", "--jq", ".headRefOid"]),
+    prView: (cwd: string, number: number) => prView(cwd, null, number),
+    prViewBySlug: (repository: string, number: number) => prView(null, repository, number),
     prFiles: (cwd: string, number: number): Effect.Effect<ReadonlyArray<PrFileChange>, GitHubApiError, CommandExecutor.CommandExecutor> =>
       Effect.gen(function* () {
         const repository = yield* slugAt(cwd)
-        const raw = yield* json(cwd, [
-          "api", `repos/${repository}/pulls/${number}/files`, "--paginate", "--slurp"
-        ])
-        return mapApiFiles(Array.isArray(raw) ? raw.flat() : [])
+        return mapApiFiles(yield* pullRequestFiles(cwd, repository, number))
       }),
     prDiff: (cwd: string, number: number) => execute(cwd, ["pr", "diff", String(number)]),
     prCheckout: (cwd: string, number: number) =>

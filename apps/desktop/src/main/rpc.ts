@@ -258,7 +258,9 @@ export const githubAckEvent = (
     pending.resolve();
   });
 
-export const githubConnectionStatus = (): Effect.Effect<
+const githubConnectionWithCli = (
+  appStatus: Effect.Effect<GitHubAppConnectionStatus, GitHubApiError, GitHubAuth>,
+): Effect.Effect<
   GitHubAppConnectionStatus,
   AuthError,
   GitHubAuth | GitHubApi | CommandExecutor.CommandExecutor
@@ -267,7 +269,7 @@ export const githubConnectionStatus = (): Effect.Effect<
     const cliAvailable = yield* GitHubApi.cliAvailable().pipe(
       Effect.mapError(githubConnectionError),
     );
-    const status = yield* GitHubAuth.status().pipe(
+    const status = yield* appStatus.pipe(
       Effect.mapError(githubConnectionError),
       Effect.catchAll((error) =>
         cliAvailable
@@ -284,14 +286,14 @@ export const githubConnectionStatus = (): Effect.Effect<
     return { ...status, cliAvailable };
   });
 
+export const githubConnectionStatus = () =>
+  githubConnectionWithCli(GitHubAuth.status());
+
 export const githubRepositories = () =>
   GitHubApi.repositories().pipe(Effect.mapError(githubConnectionError));
 
-export const githubConnectionRefresh = (): Effect.Effect<
-  GitHubAppConnectionStatus,
-  AuthError,
-  GitHubAuth
-> => GitHubAuth.refresh().pipe(Effect.mapError(githubConnectionError));
+export const githubConnectionRefresh = () =>
+  githubConnectionWithCli(GitHubAuth.refresh());
 
 export const githubConnectionInstall = (): Effect.Effect<
   string,
@@ -1857,8 +1859,10 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       diff,
     });
 
-    const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
-    const postToPr = config?.github?.postAdversarialReviewComments ?? true;
+    const postToPr = yield* ConfigService.get().pipe(
+      Effect.map((config) => config?.github?.postAdversarialReviewComments ?? true),
+      Effect.orElseSucceed(() => false),
+    );
     const routedReview = { ...review, postToPr };
 
     // Post the minor/nit half to the PR as inline comments when enabled. The
@@ -1936,9 +1940,17 @@ export const githubDetectPr = (sessionId: string) =>
     if (!session?.worktreePath) return null;
     // Resolve against the worktree's live branch — the stored `session.branch`
     // drifts once the agent checks out / creates a different branch there.
-    const n = yield* GitHubApi.prForWorktree(session.worktreePath);
+    const [n, liveBranch] = yield* Effect.all([
+      GitHubApi.prForWorktree(session.worktreePath),
+      GitService.branchAt(session.worktreePath),
+    ]);
     if (n === null) return null;
-    yield* SessionStore.setPrNumber(session.id, n).pipe(
+    const persistLink = SessionStore.setPrNumber(session.id, n).pipe(
+      Effect.zipRight(
+        liveBranch === null ? Effect.void : SessionStore.setBranch(session.id, liveBranch),
+      ),
+    );
+    yield* persistLink.pipe(
       Effect.mapError((error) => new GitHubApiError({
         reason: "unavailable",
         message: error.message,
@@ -1949,16 +1961,12 @@ export const githubDetectPr = (sessionId: string) =>
     // App identity is optional for CLI-linked PRs. Hydrate it only when this
     // repository is installed, which is what makes realtime routing available.
     yield* Effect.gen(function* () {
-      const [repository, liveBranch] = yield* Effect.all([
-        GitHubApi.repository(session.worktreePath!),
-        GitService.branchAt(session.worktreePath!),
-      ]);
+      const repository = yield* GitHubApi.repository(session.worktreePath!);
       if (repository.installationId === undefined) return;
       yield* SessionStore.setGitHubLink(session.id, {
         installationId: repository.installationId,
         repositoryId: repository.id,
         prNumber: n,
-        ...(liveBranch === null ? {} : { branch: liveBranch }),
       });
       yield* GitHubAuth.upsertSessionRoute({
         sessionId: session.id,
@@ -4143,30 +4151,28 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           ),
         ),
   "Projects.cloneFromGitHub": (input) =>
-    input.installationId === undefined
-      ? Effect.gen(function* () {
-          yield* GitHubApi.cloneRepository(input.repository, input.destination);
-          return yield* ProjectService.register({
-            path: input.destination,
-            ...(input.name === undefined ? {} : { name: input.name }),
-          });
-        })
-      : Effect.gen(function* () {
-          const credential = yield* GitHubAuth.credentialsForInstallation(
-            input.installationId!,
+    Effect.gen(function* () {
+      const clone = input.installationId === undefined
+        ? GitHubApi.cloneRepository(input.repository, input.destination)
+        : GitHubAuth.credentialsForInstallation(
+            input.installationId,
             input.repository,
             ["contents:read"],
+          ).pipe(
+            Effect.flatMap((credential) =>
+              GitService.cloneWithInstallationToken(
+                input.destination,
+                input.repository,
+                credential.token,
+              ),
+            ),
           );
-          yield* GitService.cloneWithInstallationToken(
-            input.destination,
-            input.repository,
-            credential.token,
-          );
-          return yield* ProjectService.register({
-            path: input.destination,
-            ...(input.name === undefined ? {} : { name: input.name }),
-          });
-        }),
+      yield* clone;
+      return yield* ProjectService.register({
+        path: input.destination,
+        ...(input.name === undefined ? {} : { name: input.name }),
+      });
+    }),
   "Projects.ensureOnEnvironment": ({ projectId, environmentId }) =>
     Effect.gen(function* () {
       const project = yield* ProjectService.get(projectId);

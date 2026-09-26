@@ -248,6 +248,15 @@ describe("GitHubCli", () => {
     })
   })
 
+  it("surfaces missing resources so the App fallback can retry them", async () => {
+    const result = await run(Effect.either(GitHubCli.issueView("/repo", 404)), (command, args) =>
+      command === "gh" && args[0] === "issue"
+        ? { exitCode: 1, stderr: "HTTP 404: Not Found" }
+        : undefined
+    )
+    expect(result).toMatchObject({ _tag: "Left", left: { reason: "not-found" } })
+  })
+
   it("returns null only for an explicit no-PR result", async () => {
     await expect(run(GitHubCli.prForWorktree("/repo"), (command, args) =>
       command === "gh" && args[0] === "pr"
