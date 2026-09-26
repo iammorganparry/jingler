@@ -367,6 +367,11 @@ export function SelectSearch({
         }}
         onKeyDown={(event) => {
           if (event.key === "Escape") ctx.setOpen(false);
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            const options = [...(document.getElementById(ctx.listId)?.querySelectorAll<HTMLButtonElement>('[role="option"]:not(:disabled)') ?? [])];
+            options[event.key === "ArrowDown" ? 0 : options.length - 1]?.focus();
+          }
           event.stopPropagation();
           onKeyDown?.(event);
         }}
@@ -379,8 +384,66 @@ export function SelectSearch({
   );
 }
 
+const boundedSelectListHeight = ({
+  inline,
+  placement,
+  maximum,
+  trigger,
+  inner,
+  list
+}: {
+  inline: boolean
+  placement: SelectPlacement
+  maximum: number
+  trigger: HTMLElement
+  inner: HTMLElement
+  list: HTMLElement
+}): number => {
+  const triggerRect = trigger.getBoundingClientRect()
+  let available = window.innerHeight - triggerRect.bottom - 16
+  if (inline) available = window.innerHeight - inner.getBoundingClientRect().top - 16
+  else if (placement === "top") available = triggerRect.top - 16
+  return Math.max(0, Math.min(maximum, available - (inner.offsetHeight - list.offsetHeight)))
+}
+
+const useBoundedSelectListHeight = ({
+  open,
+  inline,
+  placement,
+  maximum,
+  triggerId,
+  listId,
+  innerRef
+}: {
+  open: boolean
+  inline: boolean
+  placement: SelectPlacement
+  maximum?: number
+  triggerId: string
+  listId: string
+  innerRef: { readonly current: HTMLDivElement | null }
+}): number | undefined => {
+  const [height, setHeight] = useState<number>()
+  useLayoutEffect(() => {
+    if (!open || maximum === undefined) return
+    const measure = () => {
+      const trigger = document.getElementById(triggerId)
+      const list = document.getElementById(listId)
+      const inner = innerRef.current
+      if (!trigger || !list || !inner) return
+      setHeight(boundedSelectListHeight({ inline, placement, maximum, trigger, inner, list }))
+    }
+    measure()
+    window.addEventListener("resize", measure)
+    return () => window.removeEventListener("resize", measure)
+  }, [inline, innerRef, listId, maximum, open, placement, triggerId])
+  return height
+}
+
 export interface SelectContentProps {
   className?: string;
+  listClassName?: string;
+  listMaxHeight?: number;
   children: ReactNode;
   search?: ReactNode;
   inline?: boolean;
@@ -388,6 +451,8 @@ export interface SelectContentProps {
 
 export function SelectContent({
   className,
+  listClassName,
+  listMaxHeight,
   children,
   search,
   inline = false,
@@ -423,6 +488,15 @@ return ({
   const innerRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
   const open = ctx.open;
+  const boundedListHeight = useBoundedSelectListHeight({
+    open,
+    inline,
+    placement: ctx.placement,
+    maximum: listMaxHeight,
+    triggerId: ctx.triggerId,
+    listId: ctx.listId,
+    innerRef
+  });
   const [present, setPresent] = useState(open);
   const { setPlacement } = ctx;
 
@@ -517,6 +591,8 @@ return ({
           id={ctx.listId}
           role="listbox"
           aria-labelledby={ctx.triggerId}
+          className={listClassName}
+          style={{ maxHeight: boundedListHeight }}
           variants={ctx.reduce ? undefined : LIST_VARIANTS}
           initial={false}
           animate={open ? "show" : "hidden"}

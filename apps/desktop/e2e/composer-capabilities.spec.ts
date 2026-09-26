@@ -43,23 +43,46 @@ const sessions = (id: string): ((input: { repoPath: string }) => ReadonlyArray<S
     activeChatId: `${id}_chat`
   }]
 
-test("offers only certified connection models, never harness choices", async ({ launchApp }) => {
+test("offers certified models with canonical route identity", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
-    piFixture: PI_FIXTURE,
+    piFixture: { ...PI_FIXTURE, modelCount: 30 },
     sessions: sessions("s_certified_models")
   })
   await expect(appShell(launched.window)).toBeVisible()
 
-  await launched.window.getByRole("button", { name: `Model: ${MODEL_LABEL}` }).click()
-  const modelOption = launched.window.getByRole("option", { name: new RegExp(`^${MODEL_LABEL}`) })
+  await launched.window.getByRole("button", { name: /^Model: Deterministic pi model/ }).click()
+  const search = launched.window.getByRole("textbox", { name: "Search models" })
+  const listbox = launched.window.getByRole("listbox")
+  const modelOption = launched.window.getByRole("option", { name: /^Deterministic pi model 1\b/ })
+  await expect(search).toBeVisible()
+  await expect.poll(() => launched.window.getByRole("option").count()).toBeGreaterThanOrEqual(30)
+  await expect.poll(() => listbox.evaluate((element) => element.getBoundingClientRect().bottom - window.innerHeight)).toBeLessThanOrEqual(0)
+  const geometry = await listbox.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    return { top: rect.top, clientHeight: element.clientHeight, scrollHeight: element.scrollHeight, overflowY: getComputedStyle(element).overflowY }
+  })
+  expect(geometry.overflowY).toBe("auto")
+  expect(geometry.scrollHeight).toBeGreaterThan(geometry.clientHeight)
+  expect(geometry.top).toBeGreaterThanOrEqual(0)
+  const scrollTop = await listbox.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    return element.scrollTop
+  })
+  expect(scrollTop).toBeGreaterThan(0)
+  await expect(search).toBeVisible()
+  expect(await search.evaluate((element) => element.closest('[role="listbox"]'))).toBeNull()
+  await search.fill("not a model")
+  await expect(modelOption).toHaveCount(0)
+  await search.fill("model 1")
   await expect(modelOption).toBeVisible()
+  await search.press("ArrowDown")
+  await expect(modelOption).toBeFocused()
   await expect(modelOption).toHaveAttribute(
     "data-value",
-    `${CONNECTION_ID}:${encodeURIComponent(MODEL_ID)}`
+    `${encodeURIComponent(`desktop:pi:${CONNECTION_ID}`)}:${PROVIDER_ID}:${encodeURIComponent(MODEL_ID)}`
   )
-  await expect(launched.window.getByText(/Claude Code|Codex CLI|OpenCode|Cursor Agent/i)).toHaveCount(0)
 })
 
 test("offers the same Jingler permission modes for every certified model", async ({ launchApp }) => {

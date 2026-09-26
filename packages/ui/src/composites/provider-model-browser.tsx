@@ -188,6 +188,8 @@ export function ProviderModelBrowser({
       <SelectContent
         inline={inlineContent}
         className={cn("right-auto w-72 shadow-none", inlineContent && "mt-1 w-full")}
+        listClassName="overflow-y-auto overscroll-contain"
+        listMaxHeight={448}
         search={<SelectSearch autoFocus aria-label="Search models" placeholder="Search models…" />}
       >
         {groups.map((group) => (
