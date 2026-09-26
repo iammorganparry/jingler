@@ -17,9 +17,11 @@ Limits: Node 22.14.0 in this environment despite repository Node >=24 requiremen
 
 ## PR publication
 
-- [ ] Commit the planning changes on a fresh branch based on current main.
-- [ ] Run post-rebase validation and push the branch.
-- [ ] Create the pull request with verification results and limitations.
+- [x] Commit the planning changes on a fresh branch based on current main.
+- [x] Run post-rebase validation and push the branch.
+- [x] Create the pull request with verification results and limitations.
+
+Published https://github.com/iammorganparry/jingler/pull/315 from `fix/shared-harness-planning`. PR #311 was already merged. Post-rebase verification: 1,585 cli-adapters/plannotator tests passed, 5 opt-in tests skipped; CLI-adapters and desktop typechecks, Biome error gate, and diff checks passed. Earlier workspace/Electron results above predate cleanup/rebase. No merge performed.
 
 ## Review cleanup
 
