@@ -231,6 +231,26 @@ const successEnvelope = (value: unknown): ToolResultEnvelope => ({
   error: null
 })
 
+const boundSuccessfulResult = async (
+  options: ToolRegistryOptions,
+  tool: AnyToolDefinition,
+  value: unknown
+): Promise<ToolResultEnvelope> => {
+  const serialized = JSON.stringify(value) ?? "null"
+  if (serialized.length <= tool.outputBudget) return successEnvelope(value)
+  if (!options.writeArtifact) {
+    return errorEnvelope(new ToolError("artifact-required", "Tool output exceeded its budget"))
+  }
+  const artifact = await options.writeArtifact(tool.id, serialized)
+  return {
+    status: "success",
+    value: null,
+    preview: serialized.slice(0, tool.outputBudget),
+    artifact,
+    error: null
+  }
+}
+
 const executeDefinition = async (
   options: ToolRegistryOptions,
   tool: AnyToolDefinition,
@@ -244,13 +264,14 @@ const executeDefinition = async (
     controller.abort(input.signal?.reason ?? "cancelled")
   if (tool.cancellable)
     input.signal?.addEventListener("abort", onAbort, { once: true })
+  const execution = tool.execute(value, {
+    signal: controller.signal,
+    idempotencyKey: input.idempotencyKey ?? null,
+    progress: input.progress ?? (() => undefined)
+  })
   try {
     const result = await Promise.race([
-      tool.execute(value, {
-        signal: controller.signal,
-        idempotencyKey: input.idempotencyKey ?? null,
-        progress: input.progress ?? (() => undefined)
-      }),
+      execution,
       new Promise<never>((_, reject) =>
         controller.signal.addEventListener(
           "abort",
@@ -259,24 +280,14 @@ const executeDefinition = async (
         )
       )
     ])
-    const serialized = JSON.stringify(result) ?? "null"
-    if (serialized.length <= tool.outputBudget) {
-      return successEnvelope(result)
-    }
-    if (!options.writeArtifact) {
-      return errorEnvelope(
-        new ToolError("artifact-required", "Tool output exceeded its budget")
-      )
-    }
-    const artifact = await options.writeArtifact(tool.id, serialized)
-    return {
-      status: "success",
-      value: null,
-      preview: serialized.slice(0, tool.outputBudget),
-      artifact,
-      error: null
-    }
+    return boundSuccessfulResult(options, tool, result)
   } catch (error) {
+    if (controller.signal.aborted) {
+      await Promise.race([
+        execution.catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, 1_000))
+      ])
+    }
     return errorEnvelope(
       error instanceof ToolError
         ? error

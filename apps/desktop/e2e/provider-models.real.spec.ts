@@ -77,7 +77,8 @@ const finishFreshOnboarding = async (
   const resourcesStep = window.getByRole("heading", {
     name: "Import agent resources",
   });
-  await expect(providerStep.or(resourcesStep).or(appShell(window))).toBeVisible({
+  const accountMenu = window.getByRole("button", { name: "Account menu" });
+  await expect(providerStep.or(resourcesStep).or(accountMenu)).toBeVisible({
     timeout: 30_000,
   });
   if (await providerStep.isVisible()) {
@@ -85,17 +86,17 @@ const finishFreshOnboarding = async (
     await startProviderAuthentication(window, model);
     const continueButton = window.getByRole("button", { name: "Continue" });
     await expect(
-      continueButton.or(resourcesStep).or(appShell(window)),
+      continueButton.or(resourcesStep).or(accountMenu),
     ).toBeVisible({ timeout: 30_000 });
     if (await continueButton.isVisible()) await continueButton.click();
-    await expect(resourcesStep.or(appShell(window))).toBeVisible({
+    await expect(resourcesStep.or(accountMenu)).toBeVisible({
       timeout: 30_000,
     });
   }
   if (await resourcesStep.isVisible()) {
     await window.getByRole("button", { name: "Skip for now" }).click();
   }
-  await expect(appShell(window)).toBeVisible({ timeout: 10 * 60_000 });
+  await expect(accountMenu).toBeVisible({ timeout: 10 * 60_000 });
 };
 
 const prepareCanaryRepo = (home: string): string => {
@@ -209,7 +210,8 @@ const signInToProduct = async (
   token: string,
 ): Promise<void> => {
   const signIn = window.getByRole("heading", { name: "Sign in to Jingler" });
-  await expect(signIn.or(appShell(window))).toBeVisible({ timeout: 30_000 });
+  const accountMenu = window.getByRole("button", { name: "Account menu" });
+  await expect(signIn.or(accountMenu)).toBeVisible({ timeout: 30_000 });
   if (!(await signIn.isVisible())) return;
   await app.evaluate(({ app: electronApp }, value) => {
     electronApp.emit(
@@ -218,6 +220,7 @@ const signInToProduct = async (
       `jingler://auth/callback?token=${encodeURIComponent(value)}`,
     );
   }, token);
+  await expect(signIn).not.toBeVisible({ timeout: 30_000 });
 };
 
 const certifyModel = async (

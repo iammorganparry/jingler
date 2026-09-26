@@ -13,6 +13,7 @@
     "./browser-control-mcp-service": "./src/browser-control-mcp-service.ts",
     "./config": "./src/config.ts",
     "./context-manager": "./src/context-manager.ts",
+    "./child-registry": "./src/child-registry.ts",
     "./git": "./src/git.ts",
     "./github-api": "./src/github-api.ts",
     "./github-auth": "./src/github-auth.ts",
@@ -24,6 +25,7 @@
     "./publish-metadata": "./src/publish-metadata.ts",
     "./remote-session": "./src/remote-session.ts",
     "./runtime/agent/agent-runtime": "./src/runtime/agent/agent-runtime.ts",
+    "./runtime/agent/claude-agent-runtime": "./src/runtime/agent/claude-agent-runtime.ts",
     "./runtime/agent/agent-turn-driver-live": "./src/runtime/agent/agent-turn-driver-live.ts",
     "./runtime/agent/pi-runtime-live": "./src/runtime/agent/pi-runtime-live.ts",
     "./runtime/auth/agent-secret-store": "./src/runtime/auth/agent-secret-store.ts",
@@ -34,6 +36,8 @@
     "./runtime/diagnostics/runtime-diagnostics": "./src/runtime/diagnostics/runtime-diagnostics.ts",
     "./runtime/tools/language-intelligence": "./src/runtime/tools/language-intelligence.ts",
     "./runtime/providers/provider-catalog": "./src/runtime/providers/provider-catalog.ts",
+    "./runtime/providers/agent-endpoint-catalog": "./src/runtime/providers/agent-endpoint-catalog.ts",
+    "./runtime/providers/claude-endpoint": "./src/runtime/providers/claude-endpoint.ts",
     "./runtime/providers/provider-connections": "./src/runtime/providers/provider-connections.ts",
     "./runtime/providers/pi-provider-access": "./src/runtime/providers/pi-provider-access.ts",
     "./runtime/resources/resource-services-live": "./src/runtime/resources/resource-services-live.ts",
@@ -44,11 +48,17 @@
     "./transcripts": "./src/transcripts.ts",
     "./workspace-handoff": "./src/workspace-handoff.ts",
     "./web-search": "./src/web-search.ts",
-    "./test-support": "./src/test-support.ts"
+    "./test-support": "./src/test-support.ts",
+    "./runtime/codex/runtime": "./src/runtime/codex/runtime.ts",
+    "./runtime/codex/endpoint": "./src/runtime/codex/endpoint.ts",
+    "./runtime/codex/login": "./src/runtime/codex/login.ts",
+    "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
+    "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
+    "eval:native:live": "node --import tsx evals/native/certify.ts",
     "eval:pi:deterministic": "tsx evals/run-eval.ts deterministic",
     "eval:pi:live": "tsx evals/run-eval.ts live",
     "eval:pi:replay": "tsx evals/run-eval.ts replay",
@@ -77,7 +87,8 @@
     "vscode-languageserver-protocol": "3.17.5",
     "ws": "^8.18.0",
     "xstate": "^5.32.4",
-    "zod": "^4.0.0"
+    "zod": "^4.0.0",
+    "@opencode-ai/sdk": "1.18.14"
   },
   "devDependencies": {
     "@effect/platform-node": "^0.107.0",

@@ -10,7 +10,8 @@ export const RuntimeContractVersions = Schema.Struct({
   diff: Schema.String,
   policy: Schema.String,
   capabilities: Schema.String,
-  piSdk: Schema.String
+  /** PI adapter protocol; absent for native CLI runtime targets. */
+  piSdk: Schema.optional(Schema.String)
 })
 export type RuntimeContractVersions = Schema.Schema.Type<typeof RuntimeContractVersions>
 

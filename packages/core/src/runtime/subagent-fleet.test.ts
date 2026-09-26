@@ -21,7 +21,7 @@ const node = {
   childSequence: 1,
   runId: "run-1:step:0",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "scout",
   task: "Map the runtime",
   model: "anthropic/claude-test:low",
@@ -52,7 +52,7 @@ describe("subagent fleet contracts", () => {
   it("round-trips nested run snapshots with stable identities", () => {
     const snapshot = {
       version: 2,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       registryRevision: 2,
       generatedAt: 2,
       totalActive: 2,
@@ -110,7 +110,7 @@ describe("subagent fleet contracts", () => {
   it("rejects unsupported lifecycle state instead of guessing", () => {
     expect(() => Schema.decodeUnknownSync(SubagentFleetSnapshot)({
       version: 2,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       registryRevision: 2,
       generatedAt: 2,
       totalActive: 1,
@@ -123,7 +123,7 @@ describe("subagent fleet contracts", () => {
   it("decodes the one supervision and bidirectional message contract", () => {
     expect(Schema.decodeUnknownSync(SubagentSupervisorSnapshot)({
       version: 2,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       registryRevision: 4,
       status: "running",
       goalRevision: 2,
@@ -141,7 +141,7 @@ describe("subagent fleet contracts", () => {
     expect(Schema.decodeUnknownSync(SubagentChildStateEvent)({
       version: 2,
       eventId: "event-2",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       subagentId: "child-1",
       orchestrationRunId: "run-1",
       childSequence: 3,
@@ -157,7 +157,7 @@ describe("subagent fleet contracts", () => {
       version: 2,
       messageId: "control-1",
       idempotencyKey: "parent/control-1",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       subagentId: "child-1",
       orchestrationRunId: "run-1",
       sequence: 1,
@@ -171,7 +171,7 @@ describe("subagent fleet contracts", () => {
     expect(Schema.decodeUnknownSync(SubagentControlReceipt)({
       version: 2,
       messageId: envelope.messageId,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       subagentId: "child-1",
       sequence: 1,
       status: "delivered",
@@ -181,7 +181,7 @@ describe("subagent fleet contracts", () => {
     const attention = Schema.decodeUnknownSync(SubagentAttentionRequest)({
       version: 2,
       requestId: "attention-1",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       subagentId: "child-1",
       orchestrationRunId: "run-1",
       reason: "need_decision",
@@ -193,7 +193,7 @@ describe("subagent fleet contracts", () => {
       version: 2,
       requestId: attention.requestId,
       messageId: "reply-1",
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       subagentId: "child-1",
       message: "Use the public API",
       createdAt: 13
@@ -203,7 +203,7 @@ describe("subagent fleet contracts", () => {
   it("rejects the removed fleet protocol version", () => {
     expect(() => Schema.decodeUnknownSync(SubagentFleetSnapshot)({
       version: 1,
-      parentPiSessionId: "parent",
+      parentRuntimeSessionId: "parent",
       registryRevision: 1,
       generatedAt: 1,
       totalActive: 0,

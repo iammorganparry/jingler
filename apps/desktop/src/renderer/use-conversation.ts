@@ -12,6 +12,8 @@
 import { useEffect, useMemo, useRef } from "react"
 import { useSelector } from "@xstate/react"
 import type {
+  AgentEndpointId,
+  AgentRuntimeId,
   Attachment,
   ContextBreakdown,
   GateDecision,
@@ -49,9 +51,12 @@ export interface Conversation {
   readonly reasoning?: ReasoningSetting
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
+  readonly runtimeId: AgentRuntimeId | null
+  readonly endpointId: AgentEndpointId | null
   readonly connectionId: ProviderConnectionId | null
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
+  readonly modelPending: boolean
   /** The worktree's current unified diff, for the Changes rail. */
   /** The agent is producing a turn (or paused at a gate). */
   readonly busy: boolean
@@ -102,7 +107,9 @@ export interface Conversation {
   readonly setMode: (mode: PermissionMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
   readonly setModel: (
-    connectionId: ProviderConnectionId,
+    runtimeId: AgentRuntimeId,
+    endpointId: AgentEndpointId,
+    connectionId: ProviderConnectionId | undefined,
     providerId: ProviderId,
     modelId: ProviderModelId
   ) => void
@@ -147,7 +154,7 @@ export function useConversation(
   )
   const recoveryChecked = useRef<string | null>(null)
   useEffect(() => {
-    if (!state.context.loaded || !session.chats.find(({ id }) => id === chatId)?.piSessionId) return
+    if (!state.context.loaded || !session.chats.find(({ id }) => id === chatId)?.continuation) return
     const key = `${session.id}:${chatId}`
     if (recoveryChecked.current === key) return
     recoveryChecked.current = key
@@ -185,9 +192,11 @@ export function useConversation(
         setMode: (m) => actor.send({ type: "SET_MODE", mode: m }),
         setReasoning: (value) =>
           actor.send({ type: "SET_REASONING", reasoning: value }),
-        setModel: (connection, provider, selectedModel) =>
+        setModel: (runtime, endpoint, connection, provider, selectedModel) =>
           actor.send({
             type: "SET_MODEL",
+            runtimeId: runtime,
+            endpointId: endpoint,
             connectionId: connection,
             providerId: provider,
             modelId: selectedModel
@@ -217,7 +226,7 @@ export function useConversation(
   )
   const {
     messages, mode, reasoning, skills, files,
-    connectionId, providerId, modelId, queued, steeringId,
+    runtimeId, endpointId, connectionId, providerId, modelId, modelPending, queued, steeringId,
     subagents, subagentFleetEvents, subagentControlOutcomes,
     tokens, contextBreakdown, hasMoreHistory, loadingHistory,
     runStartedAt, reviewer, reviewPhase, reviewStartedAt,
@@ -251,9 +260,12 @@ export function useConversation(
     reasoning,
     skills,
     files,
+    runtimeId,
+    endpointId,
     connectionId,
     providerId,
     modelId,
+    modelPending,
     busy,
     paused,
     queued,

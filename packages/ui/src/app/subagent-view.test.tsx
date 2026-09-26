@@ -15,7 +15,7 @@ const fleetNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => 
   childSequence: 1,
   runId: "run-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "scout",
   task: "Map the UI",
   model: "anthropic/claude-test",

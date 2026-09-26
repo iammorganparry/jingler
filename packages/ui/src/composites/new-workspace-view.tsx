@@ -1,6 +1,7 @@
 import { Spin } from "../components/spin.js"
 import * as React from "react";
 import type {
+  AgentEndpointCatalog,
   Environment,
   PermissionMode,
   ProviderCatalog,
@@ -44,7 +45,9 @@ import { IssuePickerList } from "./issue-picker-list.js";
 import {
   newWorkspaceMachine,
   type NewSessionSource,
+  type NewWorkspaceContext,
   type NewWorkspaceDeps,
+  type NewWorkspaceEvent,
 } from "./new-workspace-machine.js";
 import { PrPickerList } from "./pr-picker-list.js";
 
@@ -302,6 +305,7 @@ export interface NewWorkspaceViewProps {
   projects: ReadonlyArray<Project>;
   environments?: ReadonlyArray<Environment>;
   providerCatalog?: ProviderCatalog | null;
+  agentEndpointCatalog?: AgentEndpointCatalog | null;
   defaultConnectionId?: ProviderConnectionId | null;
   defaultModelId?: ProviderModelId | null;
   defaultMode?: PermissionMode | null;
@@ -323,255 +327,157 @@ export interface NewWorkspaceViewProps {
   onClose: () => void;
 }
 
+const startupEnvironment = (startup: PendingEnvironmentSession | null | undefined, selected: Environment | undefined) =>
+  startup == null ? selected! : { kind: startup.environmentKind, name: startup.environmentName }
+const modelSelectionError = (complete: boolean, hasSelectableModel: boolean) =>
+  complete ? undefined : hasSelectableModel
+    ? "Choose an agent runtime and model."
+    : "Connect a provider in Settings › Provider connections to choose a model."
+
+function SourcePicker({ source, icon, label, search, mine, pullRequests, issues, selectedPr, selectedIssue, loading, onSearch, onMine, onPr, onIssue }: {
+  source: NewSessionSource; icon: React.ReactNode; label: string; search: string; mine: boolean
+  pullRequests: React.ComponentProps<typeof PrPickerList>["prs"]
+  issues: React.ComponentProps<typeof IssuePickerList>["issues"]
+  selectedPr: number | null; selectedIssue: string | null; loading: boolean
+  onSearch: (value: string) => void; onMine: () => void
+  onPr: React.ComponentProps<typeof PrPickerList>["onSelect"]
+  onIssue: React.ComponentProps<typeof IssuePickerList>["onSelect"]
+}) {
+  if (source === "blank" || source === "branch") return null
+  return <section className="overflow-hidden rounded-xl border border-line bg-panel" aria-label="Source picker">
+    <header className="flex items-center gap-2 border-b border-line px-4 py-3"><span className="text-text-bright">{icon}</span><h3 className="text-[12px] font-semibold text-text-bright">{label}s</h3><span className="text-[10.5px] text-dim">Choose one to prefill this session</span></header>
+    <div className="flex items-center gap-2 px-3 pt-3"><SearchInput value={search} onChange={onSearch} placeholder={source === "pr" ? "Search pull requests…" : `Search ${label.toLowerCase()}s…`} className="flex-1" /><Button variant={mine ? "primary" : "secondary"} className="h-[34px]" aria-pressed={mine} onClick={onMine}>Just mine</Button></div>
+    <div className="p-3">{source === "pr"
+      ? <PrPickerList prs={pullRequests} selected={selectedPr} onSelect={onPr} loading={loading} />
+      : <IssuePickerList issues={issues} selected={selectedIssue} onSelect={onIssue} loading={loading} />}</div>
+  </section>
+}
+
+const contentUnavailableReason = (source: NewSessionSource, hasPr: boolean, hasIssue: boolean, projectId: string, baseBranch: string) => {
+  if (source === "pr" && !hasPr) return "Choose a pull request before starting."
+  if ((source === "github" || source.startsWith("provider:")) && !hasIssue) return "Choose an issue before starting."
+  return projectId && baseBranch ? undefined : "Choose a project and branch before starting."
+}
+const workspacePrompt = (source: NewSessionSource) => source === "pr"
+  ? "Add an instruction for this pull request (optional)"
+  : source === "branch" ? "What should the agent do on this branch?" : "Message the agent, tag @files, or use /commands and /skills"
+const selectedBranch = (source: NewSessionSource, prBranch: string | undefined, baseBranch: string) => source === "pr" ? (prBranch ?? baseBranch) : baseBranch
+const selectedBranchOption = (source: NewSessionSource, prBranch: string | undefined, baseBranch: string) => source === "pr" ? (prBranch ?? "") : baseBranch
+const remoteEnvironmentId = (environmentId: string) => environmentId === "local" ? undefined : environmentId
+const branchPlaceholder = (loading: boolean, local: boolean) => loading ? (local ? "Loading branches…" : "Preparing on host…") : "Choose branch"
+
+const workspaceUnavailableReason = (submitting: boolean, loading: boolean, localOrManaged: boolean, hasProjects: boolean, modelReason: string | undefined, contentReason: () => string | undefined) => {
+  if (submitting) return "Creating session…"
+  if (loading) return localOrManaged ? "Loading branches…" : "Preparing project on host…"
+  if (!hasProjects) return "Add a project before starting a session."
+  return modelReason ?? contentReason()
+}
+
+type WorkspaceSend = (event: NewWorkspaceEvent) => void
+function ProjectControls({ context, projectOptions, sourceOptions, checkoutOptions, branchOptions, loading, send }: {
+  context: NewWorkspaceContext; projectOptions: ReadonlyArray<PickerOption<string>>; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
+  checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">>; branchOptions: ReadonlyArray<PickerOption<string>>; loading: boolean; send: WorkspaceSend
+}) {
+  const { projectId, source, isolation, selectedPr, baseBranch, environmentId } = context
+  return <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+    <div className="min-w-[130px] flex-1"><SearchPicker value={projectId} options={projectOptions} onValueChange={(value) => send({ type: "SET_PROJECT", projectId: value })} ariaLabel="Project" placeholder="Choose project" searchPlaceholder="Search projects…" emptyLabel="No projects match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[340px]" /></div>
+    <div className="min-w-[130px] flex-1"><SearchPicker value={source} options={sourceOptions} onValueChange={(value) => send({ type: "SET_SOURCE", source: value })} ariaLabel="Session source" placeholder="Start from" searchPlaceholder="Search session sources…" emptyLabel="No session sources match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>
+    <div className="min-w-[130px] flex-1"><SearchPicker value={isolation} options={checkoutOptions} onValueChange={(value) => send({ type: "SET_ISOLATION", isolation: value })} ariaLabel="Checkout" placeholder="Choose checkout" searchPlaceholder="Search checkout modes…" emptyLabel="No checkout modes match." disabled={loading} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[300px]" /></div>
+    <div className="min-w-[130px] flex-1"><SearchPicker value={selectedBranchOption(source, selectedPr?.headRefName, baseBranch)} options={branchOptions} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} ariaLabel="Base branch" placeholder={branchPlaceholder(loading, environmentId === "local")} searchPlaceholder="Search branches…" emptyLabel="No branches match." disabled={loading || source === "pr"} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[320px]" /></div>
+  </div>
+}
+function WorkspaceComposer({ context, props, catalog, unavailableReason, controls, selectedProject, send }: {
+  context: NewWorkspaceContext; props: NewWorkspaceViewProps; catalog: AgentEndpointCatalog | null | undefined
+  unavailableReason: string | undefined; controls: React.ReactNode; selectedProject: Project | undefined; send: WorkspaceSend
+}) {
+  const { draft, attachments, source, selectedPr, baseBranch, environmentId, connectionId, providerId, modelId, mode, reasoning } = context
+  return <Composer autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} allowPlan disabledReason={unavailableReason} contextControls={controls} />
+}
+
+function NewWorkspaceContent({ props, context, send, submitting, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
+  props: NewWorkspaceViewProps; context: NewWorkspaceContext; send: WorkspaceSend; submitting: boolean; loading: boolean; sourceLoading: boolean
+  selectedEnvironment: Environment | undefined; selectedSource: PickerOption<NewSessionSource> | undefined; sourceLabel: string
+  catalog: AgentEndpointCatalog | null | undefined; unavailableReason: string | undefined; selectedProject: Project | undefined
+  projectOptions: ReadonlyArray<PickerOption<string>>; sourceOptions: ReadonlyArray<PickerOption<NewSessionSource>>
+  checkoutOptions: ReadonlyArray<PickerOption<"worktree" | "direct">>; branchOptions: ReadonlyArray<PickerOption<string>>
+}) {
+  const { source, search, mine, pullRequests, issues, selectedPr, selectedIssue, draft, provisioningPhase, error } = context
+  const startup = props.environmentStartup || (submitting && selectedEnvironment !== undefined)
+  return <div className="flex min-h-0 flex-1 flex-col bg-editor" data-testid="new-session-view">
+    <div className="flex h-12 flex-none items-center border-b border-hairline px-5"><h1 className="text-[13px] font-semibold text-text-bright">New session</h1><span className="flex-1" /><Button variant="ghost" size="icon" aria-label="Close new session" disabled={submitting && !props.environmentStartup?.error} onClick={() => send({ type: "CLOSE" })}><X size={15} /></Button></div>
+    <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">{startup
+      ? <EnvironmentStartupProgress phase={props.environmentStartup?.phase ?? provisioningPhase} error={props.environmentStartup?.error} environment={startupEnvironment(props.environmentStartup, selectedEnvironment)} />
+      : <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
+          <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
+          <SourcePicker source={source} icon={selectedSource?.icon} label={sourceLabel} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={sourceLoading} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
+          {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
+          <WorkspaceComposer context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} projectOptions={projectOptions} sourceOptions={sourceOptions} checkoutOptions={checkoutOptions} branchOptions={branchOptions} loading={loading} send={send} />} />
+          {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
+          {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
+        </div>}
+    </div>
+  </div>
+}
+
+const endpointCatalogForEnvironment = (catalog: AgentEndpointCatalog | null | undefined, environmentId: string, environment: Environment | undefined) => {
+  const targetId = environmentId === "local" ? "desktop" : (environment?.capabilities.runtime?.targetId ?? environmentId)
+  const endpoints = catalog?.endpoints.filter(({ endpoint }) => endpoint.targetId === targetId) ?? []
+  if (environment?.kind === "managed" && endpoints.length === 0) return null
+  return catalog == null ? catalog : { ...catalog, endpoints }
+}
+
+const sourceOptionsFor = (props: NewWorkspaceViewProps): ReadonlyArray<{
+    value: NewSessionSource;
+    label: string;
+    description: string;
+    icon: React.ReactNode;
+  }> => [
+    {
+      value: "blank",
+      label: "New task",
+      description: "Start from a base branch",
+      icon: <SquarePen size={15} className="text-muted-foreground" />,
+    },
+    {
+      value: "branch",
+      label: "Existing branch",
+      description: "Continue work already started",
+      icon: <GitBranch size={15} className="text-muted-foreground" />,
+    },
+    ...(props.loadPullRequests
+      ? [
+          {
+            value: "pr" as const,
+            label: "Pull request",
+            description: "Work on an open GitHub PR",
+            icon: <GitPullRequest size={15} className="text-muted-foreground" />,
+          },
+        ]
+      : []),
+    ...(props.loadGithubIssues
+      ? [
+          {
+            value: "github" as const,
+            label: "GitHub issue",
+            description: "Link and prefill from GitHub",
+            icon: <GithubMark className="size-[15px] text-muted-foreground" />,
+          },
+        ]
+      : []),
+    ...(props.issueProviders ?? []).map((provider) => ({
+      value: `provider:${provider.id}` as const,
+      label: `${provider.label} issue`,
+      description: `Link and prefill from ${provider.label}`,
+      icon:
+        provider.id === "linear" ? (
+          <LinearMark className="size-[15px] text-muted-foreground" />
+        ) : (
+          <CircleDot size={15} className="text-muted-foreground" />
+        ),
+    })),
+  ];
+
 export function NewWorkspaceView(props: NewWorkspaceViewProps) {
-  function renderStartupProgress() {
-    return (<EnvironmentStartupProgress
-            phase={props.environmentStartup?.phase ?? provisioningPhase}
-            error={props.environmentStartup?.error}
-            environment={props.environmentStartup === undefined || props.environmentStartup === null
-              ? selectedEnvironment!
-              : {
-                  kind: props.environmentStartup.environmentKind,
-                  name: props.environmentStartup.environmentName
-                }}
-          />)
-  }
-
-         function getModelSelectionError() {
-           return (connectionId === null || providerId === null || modelId === null
-      ? hasSelectableModel
-        ? "Choose a provider connection and model."
-        : "Connect a provider in Settings › Provider connections to choose a model."
-      : undefined)
-         }
-
-  function renderWorkspaceComposer() {
-    return (<Composer
-              autoFocus
-              focusKey="new-session"
-              value={draft}
-              onValueChange={(value) =>
-                send({ type: "SET_DRAFT", draft: value })
-              }
-              attachments={attachments}
-              onAttachmentsChange={(next) =>
-                send({ type: "SET_ATTACHMENTS", attachments: next })
-              }
-              onSend={() => send({ type: "SUBMIT" })}
-              placeholder={
-                source === "pr"
-                  ? "Add an instruction for this pull request (optional)"
-                  : source === "branch"
-                    ? "What should the agent do on this branch?"
-                    : "Message the agent, tag @files, or use /commands and /skills"
-              }
-              repo={selectedProject?.name}
-              branch={
-                source === "pr"
-                  ? (selectedPr?.headRefName ?? baseBranch)
-                  : baseBranch
-              }
-              environments={props.environments}
-              environmentId={
-                environmentId === "local" ? undefined : environmentId
-              }
-              onSetEnvironment={(value) =>
-                send({
-                  type: "SET_ENVIRONMENT",
-                  environmentId: value ?? "local",
-                })
-              }
-              providerCatalog={props.providerCatalog}
-              connectionId={connectionId}
-              modelId={modelId}
-              onSetModel={({
-                connectionId: nextConnection,
-                providerId: nextProvider,
-                modelId: nextModel,
-              }) =>
-                send({
-                  type: "SET_MODEL",
-                  connectionId: nextConnection,
-                  providerId: nextProvider,
-                  modelId: nextModel,
-                })
-              }
-              mode={mode}
-              onSetMode={(value) => send({ type: "SET_MODE", mode: value })}
-              reasoningEffort={reasoning?.effort}
-              thinkingEnabled={reasoning?.enabled}
-              onSetReasoning={(value) =>
-                send({ type: "SET_REASONING", reasoning: value })
-              }
-              allowPlan
-              disabledReason={unavailableReason}
-              contextControls={
-                renderProjectControls()
-              }
-            />)
-  }
-
-         function renderProjectControls() {
-           return (<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                  <div className="min-w-[130px] flex-1">
-                    <SearchPicker
-                      value={projectId}
-                      options={projectOptions}
-                      onValueChange={(value) =>
-                        send({ type: "SET_PROJECT", projectId: value })
-                      }
-                      ariaLabel="Project"
-                      placeholder="Choose project"
-                      searchPlaceholder="Search projects…"
-                      emptyLabel="No projects match."
-                      disabled={loading}
-                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
-                      contentClassName="w-[340px]"
-                    />
-                  </div>
-                  <div className="min-w-[130px] flex-1">
-                    <SearchPicker
-                      value={source}
-                      options={sourceOptions}
-                      onValueChange={(value) =>
-                        send({ type: "SET_SOURCE", source: value })
-                      }
-                      ariaLabel="Session source"
-                      placeholder="Start from"
-                      searchPlaceholder="Search session sources…"
-                      emptyLabel="No session sources match."
-                      disabled={loading}
-                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
-                      contentClassName="w-[300px]"
-                    />
-                  </div>
-                  <div className="min-w-[130px] flex-1">
-                    <SearchPicker
-                      value={isolation}
-                      options={checkoutOptions}
-                      onValueChange={(value) =>
-                        send({ type: "SET_ISOLATION", isolation: value })
-                      }
-                      ariaLabel="Checkout"
-                      placeholder="Choose checkout"
-                      searchPlaceholder="Search checkout modes…"
-                      emptyLabel="No checkout modes match."
-                      disabled={loading}
-                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
-                      contentClassName="w-[300px]"
-                    />
-                  </div>
-                  <div className="min-w-[130px] flex-1">
-                    <SearchPicker
-                      value={
-                        source === "pr"
-                          ? (selectedPr?.headRefName ?? "")
-                          : baseBranch
-                      }
-                      options={branchOptions}
-                      onValueChange={(value) =>
-                        send({ type: "SET_BASE", baseBranch: value })
-                      }
-                      ariaLabel="Base branch"
-                      placeholder={
-                        loading
-                          ? environmentId === "local"
-                            ? "Loading branches…"
-                            : "Preparing on host…"
-                          : "Choose branch"
-                      }
-                      searchPlaceholder="Search branches…"
-                      emptyLabel="No branches match."
-                      disabled={loading || source === "pr"}
-                      triggerClassName="h-8 w-full px-2 text-[11.5px]"
-                      contentClassName="w-[320px]"
-                    />
-                  </div>
-                </div>)
-         }
-
-function getContent() {
-             if (source === "pr" && selectedPr === null) return ("Choose a pull request before starting.")
-             if ((source === "github" || source.startsWith("provider:")) &&
-                selectedIssue === null) return ("Choose an issue before starting.")
-             if (!projectId || !baseBranch) return ("Choose a project and branch before starting.")
-             return (undefined)
-           }
-
-         function renderSourcePicker() {
-           return (source !== "blank" && source !== "branch" && (
-              <section
-                className="overflow-hidden rounded-xl border border-line bg-panel"
-                aria-label="Source picker"
-              >
-                <header className="flex items-center gap-2 border-b border-line px-4 py-3">
-                  <span className="text-text-bright">
-                    {selectedSource?.icon}
-                  </span>
-                  <h3 className="text-[12px] font-semibold text-text-bright">
-                    {sourceLabel}s
-                  </h3>
-                  <span className="text-[10.5px] text-dim">
-                    Choose one to prefill this session
-                  </span>
-                </header>
-                <div className="flex items-center gap-2 px-3 pt-3">
-                  <SearchInput
-                    value={search}
-                    onChange={(value) =>
-                      send({ type: "SET_SEARCH", search: value })
-                    }
-                    placeholder={
-                      source === "pr"
-                        ? "Search pull requests…"
-                        : `Search ${sourceLabel.toLowerCase()}s…`
-                    }
-                    className="flex-1"
-                  />
-                  <Button
-                    variant={mine ? "primary" : "secondary"}
-                    className="h-[34px]"
-                    aria-pressed={mine}
-                    onClick={() => send({ type: "SET_MINE", mine: !mine })}
-                  >
-                    Just mine
-                  </Button>
-                </div>
-                <div className="p-3">
-                  {source === "pr" ? (
-                    <PrPickerList
-                      prs={pullRequests}
-                      selected={selectedPr?.number ?? null}
-                      onSelect={(pr) => send({ type: "SELECT_PR", pr })}
-                      loading={sourceLoading}
-                    />
-                  ) : (
-                    <IssuePickerList
-                      issues={issues}
-                      selected={selectedIssue?.id ?? null}
-                      onSelect={(issue) =>
-                        send({ type: "SELECT_ISSUE", issue })
-                      }
-                      loading={sourceLoading}
-                    />
-                  )}
-                </div>
-              </section>
-            ))
-         }
-
-         function getUnavailableReason() {
-
-
-           if (submitting) return ("Creating session…")
-           if (loading) return (environmentId === "local" || selectedEnvironment?.kind === "managed"
-        ? "Loading branches…"
-        : "Preparing project on host…")
-           if (props.projects.length === 0) return ("Add a project before starting a session.")
-           return (modelUnavailableReason ??
-          (getContent()))
-         }
-
   const depsRef = React.useRef<NewWorkspaceDeps>(props);
   depsRef.current = props;
   const getDeps = React.useCallback(() => depsRef.current, []);
@@ -611,6 +517,7 @@ function getContent() {
   }, [
     props.open,
     props.providerCatalog,
+    props.agentEndpointCatalog,
     props.defaultConnectionId,
     props.defaultModelId,
     send,
@@ -619,25 +526,15 @@ function getContent() {
   const {
     projectId,
     environmentId,
-    isolation,
     baseBranch,
     branches,
     source,
-    search,
-    mine,
-    pullRequests,
-    issues,
     selectedPr,
     selectedIssue,
-    draft,
-    attachments,
-    mode,
-    reasoning,
-    connectionId,
+    runtimeId,
+    endpointId,
     providerId,
     modelId,
-    provisioningPhase,
-    error,
   } = state.context;
   const selectedProject = props.projects.find(
     (project) => project.id === projectId,
@@ -645,6 +542,7 @@ function getContent() {
   const selectedEnvironment = props.environments?.find(
     (environment) => environment.id === environmentId,
   );
+  const agentEndpointCatalog = endpointCatalogForEnvironment(props.agentEndpointCatalog, environmentId, selectedEnvironment)
   const submitting = state.matches("submitting");
   const loading = state.matches("loading");
   const sourceLoading = state.matches("sourceLoading");
@@ -652,9 +550,18 @@ function getContent() {
     props.providerCatalog?.connections.some(({ models }) =>
       models.some((model) => model.selectable),
     ) === true;
-  const modelUnavailableReason =
-    getModelSelectionError();
-  const unavailableReason = getUnavailableReason();
+  const modelUnavailableReason = modelSelectionError(
+    runtimeId !== null && endpointId !== null && providerId !== null && modelId !== null,
+    hasSelectableModel,
+  );
+  const unavailableReason = workspaceUnavailableReason(
+    submitting,
+    loading,
+    environmentId === "local" || selectedEnvironment?.kind === "managed",
+    props.projects.length > 0,
+    modelUnavailableReason,
+    () => contentUnavailableReason(source, selectedPr !== null, selectedIssue !== null, projectId, baseBranch),
+  );
 
   const projectOptions: ReadonlyArray<PickerOption<string>> =
     props.projects.map((project) => ({
@@ -700,132 +607,28 @@ function getContent() {
       icon: <GitBranch size={16} className="flex-none text-muted-foreground" aria-hidden />,
     }),
   );
-  const sourceOptions: ReadonlyArray<{
-    value: NewSessionSource;
-    label: string;
-    description: string;
-    icon: React.ReactNode;
-  }> = [
-    {
-      value: "blank",
-      label: "New task",
-      description: "Start from a base branch",
-      icon: <SquarePen size={15} className="text-muted-foreground" />,
-    },
-    {
-      value: "branch",
-      label: "Existing branch",
-      description: "Continue work already started",
-      icon: <GitBranch size={15} className="text-muted-foreground" />,
-    },
-    ...(props.loadPullRequests
-      ? [
-          {
-            value: "pr" as const,
-            label: "Pull request",
-            description: "Work on an open GitHub PR",
-            icon: <GitPullRequest size={15} className="text-muted-foreground" />,
-          },
-        ]
-      : []),
-    ...(props.loadGithubIssues
-      ? [
-          {
-            value: "github" as const,
-            label: "GitHub issue",
-            description: "Link and prefill from GitHub",
-            icon: <GithubMark className="size-[15px] text-muted-foreground" />,
-          },
-        ]
-      : []),
-    ...(props.issueProviders ?? []).map((provider) => ({
-      value: `provider:${provider.id}` as const,
-      label: `${provider.label} issue`,
-      description: `Link and prefill from ${provider.label}`,
-      icon:
-        provider.id === "linear" ? (
-          <LinearMark className="size-[15px] text-muted-foreground" />
-        ) : (
-          <CircleDot size={15} className="text-muted-foreground" />
-        ),
-    })),
-  ];
+  const sourceOptions = sourceOptionsFor(props);
   const selectedSource = sourceOptions.find(
     (option) => option.value === source,
   );
   const sourceLabel = selectedSource?.label ?? "issue";
 
-  return (
-    <div
-      className="flex min-h-0 flex-1 flex-col bg-editor"
-      data-testid="new-session-view"
-    >
-      <div className="flex h-12 flex-none items-center border-b border-hairline px-5">
-        <h1 className="text-[13px] font-semibold text-text-bright">
-          New session
-        </h1>
-        <span className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Close new session"
-          disabled={submitting && !props.environmentStartup?.error}
-          onClick={() => send({ type: "CLOSE" })}
-        >
-          <X size={15} />
-        </Button>
-      </div>
-      <div className="flex min-h-0 flex-1 overflow-auto px-6 py-10">
-        {props.environmentStartup || (submitting && selectedEnvironment !== undefined) ? (
-          renderStartupProgress()
-        ) : (
-          <div className="m-auto flex w-full max-w-[1040px] flex-col gap-6">
-            <div className="flex items-center gap-3">
-              <div>
-                <h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">
-                  What are we working on?
-                </h2>
-                <p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">
-                  Choose where the work starts, configure its checkout, then
-                  send the first message.
-                </p>
-              </div>
-              <span className="flex-1" />
-              {props.onAddProject && (
-                <Button variant="secondary" onClick={props.onAddProject}>
-                  <FolderGit2 size={14} /> Add project
-                </Button>
-              )}
-            </div>
-            {renderSourcePicker()}
-
-            {source === "branch" && (
-              <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">
-                The selected branch will be checked out directly in the session
-                worktree; Jingler will not create a replacement task branch.
-              </p>
-            )}
-
-            {renderWorkspaceComposer()}
-            {draft.trim().length === 0 && unavailableReason === undefined && (
-              <div className="flex justify-end">
-                <Button
-                  variant="secondary"
-                  aria-label="Create workspace"
-                  onClick={() => send({ type: "SUBMIT" })}
-                >
-                  <MessageCircle size={14} /> Create without a first message
-                </Button>
-              </div>
-            )}
-            {error && (
-              <p role="alert" className="text-[11px] text-red">
-                {error}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <NewWorkspaceContent
+    props={props}
+    context={state.context}
+    send={send}
+    submitting={submitting}
+    loading={loading}
+    sourceLoading={sourceLoading}
+    selectedEnvironment={selectedEnvironment}
+    selectedSource={selectedSource}
+    sourceLabel={sourceLabel}
+    catalog={agentEndpointCatalog}
+    unavailableReason={unavailableReason}
+    selectedProject={selectedProject}
+    projectOptions={projectOptions}
+    sourceOptions={sourceOptions}
+    checkoutOptions={checkoutOptions}
+    branchOptions={branchOptions}
+  />;
 }

@@ -335,7 +335,7 @@ export interface PiSubagentSupervisorAttentionInput {
 
 export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly parentPiSessionAliases?: ReadonlyArray<string>
   readonly asyncRunsDir?: string
   readonly emit: (event: SubagentFleetEvent) => void
@@ -346,8 +346,8 @@ export interface PiSubagentLifecycleAdapterOptions {
 
 export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
-  readonly #parentPiSessionId: string
-  readonly #parentPiSessionIds: ReadonlySet<string>
+  readonly #parentRuntimeSessionId: string
+  readonly #parentRuntimeSessionIds: ReadonlySet<string>
   readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
   readonly #now: () => number
@@ -357,9 +357,9 @@ export class PiSubagentLifecycleAdapter {
 
   constructor(options: PiSubagentLifecycleAdapterOptions) {
     this.#events = options.events
-    this.#parentPiSessionId = options.parentPiSessionId
-    this.#parentPiSessionIds = new Set([
-      options.parentPiSessionId,
+    this.#parentRuntimeSessionId = options.parentRuntimeSessionId
+    this.#parentRuntimeSessionIds = new Set([
+      options.parentRuntimeSessionId,
       ...(options.parentPiSessionAliases ?? [])
     ])
     this.#asyncRunsDir = options.asyncRunsDir
@@ -368,13 +368,13 @@ export class PiSubagentLifecycleAdapter {
     this.#trustedSessionRoots = new Set(options.trustedSessionRoots ?? [])
     this.#supervision = Effect.runSync(
       makeSubagentSupervisionService(
-        options.parentPiSessionId,
+        options.parentRuntimeSessionId,
         this.#now,
         options.controlJournal === null
           ? undefined
           : options.controlJournal ?? makeSubagentControlJournal({
               asyncDir: options.asyncRunsDir ?? defaultPiSubagentAsyncDir(),
-              parentPiSessionId: options.parentPiSessionId
+              parentRuntimeSessionId: options.parentRuntimeSessionId
             })
       )
     )
@@ -402,7 +402,7 @@ export class PiSubagentLifecycleAdapter {
     const context = this.#state().tree
     return {
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-      parentPiSessionId: this.#parentPiSessionId,
+      parentRuntimeSessionId: this.#parentRuntimeSessionId,
       registryRevision: context.registryRevision,
       generatedAt: context.generatedAt,
       totalActive: context.totalActive,
@@ -437,7 +437,7 @@ export class PiSubagentLifecycleAdapter {
     )
     return {
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-      parentPiSessionId: this.#parentPiSessionId,
+      parentRuntimeSessionId: this.#parentRuntimeSessionId,
       registryRevision: snapshot.registryRevision,
       status: active.length > 0 ? "running" : "completed",
       goalRevision: 0,
@@ -459,7 +459,7 @@ export class PiSubagentLifecycleAdapter {
   progress(input: PiSubagentProgressInput): void {
     const now = this.#now()
     const context = this.#state().tree
-    const rootId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
+    const rootId = subagentFleetNodeId(this.#parentRuntimeSessionId, input.runId)
     // An empty-children report is an ASYNC spawn acknowledgment: the tool
     // returned `{mode, runId}` with no per-child progress because the work
     // detached into its own process. Upsert a running root so the Fleet learns
@@ -514,7 +514,7 @@ export class PiSubagentLifecycleAdapter {
           ),
           runId: input.runId,
           parentId: null,
-          parentPiSessionId: this.#parentPiSessionId,
+          parentRuntimeSessionId: this.#parentRuntimeSessionId,
         ...emptyProgressIdentity(existing, input.mode),
           status: "running",
           terminal: null,
@@ -577,7 +577,7 @@ export class PiSubagentLifecycleAdapter {
           ...this.#identity(subagentId, input.runId),
           runId: subagentId,
           parentId: existing?.parentId ?? childParentId,
-          parentPiSessionId: this.#parentPiSessionId,
+          parentRuntimeSessionId: this.#parentRuntimeSessionId,
           agent: child.agent,
           task: cleanTaskLabel(child.task),
         status,
@@ -603,7 +603,7 @@ export class PiSubagentLifecycleAdapter {
     const completedIds = new Set([
       rootId,
       ...(completion.results ?? []).map((child, position) => subagentFleetNodeId(
-        this.#parentPiSessionId,
+        this.#parentRuntimeSessionId,
         child.runId ?? `${completion.runId}:step:${child.index ?? position}`
       ))
     ])
@@ -658,7 +658,7 @@ export class PiSubagentLifecycleAdapter {
         rootId,
         ...input.children.map((child) =>
           subagentFleetNodeId(
-            this.#parentPiSessionId,
+            this.#parentRuntimeSessionId,
             child.runId ?? `${input.runId}:step:${child.index}`
           )
         )
@@ -693,7 +693,7 @@ export class PiSubagentLifecycleAdapter {
     const context = this.#state().tree
     const existing = context.nodes.find((node) => node.subagentId === subagentId)
     if (existing?.attention?.requestId === input.requestId) return
-    const parentId = subagentFleetNodeId(this.#parentPiSessionId, input.runId)
+    const parentId = subagentFleetNodeId(this.#parentRuntimeSessionId, input.runId)
     this.#publish({
       _tag: "Upsert",
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -703,7 +703,7 @@ export class PiSubagentLifecycleAdapter {
         ...(existing ?? {
           runId: subagentId,
           parentId: context.nodes.some((node) => node.id === parentId) ? parentId : null,
-          parentPiSessionId: this.#parentPiSessionId,
+          parentRuntimeSessionId: this.#parentRuntimeSessionId,
           agent: input.agent,
           task: "Delegated work",
           model: null,
@@ -742,7 +742,7 @@ export class PiSubagentLifecycleAdapter {
     request: SubagentFleetControlRequest,
     sequence: number
   ): Effect.Effect<SubagentFleetControlOutcome> {
-    if (request.parentPiSessionId !== this.#parentPiSessionId) {
+    if (request.parentRuntimeSessionId !== this.#parentRuntimeSessionId) {
       return Effect.succeed(this.#outcome(
         request,
         sequence,
@@ -841,8 +841,8 @@ export class PiSubagentLifecycleAdapter {
   async refresh(): Promise<SubagentFleetSnapshot> {
     const durable = await Effect.runPromise(readDurablePiSubagentNodes({
       ...(this.#asyncRunsDir ? { asyncDir: this.#asyncRunsDir } : {}),
-      parentPiSessionId: this.#parentPiSessionId,
-      parentPiSessionAliases: this.#parentPiSessionIds,
+      parentRuntimeSessionId: this.#parentRuntimeSessionId,
+      parentPiSessionAliases: this.#parentRuntimeSessionIds,
       registryRevision: 0,
       now: this.#now()
     }))
@@ -864,7 +864,7 @@ export class PiSubagentLifecycleAdapter {
         occurredAt: generatedAt,
         snapshot: {
           version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-          parentPiSessionId: this.#parentPiSessionId,
+          parentRuntimeSessionId: this.#parentRuntimeSessionId,
           registryRevision: durableRevision,
           generatedAt,
           totalActive: durable.totalActive,
@@ -953,7 +953,7 @@ export class PiSubagentLifecycleAdapter {
       occurredAt: generatedAt,
       snapshot: {
         version: SUBAGENT_FLEET_PROTOCOL_VERSION,
-        parentPiSessionId: this.#parentPiSessionId,
+        parentRuntimeSessionId: this.#parentRuntimeSessionId,
         registryRevision,
         generatedAt,
         totalActive: reply.data.fleet.totalActive,
@@ -1006,7 +1006,7 @@ export class PiSubagentLifecycleAdapter {
     registryRevision: number
   ): ReadonlyArray<SubagentFleetNode> {
     return reply.data.fleet.entries.map((entry) => ({
-      id: subagentFleetNodeId(this.#parentPiSessionId, entry.key),
+      id: subagentFleetNodeId(this.#parentRuntimeSessionId, entry.key),
       subagentId: entry.key,
       orchestrationRunId: entry.key,
       nodeKind: "agent",
@@ -1014,7 +1014,7 @@ export class PiSubagentLifecycleAdapter {
       childSequence: 0,
       runId: entry.key,
       parentId: null,
-      parentPiSessionId: this.#parentPiSessionId,
+      parentRuntimeSessionId: this.#parentRuntimeSessionId,
       agent: cleanAgentLabel(entry.agent),
       task: cleanTaskLabel(entry.goal),
       model: entry.model ?? null,
@@ -1122,7 +1122,7 @@ export class PiSubagentLifecycleAdapter {
   }
 
   #belongsToParent(sessionId: string | undefined, runId: string): boolean {
-    if (sessionId !== undefined) return this.#parentPiSessionIds.has(sessionId)
+    if (sessionId !== undefined) return this.#parentRuntimeSessionIds.has(sessionId)
     return this.#state().asyncStarts.has(runId) || this.#state().tree.nodes.some(
       (node) => node.subagentId === runId || node.orchestrationRunId === runId
     )
@@ -1166,9 +1166,9 @@ export class PiSubagentLifecycleAdapter {
         ),
         runId: started.id,
         parentId: started.parentWorkflowRunId
-          ? subagentFleetNodeId(this.#parentPiSessionId, started.parentWorkflowRunId)
+          ? subagentFleetNodeId(this.#parentRuntimeSessionId, started.parentWorkflowRunId)
           : null,
-        parentPiSessionId: this.#parentPiSessionId,
+        parentRuntimeSessionId: this.#parentRuntimeSessionId,
         agent: started.agent ?? started.agents?.join(" + ") ?? started.mode ?? "subagent",
         task: cleanTaskLabel(started.goal ?? started.task),
         model: null,
@@ -1191,7 +1191,7 @@ export class PiSubagentLifecycleAdapter {
     if (!completion || !this.#belongsToParent(completion.sessionId, completion.runId)) return
     const now = completion.timestamp ?? this.#now()
     const start = this.#state().asyncStarts.get(completion.runId)
-    const rootId = subagentFleetNodeId(this.#parentPiSessionId, completion.runId)
+    const rootId = subagentFleetNodeId(this.#parentRuntimeSessionId, completion.runId)
     const existingRoot = this.#state().tree.nodes.find(
       (node) => node.id === rootId
     )
@@ -1209,7 +1209,7 @@ export class PiSubagentLifecycleAdapter {
         ),
         runId: completion.runId,
         parentId: existingRoot?.parentId ?? null,
-        parentPiSessionId: this.#parentPiSessionId,
+        parentRuntimeSessionId: this.#parentRuntimeSessionId,
         agent: completion.agent ?? start?.agent ?? "subagent",
         task: cleanTaskLabel(start?.goal ?? start?.task ?? completion.summary),
         model: null,
@@ -1265,7 +1265,7 @@ export class PiSubagentLifecycleAdapter {
         ...this.#identity(subagentId, input.completion.runId),
         runId: subagentId,
         parentId: existing === undefined ? input.rootId : existing.parentId,
-        parentPiSessionId: this.#parentPiSessionId,
+        parentRuntimeSessionId: this.#parentRuntimeSessionId,
         agent: input.child.agent ?? existing?.agent ?? `step-${index + 1}`,
         ...completedChildPresentation(
           input.child, existing, input.start),
@@ -1317,7 +1317,7 @@ export class PiSubagentLifecycleAdapter {
       Schema.decodeUnknownOption(ProcessTerminal)(payload)
     )
     if (!terminal || terminal.state === "pending") return
-    const id = subagentFleetNodeId(this.#parentPiSessionId, terminal.runId)
+    const id = subagentFleetNodeId(this.#parentRuntimeSessionId, terminal.runId)
     const existing = this.#state().tree.nodes.find(
       (node) => node.id === id
     )

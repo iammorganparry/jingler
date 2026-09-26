@@ -1,5 +1,5 @@
-import type { CreateSessionInput, Environment, Project, ProviderCatalog } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import type { AgentEndpointCatalog, CreateSessionInput, Environment, Project, ProviderCatalog } from "@jingler/core"
+import { nativeCliEndpointId, piEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
 import { createActor, waitFor } from "xstate"
 import { describe, expect, it, vi } from "vitest"
@@ -11,6 +11,7 @@ const projects: ReadonlyArray<Project> = [
 ]
 
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
+const endpointId = piEndpointId("local", connectionId)
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
 const providerCatalog: ProviderCatalog = {
@@ -100,6 +101,64 @@ const actorFor = (
 })
 
 describe("newWorkspaceMachine", () => {
+  it("submits an endpoint-selected session without a PI connection id", async () => {
+    const claudeEndpointId = nativeCliEndpointId("desktop", "claude")
+    const endpointCatalog: AgentEndpointCatalog = {
+      refreshedAt: "2026-09-25T00:00:00.000Z",
+      stale: false,
+      endpoints: [{
+        endpoint: {
+          id: claudeEndpointId,
+          runtimeId: "claude",
+          targetId: "desktop",
+          label: "Claude Code",
+          status: "ready",
+          version: "2.1.282",
+          features: {
+            steer: "none",
+            planReview: false,
+            subagentFleet: false,
+            backgroundTasks: false
+          }
+        },
+        models: [{
+          providerId,
+          id: modelId,
+          label: "Claude Sonnet",
+          capabilities: {
+            contextWindow: 1_000_000,
+            reasoning: ["medium"],
+            vision: true
+          },
+          verification: "unverified",
+          status: "ready",
+          selectable: true,
+          certificationKey: null
+        }]
+      }]
+    }
+    const onCreate = vi.fn(async (_input: CreateSessionInput) => undefined)
+    const actor = actorFor(onCreate, {
+      providerCatalog: null,
+      agentEndpointCatalog: endpointCatalog,
+      defaultConnectionId: null,
+      defaultModelId: null
+    }).start()
+
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, (snapshot) => snapshot.matches("editing"))
+    actor.send({ type: "SUBMIT" })
+    await waitFor(actor, (snapshot) => snapshot.matches("closed"))
+
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      runtimeId: "claude",
+      endpointId: claudeEndpointId,
+      providerId,
+      modelId
+    }), [], expect.any(Function))
+    expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("connectionId")
+  })
+
   it("starts every model in the configured default mode and falls back to Auto", async () => {
     const fallback = actorFor().start()
     fallback.send({ type: "OPEN", projectId: "p-local" })
@@ -372,7 +431,14 @@ describe("newWorkspaceMachine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("editing"))
     actor.send({ type: "SET_REASONING", reasoning: { enabled: true, effort: "high" } })
     const opusId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus")
-    actor.send({ type: "SET_MODEL", connectionId, providerId, modelId: opusId })
+    actor.send({
+      type: "SET_MODEL",
+      runtimeId: "pi",
+      endpointId,
+      connectionId,
+      providerId,
+      modelId: opusId
+    })
     expect(actor.getSnapshot().context.reasoning).toBeUndefined()
     actor.send({ type: "SUBMIT" })
     await waitFor(actor, (snapshot) => snapshot.matches("closed"))
@@ -471,4 +537,21 @@ describe("newWorkspaceMachine", () => {
       mode: "auto"
     }), [], expect.any(Function))
   })
+})
+
+it("retains the selected provider when overlapping native models refresh", async () => {
+  const endpointId = nativeCliEndpointId("desktop", "opencode")
+  const beta = ProviderId.make("beta")
+  const endpointCatalog: AgentEndpointCatalog = {
+    refreshedAt: "2026-09-25T00:00:00.000Z", stale: false,
+    endpoints: [{ endpoint: { id: endpointId, runtimeId: "opencode", targetId: "desktop", label: "OpenCode CLI", status: "ready", version: "1.18.14", features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } }, models: [ProviderId.make("alpha"), beta].map(providerId => ({ ...providerCatalog.connections[0]!.models[0]!, providerId, status: "ready" as const })) }]
+  }
+  const actor = actorFor(undefined, { agentEndpointCatalog: endpointCatalog }).start()
+  try {
+    actor.send({ type: "OPEN", projectId: "p-local" })
+    await waitFor(actor, snapshot => snapshot.matches("editing"))
+    actor.send({ type: "SET_MODEL", runtimeId: "opencode", endpointId, providerId: beta, modelId })
+    actor.send({ type: "SYNC_MODELS" })
+    expect(actor.getSnapshot().context).toMatchObject({ endpointId, providerId: beta, modelId })
+  } finally { actor.stop() }
 })

@@ -36,6 +36,7 @@ export interface ProviderConnectionsOptions {
 export interface ProviderConnectionsShape {
   readonly loginEvents: Stream.Stream<ProviderLoginEvent>
   readonly list: Effect.Effect<ProviderCatalog, ProviderConnectionsError>
+  readonly refreshCatalog: Effect.Effect<ProviderCatalog, ProviderConnectionsError>
   readonly status: Effect.Effect<ReadonlyArray<ProviderConnection>, ProviderConnectionsError>
   /** Main-process-only credential resolution for an explicitly selected route. */
   readonly resolveCredential: (
@@ -149,6 +150,9 @@ export const makeProviderConnections = (
       loginEvents: Stream.fromPubSub(loginEvents),
       list: options.catalog.list.pipe(
         Effect.mapError(serviceError("Failed to list providers"))
+      ),
+      refreshCatalog: options.catalog.refresh.pipe(
+        Effect.mapError(serviceError("Failed to refresh providers"))
       ),
       status: options.broker.list,
       resolveCredential: (id) => brokerCall(options.broker.resolve(id)),

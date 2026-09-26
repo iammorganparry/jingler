@@ -78,6 +78,45 @@ describe("legacy runtime identity migration", () => {
     })
   })
 
+  it("tags legacy PI continuations with their target-scoped endpoint", () => {
+    const result = migrateLegacyRuntimeIdentity({
+      id: "session-1",
+      environmentId: "device-1",
+      activeChatId: "chat-1",
+      connectionId: "connection-1",
+      providerId: "anthropic",
+      modelId: "anthropic/claude-sonnet",
+      piSessionId: "session.jsonl",
+      chats: [{
+        id: "chat-1",
+        connectionId: "connection-1",
+        providerId: "anthropic",
+        modelId: "anthropic/claude-sonnet",
+        piSessionId: "chat.jsonl"
+      }]
+    }) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      runtimeId: "pi",
+      endpointId: "device-1:pi:connection-1",
+      continuation: {
+        runtimeId: "pi",
+        endpointId: "device-1:pi:connection-1",
+        id: "chat.jsonl"
+      },
+      chats: [{
+        runtimeId: "pi",
+        endpointId: "device-1:pi:connection-1",
+        continuation: {
+          runtimeId: "pi",
+          endpointId: "device-1:pi:connection-1",
+          id: "chat.jsonl"
+        }
+      }]
+    })
+    expect(result).not.toHaveProperty("piSessionId")
+  })
+
   it("migrates config defaults without inventing a credential connection", () => {
     expect(migrateLegacyConfigIdentity({
       defaultCli: "claude",
@@ -89,4 +128,27 @@ describe("legacy runtime identity migration", () => {
       reposDir: "/repos"
     })
   })
+})
+
+it("preserves canonical identity and unrelated data alongside a legacy chat", () => {
+  const canonical = {
+    id: "native", runtimeId: "claude", endpointId: "desktop:claude:default",
+    providerId: "anthropic", modelId: "anthropic/opus",
+    continuation: { runtimeId: "claude", endpointId: "desktop:claude:default", id: "native-thread" },
+    transcriptMarker: "native-history"
+  }
+  const source = {
+    ...canonical, id: "session", activeChatId: "native", cli: "claude",
+    worktreePath: "/existing/tree", branch: "existing-branch",
+    chats: [canonical, { id: "legacy", model: "sonnet", resumeId: "old-thread", transcriptMarker: "old-history" }]
+  }
+  const migrated = migrateLegacyRuntimeIdentity(source)
+  expect(migrated).toMatchObject({
+    ...canonical, id: "session", worktreePath: source.worktreePath, branch: source.branch,
+    chats: [canonical, { id: "legacy", legacyModel: "sonnet", legacyResumeId: "old-thread", transcriptMarker: "old-history" }]
+  })
+  expect(migrated).not.toHaveProperty("connectionSelectionRequired")
+  expect((migrated as { chats: unknown[] }).chats[0]).not.toHaveProperty("connectionSelectionRequired")
+  expect(migrateLegacyRuntimeIdentity(migrated)).toEqual(migrated)
+  expect(source.chats[1]).toHaveProperty("resumeId", "old-thread")
 })

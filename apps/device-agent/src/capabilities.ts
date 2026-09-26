@@ -1,3 +1,5 @@
+import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
+import { probeCodexEndpoint } from "@jingler/cli-adapters/runtime/codex/endpoint"
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
 import { homedir, arch, platform } from "node:os"
 import { join } from "node:path"
@@ -6,7 +8,11 @@ import { AppPaths } from "@jingler/cli-adapters/app-paths"
 import { makeAppPaths } from "@jingler/cli-adapters/app-paths-factory"
 import { ConfigService } from "@jingler/cli-adapters/config"
 import { WorkspaceService } from "@jingler/cli-adapters/workspace"
+import { ProviderConnections } from "@jingler/cli-adapters/runtime/providers/provider-connections"
+import { projectPiEndpointCatalog } from "@jingler/cli-adapters/runtime/providers/agent-endpoint-catalog"
+import { probeClaudeEndpoint } from "@jingler/cli-adapters/runtime/providers/claude-endpoint"
 import type {
+  AgentEndpointCatalog,
   ProviderConnection,
   RemoteDeviceDiscovery,
   RemoteRepositoryCapability,
@@ -21,6 +27,7 @@ export interface CapabilitySources {
   readonly repositories: () => Effect.Effect<ReadonlyArray<Repo>, unknown>
   readonly branches: (repoPath: string) => Effect.Effect<ReadonlyArray<string>, unknown>
   readonly providerConnections?: () => Effect.Effect<ReadonlyArray<ProviderConnection>, unknown>
+  readonly endpointCatalog?: () => Effect.Effect<AgentEndpointCatalog, unknown>
   readonly platform: () => { readonly os: string; readonly arch: string }
 }
 
@@ -75,6 +82,17 @@ export const discoverDeviceCapabilities = (
     const providerConnections = yield* (sources.providerConnections?.() ?? Effect.succeed([])).pipe(
       Effect.orElseSucceed(() => [])
     )
+    const endpointCatalog = yield* (sources.endpointCatalog?.() ?? Effect.succeed({
+      endpoints: [],
+      refreshedAt: new Date().toISOString(),
+      stale: false
+    })).pipe(
+      Effect.orElseSucceed(() => ({
+        endpoints: [],
+        refreshedAt: new Date().toISOString(),
+        stale: true
+      }))
+    )
     const remoteRepositories = yield* Effect.forEach(
       repositories.slice(0, 1_024),
       (repository): Effect.Effect<RemoteRepositoryCapability> =>
@@ -111,6 +129,7 @@ export const discoverDeviceCapabilities = (
           resourceIds: [],
           targetId
         },
+        endpointCatalog,
         providerConnections: providerConnections.map((connection) => ({
           id: connection.id,
           providerId: connection.providerId,
@@ -151,6 +170,23 @@ export const discoverLiveDeviceCapabilities = (
           branches: (repoPath) =>
             WorkspaceService.branches(repoPath).pipe(Effect.provide(layer)),
           providerConnections: () => Effect.succeed(deviceProviders.connections),
+          endpointCatalog: () => Effect.gen(function* () {
+            const pi = yield* ProviderConnections.pipe(
+              Effect.flatMap((service) => service.list),
+              Effect.map(projectPiEndpointCatalog),
+              Effect.provide(deviceProviders.ProviderConnectionsLive),
+              Effect.provide(deviceProviders.SecretStoreLive),
+              Effect.provide(layer)
+            )
+            const claude = yield* Effect.promise(() =>
+              probeClaudeEndpoint({ targetId })
+            )
+            return {
+              ...pi,
+              refreshedAt: new Date().toISOString(),
+              endpoints: [...pi.endpoints.slice(0, 61), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId })), yield* Effect.promise(() => probeOpenCodeEndpoint({ targetId: targetId }))]
+            }
+          }),
           platform: () => ({ os: platform(), arch: arch() })
         },
         agentVersion,

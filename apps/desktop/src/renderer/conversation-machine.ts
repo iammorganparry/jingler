@@ -9,6 +9,8 @@
  * the transcript with the same `applyStreamEvent` the main process persists with.
  */
 import type {
+  AgentEndpointId,
+  AgentRuntimeId,
   Attachment,
   ContextBreakdown,
   ExecutionMode,
@@ -66,6 +68,31 @@ import {
   stopChild
 } from "xstate"
 import { rpc } from "./rpc-client.js"
+
+const modelMutations = new Map<string, { generation: number; tail: Promise<void> }>()
+
+const persistModelSelection = (
+  key: string,
+  run: () => Promise<Session>,
+  onSuccess: (session: Session) => void,
+  onLatestFailure: () => void
+): void => {
+  const current = modelMutations.get(key)
+  const generation = (current?.generation ?? 0) + 1
+  const started = current === undefined
+    ? run()
+    : current.tail.catch(() => undefined).then(run)
+  const request = started.then((session) => {
+    if (modelMutations.get(key)?.generation === generation) onSuccess(session)
+  })
+    .catch(() => {
+      if (modelMutations.get(key)?.generation === generation) onLatestFailure()
+    })
+    .finally(() => {
+      if (modelMutations.get(key)?.generation === generation) modelMutations.delete(key)
+    })
+  modelMutations.set(key, { generation, tail: request })
+}
 import { completedSubagentNodes } from "./subagent-tab-store.js"
 import { compactMessageParts, compactMessages } from "./transcript-compaction.js"
 
@@ -94,25 +121,25 @@ export const boundedFleetEvents = (
   events: ReadonlyArray<SubagentFleetEvent>
 ): ReadonlyArray<SubagentFleetEvent> => {
   if (events.length <= MAX_FLEET_EVENTS) return events
-  const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
+  const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(events, "")
   const tombstones = new Map<string, Extract<SubagentFleetEvent, { _tag: "Remove" }>>()
   let latestSnapshot: Extract<SubagentFleetEvent, { _tag: "Snapshot" }> | null = null
   const terminalIds = new Set<string>()
   for (const event of events) {
     if (event._tag === "Remove") {
-      recordFleetTombstone(tombstones, event, parentPiSessionId)
+      recordFleetTombstone(tombstones, event, parentRuntimeSessionId)
       continue
     }
-    if (event._tag === "Snapshot" && event.snapshot.parentPiSessionId === parentPiSessionId) {
+    if (event._tag === "Snapshot" && event.snapshot.parentRuntimeSessionId === parentRuntimeSessionId) {
       if (isNewerFleetSnapshot(event, latestSnapshot)) latestSnapshot = event
     }
-    const nodes = fleetNodesForParent(event, parentPiSessionId)
+    const nodes = fleetNodesForParent(event, parentRuntimeSessionId)
     recordTerminalFleetIds(terminalIds, nodes)
   }
 
-  const activeNodes = parentPiSessionId === ""
+  const activeNodes = parentRuntimeSessionId === ""
     ? []
-    : projectSubagentFleetEvents(parentPiSessionId, events).nodes.filter((node) =>
+    : projectSubagentFleetEvents(parentRuntimeSessionId, events).nodes.filter((node) =>
         ACTIVE_FLEET_STATUSES.has(node.status)
       )
   const activeIds = new Set(activeNodes.map((node) => node.id))
@@ -125,10 +152,10 @@ export const boundedFleetEvents = (
   }))
   const parentEvents = events.filter((event) =>
     event._tag === "Upsert"
-      ? event.node.parentPiSessionId === parentPiSessionId
+      ? event.node.parentRuntimeSessionId === parentRuntimeSessionId
       : event._tag === "Snapshot"
-        ? event.snapshot.parentPiSessionId === parentPiSessionId
-        : event.id.startsWith(`${parentPiSessionId}/`)
+        ? event.snapshot.parentRuntimeSessionId === parentRuntimeSessionId
+        : event.id.startsWith(`${parentRuntimeSessionId}/`)
   )
   const terminalEvents = completedSubagentNodes(parentEvents)
     .map((node): SubagentFleetEvent => ({
@@ -159,7 +186,7 @@ export const boundedFleetEvents = (
     : events
         .filter((event) =>
           event._tag === "Upsert" &&
-          event.node.parentPiSessionId === parentPiSessionId &&
+          event.node.parentRuntimeSessionId === parentRuntimeSessionId &&
           !activeIds.has(event.node.id) &&
           !terminalIds.has(event.node.id)
         )
@@ -185,7 +212,7 @@ export const boundedFleetEvents = (
 
 import { publishSessionUpdate } from "./session-updates.js"
 import {
-  parentPiSessionIdFromFleetEvents,
+  parentRuntimeSessionIdFromFleetEvents,
   projectSubagentFleetEvents,
   settleStoppedFleet
 } from "./subagent-fleet-machine.js"
@@ -197,20 +224,31 @@ const isExecutionMode = (mode: PermissionMode): mode is ExecutionMode =>
 const withProviderModel = (
   session: Session,
   chatId: string,
-  connectionId: ProviderConnectionId,
+  runtimeId: AgentRuntimeId,
+  endpointId: AgentEndpointId,
+  connectionId: ProviderConnectionId | undefined,
   providerId: ProviderId,
   modelId: ProviderModelId
 ): Session => {
   const current = session.chats.find((chat) => chat.id === chatId)
+  const endpointChanged =
+    current?.runtimeId !== runtimeId || current?.endpointId !== endpointId
+  const nextConnectionId = connectionId ?? (
+    endpointChanged ? undefined : current?.connectionId
+  )
   const changed =
-    current?.connectionId !== connectionId ||
+    endpointChanged ||
+    current?.connectionId !== nextConnectionId ||
     current?.providerId !== providerId ||
     current?.modelId !== modelId
   return {
     ...session,
-    connectionId,
+    runtimeId,
+    endpointId,
+    connectionId: nextConnectionId,
     providerId,
     modelId,
+    ...(endpointChanged ? { continuation: undefined } : {}),
     connectionSelectionRequired: false,
     modelSelectionRequired: false,
     chats: session.chats.map((chat) =>
@@ -218,9 +256,12 @@ const withProviderModel = (
         ? chat
         : {
             ...chat,
-            connectionId,
+            runtimeId,
+            endpointId,
+            connectionId: nextConnectionId,
             providerId,
             modelId,
+            ...(endpointChanged ? { continuation: undefined } : {}),
             connectionSelectionRequired: false,
             modelSelectionRequired: false,
             ...(changed ? { reasoning: undefined } : {})
@@ -269,9 +310,12 @@ export interface ConversationContext {
   readonly executionMode: ExecutionMode
   readonly skills: ReadonlyArray<Skill>
   readonly files: ReadonlyArray<string>
+  readonly runtimeId: AgentRuntimeId | null
+  readonly endpointId: AgentEndpointId | null
   readonly connectionId: ProviderConnectionId | null
   readonly providerId: ProviderId | null
   readonly modelId: ProviderModelId | null
+  readonly modelPending: boolean
   /** Lightweight worktree totals for the Changes rail. */
   readonly diffStat: SessionDiffStat
   /**
@@ -462,11 +506,15 @@ type ConversationEvent =
   | { type: "SET_MODE"; mode: PermissionMode }
   | {
       type: "SET_MODEL"
-      connectionId: ProviderConnectionId
+      runtimeId: AgentRuntimeId
+      endpointId: AgentEndpointId
+      connectionId?: ProviderConnectionId
       providerId: ProviderId
       modelId: ProviderModelId
     }
   | { type: "SET_REASONING"; reasoning?: ReasoningSetting }
+  | { type: "MODEL_PERSISTED"; session: Session }
+  | { type: "MODEL_PERSIST_FAILED"; session: Session }
   | { type: "SESSION_UPDATED"; session: Session }
   | {
       type: "WORKSPACE_META_LOADED"
@@ -923,6 +971,54 @@ const foldUsage = (
   tokens: e.tokens,
   contextBreakdown: e.breakdown ?? null
 })
+
+const reconciledSession = (context: ConversationContext, session: Session, clearModelPending: boolean): Partial<ConversationContext> => {
+  const chat = session.chats.find((candidate) => candidate.id === context.chatId)
+  if (chat === undefined) return { session }
+  const persistedMode = chat.mode ?? session.mode ?? "accept-edits"
+  return {
+    session,
+    runtimeId: chat.runtimeId ?? session.runtimeId ?? null,
+    endpointId: chat.endpointId ?? session.endpointId ?? null,
+    connectionId: chat.connectionId ?? session.connectionId ?? null,
+    providerId: chat.providerId ?? session.providerId ?? null,
+    modelId: chat.modelId ?? session.modelId ?? null,
+    ...(clearModelPending ? { modelPending: false } : {}),
+    // Plan is a transient overlay; session updates only replace its restore-on-approval mode.
+    mode: isExecutionMode(context.mode) ? persistedMode : context.mode,
+    executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
+    reasoning: chat.reasoning,
+    tokens: chat.contextTokens ?? context.tokens,
+    persistedStatus: session.status
+  }
+}
+
+const initialConversationChat = (input: { session: Session; chatId?: string }) => {
+  const chats = input.session.chats ?? []
+  return chats.find((candidate) => candidate.id === (input.chatId ?? input.session.activeChatId)) ?? chats[0] ?? {
+    id: input.chatId ?? input.session.activeChatId ?? input.session.id,
+    title: null,
+    createdAt: input.session.updatedAt,
+    updatedAt: input.session.updatedAt,
+    mode: input.session.mode,
+    contextTokens: input.session.contextTokens
+  }
+}
+const initialConversationContext = (input: { session: Session; chatId?: string }): ConversationContext => {
+  const chat = initialConversationChat(input)
+  return {
+    session: input.session, chatId: chat.id, messages: [], sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] }, remotePublishProgress: null,
+    mode: chat.mode ?? input.session.mode ?? "accept-edits", executionMode: chat.mode && isExecutionMode(chat.mode) ? chat.mode : "accept-edits",
+    skills: [], files: [], runtimeId: chat.runtimeId ?? input.session.runtimeId ?? null, endpointId: chat.endpointId ?? input.session.endpointId ?? null,
+    connectionId: chat.connectionId ?? input.session.connectionId ?? null, providerId: chat.providerId ?? input.session.providerId ?? null,
+    modelId: chat.modelId ?? input.session.modelId ?? null, modelPending: false, diffStat: { added: 0, removed: 0, files: 0 }, patchAt: 0,
+    pendingText: "", pendingAgentContext: "", pendingImages: [], pendingExternalInstruction: null, pendingExternalAcceptances: [], reasoning: chat.reasoning,
+    queued: [], steeringId: null, queueParked: false, subagents: [], subagentFleetEvents: [], subagentControlOutcomes: [], foldsSinceCompaction: 0,
+    sharedPlanChatId: null, sharedPlan: null, tokens: chat.contextTokens ?? input.session.contextTokens ?? 0, contextBreakdown: null,
+    runStartedAt: null, lastOutcome: null, persistedStatus: input.session.status, loaded: false, hasMoreHistory: false, historyCursor: null,
+    loadingHistory: false, reviewer: null, reviewPhase: "starting", reviewStartedAt: null
+  }
+}
 
 export const conversationMachine = setup({
   types: {
@@ -1743,30 +1839,12 @@ export const conversationMachine = setup({
       }
     }),
     reconcileSession: assign(({ context, event }) => {
-      if (event.type !== "SESSION_UPDATED") return {}
-      const chat = event.session.chats.find((candidate) => candidate.id === context.chatId)
-      if (chat === undefined) return { session: event.session }
-      const providerId = chat.providerId ?? event.session.providerId ?? null
-      const persistedMode = chat.mode ?? event.session.mode ?? "accept-edits"
-      // Plan/Gigaplan are TRANSIENT client overlays the backend never persists
-      // (see `agent-runner.setMode`: plan is held in memory, only the exec mode
-      // reaches `session.mode`). A `SESSION_UPDATED` therefore always carries a
-      // concrete exec mode, so adopting it blindly would yank a live plan
-      // selection back to auto the instant any session sync lands. Keep the
-      // operator's transient selection; still sync `executionMode` to whatever
-      // the backend now says the restore-on-approval mode is.
-      const mode = isExecutionMode(context.mode) ? persistedMode : context.mode
-      return {
-        session: event.session,
-        connectionId: chat.connectionId ?? event.session.connectionId ?? null,
-        providerId,
-        modelId: chat.modelId ?? event.session.modelId ?? null,
-        mode,
-        executionMode: isExecutionMode(persistedMode) ? persistedMode : context.executionMode,
-        reasoning: chat.reasoning,
-        tokens: chat.contextTokens ?? context.tokens,
-        persistedStatus: event.session.status
-      }
+      if (
+        event.type !== "SESSION_UPDATED" &&
+        event.type !== "MODEL_PERSISTED" &&
+        event.type !== "MODEL_PERSIST_FAILED"
+      ) return {}
+      return reconciledSession(context, event.session, event.type !== "SESSION_UPDATED")
     }),
     applySharedPlan: assign(({ context, event }) => {
       if (event.type !== "SHARED_PLAN_UPDATED") return {}
@@ -1810,26 +1888,40 @@ export const conversationMachine = setup({
         sharedPlan: event.plan
       }
     }),
-    persistProviderModel: assign(({ context, event }) => {
+    persistProviderModel: assign(({ context, event, self }) => {
       if (event.type !== "SET_MODEL") return {}
       const session = withProviderModel(
         context.session,
         context.chatId,
+        event.runtimeId,
+        event.endpointId,
         event.connectionId,
         event.providerId,
         event.modelId
       )
-      void rpc.agentSetModel(
-        context.session.id,
-        context.chatId,
-        event.connectionId,
-        event.providerId,
-        event.modelId
-      ).then(publishSessionUpdate).catch(() => {})
+      persistModelSelection(
+        `${context.session.id}:${context.chatId}`,
+        () => rpc.agentEndpointSetModel(
+          context.session.id,
+          context.chatId,
+          event.runtimeId,
+          event.endpointId,
+          event.providerId,
+          event.modelId
+        ),
+        (persisted) => {
+          publishSessionUpdate(persisted)
+          self.send({ type: "MODEL_PERSISTED", session: persisted })
+        },
+        () => self.send({ type: "MODEL_PERSIST_FAILED", session: context.session })
+      )
       return {
-        connectionId: event.connectionId,
+        runtimeId: event.runtimeId,
+        endpointId: event.endpointId,
+        connectionId: session.chats.find((chat) => chat.id === context.chatId)?.connectionId ?? null,
         providerId: event.providerId,
         modelId: event.modelId,
+        modelPending: true,
         reasoning: session.chats.find((chat) => chat.id === context.chatId)?.reasoning,
         session
       }
@@ -1993,6 +2085,8 @@ export const conversationMachine = setup({
     RECOVER_SUBAGENT_FLEET: { actions: "recoverSubagentFleet" },
     SET_REASONING: { actions: "persistReasoning" },
     SET_MODEL: { actions: "persistProviderModel" },
+    MODEL_PERSISTED: { actions: "reconcileSession" },
+    MODEL_PERSIST_FAILED: { actions: "reconcileSession" },
     SESSION_UPDATED: { guard: "sessionChanged", actions: "reconcileSession" },
     SHARED_PLAN_UPDATED: { guard: "sharedPlanChanged", actions: "applySharedPlan" },
     // Root-level for the same reason: a sub-agent's tab outlives the turn that
@@ -2021,72 +2115,7 @@ export const conversationMachine = setup({
       actions: ["applyHistory", stopChild("history-page")]
     }
   },
-  context: ({ input }) => {
-    const persistedChats = input.session.chats ?? []
-    const chat =
-      persistedChats.find(
-        (candidate) => candidate.id === (input.chatId ?? input.session.activeChatId)
-      ) ??
-      persistedChats[0] ?? {
-        id: input.chatId ?? input.session.activeChatId ?? input.session.id,
-        title: null,
-        createdAt: input.session.updatedAt,
-        updatedAt: input.session.updatedAt,
-        mode: input.session.mode,
-        contextTokens: input.session.contextTokens
-      }
-    const providerId = chat.providerId ?? input.session.providerId ?? null
-    return {
-      session: input.session,
-      chatId: chat.id,
-      messages: [],
-      sessionEventCursor: { sequence: 0, revision: 0, eventIds: [] },
-      remotePublishProgress: null,
-      mode: chat.mode ?? input.session.mode ?? "accept-edits",
-      executionMode:
-        chat.mode && isExecutionMode(chat.mode)
-          ? chat.mode
-          : "accept-edits",
-      skills: [],
-      files: [],
-      connectionId: chat.connectionId ?? input.session.connectionId ?? null,
-      providerId,
-      modelId: chat.modelId ?? input.session.modelId ?? null,
-      diffStat: { added: 0, removed: 0, files: 0 },
-      patchAt: 0,
-      pendingText: "",
-      pendingAgentContext: "",
-      pendingImages: [],
-      pendingExternalInstruction: null,
-      pendingExternalAcceptances: [],
-      reasoning: chat.reasoning,
-      queued: [],
-      steeringId: null,
-      queueParked: false,
-      subagents: [],
-      subagentFleetEvents: [],
-      subagentControlOutcomes: [],
-      foldsSinceCompaction: 0,
-      sharedPlanChatId: null,
-      sharedPlan: null,
-      // Rehydrate the last measured working set immediately. ContextManager owns
-      // the trigger/phase snapshot, but the view reads this live field for the
-      // meter's numerator; starting at zero hid the whole component after every
-      // app restart until Codex happened to emit another Usage event.
-      tokens: chat.contextTokens ?? input.session.contextTokens ?? 0,
-      contextBreakdown: null,
-      runStartedAt: null,
-      lastOutcome: null,
-      persistedStatus: input.session.status,
-      loaded: false,
-      hasMoreHistory: false,
-      historyCursor: null,
-      loadingHistory: false,
-      reviewer: null,
-      reviewPhase: "starting",
-      reviewStartedAt: null
-    }
-  },
+  context: ({ input }) => initialConversationContext(input),
   states: {
     loading: {
       /**
@@ -2478,9 +2507,9 @@ export const conversationMachine = setup({
 function recordFleetTombstone(
   tombstones: Map<string, Extract<SubagentFleetEvent, { _tag: "Remove" }>>,
   event: Extract<SubagentFleetEvent, { _tag: "Remove" }>,
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
 ): void {
-  if (parentPiSessionId !== "" && !event.id.startsWith(`${parentPiSessionId}/`)) return
+  if (parentRuntimeSessionId !== "" && !event.id.startsWith(`${parentRuntimeSessionId}/`)) return
   const current = tombstones.get(event.id)
   if (event.registryRevision >= (current?.registryRevision ?? -1)) {
     tombstones.delete(event.id)
@@ -2502,11 +2531,11 @@ function isNewerFleetSnapshot(
 
 function fleetNodesForParent(
   event: Exclude<SubagentFleetEvent, { _tag: "Remove" }>,
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
 ) {
   return event._tag === "Upsert"
-    ? event.node.parentPiSessionId === parentPiSessionId ? [event.node] : []
-    : event.snapshot.parentPiSessionId === parentPiSessionId ? event.snapshot.nodes : []
+    ? event.node.parentRuntimeSessionId === parentRuntimeSessionId ? [event.node] : []
+    : event.snapshot.parentRuntimeSessionId === parentRuntimeSessionId ? event.snapshot.nodes : []
 }
 
 function foldMainStreamEvent(context: ConversationContext, e: StreamEvent) {

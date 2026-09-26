@@ -1,3 +1,4 @@
+import type { AgentEndpointCatalog } from "@jingler/core"
 import { spawn, type ChildProcess } from "node:child_process"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
@@ -49,6 +50,8 @@ export interface FakeDeviceRelay {
   readonly url: string
   readonly token: string
   readonly deviceHome: string
+  readonly setEndpointCatalog: (catalog: AgentEndpointCatalog) => void
+  readonly endpointRequests: () => readonly string[]
   readonly sshClaims: () => number
   readonly desktopBearerForwarded: () => boolean
   readonly commandAdmissions: (sessionId: string, operation?: string) => number
@@ -109,7 +112,10 @@ export const startFakeDeviceRelay = async (
   let paired = false
   let state: "online" | "offline" | "incompatible" = "offline"
   let forcedState: "offline" | "incompatible" | null = null
+  let catalogOverride: AgentEndpointCatalog | undefined
   let discovery: Record<string, unknown> | null = null
+  const endpointRequests: string[] = []
+  const pendingCatalogs = new Map<string, { targetId: string; finish: (catalog: unknown) => void }>()
   let claimCount = 0
   let bearerForwarded = false
   let agent: ChildProcess | null = null
@@ -321,6 +327,25 @@ const routes = [
         }
       },
       {
+        matches: () => (url.pathname === `/api/devices/${DEVICE_ID}/discovery` && request.method === "POST"),
+        handle: async function refreshEndpoints() {
+          const body = await readBody(request)
+          if (!control || typeof body.targetId !== "string") return json(response, 503, { error: "offline" })
+          const requestId = `catalog-${endpointRequests.length + 1}`
+          endpointRequests.push(String(body.action))
+          const catalog = await new Promise<unknown>((resolve) => {
+            const timer = setTimeout(() => { pendingCatalogs.delete(requestId); resolve(null) }, 10_000)
+            pendingCatalogs.set(requestId, { targetId: body.targetId as string, finish: (value) => {
+              clearTimeout(timer); pendingCatalogs.delete(requestId); resolve(value)
+            } })
+            control!.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, ...body }))
+          })
+          if (!catalog) return json(response, 504, { error: "timeout" })
+          discovery = { ...discovery, capabilities: { ...deviceCapabilities(discovery), endpointCatalog: catalog } }
+          return json(response, 200, { version: 1, deviceId: DEVICE_ID, discovery, updatedAt: now() })
+        }
+      },
+      {
         matches: () => (url.pathname === `/api/devices/${DEVICE_ID}/discovery` && request.method === "GET"),
         handle: function discoverDevice() {
           return json(response, 200, {
@@ -402,24 +427,30 @@ if (route) return route.handle();
   })
 
   const sockets = new WebSocketServer({ noServer: true })
+  const receiveControlMessage = (raw: WebSocket.RawData) => {
+    const message = JSON.parse(raw.toString()) as Record<string, unknown>
+    if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
+      process.stderr.write(`[device-control] ${JSON.stringify(message)}\n`)
+    }
+    if (message.type === "endpoint-catalog-update" && typeof message.requestId === "string") {
+      const pending = pendingCatalogs.get(message.requestId)
+      if (pending?.targetId === message.targetId) pending.finish(catalogOverride ?? message.catalog)
+    }
+    if (
+      message.type === "announce" &&
+      message.discovery &&
+      typeof message.discovery === "object"
+    )
+      discovery = message.discovery as Record<string, unknown>
+  }
+
   server.on("upgrade", (request, socket, head) => {
     sockets.handleUpgrade(request, socket, head, (websocket) => {
       const url = new URL(request.url ?? "/", baseUrl)
       if (url.pathname === "/v1/device-connect") {
         control = websocket
         if (forcedState === null) state = "online"
-        websocket.on("message", (raw) => {
-          const message = JSON.parse(raw.toString()) as Record<string, unknown>
-          if (process.env.JINGLER_E2E_DEVICE_LOG === "1") {
-            process.stderr.write(`[device-control] ${JSON.stringify(message)}\n`)
-          }
-          if (
-            message.type === "announce" &&
-            message.discovery &&
-            typeof message.discovery === "object"
-          )
-            discovery = message.discovery as Record<string, unknown>
-        })
+        websocket.on("message", receiveControlMessage)
         websocket.on("close", () => {
           if (control === websocket) {
             control = null
@@ -441,6 +472,8 @@ if (route) return route.handle();
     url: baseUrl,
     token: TOKEN,
     deviceHome: options.deviceHome,
+    setEndpointCatalog: (catalog) => { catalogOverride = catalog },
+    endpointRequests: () => [...endpointRequests],
     sshClaims: () => claimCount,
     desktopBearerForwarded: () => bearerForwarded,
     commandAdmissions: (sessionId, operation) => {

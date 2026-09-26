@@ -278,6 +278,64 @@ describe("pending device pairing", () => {
     ).resolves.toEqual({ version: 1, devices: [] })
   })
 
+  it("correlates endpoint refresh, rejects wrong targets and superseded replies, and bounds waiting", async () => {
+    const keys = await keyPair()
+    const paired = await claimDevice("catalog_abcdefghijkl", "catalog-owner", keys.publicKey)
+    await runInDurableObject(paired.registry, async (instance, state) => {
+      const deviceId = paired.claim.deviceId
+      const targetId = "remote-target"
+      const runtime = {
+        versions: { behavior: "1", authentication: "1", prompt: "1", tools: "1", diff: "1", policy: "1", capabilities: "1", piSdk: "1" },
+        toolIds: [], resourceIds: [], targetId
+      }
+      const discovery = {
+        version: 1, agentVersion: "2.0.3", platform: { os: "linux", arch: "x64" },
+        capabilities: { ...registration(keys.publicKey).capabilities, runtime }, repositories: []
+      }
+      state.storage.sql.exec("INSERT INTO device_discovery (device_id, discovery_json, updated_at) VALUES (?, ?, ?)", deviceId, JSON.stringify(discovery), 150)
+      const pair = new WebSocketPair()
+      state.acceptWebSocket(pair[1], [`device:${deviceId}`])
+      pair[0].accept()
+      pair[1].serializeAttachment({ deviceId, generation: 1, expiresAt: Math.floor(Date.now() / 1000) + 120 })
+      const catalog = { endpoints: [], refreshedAt: "2026-09-25T00:00:00.000Z", stale: false }
+      const reply = (requestId: string, target = targetId, responseCatalog = catalog) => instance.webSocketMessage(pair[1], JSON.stringify({
+        type: "endpoint-catalog-update", version: 1, requestId, targetId: target, catalog: responseCatalog
+      }))
+      const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+      expect(await instance.requestEndpointCatalog(deviceId, "wrong", "wrong-request", "refresh")).toBeNull()
+      const superseded = instance.requestEndpointCatalog(deviceId, targetId, "request-old", "refresh")
+      await tick()
+      const current = instance.requestEndpointCatalog(deviceId, targetId, "request-new", "auth-status")
+      await tick()
+      expect(await superseded).toBeNull()
+      await reply("request-old")
+      await reply("request-new", "wrong")
+      expect((await instance.getDiscovery(deviceId))?.discovery?.capabilities.endpointCatalog).toBeUndefined()
+      await reply("request-new")
+      expect(await current).toMatchObject({ deviceId, discovery: { capabilities: { endpointCatalog: catalog } } })
+      const login = { loginId: "login", verificationUrl: "https://example.com", userCode: "CODE" }
+      const loginPending = instance.requestEndpointCatalog(deviceId, targetId, "login-request", "login-start", undefined, { targetId, action: "login-start", endpointId: `${targetId}:codex:default` })
+      await tick()
+      await instance.webSocketMessage(pair[1], JSON.stringify({ type: "endpoint-catalog-update", version: 1, requestId: "login-request", targetId, catalog, login }))
+      expect(await loginPending).toMatchObject({ login })
+      expect(await instance.getDiscovery(deviceId)).not.toHaveProperty("login")
+      expect(JSON.stringify(state.storage.sql.exec("SELECT discovery_json FROM device_discovery WHERE device_id = ?", deviceId).toArray())).not.toContain("CODE")
+      // Valid probes may exceed the relay's former ten-second window.
+      const slow = instance.requestEndpointCatalog(deviceId, targetId, "request-slow", "refresh", undefined, undefined, 30)
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      await reply("request-slow")
+      expect(await slow).toMatchObject({ deviceId })
+      // A late duplicate cannot replace accepted discovery.
+      await reply("request-new")
+      const start = Date.now()
+      expect(await instance.requestEndpointCatalog(deviceId, targetId, "request-timeout", "refresh", undefined, undefined, 20)).toBeNull()
+      expect(Date.now() - start).toBeGreaterThanOrEqual(20)
+      await reply("request-timeout", targetId, { ...catalog, refreshedAt: "stale-response" })
+      expect((await instance.getDiscovery(deviceId))?.discovery?.capabilities.endpointCatalog).toEqual(catalog)
+      pair[0].close()
+    })
+  }, 20_000)
+
   it("returns versioned discovery only from the owning user registry", async () => {
     const keys = await keyPair()
     const owner = "discovery-owner"

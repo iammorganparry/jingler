@@ -7,10 +7,10 @@ const SUBAGENT_PACKAGE = "pi-subagents"
 const SUBAGENT_RUNTIME_LOADER = "jiti"
 const PLANNOTATOR_PACKAGE = "@jingler/plannotator-ext"
 
+const NATIVE_DEVICE_PACKAGES = ["@opencode-ai/sdk"]
 const LEGACY_HARNESS_PACKAGES = [
   "@anthropic-ai/claude-agent-sdk",
-  "@openai/codex-sdk",
-  "@opencode-ai/sdk"
+  "@openai/codex-sdk"
 ]
 
 const LEADING_SLASH = /^\//
@@ -20,7 +20,7 @@ const RELEASE_CERTIFICATION_MARKER = "jingler-release-certification-manifest-v1"
 const packageMarker = (name) => `node_modules/${name}/`
 
 export const auditDeviceBundle = (source) => [
-  ...PI_PACKAGES.flatMap((name) =>
+  ...[...PI_PACKAGES, ...NATIVE_DEVICE_PACKAGES].flatMap((name) =>
     source.includes(packageMarker(name)) ? [] : [`device bundle is missing ${name}`]
   ),
   ...LEGACY_HARNESS_PACKAGES.flatMap((name) =>

@@ -1,3 +1,4 @@
+import type { EndpointControlInput } from "@jingler/core"
 import type {
   AccountDevice,
   DeviceEnrollmentCredentialResponse,
@@ -571,10 +572,23 @@ export class EnvironmentService extends Effect.Service<EnvironmentService>()(
 
       const discovery = (
         deviceId: string,
+        endpointRequest?: EndpointControlInput,
       ): Effect.Effect<EnvironmentDiscovery, EnvironmentError> =>
         request(
           `${DEVICE_API_ROOT}/${encodeURIComponent(deviceId)}/discovery`,
           EnvironmentDiscoverySchema,
+          endpointRequest ? { method: "POST", body: JSON.stringify(endpointRequest) } : undefined,
+        ).pipe(
+          Effect.tap((response) => Effect.sync(() => {
+            const current = environmentsById.get(deviceId);
+            if (current?.kind === "owned" && response.discovery !== null) {
+              environmentsById.set(deviceId, {
+                ...current,
+                capabilities: response.discovery.capabilities,
+                agentVersion: response.discovery.agentVersion,
+              });
+            }
+          })),
         );
 
       return {

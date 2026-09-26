@@ -48,7 +48,7 @@ export interface SubagentParentSpec {
 }
 
 interface RegisteredChild {
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly agent: string
   readonly role: AgentRole
   readonly mode: RuntimeMode
@@ -65,7 +65,7 @@ interface BrokerState {
 }
 
 export interface RegisterSubagentParentInput {
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly agents: ReadonlyArray<string>
   readonly spec: SubagentParentSpec
   readonly registry: ToolRegistry
@@ -77,7 +77,7 @@ export interface SubagentCapabilityBrokerShape {
   readonly register: (
     input: RegisterSubagentParentInput
   ) => Effect.Effect<ReadonlyArray<SubagentCapability>, Error>
-  readonly unregister: (parentPiSessionId: string) => Effect.Effect<void>
+  readonly unregister: (parentRuntimeSessionId: string) => Effect.Effect<void>
   readonly close: Effect.Effect<void>
 }
 
@@ -232,12 +232,12 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
     runRequest(handleRequest(ref, request, response))
   })
 
-  const unregister = (parentPiSessionId: string): Effect.Effect<void> =>
+  const unregister = (parentRuntimeSessionId: string): Effect.Effect<void> =>
     Ref.update(ref, (state) => {
       const children = new Map(state.children)
-      for (const token of state.parentTokens.get(parentPiSessionId) ?? []) children.delete(token)
+      for (const token of state.parentTokens.get(parentRuntimeSessionId) ?? []) children.delete(token)
       const parentTokens = new Map(state.parentTokens)
-      parentTokens.delete(parentPiSessionId)
+      parentTokens.delete(parentRuntimeSessionId)
       return { ...state, children, parentTokens }
     })
 
@@ -252,7 +252,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
       return yield* SynchronizedRef.modifyEffect(ref, (state) => Effect.try({
         try: () => {
           const children = new Map(state.children)
-          for (const token of state.parentTokens.get(input.parentPiSessionId) ?? []) {
+          for (const token of state.parentTokens.get(input.parentRuntimeSessionId) ?? []) {
             children.delete(token)
           }
           const parentTokens = new Map(state.parentTokens)
@@ -262,7 +262,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
             const profile = childExecutionProfile(input.spec, agent)
             const tools = subagentCapabilityTools(input.registry, profile.role, profile.mode)
             children.set(token, {
-              parentPiSessionId: input.parentPiSessionId,
+              parentRuntimeSessionId: input.parentRuntimeSessionId,
               agent,
               role: profile.role,
               mode: profile.mode,
@@ -276,7 +276,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               version: SUBAGENT_CAPABILITY_VERSION,
               endpoint: state.endpoint,
               token,
-              parentPiSessionId: input.parentPiSessionId,
+              parentRuntimeSessionId: input.parentRuntimeSessionId,
               agent,
               targetId: input.spec.targetCapabilities.targetId,
               role: profile.role,
@@ -284,7 +284,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               tools
             } satisfies SubagentCapability
           })
-          parentTokens.set(input.parentPiSessionId, tokens)
+          parentTokens.set(input.parentRuntimeSessionId, tokens)
           return [capabilities, { ...state, children, parentTokens }] as const
         },
         catch: (cause) => cause instanceof Error
@@ -320,7 +320,7 @@ function* executeCapabilityRequest(
   })
   const state = yield* Ref.get(ref)
   const child = state.children.get(decoded.token)
-  if (!child || child.parentPiSessionId !== decoded.parentPiSessionId) {
+  if (!child || child.parentRuntimeSessionId !== decoded.parentRuntimeSessionId) {
     return yield* writeJson(response, 403, { error: "forbidden" })
   }
   if (!child.grantedToolIds.has(decoded.toolId)) {

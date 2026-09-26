@@ -7,9 +7,10 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   ProviderModelId,
+  piEndpointId,
   runtimeCapabilitiesMatch,
   type AuthKind,
-  type PiRunSpec,
+  type AgentRunSpec,
   type ProviderConnection as ProviderConnectionType,
   type RuntimeCapabilityManifest,
   type StreamEvent
@@ -288,7 +289,7 @@ const specFor = (input: {
   readonly connection: ProviderConnectionType
   readonly target: PiScenarioTarget
   readonly registry: ToolRegistry | undefined
-}): PiRunSpec => {
+}): AgentRunSpec => {
   const { scenarioId, root, connection, target, registry } = input
   const modelId = Schema.decodeUnknownSync(ProviderModelId)(
     `${target.providerId}/${target.modelId}`
@@ -297,6 +298,8 @@ const specFor = (input: {
     runId: `eval-${scenarioId}`,
     sessionId: "eval-session",
     chatId: "eval-chat",
+    runtimeId: "pi",
+    endpointId: piEndpointId(target.capabilities.targetId, connection.id),
     connectionId: connection.id,
     modelId,
     role: "conversation",
@@ -304,7 +307,7 @@ const specFor = (input: {
     cwd: root,
     prompt: promptFor(scenarioId),
     priorMessages: [],
-    piSessionId: null,
+    continuation: null,
     seed: null,
     targetCapabilities: {
       versions: CURRENT_RUNTIME_CONTRACTS,
@@ -342,7 +345,7 @@ const contextFor = (
 const recordPreflight = (
   scenarioId: string,
   authKind: AuthKind,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   targetCapabilities: RuntimeCapabilityManifest,
   observations: Array<EvalObservation>
 ): void => {
@@ -376,7 +379,7 @@ interface ScenarioExecution {
   readonly credentials: ProviderCredentialStore
   readonly registry: ToolRegistry | undefined
   readonly tracker: FileChangeTracker | undefined
-  readonly spec: PiRunSpec
+  readonly spec: AgentRunSpec
   readonly context: AgentRuntimeContext
   readonly targetCapabilities: RuntimeCapabilityManifest
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>

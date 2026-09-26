@@ -1,3 +1,4 @@
+import type { EndpointControlInput, NativeEndpointLogin } from "@jingler/core"
 import type {
   DeviceClaim,
   DeviceChallenge,
@@ -13,6 +14,7 @@ import type {
 } from "@jingler/core"
 import {
   DeviceControlClientMessage,
+  ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS,
   DevicePublicKey as DevicePublicKeySchema,
   DeviceEncryptionPublicKey as DeviceEncryptionPublicKeySchema,
   RemoteDeviceCapabilities as RemoteDeviceCapabilitiesSchema,
@@ -240,6 +242,10 @@ const safeSocketClose = (
 /** Per-user authorization state, plus isolated one-row instances for pending pairings. */
 export class DeviceRegistryObject extends DurableObject<Env> {
   private scheduledAlarmAt: number | null | undefined
+  private readonly pendingEndpointRequests = new Map<
+    string,
+    { readonly deviceId: string; readonly action: EndpointControlInput["action"]; readonly targetId: string; readonly deadlineAt: number; readonly socket: WebSocket; readonly finish: (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => void }
+  >()
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
@@ -411,6 +417,9 @@ export class DeviceRegistryObject extends DurableObject<Env> {
         { status: 403 }
       )
     }
+    for (const pending of this.pendingEndpointRequests.values()) {
+      if (pending.deviceId === deviceId) pending.finish(null)
+    }
     for (const socket of this.ctx.getWebSockets(`device:${deviceId}`)) {
       safeSocketClose(socket, 4002, "Connection replaced")
     }
@@ -475,6 +484,9 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       safeSocketClose(socket, 4003, "Device revoked")
       return
     }
+    if (message.type === "endpoint-catalog-update") {
+      return this.receiveEndpointCatalog(socket, attachment, message, nowSeconds)
+    }
     if (message.type === "announce") {
       this.ctx.storage.sql.exec(
         `INSERT INTO device_discovery (device_id, discovery_json, updated_at)
@@ -499,6 +511,67 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     }
   }
 
+  private async receiveEndpointCatalog(
+    socket: WebSocket,
+    attachment: DeviceSocketAttachment,
+    message: Extract<Schema.Schema.Type<typeof DeviceControlClientMessage>, { type: "endpoint-catalog-update" }>,
+    nowSeconds: number
+  ): Promise<void> {
+    const pending = this.pendingEndpointRequests.get(message.requestId)
+    if (
+      pending === undefined ||
+      pending.socket !== socket ||
+      pending.deviceId !== attachment.deviceId ||
+      pending.targetId !== message.targetId ||
+      Date.now() >= pending.deadlineAt
+    ) {
+      socket.send(JSON.stringify({ type: "error", code: "stale-endpoint-catalog" }))
+      return
+    }
+    const row = this.ctx.storage.sql.exec<DiscoveryRow>(
+      "SELECT discovery_json, updated_at FROM device_discovery WHERE device_id = ?",
+      attachment.deviceId
+    ).toArray()[0]
+    if (row === undefined) {
+      socket.send(JSON.stringify({ type: "error", code: "missing-discovery" }))
+      return
+    }
+    const discovery = Schema.decodeUnknownSync(RemoteDeviceDiscoverySchema)(
+      JSON.parse(row.discovery_json)
+    )
+    if (discovery.capabilities.runtime?.targetId !== message.targetId ||
+        message.catalog.endpoints.some(({ endpoint }) => endpoint.targetId !== message.targetId)) {
+      socket.send(JSON.stringify({ type: "error", code: "wrong-target" }))
+      return
+    }
+    const updated = {
+      ...discovery,
+      capabilities: { ...discovery.capabilities, endpointCatalog: message.catalog }
+    }
+    this.ctx.storage.sql.exec(
+      `UPDATE device_discovery SET discovery_json = ?, updated_at = ? WHERE device_id = ?`,
+      JSON.stringify(updated),
+      nowSeconds,
+      attachment.deviceId
+    )
+    this.ctx.storage.sql.exec(
+      `UPDATE devices SET capabilities_json = ?, updated_at = ?
+       WHERE device_id = ? AND generation = ? AND state = 'active'`,
+      JSON.stringify(updated.capabilities),
+      nowSeconds,
+      attachment.deviceId,
+      attachment.generation
+    )
+    const result = await this.getDiscovery(attachment.deviceId)
+    pending.finish(result ? { ...result, ...(message.login ? { login: message.login } : {}), ...(message.loginError ? { loginError: message.loginError } : {}) } : null)
+    socket.send(JSON.stringify({
+      type: "endpoint-catalog-updated",
+      requestId: message.requestId,
+      at: nowSeconds
+    }))
+    return
+  }
+
   override async webSocketClose(
     socket: WebSocket,
     code: number,
@@ -506,6 +579,9 @@ export class DeviceRegistryObject extends DurableObject<Env> {
     _wasClean: boolean
   ): Promise<void> {
     const attachment = this.socketAttachment(socket)
+    for (const pending of this.pendingEndpointRequests.values()) {
+      if (pending.socket === socket) pending.finish(null)
+    }
     safeSocketClose(socket, code, reason)
     if (
       attachment &&
@@ -839,6 +915,8 @@ export class DeviceRegistryObject extends DurableObject<Env> {
   }
 
   async getDiscovery(deviceId: string): Promise<{
+    login?: typeof NativeEndpointLogin.Type
+    loginError?: string
     readonly version: 1
     readonly deviceId: string
     readonly discovery: RemoteDeviceDiscovery | null
@@ -907,6 +985,47 @@ export class DeviceRegistryObject extends DurableObject<Env> {
       MAX_DEVICE_SESSIONS
     ).toArray()[0]
     return registered !== undefined
+  }
+
+  async requestEndpointCatalog(
+    deviceId: string,
+    targetId: string,
+    requestId: string,
+    action: EndpointControlInput["action"],
+    nowSeconds = Math.floor(Date.now() / 1_000),
+    input?: EndpointControlInput,
+    timeoutMs = ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS
+  ): Promise<Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>> {
+    if (requestId.length === 0 || requestId.length > 128 || this.pendingEndpointRequests.size >= 64 || this.pendingEndpointRequests.has(requestId)) return null
+    const discovery = await this.getDiscovery(deviceId)
+    if (discovery?.discovery?.capabilities.runtime?.targetId !== targetId) return null
+    const sockets = this.ctx.getWebSockets(`device:${deviceId}`)
+    const socket = sockets.find((candidate) => {
+      const attachment = this.socketAttachment(candidate)
+      const device = this.deviceRow(deviceId)
+      return attachment && device?.state === "active" &&
+        attachment.generation === device.generation && attachment.expiresAt > nowSeconds
+    })
+    if (!socket || this.pendingEndpointRequests.size >= 64 || this.pendingEndpointRequests.has(requestId)) return null
+    // Superseded responses must never overwrite a newer request's discovery.
+    for (const pending of this.pendingEndpointRequests.values()) {
+      if (pending.deviceId === deviceId && !pending.action.startsWith("login-") && !action.startsWith("login-")) pending.finish(null)
+    }
+    return new Promise((resolve) => {
+      const finish = (value: Awaited<ReturnType<DeviceRegistryObject["getDiscovery"]>>) => {
+        clearTimeout(timer)
+        this.pendingEndpointRequests.delete(requestId)
+        resolve(value)
+      }
+      const deadlineAt = Date.now() + timeoutMs
+      const timer = setTimeout(() => finish(null), timeoutMs)
+      this.pendingEndpointRequests.set(requestId, { deviceId, action, targetId, deadlineAt, socket, finish })
+      try {
+        socket.send(JSON.stringify({ type: "endpoint-catalog-request", version: 1, requestId, deadlineAt, targetId, action, endpointId: input?.endpointId, loginId: input?.loginId }))
+      } catch {
+        finish(null)
+      }
+    })
   }
 
   async notifySession(

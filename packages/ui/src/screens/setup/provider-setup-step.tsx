@@ -1,4 +1,6 @@
+import { NativeEndpointLogin, type NativeEndpointLoginActions } from "../../composites/native-endpoint-login.js"
 import type {
+  AgentEndpointCatalog,
   AuthKind,
   CodexLoginMethod,
   ProviderCatalog,
@@ -18,6 +20,8 @@ import {
 
 export interface ProviderSetupStepProps {
   catalog: ProviderCatalog | null;
+  nativeEndpointLogin?: NativeEndpointLoginActions;
+  endpointCatalog?: AgentEndpointCatalog | null;
   loginEvent: ProviderLoginEvent | null;
   busy: boolean;
   pendingAuthKind?: AuthKind | null;
@@ -31,8 +35,23 @@ export interface ProviderSetupStepProps {
   onRetry: () => void;
 }
 
+const canUseProviderCatalog = (catalog: ProviderCatalog | null, endpoints: AgentEndpointCatalog["endpoints"]): boolean =>
+  endpoints.some(({ endpoint, models }) => endpoint.status === "ready" && models.some(({ selectable }) => selectable)) ||
+  catalog?.connections.some(({ connection }) => connection.status === "authenticated") === true
+
+const providerProgressLabel = (pendingAuthKind: AuthKind | null) =>
+    pendingAuthKind === "claude-setup-token"
+      ? "Connecting Claude…"
+      : pendingAuthKind === "openai-codex-oauth"
+        ? "Connecting Codex…"
+        : pendingAuthKind === "api-key"
+          ? "Saving API key…"
+          : "Updating provider connections…";
+
 export function ProviderSetupStep({
   catalog,
+  endpointCatalog = null,
+  nativeEndpointLogin,
   loginEvent,
   busy,
   pendingAuthKind = null,
@@ -45,10 +64,8 @@ export function ProviderSetupStep({
   onCancel,
   onRetry,
 }: ProviderSetupStepProps) {
-  const canContinue =
-    catalog?.connections.some(
-      ({ connection }) => connection.status === "authenticated",
-    ) === true;
+  const detectedEndpoints = endpointCatalog?.endpoints ?? []
+  const canContinue = canUseProviderCatalog(catalog, detectedEndpoints)
   const authenticatedConnections =
     catalog?.connections.filter(
       ({ connection }) => connection.status === "authenticated",
@@ -74,14 +91,7 @@ export function ProviderSetupStep({
       return true;
     },
   );
-  const progressLabel =
-    pendingAuthKind === "claude-setup-token"
-      ? "Connecting Claude…"
-      : pendingAuthKind === "openai-codex-oauth"
-        ? "Connecting Codex…"
-        : pendingAuthKind === "api-key"
-          ? "Saving API key…"
-          : "Updating provider connections…";
+  const progressLabel = providerProgressLabel(pendingAuthKind)
 
   const authForms = (
     <ProviderAuthForms
@@ -105,6 +115,24 @@ export function ProviderSetupStep({
           subscription connection never falls back to an API key.
         </p>
       </div>
+
+      {detectedEndpoints.length > 0 && (
+        <div aria-label="Detected agent runtimes" className="rounded-xl border border-line bg-sunken p-3">
+          <div className="text-xs font-semibold text-text-bright">Detected agent runtimes</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {detectedEndpoints.map(({ endpoint }) => (
+              <div
+                key={endpoint.id}
+                className={endpoint.status === "ready"
+                  ? "rounded-full border border-green/30 bg-green/10 px-2.5 py-1 text-xs text-green"
+                  : "rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-muted-foreground"}
+              >
+                <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && (
         <Callout tone="red">

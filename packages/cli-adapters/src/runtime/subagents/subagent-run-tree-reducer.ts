@@ -22,7 +22,7 @@ export interface SubagentNodeClock {
 }
 
 export interface SubagentRunTreeContext {
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly nodes: ReadonlyArray<SubagentFleetNode>
   readonly seenEventIds: ReadonlyArray<string>
   readonly nodeClocks: ReadonlyArray<SubagentNodeClock>
@@ -33,8 +33,8 @@ export interface SubagentRunTreeContext {
   readonly activeCapacity: { readonly used: number; readonly limit: number }
 }
 
-const belongsToParent = (parentPiSessionId: string, id: string): boolean =>
-  id.startsWith(`${parentPiSessionId}/`)
+const belongsToParent = (parentRuntimeSessionId: string, id: string): boolean =>
+  id.startsWith(`${parentRuntimeSessionId}/`)
 
 const createsCycle = (
   nodes: ReadonlyArray<SubagentFleetNode>,
@@ -98,22 +98,22 @@ const withSeen = (
 })
 
 const validNode = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   node: SubagentFleetNode
 ): boolean =>
-  node.parentPiSessionId === parentPiSessionId &&
-  node.id === `${parentPiSessionId}/${encodeURIComponent(node.subagentId)}` &&
-  belongsToParent(parentPiSessionId, node.id) &&
-  (node.parentId === null || belongsToParent(parentPiSessionId, node.parentId))
+  node.parentRuntimeSessionId === parentRuntimeSessionId &&
+  node.id === `${parentRuntimeSessionId}/${encodeURIComponent(node.subagentId)}` &&
+  belongsToParent(parentRuntimeSessionId, node.id) &&
+  (node.parentId === null || belongsToParent(parentRuntimeSessionId, node.parentId))
 
 const reconcileSnapshot = (
   current: SubagentRunTreeContext,
   snapshot: SubagentFleetSnapshot
 ): SubagentRunTreeContext => {
   if (
-    snapshot.parentPiSessionId !== current.parentPiSessionId ||
+    snapshot.parentRuntimeSessionId !== current.parentRuntimeSessionId ||
     snapshot.registryRevision < current.registryRevision ||
-    snapshot.nodes.some((node) => !validNode(current.parentPiSessionId, node))
+    snapshot.nodes.some((node) => !validNode(current.parentRuntimeSessionId, node))
   ) return current
   const activeIds = new Set(snapshot.nodes.map(({ id }) => id))
   let nodes = current.nodes
@@ -184,7 +184,7 @@ export const reduceSubagentFleetEvent = (
     return reconciled === context ? context : withSeen(reconciled, event)
   }
   if (event._tag === "Remove") {
-    if (!belongsToParent(context.parentPiSessionId, event.id)) return context
+    if (!belongsToParent(context.parentRuntimeSessionId, event.id)) return context
     const clock = clockFor(context.nodeClocks, event.id)
     if (clock && clock.registryRevision > event.registryRevision) return withSeen(context, event)
     return withSeen({
@@ -200,7 +200,7 @@ export const reduceSubagentFleetEvent = (
       registryRevision: Math.max(context.registryRevision, event.registryRevision)
     }, event)
   }
-  if (!validNode(context.parentPiSessionId, event.node)) return context
+  if (!validNode(context.parentRuntimeSessionId, event.node)) return context
   const clock = clockFor(context.nodeClocks, event.node.id)
   if (
     clock &&
@@ -222,9 +222,9 @@ export const reduceSubagentFleetEvent = (
 }
 
 export const emptySubagentRunTree = (
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
 ): SubagentRunTreeContext => ({
-  parentPiSessionId,
+  parentRuntimeSessionId,
   nodes: [],
   seenEventIds: [],
   nodeClocks: [],

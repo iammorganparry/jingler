@@ -3,7 +3,7 @@ import type {
   AgentRosterEntry,
   ExplanationPayload,
   PeerAgentMessageResult,
-  PiRunSpec,
+  AgentRunSpec,
   QuestionAnswer,
   QuestionRequest,
   StreamEvent
@@ -23,7 +23,7 @@ import type { JinglerMcpAttachments } from "./runtime/tools/mcp-tools.js"
 export type RemoteMcpServer = RuntimeRemoteMcpServer
 
 /** Canonical parameters for one turn through the embedded pi runtime. */
-export interface AgentTurnSpec extends Omit<PiRunSpec, "runId"> {
+export interface AgentTurnSpec extends Omit<AgentRunSpec, "runId"> {
   /** Images the operator attached as context for this turn (empty when none). */
   readonly images: ReadonlyArray<Attachment>
   /** Secret-bearing, main-process-only capabilities; never persisted or sent over RPC. */

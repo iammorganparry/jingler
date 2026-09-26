@@ -39,12 +39,12 @@ const messageTime = (agent: Subagent): number => {
 }
 
 export const legacySubagentNodeId = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   agentId: string
-): string => subagentFleetNodeId(parentPiSessionId, `legacy:${agentId}`)
+): string => subagentFleetNodeId(parentRuntimeSessionId, `legacy:${agentId}`)
 
 export const projectLegacySubagents = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   agents: ReadonlyArray<Subagent>
 ): ReadonlyArray<SubagentFleetEvent> => {
   const ids = new Set(agents.map(({ id }) => id))
@@ -52,7 +52,7 @@ export const projectLegacySubagents = (
     const occurredAt = messageTime(agent)
     const status = legacyStatus(agent.status)
     const node: SubagentFleetNode = {
-      id: legacySubagentNodeId(parentPiSessionId, agent.id),
+      id: legacySubagentNodeId(parentRuntimeSessionId, agent.id),
       subagentId: `legacy:${agent.id}`,
       orchestrationRunId: `legacy:${agent.parentId ?? agent.id}`,
       nodeKind: "agent",
@@ -61,9 +61,9 @@ export const projectLegacySubagents = (
       runId: `legacy:${agent.id}`,
       parentId:
         agent.parentId !== null && ids.has(agent.parentId)
-          ? legacySubagentNodeId(parentPiSessionId, agent.parentId)
+          ? legacySubagentNodeId(parentRuntimeSessionId, agent.parentId)
           : null,
-      parentPiSessionId,
+      parentRuntimeSessionId,
       agent: agent.name,
       task: agent.description,
       model: null,
@@ -105,45 +105,45 @@ export const projectLegacySubagents = (
 }
 
 const parentOf = (event: SubagentFleetEvent): string | null => {
-  if (event._tag === "Snapshot") return event.snapshot.parentPiSessionId
-  if (event._tag === "Upsert") return event.node.parentPiSessionId
+  if (event._tag === "Snapshot") return event.snapshot.parentRuntimeSessionId
+  if (event._tag === "Upsert") return event.node.parentRuntimeSessionId
   return null
 }
 
-export const parentPiSessionIdFromFleetEvents = (
+export const parentRuntimeSessionIdFromFleetEvents = (
   events: ReadonlyArray<SubagentFleetEvent>,
   fallback: string
 ): string => {
-  let latest: { readonly parentPiSessionId: string; readonly occurredAt: number } | null = null
+  let latest: { readonly parentRuntimeSessionId: string; readonly occurredAt: number } | null = null
   for (const event of events) {
-    const parentPiSessionId = parentOf(event)
+    const parentRuntimeSessionId = parentOf(event)
     if (
-      parentPiSessionId !== null &&
+      parentRuntimeSessionId !== null &&
       (latest === null || event.occurredAt >= latest.occurredAt)
     ) {
-      latest = { parentPiSessionId, occurredAt: event.occurredAt }
+      latest = { parentRuntimeSessionId, occurredAt: event.occurredAt }
     }
   }
-  return latest?.parentPiSessionId ?? fallback
+  return latest?.parentRuntimeSessionId ?? fallback
 }
 
 const belongsToParent = (
   event: SubagentFleetEvent,
-  parentPiSessionId: string
+  parentRuntimeSessionId: string
 ): boolean => {
   const parent = parentOf(event)
-  if (parent !== null) return parent === parentPiSessionId
+  if (parent !== null) return parent === parentRuntimeSessionId
   return event._tag === "Remove" &&
-    event.id.startsWith(`${parentPiSessionId}/`)
+    event.id.startsWith(`${parentRuntimeSessionId}/`)
 }
 
 export const projectSubagentFleetEvents = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   events: ReadonlyArray<SubagentFleetEvent>
 ): SubagentRunTreeContext =>
   events
-    .filter((event) => belongsToParent(event, parentPiSessionId))
-    .reduce(reduceSubagentFleetEvent, emptySubagentRunTree(parentPiSessionId))
+    .filter((event) => belongsToParent(event, parentRuntimeSessionId))
+    .reduce(reduceSubagentFleetEvent, emptySubagentRunTree(parentRuntimeSessionId))
 
 const ACTIVE_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set([
   "queued",
@@ -156,9 +156,9 @@ export const settleStoppedFleet = (
   events: ReadonlyArray<SubagentFleetEvent>,
   occurredAt: number
 ): ReadonlyArray<SubagentFleetEvent> => {
-  const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
-  if (parentPiSessionId === "") return events
-  const activeNodes = projectSubagentFleetEvents(parentPiSessionId, events).nodes.filter((node) =>
+  const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(events, "")
+  if (parentRuntimeSessionId === "") return events
+  const activeNodes = projectSubagentFleetEvents(parentRuntimeSessionId, events).nodes.filter((node) =>
     ACTIVE_STATUSES.has(node.status)
   )
   if (activeNodes.length === 0) return events
@@ -192,13 +192,13 @@ export const subagentFleetMachine = setup({
   types: {
     context: {} as SubagentFleetContext,
     events: {} as SubagentFleetUiEvent,
-    input: {} as { readonly parentPiSessionId: string }
+    input: {} as { readonly parentRuntimeSessionId: string }
   }
 }).createMachine({
   id: "subagent-fleet",
   initial: "ready",
   context: ({ input }) => ({
-    tree: emptySubagentRunTree(input.parentPiSessionId),
+    tree: emptySubagentRunTree(input.parentRuntimeSessionId),
     selectedId: MAIN_FLEET_AGENT
   }),
   states: {
@@ -206,13 +206,13 @@ export const subagentFleetMachine = setup({
       on: {
         SYNC: {
           actions: assign(({ context, event }) => {
-            const parentPiSessionId = parentPiSessionIdFromFleetEvents(
+            const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(
               event.events,
-              context.tree.parentPiSessionId
+              context.tree.parentRuntimeSessionId
             )
-            const tree = projectSubagentFleetEvents(parentPiSessionId, event.events)
+            const tree = projectSubagentFleetEvents(parentRuntimeSessionId, event.events)
             const parentChanged =
-              parentPiSessionId !== context.tree.parentPiSessionId
+              parentRuntimeSessionId !== context.tree.parentRuntimeSessionId
             return {
               tree,
               selectedId:

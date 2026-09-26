@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { AgentEndpointId } from "@jingler/core"
 import type { Session, SubagentFleetEvent, SubagentFleetNode, SubagentFleetSnapshot } from "@jingler/core"
 import {
   emptySubagentRunTree,
@@ -39,7 +40,7 @@ const node: SubagentFleetNode = {
   childSequence: 1,
   runId: "run-1",
   parentId: null,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "worker",
   task: "Test recovery",
   model: null,
@@ -76,7 +77,7 @@ const upsert: SubagentFleetEvent = {
 
 const snapshot = (over: Partial<SubagentFleetSnapshot> = {}): SubagentFleetSnapshot => ({
   version: 2,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   registryRevision: 20,
   generatedAt: 20,
   totalActive: 0,
@@ -88,6 +89,8 @@ const snapshot = (over: Partial<SubagentFleetSnapshot> = {}): SubagentFleetSnaps
 
 const tree = (...events: ReadonlyArray<SubagentFleetEvent>) =>
   events.reduce(reduceSubagentFleetEvent, emptySubagentRunTree("parent"))
+
+const endpointId = AgentEndpointId.make("desktop:pi:test")
 
 const session = {
   id: "session-1",
@@ -106,7 +109,9 @@ const session = {
     title: "Main",
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z",
-    piSessionId: "parent"
+    runtimeId: "pi",
+    endpointId,
+    continuation: { runtimeId: "pi", endpointId, id: "parent" }
   }],
   mode: "auto"
 } as Session

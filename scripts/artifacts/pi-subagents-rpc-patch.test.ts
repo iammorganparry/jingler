@@ -179,7 +179,7 @@ describe("Jingler pi-subagents compatibility patch", () => {
         version: 1,
         endpoint: "http://127.0.0.1:1/v1/subagent-tool",
         token: "fixture-token",
-        parentPiSessionId: parent,
+        parentRuntimeSessionId: parent,
         agent,
         targetId: "desktop",
         role: "conversation",

@@ -7,7 +7,7 @@ import type {
 import { isSubagentFleetNodeNewer } from "@jingler/cli-adapters/runtime/subagents/subagent-run-tree-reducer"
 import {
   MAIN_FLEET_AGENT,
-  parentPiSessionIdFromFleetEvents,
+  parentRuntimeSessionIdFromFleetEvents,
   projectLegacySubagents,
   projectSubagentFleetEvents
 } from "./subagent-fleet-machine.js"
@@ -122,22 +122,22 @@ export const completedSubagentNodes = (
 export const projectSubagentTabs = (input: {
   readonly sessionId: string
   readonly chatId: string
-  readonly piSessionId: string | null
+  readonly continuation: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
   readonly legacyAgents: ReadonlyArray<Subagent>
   readonly canonicalNodes?: ReadonlyArray<SubagentFleetNode>
 }): SubagentTabSnapshot => {
-  const parentPiSessionId = parentPiSessionIdFromFleetEvents(
+  const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(
     input.events,
-    input.piSessionId ?? `${input.sessionId}:${input.chatId}`
+    input.continuation ?? `${input.sessionId}:${input.chatId}`
   )
-  const legacyEvents = projectLegacySubagents(parentPiSessionId, input.legacyAgents)
+  const legacyEvents = projectLegacySubagents(parentRuntimeSessionId, input.legacyAgents)
   const events = [...input.events, ...legacyEvents]
   const nodes = input.canonicalNodes === undefined
-    ? projectSubagentFleetEvents(parentPiSessionId, events).nodes
+    ? projectSubagentFleetEvents(parentRuntimeSessionId, events).nodes
     : [
         ...input.canonicalNodes,
-        ...projectSubagentFleetEvents(parentPiSessionId, legacyEvents).nodes
+        ...projectSubagentFleetEvents(parentRuntimeSessionId, legacyEvents).nodes
       ]
   return {
     chatId: input.chatId,

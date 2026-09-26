@@ -261,13 +261,14 @@ export const serveDevice = async (
       {
         refreshGrant: createDeviceGrantRefresher(enrollment, identity),
         connect: connectDeviceWebSocket,
-        discover: () =>
+        discover: (requestSignal) =>
           Effect.runPromise(
             discoverLiveDeviceCapabilities(
               paths.jinglerRoot,
               DEVICE_AGENT_VERSION,
               enrollment.deviceId
-            )
+            ),
+            requestSignal ? { signal: requestSignal } : undefined
           ),
         sleep: abortableSleep,
         handleSessionRequest: (request) => {

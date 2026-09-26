@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest"
 import {
+  AgentEndpointCatalog,
   CURRENT_RUNTIME_CONTRACTS,
   Environment,
   ProviderCatalog,
@@ -12,6 +13,7 @@ import {
   DEFAULT_PLAN_SPLIT_RATIO,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
+import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import { providerRebindOf, providerRecoveryOf } from "./provider-recovery.js"
 
 describe("conversation/plan split ratio", () => {
@@ -26,6 +28,21 @@ describe("conversation/plan split ratio", () => {
     expect(clampedPlanSplitRatio(0.9, 801)).toBeCloseTo(0.55)
     expect(clampedPlanSplitRatio(0.1, 801)).toBeCloseTo(0.45)
     expect(clampedPlanSplitRatio(0.9, 721)).toBe(0.5)
+  })
+})
+
+describe("session endpoint targeting", () => {
+  const session = { environmentId: "device-one" } as Session
+  const owned = { id: "device-one", kind: "owned", capabilities: { runtime: { targetId: "target-one" } } } as Environment
+  const catalog = { endpoints: [{ endpoint: { targetId: "desktop" }, models: [] }], refreshedAt: "2026-01-01T00:00:00.000Z", stale: false } as unknown as AgentEndpointCatalog
+
+  it("uses the runtime target rather than the environment record id", () => {
+    expect(runtimeTargetForSession(session, [owned])).toBe("target-one")
+  })
+
+  it("falls back to provider models when managed discovery has no endpoints", () => {
+    const managed = { ...owned, kind: "managed" } as Environment
+    expect(endpointCatalogForSession(session, [managed], catalog)).toBeNull()
   })
 })
 

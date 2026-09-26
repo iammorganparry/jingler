@@ -89,7 +89,7 @@ export const SubagentFleetNode = Schema.Struct({
   childSequence: Schema.Number,
   runId: Schema.String,
   parentId: Schema.NullOr(Schema.String),
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   agent: Schema.String,
   task: Schema.String,
   model: Schema.NullOr(Schema.String),
@@ -111,13 +111,13 @@ export const SubagentFleetNode = Schema.Struct({
 export type SubagentFleetNode = Schema.Schema.Type<typeof SubagentFleetNode>
 
 export const subagentFleetNodeId = (
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   subagentId: string
-): string => `${parentPiSessionId}/${encodeURIComponent(subagentId)}`
+): string => `${parentRuntimeSessionId}/${encodeURIComponent(subagentId)}`
 
 export const SubagentFleetSnapshot = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   registryRevision: Schema.Number,
   generatedAt: Schema.Number,
   totalActive: Schema.Number,
@@ -165,7 +165,7 @@ export type SubagentFleetControlAction = Schema.Schema.Type<
 export const SubagentFleetControlRequest = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   requestId: SubagentFleetMessageId,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   runId: Schema.String,
   action: SubagentFleetControlAction,
   message: Schema.NullOr(Schema.String),
@@ -224,7 +224,7 @@ export const SubagentSiblingSummary = Schema.Struct({
 
 export const SubagentSupervisorSnapshot = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   registryRevision: Schema.Number,
   status: SubagentSupervisorStatus,
   goalRevision: Schema.Number,
@@ -239,7 +239,7 @@ export type SubagentSupervisorSnapshot = Schema.Schema.Type<
 export const SubagentChildStateEvent = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   eventId: SubagentFleetMessageId,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   subagentId: Schema.String,
   orchestrationRunId: Schema.String,
   childSequence: Schema.Number,
@@ -257,7 +257,7 @@ export const SubagentControlEnvelope = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   messageId: SubagentFleetMessageId,
   idempotencyKey: Schema.String,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   subagentId: Schema.String,
   orchestrationRunId: Schema.String,
   sequence: Schema.Number,
@@ -272,7 +272,7 @@ export type SubagentControlEnvelope = Schema.Schema.Type<typeof SubagentControlE
 export const SubagentControlReceipt = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   messageId: SubagentFleetMessageId,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   subagentId: Schema.String,
   sequence: Schema.Number,
   status: SubagentControlDeliveryStatus,
@@ -284,7 +284,7 @@ export type SubagentControlReceipt = Schema.Schema.Type<typeof SubagentControlRe
 export const SubagentAttentionRequest = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   requestId: SubagentFleetMessageId,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   subagentId: Schema.String,
   orchestrationRunId: Schema.String,
   reason: SubagentFleetAttentionReason,
@@ -298,7 +298,7 @@ export const SubagentAttentionReply = Schema.Struct({
   version: Schema.Literal(SUBAGENT_FLEET_PROTOCOL_VERSION),
   requestId: SubagentFleetMessageId,
   messageId: SubagentFleetMessageId,
-  parentPiSessionId: Schema.String,
+  parentRuntimeSessionId: Schema.String,
   subagentId: Schema.String,
   message: Schema.String,
   createdAt: Schema.Number

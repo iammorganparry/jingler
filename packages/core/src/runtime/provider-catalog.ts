@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { ReasoningEffort } from "../domain.js"
+import { ReasoningEffort } from "./reasoning-effort.js"
 import { ProviderConnection, ProviderId, ProviderModelId } from "./provider-connection.js"
 
 export const ProviderModelCapabilities = Schema.Struct({

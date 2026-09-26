@@ -1,5 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { appShell, expect, test, type LaunchedApp } from "./fixtures.js";
 
 const SUBSCRIPTION_ENTITLEMENT = /Test subscription · subscription/;
@@ -422,3 +422,19 @@ test("imports every detected agent resource in one action", async ({
     launched.window.getByText("resource-12", { exact: true }),
   ).toBeVisible();
 });
+
+test("detects native Claude during onboarding without a PI connection", async ({ launchApp }) => {
+  const launched = await launchApp({
+    withRepo: true,
+    piFixture: { scenarioId: "composer-capabilities", authRoute: "openai-codex-oauth", seedConnection: false },
+    e2eEnv: { JINGLER_CLAUDE_BINARY: resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs") }
+  })
+  await chooseFixtureRepo(launched)
+  await expect(launched.window.getByText("Claude Code", { exact: true }).first()).toBeVisible()
+  await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(launched.window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
+  await launched.window.getByRole("button", { name: "Skip for now" }).click()
+  await expect(appShell(launched.window)).toBeVisible()
+  await launched.window.reload()
+  await expect(appShell(launched.window)).toBeVisible()
+})

@@ -1,4 +1,6 @@
+import { NativeEndpointLogin, type NativeEndpointLoginActions } from "./native-endpoint-login.js"
 import {
+  type AgentEndpointCatalog,
   type AuthKind,
   type CodexLoginMethod,
   ProviderConnectionId,
@@ -81,6 +83,8 @@ const ModelChip = ({
 
 export interface ProviderConnectionsSettingsProps {
   catalog: ProviderCatalog | null
+  nativeEndpointLogin?: NativeEndpointLoginActions
+  endpointCatalog?: AgentEndpointCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
   busy?: boolean
@@ -111,6 +115,8 @@ export interface ProviderConnectionsSettingsProps {
 
 export function ProviderConnectionsSettings({
   catalog,
+  endpointCatalog = null,
+  nativeEndpointLogin,
   defaultConnectionId = null,
   defaultModelId = null,
   busy = false,
@@ -186,6 +192,18 @@ export function ProviderConnectionsSettings({
           <span className="text-[11.5px] leading-relaxed text-muted-foreground">
             Each connection pins an account, target, and billing route. Jingler never falls through to another credential.
           </span>
+          {endpointCatalog && (
+            <div aria-label="Agent runtime endpoints" className="flex flex-wrap gap-1.5">
+              {endpointCatalog.endpoints.map(({ endpoint }) => (
+                <div
+                  key={endpoint.id}
+                  className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted-foreground"
+                >
+                  <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex flex-1 flex-col gap-1.5 overflow-auto p-3 pt-1">
           {connections.map(({ connection, models }) => (

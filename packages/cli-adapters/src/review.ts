@@ -7,7 +7,7 @@ import type {
   ReviewSeverity,
   StreamEvent
 } from "@jingler/core"
-import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, piEndpointId, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, RcMap, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
@@ -430,11 +430,13 @@ function* prepareReviewTurn(
         const baseSpec: AgentTurnSpec = {
           sessionId: input.sessionId,
           chatId: reviewChatId ?? input.sessionId,
+          runtimeId: "pi",
+          endpointId: piEndpointId(input.targetId ?? "desktop", input.connectionId),
           connectionId: input.connectionId,
           modelId: input.modelId,
           role: "review",
           priorMessages: [],
-          piSessionId: null,
+          continuation: null,
           seed: null,
           targetCapabilities: {
             versions: CURRENT_RUNTIME_CONTRACTS,

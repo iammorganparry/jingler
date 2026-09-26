@@ -45,7 +45,7 @@ function ComposerFixture() {
       connectionId={connectionId}
       modelId={modelId}
       onSetModel={(selection) => {
-        setConnectionId(selection.connectionId)
+        if (selection.connectionId !== undefined) setConnectionId(selection.connectionId)
         setModelId(selection.modelId)
       }}
       environments={[

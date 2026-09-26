@@ -3,6 +3,9 @@ import { defaultProps } from "../lib/default-props.js"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { planDocumentToPlan } from "@jingler/core"
 import type {
+  AgentEndpointCatalog,
+  AgentEndpointId,
+  AgentRuntimeId,
   Attachment,
   ContextBreakdown,
   GateDecision,
@@ -158,11 +161,15 @@ export interface ConversationViewProps {
   environmentPending?: boolean
   onSetEnvironment?: (environmentId?: string) => void
   providerCatalog?: ProviderCatalog | null
+  agentEndpointCatalog?: AgentEndpointCatalog | null
+  endpointId?: AgentEndpointId | null
   connectionId?: ProviderConnectionId | null
   providerId?: ProviderId | null
   modelId?: ProviderModelId | null
   onSetModel?: (selection: {
-    connectionId: ProviderConnectionId
+    runtimeId: AgentRuntimeId
+    endpointId: AgentEndpointId
+    connectionId?: ProviderConnectionId
     providerId: ProviderId
     modelId: ProviderModelId
   }) => void
@@ -290,7 +297,7 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -457,7 +464,10 @@ function renderSessionAnalytics() {
                 busy={busy}
                 disabledReason={composerDisabledReason}
                 providerCatalog={providerCatalog}
+                agentEndpointCatalog={agentEndpointCatalog}
+                endpointId={endpointId}
                 connectionId={connectionId}
+                providerId={providerId}
                 modelId={modelId}
                 onSetModel={onSetModel}
                 mode={mode}

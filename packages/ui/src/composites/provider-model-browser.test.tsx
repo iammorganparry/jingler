@@ -1,5 +1,5 @@
-import type { ProviderCatalog } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import type { AgentEndpointCatalog, ProviderCatalog } from "@jingler/core"
+import { nativeCliEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -78,6 +78,98 @@ describe("ProviderModelBrowser", () => {
     expect(screen.queryByText("anthropic/claude-sonnet · local")).toBeNull()
     expect(screen.queryByText("Claude Opus stale")).toBeNull()
     fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
-    expect(onSelect).toHaveBeenCalledWith({ connectionId, providerId, modelId })
+    expect(onSelect).toHaveBeenCalledWith({
+      runtimeId: "pi",
+      endpointId: "local:pi:claude-max",
+      connectionId,
+      providerId,
+      modelId
+    })
   })
+
+  it("groups endpoint models by their visible runtime route", () => {
+    const endpointCatalog: AgentEndpointCatalog = {
+      refreshedAt: "2026-08-10T00:00:00.000Z",
+      stale: false,
+      endpoints: [{
+        endpoint: {
+          id: "local:pi:claude-max" as AgentEndpointCatalog["endpoints"][number]["endpoint"]["id"],
+          runtimeId: "pi",
+          targetId: "local",
+          label: "PI · Max account",
+          status: "ready",
+          version: null,
+          features: {
+            steer: "text",
+            planReview: true,
+            subagentFleet: true,
+            backgroundTasks: true
+          }
+        },
+        models: [{
+          ...catalog.connections[0]!.models[0]!,
+          status: "ready"
+        }]
+      }]
+    }
+    const onSelect = vi.fn()
+    render(
+      <ProviderModelBrowser
+        catalog={endpointCatalog}
+        endpointId={null}
+        connectionId={null}
+        modelId={null}
+        onSelect={onSelect}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+    expect(screen.getByRole("group", { name: "PI · Max account" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
+    expect(onSelect).toHaveBeenCalledWith({
+      runtimeId: "pi",
+      endpointId: "local:pi:claude-max",
+      providerId,
+      modelId
+    })
+  })
+})
+
+
+it("selects and displays distinct providers sharing one endpoint and model ID", () => {
+  const endpointId = nativeCliEndpointId("desktop", "opencode")
+  const alpha = ProviderId.make("alpha")
+  const beta = ProviderId.make("beta")
+  const sharedId = ProviderModelId.make("shared")
+  const models = [alpha, beta].map(providerId => ({ ...catalog.connections[0]!.models[0]!, providerId, id: sharedId, label: `Model ${providerId}`, status: "ready" as const }))
+  const endpointCatalog: AgentEndpointCatalog = { refreshedAt: catalog.refreshedAt, stale: false, endpoints: [{ endpoint: { id: endpointId, runtimeId: "opencode", targetId: "desktop", label: "OpenCode CLI", status: "ready", version: "1.18.14", features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } }, models }] }
+  const onSelect = vi.fn()
+  render(<ProviderModelBrowser catalog={endpointCatalog} endpointId={endpointId} connectionId={null} providerId={beta} modelId={sharedId} onSelect={onSelect} />)
+  fireEvent.click(screen.getByRole("button", { name: "Model: Model beta" }))
+  fireEvent.click(screen.getByRole("option", { name: /Model beta/ }))
+  expect(onSelect).toHaveBeenLastCalledWith({ runtimeId: "opencode", endpointId, providerId: beta, modelId: sharedId })
+  fireEvent.click(screen.getByRole("button", { name: "Model: Model beta" }))
+  fireEvent.click(screen.getByRole("option", { name: /Model alpha/ }))
+  expect(onSelect).toHaveBeenLastCalledWith({ runtimeId: "opencode", endpointId, providerId: alpha, modelId: sharedId })
+})
+
+it.each(["missing", "unsupported"] as const)("makes a remote-only endpoint selectable after %s refresh recovery", (status) => {
+  const endpointId = nativeCliEndpointId("device-only", "claude")
+  const entry: AgentEndpointCatalog["endpoints"][number] = {
+    endpoint: { id: endpointId, runtimeId: "claude", targetId: "device-only", label: "Remote Claude", status, version: null,
+      features: { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } },
+    models: [{ ...catalog.connections[0]!.models[0]!, status: "unavailable", selectable: false }]
+  }
+  const onSelect = vi.fn()
+  const props = { endpointId: null, connectionId: null, modelId: null, onSelect }
+  const view = render(<ProviderModelBrowser {...props} catalog={{ refreshedAt: "2026-09-24T00:00:00Z", stale: false, endpoints: [entry] }} />)
+  fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+  const option = screen.queryByRole("option", { name: /Claude Sonnet/i })
+  if (option) fireEvent.click(option)
+  expect(onSelect).not.toHaveBeenCalled()
+  view.rerender(<ProviderModelBrowser {...props} catalog={{ refreshedAt: "2026-09-25T00:00:00.000Z", stale: false,
+    endpoints: [{ ...entry, endpoint: { ...entry.endpoint, status: "ready" }, models: entry.models.map(model => ({ ...model, status: "ready", selectable: true })) }] }} />)
+  if (screen.getByRole("button", { name: "Model: Choose model" }).getAttribute("aria-expanded") !== "true") fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }))
+  fireEvent.click(screen.getByRole("option", { name: /Claude Sonnet/i }))
+  expect(onSelect).toHaveBeenCalledWith({ runtimeId: "claude", endpointId, providerId, modelId })
 })

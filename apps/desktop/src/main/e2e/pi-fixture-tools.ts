@@ -3,7 +3,7 @@ import type {
   PiAgentRuntimeLiveOptions,
   ToolRegistry
 } from "@jingler/cli-adapters"
-import type { PiRunSpec, StreamEvent } from "@jingler/core"
+import type { AgentRunSpec, StreamEvent } from "@jingler/core"
 import { Effect, Schema } from "effect"
 
 export const E2E_BACKGROUND_TOOL = "jingler_e2e_background"
@@ -151,7 +151,7 @@ const startLegacyAgent = (
 
 const executeBackgroundFixture = (
   context: AgentRuntimeContext,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   kind: E2eBackgroundKind
 ): Effect.Effect<{ readonly started: E2eBackgroundKind }> => {
   const taskId = `e2e-background-${spec.runId}`
@@ -167,7 +167,7 @@ const executeBackgroundFixture = (
 
 const registerBackgroundFixtureTool = (
   registry: ToolRegistry,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   context: AgentRuntimeContext
 ): void => {
   registry.register({
@@ -215,10 +215,10 @@ const heldSubagentEvents = (
   direct: boolean
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
-  const parentPiSessionId = `e2e-parent-${runId}`
+  const parentRuntimeSessionId = `e2e-parent-${runId}`
   const at = phase === "start" ? 10 : 20
   const fleetNode = (id: string, agent: string, task: string) =>
-    heldFleetNode(id, agent, task, phase, runId, parentPiSessionId, at)
+    heldFleetNode(id, agent, task, phase, runId, parentRuntimeSessionId, at)
 
   return direct
     ? [fleetNode(first, "Worker", "Inspect direct delegation")]
@@ -230,7 +230,7 @@ const heldSubagentEvents = (
 
 const registerHeldSubagentsTool = (
   registry: ToolRegistry,
-  spec: PiRunSpec,
+  spec: AgentRunSpec,
   context: AgentRuntimeContext
 ): void => {
   registry.register({
@@ -320,7 +320,7 @@ const heldFleetNode = (
   task: string,
   phase: "start" | "settle",
   runId: string,
-  parentPiSessionId: string,
+  parentRuntimeSessionId: string,
   at: number
 ): Extract<StreamEvent, { readonly _tag: "SubagentFleetChanged" }> => ({
   _tag: "SubagentFleetChanged",
@@ -330,7 +330,7 @@ const heldFleetNode = (
     eventId: `${phase}:${id}`,
     occurredAt: at,
     node: {
-      id: `${parentPiSessionId}/${id}`,
+      id: `${parentRuntimeSessionId}/${id}`,
       subagentId: id,
       orchestrationRunId: runId,
       nodeKind: "agent",
@@ -338,7 +338,7 @@ const heldFleetNode = (
       childSequence: phase === "start" ? 1 : 2,
       runId: id,
       parentId: null,
-      parentPiSessionId,
+      parentRuntimeSessionId,
       agent,
       task,
       model: "e2e/pi-fixture:high",

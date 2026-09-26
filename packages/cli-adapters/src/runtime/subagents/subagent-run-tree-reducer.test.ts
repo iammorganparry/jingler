@@ -8,8 +8,8 @@ import {
   reduceSubagentFleetEvent
 } from "./subagent-run-tree-reducer.js"
 
-const createSubagentRunTreeActor = (parentPiSessionId: string) => {
-  let context = emptySubagentRunTree(parentPiSessionId)
+const createSubagentRunTreeActor = (parentRuntimeSessionId: string) => {
+  let context = emptySubagentRunTree(parentRuntimeSessionId)
   const actor = {
     start: () => actor,
     send: ({ event }: { readonly type: "INGEST"; readonly event: SubagentFleetEvent }) => {
@@ -37,7 +37,7 @@ const node = (
   childSequence: 1,
   runId: subagentId,
   parentId,
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agent: "scout",
   task: "Inspect",
   model: "anthropic/claude-test:low",
@@ -99,7 +99,7 @@ describe("subagent run tree reducer", () => {
         occurredAt: 4,
         snapshot: {
           version: 2,
-          parentPiSessionId: "parent",
+          parentRuntimeSessionId: "parent",
           registryRevision: 4,
           generatedAt: 4,
           totalActive: 0,
@@ -132,7 +132,7 @@ describe("subagent run tree reducer", () => {
         occurredAt: 4,
         snapshot: {
           version: 2,
-          parentPiSessionId: "other",
+          parentRuntimeSessionId: "other",
           registryRevision: 4,
           generatedAt: 4,
           totalActive: 2,
@@ -174,7 +174,7 @@ describe("subagent run tree reducer", () => {
       type: "INGEST",
       event: upsert("foreign-upsert", {
         ...node("other/run", 30),
-        parentPiSessionId: "other"
+        parentRuntimeSessionId: "other"
       })
     })
     actor.send({

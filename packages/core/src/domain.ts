@@ -10,6 +10,14 @@ import {
   ProviderModelId,
 } from "./runtime/provider-connection.js";
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js";
+import { ReasoningEffort } from "./runtime/reasoning-effort.js";
+export { ReasoningEffort } from "./runtime/reasoning-effort.js";
+import {
+  AgentEndpointId,
+  AgentRuntimeId,
+  RuntimeContinuation,
+} from "./runtime/agent-endpoint.js";
+import { AgentEndpointCatalog } from "./runtime/agent-endpoint-catalog.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js";
 import { SubagentModelAssignments } from "./runtime/subagent-settings.js";
 import { OffloadComputeSettings } from "./offload-compute.js";
@@ -60,6 +68,7 @@ export const EnvironmentCapabilities = Schema.Struct({
   capabilities: Schema.Array(Schema.String),
   maxConcurrentSessions: Schema.Number,
   runtime: Schema.optional(RuntimeCapabilityManifest),
+  endpointCatalog: Schema.optional(AgentEndpointCatalog),
   providerConnections: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -264,8 +273,8 @@ export type DiffStat = Schema.Schema.Type<typeof DiffStat>;
  * - `ask` — pause for approval before every edit and command,
  * - `accept-edits` — auto-apply file edits, still pause for shell commands,
  * - `auto` — auto-apply edits and run allowlisted commands without prompting,
- * - `plan` — read-only planning: the agent designs a plan for review and cannot
- *   edit or run commands until the operator approves it (see `supportsPlanMode`).
+ * - `plan` — planning with auto permissions; Plannotator controls when a plan
+ *   needs operator review, not workspace access.
  */
 export const PermissionMode = Schema.Literal(
   "ask",
@@ -306,16 +315,6 @@ export type CodexReasoningEffort = Schema.Schema.Type<
  * it independently, and treating "off" as the bottom rung made it possible to
  * send incompatible combinations such as disabled thinking with maximum effort.
  */
-export const ReasoningEffort = Schema.Literal(
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-);
-export type ReasoningEffort = Schema.Schema.Type<typeof ReasoningEffort>;
-
 export const ReasoningSetting = Schema.Struct({
   enabled: Schema.Boolean,
   effort: Schema.optional(ReasoningEffort),
@@ -393,11 +392,13 @@ export const Chat = Schema.Struct({
   reasoning: Schema.optional(ReasoningSetting),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
   contextTokens: Schema.optional(Schema.Number),
-  /** Canonical provider selection and pi continuation identity. */
+  /** Canonical runtime endpoint, provider model, and owned continuation. */
+  runtimeId: Schema.optional(AgentRuntimeId),
+  endpointId: Schema.optional(AgentEndpointId),
   connectionId: Schema.optional(ProviderConnectionId),
   providerId: Schema.optional(ProviderId),
   modelId: Schema.optional(ProviderModelId),
-  piSessionId: Schema.optional(Schema.String),
+  continuation: Schema.optional(RuntimeContinuation),
   modelSelectionRequired: Schema.optional(Schema.Boolean),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   legacyModel: Schema.optional(Schema.String),
@@ -538,11 +539,13 @@ export const Session = Schema.Struct({
   semanticBranchPending: Schema.optional(Schema.Boolean),
   title: Schema.String,
   status: SessionStatus,
-  /** Canonical pi execution identity. */
+  /** Canonical execution identity mirrored from the active chat. */
+  runtimeId: Schema.optional(AgentRuntimeId),
+  endpointId: Schema.optional(AgentEndpointId),
   connectionId: Schema.optional(ProviderConnectionId),
   providerId: Schema.optional(ProviderId),
   modelId: Schema.optional(ProviderModelId),
-  piSessionId: Schema.optional(Schema.String),
+  continuation: Schema.optional(RuntimeContinuation),
   modelSelectionRequired: Schema.optional(Schema.Boolean),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   legacyCli: Schema.optional(Schema.String),
@@ -992,8 +995,7 @@ export const WorkspaceConfig = Schema.Struct({
 });
 export type WorkspaceConfig = Schema.Schema.Type<typeof WorkspaceConfig>;
 
-/** Plan mode runs its (read-only) commands unattended unless told otherwise. */
-/** @deprecated Plan mode now always uses Auto permissions. */
+/** @deprecated Plan mode always uses Auto permissions. */
 export const PLAN_AUTO_RUN_DEFAULT = true;
 
 /** ADHD response shaping is opt-in — it rewrites the voice of every session. */
@@ -1883,7 +1885,9 @@ export const CreateSessionInput = Schema.Struct({
   /** Optional first task, opened as the new workspace's initial composer draft. */
   initialPrompt: Schema.optional(Schema.String),
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: ProviderConnectionId,
+  runtimeId: Schema.optional(AgentRuntimeId),
+  endpointId: Schema.optional(AgentEndpointId),
+  connectionId: Schema.optional(ProviderConnectionId),
   providerId: ProviderId,
   modelId: ProviderModelId,
   /** Optional permission mode selected in the new-session composer. */
@@ -1924,7 +1928,9 @@ export const CreateSessionFromPrInput = Schema.Struct({
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: ProviderConnectionId,
+  runtimeId: Schema.optional(AgentRuntimeId),
+  endpointId: Schema.optional(AgentEndpointId),
+  connectionId: Schema.optional(ProviderConnectionId),
   providerId: ProviderId,
   modelId: ProviderModelId,
   mode: Schema.optional(PermissionMode),
@@ -1960,7 +1966,9 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
   /** Canonical, explicitly authenticated runtime route. */
-  connectionId: ProviderConnectionId,
+  runtimeId: Schema.optional(AgentRuntimeId),
+  endpointId: Schema.optional(AgentEndpointId),
+  connectionId: Schema.optional(ProviderConnectionId),
   providerId: ProviderId,
   modelId: ProviderModelId,
   mode: Schema.optional(PermissionMode),

@@ -8,6 +8,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
+  AgentEndpointCatalog,
   Environment,
   McpConfigEntry,
   McpRemoteAuth,
@@ -22,6 +23,7 @@ import type {
 import {
   agentFileActivityOf,
   clampFontScale,
+  piEndpointId,
   plannotatorProjectionToPlanDocument
 } from "@jingler/core"
 import {
@@ -40,6 +42,7 @@ import {
   useContainerWidth
 } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
+import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
   publishFleetAgentFileActivity,
   releaseFleetAgentFileActivityPublisher,
@@ -155,6 +158,61 @@ function McpRecoveryCards({
   )
 }
 
+const activeChatFor = (session: Session) => session.chats.find((chat) => chat.id === session.activeChatId) ?? session.chats[0]!
+
+const usePlanSplit = () => {
+  const [rowRef, rowWidth] = useContainerWidth()
+  const [ratio, setRatio] = useState(initialPlanSplitRatio)
+  const effectiveRatio = clampedPlanSplitRatio(ratio, rowWidth)
+  const columnRef = useRef<HTMLDivElement | null>(null)
+  const dragRatio = useRef<number | null>(null)
+  const live = useRef({ ratio: effectiveRatio, rowWidth })
+  live.current = { ratio: effectiveRatio, rowWidth }
+  const columnWidth = (value: number) => `calc(${value * 100}% - ${value * PLAN_SPLIT_HANDLE_WIDTH}px)`
+  const adjust = useCallback((deltaX: number) => {
+    const { ratio: current, rowWidth: width } = live.current
+    if (width <= 0) return
+    const next = resizedPlanSplitRatio(dragRatio.current ?? current, width, deltaX)
+    dragRatio.current = next
+    if (columnRef.current) columnRef.current.style.width = columnWidth(next)
+  }, [])
+  const commit = useCallback(() => {
+    const next = dragRatio.current
+    dragRatio.current = null
+    if (next === null) return
+    setRatio(next)
+    try { localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next)) } catch { /* in-memory ratio still works */ }
+  }, [])
+  return { rowRef, columnRef, columnWidth: columnWidth(effectiveRatio), adjust, commit }
+}
+
+const useEnvironmentHandoff = (sessionId: string, busy: boolean) => {
+  const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<string | undefined | null>(null)
+  const [handoffAfterStop, setHandoffAfterStop] = useState<{ environmentId: string | undefined } | null>(null)
+  const continueEnvironmentMutation = useMutation({
+    mutationFn: (environmentId?: string) => rpc.sessionsContinueOnEnvironment(sessionId, environmentId),
+    onSuccess: (continued) => {
+      setContinuationEnvironmentId(null)
+      setHandoffAfterStop(null)
+      publishSessionUpdate(continued)
+    }
+  })
+  const environmentMutation = useMutation({
+    mutationFn: (environmentId?: string) => rpc.sessionsSetEnvironment(sessionId, environmentId),
+    onSuccess: publishSessionUpdate,
+    onError: (error, environmentId) => {
+      if (rpcFailureTag(error) === "EnvironmentHandoffError" && rpcFailureReason(error) === "has-work") setContinuationEnvironmentId(environmentId)
+    }
+  })
+  useEffect(() => {
+    if (handoffAfterStop === null || busy) return
+    const { environmentId } = handoffAfterStop
+    setHandoffAfterStop(null)
+    continueEnvironmentMutation.mutate(environmentId)
+  }, [busy, handoffAfterStop, continueEnvironmentMutation.mutate])
+  return { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation }
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -166,6 +224,7 @@ export function ConversationPane({
   onOpenFile,
   environments,
   providerCatalog,
+  agentEndpointCatalog,
   onSelectFiles,
   onSelectChanges,
   onOpenProviderSettings,
@@ -179,8 +238,10 @@ export function ConversationPane({
   session: Session
   /** Live paired-device catalogue owned by the app-level environment controller. */
   environments: ReadonlyArray<Environment>
-  /** Certified provider connections available on this execution target. */
+  /** PI provider settings and recovery state. */
   providerCatalog?: ProviderCatalog | null
+  /** Selectable runtime endpoints and their models. */
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   /**
    * Which face of the session to show: the transcript, the Plan Review, or both
    * side by side. `split` renders the SAME Plan Review beside the transcript
@@ -222,9 +283,7 @@ export function ConversationPane({
    */
   paneFocused?: boolean
 }) {
-  const activeChat =
-    session.chats.find((chat) => chat.id === session.activeChatId) ??
-    session.chats[0]!
+  const activeChat = activeChatFor(session)
   const localMcpConfig = localMcp(
     session.environmentId,
     mcpServers,
@@ -234,40 +293,7 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
-  const [continuationEnvironmentId, setContinuationEnvironmentId] = useState<
-    string | undefined | null
-  >(null)
-  const [handoffAfterStop, setHandoffAfterStop] = useState<{
-    environmentId: string | undefined
-  } | null>(null)
-  const continueEnvironmentMutation = useMutation({
-    mutationFn: (environmentId?: string) =>
-      rpc.sessionsContinueOnEnvironment(session.id, environmentId),
-    onSuccess: (continued) => {
-      setContinuationEnvironmentId(null)
-      setHandoffAfterStop(null)
-      publishSessionUpdate(continued)
-    }
-  })
-  const environmentMutation = useMutation({
-    mutationFn: (environmentId?: string) =>
-      rpc.sessionsSetEnvironment(session.id, environmentId),
-    onSuccess: publishSessionUpdate,
-    onError: (error, environmentId) => {
-      if (
-        rpcFailureTag(error) === "EnvironmentHandoffError" &&
-        rpcFailureReason(error) === "has-work"
-      ) {
-        setContinuationEnvironmentId(environmentId)
-      }
-    }
-  })
-  useEffect(() => {
-    if (handoffAfterStop === null || convo.busy) return
-    const { environmentId } = handoffAfterStop
-    setHandoffAfterStop(null)
-    continueEnvironmentMutation.mutate(environmentId)
-  }, [convo.busy, handoffAfterStop, continueEnvironmentMutation.mutate])
+  const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
     (enabled: boolean) => {
@@ -320,66 +346,41 @@ export function ConversationPane({
     [session.id]
   )
 
-  // A ratio, not a fixed plan width: the first split gives Plan Review two
-  // thirds and chat one third, then preserves that proportion across window sizes.
-  // The operator's raw ratio stays persisted even if a temporarily narrower
-  // pane has to clamp it to preserve a 360px floor on both columns.
-  const [planSplitRowRef, planSplitRowWidth] = useContainerWidth()
-  const [planSplitRatio, setPlanSplitRatio] = useState(initialPlanSplitRatio)
-  const effectivePlanSplitRatio = clampedPlanSplitRatio(
-    planSplitRatio,
-    planSplitRowWidth
-  )
-  // Same live-drag discipline as the session auxiliary split: a drag's
-  // per-pointermove deltas write the column width to the DOM directly, and
-  // React state commits ONCE on release — a setState per move re-rendered the
-  // conversation AND the whole Plan Review per mouse movement.
-  const planSplitColumnRef = useRef<HTMLDivElement | null>(null)
-  const dragPlanSplitRatio = useRef<number | null>(null)
-  const livePlanSplitState = useRef({
-    ratio: effectivePlanSplitRatio,
-    rowWidth: planSplitRowWidth,
-  })
-  livePlanSplitState.current = {
-    ratio: effectivePlanSplitRatio,
-    rowWidth: planSplitRowWidth,
-  }
-  const planSplitColumnWidth = (ratio: number): string =>
-    `calc(${ratio * 100}% - ${ratio * PLAN_SPLIT_HANDLE_WIDTH}px)`
-  const adjustPlanSplit = useCallback((deltaX: number) => {
-    const { ratio, rowWidth } = livePlanSplitState.current
-    if (rowWidth <= 0) return
-    const next = resizedPlanSplitRatio(
-      dragPlanSplitRatio.current ?? ratio,
-      rowWidth,
-      deltaX
-    )
-    dragPlanSplitRatio.current = next
-    const column = planSplitColumnRef.current
-    if (column) column.style.width = planSplitColumnWidth(next)
-  }, [])
-  const commitPlanSplit = useCallback(() => {
-    const next = dragPlanSplitRatio.current
-    dragPlanSplitRatio.current = null
-    if (next === null) return
-    setPlanSplitRatio(next)
-    try {
-      localStorage.setItem(PLAN_SPLIT_RATIO_KEY, String(next))
-    } catch {
-      /* A private/quota-limited renderer still keeps the in-memory ratio. */
-    }
-  }, [])
+  const {
+    rowRef: planSplitRowRef,
+    columnRef: planSplitColumnRef,
+    columnWidth: planSplitColumnWidth,
+    adjust: adjustPlanSplit,
+    commit: commitPlanSplit
+  } = usePlanSplit()
 
   const providersQuery = useQuery({ queryKey: ["config"], queryFn: () => rpc.configGet() })
+  const sessionTargetId = runtimeTargetForSession(session, environments)
+  const sessionEndpointCatalog = endpointCatalogForSession(session, environments, agentEndpointCatalog)
   // The chips describe the values that will actually be sent. Discovery may
   // offer a recovery choice, but never projects a different harness silently.
-  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(session, convo, providerCatalog, environments)
+  const { providerRecovery, rebindConnectionId, composerDisabledReason } = conversationProviderRecovery(
+    session,
+    convo,
+    providerCatalog,
+    sessionEndpointCatalog,
+    environments
+  )
+  const effectiveComposerDisabledReason = convo.modelPending
+    ? "Saving the selected agent runtime…"
+    : composerDisabledReason
   const { providerId: convoProviderId, modelId: convoModelId, setModel } = convo
   useEffect(() => {
     if (rebindConnectionId === undefined) return
     if (convoProviderId == null || convoModelId == null) return
-    setModel(rebindConnectionId, convoProviderId, convoModelId)
-  }, [rebindConnectionId, convoProviderId, convoModelId, setModel])
+    setModel(
+      "pi",
+      piEndpointId(sessionTargetId, rebindConnectionId),
+      rebindConnectionId,
+      convoProviderId,
+      convoModelId
+    )
+  }, [rebindConnectionId, convoProviderId, convoModelId, sessionTargetId, setModel])
 
   const mutationRecovery = useMutation({
     mutationFn: (input: { readonly runId: string; readonly callId: string }) =>
@@ -640,7 +641,7 @@ export function ConversationPane({
   const fleet = useSubagentFleet({
     sessionId: session.id,
     chatId: activeChat.id,
-    piSessionId: activeChat.piSessionId ?? null,
+    continuation: activeChat.continuation?.id ?? null,
     events: convo.subagentFleetEvents,
     legacyAgents: legacyFleetAgents
   })
@@ -907,7 +908,8 @@ export function ConversationPane({
                 handoffQueued,
                 handoffModel,
                 providerCatalog,
-                composerDisabledReason,
+                agentEndpointCatalog: sessionEndpointCatalog,
+                composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
                 onOpenPlanReview,
                 onForkOntoBranchStable,
@@ -965,7 +967,7 @@ export function ConversationPane({
             ref={planSplitColumnRef}
             data-testid="plan-split-column"
             style={{
-              width: planSplitColumnWidth(effectivePlanSplitRatio)
+              width: planSplitColumnWidth
             }}
             className="flex min-h-0 flex-none flex-col overflow-hidden border-l border-hairline"
           >
@@ -1099,6 +1101,7 @@ function renderMainConversation({
   handoffQueued,
   handoffModel,
   providerCatalog,
+  agentEndpointCatalog,
   composerDisabledReason,
   sendPrompt,
   onOpenPlanReview,
@@ -1133,6 +1136,7 @@ function renderMainConversation({
   handoffQueued: (id: string) => void;
   handoffModel: string | null;
   providerCatalog: ProviderCatalog | null | undefined;
+  agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
   composerDisabledReason: string | undefined;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
@@ -1206,11 +1210,14 @@ function renderMainConversation({
       ? `Hand off — run this in a new chat on ${handoffModel}`
       : "Hand off — run this in a new chat"}
     providerCatalog={providerCatalog}
+    agentEndpointCatalog={agentEndpointCatalog}
+    endpointId={convo.endpointId}
     connectionId={convo.connectionId}
     providerId={convo.providerId}
     modelId={convo.modelId}
     composerDisabledReason={composerDisabledReason}
-    onSetModel={({ connectionId, providerId, modelId }) => convo.setModel(connectionId, providerId, modelId)}
+    onSetModel={({ runtimeId, endpointId, connectionId, providerId, modelId }) =>
+      convo.setModel(runtimeId, endpointId, connectionId, providerId, modelId)}
     onSend={sendPrompt}
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
@@ -1404,13 +1411,13 @@ function useFleetChildTranscript(session: Session, fleet: SubagentFleetControlle
       "subagent-transcript",
       session.id,
       chatId,
-      fleet.selectedNode?.parentPiSessionId,
+      fleet.selectedNode?.parentRuntimeSessionId,
       fleet.selectedNode?.runId
     ],
     queryFn: () => rpc.agentSubagentTranscript(
       session.id,
       chatId,
-      fleet.selectedNode!.parentPiSessionId,
+      fleet.selectedNode!.parentRuntimeSessionId,
       fleet.selectedNode!.runId
     ),
     enabled:
@@ -1442,12 +1449,27 @@ function plannotatorReviewId(projection: Conversation["plannotator"]): string | 
   return projection?.review?.reviewId ?? null
 }
 
-function conversationProviderRecovery(session: Session, convo: Conversation, providerCatalog: ProviderCatalog | undefined | null, environments: ReadonlyArray<Environment>) {
+function conversationProviderRecovery(
+  session: Session,
+  convo: Conversation,
+  providerCatalog: ProviderCatalog | undefined | null,
+  endpointCatalog: AgentEndpointCatalog | undefined | null,
+  environments: ReadonlyArray<Environment>
+) {
+  const nativeReady = convo.runtimeId !== "pi" && endpointCatalog?.endpoints.some(
+    ({ endpoint, models }) =>
+      endpoint.id === convo.endpointId &&
+      endpoint.status === "ready" &&
+      models.some((model) => model.id === convo.modelId && model.providerId === convo.providerId && model.selectable)
+  ) === true
+  if (nativeReady) {
+    return { providerRecovery: undefined, rebindConnectionId: undefined, composerDisabledReason: undefined }
+  }
   const providerSelection = {
     ...convo,
     connectionSelectionRequired: session.connectionSelectionRequired,
     modelSelectionRequired: session.modelSelectionRequired,
-    targetId: session.environmentId ?? "desktop",
+    targetId: runtimeTargetForSession(session, environments),
     target: environments.find((environment) => environment.id === session.environmentId)
   }
   const providerRecovery = providerCatalog

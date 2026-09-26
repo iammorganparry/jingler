@@ -1,4 +1,7 @@
 import type {
+  AgentEndpointCatalog,
+  AgentEndpointId,
+  AgentRuntimeId,
   Attachment,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -15,6 +18,7 @@ import type {
   Project,
   ReasoningSetting
 } from "@jingler/core"
+import { piEndpointId } from "@jingler/core"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
 
@@ -25,6 +29,7 @@ export interface NewWorkspaceDeps {
   environments?: ReadonlyArray<Environment>
   issueProviders?: ReadonlyArray<IssueProviderDescriptor>
   providerCatalog?: ProviderCatalog | null
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   defaultConnectionId?: ProviderConnectionId | null
   defaultModelId?: ProviderModelId | null
   defaultMode?: PermissionMode | null
@@ -59,6 +64,8 @@ export interface NewWorkspaceContext {
   attachments: ReadonlyArray<Attachment>
   mode: PermissionMode
   reasoning?: ReasoningSetting
+  runtimeId: AgentRuntimeId | null
+  endpointId: AgentEndpointId | null
   connectionId: ProviderConnectionId | null
   providerId: ProviderId | null
   modelId: ProviderModelId | null
@@ -66,7 +73,7 @@ export interface NewWorkspaceContext {
   error: string | null
 }
 
-type NewWorkspaceEvent =
+export type NewWorkspaceEvent =
   | { type: "OPEN"; projectId?: string; pr?: PrSummary }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
@@ -82,7 +89,9 @@ type NewWorkspaceEvent =
   | { type: "SET_ATTACHMENTS"; attachments: ReadonlyArray<Attachment> }
   | {
       type: "SET_MODEL"
-      connectionId: ProviderConnectionId
+      runtimeId: AgentRuntimeId
+      endpointId: AgentEndpointId
+      connectionId?: ProviderConnectionId
       providerId: ProviderId
       modelId: ProviderModelId
     }
@@ -95,11 +104,16 @@ type NewWorkspaceEvent =
   | { type: "PROVISION_FAILED"; error: unknown }
 
 const canonicalWorkspaceModel = (context: NewWorkspaceContext) => (
-              context.connectionId !== null &&
+              context.runtimeId !== null &&
+              context.endpointId !== null &&
               context.providerId !== null &&
               context.modelId !== null
                 ? {
-                    connectionId: context.connectionId,
+                    runtimeId: context.runtimeId,
+                    endpointId: context.endpointId,
+                    ...(context.connectionId === null
+                      ? {}
+                      : { connectionId: context.connectionId }),
                     providerId: context.providerId,
                     modelId: context.modelId
                 }
@@ -153,33 +167,70 @@ const preferredBranch = (branches: ReadonlyArray<string>): string =>
   branches.find((branch) => branch === "master") ??
   branches[0] ?? ""
 
+interface ProviderChoice {
+  runtimeId: AgentRuntimeId
+  endpointId: AgentEndpointId
+  connectionId: ProviderConnectionId | null
+  providerId: ProviderId
+  modelId: ProviderModelId
+}
+const preferredProviderChoice = (choices: ReadonlyArray<ProviderChoice>, deps: NewWorkspaceDeps, endpointId: AgentEndpointId | null, connectionId: ProviderConnectionId | null, modelId: ProviderModelId | null, providerId: ProviderId | null) =>
+  choices.find((choice) => choice.endpointId === endpointId && choice.modelId === modelId && (providerId === null || choice.providerId === providerId)) ??
+  choices.find((choice) => choice.connectionId === connectionId && choice.modelId === modelId && (providerId === null || choice.providerId === providerId)) ??
+  choices.find((choice) => choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId) ??
+  choices[0]
+
 const providerSelection = (
   deps: NewWorkspaceDeps,
+  environmentId = "local",
+  currentEndpointId: AgentEndpointId | null = null,
   currentConnectionId: ProviderConnectionId | null = null,
-  currentModelId: ProviderModelId | null = null
+  currentModelId: ProviderModelId | null = null,
+  currentProviderId: ProviderId | null = null
 ): {
+  runtimeId: AgentRuntimeId | null
+  endpointId: AgentEndpointId | null
   connectionId: ProviderConnectionId | null
   providerId: ProviderId | null
   modelId: ProviderModelId | null
 } => {
-  const choices = (deps.providerCatalog?.connections ?? []).flatMap(({ connection, models }) =>
-    models
-      .filter(({ selectable }) => selectable)
-      .map((model) => ({
+  const environment = deps.environments?.find(({ id }) => id === environmentId)
+  const targetId = environmentId === "local"
+    ? "desktop"
+    : (environment?.capabilities.runtime?.targetId ?? environmentId)
+  const endpointChoices = (deps.agentEndpointCatalog?.endpoints ?? [])
+    .filter(({ endpoint }) => endpoint.targetId === targetId)
+    .flatMap(({ endpoint, models }) =>
+      models.filter(({ selectable }) => selectable).map((model) => ({
+        runtimeId: endpoint.runtimeId,
+        endpointId: endpoint.id,
+        connectionId: null,
+        providerId: model.providerId,
+        modelId: model.id
+      }))
+    )
+  const providerChoices = (deps.providerCatalog?.connections ?? []).flatMap(
+    ({ connection, models }) =>
+      models.filter(({ selectable }) => selectable).map((model) => ({
+        runtimeId: "pi" as const,
+        endpointId: piEndpointId(connection.targetId, connection.id),
         connectionId: connection.id,
         providerId: model.providerId,
         modelId: model.id
       }))
   )
-  const selected =
-    choices.find((choice) =>
-      choice.connectionId === currentConnectionId && choice.modelId === currentModelId
-    ) ??
-    choices.find((choice) =>
-      choice.connectionId === deps.defaultConnectionId && choice.modelId === deps.defaultModelId
-    ) ??
-    choices[0]
-  return selected ?? { connectionId: null, providerId: null, modelId: null }
+  const managed = environment?.kind === "managed"
+  const choices = deps.agentEndpointCatalog == null || (managed && endpointChoices.length === 0)
+    ? providerChoices
+    : endpointChoices
+  const selected = preferredProviderChoice(choices, deps, currentEndpointId, currentConnectionId, currentModelId, currentProviderId)
+  return selected ?? {
+    runtimeId: null,
+    endpointId: null,
+    connectionId: null,
+    providerId: null,
+    modelId: null
+  }
 }
 
 const errorText = (cause: unknown, fallback: string): string =>
@@ -272,7 +323,8 @@ export const newWorkspaceMachine = setup({
     canSubmit: ({ context }) =>
       context.resolvedProject !== null &&
       context.baseBranch.length > 0 &&
-      context.connectionId !== null &&
+      context.runtimeId !== null &&
+      context.endpointId !== null &&
       context.providerId !== null &&
       context.modelId !== null &&
       (context.source === "pr" ? context.selectedPr !== null :
@@ -286,7 +338,7 @@ export const newWorkspaceMachine = setup({
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
-      const provider = providerSelection(deps)
+      const provider = providerSelection(deps, "local")
       return {
         projectId: selected?.id ?? "",
         environmentId: "local",
@@ -313,12 +365,21 @@ export const newWorkspaceMachine = setup({
       }
     }),
     syncProviderModels: assign(({ context }) =>
-      providerSelection(context.getDeps(), context.connectionId, context.modelId)
+      providerSelection(
+        context.getDeps(),
+        context.environmentId,
+        context.endpointId,
+        context.connectionId,
+        context.modelId,
+        context.providerId
+      )
     ),
     setProviderModel: assign(({ event }) =>
       event.type === "SET_MODEL"
         ? {
-            connectionId: event.connectionId,
+            runtimeId: event.runtimeId,
+            endpointId: event.endpointId,
+            connectionId: event.connectionId ?? null,
             providerId: event.providerId,
             modelId: event.modelId,
             reasoning: undefined
@@ -376,6 +437,8 @@ export const newWorkspaceMachine = setup({
     attachments: [],
     mode: "auto",
     reasoning: undefined,
+    runtimeId: null,
+    endpointId: null,
     connectionId: null,
     providerId: null,
     modelId: null,
@@ -413,8 +476,9 @@ export const newWorkspaceMachine = setup({
         SET_ENVIRONMENT: {
           target: "loading",
           reenter: true,
-          actions: assign(({ event }) => ({
+          actions: assign(({ context, event }) => ({
             environmentId: event.environmentId,
+            ...providerSelection(context.getDeps(), event.environmentId),
             branches: [],
             baseBranch: "",
             resolvedProject: null,
@@ -430,7 +494,7 @@ export const newWorkspaceMachine = setup({
       on: {
         CLOSE: { target: "closed", actions: "close" },
         SET_PROJECT: { target: "loading", actions: "selectProject" },
-        SET_ENVIRONMENT: { target: "loading", actions: assign(({ event }) => ({ environmentId: event.environmentId, branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null })) },
+        SET_ENVIRONMENT: { target: "loading", actions: assign(({ context, event }) => ({ environmentId: event.environmentId, ...providerSelection(context.getDeps(), event.environmentId), branches: [], baseBranch: "", resolvedProject: null, ...resetSource, error: null })) },
         SET_SOURCE: [
           { guard: "sourceNeedsLoading", target: "sourceLoading", actions: "setSource" },
           { actions: "setSource" }

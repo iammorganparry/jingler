@@ -402,7 +402,7 @@ describe("ContextManager.observe", () => {
       recordingAdapter(GOOD_REPLY, rec)
     )
     const spec = rec.specs[0]!
-    expect(spec.piSessionId).toBeNull()
+    expect(spec.continuation).toBeNull()
     expect(spec.mode).toBe("read-only")
   })
 

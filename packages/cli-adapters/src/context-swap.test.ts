@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { piEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
@@ -41,6 +41,9 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const SESSION = "s_swap"
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max")
+const endpointId = piEndpointId("desktop", connectionId)
+const piContinuation = (id: string) => ({ runtimeId: "pi" as const, endpointId, id })
 
 const installed: FakeCommandHandler = (command, args) => {
   if (command === "which" || command === "where") return { stdout: `/opt/homebrew/bin/${args[0]}` }
@@ -107,7 +110,9 @@ const seed = (over: Partial<Session> = {}) =>
       branch: "chore/swap",
       title: "Swap",
       status: "idle",
-      connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+      runtimeId: "pi",
+      endpointId,
+      connectionId,
       providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
       modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
       diff: { added: 0, removed: 0 },
@@ -128,10 +133,12 @@ const seed = (over: Partial<Session> = {}) =>
         title: null,
         createdAt: now,
         updatedAt: now,
-        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        runtimeId: "pi",
+        endpointId,
+        connectionId,
         providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
         modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
-        piSessionId: over.piSessionId ?? "harness_thread_old",
+        continuation: over.continuation ?? piContinuation("harness_thread_old"),
         ...("contextTokens" in over
           ? over.contextTokens === undefined
             ? {}
@@ -140,7 +147,7 @@ const seed = (over: Partial<Session> = {}) =>
       }],
       activeChatId: SESSION,
       worktreePath: temp.root,
-      piSessionId: "harness_thread_old",
+      continuation: piContinuation("harness_thread_old"),
       ...over
     }
     mkdirSync(temp.root, { recursive: true })
@@ -224,7 +231,7 @@ describe("compaction swap", () => {
   it("starts a fresh pi session instead of resuming the old context", async () => {
     await compactThenPrompt()
     const spec = turnSpec()
-    expect(spec.piSessionId).toBeNull()
+    expect(spec.continuation).toBeNull()
     expect(spec.seed).toBeNull()
   })
 
@@ -304,10 +311,10 @@ describe("compaction swap", () => {
         title: null,
         createdAt: "2026-07-24T00:00:00.000Z",
         updatedAt: "2026-07-24T00:00:00.000Z",
-        connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+        connectionId: connectionId,
         providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
         modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet"),
-        piSessionId: "harness_thread_old"
+        continuation: piContinuation("harness_thread_old")
       }]
     })
     const marker = events.find((e) => e._tag === "ContextCompacted") as { tokensBefore: number }
@@ -323,8 +330,8 @@ describe("compaction swap", () => {
   it("adopts the new pi session and never the abandoned one", async () => {
     const { session } = await compactThenPrompt()
     const chat = session.chats.find((candidate) => candidate.id === session.activeChatId)
-    expect(chat?.piSessionId).toBe("harness_thread_new")
-    expect(chat?.piSessionId).not.toBe("harness_thread_old")
+    expect(chat?.continuation?.id).toBe("harness_thread_new")
+    expect(chat?.continuation?.id).not.toBe("harness_thread_old")
   })
 
   it("applies only once — the turn after a swap resumes normally", async () => {
@@ -342,7 +349,7 @@ describe("compaction swap", () => {
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<AgentTurnSpec>
     )
     // The second turn resumes the conversation the first one established.
-    expect(second.piSessionId).toBe("harness_thread_new")
+    expect(second.continuation?.id).toBe("harness_thread_new")
     expect(second.prompt).not.toContain("CONTEXT COMPACTED")
   })
 })
@@ -358,7 +365,7 @@ describe("no compaction pending", () => {
         return specs[specs.length - 1]!
       }).pipe(Effect.orDie, Effect.provide(layers())) as Effect.Effect<AgentTurnSpec>
     )
-    expect(spec.piSessionId).toBe("harness_thread_old")
+    expect(spec.continuation?.id).toBe("harness_thread_old")
     // "Byte-identical" now means "carries no compaction primer". The standing
     // question-channel note prefixes every turn regardless, so the meaningful
     // assertion is that no summary was spliced in and the user's text is last.

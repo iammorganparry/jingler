@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js"
+import { AgentEndpointCatalog } from "./runtime/agent-endpoint-catalog.js"
 import {
   AuthKind,
   AuthStatus,
@@ -17,6 +18,7 @@ export const DEVICE_GRANT_VERSION = 1 as const
 export const CLIENT_ATTACHMENT_VERSION = 1 as const
 export const REMOTE_SESSION_INVENTORY_VERSION = 1 as const
 export const CONTROLLER_LEASE_VERSION = 1 as const
+export const ENDPOINT_CATALOG_REQUEST_TIMEOUT_MS = 120_000
 /** Upper bound enforced independently by the issuer and relay verifier. */
 export const REMOTE_GRANT_MAX_TTL_SECONDS = 15 * 60
 export const MANAGED_RUNTIME_GRANT_MAX_TTL_SECONDS = 5 * 60
@@ -210,8 +212,9 @@ export const RemoteDeviceCapabilities = Schema.Struct({
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   capabilities: Schema.Array(RemoteDeviceCapability).pipe(Schema.maxItems(16)),
   maxConcurrentSessions: Schema.Int.pipe(Schema.between(1, 64)),
-  /** Present on pi-capable agents; absent only on legacy device records. */
+  /** Target-wide compatibility; runtime-specific versions live on endpoints. */
   runtime: Schema.optional(RuntimeCapabilityManifest),
+  endpointCatalog: Schema.optional(AgentEndpointCatalog),
   providerConnections: Schema.optional(
     Schema.Array(
       Schema.Struct({
@@ -472,7 +475,22 @@ export type RemoteDeviceDiscovery = Schema.Schema.Type<
   typeof RemoteDeviceDiscovery
 >
 
+export const NativeEndpointLogin = Schema.Struct({
+  loginId: Schema.String.pipe(Schema.maxLength(256)),
+  verificationUrl: Schema.String.pipe(Schema.maxLength(2048)),
+  userCode: Schema.String.pipe(Schema.maxLength(256))
+})
+export const EndpointControlInput = Schema.Struct({
+  targetId: Identity,
+  action: Schema.Literal("list", "refresh", "auth-status", "login-start", "login-cancel"),
+  endpointId: Schema.optional(Schema.String.pipe(Schema.maxLength(512))),
+  loginId: Schema.optional(Schema.String.pipe(Schema.maxLength(256)))
+})
+export type EndpointControlInput = Schema.Schema.Type<typeof EndpointControlInput>
+
 export const EnvironmentDiscovery = Schema.Struct({
+  login: Schema.optional(NativeEndpointLogin),
+  loginError: Schema.optional(Schema.String.pipe(Schema.maxLength(256))),
   version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
   deviceId: RemoteDeviceId,
   discovery: Schema.NullOr(RemoteDeviceDiscovery),
@@ -480,12 +498,33 @@ export const EnvironmentDiscovery = Schema.Struct({
 })
 export type EnvironmentDiscovery = Schema.Schema.Type<typeof EnvironmentDiscovery>
 
+export const EndpointCatalogRequest = Schema.Struct({
+  type: Schema.Literal("endpoint-catalog-request"),
+  version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
+  requestId: OpaqueId,
+  deadlineAt: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+  ...EndpointControlInput.fields
+})
+export type EndpointCatalogRequest = Schema.Schema.Type<typeof EndpointCatalogRequest>
+
+export const EndpointCatalogUpdate = Schema.Struct({
+  type: Schema.Literal("endpoint-catalog-update"),
+  version: Schema.Literal(REMOTE_PROTOCOL_VERSION),
+  requestId: OpaqueId,
+  targetId: Identity,
+  catalog: AgentEndpointCatalog,
+  login: Schema.optional(NativeEndpointLogin),
+  loginError: Schema.optional(Schema.String.pipe(Schema.maxLength(256)))
+})
+export type EndpointCatalogUpdate = Schema.Schema.Type<typeof EndpointCatalogUpdate>
+
 export const DeviceControlClientMessage = Schema.Union(
   Schema.Struct({ type: Schema.Literal("ping") }),
   Schema.Struct({
     type: Schema.Literal("announce"),
     discovery: RemoteDeviceDiscovery
-  })
+  }),
+  EndpointCatalogUpdate
 )
 export type DeviceControlClientMessage = Schema.Schema.Type<
   typeof DeviceControlClientMessage

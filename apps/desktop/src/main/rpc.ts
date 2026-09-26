@@ -1,3 +1,5 @@
+import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
+import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 /**
  * RPC transport — the crux of the app.
  *
@@ -16,6 +18,7 @@ import {
   EMPTY_REVIEW_DIFF,
   AgentRunner,
   AgentRuntime,
+  runtimeOwnerForSession,
   AppPaths,
   AssetService,
   AuthService,
@@ -25,6 +28,8 @@ import {
   WebSearchCredentialService,
   makeAgentRuntimeTitleGenerator,
   makeOffloadCommandRouter,
+  projectPiEndpointCatalog,
+  probeClaudeEndpoint,
   EnvironmentService,
   ExplanationStore,
   RemoteSessionService,
@@ -65,7 +70,6 @@ import {
   runPublishMachineExclusive,
   UsageService,
   fetchPiProviderUsage,
-  readLocalClaudeCliAccessToken,
   routePeerAgentMessage,
   adoptableChatIdentities,
   sessionNeedsRuntimeIdentity,
@@ -123,6 +127,10 @@ import {
   Project as ProjectSchema,
   RemotePublishPrepared as RemotePublishPreparedSchema,
   ProviderConnectionError,
+  type AgentEndpointId,
+  type ProviderConnectionId,
+  piEndpointId,
+  providerConnectionIdForPiEndpoint,
   AgentResourceRpcError,
   WEB_SEARCH_CONFIG_DEFAULT,
   type WebSearchConfig,
@@ -554,6 +562,32 @@ type SessionWithPr = Session & { readonly prNumber: number };
 const hasActivePr = (session: Session | null): session is SessionWithPr =>
   session !== null && session.prNumber !== null;
 
+const resolvePiCreateInput = <Input extends {
+  readonly runtimeId?: "pi" | "claude" | "codex" | "opencode"
+  readonly endpointId?: AgentEndpointId
+  readonly connectionId?: ProviderConnectionId
+}>(input: Input): Effect.Effect<Input, ProviderConnectionError> => {
+  if (input.connectionId !== undefined || input.runtimeId !== "pi") {
+    return Effect.succeed(input)
+  }
+  if (input.endpointId === undefined) {
+    return Effect.fail(new ProviderConnectionError({
+      message: "PI session creation requires an endpoint"
+    }))
+  }
+  const connectionId = providerConnectionIdForPiEndpoint(
+    input.endpointId,
+    "environmentId" in input && typeof input.environmentId === "string"
+      ? input.environmentId
+      : "desktop"
+  )
+  return connectionId === null
+    ? Effect.fail(new ProviderConnectionError({
+        message: "PI endpoint does not belong to the execution target"
+      }))
+    : Effect.succeed({ ...input, connectionId })
+}
+
 export const sessionCreationOptions = (
   input: {
     readonly modelId: CreateSessionInput["modelId"];
@@ -598,9 +632,12 @@ export const createSessionFromPr = (input: CreateSessionFromPrInput) =>
       Effect.orElseSucceed(() => null),
     );
     const allowSharedCheckout = config?.git?.shareCheckedOutBranches ?? true;
-    return yield* SessionStore.createFromPr(input, {
+    const runtimeInput = yield* resolvePiCreateInput(input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
+    return yield* SessionStore.createFromPr(runtimeInput, {
       allowSharedCheckout,
-      ...sessionCreationOptions(input, config?.defaultMode),
+      ...sessionCreationOptions(runtimeInput, config?.defaultMode),
     });
   });
 
@@ -628,9 +665,12 @@ export const createSession = (input: CreateSessionInput) =>
                 : { environmentId: project.environmentId }),
             })),
           );
+    const runtimeInput = yield* resolvePiCreateInput(resolvedInput).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
     return yield* SessionStore.create(
-      resolvedInput,
-      sessionCreationOptions(resolvedInput, config?.defaultMode),
+      runtimeInput,
+      sessionCreationOptions(runtimeInput, config?.defaultMode),
     );
   });
 
@@ -686,9 +726,12 @@ export const createSessionRouted = (
   progress?: SessionCreationProgress,
 ) =>
   Effect.gen(function* () {
-    if (input.environmentId === undefined) {
+    const runtimeInput = yield* resolvePiCreateInput(input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
+    if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
-      const session = yield* createSession(input);
+      const session = yield* createSession(runtimeInput);
       yield* reportSessionCreation(progress, "ready");
       return session;
     }
@@ -696,16 +739,16 @@ export const createSessionRouted = (
     yield* reportSessionCreation(progress, "checking-access");
     const environmentService = yield* EnvironmentService;
     const environment = yield* environmentService
-      .environment(input.environmentId)
+      .environment(runtimeInput.environmentId)
       .pipe(
         Effect.mapError(
           (cause) => new GitError({ message: cause.message, cause }),
         ),
       );
     return yield* provisionRemoteSession(
-      input.environmentId,
+      runtimeInput.environmentId,
       "Sessions.create",
-      input,
+      runtimeInput,
       progress,
       environment,
     );
@@ -721,9 +764,12 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
     const config = yield* ConfigService.get().pipe(
       Effect.orElseSucceed(() => null),
     );
+    const runtimeInput = yield* resolvePiCreateInput(input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
     return yield* SessionStore.createFromIssue(
-      input,
-      sessionCreationOptions(input, config?.defaultMode),
+      runtimeInput,
+      sessionCreationOptions(runtimeInput, config?.defaultMode),
     );
   });
 
@@ -759,6 +805,14 @@ const ensureProjectOnOwnedEnvironment = (
     )
   )
 })
+
+const decodeRemoteSession = (value: unknown, environmentId: string) =>
+  Schema.decodeUnknown(SessionSchema)(value).pipe(
+    Effect.mapError((cause) => new GitError({ message: "The remote device returned invalid session metadata", cause })),
+    Effect.flatMap((session) => session.environmentId === environmentId
+      ? Effect.succeed(session)
+      : Effect.fail(new GitError({ message: "The remote device returned a session for a different environment" })))
+  )
 
 const provisionRemoteSession = (
   environmentId: string,
@@ -832,6 +886,11 @@ const provisionRemoteSession = (
         source,
       });
       yield* reportSessionCreation(progress, "starting-sandbox");
+      if (input.connectionId === undefined) {
+        return yield* Effect.fail(new GitError({
+          message: "This managed environment requires a PI provider connection"
+        }))
+      }
       yield* environmentService
         .hydrateManagedWorkspace(environment, sessionId, plan, {
           connectionId: input.connectionId,
@@ -866,23 +925,7 @@ const provisionRemoteSession = (
         (cause) => new GitError({ message: cause.message, cause }),
       ),
     );
-    const created = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
-      Effect.mapError(
-        (cause) =>
-          new GitError({
-            message: "The remote device returned invalid session metadata",
-            cause,
-          }),
-      ),
-    );
-    if (created.environmentId !== environmentId) {
-      return yield* Effect.fail(
-        new GitError({
-          message:
-            "The remote device returned a session for a different environment",
-        }),
-      );
-    }
+    const created = yield* decodeRemoteSession(value, environmentId);
     const persisted = yield* sessions.upsertRemote(created);
     yield* reportSessionCreation(progress, "ready");
     return persisted;
@@ -908,17 +951,20 @@ export const createSessionFromPrRouted = (
   progress?: SessionCreationProgress,
 ) =>
   Effect.gen(function* () {
-    if (input.environmentId === undefined) {
+    const runtimeInput = yield* resolvePiCreateInput(input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
+    if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
-      const session = yield* createSessionFromPr(input);
+      const session = yield* createSessionFromPr(runtimeInput);
       yield* reportSessionCreation(progress, "ready");
       return session;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
-      input.environmentId,
+      runtimeInput.environmentId,
       "Sessions.createFromPr",
-      input,
+      runtimeInput,
       progress,
     );
   });
@@ -928,17 +974,20 @@ export const createSessionFromIssueRouted = (
   progress?: SessionCreationProgress,
 ) =>
   Effect.gen(function* () {
-    if (input.environmentId === undefined) {
+    const runtimeInput = yield* resolvePiCreateInput(input).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
+    )
+    if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
-      const session = yield* createSessionFromIssue(input);
+      const session = yield* createSessionFromIssue(runtimeInput);
       yield* reportSessionCreation(progress, "ready");
       return session;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
-      input.environmentId,
+      runtimeInput.environmentId,
       "Sessions.createFromIssue",
-      input,
+      runtimeInput,
       progress,
     );
   });
@@ -3743,6 +3792,50 @@ const providerOperation = <A, E extends { readonly message: string }>(
     ),
   );
 
+const nativeEndpointLogin = (input: { endpointId: string; targetId: string; loginId?: string }, cancel = false) =>
+  Effect.gen(function* () {
+    if (input.targetId === "desktop") {
+      return yield* Effect.tryPromise({
+        try: () => cancel
+          ? codexEndpointLogin.cancel(input.endpointId, input.targetId, input.loginId ?? "").then(() => undefined)
+          : codexEndpointLogin.start(input.endpointId, input.targetId),
+        catch: () => new ProviderConnectionError({ message: "Native Codex login failed" })
+      })
+    }
+    const environments = yield* EnvironmentService
+    const targets = yield* environments.list
+    const target = targets.find((entry) => entry.kind === "owned" && entry.capabilities?.runtime?.targetId === input.targetId)
+    if (!target) return yield* Effect.fail(new ProviderConnectionError({ message: "Native login target is unavailable" }))
+    const response = yield* environments.discovery(target.id, {
+      ...input, action: cancel ? "login-cancel" : "login-start"
+    })
+    if (response.loginError || (!cancel && !response.login))
+      return yield* Effect.fail(new ProviderConnectionError({ message: response.loginError ?? "Native login returned no device code" }))
+    return response.login
+  }).pipe(Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message })))
+
+const localAgentEndpointCatalog = (refresh: boolean) =>
+  Effect.gen(function* () {
+    const providers = yield* ProviderConnections
+    const providerCatalog = yield* (refresh
+      ? providers.refreshCatalog
+      : providers.list).pipe(
+        Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message }))
+      )
+    const claude = yield* Effect.tryPromise({
+      try: () => probeClaudeEndpoint({ targetId: "desktop" }),
+      catch: (cause) => new ProviderConnectionError({
+        message: cause instanceof Error ? cause.message : "Claude CLI probe failed"
+      })
+    })
+    const pi = projectPiEndpointCatalog(providerCatalog)
+    return {
+      refreshedAt: new Date().toISOString(),
+      stale: pi.stale,
+      endpoints: [...pi.endpoints.slice(0, 61), claude, yield* Effect.promise(() => probeCodexEndpoint({ targetId: "desktop" })), yield* Effect.promise(() => probeOpenCodeEndpoint({ targetId: "desktop" }))]
+    }
+  })
+
 const agentResourceError = (
   operation: AgentResourceRpcError["operation"],
   cause: { readonly message: string },
@@ -3851,6 +3944,80 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
   "RuntimeDiagnostics.export": ({ runId }) => RuntimeDiagnostics.export(runId),
+  "AgentEndpoint.list": () => localAgentEndpointCatalog(false),
+  "AgentEndpoint.refresh": () => localAgentEndpointCatalog(true),
+  "AgentEndpoint.startLogin": (input) => nativeEndpointLogin(input).pipe(Effect.flatMap((login) =>
+    login ? Effect.succeed(login) : Effect.fail(new ProviderConnectionError({ message: "Native login returned no device code" })))),
+  "AgentEndpoint.cancelLogin": (input) => nativeEndpointLogin(input, true).pipe(Effect.asVoid),
+  "AgentEndpoint.setModel": (input) => Effect.gen(function* () {
+    const { sessionId, chatId, runtimeId, endpointId, providerId, modelId } = input
+    const session = yield* SessionStore.get(sessionId)
+    const endpointCatalog = session.environmentId === undefined
+      ? yield* localAgentEndpointCatalog(false)
+      : (yield* EnvironmentService.environment(session.environmentId).pipe(
+          Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message }))
+        )).capabilities?.endpointCatalog
+    const selectable = endpointCatalog?.endpoints.some(({ endpoint, models }) =>
+      endpoint.id === endpointId &&
+      endpoint.runtimeId === runtimeId &&
+      endpoint.status === "ready" &&
+      models.some((model) =>
+        model.providerId === providerId && model.id === modelId && model.selectable
+      )
+    ) === true
+    if (!selectable) {
+      return yield* Effect.fail(new ProviderConnectionError({
+        message: "Agent endpoint model is unavailable"
+      }))
+    }
+    if (session.environmentId !== undefined) {
+      const remote = yield* RemoteSessionService
+      const value = yield* remote.request(session, "AgentEndpoint.setModel", input).pipe(
+        Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message }))
+      )
+      const updated = yield* Schema.decodeUnknown(SessionSchema)(value).pipe(
+        Effect.mapError((cause) => new ProviderConnectionError({ message: `The remote device returned invalid session metadata: ${String(cause)}` }))
+      )
+      if (updated.id !== sessionId || updated.environmentId !== session.environmentId) {
+        return yield* Effect.fail(new ProviderConnectionError({ message: "The remote device returned model state for another session" }))
+      }
+      return yield* SessionStore.upsertRemote(updated)
+    }
+    if (runtimeId !== "pi") {
+      yield* SessionStore.setAgentModel(
+        sessionId,
+        chatId,
+        runtimeId,
+        endpointId,
+        providerId,
+        modelId
+      )
+      return yield* SessionStore.get(sessionId)
+    }
+    const providers = yield* ProviderConnections
+    const catalog = yield* providers.list.pipe(
+      Effect.mapError((cause) => new ProviderConnectionError({ message: cause.message }))
+    )
+    const entry = catalog.connections.find(({ connection, models }) =>
+      piEndpointId(connection.targetId, connection.id) === endpointId &&
+      models.some((model) =>
+        model.providerId === providerId && model.id === modelId && model.selectable
+      )
+    )
+    if (entry === undefined) {
+      return yield* Effect.fail(new ProviderConnectionError({
+        message: "Agent endpoint model is unavailable"
+      }))
+    }
+    const runner = yield* AgentRunner
+    return yield* runner.setModel(
+      sessionId,
+      chatId,
+      entry.connection.id,
+      providerId,
+      modelId
+    )
+  }),
   "Provider.list": () => providerOperation((service) => service.list),
   "Provider.status": () => providerOperation((service) => service.status),
   "Provider.loginEvents": () =>
@@ -3931,8 +4098,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Environment.list": () => EnvironmentService.list,
   "Environment.refresh": () => EnvironmentService.refresh,
-  "Environment.discovery": ({ deviceId }) =>
-    EnvironmentService.discovery(deviceId),
+  "Environment.discovery": ({ deviceId, endpointRequest }) =>
+    EnvironmentService.discovery(deviceId, endpointRequest),
   // Presence polling is long-lived. A token refresh or brief relay outage
   // pauses updates rather than permanently terminating the subscription: a
   // failed poll is skipped (not retried in place — the old uncapped
@@ -4761,28 +4928,31 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Agent.subagentFleetSnapshot": ({
     sessionId,
     chatId,
-    parentPiSessionId
+    parentRuntimeSessionId
   }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId)
       const runtime = yield* AgentRuntime
+      const owner = runtimeOwnerForSession(session, chatId)
+      if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
       const remote = yield* RemoteSessionService
       return yield* routeSessionOperation(
         session,
         "Agent.subagentFleetSnapshot",
-        { chatId, parentPiSessionId },
+        { chatId, parentRuntimeSessionId },
         {
           execute: () => runtime.subagentFleetSnapshot(
+            owner,
             sessionId,
             chatId,
-            parentPiSessionId
+            parentRuntimeSessionId
           )
         },
         {
           execute: () => remote.request(
             session,
             "Agent.subagentFleetSnapshot",
-            { chatId, parentPiSessionId }
+            { chatId, parentRuntimeSessionId }
           ).pipe(Effect.flatMap(Schema.decodeUnknown(SubagentFleetSnapshot)))
         }
       )
@@ -4800,22 +4970,25 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Agent.subagentTranscript": ({
     sessionId,
     chatId,
-    parentPiSessionId,
+    parentRuntimeSessionId,
     runId
   }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId)
       const runtime = yield* AgentRuntime
+      const owner = runtimeOwnerForSession(session, chatId)
+      if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
       const remote = yield* RemoteSessionService
       return yield* routeSessionOperation(
         session,
         "Agent.subagentTranscript",
-        { chatId, parentPiSessionId, runId },
+        { chatId, parentRuntimeSessionId, runId },
         {
           execute: () => runtime.subagentTranscript(
+            owner,
             sessionId,
             chatId,
-            parentPiSessionId,
+            parentRuntimeSessionId,
             runId
           )
         },
@@ -4823,7 +4996,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
           execute: () => remote.request(
             session,
             "Agent.subagentTranscript",
-            { chatId, parentPiSessionId, runId }
+            { chatId, parentRuntimeSessionId, runId }
           ).pipe(Effect.flatMap(Schema.decodeUnknown(Schema.Array(MessageSchema))))
         }
       )
@@ -4836,13 +5009,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId)
       const runtime = yield* AgentRuntime
+      const owner = runtimeOwnerForSession(session, chatId)
+      if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
       const remote = yield* RemoteSessionService
       return yield* routeSessionOperation(
         session,
         "Agent.controlSubagent",
         { chatId, request },
         {
-          execute: () => runtime.controlSubagent(sessionId, chatId, request)
+          execute: () => runtime.controlSubagent(owner, sessionId, chatId, request)
         },
         {
           execute: () => remote.request(
@@ -4972,13 +5147,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                           authKind: entry.connection.authKind,
                           access: credential.access,
                           accountId: credential.accountId,
-                          // Only the desktop target can borrow the local
-                          // Claude CLI login; a remote device's keychain is
-                          // not reachable from here.
-                          fallbackAccess:
-                            entry.connection.targetId === "desktop"
-                              ? () => readLocalClaudeCliAccessToken()
-                              : null,
+                          fallbackAccess: null,
                           signal,
                         }),
                       ),
@@ -5228,13 +5397,17 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   // operator's verdict straight onto the live session's event bus, where the
   // forked Plannotator extension resolves its awaited review by reviewId.
   "Plan.decide": ({ sessionId, chatId, reviewId, approved, feedback }) =>
-    Effect.flatMap(AgentRuntime, (runtime) =>
-      runtime.decidePlanReview(sessionId, chatId, {
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId)
+      const owner = runtimeOwnerForSession(session, chatId)
+      if (owner === null) return yield* Effect.fail(new Error("Session runtime endpoint is unavailable"))
+      const runtime = yield* AgentRuntime
+      yield* runtime.decidePlanReview(owner, sessionId, chatId, {
         reviewId,
         approved,
         ...(feedback === undefined ? {} : { feedback })
       })
-    ).pipe(
+    }).pipe(
       Effect.mapError(
         (cause) => new GitError({ message: "Could not deliver the plan review decision", cause })
       )

@@ -181,16 +181,3 @@ export const SetSessionProviderModelInput = Schema.Struct({
 export type SetSessionProviderModelInput = Schema.Schema.Type<
   typeof SetSessionProviderModelInput
 >
-
-export const SessionRuntimeIdentity = Schema.Struct({
-  connectionId: Schema.NullOr(ProviderConnectionId),
-  providerId: Schema.NullOr(ProviderId),
-  modelId: Schema.NullOr(ProviderModelId),
-  piSessionId: Schema.NullOr(Schema.String),
-  modelSelectionRequired: Schema.Boolean,
-  connectionSelectionRequired: Schema.Boolean,
-  legacyCli: Schema.NullOr(Schema.String),
-  legacyModel: Schema.NullOr(Schema.String),
-  legacyResumeId: Schema.NullOr(Schema.String)
-})
-export type SessionRuntimeIdentity = Schema.Schema.Type<typeof SessionRuntimeIdentity>

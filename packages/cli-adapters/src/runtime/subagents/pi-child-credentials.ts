@@ -18,8 +18,8 @@ export class PiChildCredentialError extends Data.TaggedError(
   readonly cause?: unknown
 }> {}
 
-export const childCredentialKey = (parentPiSessionId: string): string =>
-  createHash("sha256").update(parentPiSessionId).digest("hex")
+export const childCredentialKey = (parentRuntimeSessionId: string): string =>
+  createHash("sha256").update(parentRuntimeSessionId).digest("hex")
 
 export const childProviderConnections = (
   parent: ProviderConnection,
@@ -40,12 +40,12 @@ export class PiChildCredentials {
     readonly credentials: ProviderCredentialStore
   ) {}
 
-  directory(parentPiSessionId: string): string {
-    return join(this.root, childCredentialKey(parentPiSessionId))
+  directory(parentRuntimeSessionId: string): string {
+    return join(this.root, childCredentialKey(parentRuntimeSessionId))
   }
 
   materialize(
-    parentPiSessionId: string,
+    parentRuntimeSessionId: string,
     connections: ReadonlyArray<ProviderConnection>,
     capabilities: ReadonlyArray<SubagentCapability>
   ): Effect.Effect<string, PiChildCredentialError> {
@@ -79,12 +79,12 @@ export class PiChildCredentials {
                 if (
                   capabilities.length === 0 ||
                   capabilities.some(
-                    (capability) => capability.parentPiSessionId !== parentPiSessionId
+                    (capability) => capability.parentRuntimeSessionId !== parentRuntimeSessionId
                   )
                 ) {
                   throw new Error("Child capabilities do not match their parent session")
                 }
-                const directory = this.directory(parentPiSessionId)
+                const directory = this.directory(parentRuntimeSessionId)
                 const authPath = join(directory, "auth.json")
                 const capabilityPaths = capabilities.map((capability) => ({
                   capability,
@@ -142,9 +142,9 @@ export class PiChildCredentials {
     )
   }
 
-  remove(parentPiSessionId: string): Effect.Effect<void> {
+  remove(parentRuntimeSessionId: string): Effect.Effect<void> {
     return Effect.promise(() =>
-      rm(this.directory(parentPiSessionId), { recursive: true, force: true })
+      rm(this.directory(parentRuntimeSessionId), { recursive: true, force: true })
     )
   }
 

@@ -7,6 +7,7 @@ import { Schema } from "effect"
 import { installDeviceService, removeDeviceService } from "./device-service.js"
 import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
 import { runManagedCommand } from "./managed-command.js"
+import { shutdownDeviceAgent } from "./shutdown.js"
 import {
   deviceAgentPaths,
   deviceStatus,
@@ -125,11 +126,7 @@ const main = async (): Promise<void> => {
         await revokeLocalDevice()
         await removeDeviceService()
       }
-      // Runtime services may own long-lived Node handles (for example an
-      // embedded callback server). At this point the control connection and
-      // every tracked session task have settled, so do not let those handles
-      // keep a revoked or stopped daemon orphaned under launchd.
-      process.exit(0)
+      shutdownDeviceAgent()
       return
     }
     case "install-service": {

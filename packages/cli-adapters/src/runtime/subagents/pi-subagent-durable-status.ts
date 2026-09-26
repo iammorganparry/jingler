@@ -169,7 +169,7 @@ export interface DurablePiSubagentProjection {
 }
 
 const commonNode = (input: {
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly subagentId: string
   readonly orchestrationRunId: string
   readonly runId: string
@@ -179,16 +179,16 @@ const commonNode = (input: {
 }): Pick<
   SubagentFleetNode,
   | "id" | "subagentId" | "orchestrationRunId" | "registryRevision"
-  | "childSequence" | "runId" | "parentPiSessionId" | "health" | "blocking"
+  | "childSequence" | "runId" | "parentRuntimeSessionId" | "health" | "blocking"
   | "terminal" | "startedAt" | "updatedAt" | "completedAt"
 > => ({
-  id: subagentFleetNodeId(input.parentPiSessionId, input.subagentId),
+  id: subagentFleetNodeId(input.parentRuntimeSessionId, input.subagentId),
   subagentId: input.subagentId,
   orchestrationRunId: input.orchestrationRunId,
   registryRevision: input.registryRevision,
   childSequence: 0,
   runId: input.runId,
-  parentPiSessionId: input.parentPiSessionId,
+  parentRuntimeSessionId: input.parentRuntimeSessionId,
   health: "unknown",
   blocking: null,
   terminal: null,
@@ -199,7 +199,7 @@ const commonNode = (input: {
 
 const projectRoot = (
   status: DurableStatusValue,
-  input: { parentPiSessionId: string; registryRevision: number; now: number }
+  input: { parentRuntimeSessionId: string; registryRevision: number; now: number }
 ): SubagentFleetNode => {
   const updatedAt = status.lastUpdate ?? input.now
   return {
@@ -231,7 +231,7 @@ const projectStep = (
   status: DurableStatusValue,
   step: DurableStepValue,
   index: number,
-  input: { parentPiSessionId: string; registryRevision: number; now: number }
+  input: { parentRuntimeSessionId: string; registryRevision: number; now: number }
 ): SubagentFleetNode => {
   const subagentId = step.runId ?? `${status.runId}:step:${index}`
   const startedAt = step.startedAt ?? status.startedAt
@@ -263,7 +263,7 @@ const projectStep = (
 
 export const readDurablePiSubagentNodes = (input: {
   readonly asyncDir?: string
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly parentPiSessionAliases: ReadonlySet<string>
   readonly registryRevision?: number
   readonly maxNodes?: number
@@ -309,7 +309,7 @@ export const readDurablePiSubagentNodes = (input: {
   const now = input.now ?? Date.now()
   const registryRevision = input.registryRevision ?? 0
   const allNodes = statuses.flatMap((status) => {
-    const nodeInput = { parentPiSessionId: input.parentPiSessionId, registryRevision, now }
+    const nodeInput = { parentRuntimeSessionId: input.parentRuntimeSessionId, registryRevision, now }
     // A step is worth projecting while it is active — and STAYS worth
     // projecting once it has a transcript. A workflow's only output IS its
     // steps' sessions; dropping completed steps left a lone sessionFile-less

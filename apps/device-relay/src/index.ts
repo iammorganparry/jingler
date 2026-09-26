@@ -1,3 +1,4 @@
+import { EndpointControlInput } from "@jingler/core"
 import type {
   DeviceRelayGrantAudience,
   DeviceRelayGrantClaims
@@ -315,6 +316,14 @@ const handleDiscovery = async (
   if (!claims) return json({ error: "Invalid device-control grant" }, 401)
   if (!scopedDevice(claims, deviceId)) return json({ error: "Grant resource mismatch" }, 403)
   const registry = env.DEVICE_REGISTRY.getByName(claims.subject)
+  if (request.method === "POST") {
+    const input = await decodedBody(request, EndpointControlInput)
+    if (!input) return json({ error: "Invalid endpoint catalog request" }, 400)
+    const updated = await registry.requestEndpointCatalog(
+      deviceId, input.targetId, crypto.randomUUID(), input.action, undefined, input
+    )
+    return updated ? json(updated) : json({ error: "Endpoint catalog unavailable or timed out" }, 504)
+  }
   const discovery = await registry.getDiscovery(deviceId)
   return discovery ? json(discovery) : json({ error: "Device not found" }, 404)
 }
@@ -859,7 +868,7 @@ const routeDeviceConnection = async (request: Request, env: Env, url: URL): Prom
     )
   }
   const discoveryDeviceId = routeDeviceId(url.pathname, "/discovery")
-  if (request.method === "GET" && discoveryDeviceId) {
+  if ((request.method === "GET" || request.method === "POST") && discoveryDeviceId) {
     return handleDiscovery(request, env, discoveryDeviceId)
   }
   if (request.method === "POST" && url.pathname === "/v1/device-challenges") {

@@ -53,7 +53,7 @@ const call = (
     body: JSON.stringify({
       version: 1,
       token: input.token ?? capability.token,
-      parentPiSessionId: capability.parentPiSessionId,
+      parentRuntimeSessionId: capability.parentRuntimeSessionId,
       ...(input.claimedAgent ? { childAgent: input.claimedAgent } : {}),
       callId: "child-call",
       toolId: input.toolId ?? "inspect",
@@ -67,14 +67,14 @@ const register = (
   registry: ToolRegistry,
   runtimeContext = context()
 ) => Effect.runPromise(broker.register({
-  parentPiSessionId: "parent",
+  parentRuntimeSessionId: "parent",
   agents: ["worker", "reviewer"],
   spec,
   registry,
   context: runtimeContext,
   supervisorState: () => ({
     version: 2,
-    parentPiSessionId: "parent",
+    parentRuntimeSessionId: "parent",
     registryRevision: 1,
     status: "running",
     goalRevision: 0,
@@ -95,14 +95,14 @@ describe("SubagentCapabilityBroker", () => {
     await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
       const broker = yield* SubagentCapabilityBrokerService
       const capabilities = yield* broker.register({
-        parentPiSessionId: "parent",
+        parentRuntimeSessionId: "parent",
         agents: ["worker"],
         spec,
         registry: new ToolRegistry(),
         context: context(),
         supervisorState: () => ({
           version: 2,
-          parentPiSessionId: "parent",
+          parentRuntimeSessionId: "parent",
           registryRevision: 0,
           status: "running",
           goalRevision: 0,
@@ -192,7 +192,7 @@ describe("SubagentCapabilityBroker", () => {
       status: "success",
       value: {
         version: 2,
-        parentPiSessionId: "parent",
+        parentRuntimeSessionId: "parent",
         siblings: []
       }
     })
@@ -287,7 +287,7 @@ describe("SubagentCapabilityBroker", () => {
       body: JSON.stringify({
         version: 1,
         token: worker.token,
-        parentPiSessionId: "another-parent",
+        parentRuntimeSessionId: "another-parent",
         callId: "child-call",
         toolId: "inspect",
         arguments: { value: "ok" }
