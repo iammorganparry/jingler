@@ -1,4 +1,4 @@
-import type { Event, Part, AssistantMessage, GlobalEvent } from "@opencode-ai/sdk/v2/client"
+import type { Event, Part, AssistantMessage, UserMessage, GlobalEvent } from "@opencode-ai/sdk/v2/client"
 import type { StreamEvent } from "@jingler/core"
 
 /** v1 sync envelopes coexist with legacy events in the 1.18.14 global stream. */
@@ -29,18 +29,7 @@ export class OpenCodeEvents {
   map(event: Event): StreamEvent[] {
     if (eventSessionId(event) !== this.sessionID) return []
     switch (event.type) {
-      case "message.updated": {
-        const message = event.properties.info
-        if (message.role === "user") {
-          this.parentID ??= message.id
-          return []
-        }
-        if (this.parentID === undefined || message.role !== "assistant" || message.sessionID !== this.sessionID || message.parentID !== this.parentID) return []
-        if (this.messages.size >= 4096 && !this.messages.has(message.id)) throw new Error("OpenCode message bound exceeded")
-        this.messages.add(message.id)
-        if (message.error) throw new Error("OpenCode assistant failed")
-        return this.updateUsage(message)
-      }
+      case "message.updated": return this.message(event.properties.info)
       case "message.part.updated": {
         const part = event.properties.part
         if (part.sessionID !== this.sessionID || !this.messages.has(part.messageID)) return []
@@ -57,6 +46,17 @@ export class OpenCodeEvents {
       }
       default: return []
     }
+  }
+  private message(message: UserMessage | AssistantMessage): StreamEvent[] {
+    if (message.role === "user") {
+      this.parentID ??= message.id
+      return []
+    }
+    if (this.parentID === undefined || message.role !== "assistant" || message.sessionID !== this.sessionID || message.parentID !== this.parentID) return []
+    if (this.messages.size >= 4096 && !this.messages.has(message.id)) throw new Error("OpenCode message bound exceeded")
+    this.messages.add(message.id)
+    if (message.error) throw new Error("OpenCode assistant failed")
+    return this.updateUsage(message)
   }
   private updateUsage(message: AssistantMessage): StreamEvent[] {
     const t = message.tokens
