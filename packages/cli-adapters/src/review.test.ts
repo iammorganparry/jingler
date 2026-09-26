@@ -8,7 +8,7 @@ import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { ReviewService, extractJsonBlock, parseFindings } from "./review.js"
+import { ReviewService, extractJsonBlock, parseFindings, parseLineFindings } from "./review.js"
 import { adversarialPrompt, fenceFor } from "./review-prompt.js"
 import type { ReviewEnv, ReviewInput } from "./review.js"
 import { ReviewStore } from "./review-store.js"
@@ -1054,5 +1054,43 @@ describe("ReviewService — reset is atomic", () => {
 
     expect(JSON.stringify(seen)).not.toContain("PREVIOUS RUN")
     expect(seen.filter((e) => e._tag === "Done")).toHaveLength(1)
+  })
+})
+
+describe("parseLineFindings", () => {
+  // A real reviewer reply that skipped the JSON contract.
+  const terse = [
+    "packages/cli-adapters/src/runtime/agent/pi-session-factory.ts:L843: shrink: `{ result }` adds a redundant wrapper that its only caller immediately unwraps. Return `result` directly and assign it directly to `EmbeddedSession.result`.",
+    "packages/cli-adapters/src/runtime/agent/registry-tool-bridge.ts:L110: shrink: `previous.catch(() => undefined)` duplicates rejection handling already applied before storing every queue tail. Use `previous.then(...)`.",
+    "net: -1 lines possible."
+  ].join("\n")
+
+  it("recovers anchored findings from a terse path:Lnn reply", () => {
+    const findings = parseFindings(terse)
+    expect(findings).toHaveLength(2)
+    expect(findings![0]).toMatchObject({
+      id: "f1",
+      path: "packages/cli-adapters/src/runtime/agent/pi-session-factory.ts",
+      line: 843,
+      severity: "nit",
+      title: "`{ result }` adds a redundant wrapper that its only caller immediately unwraps."
+    })
+    expect(findings![1]).toMatchObject({ id: "f2", line: 110, severity: "nit" })
+  })
+
+  it("reads a range and treats an unknown category as minor", () => {
+    expect(parseLineFindings("- src/a.ts:12-18: bug: Off by one on the last page.")).toEqual([
+      expect.objectContaining({ path: "src/a.ts", line: 12, endLine: 18, severity: "minor" })
+    ])
+  })
+
+  it("stays null for prose, so a refusal still surfaces as the note", () => {
+    expect(parseFindings("I can't review this diff: it is empty.")).toBeNull()
+  })
+
+  it("prefers the JSON contract when both are present", () => {
+    const json = JSON.stringify({ findings: [{ title: "From JSON" }] })
+    const text = ["src/a.ts:L1: shrink: x.", "```json", json, "```"].join("\n")
+    expect(parseFindings(text)).toEqual([expect.objectContaining({ title: "From JSON" })])
   })
 })
