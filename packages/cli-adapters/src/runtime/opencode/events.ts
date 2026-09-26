@@ -24,14 +24,18 @@ export class OpenCodeEvents {
   get hasResponse() { return this.messages.size > 0 }
   tokens = 0
   cost = 0
-  constructor(readonly sessionID: string, readonly parentID: string) {}
+  constructor(readonly sessionID: string, private parentID?: string) {}
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: exhaustive vendor event normalization keeps per-turn correlation explicit.
   map(event: Event): StreamEvent[] {
     if (eventSessionId(event) !== this.sessionID) return []
     switch (event.type) {
       case "message.updated": {
         const message = event.properties.info
-        if (message.role !== "assistant" || message.sessionID !== this.sessionID || message.parentID !== this.parentID) return []
+        if (message.role === "user") {
+          this.parentID ??= message.id
+          return []
+        }
+        if (this.parentID === undefined || message.role !== "assistant" || message.sessionID !== this.sessionID || message.parentID !== this.parentID) return []
         if (this.messages.size >= 4096 && !this.messages.has(message.id)) throw new Error("OpenCode message bound exceeded")
         this.messages.add(message.id)
         if (message.error) throw new Error("OpenCode assistant failed")
@@ -85,6 +89,7 @@ export class OpenCodeEvents {
       diff: preview === null ? null : { added: lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length, removed: lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length }, output: output.slice(-16_000) }]
   }
   private part(part: Part): StreamEvent[] {
+    if (part.type === "tool" && part.tool.startsWith("jingler_")) return []
     let state = this.parts.get(part.id)
     const events: StreamEvent[] = []
     if (!state) {

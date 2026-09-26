@@ -343,7 +343,7 @@ describe("pi session creation", () => {
       createSession
     })
 
-    const handle = await Effect.runPromise(factory.create(makeSpec(root), {} as never))
+    const handle = await Effect.runPromise(factory.create({ ...makeSpec(root), ponytailMode: "lite" }, {} as never))
     const received = captured[0]
     expect(handle.id).toBe("/tmp/pi-session.jsonl")
     expect(handle.parentRuntimeSessionId).toBe("pi-session")
@@ -360,13 +360,12 @@ describe("pi session creation", () => {
     ])
     expect(received?.resourceLoader?.getExtensions().extensions).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: expect.stringContaining("pi-subagents") }),
-      expect.objectContaining({ path: expect.stringContaining("ponytail") }),
       expect.objectContaining({ path: expect.stringContaining("plannotator") })
     ]))
     expect(session.bindExtensions).toHaveBeenCalledWith(
       expect.objectContaining({ mode: "rpc", uiContext: expect.any(Object) })
     )
-    expect(received?.resourceLoader?.getSkills().skills.map(({ name }) => name)).toContain("ponytail")
+    expect(received?.resourceLoader?.getSystemPrompt()).toContain("PONYTAIL MODE ACTIVE — level: lite")
     expectLockedSystemPrompt(received?.resourceLoader?.getSystemPrompt())
     expect(received?.sessionManager?.getEntries()).toEqual([
       expect.objectContaining({

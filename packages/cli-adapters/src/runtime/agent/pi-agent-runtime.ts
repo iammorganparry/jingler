@@ -223,6 +223,7 @@ const lockedCapabilityFingerprint = (
 ): string => JSON.stringify({
   role: spec.role,
   mode: spec.mode,
+  ponytailMode: spec.ponytailMode,
   targetId: spec.targetCapabilities.targetId,
   toolIds: [...spec.targetCapabilities.toolIds].sort(),
   resourceIds: [...spec.targetCapabilities.resourceIds].sort(),

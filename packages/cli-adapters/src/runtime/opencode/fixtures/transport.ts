@@ -1,11 +1,14 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { randomUUID } from "node:crypto"
 import type { OpenCodeOptions } from "../server.js"
 
-interface FixtureBody { permission: unknown; parts: { text: string }[]; messageID: string; reply: string; answers: string[][] }
+interface FixtureBody { config?: { url: string; headers: Record<string, string> }; system?: string; permission: unknown; parts: { text: string }[]; messageID: string; reply: string; answers: string[][] }
 type FixtureSession = { id: string; directory: string; permission: unknown }
 
 /** Socket-free HTTP responses still exercise the real generated SDK and SSE parser. */
 export const fixtureTransport = () => {
+  const relays = new Map<string, NonNullable<FixtureBody["config"]>>()
   const sessions = new Map<string, FixtureSession>()
   const streams = new Set<ReadableStreamDefaultController<Uint8Array>>()
   const pending = new Map<string, (reply?: string) => void>()
@@ -22,24 +25,36 @@ export const fixtureTransport = () => {
     emit(directory, "message.part.updated", { sessionID: id, part: { id: messageID, sessionID: id, messageID, type: "text", text: `OpenCode: ${prompt}${reply}`, time: { start: 1, end: 2 } } })
     emit(directory, "session.idle", { sessionID: id })
   }
-  const handlePrompt = (directory: string, id: string, body: FixtureBody) => {
+  const handlePrompt = async (directory: string, id: string, body: FixtureBody, server: string) => {
+    body.messageID ??= `msg_${randomUUID()}`
+    emit(directory, "message.updated", { info: { id: body.messageID, sessionID: id, role: "user" } })
     const prompt = body.parts[0]!.text
     const messageID = `msg_${randomUUID()}`
     const finish = (reply = "") => finishPrompt(directory, id, body.messageID, messageID, prompt, reply)
-    if (prompt === "disconnect") { for (const stream of streams) stream.close(); streams.clear() }
+    if (prompt === "registry-probe") {
+      const relay = relays.get(server)!
+      const client = new Client({ name: "opencode-fixture", version: "1" })
+      try {
+        await client.connect(new StreamableHTTPClientTransport(new URL(relay.url), { requestInit: { headers: relay.headers } }))
+        const listed = await client.listTools()
+        const result = await client.callTool({ name: "probe_echo", arguments: {} })
+        finish(JSON.stringify({ names: listed.tools.map(t => t.name), output: result.content, inherited: body.system?.includes("jingler.identity-and-safety") }))
+      } finally { await client.close() }
+    }
+    else if (prompt === "disconnect") { for (const stream of streams) stream.close(); streams.clear() }
     else if (prompt === "permission") { pending.set(id, finish); emit(directory, "permission.asked", { id, sessionID: id, permission: "bash", patterns: [], always: [], metadata: {} }) }
     else if (prompt === "question") { const requestID = `que_${randomUUID()}`; pending.set(requestID, finish); emit(directory, "question.asked", { id: requestID, sessionID: id, questions: [{ header: "Choice", question: "Pick one", options: [{ label: "One", description: "First option" }], multiple: false, custom: true }] }) }
     else if (prompt !== "wait") finish()
     return new Response(null, { status: 204 })
   }
-  const handleSession = (match: RegExpExecArray, directory: string, body: FixtureBody) => {
+  const handleSession = (match: RegExpExecArray, directory: string, body: FixtureBody, server: string) => {
     const id = match[1]!
     const session = sessions.get(id)
     if (!session) return json({}, 404)
     if (!match[2]) return json(session)
     if (match[2] === "fork") { const fork = { ...session, id: `ses_${randomUUID()}`, directory }; sessions.set(fork.id, fork); return json(fork) }
     if (match[2] === "abort") { pending.delete(id); return json(true) }
-    if (match[2] === "prompt_async") return handlePrompt(directory, id, body)
+    if (match[2] === "prompt_async") return handlePrompt(directory, id, body, server)
     return json({}, 404)
   }
   const globalResponse = (url: URL): Response | null => {
@@ -59,6 +74,11 @@ export const fixtureTransport = () => {
     pending.delete(question[1]!)
     return json(true)
   }
+  const mcpResponse = (url: URL, request: Request, body: FixtureBody): Response | null => {
+    if (url.pathname !== "/mcp" || request.method !== "POST" || !body.config) return null
+    relays.set(request.headers.get("authorization")!, body.config)
+    return json({ jingler: { status: "connected" } })
+  }
   const fetch: typeof globalThis.fetch = async input => {
     const request = input as Request
     requests.push(request.clone())
@@ -71,8 +91,8 @@ export const fixtureTransport = () => {
     if (url.pathname === "/session" && request.method === "POST") { const session = { id: `ses_${randomUUID()}`, directory, permission: body.permission }; sessions.set(session.id, session); return json(session) }
     if (url.pathname === "/session/status") return json({})
     const session = /^\/session\/(ses_[\w-]+)(?:\/(.*))?$/.exec(url.pathname)
-    if (session) return handleSession(session, directory, body)
-    return replyResponse(url, body) ?? json({}, 404)
+    if (session) return handleSession(session, directory, body, request.headers.get("authorization")!)
+    return mcpResponse(url, request, body) ?? replyResponse(url, body) ?? json({}, 404)
   }
   const options = (binary: string): OpenCodeOptions => ({ binary, port: async () => 54321, fetch, environment: { ...process.env, XDG_CACHE_HOME: "memory-transport" } })
   return { fetch, options, requests, emit }

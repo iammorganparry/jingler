@@ -15,7 +15,7 @@ import {
   makeClaudeAgentRuntime
 } from "./claude-agent-runtime.js"
 import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
-import * as toolRelay from "../providers/claude-cli-tool-relay.js"
+import * as toolRelay from "../providers/registry-mcp-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
@@ -252,9 +252,10 @@ it("releases scoped registry resources if preparation fails", async () => {
 
 // Parser/process tests use a socket-free relay; the real two-round MCP test above
 // retains end-to-end relay coverage.
-const stubRelay = () => vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValueOnce({
+const stubRelay = () => vi.spyOn(toolRelay, "startRegistryMcpRelay").mockResolvedValueOnce({
+  attachment: { name: "jingler", url: "http://127.0.0.1/mcp", headers: {} },
   mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
-  environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+  environment: { JINGLER_TOOL_RELAY_TOKEN: "fixture-token" },
   close: async () => {}
 })
 
@@ -336,9 +337,10 @@ it("keeps one result when completion races an interrupt", async () => {
 })
 
 it("rejects concurrent runs for one resumed Claude session", async () => {
-  vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValue({
-    mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
-    environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+  vi.spyOn(toolRelay, "startRegistryMcpRelay").mockResolvedValue({
+    attachment: { name: "jingler", url: "http://127.0.0.1/mcp", headers: {} },
+  mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
+    environment: { JINGLER_TOOL_RELAY_TOKEN: "fixture-token" },
     close: async () => {}
   })
   const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)

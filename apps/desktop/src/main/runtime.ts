@@ -1,5 +1,3 @@
-import { makeOpenCodeRuntimeRegistration } from "@jingler/cli-adapters/runtime/opencode/runtime"
-import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/codex/runtime"
 /**
  * The main-process Effect runtime. `AppLayer` wires every backend dependency the
  * RPC handlers need — the Node platform (`CommandExecutor` + `FileSystem` +
@@ -11,9 +9,7 @@ import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/code
 import {
   AgentRunner,
   AgentResourcesLive,
-  AgentRuntimeRegistry,
   AgentRuntimeRouterLive,
-  makeAgentRuntimeRegistry,
   AgentTurnDriverLive,
   AssetService,
   AuthService,
@@ -152,15 +148,8 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(SecretStoreLayer)
 )
 
-const RuntimeRegistryLayer = Layer.effect(
-  AgentRuntimeRegistry,
-  Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
-    ...pi.registrations.values(), makeCodexRuntimeRegistration(), makeOpenCodeRuntimeRegistration()
-  ]))
-).pipe(Layer.provide(PiRuntimeLayer))
-
 const AgentRuntimeLayer = AgentRuntimeRouterLive.pipe(
-  Layer.provide(RuntimeRegistryLayer)
+  Layer.provide(PiRuntimeLayer)
 )
 
 const AgentExecutionLayer = AgentTurnDriverLive.pipe(

@@ -1,10 +1,12 @@
-import { randomBytes } from "node:crypto"
+import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
+
+export type OpenCodeRuntimeOptions = OpenCodeOptions & NativeRuntimeToolsOptions
 import { realpath } from "node:fs/promises"
 import { nativeCliEndpointId, type AgentRunSpec, type StreamEvent } from "@jingler/core"
 import type { Event, PermissionRuleset, PermissionRequest, QuestionRequest } from "@opencode-ai/sdk/v2/client"
 import { Effect, Stream } from "effect"
 import { AgentRuntimeError, type AgentRuntimeContext, type AgentRuntimeRegistration, type AgentRuntimeShape } from "../agent/agent-runtime.js"
-import { acquireOpenCode, makeOpenCodePool, type OpenCodeOptions, type OpenCodeServer } from "./server.js"
+import { OpenCodeServer, type OpenCodeOptions } from "./server.js"
 import { OpenCodeEvents } from "./events.js"
 import { OpenCodeInbox } from "./inbox.js"
 import { readOpenCodeModels } from "./endpoint.js"
@@ -15,6 +17,7 @@ const ownerKey = (endpoint: string, session: string) => JSON.stringify([endpoint
 const reads = ["read", "glob", "grep", "list", "lsp"]
 export const openCodePermissions = (mode: AgentRunSpec["mode"]): PermissionRuleset => [
   { permission: "*", pattern: "*", action: mode === "read-only" ? "deny" : "ask" },
+  { permission: "jingler_*", pattern: "*", action: "allow" },
   ...reads.map((permission) => ({ permission, pattern: "*", action: "allow" as const })),
   // Task permissions cannot represent Jingler subagents; questions use Jingler's UI protocol.
   { permission: "task", pattern: "*", action: "deny" },
@@ -92,22 +95,22 @@ const assertOwner = (spec: AgentRunSpec) => {
   if (!spec.providerId) throw new Error("OpenCode requires an explicit provider identity")
 }
 interface Active { server: OpenCodeServer; directory: string; inbox: OpenCodeInbox }
-export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntimeShape => {
-  const acquire = options ? makeOpenCodePool(options) : acquireOpenCode
+export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): AgentRuntimeShape => {
   const active = new Map<string, Active>()
   const reservations = new Set<string>()
   return {
     run: (spec, context) => Stream.unwrapScoped(Effect.gen(function* () {
       yield* Effect.try({ try: () => {
         assertOwner(spec)
-        if (context.mcp?.browser || context.mcp?.configured?.length) throw new Error("OpenCode run-scoped MCP attachments are unsupported")
         if (spec.reasoning) throw new Error("OpenCode reasoning overrides are unsupported")
       }, catch: (cause) => new AgentRuntimeError({ reason: "runtime", message: cause instanceof Error ? cause.message : "Invalid OpenCode run" }) })
-      const lease = yield* Effect.acquireRelease(Effect.tryPromise({ try: () => acquire(spec.targetCapabilities.targetId), catch: failure }), (owned) => Effect.promise(owned.release))
+      const prepared = yield* prepareNativeRuntimeTools(spec, context, options ?? {})
+      // MCP.add is directory-scoped. A per-run server prevents same-directory chats sharing credentials.
+      const server = yield* Effect.acquireRelease(Effect.tryPromise({ try: () => OpenCodeServer.start(options), catch: failure }), (owned) => Effect.promise(() => owned.close()))
       const abort = new AbortController()
       let cleanup = async () => { abort.abort() }
       yield* Effect.addFinalizer(() => Effect.promise(() => cleanup()))
-      const iterator = run(spec, context, lease.server, abort, (fn) => { cleanup = fn })
+      const iterator = run(spec, context, server, prepared, abort, (fn) => { cleanup = fn })
       return Stream.fromAsyncIterable({ [Symbol.asyncIterator]: () => ({ next: () => iterator.next(), return: async () => { await cleanup(); return iterator.return(undefined) } }) }, failure)
     })),
     interrupt: (continuation, targetId) => Effect.tryPromise({ try: async () => {
@@ -121,7 +124,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one scoped turn owns the reservation, event stream, and abort cleanup.
-  async function* run(spec: AgentRunSpec, context: AgentRuntimeContext, server: OpenCodeServer, abort: AbortController, setCleanup: (fn: () => Promise<void>) => void): AsyncGenerator<StreamEvent> {
+  async function* run(spec: AgentRunSpec, context: AgentRuntimeContext, server: OpenCodeServer, prepared: Effect.Effect.Success<ReturnType<typeof prepareNativeRuntimeTools>>, abort: AbortController, setCleanup: (fn: () => Promise<void>) => void): AsyncGenerator<StreamEvent> {
     const pendingKey = spec.continuation ? ownerKey(spec.endpointId, spec.continuation.id) : undefined
     if (pendingKey && reservations.has(pendingKey)) throw new Error("OpenCode session already reserved")
     if (pendingKey) reservations.add(pendingKey)
@@ -156,6 +159,11 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
       abort.signal.throwIfAborted()
       const models = await readOpenCodeModels(server, directory, abort.signal)
       if (!models.some((model) => model.providerId === spec.providerId && model.id === spec.modelId && model.selectable)) throw new Error("OpenCode model is unavailable")
+      const attachment = prepared.relay.attachment
+      const connected = await server.client.mcp.add({ directory, name: attachment.name, config: {
+        type: "remote", url: attachment.url, headers: { ...attachment.headers }, oauth: false
+      } }, { throwOnError: true, signal: abort.signal })
+      if (connected.data.jingler?.status !== "connected") throw new Error("Jingler tool relay did not connect")
       const { session, fresh } = await openOpenCodeSession(server, spec, directory, abort.signal)
       id = session.id
       abort.signal.throwIfAborted()
@@ -165,11 +173,11 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
       active.set(key, { server, directory, inbox })
       await inbox.connectedBeforePrompt()
       abort.signal.throwIfAborted()
-      const messageID = `msg_${Date.now().toString(16)}${randomBytes(12).toString("hex")}`
-      const events = new OpenCodeEvents(id, messageID)
+      // OpenCode's loop compares sortable IDs. Let the server mint the user ID and correlate its event.
+      const events = new OpenCodeEvents(id)
       const permissions = new Set<string>()
       const questions = new Set<string>()
-      await server.client.session.promptAsync({ sessionID: id, directory, messageID, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true, signal: abort.signal })
+      await server.client.session.promptAsync({ sessionID: id, directory, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", system: prepared.systemPrompt, parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true, signal: abort.signal })
       abort.signal.throwIfAborted()
       yield { _tag: "Started", sessionId: id, model: spec.modelId }
       for (;;) {
@@ -188,4 +196,4 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeOptions): AgentRuntim
     } finally { clearTimeout(timeout); await cleanup() }
   }
 }
-export const makeOpenCodeRuntimeRegistration = (options?: OpenCodeOptions): AgentRuntimeRegistration => ({ runtimeId: "opencode", runtime: makeOpenCodeAgentRuntime(options), ownsEndpoint: (endpointId, targetId) => endpointId === nativeCliEndpointId(targetId, "opencode") })
+export const makeOpenCodeRuntimeRegistration = (options?: OpenCodeRuntimeOptions): AgentRuntimeRegistration => ({ runtimeId: "opencode", runtime: makeOpenCodeAgentRuntime(options), ownsEndpoint: (endpointId, targetId) => endpointId === nativeCliEndpointId(targetId, "opencode") })

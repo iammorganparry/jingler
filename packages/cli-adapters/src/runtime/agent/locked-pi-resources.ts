@@ -9,10 +9,6 @@ import {
 } from "@earendil-works/pi-coding-agent"
 import { Data, Effect } from "effect"
 import { PI_SUBAGENTS_EXTENSION_PATH } from "../subagents/pi-subagents-bootstrap.js"
-import {
-  PONYTAIL_EXTENSION_PATH,
-  PONYTAIL_SKILLS_PATH
-} from "../resources/ponytail-resources.js"
 export { PONYTAIL_EXTENSION_PATH, PONYTAIL_SKILLS_PATH } from "../resources/ponytail-resources.js"
 
 const require = createRequire(import.meta.url)
@@ -22,7 +18,6 @@ export const PLANNOTATOR_EXTENSION_PATH = dirname(
 
 const ALLOWED_EXTENSION_PATHS = new Set([
   PI_SUBAGENTS_EXTENSION_PATH,
-  PONYTAIL_EXTENSION_PATH,
   PLANNOTATOR_EXTENSION_PATH
 ])
 
@@ -94,10 +89,9 @@ export const createLockedPiResources = (
         noContextFiles: true,
         additionalExtensionPaths: [
           PI_SUBAGENTS_EXTENSION_PATH,
-          PONYTAIL_EXTENSION_PATH,
           PLANNOTATOR_EXTENSION_PATH
         ],
-        additionalSkillPaths: [PONYTAIL_SKILLS_PATH],
+        additionalSkillPaths: [],
         additionalPromptTemplatePaths: [],
         additionalThemePaths: [],
         extensionFactories: [],
@@ -111,7 +105,7 @@ export const createLockedPiResources = (
         }),
         skillsOverride: (base) => ({
           ...base,
-          skills: base.skills.filter((skill) => skill.filePath.startsWith(PONYTAIL_SKILLS_PATH))
+          skills: []
         }),
         promptsOverride: () => ({ prompts: [], diagnostics: [] }),
         themesOverride: () => ({ themes: [], diagnostics: [] }),
@@ -144,8 +138,7 @@ export const assertLockedPiResources = (
     ],
     [
       "skill",
-      loader.getSkills().skills.length > 0 &&
-        loader.getSkills().skills.every((skill) => skill.filePath.startsWith(PONYTAIL_SKILLS_PATH))
+      loader.getSkills().skills.length === 0
     ],
     ["prompt template", loader.getPrompts().prompts.length === 0],
     ["theme", loader.getThemes().themes.length === 0],

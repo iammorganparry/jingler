@@ -33,6 +33,7 @@ import {
 import { ProviderConnections,
   type ProviderConnectionsShape
 } from "../providers/provider-connections.js"
+import { makePortableRuntime } from "../resources/portable-runtime.js"
 import { AgentResourceService } from "../resources/agent-resource-service.js"
 import { McpConfigService } from "../../mcp-config-service.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
@@ -62,6 +63,9 @@ import {
 } from "./agent-runtime.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makeClaudeRuntimeRegistration } from "./claude-agent-runtime.js"
+import { makeCodexRuntimeRegistration } from "../codex/runtime.js"
+import { makeOpenCodeRuntimeRegistration } from "../opencode/runtime.js"
+import type { NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
@@ -481,16 +485,20 @@ export const makePiAgentRuntimeLive = (
 
     const factory = makePiSessionFactory(factoryOptions)
     const runtime = yield* makePiAgentRuntime(factory)
-    return makeAgentRuntimeRegistry([{
-      runtimeId: "pi",
-      runtime,
-      ownsEndpoint: piEndpointTargets
-    }, makeClaudeRuntimeRegistration({
+    const nativeTools: NativeRuntimeToolsOptions = {
       createToolRegistry: (spec, context) => Effect.acquireRelease(
         Effect.sync(() => factoryOptions.terminalTracker(spec)),
         (tracker) => tracker.dispose().pipe(Effect.orDie)
       ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
-    })])
+    }
+    const portable = makePortableRuntime(managedResources, join(paths.managedResourcesDir, "portable-modes.json"))
+    return makeAgentRuntimeRegistry([{
+      runtimeId: "pi" as const,
+      runtime,
+      ownsEndpoint: piEndpointTargets
+    }, makeClaudeRuntimeRegistration(nativeTools),
+    makeCodexRuntimeRegistration(nativeTools),
+    makeOpenCodeRuntimeRegistration(nativeTools)].map((registration) => ({ ...registration, runtime: portable(registration.runtime) })))
   })
 )
 

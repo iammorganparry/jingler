@@ -1,4 +1,6 @@
 import { Server } from "node:http"
+import { execFile } from "node:child_process"
+import { promisify } from "node:util"
 import { readFile, stat } from "node:fs/promises"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
@@ -8,7 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { createPiTools } from "../agent/pi-tool-bridge.js"
 import { ToolRegistry, type ToolDefinition } from "../tools/tool-registry.js"
-import { startClaudeCliToolRelay } from "./claude-cli-tool-relay.js"
+import { startRegistryMcpRelay } from "./registry-mcp-relay.js"
 
 const spec = { role: "conversation", mode: "ask" } as const
 const context = {
@@ -22,11 +24,11 @@ const definition = (overrides: Partial<ToolDefinition<{ value: string }>> = {}):
   outputBudget: 100, cancellable: true, idempotency: "safe",
   execute: async ({ value }) => ({ actual: value }), ...overrides
 })
-const connect = async (relay: Awaited<ReturnType<typeof startClaudeCliToolRelay>>) => {
+const connect = async (relay: Awaited<ReturnType<typeof startRegistryMcpRelay>>) => {
   const serialized = await readFile(relay.mcpConfigPath, "utf8")
   const config = JSON.parse(serialized)
   const { url } = config.mcpServers.jingler
-  const headers = { Authorization: `Bearer ${relay.environment.JINGLER_CLAUDE_MCP_TOKEN}` }
+  const headers = { Authorization: `Bearer ${relay.environment.JINGLER_TOOL_RELAY_TOKEN}` }
   const client = new Client({ name: "test", version: "1" })
   await client.connect(new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } }))
   return { client, url: url as string, headers, serialized }
@@ -37,12 +39,12 @@ describe("native Claude registry MCP relay", () => {
     const registry = new ToolRegistry()
     registry.register(definition())
     registry.register(definition({ id: "hidden", roles: ["review"] }))
-    const relay = await startClaudeCliToolRelay({ registry, spec, context })
+    const relay = await startRegistryMcpRelay({ registry, spec, context })
     const { client, serialized } = await connect(relay)
     try {
       expect((await stat(relay.mcpConfigPath)).mode & 0o777).toBe(0o600)
-      expect(serialized).not.toContain(relay.environment.JINGLER_CLAUDE_MCP_TOKEN)
-      expect(serialized).toContain("${JINGLER_CLAUDE_MCP_TOKEN}")
+      expect(serialized).not.toContain(relay.environment.JINGLER_TOOL_RELAY_TOKEN)
+      expect(serialized).toContain("${JINGLER_TOOL_RELAY_TOKEN}")
       expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(createPiTools(registry, spec, context).map(({ name }) => name))
       for (const value of ["first", "second"]) {
         expect(await client.callTool({ name: "echo", arguments: { value } })).toMatchObject({
@@ -71,10 +73,11 @@ describe("native Claude registry MCP relay", () => {
       risk: "execute", outputBudget: 1000,
       execute: async ({ command }, { progress }) => {
         progress({ message: "hello", completed: 1, total: 1 })
-        return { command, exitCode: 0, stdout: "hello\n", stderr: "" }
+        const { stdout, stderr } = await promisify(execFile)(process.execPath, ["-e", "console.log('hello')"])
+        return { command, exitCode: 0, stdout, stderr }
       }
     })
-    const relay = await startClaudeCliToolRelay({ registry, spec, context: {
+    const relay = await startRegistryMcpRelay({ registry, spec, context: {
       ...context, publishEvent: (event) => Effect.promise(async () => {
         await Promise.resolve()
         events.push(event)
@@ -99,7 +102,7 @@ describe("native Claude registry MCP relay", () => {
     registry.register(definition())
     registry.register(definition({ id: "network", risk: "network", execute }))
     registry.register(definition({ id: "hidden", roles: ["review"], execute }))
-    const relay = await startClaudeCliToolRelay({ registry, spec, context: { ...context, canUseTool: () => Effect.succeed("deny") } })
+    const relay = await startRegistryMcpRelay({ registry, spec, context: { ...context, canUseTool: () => Effect.succeed("deny") } })
     const { client, url, headers } = await connect(relay)
     try {
       for (const [name, args, code] of [
@@ -119,6 +122,25 @@ describe("native Claude registry MCP relay", () => {
     await expect(fetch(url)).rejects.toThrow()
   })
 
+  it("settles the visible tool when permission handling fails without exposing the exception", async () => {
+    const events: StreamEvent[] = []
+    const registry = new ToolRegistry()
+    registry.register(definition({ risk: "network" }))
+    const relay = await startRegistryMcpRelay({ registry, spec, context: {
+      ...context,
+      canUseTool: () => Effect.die(new Error("private credential detail")),
+      publishEvent: (event) => Effect.sync(() => { events.push(event) })
+    } })
+    const { client } = await connect(relay)
+    try {
+      const result = await client.callTool({ name: "echo", arguments: { value: "x" } })
+      expect(result).toMatchObject({ isError: true })
+      expect(JSON.stringify(result)).not.toContain("private credential")
+      expect(events.map(({ _tag }) => _tag)).toEqual(["ToolStart", "ToolEnd"])
+      expect(events[1]).toMatchObject({ status: "error" })
+    } finally { await client.close(); await relay.close() }
+  })
+
   it("aborts an in-flight call and closes its sockets/config on close", async () => {
     let started!: () => void
     const ready = new Promise<void>((resolve) => { started = resolve })
@@ -128,7 +150,7 @@ describe("native Claude registry MCP relay", () => {
       started()
       return new Promise((resolve) => signal.addEventListener("abort", () => { aborted = true; resolve(null) }, { once: true }))
     } }))
-    const relay = await startClaudeCliToolRelay({ registry, spec, context })
+    const relay = await startRegistryMcpRelay({ registry, spec, context })
     const { client } = await connect(relay)
     const pending = client.callTool({ name: "echo", arguments: { value: "x" } }).catch(() => null)
     await ready
@@ -154,7 +176,7 @@ describe("native Claude registry MCP relay", () => {
     } })
     registry.register(definition({ risk: "mutate", idempotency: "keyed" }))
     let allow = true
-    const relay = await startClaudeCliToolRelay({ registry, spec, context: {
+    const relay = await startRegistryMcpRelay({ registry, spec, context: {
       ...context, canUseTool: () => Effect.succeed(allow ? "allow" : "deny")
     } })
     const { client } = await connect(relay)
@@ -176,7 +198,7 @@ describe("native Claude registry MCP relay", () => {
 it("binds the actual MCP listener exclusively to IPv4 loopback", async () => {
   const listen = vi.spyOn(Server.prototype, "listen")
   try {
-    const relay = await startClaudeCliToolRelay({ registry: new ToolRegistry(), spec, context })
+    const relay = await startRegistryMcpRelay({ registry: new ToolRegistry(), spec, context })
     try {
       expect(listen).toHaveBeenCalledWith(0, "127.0.0.1", expect.any(Function))
       const server = listen.mock.instances[0]!

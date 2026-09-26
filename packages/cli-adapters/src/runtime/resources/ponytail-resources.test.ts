@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   PONYTAIL_EXTENSION_PATH,
   PONYTAIL_SKILLS_PATH,
-  PONYTAIL_VERSION
+  PONYTAIL_VERSION,
+  ponytailPromptLayers
 } from "./ponytail-resources.js"
 
 interface PonytailCommandResult {
@@ -48,6 +49,12 @@ const loadPonytail = async (): Promise<PonytailModule> =>
   import(pathToFileURL(PONYTAIL_EXTENSION_PATH).href) as Promise<PonytailModule>
 
 describe("bundled Ponytail resources", () => {
+  it("keeps review behavior in the shared prompt across harness switches and removes it when off", () => {
+    expect(ponytailPromptLayers("review")[0]?.content).toContain("Review diffs for unnecessary complexity")
+    expect(ponytailPromptLayers("lite")[0]?.content).toContain("PONYTAIL MODE ACTIVE — level: lite")
+    expect(ponytailPromptLayers("off")).toEqual([])
+  })
+
   it("pins the official package and all six skills", async () => {
     expect(PONYTAIL_VERSION).toBe("4.9.0")
     const { readdir } = await import("node:fs/promises")

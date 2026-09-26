@@ -1,34 +1,62 @@
-# Claude Code runtime contract
+# Unified Jingler capabilities across native harnesses
 
-- [ ] Trace both Claude entry points, prompt compilation, tool execution, and UI event consumption; reproduce the missing-result failure.
-- [ ] Use the existing Jingler runtime/event contract for Claude output and preserve tool names, arguments, results, errors, and cancellation without duplicate execution.
-- [ ] Pass the compiled Jingler prompt/rules and active tool catalog to Claude; retain Jingler permission enforcement and subscription authentication.
-- [ ] Add and run regression tests for shell output, tool rendering events, prompt inheritance, repeated turns, and failures; run security checks for relay changes.
-- [ ] Report verified behavior, current vendor references, and any live-test limitations.
+## Goal and decisions
 
-## Updated operator requirements
+Jingler owns prompts/rules, portable skills (including Ponytail), configured MCP authentication/discovery, permission checks, and normalized tool events. Pi, Claude Code, Codex and OpenCode retain their own conversation loops. Switching harnesses must not remove a supported Jingler-managed skill or MCP service. Do not enable arbitrary local hooks/plugins to achieve parity.
 
-Jingler owns a unified skill and MCP experience across harnesses. Portable capabilities (including Ponytail) must be exposed through Jingler-managed catalogs, state, and execution rather than each harness's private plugin installation. Truly harness-specific features remain conditional. Keep native harness loops; do not migrate Claude to Pi just to inherit extensions.
+Reuse the existing `AgentRuntimeShape`, `StreamEvent`, `ToolRegistry`, `AgentResourceService`, `PromptCompiler`, and registry-backed MCP relay. Do not introduce another skill/MCP subsystem. Pi-specific subagent/plan execution internals remain conditional; do not advertise unavailable tools in native prompts.
 
-Research confirmed Ponytail 4.9.0 supports Claude, Pi, Codex, and OpenCode. Its npm package includes shared instructions/skills but omits the native Claude plugin manifest. Its native hooks use a shared mode file, unsuitable for isolated Jingler chat state without additional work. Reuse shared instructions and let Jingler own state. References: https://github.com/DietrichGebert/ponytail/blob/v4.9.0/docs/agent-portability.md and https://code.claude.com/docs/en/plugins-reference.
+## Implementation checklist
 
-Before expanding implementation, trace shared skills/MCP preparation and prompt compilation across all four runtimes, then submit the revised cross-harness plan for review. Current runtime changes are partial, not ready to claim complete.
+- [x] Trace the four runtimes and research supported vendor integration points; verify current Claude tool round trips.
+- [x] Share complete registry/prompt preparation and the authenticated MCP relay across native adapters; wire desktop and device registration through that preparation.
+- [x] Make portable skills and Ponytail Jingler-owned, including command expansion and per-chat state that survives restart and harness changes; retain the same skill catalog in the composer.
+- [x] Connect Codex and OpenCode to the shared capabilities, refresh them on resume, and prevent duplicate tool events or cross-chat credential/tool leakage.
+- [x] Run parity, permissions, cancellation, concurrency, resume, prompt/skill, and tool-result regressions; typecheck, review security-sensitive changes, and report live verification limits.
 
-## Observed progress
+## Concrete changes
 
-- Baseline: 33 existing Claude tests passed.
-- Fixed native launch's --safe-mode conflict with MCP, added compiled core prompt, and forwarded command targets/progress using the existing event contract.
-- Live Claude 2.1.282 testing exposed rejection of rate_limit_event; accepted that metadata record.
-- Live native supplied-tool/result check passed; live Pi sampling-provider two-turn tool/result check passed.
-- Focused deterministic run: 49 passed, one opt-in live test skipped. Latest typecheck identified a test observer fixture type issue; fixture corrected, rerun pending.
-- The exact supplied transcript's repeated continuation-text failure has not been reproduced.
+### Shared preparation and relay
 
-## Findings before implementation
+The full production registry factory currently lives in `runtime/agent/pi-runtime-live.ts`. It already loads authenticated MCP configurations, target-enabled managed resources, workspace tools, plugins, and mutation tracking. Claude reuses it; Codex/OpenCode are separately registered without it in desktop and device composition.
 
-There are two paths: `claude-cli-provider.ts` exposes a Pi sampling provider and stops Claude after capturing one MCP call; `claude-agent-runtime.ts` runs Claude as a native agent and executes tools through the registry relay. Both have separate stream decoders. The native runtime currently supplies no compiled Jingler system prompt. Its relay publishes ToolStart with no target and does not forward tool updates. The supplied transcript's exact failure has not yet been reproduced.
+Expose/reuse this factory for all native registrations. Generalize `claude-cli-tool-relay.ts` only enough to expose a standard HTTP MCP attachment while retaining its existing role/mode filtering, permissions, output bounds, cancellation, mutation serialization, secret handling, and lifecycle events. Keep vendor config serialization in the respective adapters.
 
-Reuse `AgentRuntimeShape`, `StreamEvent`, the existing prompt compiler, and registry execution rather than introducing a third interface. Trace endpoint ownership before deciding whether the legacy sampling path can be removed safely.
+Compile core Jingler rules and the exact active catalog once per turn. Share that preparation rather than independently reconstructing prompts in each runtime. Keep unsupported Pi extension instructions out of native prompts.
 
-Installed Claude CLI: 2.1.282. MCP SDK declared: ^1.29.0. Pi packages: 0.84.1. No Anthropic Agent SDK dependency in cli-adapters; integration uses the CLI JSONL protocol.
+### Portable skills and Ponytail
 
-Vendor reference: https://code.claude.com/docs/en/headless (reviewed). Do not switch subscription sessions to --bare: current docs say that mode does not read subscription OAuth credentials.
+Keep managed resource authorization in `AgentResourceService` and the existing list/load tools. Move portable command preparation ahead of harness dispatch, so `/skill` invocation is consistent. Reuse Ponytail 4.9.0's installed shared instruction builder and skill files, not its native hooks or a copied ruleset. Use existing persisted chat/transcript data where sufficient; add minimal explicit chat state only if necessary for restart, mode/default changes, and harness switches. Pi must not inject a second conflicting Ponytail mode.
+
+### Codex
+
+Attach only the Jingler registry relay for Jingler-managed tools/services, rather than forwarding upstream MCP secrets/config independently. Inject compiled instructions through the generated protocol's supported instruction fields on both start and resume. Preserve existing unsupported permission-mode restrictions until tests prove an equivalent safe path; do not silently weaken approvals.
+
+### OpenCode
+
+Installed SDK/server target is 1.18.14. The SDK exposes MCP add by directory, not by session. Therefore use an owned per-run server for registry-backed execution, rather than adding run credentials to the existing shared discovery server. Session storage/resume remains native. Inject the shared prompt via the SDK system field and attach the Jingler relay inside that isolated server. Keep discovery pooling unchanged. Verify cleanup, concurrent same-directory chats, and resumed sessions with rotated relay credentials.
+
+## Final verification
+
+- Full regression run: 278 files passed; 2,868 tests passed; four opt-in live tests skipped. After the final small refactor, 106 focused tests passed, followed by 33 final fixture/state/event checks. Core, cli-adapters, desktop and device-agent typechecks passed. Changed-file Biome lint has no errors (warnings remain); `git diff --check` passed.
+- All four live checks passed together on the final runtime code: native Claude, Claude via Pi sampling, native Codex, and native OpenCode. Versions: Claude Code 2.1.282; Codex 0.153.2; OpenCode/SDK 1.18.14; Pi 0.84.1; Ponytail 4.9.0. Codex used `gpt-6-astra`; OpenCode used `big-pickle`.
+- Live testing found and fixed additional protocol issues: native tool aliases must be mapped explicitly; Codex's redundant MCP approval must be delegated only for Jingler's own permission-enforcing relay; OpenCode must generate its own sortable message IDs, otherwise it repeatedly answers the same turn. Regression coverage includes server-ID correlation, isolated concurrent chats, resumed credential refresh, and relay-event deduplication.
+- Independent reviews found no blockers, including a follow-up on scoped Codex approval and OpenCode correlation. semgrep, trivy and gitleaks are unavailable; no scanner-clean claim is made. Validation ran on Node 22.14.0; the repository requests >=24.
+- The exact supplied Claude transcript's continuation-text loop was not reproduced. The current native and sampling paths both passed tool/result round trips. No interactive desktop/browser QA was performed; verification covers normalized tool events and existing renderer/RPC tests.
+
+Portable mode state is stored in the existing managed-resources directory as `portable-modes.json`, keyed by Jingler session/chat. Initial migration replays explicit mode commands from the visible transcript. Built-in skill descriptors now have one shared definition for the composer and agent catalog.
+
+## Vendor references reviewed
+
+- Claude headless execution: https://code.claude.com/docs/en/headless
+- Claude flags: https://code.claude.com/docs/en/cli-reference
+- Claude plugin behavior: https://code.claude.com/docs/en/plugins-reference
+- Ponytail version-matched portability: https://github.com/DietrichGebert/ponytail/blob/v4.9.0/docs/agent-portability.md
+- Ponytail version-matched Claude manifest: https://github.com/DietrichGebert/ponytail/blob/v4.9.0/.claude-plugin/plugin.json
+- Codex app-server: https://learn.chatgpt.com/docs/app-server (matched to generated 0.153.2 protocol)
+- Codex version-matched MCP approval configuration: https://github.com/openai/codex/blob/rust-v0.153.2/codex-rs/core/config.schema.json and https://developers.openai.com/codex/config-reference
+- OpenCode SDK: https://opencode.ai/docs/sdk/ (public examples differ from v2; calls matched to installed 1.18.14 v2 types). Sortable-ID ordering context: https://github.com/anomalyco/opencode/issues/42608; the adapter fix uses server-generated IDs rather than reproducing the vendor algorithm.
+
+## Estimate and scope
+
+Original estimate: 120–180 minutes. Implementation and verification are complete. No new dependencies, no migration of Claude into Pi, no activation of arbitrary user/project plugins, and no claim of universal parity for harness-private features. Native server isolation adds process startup cost; only optimize sharing after safe concurrent execution is proven.

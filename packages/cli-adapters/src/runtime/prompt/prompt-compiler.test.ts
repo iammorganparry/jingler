@@ -5,6 +5,18 @@ import { promptLayer, runtimeInvariantLayers } from "./role-profiles.js"
 const tool = { id: "workspace_read", version: "1", description: "Read a bounded project file." }
 
 describe("PromptCompiler", () => {
+  it.each(["claude", "codex", "opencode"] as const)("keeps core rules without promising Pi-only tools for %s", (runtimeId) => {
+    const compiled = new PromptCompiler().compile({
+      layers: runtimeInvariantLayers("conversation", "auto", runtimeId),
+      tools: [{ id: "jingler_load_resource", version: "1", description: "Load a managed skill." }],
+      tokenBudget: 8_000
+    })
+    expect(compiled.text).toContain("jingler.identity-and-safety")
+    expect(compiled.text).toContain("jingler.engineering-principles")
+    expect(compiled.text).toContain("jingler_load_resource")
+    expect(compiled.text).not.toContain("plannotator_submit_plan")
+  })
+
   it("compiles immutable policy before role, tools, workspace, preferences, and turn context", () => {
     const result = new PromptCompiler().compile({
       layers: [

@@ -27,6 +27,8 @@ const finishPrompt = (directory, id, body, messageID, prompt, reply = '') => {
 }
 const handlePrompt = (request, response, directory, id, body) => {
   response.writeHead(204); response.end()
+  body.messageID ??= `msg_${randomUUID()}`
+  emit(directory, "message.updated", { info: { id: body.messageID, sessionID: id, role: "user" } })
   const prompt = body.parts[0].text
   const messageID = `msg_${randomUUID()}`
   const finish = (reply = '') => finishPrompt(directory, id, body, messageID, prompt, reply)
