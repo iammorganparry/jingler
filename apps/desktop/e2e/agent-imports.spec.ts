@@ -37,6 +37,32 @@ const seededSession = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSe
   activeChatId: CHAT_ID
 }]
 
+test("Jingler-owned Ponytail commands survive an app restart", async ({ launchApp }) => {
+  const first = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: { scenarioId: "portable-commands", authRoute: "api-key" },
+    sessions: seededSession
+  })
+  await expect(appShell(first.window)).toBeVisible()
+  const composer = first.window.getByPlaceholder("Message the agent…")
+  await composer.fill("/ponytail ultra")
+  await composer.press("Enter")
+  await expect(first.window.getByText("Ponytail: ultra.", { exact: true })).toBeVisible()
+  await first.app.close()
+
+  const resumed = await launchApp({
+    home: first.home, reposDir: first.reposDir, userDataDir: first.userDataDir,
+    configured: true, withRepo: true,
+    piFixture: { scenarioId: "portable-commands", authRoute: "api-key" }
+  })
+  await expect(appShell(resumed.window)).toBeVisible()
+  const resumedComposer = resumed.window.getByPlaceholder("Message the agent…")
+  await resumedComposer.fill("/ponytail status")
+  await resumedComposer.press("Enter")
+  await expect(resumed.window.getByText("Ponytail: ultra.", { exact: true })).toHaveCount(2)
+})
+
 test("invokes an imported skill through the real pi runtime", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
