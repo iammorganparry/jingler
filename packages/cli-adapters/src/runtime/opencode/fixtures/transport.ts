@@ -59,6 +59,7 @@ export const fixtureTransport = () => {
   }
   const globalResponse = (url: URL): Response | null => {
     if (url.pathname === "/global/health") return json({ healthy: true, version: "1.18.14" })
+    if (url.pathname === "/config") return json({})
     if (url.pathname === "/provider") return json({ all: providers, connected: ["alpha", "beta"], default: {} })
     if (url.pathname === "/config/providers") return json({ providers, default: {} })
     if (url.pathname !== "/global/event") return null

@@ -10,6 +10,7 @@ import {
   type ResourceImportResult
 } from "@jingler/core"
 import { Context, Data, Effect, PubSub, Schema, Stream } from "effect"
+import { isBuiltinResourceId } from "./portable-skills.js"
 import { AtomicJsonFile } from "../persistence/atomic-json-file.js"
 
 const MAX_RESOURCE_BYTES = 256 * 1024
@@ -81,7 +82,7 @@ const nextId = async (
   let suffix = 1
   while (true) {
     const candidate = (suffix === 1 ? requested : `${requested}-${suffix}`) as ManagedResourceId
-    if (!used.has(candidate)) {
+    if (!used.has(candidate) && !isBuiltinResourceId(candidate)) {
       const exists = await stat(targetFor(root, kind, candidate)).then(() => true, () => false)
       if (!exists) return candidate
     }
@@ -143,7 +144,33 @@ export const makeAgentResourceService = (
     const changes = yield* PubSub.unbounded<ReadonlyArray<ManagedResource>>()
 
     const list = Effect.tryPromise({
-      try: () => catalog.read(),
+      try: async () => {
+        const current = await catalog.read()
+        if (!current.some(({ id }) => isBuiltinResourceId(id))) return current
+        // Retain legacy files as rollback copies; failed catalog writes cannot lose imported instructions.
+        const created: string[] = []
+        try {
+          await catalog.update(async (resources) => {
+            const migrated = [...resources]
+            for (const [index, resource] of migrated.entries()) {
+              if (!isBuiltinResourceId(resource.id)) continue
+              const content = await managedContent(root, resource)
+              if (content === null) throw new Error("Could not migrate reserved resource ID")
+              const id = await nextId(resource.id, migrated, root, resource.kind)
+              const managedPath = targetFor(root, resource.kind, id)
+              await mkdir(dirname(managedPath), { recursive: true })
+              await writeFile(managedPath, content, { flag: "wx" })
+              created.push(managedPath)
+              migrated[index] = { ...resource, id, managedPath }
+            }
+            return migrated
+          })
+        } catch (cause) {
+          await Promise.all(created.map((path) => rm(path, { force: true })))
+          throw cause
+        }
+        return catalog.read()
+      },
       catch: () => serviceError("list", "Could not read the managed resource catalog")
     })
 

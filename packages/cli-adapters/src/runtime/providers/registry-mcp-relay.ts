@@ -78,13 +78,15 @@ export const startRegistryMcpRelay = async (
     servers.add(server)
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: descriptors }))
     server.setRequestHandler(CallToolRequestSchema, async ({ params }, extra) => {
+      // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: keep progress settlement and terminal publication in one lifecycle.
       const execute = async () => {
         const toolCallId = randomUUID()
         await Effect.runPromise(input.context.publishEvent({
           _tag: "ToolStart", id: toolCallId, name: params.name, target: toolTarget(params.arguments)
         }))
+        let updates = Promise.resolve()
+        let publicationFailed = false
         try {
-          let updates = Promise.resolve()
           const result = await executeRegistryTool({
             ...input,
             id: params.name,
@@ -96,10 +98,11 @@ export const startRegistryMcpRelay = async (
               updates = updates.then(() => Effect.runPromise(input.context.publishEvent({
                 _tag: "ToolDelta", id: toolCallId,
                 output: result.content.map(({ text }) => text).join("\n")
-              })))
+              }))).catch(() => { publicationFailed = true })
             }
           })
           await updates
+          if (publicationFailed) throw new Error("Tool progress publication failed")
           await Effect.runPromise(input.context.publishEvent({
             _tag: "ToolEnd", id: toolCallId,
             status: result.details.status === "success" ? "success" : "error",
@@ -109,6 +112,7 @@ export const startRegistryMcpRelay = async (
           }))
           return { content: result.content, isError: result.details.status !== "success" }
         } catch {
+          await updates
           const output = "Tool execution failed or was cancelled"
           await Effect.runPromise(input.context.publishEvent({
             _tag: "ToolEnd", id: toolCallId, status: "error", meta: null, diff: null, preview: null, output

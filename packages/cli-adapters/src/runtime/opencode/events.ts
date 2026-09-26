@@ -24,7 +24,7 @@ export class OpenCodeEvents {
   get hasResponse() { return this.messages.size > 0 }
   tokens = 0
   cost = 0
-  constructor(readonly sessionID: string, private parentID?: string) {}
+  constructor(readonly sessionID: string, private parentID?: string, private readonly relayTools: ReadonlySet<string> = new Set()) {}
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: exhaustive vendor event normalization keeps per-turn correlation explicit.
   map(event: Event): StreamEvent[] {
     if (eventSessionId(event) !== this.sessionID) return []
@@ -89,7 +89,7 @@ export class OpenCodeEvents {
       diff: preview === null ? null : { added: lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length, removed: lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length }, output: output.slice(-16_000) }]
   }
   private part(part: Part): StreamEvent[] {
-    if (part.type === "tool" && part.tool.startsWith("jingler_")) return []
+    if (part.type === "tool" && this.relayTools.has(part.tool)) return []
     let state = this.parts.get(part.id)
     const events: StreamEvent[] = []
     if (!state) {

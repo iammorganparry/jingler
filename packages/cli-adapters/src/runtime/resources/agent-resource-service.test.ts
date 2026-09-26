@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { ManagedResourceId } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
 import { afterEach, describe, expect, it } from "vitest"
+import { loadPortableResource, portableResourceCatalog } from "./portable-skills.js"
 import { detectAgentResources } from "./resource-detector.js"
 import { makeAgentResourceService } from "./agent-resource-service.js"
 
@@ -59,6 +60,29 @@ describe("AgentResourceService", () => {
     }], { kind: "portable", allowedTargets: [] }))
     expect(aliased.skipped.map(({ code }) => code)).toEqual(["duplicate"])
     expect(await Effect.runPromise(service.list)).toHaveLength(2)
+  })
+
+  it("reserves built-in IDs and migrates existing collisions without replacing instructions", async () => {
+    const home = await temporary()
+    const managedRoot = await temporary()
+    const source = join(home, ".agents", "skills", "explain")
+    await mkdir(source, { recursive: true })
+    await writeFile(join(source, "SKILL.md"), "Imported explanation instructions")
+    const service = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
+    const result = await Effect.runPromise(service.importResources((await detected(home)).candidates, { kind: "portable", allowedTargets: [] }))
+    expect(result.imported).toEqual([id("explain-2")])
+    const [resource] = await Effect.runPromise(service.list)
+    const legacyPath = join(managedRoot, "skills", "explain", "SKILL.md")
+    await mkdir(join(managedRoot, "skills", "explain"), { recursive: true })
+    await writeFile(legacyPath, "Legacy imported instructions")
+    await writeFile(join(managedRoot, "catalog.json"), JSON.stringify([resource, { ...resource, id: "explain", managedPath: legacyPath }]))
+    const restarted = await Effect.runPromise(makeAgentResourceService({ managedRoot }))
+    const resources = await Effect.runPromise(restarted.enabledForTarget("desktop"))
+    expect(resources.map(({ id }) => id)).toEqual(["explain-2", "explain-3"])
+    const available = new Set(portableResourceCatalog(resources).map(({ id }) => String(id)))
+    expect(await Effect.runPromise(loadPortableResource(restarted, available, id("explain-2")))).toBe("Imported explanation instructions")
+    expect(await Effect.runPromise(loadPortableResource(restarted, available, id("explain-3")))).toBe("Legacy imported instructions")
+    expect(await Effect.runPromise(restarted.list)).toEqual(resources)
   })
 
   it("deduplicates identical skill content while preserving different same-name skills", async () => {

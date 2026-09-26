@@ -491,7 +491,7 @@ export const makePiAgentRuntimeLive = (
         (tracker) => tracker.dispose().pipe(Effect.orDie)
       ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
     }
-    const portable = makePortableRuntime(managedResources, join(paths.managedResourcesDir, "portable-modes.json"))
+    const portable = makePortableRuntime(managedResources, join(paths.managedResourcesDir, "portable-modes.json"), paths.piSessionsDir)
     return makeAgentRuntimeRegistry([{
       runtimeId: "pi" as const,
       runtime,

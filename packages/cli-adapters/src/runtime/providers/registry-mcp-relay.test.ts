@@ -96,6 +96,67 @@ describe("native Claude registry MCP relay", () => {
     } finally { await client.close(); await relay.close() }
   })
 
+  it("handles rejected progress immediately while execution is pending", async () => {
+    const events: StreamEvent[] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    let published!: () => void
+    const rejected = new Promise<void>((resolve) => { published = resolve })
+    const registry = new ToolRegistry()
+    registry.register(definition({ execute: async (_input, { progress }) => {
+      progress({ message: "pending", completed: 0, total: 1 })
+      await held
+      return "finished"
+    } }))
+    const relay = await startRegistryMcpRelay({ registry, spec, context: {
+      ...context, publishEvent: (event) => Effect.sync(() => {
+        events.push(event)
+        if (event._tag === "ToolDelta") { published(); throw new Error("publication failed") }
+      })
+    } })
+    const { client } = await connect(relay)
+    try {
+      const pending = client.callTool({ name: "echo", arguments: { value: "x" } })
+      await rejected
+      // Cross an event-loop boundary while execution is held: unhandled rejections fail Vitest.
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(events.map(({ _tag }) => _tag)).toEqual(["ToolStart", "ToolDelta"])
+      release()
+      expect(await pending).toMatchObject({ isError: true })
+      expect(events.map(({ _tag }) => _tag)).toEqual(["ToolStart", "ToolDelta", "ToolEnd"])
+      expect(events.at(-1)).toMatchObject({ status: "error" })
+    } finally { release(); await client.close(); await relay.close() }
+  })
+
+  it("drains pending progress before ToolEnd when registry execution throws", async () => {
+    const events: string[] = []
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    let started!: () => void
+    const publishing = new Promise<void>((resolve) => { started = resolve })
+    const registry = new ToolRegistry()
+    registry.register(definition())
+    vi.spyOn(registry, "execute").mockImplementation((request) => Effect.sync(() => {
+      request.progress?.({ message: "pending", completed: 0, total: 1 })
+    }).pipe(Effect.zipRight(Effect.die("registry failed"))))
+    const relay = await startRegistryMcpRelay({ registry, spec, context: {
+      ...context, publishEvent: (event) => Effect.promise(async () => {
+        if (event._tag === "ToolDelta") { started(); await held }
+        events.push(event._tag)
+      })
+    } })
+    const { client } = await connect(relay)
+    try {
+      const pending = client.callTool({ name: "echo", arguments: { value: "x" } })
+      await publishing
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(events).toEqual(["ToolStart"])
+      release()
+      expect(await pending).toMatchObject({ isError: true })
+      expect(events).toEqual(["ToolStart", "ToolDelta", "ToolEnd"])
+    } finally { release(); await client.close(); await relay.close() }
+  })
+
   it("denies permission, unknown and inactive tools, validates input and bounds output", async () => {
     const execute = vi.fn(async () => "never")
     const registry = new ToolRegistry()

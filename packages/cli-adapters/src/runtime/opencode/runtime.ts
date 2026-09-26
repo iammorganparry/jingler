@@ -15,9 +15,9 @@ const failure = (cause: unknown) => cause instanceof AgentRuntimeError ? cause :
 const unsupported = () => Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "This operation is unavailable in native OpenCode" }))
 const ownerKey = (endpoint: string, session: string) => JSON.stringify([endpoint, session])
 const reads = ["read", "glob", "grep", "list", "lsp"]
-export const openCodePermissions = (mode: AgentRunSpec["mode"]): PermissionRuleset => [
+export const openCodePermissions = (mode: AgentRunSpec["mode"], relayTools: ReadonlySet<string> = new Set()): PermissionRuleset => [
   { permission: "*", pattern: "*", action: mode === "read-only" ? "deny" : "ask" },
-  { permission: "jingler_*", pattern: "*", action: "allow" },
+  ...[...relayTools].map((permission) => ({ permission, pattern: "*", action: "allow" as const })),
   ...reads.map((permission) => ({ permission, pattern: "*", action: "allow" as const })),
   // Task permissions cannot represent Jingler subagents; questions use Jingler's UI protocol.
   { permission: "task", pattern: "*", action: "deny" },
@@ -26,8 +26,8 @@ export const openCodePermissions = (mode: AgentRunSpec["mode"]): PermissionRules
 
 /** Missing sessions alone recover by seeding. Auth, corruption and path mismatches fail. */
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: continuation recovery stays visible beside the vendor calls it governs.
-export const openOpenCodeSession = async (server: OpenCodeServer, spec: AgentRunSpec, directory: string, signal?: AbortSignal) => {
-  const permission = openCodePermissions(spec.mode)
+export const openOpenCodeSession = async (server: OpenCodeServer, spec: AgentRunSpec, directory: string, signal?: AbortSignal, relayTools: ReadonlySet<string> = new Set()) => {
+  const permission = openCodePermissions(spec.mode, relayTools)
   const request = { throwOnError: true as const, ...(signal ? { signal } : {}) }
   const sessionRequest = { throwOnError: true as const }
   if (spec.continuation) {
@@ -164,7 +164,8 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
         type: "remote", url: attachment.url, headers: { ...attachment.headers }, oauth: false
       } }, { throwOnError: true, signal: abort.signal })
       if (connected.data.jingler?.status !== "connected") throw new Error("Jingler tool relay did not connect")
-      const { session, fresh } = await openOpenCodeSession(server, spec, directory, abort.signal)
+      const relayTools = new Set(prepared.registry.capabilitiesFor(spec.role, spec.mode).map(({ id }) => `jingler_${id}`))
+      const { session, fresh } = await openOpenCodeSession(server, spec, directory, abort.signal, relayTools)
       id = session.id
       abort.signal.throwIfAborted()
       const key = ownerKey(spec.endpointId, id)
@@ -174,7 +175,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       await inbox.connectedBeforePrompt()
       abort.signal.throwIfAborted()
       // OpenCode's loop compares sortable IDs. Let the server mint the user ID and correlate its event.
-      const events = new OpenCodeEvents(id)
+      const events = new OpenCodeEvents(id, undefined, relayTools)
       const permissions = new Set<string>()
       const questions = new Set<string>()
       await server.client.session.promptAsync({ sessionID: id, directory, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", system: prepared.systemPrompt, parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true, signal: abort.signal })

@@ -28,7 +28,7 @@ const setup = async () => {
     received.push(input)
     return Stream.make({ _tag: "Done" as const, tokens: 0, costUsd: 0 })
   } }
-  const wrap = () => makePortableRuntime(service, join(root, "modes.json"))(harness)
+  const wrap = () => makePortableRuntime(service, join(root, "modes.json"), root)(harness)
   const run = (runtime: ReturnType<typeof wrap>, input: AgentRunSpec) => Effect.runPromise(runtime.run(input, context).pipe(Stream.runCollect))
   return { root, service, received, wrap, run }
 }
@@ -52,6 +52,22 @@ describe("Jingler portable skills", () => {
     expect(received.at(-1)?.ponytailMode).toBe("off")
   })
 
+  it("migrates the persisted Pi mode without its original visible command, only once", async () => {
+    const { root, received, wrap, run } = await setup()
+    const file = join(root, "legacy.jsonl")
+    const entries = [
+      { type: "session", version: 3, id: "legacy", cwd: root, timestamp: new Date().toISOString() },
+      { type: "custom", id: "mode", parentId: null, customType: "ponytail-mode", data: { mode: "ultra" }, timestamp: new Date().toISOString() }
+    ]
+    await writeFile(file, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
+    const input = spec({ runtimeId: "pi", seed: { reason: "migration", messages: [] }, continuation: { runtimeId: "pi", endpointId: spec().endpointId, id: file } })
+    await run(wrap(), input)
+    expect(received.at(-1)?.ponytailMode).toBe("ultra")
+    await run(wrap(), { ...input, prompt: "/ponytail off" })
+    await run(wrap(), input)
+    expect(received.at(-1)?.ponytailMode).toBe("off")
+  })
+
   it("uses raw operator text, not injected policy, for mode commands", async () => {
     const { received, wrap, run } = await setup()
     const runtime = wrap()
@@ -66,12 +82,20 @@ describe("Jingler portable skills", () => {
     const { received, wrap, run } = await setup()
     const runtime = wrap()
     for (const runtimeId of ["pi", "claude", "codex", "opencode"] as const) {
-      await run(runtime, spec({ runtimeId, operatorPrompt: "/ponytail-review current diff", prompt: "/ponytail-review current diff\n\nKEEP POLICY" }))
+      await run(runtime, spec({ runtimeId, operatorPrompt: "/skill:ponytail-review current diff", prompt: "/skill:ponytail-review current diff\n\nKEEP POLICY" }))
       expect(received.at(-1)?.prompt).toContain("Review diffs for unnecessary complexity")
       expect(received.at(-1)?.prompt).toContain("current diff")
       expect(received.at(-1)?.prompt).toContain("KEEP POLICY")
       expect(received.at(-1)?.ponytailMode).toBe("review")
     }
+  })
+
+  it("serves Jingler-specific help across harnesses", async () => {
+    const { received, wrap, run } = await setup()
+    await run(wrap(), spec({ prompt: "/ponytail-help" }))
+    expect(received.at(-1)?.prompt).toContain("/ponytail lite|full|ultra|off")
+    expect(received.at(-1)?.prompt).toContain("Update Jingler")
+    expect(received.at(-1)?.prompt).not.toMatch(/@ponytail|\/plugin|\/reload-plugins/u)
   })
 
   it("expands enabled managed skills but does not load target-disabled resources", async () => {
@@ -87,6 +111,8 @@ describe("Jingler portable skills", () => {
     expect(received.at(-1)?.prompt).toContain("POLICY")
     await expect(run(runtime, spec({ prompt: "/deploy staging", targetCapabilities: { ...spec().targetCapabilities, targetId: "other" } })))
       .rejects.toThrow("disabled or unavailable")
-    expect(received).toHaveLength(1)
+    await run(runtime, spec({ prompt: "/deploy $& $` $' $$" }))
+    expect(received.at(-1)?.prompt).toContain("Deploy $& $` $' $$ after tests.")
+    expect(received).toHaveLength(2)
   })
 })
