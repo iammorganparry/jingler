@@ -1,37 +1,12 @@
-import { useState } from "react"
+
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { PrFileChange, PullRequest as PullRequestData } from "@jingler/core"
+import type { PullRequest as PullRequestData } from "@jingler/core"
 import { LookFor, WidthLadder } from "../story-support.js"
-import type { ReviewSource } from "./changes-review.js"
-import { ChangesReviewPreview } from "./changes-review-preview.js"
 import { PullRequestView } from "./pull-request-view.js"
 
 const meta: Meta = { title: "Responsive/Panes", parameters: { layout: "fullscreen" } }
 export default meta
 type Story = StoryObj
-
-const FILES: ReadonlyArray<PrFileChange> = [
-  { path: "src/auth/session.ts", additions: 8, deletions: 3, commentCount: 2, viewed: false },
-  { path: "src/auth/refresh.ts", additions: 42, deletions: 0, commentCount: 0, viewed: false },
-  { path: "src/auth/token-store.ts", additions: 40, deletions: 0, commentCount: 0, viewed: true }
-]
-
-const DIFF = [
-  "diff --git a/src/auth/session.ts b/src/auth/session.ts",
-  "index 111..222 100644",
-  "--- a/src/auth/session.ts",
-  "+++ b/src/auth/session.ts",
-  "@@ -31,6 +31,8 @@ export function session()",
-  "   const s = req.session",
-  "-  if (!s.token) return next()",
-  "+  if (isExpired(s.token)) {",
-  "+    await refresh(s)",
-  "+  }",
-  "   return next()",
-  ""
-].join("\n")
-
-const FILE_DIFFS = FILES.map((f) => ({ path: f.path, diff: DIFF }))
 
 const PR: PullRequestData = {
   number: 482,
@@ -76,47 +51,6 @@ const PR: PullRequestData = {
   mergeBlockers: [],
   mergeStateStatus: "CLEAN"
 } as unknown as PullRequestData
-
-/**
- * Code Review: a file list, a diff, and a review tray.
- *
- * The two rails were 160px and 260px of `flex-none`, and `review-diff.tsx` spends
- * another 84px on fixed line-number gutters inside whatever is left. In a 500px
- * pane that came to roughly 70px of actual code — not a narrower view of the
- * diff so much as no view of it.
- */
-export const CodeReview: Story = {
-  render: () => (
-    <div className="min-h-screen bg-canvas">
-      <LookFor>
-        <strong className="text-text-bright">Look for:</strong> both rails docked only while their
-        saved widths leave at least 560px for the diff. Otherwise two toggle buttons appear in the
-        header — clicking either floats it as a sheet OVER the diff. The diff column should never
-        fall below a readable width, and the header should wrap rather than clip its &quot;Finish
-        review&quot; button.
-      </LookFor>
-      <WidthLadder height={420} render={() => <CodeReviewPane />} />
-    </div>
-  )
-}
-
-function CodeReviewPane() {
-  const source: ReviewSource = "pr"
-  const [activePath, setActivePath] = useState<string | null>(FILES[0]!.path)
-  return (
-    <ChangesReviewPreview
-      files={FILES}
-      activePath={activePath}
-      fileDiffs={FILE_DIFFS}
-      drafts={[]}
-      routeTargetSession="Refactor auth flow"
-      connected
-      source={source}
-      onSelectFile={setActivePath}
-      onAddDraft={() => {}}
-    />
-  )
-}
 
 /**
  * Pull Request: a 760px reading column beside a 352px rail.

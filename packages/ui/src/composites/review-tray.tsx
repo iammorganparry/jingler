@@ -76,21 +76,22 @@ export function ReviewTray({
       </div>
 
       <div className="flex flex-none flex-col gap-[11px] border-t border-hairline p-[11px]">
-        <div className="flex gap-[9px]">
+        {/* Stacked, primary first: side by side they clipped in the tray's width. */}
+        <div className="flex flex-col gap-2">
           <Button
-            variant="secondary"
-            className="flex-1 justify-center"
-            disabled={count === 0}
-            onClick={() => onFinishReview("comment_only")}
-          >
-            Comment only
-          </Button>
-          <Button
-            className="flex-[1.4] justify-center"
+            className="w-full justify-center"
             disabled={count === 0}
             onClick={() => onFinishReview("send_to_agent")}
           >
             Send {count} to agent →
+          </Button>
+          <Button
+            variant="secondary"
+            className="w-full justify-center"
+            disabled={count === 0}
+            onClick={() => onFinishReview("comment_only")}
+          >
+            Comment only
           </Button>
         </div>
       </div>

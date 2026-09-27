@@ -114,6 +114,35 @@ describe("ReviewFileDiff selection", () => {
     expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull()
   })
 
+  it("sends a comment straight to the agent without collecting a draft", async () => {
+    const onAddDraft = vi.fn()
+    const onSendComment = vi.fn()
+    render(
+      <WidthTierValue width={1_240}>
+        <ReviewFileDiff
+          {...diffProps}
+          file={file(path)}
+          diff={patch}
+          source="local"
+          onAddDraft={onAddDraft}
+          onSendComment={onSendComment}
+        />
+      </WidthTierValue>
+    )
+
+    const textarea = await selectOldLineOne()
+    const send = screen.getByRole("button", { name: "Send to agent" })
+    expect(send.hasAttribute("disabled")).toBe(true)
+    fireEvent.change(textarea, { target: { value: "Rename this." } })
+    fireEvent.click(send)
+
+    expect(onSendComment).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ path, body: "Rename this." })
+    )
+    expect(onAddDraft).not.toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull()
+  })
+
   it("renders a hierarchical status-aware changed-files tree with model-owned keyboard focus", async () => {
     const otherPath = "src/store.ts"
     const onSelectFile = vi.fn()

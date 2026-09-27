@@ -15,6 +15,7 @@ import {
   createPierreCodeViewItem,
   createPierreFileContents,
   DiffView,
+  ExplorerPanel,
   FileQuickOpen,
   parsePierreFileDiffs,
   PierreEditor,
@@ -27,7 +28,7 @@ import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
-import { ChangesExplorerPanel, ExplorerChangesFilter, useChangesReview } from "./changes-review.js"
+import { ChangesExplorerPanel, useChangesReview } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
@@ -185,19 +186,14 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
   }
 
   return (
-    <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
-      <div className="flex-none border-b border-hairline px-3 py-2">
-        <div className="truncate font-mono text-[10.5px] text-text">{session.branch}</div>
-        <div className="truncate text-[10px] text-dim" title={session.worktreePath}>{session.worktreePath}</div>
-        <div className="mt-2">
-          <ExplorerChangesFilter
-            session={session}
-            value={shownFilter}
-            onChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
-          />
-        </div>
-      </div>
-      <div className="relative min-h-0 flex-1">
+    <ExplorerPanel
+      branch={session.branch}
+      worktreePath={session.worktreePath}
+      filter={shownFilter}
+      onFilterChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
+      localAvailable={session.worktreePath != null}
+      prAvailable={session.prNumber != null}
+    >
         {filter !== "all" ? (
           <ChangesExplorerPanel
             session={session}
@@ -218,8 +214,7 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
           }}
         />
         )}
-      </div>
-    </section>
+    </ExplorerPanel>
   )
 }
 
@@ -846,6 +841,7 @@ function ReviewDiffCanvas({
         focused={changes.focused}
         onToggleFocus={changes.toggleFocus}
         onAddDraft={review.addDraft}
+        onSendComment={changes.sendComment}
         onRemoveDraft={review.removeDraft}
         onToggleViewed={review.toggleViewed}
         onRevertLines={changes.revertLines}

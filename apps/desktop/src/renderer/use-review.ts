@@ -11,6 +11,7 @@ import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
 import type { ReviewOmittedFile } from "@jingler/ui"
 import { diffBlocks, diffForPath } from "./review-diff-blocks.js"
 import { rpc } from "./rpc-client.js"
+import { reviewCommentsContext } from "./review-references.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { prKey } from "./use-pull-request.js"
 import {
@@ -216,7 +217,9 @@ export function useReview(session: Session): ReviewState {
         // parallel agent whose output never reached this conversation.
         getConversationActor(session).send({
           type: "SEND",
-          text: `Please address these code review comments:\n\n${summary}`
+          text: `Please address these code review comments:\n\n${summary}`,
+          // The code each comment points at, not just its line numbers.
+          agentContext: reviewCommentsContext((path) => diffForPath(blocks, path), current)
         })
       } else {
         // Post as a review carrying INLINE comments, not one flattened top-level
@@ -247,7 +250,7 @@ export function useReview(session: Session): ReviewState {
       }
       clearReviewDrafts(session.id, session.prNumber)
     },
-    [drafts, session, qc]
+    [blocks, drafts, session, qc]
   )
 
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })

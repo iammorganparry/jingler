@@ -287,6 +287,14 @@ interface ReviewCodeViewProps {
   readonly onRevertFile?: (path: string) => void
   readonly onDeslopFile?: (path: string) => void
   readonly onSendFindingToAgent?: (findingId: string) => void
+  /** Send one comment straight to the agent, bypassing the review drafts. */
+  readonly onSendComment?: (comment: {
+    path: string
+    line: number
+    endLine: number | null
+    body: string
+    routeToAgent: boolean
+  }) => void
   readonly onTokenEnter?: PierreCodeViewProps["onTokenEnter"]
   readonly onTokenLeave?: PierreCodeViewProps["onTokenLeave"]
 }
@@ -314,6 +322,7 @@ export function ReviewCodeView({
   onRevertFile,
   onDeslopFile,
   onSendFindingToAgent,
+  onSendComment,
   onTokenEnter,
   onTokenLeave
 }: ReviewCodeViewProps) {
@@ -410,18 +419,32 @@ export function ReviewCodeView({
             selectedEntry === undefined
               ? null
               : newSideRangeForReviewSelection(selected, selectedEntry.fileDiff)
+          const toComment = (draft: { body: string; routeToAgent: boolean }) =>
+            newSideRange === null
+              ? null
+              : {
+                  path: selected.path,
+                  line: newSideRange.startLine,
+                  endLine:
+                    newSideRange.endLine === newSideRange.startLine
+                      ? null
+                      : newSideRange.endLine,
+                  body: draft.body,
+                  routeToAgent: draft.routeToAgent
+                }
           const submit = (draft: { body: string; routeToAgent: boolean }) => {
-            if (newSideRange === null) return
-            onAddDraft({
-              path: selected.path,
-              line: newSideRange.startLine,
-              endLine:
-                newSideRange.endLine === newSideRange.startLine
-                  ? null
-                  : newSideRange.endLine,
-              body: draft.body,
-              routeToAgent: draft.routeToAgent
-            })
+            const comment = toComment(draft)
+            if (comment === null) return
+            onAddDraft(comment)
+            clearSelection()
+          }
+          // Sending skips the review: the agent gets it now. Without a sender
+          // wired, fall back to collecting it so nothing is lost.
+          const sendNow = (draft: { body: string; routeToAgent: boolean }) => {
+            const comment = toComment(draft)
+            if (comment === null) return
+            if (onSendComment) onSendComment(comment)
+            else onAddDraft(comment)
             clearSelection()
           }
           return (
@@ -442,7 +465,7 @@ export function ReviewCodeView({
                 initialBody={payload.initialBody}
                 onCancel={clearSelection}
                 onAddToReview={submit}
-                onCommentAndSend={submit}
+                onCommentAndSend={sendNow}
                 onRevert={
                   local && onRevertLines !== undefined && newSideRange !== null
                     ? () => {
@@ -488,7 +511,8 @@ export function ReviewCodeView({
       local,
       onAddDraft,
       onRemoveDraft,
-      onRevertLines
+      onRevertLines,
+      onSendComment
     ]
   )
 

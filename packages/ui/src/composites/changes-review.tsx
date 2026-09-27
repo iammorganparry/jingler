@@ -19,6 +19,7 @@ import { Maximize2, Minimize2 } from "lucide-react"
 import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import { SegmentedControl } from "../components/segmented-control.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
 import type { JinglerLineSelection } from "../diff/pierre-selection.js"
 import { cn } from "../lib/cn.js"
@@ -33,6 +34,9 @@ import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff a review shows — the PR, or the worktree's uncommitted changes. */
 export type ReviewSource = "pr" | "local"
+
+/** What the Explorer lists: the whole repository, or one diff source's changes. */
+export type ExplorerFilter = "all" | ReviewSource
 
 /** A changed file listed with counts whose patch was too large to transport. */
 export interface ReviewOmittedFile {
@@ -96,6 +100,59 @@ export function OmittedFilesNotice({
           : "."}
       </Callout>
     </div>
+  )
+}
+
+export interface ExplorerPanelProps {
+  readonly branch: string
+  readonly worktreePath?: string
+  /** The filter to SHOW — the effective source, when a PR falls back to local. */
+  readonly filter: ExplorerFilter
+  readonly onFilterChange: (filter: ExplorerFilter) => void
+  readonly localAvailable: boolean
+  readonly prAvailable: boolean
+  /** The repository tree, or `ChangedFilesExplorer` when filtered. */
+  readonly children: ReactNode
+}
+
+/**
+ * The sidebar Explorer: the worktree it shows, and a filter between the whole
+ * repository and one diff source's changed files. The Changes rail button sets
+ * the filter; picking "All files" returns to the plain tree.
+ */
+export function ExplorerPanel({
+  branch,
+  worktreePath,
+  filter,
+  onFilterChange,
+  localAvailable,
+  prAvailable,
+  children
+}: ExplorerPanelProps) {
+  return (
+    <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
+      <div className="flex-none border-b border-hairline px-3 py-2">
+        <div className="truncate font-mono text-[10.5px] text-text">{branch}</div>
+        {worktreePath ? (
+          <div className="truncate text-[10px] text-dim" title={worktreePath}>
+            {worktreePath}
+          </div>
+        ) : null}
+        <div className="mt-2">
+          <SegmentedControl<ExplorerFilter>
+            value={filter}
+            onChange={onFilterChange}
+            className="w-full"
+            items={[
+              { value: "all", label: "All files" },
+              { value: "local", label: "Uncommitted", disabled: !localAvailable },
+              { value: "pr", label: "Pull request", disabled: !prAvailable }
+            ]}
+          />
+        </div>
+      </div>
+      <div className="relative min-h-0 flex-1">{children}</div>
+    </section>
   )
 }
 
@@ -200,6 +257,8 @@ export interface ReviewFileDiffProps {
   readonly focused: boolean
   readonly onToggleFocus: () => void
   readonly onAddDraft: (draft: ReviewDraftInput) => void
+  /** "Send to agent" in the comment box: hand one comment to the agent now. */
+  readonly onSendComment?: (comment: ReviewDraftInput) => void
   readonly onRemoveDraft: (id: string) => void
   readonly onToggleViewed: (path: string, viewed: boolean) => void
   readonly onRevertLines?: (range: { path: string; startLine: number; endLine: number }) => void
@@ -230,6 +289,7 @@ export function ReviewFileDiff({
   focused,
   onToggleFocus,
   onAddDraft,
+  onSendComment,
   onRemoveDraft,
   onToggleViewed,
   onRevertLines,
@@ -303,6 +363,7 @@ export function ReviewFileDiff({
           onSelectionChange={setSelection}
           onActivePathChange={ignoreActivePath}
           onAddDraft={onAddDraft}
+          onSendComment={onSendComment}
           onRemoveDraft={onRemoveDraft}
           onToggleViewed={onToggleViewed}
           onRevertLines={local ? onRevertLines : undefined}

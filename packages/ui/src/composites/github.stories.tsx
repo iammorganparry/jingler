@@ -1,16 +1,12 @@
-import { useState } from "react"
+
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type {
   AdversarialReview,
-  PrFileChange,
   PullRequest as PullRequestData,
-  PrReviewThread,
   ReviewFinding,
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
-import type { ReviewSource } from "./changes-review.js"
-import { ChangesReviewPreview } from "./changes-review-preview.js"
 import { ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
 
@@ -376,171 +372,6 @@ export const PullRequestEmpty: Story = {
   )
 }
 
-const files: ReadonlyArray<PrFileChange> = [
-  { path: "src/auth/session.ts", additions: 8, deletions: 3, commentCount: 2, viewed: false },
-  { path: "src/auth/refresh.ts", additions: 42, deletions: 0, commentCount: 0, viewed: false }
-]
-
-const fileDiff = [
-  "diff --git a/src/auth/session.ts b/src/auth/session.ts",
-  "index 111..222 100644",
-  "--- a/src/auth/session.ts",
-  "+++ b/src/auth/session.ts",
-  "@@ -31,6 +31,8 @@ export function session()",
-  "   const s = req.session",
-  "-  if (!s.token) return next()",
-  "+  if (isExpired(s.token)) {",
-  "+    await refresh(s)",
-  "+  }",
-  "   return next()",
-  ""
-].join("\n")
-
-/**
- * Code Review with adversarial findings anchored to their files. The third
- * finding names a file that is NOT in this diff — it collects into "general"
- * rather than vanishing.
- */
-export const CodeReviewWithFindings: Story = {
-  render: () => {
-    const source: ReviewSource = "pr"
-    return (
-      <div className="flex h-screen bg-editor">
-        <ChangesReviewPreview
-          files={files}
-          activePath="src/auth/session.ts"
-          fileDiffs={[
-            { path: "src/auth/session.ts", diff: fileDiff },
-            { path: "src/auth/refresh.ts", diff: fileDiff }
-          ]}
-          drafts={[]}
-          routeTargetSession="Refactor auth flow"
-          connected
-          source={source}
-          onSelectFile={() => {}}
-          onAddDraft={() => {}}
-          onRevertLines={() => {}}
-          onRevertFile={() => {}}
-          review={{
-            ...adversarialReview,
-            findings: [
-              ...adversarialReview.findings,
-              {
-                id: "f4",
-                path: "src/unrelated/helper.ts",
-                line: 3,
-                endLine: null,
-                severity: "minor",
-                title: "Finding on a file outside this diff",
-                rationale:
-                  "The reviewer read this file for context. It isn't in the PR, so the finding collects under General rather than being dropped.",
-                suggestion: null,
-                resolvedBy: null
-              }
-            ]
-          }}
-          onSendFindingToAgent={() => {}}
-          sentFindingIds={new Set(["f2"])}
-        />
-      </div>
-    )
-  }
-}
-
-/**
- * The file list's feedback markers and its filter.
- *
- * `session.ts` carries a finding, a draft AND an unresolved thread (3);
- * `refresh.ts` carries only a finding (1); `untouched.ts` carries nothing and is
- * what the filter hides. The resolved thread on `untouched.ts` is deliberate —
- * it must NOT count, or the filter never empties.
- */
-export const CodeReviewFeedbackFilter: Story = {
-  render: () => {
-    const source: ReviewSource = "pr"
-    const [activePath, setActivePath] = useState<string | null>("src/auth/session.ts")
-    const withUntouched: ReadonlyArray<PrFileChange> = [
-      ...files,
-      { path: "src/untouched.ts", additions: 2, deletions: 1, commentCount: 0, viewed: false }
-    ]
-    const thread = (path: string, isResolved: boolean): PrReviewThread => ({
-      id: `t-${path}`,
-      reviewId: null,
-      path,
-      line: 31,
-      startLine: null,
-      originalLine: null,
-      originalStartLine: null,
-      diffHunk: "",
-      isResolved,
-      isOutdated: false,
-      resolvedBy: null,
-      comments: []
-    })
-    return (
-      <div className="flex h-screen bg-editor">
-        <ChangesReviewPreview
-          files={withUntouched}
-          reviewThreads={[thread("src/auth/session.ts", false), thread("src/untouched.ts", true)]}
-          activePath={activePath}
-          fileDiffs={withUntouched.map((f) => ({ path: f.path, diff: fileDiff }))}
-          drafts={[
-            {
-              id: "d1",
-              path: "src/auth/session.ts",
-              line: 33,
-              endLine: null,
-              body: "Worth a comment.",
-              routeToAgent: false
-            }
-          ]}
-          routeTargetSession="Refactor auth flow"
-          connected
-          source={source}
-          onSelectFile={setActivePath}
-          onAddDraft={() => {}}
-          review={{
-            ...adversarialReview,
-            findings: [
-              { ...adversarialReview.findings[0]!, path: "src/auth/session.ts", line: 31 },
-              { ...adversarialReview.findings[1]!, path: "src/auth/refresh.ts", line: 31, endLine: null }
-            ]
-          }}
-          onSendFindingToAgent={() => {}}
-        />
-      </div>
-    )
-  }
-}
-
-/** The Code Review tab — a two-source diff (PR / Uncommitted) with revert on local. */
-export const CodeReview: Story = {
-  render: () => {
-    const source: ReviewSource = "local"
-    return (
-      <div className="flex h-screen bg-editor">
-        <ChangesReviewPreview
-          files={files}
-          activePath="src/auth/session.ts"
-          fileDiffs={[
-            { path: "src/auth/session.ts", diff: fileDiff },
-            { path: "src/auth/refresh.ts", diff: fileDiff }
-          ]}
-          drafts={[]}
-          routeTargetSession="Refactor auth flow"
-          connected
-          source={source}
-          onSelectFile={() => {}}
-          onAddDraft={() => {}}
-          onRevertLines={() => {}}
-          onRevertFile={() => {}}
-        />
-      </div>
-    )
-  }
-}
-
-/** The Settings view — the GitHub integration section (connected). */
 export const Settings: Story = {
   render: () => (
     <div className="flex h-screen bg-editor">

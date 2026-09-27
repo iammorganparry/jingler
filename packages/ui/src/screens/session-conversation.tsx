@@ -215,6 +215,8 @@ export interface SessionConversationProps {
   onRevealChanges?: (sessionId: string) => void
   /** Review Focus: hold the sidebar collapsed so only the diff has the width. */
   sidebarCollapsed?: boolean
+  /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
+  initialWorkspaceView?: "sessions" | "explorer"
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
@@ -249,7 +251,9 @@ export function SessionConversation(props: SessionConversationProps) {
   )
   const selectedProjectId = props.selectedProjectId ?? localProjectId
   const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
-  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
+  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">(
+    props.initialWorkspaceView ?? "sessions"
+  )
   const onRevealChangesProp = props.onRevealChanges
   const [sidebarExpandRequest, setSidebarExpandRequest] = useState(0)
   const revealChanges = useCallback(

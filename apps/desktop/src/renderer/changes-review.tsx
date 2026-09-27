@@ -7,18 +7,10 @@
 import { useCallback, useMemo } from "react"
 import type { Session } from "@jingler/core"
 import { workspaceModeOf } from "@jingler/core"
-import {
-  ChangedFilesExplorer,
-  ReviewSidebar,
-  SegmentedControl
-} from "@jingler/ui"
+import { ChangedFilesExplorer, ReviewSidebar } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
-import {
-  setReviewFilter,
-  setReviewFocused,
-  useReviewFocused,
-  type ReviewFilter
-} from "./review-store.js"
+import { setReviewFilter, setReviewFocused, useReviewFocused } from "./review-store.js"
+import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { useReview } from "./use-review.js"
 
@@ -42,6 +34,27 @@ export function useChangesReview(session: Session, connected: boolean) {
     (path: string) => getConversationActor(session).send({ type: "SEND", text: deslopPrompt(path) }),
     [session]
   )
+  // "Send to agent" from the comment box: the same conversation path the review
+  // tray uses, for one comment, without collecting it as a draft first.
+  const fileDiffs = review.fileDiffs
+  const sendComment = useCallback(
+    (comment: { path: string; line: number; endLine: number | null; body: string }) => {
+      const lines =
+        comment.endLine !== null && comment.endLine > comment.line
+          ? `L${comment.line}-${comment.endLine}`
+          : `L${comment.line}`
+      getConversationActor(session).send({
+        type: "SEND",
+        text: `Please address this code review comment on \`${comment.path}\` ${lines}:\n\n${comment.body}`,
+        // The referenced lines themselves, as the composer's code references carry them.
+        agentContext: reviewCommentsContext(
+          (path) => fileDiffs.find((entry) => entry.path === path)?.diff ?? "",
+          [comment]
+        )
+      })
+    },
+    [fileDiffs, session]
+  )
   const focused = useReviewFocused()
   const toggleFocus = useCallback(() => setReviewFocused(!focused), [focused])
 
@@ -49,6 +62,7 @@ export function useChangesReview(session: Session, connected: boolean) {
     review,
     adversarial,
     deslopFile,
+    sendComment,
     focused,
     toggleFocus,
     revertLines: worktree ? review.revertLines : undefined,
@@ -59,29 +73,6 @@ export function useChangesReview(session: Session, connected: boolean) {
 /** What the Changes rail button does: show this session's changes in the Explorer. */
 export const revealSessionChanges = (session: Session): void =>
   setReviewFilter(session.id, session.prNumber, session.prNumber != null ? "pr" : "local")
-
-export function ExplorerChangesFilter({
-  session,
-  value,
-  onChange
-}: {
-  readonly session: Session
-  readonly value: ReviewFilter
-  readonly onChange: (filter: ReviewFilter) => void
-}) {
-  return (
-    <SegmentedControl<ReviewFilter>
-      value={value}
-      onChange={onChange}
-      className="w-full"
-      items={[
-        { value: "all", label: "All files" },
-        { value: "local", label: "Uncommitted", disabled: session.worktreePath == null },
-        { value: "pr", label: "Pull request", disabled: session.prNumber == null }
-      ]}
-    />
-  )
-}
 
 export function ChangesExplorerPanel({
   session,
