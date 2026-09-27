@@ -22,6 +22,8 @@ import {
   type ClaudeCliToolRelay,
   type RelayedToolCall
 } from "./claude-cli-sampling-relay.js"
+import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
+import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
   loggedIn: Schema.Boolean,
@@ -311,6 +313,8 @@ const decodeClaudeLine = (line: string): DecodedClaudeLine => {
   } catch {
     throw new Error("Claude CLI emitted malformed stream JSON")
   }
+  // Usage windows for the Usage panel; never part of the reply.
+  if (recordClaudeCliRateLimits(value)) return { kind: "ignored" }
   const delta = Option.getOrNull(decodeStreamDelta(value))
   if (delta !== null) return { kind: "delta", value: delta }
   const result = Option.getOrNull(decodeResult(value))
@@ -395,15 +399,35 @@ const toolEvents = (
 interface ClaudeOutputState {
   result: typeof ClaudeResult.Type | null
   open: OpenContent | null
+  /** A call the CLI rejected although pi offered the tool; see claude-cli-tool-rescue. */
+  rescued: RelayedToolCall | null
 }
+
+/** Only these whole-message records can carry a rejected tool call or the CLI's tool list. */
+const RESCUE_RECORD = /^\{"type":"(?:assistant|user|system)"/u
 
 async function* streamClaudeOutput(
   child: ChildProcessWithoutNullStreams,
   partial: AssistantMessage,
-  state: ClaudeOutputState
+  state: ClaudeOutputState,
+  rescue: ReturnType<typeof makeClaudeCliToolRescue>
 ): AsyncGenerator<AssistantMessageEvent> {
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
   for await (const line of lines) {
+    if (RESCUE_RECORD.test(line)) {
+      let record: unknown
+      try {
+        record = JSON.parse(line)
+      } catch {
+        throw new Error("Claude CLI emitted malformed stream JSON")
+      }
+      const { call } = rescue(record)
+      if (call !== null) {
+        state.rescued = call
+        return
+      }
+      continue
+    }
     const decoded = decodeClaudeLine(line)
     if (decoded.kind === "result") {
       state.result = decoded.value
@@ -467,7 +491,7 @@ async function* runClaudeCli(
   yield { type: "start", partial: { ...partial } }
   const binary = providerOptions.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
   const environment = subscriptionEnvironment(providerOptions.environment ?? process.env)
-  const output: ClaudeOutputState = { result: null, open: null }
+  const output: ClaudeOutputState = { result: null, open: null, rescued: null }
   let relay: ClaudeCliToolRelay | null = null
   let child: ChildProcessWithoutNullStreams | null = null
   let stderr = ""
@@ -506,7 +530,12 @@ async function* runClaudeCli(
     options.signal?.addEventListener("abort", onAbort, { once: true })
     if (options.signal?.aborted) onAbort()
     if (!child.stdin.writableEnded) child.stdin.end(`${inputLine(context)}\n`)
-    for await (const event of streamClaudeOutput(child, partial, output)) yield event
+    const rescue = makeClaudeCliToolRescue(new Set((context.tools ?? []).map(({ name }) => name)))
+    for await (const event of streamClaudeOutput(child, partial, output, rescue)) yield event
+    if (toolCall === null && output.rescued !== null) {
+      toolCall = output.rescued
+      await stop()
+    }
     await Promise.race([captured, processClosed])
     const closed = closeContentEvent(partial, output.open)
     if (closed !== null) yield closed

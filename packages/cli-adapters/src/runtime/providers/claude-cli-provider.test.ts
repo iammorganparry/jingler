@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, writeFile } from "node:fs/promises"
+import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Type, fauxProvider, type AssistantMessageEvent, type Context } from "@earendil-works/pi-ai"
@@ -154,6 +155,63 @@ console.log(JSON.stringify({type:"result",subtype:leaked?"error":"success",is_er
       totalTokens: 12,
       cost: { total: 0 }
     })
+  })
+
+  it("runs a tool the CLI rejected as missing through pi instead of stalling the turn", async () => {
+    // Regression: the CLI answered "No such tool available" for tools pi had
+    // offered (command_execute, command_inspect, subagent); the call never
+    // reached the relay and the model gave up on its shell.
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"system",subtype:"init",tools:["mcp__jingler__workspace_read_file"]}))
+console.log(JSON.stringify({type:"assistant",message:{content:[{type:"tool_use",id:"toolu_9",name:"mcp__jingler__command_execute",input:{command:"git status"}}]}}))
+console.log(JSON.stringify({type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_9",is_error:true,content:"<tool_use_error>Error: No such tool available: mcp__jingler__command_execute</tool_use_error>"}]}}))
+console.log(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",index:0,delta:{type:"text_delta",text:"My shell is gone."}}}))
+console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"My shell is gone.",usage:{}}))
+setInterval(() => {}, 1000)
+`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise(() => {}),
+        close: async () => {}
+      })
+    })(model, {
+      ...context,
+      tools: [{ name: "command_execute", description: "Run a command.", parameters: { type: "object", properties: {} } } as never]
+    })
+    const events = await collect(stream)
+    const done = events.at(-1)
+    expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
+    const end = events.find((event) => event.type === "toolcall_end")
+    expect(end?.type === "toolcall_end" ? end.toolCall : null).toMatchObject({
+      name: "command_execute",
+      arguments: { command: "git status" }
+    })
+    expect(events.some((event) => event.type === "text_delta")).toBe(false)
+  })
+
+  it("hands the CLI's rate-limit report to the Usage panel through the pi bridge", async () => {
+    resetClaudeCliRateLimits()
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"rate_limit_event",rate_limit_info:{status:"allowed",unifiedWindows:{seven_day:{utilization:0.5,resetsAt:1790992800}}}}))
+console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"Done",usage:{}}))
+`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise(() => {}),
+        close: async () => {}
+      })
+    })(model, context)
+    expect((await collect(stream)).at(-1)?.type).toBe("done")
+    expect(latestClaudeCliRateLimits()?.windows.seven_day).toEqual({ utilization: 0.5, resetsAt: 1790992800 })
+    resetClaudeCliRateLimits()
   })
 
   it("gives pi the last request's usage, which it reads as context", async () => {
