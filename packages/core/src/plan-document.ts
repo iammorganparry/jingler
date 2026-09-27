@@ -382,6 +382,8 @@ export const PlanDocument = Schema.Struct({
   reviewId: Schema.optional(Schema.String),
   /** Read-only Plannotator source; absent for other plan producers. */
   sourceMarkdown: Schema.optional(Schema.String),
+  /** The prior reviewed revision's source, for "what changed" review. */
+  previousSourceMarkdown: Schema.optional(Schema.String),
   status: PlanDocumentStatus,
   plan: PlanPrd,
   updatedAt: Schema.String,

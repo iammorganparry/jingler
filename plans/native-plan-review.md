@@ -161,12 +161,12 @@ After a deny/resubmit, the reviewer can see exactly what the agent changed.
 ### Technical explanation
 `PlanDocument` already carries `revision` and `sourceMarkdown`. Keeping one previous copy is enough for the reviewer's question ("what did you change?"). Full version history is **skipped**. Add it if people ask to compare non-adjacent revisions.
 
-- [ ] Carry `previousSourceMarkdown` through projection on resubmission
-- [ ] Add the revision-diff toggle to `PlanReview`
+- [x] Carry `previousSourceMarkdown` through projection on resubmission (the extension snapshots the reviewed text per plan path when each review starts and publishes it as `previousPlanContent` only when it differs)
+- [x] Add the revision-diff toggle to `PlanReview`
 
 ### Acceptance
-- [ ] Resubmitting the same plan file sets `previousSourceMarkdown` to the prior revision's source. The first submission leaves it unset (test[unit]: packages/core/src/plannotator-projection.test.ts::keeps previous source on resubmission)
-- [ ] The toggle appears only when a previous revision exists and renders its diff (test[unit]: packages/ui/src/screens/plan-review.test.tsx::shows revision diff after resubmission)
+- [x] Resubmitting the same plan file sets `previousSourceMarkdown` to the prior revision's source. The first submission leaves it unset (test[unit]: packages/core/src/plannotator-projection.test.ts::keeps previous source on resubmission)
+- [x] The toggle appears only when a previous revision exists and renders its diff (test[unit]: packages/ui/src/screens/plan-review.test.tsx::shows revision diff after resubmission)
 
 ### Files
 - `packages/core/src/plan-document.ts` — M

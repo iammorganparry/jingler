@@ -15,6 +15,8 @@ export interface PlannotatorHostStateEvent {
 	checklist: Array<{ step: number; text: string; completed: boolean }>;
 	/** Current Markdown scratchpad; the embedded review app renders this directly. */
 	planContent?: string;
+	/** The previously reviewed text of the same plan file, when it was resubmitted with changes. */
+	previousPlanContent?: string;
 	/** Structured scratchpad payload (plan-parse.ts); absent for flat plans. */
 	title?: string | null;
 	revision?: number;

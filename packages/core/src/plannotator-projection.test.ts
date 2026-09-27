@@ -95,6 +95,30 @@ describe("Plannotator native projection", () => {
     ])
   })
 
+  it("keeps previous source on resubmission", () => {
+    const base = {
+      phase: "planning",
+      planFilePath: "PLAN.md",
+      review: { reviewId: "r2" },
+      checklist: [],
+      planContent: "# Plan\n\n- keep format\n"
+    }
+    const first = plannotatorProjectionToPlanDocument(
+      Schema.decodeUnknownSync(PlannotatorProjection)(base), "s", "c", "2026-09-27T00:00:00.000Z"
+    )
+    expect(first.previousSourceMarkdown).toBeUndefined()
+
+    const resubmitted = plannotatorProjectionToPlanDocument(
+      Schema.decodeUnknownSync(PlannotatorProjection)({ ...base, previousPlanContent: "# Plan\n\n- replace format\n" }),
+      "s", "c", "2026-09-27T00:00:00.000Z"
+    )
+    expect(resubmitted.previousSourceMarkdown).toBe("# Plan\n\n- replace format\n")
+    expect(resubmitted.sourceMarkdown).toBe("# Plan\n\n- keep format\n")
+    // The host decodes over IPC; the new field must survive the core schema.
+    expect(Schema.decodeUnknownSync(PlanDocument)(structuredClone(resubmitted)).previousSourceMarkdown)
+      .toBe("# Plan\n\n- replace format\n")
+  })
+
   it("decodes a legacy flat payload without the structured fields", () => {
     const projection = Schema.decodeUnknownSync(PlannotatorProjection)({
       phase: "executing",

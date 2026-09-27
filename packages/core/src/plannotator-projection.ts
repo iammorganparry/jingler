@@ -132,6 +132,8 @@ export const PlannotatorProjection = Schema.Struct({
   checklist: Schema.Array(PlannotatorChecklistItem),
   /** Current Markdown scratchpad; absent from legacy publishers. */
   planContent: Schema.optional(Schema.String),
+  /** Previously reviewed text of the same plan file; absent on first submission. */
+  previousPlanContent: Schema.optional(Schema.String),
   /** Structured plan payload — absent from flat/legacy publishers. */
   title: Schema.optional(Schema.NullOr(Schema.String)),
   revision: Schema.optional(Schema.Number),
@@ -171,6 +173,7 @@ export const plannotatorProjectionToPlanDocument = (
   revision: projection.revision ?? 1,
   reviewId: projection.review?.reviewId,
   sourceMarkdown: projection.planContent,
+  previousSourceMarkdown: projection.previousPlanContent,
   status: projectionStatus(projection),
   plan: {
     title: projection.title ?? projection.planFilePath ?? "Plan",

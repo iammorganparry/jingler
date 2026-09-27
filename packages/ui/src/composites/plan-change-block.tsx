@@ -3,6 +3,7 @@ import { FileCode2 } from "lucide-react"
 import { useMemo } from "react"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { normalizeDiffPreviewPatch, parsePierreFileDiffs } from "../diff/parse.js"
+import { createPierreFileDiff } from "../diff/pierre-model.js"
 import { PierreFileDiffView, PierreProvider } from "../diff/pierre-provider.js"
 import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
 
@@ -52,5 +53,30 @@ export function PlanChangeBlock({ path, patch }: PlanChangeBlockProps) {
         </PierreProvider>
       )}
     </figure>
+  )
+}
+
+export interface PlanRevisionDiffProps {
+  readonly path: string
+  readonly before: string
+  readonly after: string
+}
+
+/** What changed in the plan file between the previous review and this one. */
+export function PlanRevisionDiff({ path, before, after }: PlanRevisionDiffProps) {
+  const theme = useThemeSyntax()
+  const tokens = useOptionalThemeTokens()
+  const fileDiff = useMemo(
+    () => createPierreFileDiff({ status: "modified", path, before, after }),
+    [path, before, after]
+  )
+  return (
+    <PierreProvider theme={theme} tokens={tokens ?? FALLBACK_TOKENS}>
+      <PierreFileDiffView
+        label="Changes since the previous revision"
+        fileDiff={fileDiff}
+        options={{ disableFileHeader: true, stickyHeader: false, wrap: true }}
+      />
+    </PierreProvider>
   )
 }

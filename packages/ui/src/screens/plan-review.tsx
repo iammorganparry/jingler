@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Button } from "../components/button.js"
 import { Markdown } from "../components/markdown.js"
 import { MermaidDiagram } from "../components/mermaid-diagram.js"
+import { PlanRevisionDiff } from "../composites/plan-change-block.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
 
 export interface PlanReviewComment {
@@ -19,6 +20,8 @@ export interface PlanReviewProps {
   readonly onApprove?: () => void | Promise<void>
   readonly onRevise?: (feedback?: string) => void | Promise<void>
 }
+
+const PLANNOTATOR_ID_PREFIX = /^plannotator:/
 
 const blockquote = (text: string): string =>
   text.split("\n").map((line) => `> ${line}`).join("\n")
@@ -123,6 +126,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const [comments, setComments] = useState<ReadonlyArray<PlanReviewComment>>([])
   const [general, setGeneral] = useState("")
   const [busy, setBusy] = useState(false)
+  const [showChanges, setShowChanges] = useState(false)
   const canDecide =
     canApprove &&
     document.reviewId !== undefined &&
@@ -182,6 +186,26 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
       <div ref={container} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-5">
         <article className="sb-plan mx-auto flex max-w-3xl flex-col gap-4 text-[13px] text-text-body">
           <h1 className="text-xl font-semibold text-text-bright">{plan.title}</h1>
+          {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="self-start"
+                aria-expanded={showChanges}
+                onClick={() => setShowChanges((current) => !current)}
+              >
+                {showChanges ? "Hide changes" : `Changes since revision ${Math.max(1, document.revision - 1)}`}
+              </Button>
+              {showChanges && (
+                <PlanRevisionDiff
+                  path={document.id.replace(PLANNOTATOR_ID_PREFIX, "")}
+                  before={document.previousSourceMarkdown}
+                  after={document.sourceMarkdown}
+                />
+              )}
+            </div>
+          )}
           {plan.sections.map((section) => (
             <section key={section.id} data-section={section.id}>
               {section.title.length > 0 && <h2 className="sb-plan-heading">{section.title}</h2>}

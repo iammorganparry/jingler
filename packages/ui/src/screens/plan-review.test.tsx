@@ -150,6 +150,31 @@ describe("PlanReview", () => {
     await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
   })
 
+  it("shows revision diff after resubmission", async () => {
+    const first = renderReview({ document: { ...document, sourceMarkdown: "# Auth\n- keep\n" } })
+    expect(screen.queryByRole("button", { name: /Changes since revision/ })).toBeNull()
+    first.unmount()
+
+    renderReview({
+      document: {
+        ...document,
+        revision: 2,
+        sourceMarkdown: "# Auth\n- keep the token format\n",
+        previousSourceMarkdown: "# Auth\n- replace the token format\n"
+      }
+    })
+    expect(screen.queryByRole("region", { name: "Changes since the previous revision" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Changes since revision 1" }))
+    const diff = await screen.findByRole("region", { name: "Changes since the previous revision" })
+    await waitFor(() => {
+      const text = diff.querySelector("diffs-container")?.shadowRoot?.textContent ?? diff.textContent ?? ""
+      expect(text).toContain("keep the token format")
+      expect(text).toContain("replace the token format")
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Hide changes" }))
+    expect(screen.queryByRole("region", { name: "Changes since the previous revision" })).toBeNull()
+  })
+
   it("is read-only once the plan is approved", () => {
     renderReview({ document: { ...document, status: "approved" } })
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()
