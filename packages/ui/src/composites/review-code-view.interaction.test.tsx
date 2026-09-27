@@ -17,6 +17,27 @@ const patch = [
 
 let nativeScrollTo: typeof HTMLElement.prototype.scrollTo
 
+const COMPOSER_PLACEHOLDER = "Suggest a change or ask the agent to fix this…"
+
+/**
+ * Pierre re-renders its shadow DOM after first paint, so a line element found
+ * early can be detached by the time it is clicked. Re-query and click until the
+ * composer opens.
+ */
+const selectOldLineOne = () =>
+  waitFor(
+    () => {
+      const line = document
+        .querySelector("diffs-container")
+        ?.shadowRoot?.querySelector<HTMLElement>('[data-column-number="1"]')
+      expect(line?.isConnected).toBe(true)
+      fireEvent.pointerDown(line!, { pointerId: 1, clientX: 10, clientY: 10 })
+      fireEvent.pointerUp(document, { pointerId: 1, clientX: 10, clientY: 10 })
+      return screen.getByPlaceholderText(COMPOSER_PLACEHOLDER)
+    },
+    { timeout: 5_000 }
+  )
+
 beforeEach(() => {
   nativeScrollTo = HTMLElement.prototype.scrollTo
   Object.defineProperty(HTMLElement.prototype, "scrollTo", {
@@ -77,31 +98,7 @@ describe("ReviewCodeView selection", () => {
       </WidthTierValue>
     )
 
-    const container = await waitFor(
-      () => {
-        const element = document.querySelector("diffs-container")
-        expect(element?.shadowRoot).toBeTruthy()
-        return element!
-      },
-      { timeout: 5_000 }
-    )
-    const oldLine = await waitFor(
-      () => {
-        const element = container.shadowRoot?.querySelector<HTMLElement>(
-          '[data-column-number="1"]'
-        )
-        expect(element).toBeTruthy()
-        return element!
-      },
-      { timeout: 5_000 }
-    )
-
-    fireEvent.pointerDown(oldLine, { pointerId: 1, clientX: 10, clientY: 10 })
-    fireEvent.pointerUp(document, { pointerId: 1, clientX: 10, clientY: 10 })
-
-    const textarea = await screen.findByPlaceholderText(
-      "Suggest a change or ask the agent to fix this…"
-    )
+    const textarea = await selectOldLineOne()
     expect(screen.getByText(`${path.split("/").at(-1)} old L1`)).toBeTruthy()
     fireEvent.change(textarea, { target: { value: "Keep the legacy contract." } })
     fireEvent.click(screen.getByRole("button", { name: "Add to review" }))
@@ -114,7 +111,7 @@ describe("ReviewCodeView selection", () => {
       routeToAgent: true
     })
     expect(
-      screen.queryByPlaceholderText("Suggest a change or ask the agent to fix this…")
+      screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)
     ).toBeNull()
   })
 
@@ -198,19 +195,7 @@ describe("ReviewCodeView selection", () => {
     )
 
     scrollTo.mockClear()
-    const diffHost = await waitFor(() => {
-      const element = document.querySelector("diffs-container")
-      expect(element?.shadowRoot).toBeTruthy()
-      return element!
-    })
-    const oldLine = diffHost.shadowRoot!.querySelector<HTMLElement>(
-      '[data-column-number="1"]'
-    )!
-    fireEvent.pointerDown(oldLine, { pointerId: 1, clientX: 10, clientY: 10 })
-    fireEvent.pointerUp(document, { pointerId: 1, clientX: 10, clientY: 10 })
-    await screen.findByPlaceholderText(
-      "Suggest a change or ask the agent to fix this…"
-    )
+    await selectOldLineOne()
     expect(scrollTo).not.toHaveBeenCalled()
   })
 
