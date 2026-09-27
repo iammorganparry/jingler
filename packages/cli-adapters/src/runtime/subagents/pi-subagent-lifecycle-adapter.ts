@@ -239,6 +239,13 @@ const statusFrom = (
   return "unknown"
 }
 
+const completedChildOutcome = (
+  child: typeof CompletionChild.Type
+): PiSubagentCompletedInput["outcome"] => {
+  if (child.stopped || child.interrupted || child.timedOut) return "cancelled"
+  return child.success === false ? "error" : "success"
+}
+
 const artifactsFor = (child: typeof CompletionChild.Type): ReadonlyArray<SubagentFleetArtifact> => [
   ...(child.artifactPath
     ? [{ kind: "result" as const, path: child.artifactPath, label: "Result" }]
@@ -1365,11 +1372,7 @@ export class PiSubagentLifecycleAdapter {
       startedAt,
       endedAt: input.now,
       usage: input.child.usage,
-      outcome: input.child.stopped || input.child.interrupted || input.child.timedOut
-        ? "cancelled"
-        : input.child.success === false
-          ? "error"
-          : "success"
+      outcome: completedChildOutcome(input.child)
     })
   }
 

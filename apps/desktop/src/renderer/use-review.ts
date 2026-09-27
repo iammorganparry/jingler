@@ -5,32 +5,38 @@
  * the local source it also drives reverts (line-range + whole-file) against the
  * worktree, refetching after each.
  */
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrFileChange, PrReviewThread, Session } from "@jingler/core"
 import type { ReviewOmittedFile } from "@jingler/ui"
 import { diffBlocks, diffForPath } from "./review-diff-blocks.js"
 import { rpc } from "./rpc-client.js"
+import { reviewCommentsContext } from "./review-references.js"
 import { getConversationActor } from "./conversation-registry.js"
 import { prKey } from "./use-pull-request.js"
-import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
+import {
+  addReviewDraft,
+  clearReviewDrafts,
+  removeReviewDraft,
+  setReviewFilter,
+  setReviewViewed,
+  useSessionReviewState,
+  type ReviewDraft,
+  type ReviewFilter
+} from "./review-store.js"
 
-/** Which diff the Code Review is showing. */
+export type { ReviewDraft, ReviewFilter } from "./review-store.js"
+
+/** Which diff the review is showing. */
 export type ReviewSource = "pr" | "local"
-
-export interface ReviewDraft {
-  readonly id: string
-  readonly path: string
-  readonly line: number
-  readonly endLine: number | null
-  readonly body: string
-  readonly routeToAgent: boolean
-}
 
 const draftLabel = (d: ReviewDraft): string =>
   `${d.path} ${d.endLine && d.endLine > d.line ? `L${d.line}-${d.endLine}` : `L${d.line}`}`
 
 export interface ReviewState {
+  /** The Explorer's filter; `source` is the diff it resolves to. */
+  readonly filter: ReviewFilter
+  readonly setFilter: (filter: ReviewFilter) => void
   readonly source: ReviewSource
   readonly setSource: (source: ReviewSource) => void
   readonly prAvailable: boolean
@@ -77,33 +83,17 @@ const availableReviewSource = (
 
 export function useReview(session: Session): ReviewState {
   const qc = useQueryClient()
-  const [source, setSourceRaw] = useState<ReviewSource>("pr")
+  // Filter, drafts and viewed markers are shared across the Explorer, the Files
+  // view and the review tray, so they live in the session's review store.
+  const shared = useSessionReviewState(session.id, session.prNumber)
+  const { filter, drafts } = shared
+  const viewedPaths = shared.viewed
+  const source: ReviewSource = filter === "pr" ? "pr" : "local"
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<ReadonlyArray<ReviewDraft>>([])
-  const [viewedPaths, setViewedPaths] = useState<ReadonlySet<string>>(() =>
-    readViewedPaths(session.id, session.prNumber)
-  )
-  const seq = useRef(0)
 
-  // "Viewed" is a reviewer-local marker (GitHub/git don't report it) — persist it per
-  // session in localStorage so ticking a file off survives tab switches + reloads.
   const toggleViewed = useCallback(
-    (path: string, viewed: boolean) => {
-      setViewedPaths((prev) => {
-        const next = new Set(prev)
-        if (viewed) next.add(path)
-        else next.delete(path)
-        try {
-          localStorage.setItem(
-            viewedStorageKey(session.id, session.prNumber),
-            JSON.stringify([...next])
-          )
-        } catch {
-          /* ignore */
-        }
-        return next
-      })
-    },
+    (path: string, viewed: boolean) =>
+      setReviewViewed(session.id, session.prNumber, path, viewed),
     [session.id, session.prNumber]
   )
 
@@ -194,22 +184,25 @@ export function useReview(session: Session): ReviewState {
     [effective, localReview]
   )
 
-  const setSource = useCallback((s: ReviewSource) => {
-    setSourceRaw(s)
-    setSelectedPath(null) // reset to the first file of the new source
-  }, [])
+  const setFilter = useCallback(
+    (next: ReviewFilter) => {
+      setReviewFilter(session.id, session.prNumber, next)
+      setSelectedPath(null) // reset to the first file of the new source
+    },
+    [session.id, session.prNumber]
+  )
+  const setSource = useCallback((s: ReviewSource) => setFilter(s), [setFilter])
 
   const addDraft = useCallback(
-    (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) => {
-      seq.current += 1
-      setDrafts((ds) => [...ds, { id: `d_${seq.current}`, ...d }])
-    },
-    []
+    (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) =>
+      addReviewDraft(session.id, session.prNumber, d),
+    [session.id, session.prNumber]
   )
 
-  const removeDraft = useCallback((id: string) => {
-    setDrafts((ds) => ds.filter((x) => x.id !== id))
-  }, [])
+  const removeDraft = useCallback(
+    (id: string) => removeReviewDraft(session.id, session.prNumber, id),
+    [session.id, session.prNumber]
+  )
 
   const finishReview = useCallback(
     (mode: "comment_only" | "send_to_agent") => {
@@ -224,7 +217,9 @@ export function useReview(session: Session): ReviewState {
         // parallel agent whose output never reached this conversation.
         getConversationActor(session).send({
           type: "SEND",
-          text: `Please address these code review comments:\n\n${summary}`
+          text: `Please address these code review comments:\n\n${summary}`,
+          // The code each comment points at, not just its line numbers.
+          agentContext: reviewCommentsContext((path) => diffForPath(blocks, path), current)
         })
       } else {
         // Post as a review carrying INLINE comments, not one flattened top-level
@@ -253,9 +248,9 @@ export function useReview(session: Session): ReviewState {
           )
           .catch(() => {})
       }
-      setDrafts([])
+      clearReviewDrafts(session.id, session.prNumber)
     },
-    [drafts, session, qc]
+    [blocks, drafts, session, qc]
   )
 
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })
@@ -278,6 +273,8 @@ export function useReview(session: Session): ReviewState {
   )
 
   return {
+    filter,
+    setFilter,
     source: effective,
     setSource,
     prAvailable,

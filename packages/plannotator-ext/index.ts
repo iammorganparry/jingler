@@ -29,7 +29,7 @@ import {
 	extractProgressMarkers,
 	parseChecklist,
 } from "./generated/checklist.ts";
-import { persistPlanStatuses } from "./plan-status.ts";
+import { createReviewedContent, persistPlanStatuses } from "./plan-status.ts";
 
 import { loadConfig, resolveTodoProviderEnabled, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
@@ -192,6 +192,9 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let reviewStarting = false;
 	let hostChecklist: ChecklistItem[] = [];
 	let lastPlanContent: string | null = null;
+	/** Text of the last review per plan path, so a resubmission can show what changed. */
+	const reviewedContent = createReviewedContent();
+	let previousPlanContent: string | null = null;
 	let hostStructure: ParsedPlanMarkdown | null = null;
 
 	/** Remember the plan text every reader saw, so the publisher can re-derive structure. */
@@ -234,6 +237,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				checklistItems = [];
 				hostChecklist = [];
 				lastPlanContent = null;
+				previousPlanContent = null;
 				hostStructure = null;
 				idleNoticePending = true;
 				publishHostState();
@@ -292,6 +296,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 			review: activeReview,
 			checklist: hostChecklist.map((item) => ({ ...item })),
 			...(lastPlanContent === null ? {} : { planContent: lastPlanContent }),
+			...(previousPlanContent === null ? {} : { previousPlanContent }),
 			...structured,
 		} satisfies PlannotatorHostStateEvent);
 	}
@@ -547,6 +552,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 		reviewPending = false;
 		checklistItems = [];
 		lastSubmittedPath = null;
+		previousPlanContent = null;
 		// Re-detect for the next plan: a provider that appeared (or a transient
 		// write failure) should not be decided once for the whole session.
 		todoProvider = undefined;
@@ -602,6 +608,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				details: { approved: false },
 			};
 		}
+		previousPlanContent = reviewedContent.begin(inputPath, planContent);
 		reviewStarting = true;
 		reviewPending = true;
 		persistState();

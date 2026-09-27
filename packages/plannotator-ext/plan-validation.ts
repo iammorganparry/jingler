@@ -1,11 +1,26 @@
 import { parsePlanMarkdown } from "./plan-parse.ts"
 
+/** Repository-relative, no traversal: change paths become clickable file links. */
+export const isSafeRepoPath = (path: string): boolean =>
+  !/^([/\\~]|[a-zA-Z]:)/.test(path) &&
+  !path.split(/[/\\]/).includes("..")
+
 /** Validate the explicit, ID-tagged plan format without rejecting legacy plans. */
 export const validatePlanMarkdown = (content: string): string[] => {
   if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) return []
 
-  const { stages } = parsePlanMarkdown(content)
+  const { stages, sections } = parsePlanMarkdown(content)
   const errors: string[] = []
+  if (!sections.some(({ title }) => title?.trim().toLowerCase() === "test strategy")) {
+    errors.push('Plan needs a "## Test strategy" section.')
+  }
+  const changePaths = [
+    ...sections.flatMap(({ blocks }) => blocks.flatMap((b) => (b.kind === "change" ? [b.path] : []))),
+    ...stages.flatMap(({ changes }) => changes.map(({ path }) => path))
+  ]
+  for (const path of changePaths.filter((p) => !isSafeRepoPath(p))) {
+    errors.push(`Plan proposes a change to unsafe path "${path}".`)
+  }
   const ids = new Set<string>()
   for (const stage of stages) {
     const label = `Stage "${stage.title}"`

@@ -459,10 +459,21 @@ const STRUCTURED_REVIEW_PLAN = [
   "- Replace the token format",
   "### Technical explanation",
   "The implementation replaces the token format at the existing auth entry point.",
+  "```diff path=src/auth.ts",
+  "@@ -1 +1 @@",
+  "-export const tokenFormat = \"v1\"",
+  "+export const tokenFormat = \"v2\"",
+  "```",
+  "```mermaid",
+  "flowchart LR",
+  "  implement[Implement auth] --> verify[Verify auth]",
+  "  %% link verify stage:verify-auth",
+  "  %% link implement file:README.md",
+  "```",
   "### Tasks",
   "- [ ] Implement the auth change",
   "### Acceptance",
-  "- [ ] Auth implementation passes (test: src/auth.test.ts::implements auth)",
+  "- [ ] Auth implementation passes (test[unit]: src/auth.test.ts::implements auth)",
   "### Files",
   "- `src/auth.ts` — M",
   "> complexity: low",
@@ -473,6 +484,11 @@ const STRUCTURED_REVIEW_PLAN = [
   "- Run focused auth checks",
   "### Technical explanation",
   "Verification checks the existing auth entry point without changing its callers.",
+  "```diff path=README.md",
+  "@@ -1 +1,2 @@",
+  " # e2e repo",
+  "+Auth checks live in src/auth.test.ts.",
+  "```",
   "### Tasks",
   "- [ ] Verify the auth change",
   "### Acceptance",
@@ -482,9 +498,25 @@ const STRUCTURED_REVIEW_PLAN = [
   "> complexity: low",
   "> depends: implement-auth",
   "",
+  "## Test strategy",
+  "Unit tests cover the token format; the e2e flow covers sign-in.",
+  "",
   "## Verification",
   "Run the focused auth checks."
 ].join("\n")
+
+// Breaks both hard submit rules: an escaping diff path and no Test strategy.
+const INVALID_REVIEW_PLAN = STRUCTURED_REVIEW_PLAN
+  .replace("```diff path=src/auth.ts", "```diff path=../outside.ts")
+  .replace("## Test strategy\nUnit tests cover the token format; the e2e flow covers sign-in.\n\n", "")
+
+const PLAN_ANCHOR = "Replace the auth flow with a deterministic test implementation."
+/** The review plan with one prefixed note per line appended under its anchor. */
+const planWithNotes = (prefix: string, lines: ReadonlyArray<string>): string =>
+  STRUCTURED_REVIEW_PLAN.replace(PLAN_ANCHOR, [PLAN_ANCHOR, ...lines.map((line) => `${prefix}${line}`)].join("\n"))
+
+const SubmitVerdict = Schema.parseJson(Schema.Struct({ approved: Schema.Boolean, feedback: Schema.optional(Schema.String) }))
+const INVALID_PLAN_PREFIX = "invalid-input: "
 
 const planExecutionResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   if (recentToolResultCount(context, E2E_PLAN_PROGRESS_TOOL) === 0) {
@@ -494,6 +526,34 @@ const planExecutionResponse = (context: PiContext): ReturnType<typeof fauxAssist
     ], { stopReason: "toolUse" })
   }
   return fauxAssistantMessage("Implemented and verified the approved plan. [DONE:3] [DONE:4]")
+}
+
+/** The agent's reply to a submit_plan result: fix, revise, or execute. */
+const submitResultResponse = (context: PiContext, result: string, submitCount: number): ReturnType<typeof fauxAssistantMessage> => {
+  if (result.startsWith(INVALID_PLAN_PREFIX)) {
+    // Echo the validator's own errors so e2e proves the real submit gate ran.
+    const errors = result.slice(INVALID_PLAN_PREFIX.length).split("\n")
+    return callTool(WRITE_TOOL, { path: "PLAN.md", content: planWithNotes("Fixed validation error: ", errors) }, `plannotator-fix-${submitCount}`)
+  }
+  const verdict = Schema.decodeUnknownSync(SubmitVerdict)(result)
+  if (verdict.approved) return planExecutionResponse(context)
+  // Echo each quoted anchor from the reviewer's feedback into the plan, so
+  // e2e can prove selection comments reached the agent verbatim.
+  const quoted = (verdict.feedback ?? "").split("\n").filter((line) => line.startsWith("> ")).map((line) => line.slice(2))
+  return callTool(
+    WRITE_TOOL,
+    {
+      path: "PLAN.md",
+      content: planWithNotes("Reviewer quoted: ", quoted).replace(
+        "- Replace the token format",
+        "- Revise auth while keeping the existing token format"
+      ).replace(
+        "The implementation replaces the token format at the existing auth entry point.",
+        "The implementation preserves compatibility by keeping the existing token format."
+      )
+    },
+    `plannotator-rewrite-${submitCount}`
+  )
 }
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
@@ -511,29 +571,13 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
   ).length
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
-    const verdict = Schema.decodeUnknownSync(Schema.parseJson(Schema.Struct({ approved: Schema.Boolean })))(toolResultText(lastMessage))
-    if (!verdict.approved) {
-      return callTool(
-        WRITE_TOOL,
-        {
-          path: "PLAN.md",
-          content: STRUCTURED_REVIEW_PLAN.replace(
-            "- Replace the token format",
-            "- Revise auth while keeping the existing token format"
-          ).replace(
-            "The implementation replaces the token format at the existing auth entry point.",
-            "The implementation preserves compatibility by keeping the existing token format."
-          )
-        },
-        "plannotator-rewrite"
-      )
-    }
-    return planExecutionResponse(context)
+    return submitResultResponse(context, toolResultText(lastMessage), submitCount)
   }
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
     return callTool(SUBMIT_PLAN_TOOL, { filePath: "PLAN.md" }, `plannotator-submit-${submitCount + 1}`)
   }
-  return callTool(WRITE_TOOL, { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN }, "plannotator-write")
+  const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
+  return callTool(WRITE_TOOL, { path: "PLAN.md", content: invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN }, "plannotator-write")
 }
 
 const UPDATE_PLAN_TOOL = "plannotator_update_plan"

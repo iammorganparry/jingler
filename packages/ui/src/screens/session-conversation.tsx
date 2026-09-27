@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   DiffStat,
   Environment,
@@ -208,10 +208,17 @@ export interface SessionConversationProps {
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Dock panes contributed by plugins, mounted once beside the built-in docks. */
   paneContributions?: ReadonlyArray<PaneContribution>
-  /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  /** Render the Changes tab — the Code Review view over the local worktree diff. */
-  renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /**
+   * Filter the host's Explorer to a session's changes. The sidebar switches to
+   * the Explorer itself; the host owns which diff (PR or uncommitted) it shows.
+   */
+  onRevealChanges?: (sessionId: string) => void
+  /** Review Focus: hold the sidebar collapsed so only the diff has the width. */
+  sidebarCollapsed?: boolean
+  /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
+  initialWorkspaceView?: "sessions" | "explorer"
+  /** The review tray beside a session's panes; null until drafts exist. */
+  renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
   /** Render the per-session Terminal view. */
   renderTerminalDock?: (session: Session) => ReactNode
@@ -244,7 +251,19 @@ export function SessionConversation(props: SessionConversationProps) {
   )
   const selectedProjectId = props.selectedProjectId ?? localProjectId
   const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
-  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">("sessions")
+  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">(
+    props.initialWorkspaceView ?? "sessions"
+  )
+  const onRevealChangesProp = props.onRevealChanges
+  const [sidebarExpandRequest, setSidebarExpandRequest] = useState(0)
+  const revealChanges = useCallback(
+    (sessionId: string) => {
+      setWorkspaceView("explorer")
+      setSidebarExpandRequest((request) => request + 1)
+      onRevealChangesProp?.(sessionId)
+    },
+    [onRevealChangesProp]
+  )
 
   const lastSessionIds = useRef(new Map<string, string>())
   useEffect(() => {
@@ -320,8 +339,8 @@ export function SessionConversation(props: SessionConversationProps) {
             tabContributions={props.tabContributions}
             onSelectIssue={props.onSelectIssue}
             paneContributions={props.paneContributions}
-            renderReview={props.renderReview}
-            renderCode={props.renderCode}
+            onRevealChanges={revealChanges}
+            renderReviewTray={props.renderReviewTray}
             renderTerminalDock={props.renderTerminalDock}
             selectTabRequest={props.selectTabRequest}
             onTabRequestHandled={props.onTabRequestHandled}
@@ -360,6 +379,8 @@ export function SessionConversation(props: SessionConversationProps) {
       <SessionSidebar
         search={props.search}
         workspaceView={workspaceView}
+        forceCollapsed={props.sidebarCollapsed}
+        expandRequest={sidebarExpandRequest}
         onWorkspaceViewChange={setWorkspaceView}
         explorer={
           activeSession && projectIdForSession(activeSession, projects) === selectedProjectId

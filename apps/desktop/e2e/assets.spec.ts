@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Locator, Page } from "@playwright/test"
 import { appShell, expect, test } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
 
 const HIGHLIGHTER_LANGUAGE_ERROR = /Grammar for language|resolveLanguage/u
@@ -88,12 +89,7 @@ const conversationTab = (window: Page) =>
 const tree = (window: Page) =>
   window.locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
 const showTree = async (window: Page): Promise<void> => {
-  const visibleTree = tree(window).filter({ visible: true })
-  if ((await visibleTree.count()) === 0) {
-    await window.getByRole("button", { name: "Repository files", exact: true })
-      .filter({ visible: true }).last().click()
-  }
-  await expect(visibleTree.first()).toBeVisible()
+  await explorerTree(window)
 }
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
   const host = tree(window).filter({ visible: true }).first()

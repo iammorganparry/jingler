@@ -67,7 +67,8 @@ import {
   pullRequestSessionTarget,
   usePullRequestInbox,
 } from "./use-pull-request-inbox.js";
-import { ReviewPane } from "./review-pane.js";
+import { ReviewTrayDock, revealSessionChanges } from "./changes-review.js";
+import { setReviewFocused, useReviewFocused } from "./review-store.js";
 import { FileBrowserExplorer, FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
 import { TerminalDockView } from "./terminal-dock-view.js";
 import { PreviewDockView } from "./preview-dock-view.js";
@@ -99,7 +100,6 @@ import { reviewQueryKey } from "./review-routing.js";
 import {
   needsSessionRetitle,
   newlyPlannedSessionIds,
-  newlyStartedSessionIds,
 } from "./retitle-triggers.js";
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
@@ -206,6 +206,7 @@ function AuthedApp({
   onSignIn?: () => void;
 }) {
   const [state, send] = useMachine(appMachine);
+  const reviewFocused = useReviewFocused();
   const github = useGitHubConnection();
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
@@ -1034,15 +1035,6 @@ function AuthedApp({
   useEffect(() => {
     const prev = prevLiveRef.current;
     prevLiveRef.current = liveActivity;
-    // Name a fresh task the moment its FIRST run starts — the title pass runs
-    // concurrently on its own runtime session, so the agent never waits on it
-    // and the branch stops sitting on "Naming branch…" through the whole turn.
-    for (const id of newlyStartedSessionIds(prev, liveActivity, sessions)) {
-      void rpc
-        .sessionsRetitle(id)
-        .then((session) => send({ type: "SESSION_UPDATED", session }))
-        .catch(() => {});
-    }
     const completed = completedSessionIds(prev, liveActivity, sessions);
     refreshCompletedSessions(completed, sessions, send, startAutoPublish);
     if (!autoDetect) return;
@@ -1594,11 +1586,16 @@ function AuthedApp({
           />
         )}
         renderExplorer={(session, onOpenPath) => (
-          <FileBrowserExplorer session={session} onOpenPath={onOpenPath} />
+          <FileBrowserExplorer
+            session={session}
+            connected={canUseGitHubForSession(session)}
+            onOpenPath={onOpenPath}
+          />
         )}
         renderFiles={(session, ctx) => (
           <FileBrowserView
             session={session}
+            connected={canUseGitHubForSession(session)}
             path={ctx.path}
             onClosed={() => {
               if (ctx.path) closeSessionFile(session.id, ctx.path);
@@ -1682,34 +1679,18 @@ function AuthedApp({
             />
           );
         }}
-        renderReview={(session, ctx) => {
-          const access = accessForSession(session);
-          const sessionConnected = canUseGitHubForSession(session);
-          return (
-            <ReviewPane
-              key={`${session.id}:${session.prNumber ?? "none"}`}
-              session={session}
-              connected={sessionConnected}
-              connectionMessage={
-                github.connection.connected ? access.reason : undefined
-              }
-              connectionActionLabel={
-                github.connection.connected
-                  ? "Manage repositories"
-                  : "Connect GitHub"
-              }
-              onConnectGithub={ctx.onConnectGithub}
-            />
-          );
+        onRevealChanges={(sessionId) => {
+          const session = sessions.find((candidate) => candidate.id === sessionId);
+          setReviewFocused(false);
+          if (session) revealSessionChanges(session);
         }}
-        renderCode={(session, ctx) => {
+        sidebarCollapsed={reviewFocused}
+        renderReviewTray={(session, ctx) => {
           const access = accessForSession(session);
-          const sessionConnected = canUseGitHubForSession(session);
           return (
-            <ReviewPane
-              key={`${session.id}:${session.prNumber ?? "none"}`}
+            <ReviewTrayDock
               session={session}
-              connected={sessionConnected}
+              connected={canUseGitHubForSession(session)}
               connectionMessage={
                 github.connection.connected ? access.reason : undefined
               }
@@ -1777,7 +1758,6 @@ function AuthedApp({
           setSessionMutationError(null);
           try {
             await deleteSession(pendingDelete.id);
-            window.jingler.closePlannotatorSession(pendingDelete.id);
           } catch (error) {
             setSessionMutationError(
               error instanceof Error

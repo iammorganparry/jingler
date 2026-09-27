@@ -1,7 +1,6 @@
 import type { PrFileChange } from "@jingler/core"
 import { EyeOff, MessageSquare, Search } from "lucide-react"
 import { DiffStat } from "../components/diff-stat.js"
-import { Input } from "../components/input.js"
 import type { JinglerFileStatus } from "../diff/pierre-model.js"
 import {
   Select,
@@ -63,33 +62,31 @@ export function ReviewFileRail({
         </span>
       </div>
       <div className="flex flex-none flex-col gap-2 border-b border-hairline p-2">
-        <div className="relative">
-          <Search
-            size={13}
-            aria-hidden
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-dim"
-          />
-          <Input
+        {/* Dressed exactly like the sidebar's session search (`TitleSearch`). */}
+        <label className="flex h-[30px] items-center gap-2.5 rounded-lg border border-hairline bg-sunken px-3 text-[13px] text-dim transition-colors hover:border-line focus-within:border-line focus-within:ring-2 focus-within:ring-ring">
+          <Search size={14} aria-hidden className="flex-none" />
+          <input
             type="search"
             value={controls.query}
             onChange={(event) => controls.setQuery(event.currentTarget.value)}
             aria-label="Search changed files"
             placeholder="Search files…"
-            className="h-10 pl-8"
+            className="min-w-0 flex-1 bg-transparent text-text-body outline-none placeholder:text-dim"
           />
-        </div>
+        </label>
         <div className="flex items-center gap-1.5">
           <Select
             value={controls.kind}
             onValueChange={(value) => controls.setKind(value as ReviewFileKind)}
           >
             <SelectTrigger
-              className="h-10 min-w-0 flex-1"
+              className="h-[30px] min-w-0 flex-1 rounded-lg text-[12px]"
               aria-label="Filter changed files by type"
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            {/* Wider than the trigger so no option wraps. */}
+            <SelectContent className="right-auto w-[168px]">
               {REVIEW_KIND_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
@@ -108,7 +105,7 @@ export function ReviewFileRail({
             }
             onClick={controls.toggleCollapseViewed}
             className={cn(
-              "flex size-10 flex-none items-center justify-center rounded-md border bg-sunken transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
+              "flex size-[30px] flex-none items-center justify-center rounded-lg border bg-sunken transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
               controls.collapseViewed
                 ? "border-blue/40 bg-blue/[0.12] text-blue"
                 : "border-line text-dim hover:border-line-strong hover:text-text"
@@ -128,7 +125,7 @@ export function ReviewFileRail({
             }
             onClick={controls.toggleFeedback}
             className={cn(
-              "flex min-h-10 items-center justify-center gap-1.5 rounded-md border bg-sunken px-2.5 text-[11px] transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
+              "flex min-h-[30px] items-center justify-center gap-1.5 rounded-lg border bg-sunken px-2.5 text-[11px] transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
               controls.feedbackOnly
                 ? "border-blue/40 bg-blue/[0.14] text-blue"
                 : "border-line text-dim hover:border-line-strong hover:text-text"

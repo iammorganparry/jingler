@@ -1,5 +1,10 @@
 import { Schema } from "effect"
-import type { PlanBlock, PlanDocument, PlanDocumentStatus } from "./plan-document.js"
+import {
+  PlanTestKind,
+  type PlanBlock,
+  type PlanDocument,
+  type PlanDocumentStatus
+} from "./plan-document.js"
 
 export const PlannotatorChecklistItem = Schema.Struct({
   step: Schema.Number,
@@ -60,10 +65,16 @@ export const PlannotatorAcceptanceItem = Schema.Struct({
   text: Schema.String,
   status: Schema.Literal("pending", "passed"),
   testReferences: Schema.optional(
-    Schema.Array(Schema.Struct({ path: Schema.String, cases: Schema.Array(Schema.String) }))
+    Schema.Array(Schema.Struct({
+      path: Schema.String,
+      cases: Schema.Array(Schema.String),
+      kind: Schema.optional(PlanTestKind)
+    }))
   )
 })
 export type PlannotatorAcceptanceItem = Schema.Schema.Type<typeof PlannotatorAcceptanceItem>
+
+const PlannotatorChange = Schema.Struct({ path: Schema.String, patch: Schema.String })
 
 export const PlannotatorStage = Schema.Struct({
   id: Schema.String,
@@ -79,6 +90,7 @@ export const PlannotatorStage = Schema.Struct({
     { default: () => [] }
   ),
   diagrams: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
+  changes: Schema.optionalWith(Schema.Array(PlannotatorChange), { default: () => [] }),
   notes: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   complexity: Schema.optional(Schema.Literal("low", "medium", "high")),
   dependencies: Schema.optional(Schema.Array(Schema.String))
@@ -102,7 +114,8 @@ export const PlannotatorSectionBlock = Schema.Union(
     language: Schema.optional(Schema.String),
     code: Schema.String
   }),
-  Schema.Struct({ kind: Schema.Literal("diagram"), source: Schema.String })
+  Schema.Struct({ kind: Schema.Literal("diagram"), source: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal("change"), ...PlannotatorChange.fields })
 )
 export type PlannotatorSectionBlock = Schema.Schema.Type<typeof PlannotatorSectionBlock>
 
@@ -119,6 +132,8 @@ export const PlannotatorProjection = Schema.Struct({
   checklist: Schema.Array(PlannotatorChecklistItem),
   /** Current Markdown scratchpad; absent from legacy publishers. */
   planContent: Schema.optional(Schema.String),
+  /** Previously reviewed text of the same plan file; absent on first submission. */
+  previousPlanContent: Schema.optional(Schema.String),
   /** Structured plan payload — absent from flat/legacy publishers. */
   title: Schema.optional(Schema.NullOr(Schema.String)),
   revision: Schema.optional(Schema.Number),
@@ -158,6 +173,7 @@ export const plannotatorProjectionToPlanDocument = (
   revision: projection.revision ?? 1,
   reviewId: projection.review?.reviewId,
   sourceMarkdown: projection.planContent,
+  previousSourceMarkdown: projection.previousPlanContent,
   status: projectionStatus(projection),
   plan: {
     title: projection.title ?? projection.planFilePath ?? "Plan",
@@ -197,6 +213,8 @@ const sectionBlockToPlanBlock = (
       }
     case "diagram":
       return { kind: "diagram", id, source: block.source }
+    case "change":
+      return { kind: "change", id, path: block.path, patch: block.patch }
   }
 }
 
@@ -224,11 +242,19 @@ const structuredStageToPlanStage = (
     id: `${stage.id}-diagram-${index + 1}`,
     source
   })),
-  notes: stage.notes.map((text, index) => ({
-    kind: "prose" as const,
-    id: `${stage.id}-note-${index + 1}`,
-    text
-  })),
+  notes: [
+    ...stage.notes.map((text, index) => ({
+      kind: "prose" as const,
+      id: `${stage.id}-note-${index + 1}`,
+      text
+    })),
+    ...stage.changes.map((change, index) => ({
+      kind: "change" as const,
+      id: `${stage.id}-change-${index + 1}`,
+      path: change.path,
+      patch: change.patch
+    }))
+  ],
   acceptance: stage.acceptance.map((criterion) => ({
     id: `plannotator-acceptance-${criterion.step}`,
     text: criterion.text,
@@ -236,7 +262,8 @@ const structuredStageToPlanStage = (
     evidence: null,
     testReferences: (criterion.testReferences ?? []).map((reference) => ({
       path: reference.path,
-      cases: reference.cases
+      cases: reference.cases,
+      ...(reference.kind === undefined ? {} : { kind: reference.kind })
     }))
   })),
   complexity: stage.complexity,

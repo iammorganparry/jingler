@@ -15,21 +15,16 @@ import type { SeedSession } from "./fixtures.js"
 
 
 /**
- * Assert the Code Review view's changed-file list is there, and open it.
- *
- * The rail is responsive: docked open when the pane is wide, collapsed to a
- * toggle-and-sheet when it isn't (`code-review-view.responsive.test.tsx` pins both
- * shapes). The app window is 1320px and the sidebar takes its cut, so the review
- * pane lands in the collapsed band — which left the old `getByText("Changed
- * files")` matching the docked heading in the DOM but HIDDEN, and reading as the
- * whole view being broken. Going through the toggle asserts more than the old
- * locator did: the rail opens and lists the file.
+ * Reveal the Explorer filtered to the session's changes — what the Changes rail
+ * button does now that the Code Review view is merged into the Explorer.
  */
-const expectFileRail = async (window: Page): Promise<void> => {
-  const rail = window.getByTestId("review-file-rail")
-  if (await rail.isVisible()) return
-  await window.getByRole("button", { name: "Changed files" }).filter({ visible: true }).first().click({ timeout: 20_000 })
-  await expect(rail).toBeVisible({ timeout: 20_000 })
+const SEND_ONE_TO_AGENT = /Send 1 to agent/
+
+const revealChanges = async (window: Page) => {
+  await window.getByRole("button", { name: "Changes" }).first().click()
+  const explorer = window.getByTestId("changed-files-explorer")
+  await expect(explorer).toBeVisible({ timeout: 20_000 })
+  return explorer
 }
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [
@@ -368,7 +363,7 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   await expect(window.getByText("src/file-1.ts")).toHaveCount(0)
 })
 
-test("a worktree session without a PR shows a Changes tab with the Code Review view", async ({
+test("the Changes action filters the Explorer to uncommitted files and reviews one in Files", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -390,47 +385,55 @@ test("a worktree session without a PR shows a Changes tab with the Code Review v
   })
   await expect(appShell(window)).toBeVisible()
 
-  // No PR yet → the local worktree diff gets its own top-level Changes tab, which
-  // is the Code Review view scoped to the uncommitted (local) source.
-  // By accessible name, like the Pull Request / Code Review assertions below it.
-  // The tab-chrome redesign renders a non-conversation tab's text label only while
-  // that tab is selected, so `getByText("Changes")` cannot find the tab you have
-  // not clicked yet. `aria-label` survives at every width on purpose.
-  const changesTab = window.getByRole("button", { name: "Changes" }).first()
-  await expect(changesTab).toBeVisible()
-  await changesTab.click()
-  await expectFileRail(window)
-  await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
+  // No PR yet → Changes filters the Explorer to the uncommitted diff.
+  const explorer = await revealChanges(window)
+  await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible()
 
-  const rail = window.getByTestId("review-file-rail")
-  const search = rail.getByRole("searchbox", { name: "Search changed files" })
+  const search = explorer.getByRole("searchbox", { name: "Search changed files" })
   await search.fill("auth")
-  await expect(rail.locator('[data-item-path="src/auth.test.ts"]')).toBeVisible()
-  await expect(rail.locator('[data-item-path="README.md"]')).toHaveCount(0)
+  await expect(explorer.locator('[data-item-path="src/auth.test.ts"]')).toBeVisible()
+  await expect(explorer.locator('[data-item-path="README.md"]')).toHaveCount(0)
 
   await search.clear()
-  await rail.getByRole("button", { name: "Filter changed files by type" }).click()
+  await explorer.getByRole("button", { name: "Filter changed files by type" }).click()
   await window.getByRole("option", { name: "JSON" }).click()
-  await expect(rail.locator('[data-item-path="config.json"]')).toBeVisible()
-  await expect(rail.locator('[data-item-path="src/auth.test.ts"]')).toHaveCount(0)
+  await expect(explorer.locator('[data-item-path="config.json"]')).toBeVisible()
+  await expect(explorer.locator('[data-item-path="src/auth.test.ts"]')).toHaveCount(0)
+  await explorer.getByRole("button", { name: "Filter changed files by type" }).click()
+  await window.getByRole("option", { name: "All files" }).click()
 
-  await window.getByRole("button", { name: "Mark viewed: config.json" }).click()
-  await expect(window.getByRole("button", { name: "Viewed · code collapsed" })).toBeVisible()
+  // A changed file opens in Files on its review diff.
+  await explorer.locator('[data-item-path="README.md"]').click()
+  const diff = window.getByTestId("review-file-diff")
+  await expect(diff).toBeVisible({ timeout: 20_000 })
+  await expect(diff.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 
-  await window.getByRole("button", { name: "Focus diff" }).click()
-  await expect(window.getByTestId("review-file-rail")).toHaveCount(0)
+  // No drafts yet → no review tray. The first annotation brings it in.
   await expect(window.getByTestId("review-tray")).toHaveCount(0)
-  await expect(window.getByTestId("review-diff-center")).toBeVisible()
-  await window.getByRole("button", { name: "Exit review focus" }).click()
+  const lineNumbers = diff.locator("diffs-container [data-column-number]")
+  await expect(lineNumbers.first()).toBeVisible()
+  await lineNumbers.first().click({ position: { x: 6, y: 6 } })
+  const composer = window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
+  await composer.fill("Say what the repo is for.")
+  await window.getByRole("button", { name: "Add to review" }).click()
+  const tray = window.getByTestId("review-tray")
+  await expect(tray).toBeVisible()
+  await expect(tray.getByText("Say what the repo is for.")).toBeVisible()
+  await tray.getByRole("button", { name: SEND_ONE_TO_AGENT }).click()
+  await expect(tray).toHaveCount(0)
 
-  await window.setViewportSize({ width: 520, height: 720 })
-  const filesButton = window.getByRole("button", { name: "Changed files" })
-  await expect(filesButton).toBeVisible()
-  await filesButton.click()
-  const railBox = await window.getByTestId("review-file-rail").boundingBox()
-  expect(railBox).not.toBeNull()
-  expect(railBox!.x).toBeGreaterThanOrEqual(0)
-  expect(railBox!.width).toBeLessThanOrEqual(520)
+  await diff.getByRole("button", { name: "Mark viewed: README.md" }).click()
+
+  // Focus gives the diff the width: the Explorer steps aside until it ends.
+  await diff.getByRole("button", { name: "Focus diff" }).click()
+  await expect(explorer).toHaveCount(0)
+  await expect(diff).toBeVisible()
+  await diff.getByRole("button", { name: "Exit review focus" }).click()
+  await expect(window.getByTestId("changed-files-explorer")).toBeVisible()
+
+  // "All files" restores the full repository tree.
+  await window.getByRole("tab", { name: "All files" }).click()
+  await expect(window.getByTestId("changed-files-explorer")).toHaveCount(0)
 })
 
 test("the session title renames without navigating and the active chat replaces the Conversation tab", async ({
@@ -444,7 +447,7 @@ test("the session title renames without navigating and the active chat replaces 
   await expect(appShell(window)).toBeVisible()
 
   const title = window.getByTestId("conversation-tab")
-  const changes = window.getByRole("button", { name: "Changes" }).first()
+  const changes = window.getByRole("button", { name: "Files", exact: true }).first()
   await changes.click()
   await expect(changes).toHaveAttribute("aria-current", "page")
 
@@ -469,7 +472,7 @@ test("the session title renames without navigating and the active chat replaces 
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
-test("a linked PR shows the sidebar badge and the Pull Request / Code Review tabs", async ({
+test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes action", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -482,13 +485,10 @@ test("a linked PR shows the sidebar badge and the Pull Request / Code Review tab
   // The sidebar row badges the linked PR number.
   await expect(window.getByText(/#482/).first()).toBeVisible()
 
-  // The PR + Code Review tabs appear once a session has a linked PR.
   await expect(window.getByTestId("view-tab-pr").first()).toBeVisible()
-  const reviewTab = window.getByRole("button", { name: "Code Review" }).first()
-  await expect(reviewTab).toBeVisible()
-
-  // The Code Review tab is reachable (its view mounts in place of the stub).
-  await reviewTab.click()
+  // Code Review is no longer a tab: its review lives in the Explorer's filter.
+  await expect(window.getByRole("button", { name: "Code Review" })).toHaveCount(0)
+  await revealChanges(window)
   await expect(window.getByText("Next milestone")).toHaveCount(0)
 })
 
@@ -638,10 +638,10 @@ test("a passing check still links to its run", async ({ launchApp }) => {
   await expect(window.getByText("48s")).toBeVisible()
 })
 
-test("Code Review shows the Uncommitted source and reverts a whole file", async ({ launchApp }) => {
+test("Changes falls back to the Uncommitted source and reverts a whole file", async ({ launchApp }) => {
   // A session whose worktree (the e2e repo) has an uncommitted change. GitHub is
-  // disconnected, so the PR source is empty and the view falls
-  // back to the "Uncommitted" (local) diff — where Revert is enabled.
+  // disconnected, so the PR source is empty and the Explorer falls back to the
+  // "Uncommitted" (local) diff — where Revert is enabled.
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
@@ -652,21 +652,19 @@ test("Code Review shows the Uncommitted source and reverts a whole file", async 
   })
   await expect(appShell(window)).toBeVisible()
 
-  await window.getByRole("button", { name: "Code Review" }).first().click()
+  const explorer = await revealChanges(window)
+  await expect(window.getByRole("tab", { name: "Uncommitted" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+    { timeout: 20_000 }
+  )
+  await explorer.locator('[data-item-path="README.md"]').click()
+  const diff = window.getByTestId("review-file-diff")
+  await expect(diff.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 
-  // The pane mounts after resolving the empty PR source, the source
-  // toggle shows "Uncommitted" selected (the view falls back to the local source),
-  // and the local diff renders the changed file + edit.
-  await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
-  // Open the responsive rail only after the diff has settled. Clicking while
-  // the pane's first width measurement is still landing can legitimately
-  // re-dock the rail and close its temporary sheet in the same render.
-  await expectFileRail(window)
-
-  // Revert the whole file → the uncommitted change disappears from the diff.
-  await window.getByRole("button", { name: /Revert file/ }).click()
-  await expect(window.getByText("an uncommitted edit")).toHaveCount(0, { timeout: 20_000 })
+  // Revert the whole file → the uncommitted change leaves the change set.
+  await diff.getByRole("button", { name: /Revert file/ }).click()
+  await expect(explorer.locator('[data-item-path="README.md"]')).toHaveCount(0, { timeout: 20_000 })
 })
 
 test("the sidebar Settings cog opens the settings view with the GitHub section", async ({

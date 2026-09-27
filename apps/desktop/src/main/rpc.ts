@@ -96,9 +96,9 @@ import {
   branchAt,
 } from "@jingler/cli-adapters";
 import { appendFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
@@ -142,6 +142,7 @@ import {
 import type {
   BrowserBounds,
   AdversarialReview,
+  AgentModelSelection,
   StreamEvent,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -763,6 +764,11 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   });
 
 /** Resolve or clone one local project on an owned device during session startup. */
+const githubSlugFromRemote = (url: string): string | undefined => {
+  const repository = parseGitHubRemote(url);
+  return repository === null ? undefined : `${repository.owner}/${repository.repo}`;
+};
+
 const ensureProjectOnOwnedEnvironment = (
   project: Project,
   environmentId: string,
@@ -786,7 +792,11 @@ const ensureProjectOnOwnedEnvironment = (
       })
     }),
     Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-    Effect.map((remoteProject) => ({ ...remoteProject, environmentId })),
+    Effect.map((remoteProject) => ({
+      ...remoteProject,
+      environmentId,
+      githubSlug: githubSlugFromRemote(url),
+    })),
     Effect.mapError((cause) =>
       cause instanceof GitError
         ? cause
@@ -846,6 +856,7 @@ const provisionRemoteSession = (
         projectId: remoteProject.id,
         repoPath: remoteProject.path,
         repoName: remoteProject.name,
+        githubSlug: remoteProject.githubSlug,
       };
     } else if (environment.kind === "managed") {
       if (!environmentRuntimeIsCurrent(environment)) {
@@ -902,6 +913,7 @@ const provisionRemoteSession = (
         ...input,
         requestedSessionId: sessionId,
         repoPath: "/workspace",
+        githubSlug: `${repository.owner}/${repository.repo}`,
       };
     }
     yield* reportSessionCreation(progress, "creating-session");
@@ -1798,6 +1810,72 @@ export const reviewReconcile = (sessionId: string) =>
     return next;
   });
 
+const configuredReviewRuntime = (configured: AgentModelSelection) => {
+  const connectionId = configured.runtimeId === "pi"
+    ? providerConnectionIdForPiEndpoint(configured.endpointId, "desktop") ?? undefined
+    : undefined;
+  if (configured.runtimeId === "pi" && connectionId === undefined) return null;
+  return { ...configured, connectionId, targetId: "desktop" };
+};
+
+const sessionReviewRuntime = (session: Session) => {
+  const runtimeId = session.runtimeId ?? (
+    session.connectionId === undefined ? undefined : "pi"
+  );
+  if (runtimeId === undefined) return null;
+  const targetId = session.environmentId ?? "desktop";
+  const endpointId = session.endpointId ?? (
+    runtimeId === "pi" && session.connectionId !== undefined
+      ? piEndpointId(targetId, session.connectionId)
+      : undefined
+  );
+  if (
+    endpointId === undefined ||
+    session.providerId === undefined ||
+    session.modelId === undefined ||
+    (runtimeId === "pi" && session.connectionId === undefined)
+  ) return null;
+  return {
+    runtimeId,
+    endpointId,
+    connectionId: session.connectionId,
+    providerId: session.providerId,
+    modelId: session.modelId,
+    targetId,
+  };
+};
+
+const reviewRuntimeSelection = (
+  session: Session,
+  configured: AgentModelSelection | undefined,
+) => configured === undefined
+  ? sessionReviewRuntime(session)
+  : configuredReviewRuntime(configured);
+
+const reviewLocations = (
+  session: Session,
+  worktreePath: string,
+  configured: AgentModelSelection | undefined,
+) => Effect.gen(function* () {
+  if (session.environmentId === undefined) {
+    return { githubTarget: worktreePath, cwd: worktreePath };
+  }
+  if (session.githubSlug === undefined) {
+    return yield* Effect.fail(new ReviewError({
+      message: "This remote session is missing its GitHub repository identity.",
+    }));
+  }
+  const githubTarget = `github-slug:${session.githubSlug}`;
+  if (configured === undefined) return { githubTarget, cwd: worktreePath };
+  const cwd = yield* Effect.acquireRelease(
+    Effect.promise(() => mkdtemp(resolve(tmpdir(), "jingler-adversarial-review-"))),
+    (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })).pipe(
+      Effect.orElseSucceed(() => undefined),
+    ),
+  );
+  return { githubTarget, cwd };
+});
+
 /**
  * `Review.run` handler — run an adversarial review of the session's linked PR.
  *
@@ -1819,8 +1897,11 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       );
     }
 
+    const config = yield* ConfigService.get().pipe(Effect.orElseSucceed(() => null));
+    const configured = config?.github?.adversarialReviewModel;
+    const locations = yield* reviewLocations(session, session.worktreePath, configured);
     const headSha = yield* GitHubApi.prHeadSha(
-      session.worktreePath,
+      locations.githubTarget,
       session.prNumber,
     );
     if (headSha === null) {
@@ -1843,20 +1924,16 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       return prior;
     }
 
-    if (
-      session.connectionId === undefined ||
-      session.providerId === undefined ||
-      session.modelId === undefined
-    ) {
+    const runtime = reviewRuntimeSelection(session, configured);
+    if (runtime === null) {
       return yield* Effect.fail(
         new ReviewError({
-          message:
-            "Choose a provider connection before running a review.",
+          message: "Choose an adversarial review model in GitHub settings before running a review.",
         }),
       );
     }
     const diff = yield* GitHubApi.prDiff(
-      session.worktreePath,
+      locations.githubTarget,
       session.prNumber,
     );
 
@@ -1864,19 +1941,21 @@ export const reviewRun = (sessionId: string, force: boolean) =>
       sessionId,
       prNumber: session.prNumber,
       headSha,
-      cwd: session.worktreePath,
+      cwd: locations.cwd,
       repo: session.repo,
       branch: session.branch,
       baseBranch: session.baseBranch ?? null,
-      connectionId: session.connectionId,
-      providerId: session.providerId,
-      modelId: session.modelId,
-      targetId: session.environmentId ?? "desktop",
+      runtimeId: runtime.runtimeId,
+      endpointId: runtime.endpointId,
+      ...(runtime.connectionId === undefined ? {} : { connectionId: runtime.connectionId }),
+      providerId: runtime.providerId,
+      modelId: runtime.modelId,
+      targetId: runtime.targetId,
       diff,
     });
 
     const postToPr = yield* ConfigService.get().pipe(
-      Effect.map((config) => config?.github?.postAdversarialReviewComments ?? true),
+      Effect.map((latest) => latest?.github?.postAdversarialReviewComments ?? true),
       Effect.orElseSucceed(() => false),
     );
     const routedReview = { ...review, postToPr };
@@ -1889,7 +1968,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     // never re-post the same nits.
     const posted = postToPr
       ? yield* postReviewToPr(
-          session.worktreePath,
+          locations.githubTarget,
           session.prNumber,
           routedReview,
           diff,
@@ -1900,7 +1979,7 @@ export const reviewRun = (sessionId: string, force: boolean) =>
     // we can re-read later, and a failed write must not fail the run.
     yield* ReviewStore.set(sessionId, posted).pipe(Effect.ignore);
     return posted;
-  });
+  }).pipe(Effect.scoped);
 
 /**
  * Post a review's low-severity findings to the PR, returning the review stamped

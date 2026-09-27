@@ -66,7 +66,7 @@ const transcript = [{
   }]
 }]
 
-test("renders canonical create, modify, delete, and rename evidence across chat and Changes", async ({
+test("renders canonical create, modify, delete, and rename evidence across chat and the Changes Explorer", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -121,14 +121,8 @@ test("renders canonical create, modify, delete, and rename evidence across chat 
   await expect(transcriptChanges).toHaveCount(10)
 
   await window.getByRole("button", { name: "Changes" }).first().click()
-  await expect(window.getByRole("region", { name: "Code review changes" })).toBeVisible({
-    timeout: 30_000
-  })
-  const rail = window.getByTestId("review-file-rail")
-  if (!(await rail.isVisible())) {
-    await window.getByRole("button", { name: "Changed files" }).filter({ visible: true }).first().click()
-  }
-  await expect(rail).toBeVisible()
+  const rail = window.getByTestId("changed-files-explorer")
+  await expect(rail).toBeVisible({ timeout: 30_000 })
   const tree = rail.locator('[aria-label="Changed files tree"]')
   await expect(tree.locator('[data-item-path="src/new.ts"]')).toHaveAttribute(
     "data-item-git-status",

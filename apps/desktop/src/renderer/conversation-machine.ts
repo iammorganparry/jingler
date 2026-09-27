@@ -1578,6 +1578,16 @@ export const conversationMachine = setup({
       publishSessionUpdate(session)
       return { session, persistedStatus: "settled" as const }
     }),
+    retitleStartedSession: ({ context, event }) => {
+      if (
+        event.type !== "STREAM_EVENT" ||
+        event.event._tag !== "Started" ||
+        context.session.semanticBranchPending !== true
+      ) return
+      // `Started` arrives after main has persisted the first turn. Fire-and-forget
+      // from here so naming gets real prompt text without delaying the agent.
+      void rpc.sessionsRetitle(context.session.id).then(publishSessionUpdate).catch(() => {})
+    },
     foldEvent: assign(({ context, event, self }) => {
       if (event.type !== "STREAM_EVENT") return {}
       const e = event.event
@@ -2317,7 +2327,7 @@ export const conversationMachine = setup({
             guard: "canAutoFlush",
             actions: ["foldEvent", "liveRefreshDiff", "autoFlushQueue"]
           },
-          { actions: ["foldEvent", "liveRefreshDiff"] }
+          { actions: ["retitleStartedSession", "foldEvent", "liveRefreshDiff"] }
         ],
         // A live diff read resolved — reflect it in the Changes rail.
         DIFF_STAT_UPDATED: { actions: "applyLivePatch" },

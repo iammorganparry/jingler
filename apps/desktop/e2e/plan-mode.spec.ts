@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import type { ElectronApplication } from "@playwright/test"
-import { appShell, expect, type LaunchedApp, type SeedSession, test } from "./fixtures.js"
+import { appShell, expect, type LaunchedApp, type LaunchOptions, type SeedSession, test } from "./fixtures.js"
 
 const PI_FIXTURE = {
   scenarioId: "plan-mode",
@@ -9,8 +8,6 @@ const PI_FIXTURE = {
 }
 
 const COMPOSER_PLACEHOLDER = /Message .+…/
-const PLANNOTATOR_URL = /^jingler-plan:/
-const PLANNOTATOR_ENTRY_URL = /^jingler-plan:\/\/[^/]+\/$/
 
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
   id: "s_plannotator",
@@ -42,121 +39,22 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
   activeChatId: "s_plannotator_chat"
 }]
 
-/** The plan review is a bundled custom-scheme view, never a localhost server. */
-const reviewUrls = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) =>
-    webContents.getAllWebContents()
-      .map((contents) => contents.getURL())
-      .filter((url) => url.startsWith("jingler-plan:"))
+/** Plan review is a native React surface inside the main window. */
+const review = (launched: LaunchedApp) => launched.window.getByTestId("plan-review")
+const reviewText = (launched: LaunchedApp) => review(launched).innerText().catch(() => "")
+
+const approveReview = async (launched: LaunchedApp) => {
+  await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
+}
+
+const reviseReview = async (launched: LaunchedApp) => {
+  await review(launched).getByRole("textbox", { name: "General feedback" }).fill(
+    "For Implement auth (implement-auth), keep the existing token format instead of replacing it."
   )
-
-const reviewText = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    return review?.executeJavaScript("document.body.innerText") ?? ""
-  })
-
-const reviewStorage = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    return review?.executeJavaScript(`({
-      "plannotator-plan-look-choice-resolved": localStorage.getItem("plannotator-plan-look-choice-resolved"),
-      "plannotator-grid-enabled": localStorage.getItem("plannotator-grid-enabled")
-    })`) ?? {}
-  })
-
-const hostTheme = (launched: LaunchedApp) => launched.window.evaluate(() => {
-  const style = getComputedStyle(document.documentElement)
-  return {
-    editor: style.getPropertyValue("--sb-editor").trim(),
-    foreground: style.getPropertyValue("--sb-text").trim(),
-    border: style.getPropertyValue("--sb-line").trim(),
-    primary: style.getPropertyValue("--sb-brand").trim()
-  }
-})
-
-const reviewTheme = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    return review?.executeJavaScript(`(() => {
-      const style = getComputedStyle(document.documentElement);
-      return {
-        editor: style.getPropertyValue('--sb-editor').trim(),
-        background: style.getPropertyValue('--background').trim(),
-        foreground: style.getPropertyValue('--foreground').trim(),
-        border: style.getPropertyValue('--border').trim(),
-        primary: style.getPropertyValue('--primary').trim(),
-        colorScheme: style.colorScheme
-      };
-    })()`)
-  })
-
-const clickReviewButton = async (app: ElectronApplication, label: string) => {
-  await expect.poll(() =>
-    app.evaluate(async ({ webContents }, wanted) => {
-      const review = webContents.getAllWebContents()
-        .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-      return review?.executeJavaScript(`(() => {
-        const button = [...document.querySelectorAll('button')]
-          .find((candidate) => candidate.textContent?.includes(${JSON.stringify(wanted)}));
-        if (!button) return false;
-        button.click();
-        return true;
-      })()`) ?? false
-    }, label),
-  { timeout: 20_000 }).toBe(true)
+  await review(launched).getByRole("button", { name: "Request changes" }).click()
 }
 
-const choosePlanLayout = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    return review?.executeJavaScript(`(() => {
-      const buttons = [...document.querySelectorAll('button')];
-      const continueButton = buttons.find((button) => button.textContent?.includes('Continue'));
-      if (!continueButton) return false;
-      buttons.find((button) => button.textContent?.includes('Grid'))?.click();
-      continueButton.click();
-      return true;
-    })()`) ?? false
-  })
-
-const approveReview = async (app: ElectronApplication) => {
-  await choosePlanLayout(app)
-  await clickReviewButton(app, "Approve")
-}
-const approveReviewStatus = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    return review?.executeJavaScript(
-      "fetch('/api/approve', { method: 'POST' }).then((response) => response.status)"
-    )
-  })
-const reviewSecurity = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    const popupDenied = await review?.executeJavaScript("window.open('https://example.com') === null")
-    await review?.executeJavaScript("location.href = 'https://example.com'").catch(() => {})
-    return { popupDenied, url: review?.getURL() }
-  })
-
-const reviseReview = (app: ElectronApplication) =>
-  app.evaluate(async ({ webContents }) => {
-    const review = webContents.getAllWebContents()
-      .find((contents) => contents.getURL().startsWith("jingler-plan:"))
-    await review?.executeJavaScript(`fetch('/api/deny', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback: 'For Implement auth (implement-auth), keep the existing token format instead of replacing it.' })
-    }).catch(() => {})`)
-  })
-
-const startPlanReview = async (launched: LaunchedApp) => {
+const startPlanReview = async (launched: LaunchedApp, prompt = "[[plan]] replace auth") => {
   const skipImport = launched.window.getByRole("button", { name: "Skip import" })
   if (await skipImport.isVisible()) await skipImport.click()
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
@@ -164,8 +62,27 @@ const startPlanReview = async (launched: LaunchedApp) => {
   await launched.window.keyboard.press("Shift+Tab")
   await launched.window.keyboard.press("Shift+Tab")
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
-  await composer.fill("[[plan]] replace auth")
+  await composer.fill(prompt)
   await composer.press("Enter")
+}
+
+const planFile = (launched: LaunchedApp): string => {
+  const path = join(launched.repoPath, "PLAN.md")
+  return existsSync(path) ? readFileSync(path, "utf8") : ""
+}
+
+const openPlanTab = async (launched: LaunchedApp) => {
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect(review(launched)).toBeVisible()
+  return planTab
+}
+
+const launchPlanMode = async (launchApp: (options?: LaunchOptions) => Promise<LaunchedApp>) => {
+  const launched = await launchApp({ configured: true, withRepo: true, piFixture: PI_FIXTURE, sessions })
+  await expect(appShell(launched.window)).toBeVisible()
+  return launched
 }
 
 test("projects explicit deliverable stages without treating overview headings as work", async ({
@@ -187,27 +104,17 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
 
-  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
-  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
-  await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
-  await expect.poll(() => reviewText(launched.app)).toContain("Choose how plans look")
-  const expectedTheme = await hostTheme(launched)
-  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
-    ...expectedTheme,
-    background: expectedTheme.editor,
-    colorScheme: "dark"
-  })
-  await choosePlanLayout(launched.app)
-  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
-  const security = await reviewSecurity(launched.app)
-  expect(security.popupDenied).toBe(true)
-  expect(security.url).toMatch(PLANNOTATOR_URL)
+  await expect(review(launched)).toBeVisible()
+  await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
+  // Proposed diffs, typed tests, and the test strategy render natively.
+  await expect(review(launched).getByRole("region", { name: "Proposed change to src/auth.ts" }))
+    .toBeVisible()
+  await expect(review(launched).getByRole("table", { name: "Implement auth acceptance" }))
+    .toContainText("src/auth.test.ts::implements auth")
+  await expect(review(launched).getByRole("heading", { name: "Test strategy" })).toBeVisible()
 
-  await approveReview(launched.app)
-  await expect.poll(() => reviewText(launched.app)).not.toContain("Approve")
-  await expect.poll(() => reviewUrls(launched.app)).toEqual([
-    expect.stringMatching(PLANNOTATOR_ENTRY_URL)
-  ])
+  await approveReview(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
@@ -237,12 +144,117 @@ test("projects explicit deliverable stages without treating overview headings as
   await persistentTab.click()
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
     .toContain("- [x] Verify the auth change")
-  await expect.poll(() => reviewText(launched.app)).toContain("Verify the auth change")
-  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
-    ...expectedTheme,
-    background: expectedTheme.editor,
-    colorScheme: "dark"
+  await expect.poll(() => reviewText(launched)).toContain("Verify the auth change")
+})
+
+test("diagram node opens linked stage", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
   })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+
+  const verifyHeading = review(launched).getByRole("heading", { name: "Verify auth", exact: true })
+  await expect(verifyHeading).not.toBeInViewport()
+  await review(launched).getByRole("link", { name: "Open stage verify-auth" }).click()
+  await expect(verifyHeading).toBeInViewport({ timeout: 5_000 })
+})
+
+test("selection comments reach the agent and the revision diff shows what changed", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+  // First review: nothing to compare against yet.
+  await expect(review(launched).getByRole("button", { name: /Changes since revision/ })).toHaveCount(0)
+
+  const intent = review(launched)
+    .getByRole("region", { name: "Implement auth", exact: true })
+    .getByText("Implement the auth change.", { exact: true })
+  await intent.click({ clickCount: 3 })
+  await review(launched).getByRole("button", { name: "Add comment" }).click()
+  await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
+  await review(launched).getByRole("button", { name: "Save comment" }).click()
+  await expect(review(launched).getByRole("list", { name: "Review comments" }))
+    .toContainText("Keep the existing token format.")
+  await review(launched).getByRole("button", { name: "Request changes" }).click()
+
+  // The fixture agent echoes every quoted anchor it received into the rewrite.
+  await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 })
+    .toContain("Reviewer quoted: Implement the auth change.")
+
+  const toggle = review(launched).getByRole("button", { name: /Changes since revision/ })
+  await expect(toggle).toBeVisible({ timeout: 30_000 })
+  await toggle.click()
+  const changes = review(launched).getByRole("region", { name: "Changes since the previous revision" })
+  await expect(changes.getByText("Reviewer quoted: Implement the auth change.")).toBeVisible()
+  await expect(changes.getByText("- Replace the token format", { exact: false }).first()).toBeVisible()
+  await review(launched).getByRole("button", { name: "Hide changes" }).click()
+  await expect(changes).toHaveCount(0)
+
+  await approveReview(launched)
+  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+})
+
+test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const readmeChange = review(launched).getByRole("region", { name: "Proposed change to README.md" })
+  await expect(readmeChange).toBeVisible()
+  // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
+  await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
+  await review(launched).getByRole("button", { name: "Open README.md" }).click()
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+
+  await openPlanTab(launched)
+  const canvas = review(launched).getByTestId("mermaid-canvas")
+  await expect(canvas).toBeVisible()
+  await review(launched).getByRole("button", { name: "Zoom in" }).click()
+  await expect(canvas).toHaveAttribute("style", /scale\(1\.25\)/)
+  // Drag from the middle of the visible (overflow-hidden) viewport, not the
+  // scaled canvas's corner, which is clipped once zoomed.
+  const box = (await canvas.locator("xpath=..").boundingBox())!
+  const [x, y] = [box.x + box.width / 2, box.y + Math.min(20, box.height / 2)]
+  await launched.window.mouse.move(x, y)
+  await launched.window.mouse.down()
+  await launched.window.mouse.move(x + 60, y + 20, { steps: 5 })
+  await launched.window.mouse.up()
+  await expect(canvas).not.toHaveAttribute("style", /translate\(0px, 0px\)/)
+  await review(launched).getByRole("button", { name: "Reset view" }).click()
+  await expect(canvas).toHaveAttribute("style", /translate\(0px, 0px\) scale\(1\)/)
+
+  await review(launched).getByRole("button", { name: "Fullscreen" }).click()
+  const dialog = launched.window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("link", { name: "Open file README.md" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+})
+
+test("submission rejects a plan with an unsafe diff path and no test strategy", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched, "[[plan]] [[invalid-plan]] replace auth")
+
+  // The fixture agent copies the validator's errors into the fixed plan it resubmits.
+  await expect.poll(() => planFile(launched), { timeout: 30_000 })
+    .toContain('Fixed validation error: Plan needs a "## Test strategy" section.')
+  const fixed = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
+  expect(fixed).toContain('proposes a change to unsafe path "../outside.ts"')
+  expect(fixed).not.toContain("diff path=../outside.ts")
+
+  await openPlanTab(launched)
+  await expect(review(launched).getByRole("heading", { name: "Test strategy" })).toBeVisible()
+  await approveReview(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 })
 
 test("a new review in the same chat is presented and can be approved", async ({
@@ -259,9 +271,8 @@ test("a new review in the same chat is presented and can be approved", async ({
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
-  await expect.poll(() => reviewText(launched.app)).toContain("Choose how plans look")
-  await approveReview(launched.app)
+  await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
+  await approveReview(launched)
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
@@ -273,29 +284,18 @@ test("a new review in the same chat is presented and can be approved", async ({
   await composer.fill("[[plan]] revise auth again")
   await composer.press("Enter")
 
-  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible({
-    timeout: 20_000
-  })
-  await expect.poll(() => reviewText(launched.app)).toContain("Implement the auth change")
+  await expect(review(launched)).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect.poll(() => reviewText(launched.app)).not.toContain("Choose how plans look")
-  await expect.poll(() => reviewStorage(launched.app)).toMatchObject({
-    "plannotator-plan-look-choice-resolved": "true"
-  })
-  const expectedTheme = await hostTheme(launched)
-  await expect.poll(() => reviewTheme(launched.app)).toMatchObject({
-    ...expectedTheme,
-    background: expectedTheme.editor,
-    colorScheme: "dark"
-  })
-  await approveReview(launched.app)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true }))
+    .toBeVisible({ timeout: 20_000 })
+  await approveReview(launched)
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect.poll(() =>
     launched.window.getByText("Implemented and verified the approved plan.").count(),
   { timeout: 30_000 }).toBeGreaterThan(1)
 })
 
-test("a hidden renderer cannot settle a review without acknowledging delivery", async ({
+test("closing the Plan tab keeps a pending review approvable", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -310,15 +310,15 @@ test("a hidden renderer cannot settle a review without acknowledging delivery", 
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
+  await expect(review(launched)).toBeVisible()
   await launched.window.getByRole("button", { name: "Close Plan" }).click()
-  await expect(launched.window.getByTestId("plannotator-embedded-view")).toHaveCount(0)
-
-  await expect(approveReviewStatus(launched.app)).resolves.toBe(503)
+  await expect(review(launched)).toHaveCount(0)
+  await expect(launched.window.getByText("Implemented and verified the approved plan."))
+    .toHaveCount(0)
 
   await planTab.click()
-  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
-  await approveReview(launched.app)
+  await expect(review(launched)).toBeVisible()
+  await approveReview(launched)
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
@@ -339,8 +339,8 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
-  await approveReview(launched.app)
+  await expect(review(launched)).toBeVisible()
+  await approveReview(launched)
 
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
@@ -353,7 +353,7 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   expect(existsSync(join(launched.repoPath, "PLAN.md"))).toBe(false)
 })
 
-test("revises one stage approach through embedded Plannotator feedback", async ({
+test("revises one stage approach through native review feedback", async ({
   launchApp
 }) => {
   const launched = await launchApp({
@@ -368,27 +368,27 @@ test("revises one stage approach through embedded Plannotator feedback", async (
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect(launched.window.getByTestId("plannotator-embedded-view")).toBeVisible()
-  await expect.poll(() => reviewText(launched.app))
+  await expect(review(launched)).toBeVisible()
+  await expect.poll(() => reviewText(launched))
     .toContain("The implementation replaces the token format")
   const originalPlan = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
-  await reviseReview(launched.app)
+  await reviseReview(launched)
 
   // The denial goes back through the submit tool; the scripted agent rewrites
   // the SAME plan file in place and resubmits it for a second review.
   await expect.poll(() =>
     readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 }
   ).toContain("keeping the existing token format")
-  await expect.poll(() => reviewText(launched.app), { timeout: 30_000 })
+  await expect.poll(() => reviewText(launched), { timeout: 30_000 })
     .toContain("keeping the existing token format")
   const revisedPlan = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
   expect(revisedPlan.match(/<!-- id: [\w-]+ -->/g)).toEqual(
     originalPlan.match(/<!-- id: [\w-]+ -->/g)
   )
   expect(revisedPlan.split("## Verify auth")[1]).toBe(originalPlan.split("## Verify auth")[1])
-  await expect.poll(() => reviewText(launched.app))
+  await expect.poll(() => reviewText(launched))
     .toContain("The implementation preserves compatibility")
-  await approveReview(launched.app)
+  await approveReview(launched)
 
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
@@ -419,7 +419,7 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
   ).toContain("keeping the existing token format")
 })
 
-test("a pending Plannotator review reopens in the bundled view after an Electron restart", async ({
+test("a pending Plannotator review reopens natively after an Electron restart", async ({
   launchApp
 }) => {
   const first = await launchApp({
@@ -433,9 +433,7 @@ test("a pending Plannotator review reopens in the bundled view after an Electron
   const firstPlanTab = first.window.getByTestId("view-tab-plan").first()
   await expect(firstPlanTab).toBeVisible({ timeout: 20_000 })
   await firstPlanTab.click()
-  await expect.poll(() => reviewText(first.app)).toContain("Choose how plans look")
-  await choosePlanLayout(first.app)
-  await expect.poll(() => reviewText(first.app)).not.toContain("Choose how plans look")
+  await expect.poll(() => reviewText(first)).toContain("Implement the auth change")
   await first.app.close()
 
   const reopened = await launchApp({
@@ -452,9 +450,8 @@ test("a pending Plannotator review reopens in the bundled view after an Electron
   const planTab = reopened.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect(reopened.window.getByTestId("plannotator-embedded-view")).toBeVisible({ timeout: 30_000 })
-  await expect.poll(() => reviewUrls(reopened.app)).toHaveLength(1)
-  await expect.poll(() => reviewText(reopened.app)).not.toContain("Choose how plans look")
+  await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
+  await expect.poll(() => reviewText(reopened)).toContain("Implement the auth change")
 
   await reopened.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
@@ -467,13 +464,13 @@ test("a pending Plannotator review reopens in the bundled view after an Electron
 
   // The resumed review must still be decidable over the native channel.
   await planTab.click()
-  await approveReview(reopened.app)
+  await approveReview(reopened)
   await reopened.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
 
-test("closing a chat destroys its embedded Plannotator view", async ({ launchApp }) => {
+test("closing a chat removes its plan review", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -485,10 +482,10 @@ test("closing a chat destroys its embedded Plannotator view", async ({ launchApp
   const planTab = launched.window.getByTestId("view-tab-plan").first()
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect.poll(() => reviewUrls(launched.app)).toHaveLength(1)
+  await expect(review(launched)).toBeVisible()
 
   await launched.window.getByRole("button", { name: "Close [[plan]] replace auth" }).click()
-  await expect.poll(() => reviewUrls(launched.app), { timeout: 20_000 }).toEqual([])
+  await expect(review(launched)).toHaveCount(0, { timeout: 20_000 })
 })
 
 for (const recoveryCase of [
@@ -533,6 +530,6 @@ for (const recoveryCase of [
       .toHaveCount(0)
     await expect(reopened.window.getByTestId("view-tab-plan")).toHaveCount(0)
     await expect(reopened.window.getByTestId("plan-task-list")).toHaveCount(0)
-    expect(await reviewUrls(reopened.app)).toEqual([])
+    await expect(review(reopened)).toHaveCount(0)
   })
 }

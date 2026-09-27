@@ -621,7 +621,6 @@ export function ConversationPane({
       () => rpc.sessionsCloseChat(session.id, chatId),
       (updated) => {
         clearDraft(chatId)
-        window.jingler.closePlannotator({ sessionId: session.id, chatId })
         disposeChatActor(session.id, chatId)
         publishSessionUpdate(updated)
       }
@@ -1527,7 +1526,6 @@ function renderPlanSurface(
         key={pendingReviewId ?? "plan"}
         document={plannotatorDocument}
         canApprove={pendingReviewId !== null}
-        host={window.jingler}
         onApprove={() => decideReview(true)}
         onRevise={(feedback) => decideReview(false, feedback)}
       />

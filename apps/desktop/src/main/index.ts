@@ -43,7 +43,6 @@ import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from 
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
-import { installPlannotatorView, registerPlannotatorScheme } from "./plannotator-view.js"
 
 app.setName("Jingler")
 
@@ -411,7 +410,6 @@ if (!gotPrimaryLock) {
   // after ready is silently ignored and every plugin module 404s with nothing
   // in the log to say why.
   registerPluginScheme()
-  registerPlannotatorScheme()
 
   app.whenReady().then(async () => {
     enableCodexDiagnostics()
@@ -436,8 +434,6 @@ if (!gotPrimaryLock) {
     // Now that the subsystem is up, attach the handler that actually serves
     // plugin files (and the runtime shims) out of `~/jingler/plugins`.
     registerPluginProtocolHandler()
-    const disposePlannotatorView = installPlannotatorView(() => mainWindow)
-    app.once("will-quit", disposePlannotatorView)
 
     // Hand the host service its Electron-shaped pieces. No process is spawned
     // here — the first activation event does that, which is the whole point of

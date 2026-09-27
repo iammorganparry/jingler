@@ -18,13 +18,9 @@ authors.
   `plannotator-last` commands, `server/serverReview.ts`, `server/serverAnnotate.ts`,
   the upstream code-review bundle, and the generated PR-review / call-flow /
   guide modules they pulled in. Only the plan-review slice remains.
-- `assets/plan-review-v0.27.8.html` is a single-file build of upstream
-  `apps/hook` at tag v0.27.8 / commit
-  `b381ecbe1200b07db8c050715c0f2c035a44b73a`. Jingler serves it through an
-  in-process Electron protocol instead of upstream's localhost server. The
-  adjacent patch disables its GitHub release check because Jingler owns updates
-  and embedded views have no network access. The selected MIT license and
-  reproducible build metadata are adjacent to it.
+- The upstream review frontend (`apps/hook`) is not shipped. Jingler renders
+  plan review natively in `packages/ui/src/screens/plan-review.tsx` and
+  receives decisions over the pi event bus (`native-review.ts`).
 - `generated/` files keep their upstream "@generated — DO NOT EDIT" headers for
   provenance; in this fork they are ordinary forked source and may be edited.
 

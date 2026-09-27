@@ -7,7 +7,6 @@ import type {
   SubagentFleetNode
 } from "@jingler/core"
 import {
-  applyStreamEvent,
   assistantMessage,
   piEndpointId,
   ProviderConnectionId,
@@ -30,6 +29,7 @@ import {
   KEEP_RECENT_TOOL_PARTS,
   MAX_TEXT_PART_CHARS
 } from "./transcript-compaction.js"
+import { onSessionUpdate } from "./session-updates.js"
 
 /**
  * The renderer's conversation flow is a deterministic XState chart. Its only
@@ -58,6 +58,7 @@ const h = vi.hoisted(() => ({
   filesValue: [] as ReadonlyArray<string>,
   filesCalls: 0,
   statusWrites: [] as Array<string>,
+  retitleCalls: [] as Array<string>,
   skillsListCalls: 0,
   stopCalls: [] as Array<string>,
   stopGate: Promise.resolve() as Promise<void>,
@@ -198,6 +199,10 @@ vi.mock("./rpc-client.js", () => ({
       if (h.stopFails) throw new Error("stop failed")
     },
     agentChatBusy: async () => h.chatBusy,
+    sessionsRetitle: async (id: string) => {
+      h.retitleCalls.push(id)
+      return { ...session, semanticBranchPending: false, branch: "fix/name-in-background" }
+    },
     sessionsSetStatus: async (_id: string, status: string) => {
       h.statusWrites.push(status)
     }
@@ -265,6 +270,7 @@ beforeEach(() => {
   h.filesValue = []
   h.filesCalls = 0
   h.statusWrites.length = 0
+  h.retitleCalls.length = 0
   h.skillsListCalls = 0
   h.stopCalls.length = 0
   h.stopGate = Promise.resolve()
@@ -312,6 +318,48 @@ describe("conversationMachine — persisted Settled", () => {
       await waitFor(actor, (snapshot) => snapshot.matches(idle))
       expect(actor.getSnapshot().context.persistedStatus).toBe("idle")
       expect(h.statusWrites).toEqual([])
+    } finally {
+      actor.stop()
+    }
+  })
+})
+
+describe("conversationMachine — async session naming", () => {
+  it("retitles a pending branch on Started, before the agent settles", async () => {
+    const pending = { ...session, semanticBranchPending: true }
+    const updates: Session[] = []
+    const unsubscribe = onSessionUpdate((updated) => updates.push(updated))
+    const actor = createActor(conversationMachine, { input: { session: pending } }).start()
+    try {
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      actor.send({ type: "SEND", text: "Name this while working" })
+      await waitFor(actor, (snapshot) => snapshot.matches("running"))
+
+      emit({ _tag: "Started", sessionId: "runtime-1", model: "test-model" })
+      await waitFor(actor, () => h.retitleCalls.length === 1)
+      await waitFor(actor, () => updates.length === 1)
+
+      expect(h.retitleCalls).toEqual([session.id])
+      expect(updates[0]).toMatchObject({
+        semanticBranchPending: false,
+        branch: "fix/name-in-background"
+      })
+      expect(actor.getSnapshot().matches("running")).toBe(true)
+    } finally {
+      unsubscribe()
+      actor.stop()
+    }
+  })
+
+  it("does not retitle an established branch on later turns", async () => {
+    const actor = start()
+    try {
+      await waitFor(actor, (snapshot) => snapshot.matches(idle))
+      actor.send({ type: "SEND", text: "Keep working" })
+      await waitFor(actor, (snapshot) => snapshot.matches("running"))
+      emit({ _tag: "Started", sessionId: "runtime-2", model: "test-model" })
+      await Promise.resolve()
+      expect(h.retitleCalls).toEqual([])
     } finally {
       actor.stop()
     }

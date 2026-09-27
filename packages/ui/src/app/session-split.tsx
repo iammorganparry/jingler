@@ -94,8 +94,8 @@ export interface SessionSplitProps {
    * three copies in a three-way split, all fighting over the same state.
    */
   paneContributions?: ReadonlyArray<PaneContribution>
-  renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  onRevealChanges?: (sessionId: string) => void
+  renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session) => ReactNode
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
@@ -184,8 +184,8 @@ export function SessionSplit(props: SessionSplitProps) {
         renderPullRequest={props.renderPullRequest}
         tabContributions={props.tabContributions}
         onSelectIssue={props.onSelectIssue}
-        renderReview={props.renderReview}
-        renderCode={props.renderCode}
+        onRevealChanges={props.onRevealChanges}
+        renderReviewTray={props.renderReviewTray}
         // No close control in a group of one: there is nothing to close back to,
         // so it would only be a way to blank the app.
         onClosePane={single || !props.onClosePane ? undefined : () => props.onClosePane?.(index)}
