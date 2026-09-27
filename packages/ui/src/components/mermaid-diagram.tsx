@@ -14,11 +14,7 @@ export interface DiagramLink {
 }
 
 const LINK_DIRECTIVE = /^\s*%%\s*link\s+([\w-]+)\s+(file|stage):(\S+)\s*$/
-const ROOTED_PATH = /^([/\\~]|[a-zA-Z]:)/
-const PATH_SEPARATOR = /[/\\]/
 const STAGE_ID = /^[\w-]+$/
-const isSafeRepoPath = (path: string): boolean =>
-  !ROOTED_PATH.test(path) && !path.split(PATH_SEPARATOR).includes("..")
 
 /**
  * `%% link <nodeId> file:<repo path>` / `%% link <nodeId> stage:<id>`. Mermaid
@@ -29,7 +25,9 @@ export const parseLinkDirectives = (source: string): ReadonlyArray<DiagramLink> 
     const [, nodeId, kind, value] = LINK_DIRECTIVE.exec(line) ?? []
     if (nodeId === undefined || value === undefined) return []
     if (kind === "stage") return STAGE_ID.test(value) ? [{ nodeId, target: { kind: "stage", id: value } }] : []
-    return isSafeRepoPath(value) ? [{ nodeId, target: { kind: "file", path: value } }] : []
+    // No path check here: wireLink only links paths resolveOpenablePath finds in
+    // the worktree's tracked files, which never contain `..`, `~` or roots.
+    return [{ nodeId, target: { kind: "file", path: value } }]
   })
 
 const ZOOM_STEP = 1.25
@@ -151,9 +149,8 @@ function DiagramCanvas({
           // retarget the click away from linked nodes. Capture keeps the pan
           // alive when the pointer crosses the toolbar or leaves the viewport.
           if (!start.moved) event.currentTarget.setPointerCapture?.(event.pointerId)
-          start.moved = true
           dragged.current = true
-          drag.current = { x: event.clientX, y: event.clientY, moved: true }
+          Object.assign(start, { x: event.clientX, y: event.clientY, moved: true })
           setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
         }}
         onPointerUp={() => { drag.current = null }}

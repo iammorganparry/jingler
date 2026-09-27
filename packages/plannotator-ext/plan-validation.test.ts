@@ -37,7 +37,7 @@ describe("validatePlanMarkdown", () => {
     expect(validatePlanMarkdown(unsafe("src/ok.ts"))).toEqual([])
     for (const path of ["/etc/passwd", "../outside.ts", "src/../../x.ts", "~/x.ts", "C:/x.ts"]) {
       expect(validatePlanMarkdown(unsafe(path))).toEqual([
-        `Stage "Ship auth" proposes a change to unsafe path "${path}".`
+        `Plan proposes a change to unsafe path "${path}".`
       ])
     }
     expect(validatePlanMarkdown(validStage.replace(/## Test strategy[\s\S]*/, ""))).toEqual([

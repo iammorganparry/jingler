@@ -511,6 +511,86 @@ const INVALID_REVIEW_PLAN = STRUCTURED_REVIEW_PLAN
   .replace("```diff path=src/auth.ts", "```diff path=../outside.ts")
   .replace("## Test strategy\nUnit tests cover the token format; the e2e flow covers sign-in.\n\n", "")
 
+const PLAN_ANCHOR = "Replace the auth flow with a deterministic test implementation."
+/** The review plan with one note per "- "/"> "-prefixed line appended under its anchor. */
+const planWithNotes = (prefix: string, lines: ReadonlyArray<string>): string =>
+  STRUCTURED_REVIEW_PLAN.replace(PLAN_ANCHOR, [PLAN_ANCHOR, ...lines.map((line) => `${prefix}${line.slice(2)}`)].join("\n"))
+
+type PiToolResult = Extract<PiContext["messages"][number], { role: "toolResult" }>
+
+/** The agent's reply to a submit_plan result: fix, revise, or finish. */
+const submitResultResponse = (
+  lastMessage: PiToolResult,
+  submitCount: number
+): ReturnType<typeof fauxAssistantMessage> => {
+  const denial = toolResultText(lastMessage)
+  if (denial.includes("is not ready for review")) {
+    // Echo the validator's own errors so e2e proves the real submit gate ran.
+    const errors = denial.split("\n").filter((line) => line.startsWith("- "))
+    return callTool(
+      PLAN_WRITE_TOOL,
+      {
+        path: "PLAN.md",
+        content: planWithNotes("Fixed validation error: ", errors)
+      },
+      `plannotator-fix-${submitCount + 1}`
+    )
+  }
+  if (denial.includes("YOUR PLAN WAS NOT APPROVED")) {
+    // Echo each quoted anchor from the reviewer's feedback into the plan, so
+    // e2e can prove selection comments reached the agent verbatim.
+    const quoted = denial.split("\n").filter((line) => line.startsWith("> "))
+    return callTool(
+      PLAN_WRITE_TOOL,
+      {
+        path: "PLAN.md",
+        content: planWithNotes("Reviewer quoted: ", quoted).replace(
+          "- Replace the token format",
+          "- Revise auth while keeping the existing token format"
+        ).replace(
+          "The implementation replaces the token format at the existing auth entry point.",
+          "The implementation preserves compatibility by keeping the existing token format."
+        )
+      },
+      "plannotator-rewrite"
+    )
+  }
+  return fauxAssistantMessage(
+    "Implemented and verified the approved plan. [DONE:1] [DONE:2] [DONE:3] [DONE:4]"
+  )
+}
+
+/** The agent's reply to a plan write: fall back to the workspace tool, else submit. */
+const writeResultResponse = (
+  context: PiContext,
+  lastMessage: PiToolResult,
+  submitCount: number
+): ReturnType<typeof fauxAssistantMessage> => {
+  // Outside plan mode pi's markdown-only `write` tool is absent — retry the
+  // plan write with the ordinary workspace tool, as a real agent would.
+  if (toolResultText(lastMessage).includes("not found")) {
+    // Retry the SAME content (a revision, not the original plan) under a
+    // fresh call id: the run journal rejects a reused id as a duplicate.
+    const failed = context.messages.findLast((message) => message.role === "assistant")
+    const call = failed?.role === "assistant"
+      ? failed.content.find((block) => block.type === "toolCall" && block.id === lastMessage.toolCallId)
+      : undefined
+    const content = call?.type === "toolCall" && typeof call.arguments.content === "string"
+      ? call.arguments.content
+      : STRUCTURED_REVIEW_PLAN
+    return callTool(
+      WRITE_TOOL,
+      { path: "PLAN.md", content },
+      `plannotator-write-fallback-${submitCount + 1}`
+    )
+  }
+  return callTool(
+    SUBMIT_PLAN_TOOL,
+    { filePath: "PLAN.md" },
+    `plannotator-submit-${submitCount + 1}`
+  )
+}
+
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
   const planMessages = operatorText(context)
@@ -542,75 +622,13 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
   ).length
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
-    const denial = toolResultText(lastMessage)
-    if (denial.includes("is not ready for review")) {
-      // Echo the validator's own errors so e2e proves the real submit gate ran.
-      const errors = denial.split("\n").filter((line) => line.startsWith("- "))
-      return callTool(
-        PLAN_WRITE_TOOL,
-        {
-          path: "PLAN.md",
-          content: STRUCTURED_REVIEW_PLAN.replace(
-            "Replace the auth flow with a deterministic test implementation.",
-            ["Replace the auth flow with a deterministic test implementation.", ...errors.map((line) => `Fixed validation error: ${line.slice(2)}`)].join("\n")
-          )
-        },
-        `plannotator-fix-${submitCount + 1}`
-      )
-    }
-    if (denial.includes("YOUR PLAN WAS NOT APPROVED")) {
-      // Echo each quoted anchor from the reviewer's feedback into the plan, so
-      // e2e can prove selection comments reached the agent verbatim.
-      const quoted = denial.split("\n").filter((line) => line.startsWith("> "))
-      return callTool(
-        PLAN_WRITE_TOOL,
-        {
-          path: "PLAN.md",
-          content: STRUCTURED_REVIEW_PLAN.replace(
-            "Replace the auth flow with a deterministic test implementation.",
-            ["Replace the auth flow with a deterministic test implementation.", ...quoted.map((line) => `Reviewer quoted: ${line.slice(2)}`)].join("\n")
-          ).replace(
-            "- Replace the token format",
-            "- Revise auth while keeping the existing token format"
-          ).replace(
-            "The implementation replaces the token format at the existing auth entry point.",
-            "The implementation preserves compatibility by keeping the existing token format."
-          )
-        },
-        "plannotator-rewrite"
-      )
-    }
-    return fauxAssistantMessage(
-      "Implemented and verified the approved plan. [DONE:1] [DONE:2] [DONE:3] [DONE:4]"
-    )
+    return submitResultResponse(lastMessage, submitCount)
   }
   if (
     lastMessage?.role === "toolResult" &&
     (lastMessage.toolName === PLAN_WRITE_TOOL || lastMessage.toolName === WRITE_TOOL)
   ) {
-    // Outside plan mode pi's markdown-only `write` tool is absent — retry the
-    // plan write with the ordinary workspace tool, as a real agent would.
-    if (toolResultText(lastMessage).includes("not found")) {
-      // Retry the SAME content (a revision, not the original plan) under a
-      // fresh call id: the run journal rejects a reused id as a duplicate.
-      const failed = context.messages.findLast((message) => message.role === "assistant")
-      const call = failed?.role === "assistant"
-        ? failed.content.find((block) => block.type === "toolCall" && block.id === lastMessage.toolCallId)
-        : undefined
-      const content = call?.type === "toolCall" && typeof call.arguments.content === "string"
-        ? call.arguments.content
-        : STRUCTURED_REVIEW_PLAN
-      return callTool(
-        WRITE_TOOL,
-        { path: "PLAN.md", content },
-        `plannotator-write-fallback-${submitCount + 1}`
-      )
-    }
-    return callTool(
-      SUBMIT_PLAN_TOOL,
-      { filePath: "PLAN.md" },
-      `plannotator-submit-${submitCount + 1}`
-    )
+    return writeResultResponse(context, lastMessage, submitCount)
   }
   const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
   return callTool(

@@ -150,6 +150,21 @@ describe("PlanReview", () => {
     await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
   })
 
+  it("shows a failed decision and keeps comments for a retry", async () => {
+    const onRevise = vi.fn().mockRejectedValueOnce(new Error("Review is stale.")).mockResolvedValueOnce(undefined)
+    renderReview({ onRevise })
+
+    addComment("Implement the auth change.", "Keep the token format.")
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
+    expect((await screen.findByRole("alert")).textContent).toBe("Review is stale.")
+    expect(screen.getByRole("button", { name: "Request changes" }).hasAttribute("disabled")).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
+    await waitFor(() => expect(onRevise).toHaveBeenCalledTimes(2))
+    expect(onRevise.mock.calls[1]?.[0]).toContain("Keep the token format.")
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull())
+  })
+
   it("shows revision diff after resubmission", async () => {
     const first = renderReview({ document: { ...document, sourceMarkdown: "# Auth\n- keep\n" } })
     expect(screen.queryByRole("button", { name: /Changes since revision/ })).toBeNull()
@@ -191,7 +206,7 @@ describe("planFeedbackMarkdown", () => {
   it("labels whole-plan comments and quotes multi-line anchors per line", () => {
     const feedback = planFeedbackMarkdown(
       document.plan,
-      [{ id: "c1", quote: "line one\nline two", body: " Fix both. " }],
+      [{ quote: "line one\nline two", body: " Fix both. " }],
       ""
     )
     expect(feedback).toBe("# Plan Feedback\n\n## 1. Plan\n> line one\n> line two\n\nFix both.")

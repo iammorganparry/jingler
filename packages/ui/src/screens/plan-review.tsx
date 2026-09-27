@@ -8,7 +8,6 @@ import { PlanRevisionDiff } from "../composites/plan-change-block.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
 
 export interface PlanReviewComment {
-  readonly id: string
   readonly stageId?: string
   readonly quote: string
   readonly body: string
@@ -54,6 +53,8 @@ export const planFeedbackMarkdown = (
 function AcceptanceTable({ stage }: { stage: PlanPrdStage }) {
   if (stage.acceptance.length === 0) return null
   return (
+    <>
+    <h3 className="sb-plan-heading">Acceptance</h3>
     <div className="overflow-x-auto">
       <table aria-label={`${stage.title} acceptance`}>
         <thead><tr><th>Kind</th><th>Criterion</th><th>Test</th></tr></thead>
@@ -73,6 +74,7 @@ function AcceptanceTable({ stage }: { stage: PlanPrdStage }) {
         </tbody>
       </table>
     </div>
+    </>
   )
 }
 
@@ -86,7 +88,7 @@ function StageView({ stage }: { stage: PlanPrdStage }) {
       {stage.approach.length > 0 && (
         <>
           <h3 className="sb-plan-heading">Approach</h3>
-          <ul>{stage.approach.map((step) => <li key={step}><Markdown>{step}</Markdown></li>)}</ul>
+          <ul>{stage.approach.map((step, index) => <li key={index}><Markdown>{step}</Markdown></li>)}</ul>
         </>
       )}
       {body.length > 0 && <VisualBlocks blocks={body} />}
@@ -103,7 +105,6 @@ function StageView({ stage }: { stage: PlanPrdStage }) {
           </ul>
         </>
       )}
-      {stage.acceptance.length > 0 && <h3 className="sb-plan-heading">Acceptance</h3>}
       <AcceptanceTable stage={stage} />
       {stage.files.length > 0 && (
         <>
@@ -119,13 +120,13 @@ type Selection = { readonly quote: string; readonly stageId?: string; readonly t
 
 export function PlanReview({ document, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
   const container = useRef<HTMLDivElement | null>(null)
-  const draftInput = useRef<HTMLTextAreaElement | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [draft, setDraft] = useState<Selection | null>(null)
   const [draftBody, setDraftBody] = useState("")
   const [comments, setComments] = useState<ReadonlyArray<PlanReviewComment>>([])
   const [general, setGeneral] = useState("")
   const [busy, setBusy] = useState(false)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
   const [showChanges, setShowChanges] = useState(false)
   const canDecide =
     canApprove &&
@@ -157,15 +158,14 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     return () => root.removeEventListener("mouseup", onMouseUp)
   }, [canDecide])
 
-  useEffect(() => {
-    if (draft !== null) draftInput.current?.focus()
-  }, [draft])
-
   const decide = async (approved: boolean) => {
     setBusy(true)
+    setDecisionError(null)
     try {
       if (approved) await onApprove?.()
       else await onRevise?.(planFeedbackMarkdown(plan, comments, general))
+    } catch (error) {
+      setDecisionError(error instanceof Error ? error.message : "Could not send your decision.")
     } finally {
       setBusy(false)
     }
@@ -175,7 +175,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     if (draft === null || draftBody.trim().length === 0) return
     setComments((current) => [
       ...current,
-      { id: `c${current.length + 1}-${Date.now()}`, stageId: draft.stageId, quote: draft.quote, body: draftBody }
+      { stageId: draft.stageId, quote: draft.quote, body: draftBody }
     ])
     setDraft(null)
     setDraftBody("")
@@ -235,7 +235,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
             style={{ top: draft.top, left: Math.max(8, draft.left) }}
           >
             <textarea
-              ref={draftInput}
+              autoFocus
               aria-label="Comment"
               value={draftBody}
               onChange={(event) => setDraftBody(event.target.value)}
@@ -254,15 +254,15 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         <footer className="flex flex-col gap-2 border-t border-line bg-panel px-4 py-3">
           {comments.length > 0 && (
             <ul aria-label="Review comments" className="flex max-h-40 flex-col gap-1 overflow-y-auto text-[11.5px]">
-              {comments.map((comment) => (
-                <li key={comment.id} className="flex items-start gap-2">
+              {comments.map((comment, index) => (
+                <li key={index} className="flex items-start gap-2">
                   <span className="min-w-0 flex-1">
                     <q className="text-muted-foreground">{comment.quote}</q> — {comment.body}
                   </span>
                   <button
                     type="button"
                     aria-label={`Remove comment on ${comment.quote}`}
-                    onClick={() => setComments((current) => current.filter((c) => c.id !== comment.id))}
+                    onClick={() => setComments((current) => current.filter((_, i) => i !== index))}
                     className="text-dim hover:text-text-bright"
                   >
                     <X className="size-3.5" />
@@ -271,6 +271,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               ))}
             </ul>
           )}
+          {decisionError !== null && <p role="alert" className="text-[11.5px] text-red">{decisionError}</p>}
           <div className="flex items-end gap-2">
             <textarea
               aria-label="General feedback"

@@ -42,16 +42,12 @@ describe("MermaidDiagram", () => {
 })
 
 describe("parseLinkDirectives", () => {
-  it("parses safe link directives", () => {
+  it("parses file and stage directives and ignores malformed ones", () => {
     const source = [
       "flowchart LR",
       "  A[Parser] --> B[Review]",
       "  %% link A file:packages/plannotator-ext/plan-parse.ts",
       "  %% link B stage:native-review",
-      "  %% link C file:/etc/passwd",
-      "  %% link D file:../outside.ts",
-      "  %% link E file:~/secrets",
-      "  %% link F file:C:/win.ts",
       "  %% link G stage:bad\"id",
       "  %% just a comment",
       "  %% link H http:example.com"
@@ -60,6 +56,24 @@ describe("parseLinkDirectives", () => {
       { nodeId: "A", target: { kind: "file", path: "packages/plannotator-ext/plan-parse.ts" } },
       { nodeId: "B", target: { kind: "stage", id: "native-review" } }
     ])
+  })
+})
+
+describe("MermaidDiagram unsafe file links", () => {
+  it("never links a path outside the worktree's tracked files", async () => {
+    const unsafe = ["/etc/passwd", "../outside.ts", "~/secrets", "C:/win.ts"]
+    const svg = `<svg>${["A", "B", "C", "D", "E"].map((id, i) => `<g id="mermaid-r1-flowchart-${id}-${i}"></g>`).join("")}</svg>`
+    render_.mockResolvedValue({ svg })
+    const open = vi.fn()
+    render(
+      <OpenAssetProvider open={open} knownFiles={new Set(["src/a.ts", "passwd", "outside.ts"])} worktreeRoot="/w">
+        <MermaidDiagram
+          source={["flowchart LR", "  %% link A file:src/a.ts", ...unsafe.map((path, i) => `  %% link ${"BCDE"[i]} file:${path}`)].join("\n")}
+        />
+      </OpenAssetProvider>
+    )
+    await screen.findByRole("link", { name: "Open file src/a.ts" })
+    expect(screen.getAllByRole("link")).toHaveLength(1)
   })
 })
 

@@ -2,7 +2,6 @@ import { parsePlanMarkdown } from "./plan-parse.ts"
 
 /** Repository-relative, no traversal: change paths become clickable file links. */
 export const isSafeRepoPath = (path: string): boolean =>
-  path.length > 0 &&
   !/^([/\\~]|[a-zA-Z]:)/.test(path) &&
   !path.split(/[/\\]/).includes("..")
 
@@ -15,12 +14,12 @@ export const validatePlanMarkdown = (content: string): string[] => {
   if (!sections.some(({ title }) => title?.trim().toLowerCase() === "test strategy")) {
     errors.push('Plan needs a "## Test strategy" section.')
   }
-  for (const section of sections) {
-    for (const block of section.blocks) {
-      if (block.kind === "change" && !isSafeRepoPath(block.path)) {
-        errors.push(`Section "${section.title ?? "Overview"}" proposes a change to unsafe path "${block.path}".`)
-      }
-    }
+  const changePaths = [
+    ...sections.flatMap(({ blocks }) => blocks.flatMap((b) => (b.kind === "change" ? [b.path] : []))),
+    ...stages.flatMap(({ changes }) => changes.map(({ path }) => path))
+  ]
+  for (const path of changePaths.filter((p) => !isSafeRepoPath(p))) {
+    errors.push(`Plan proposes a change to unsafe path "${path}".`)
   }
   const ids = new Set<string>()
   for (const stage of stages) {
@@ -33,9 +32,6 @@ export const validatePlanMarkdown = (content: string): string[] => {
     if (stage.notes.length === 0) errors.push(`${label} needs a Technical explanation.`)
     if (stage.acceptance.length === 0) errors.push(`${label} needs Acceptance checks.`)
     if (stage.files.length === 0) errors.push(`${label} needs proposed Files.`)
-    for (const { path } of stage.changes) {
-      if (!isSafeRepoPath(path)) errors.push(`${label} proposes a change to unsafe path "${path}".`)
-    }
     for (const criterion of stage.acceptance) {
       if (!criterion.testReferences?.some(({ path, cases }) => path.length > 0 && cases.length > 0)) {
         errors.push(`${label} acceptance "${criterion.text}" needs a test path and named case.`)

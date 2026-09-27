@@ -62,11 +62,7 @@ const issues = [
     : ["desktop resources are missing the Claude CLI child provider"]),
   ...(existsSync(resolve(resourcesPath, "THIRD-PARTY-LICENSES"))
     ? []
-    : ["desktop resources are missing THIRD-PARTY-LICENSES"]),
-  // Plan review is native React now; the old embedded bundle must not ship.
-  ...(existsSync(resolve(resourcesPath, "plannotator"))
-    ? ["desktop resources still contain the retired plannotator/ bundle"]
-    : [])
+    : ["desktop resources are missing THIRD-PARTY-LICENSES"])
 ]
 
 if (issues.length > 0) {

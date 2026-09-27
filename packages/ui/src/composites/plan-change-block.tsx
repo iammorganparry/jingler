@@ -1,4 +1,5 @@
 import { jinglerDark, toTokens } from "@jingler/themes"
+import type { FileDiffMetadata } from "@pierre/diffs"
 import { FileCode2 } from "lucide-react"
 import { useMemo } from "react"
 import { useOpenPath } from "../asset/open-asset-context.js"
@@ -9,6 +10,16 @@ import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
 
 const FALLBACK_TOKENS = toTokens(jinglerDark)
 
+function PlanDiff({ label, fileDiff, wrap = false }: { label: string; fileDiff: FileDiffMetadata; wrap?: boolean }) {
+  const theme = useThemeSyntax()
+  const tokens = useOptionalThemeTokens()
+  return (
+    <PierreProvider theme={theme} tokens={tokens ?? FALLBACK_TOKENS}>
+      <PierreFileDiffView label={label} fileDiff={fileDiff} options={{ disableFileHeader: true, stickyHeader: false, wrap }} />
+    </PierreProvider>
+  )
+}
+
 export interface PlanChangeBlockProps {
   readonly path: string
   readonly patch: string
@@ -16,8 +27,6 @@ export interface PlanChangeBlockProps {
 
 /** A proposed unified diff for one file, with its path linked to the Files tab. */
 export function PlanChangeBlock({ path, patch }: PlanChangeBlockProps) {
-  const theme = useThemeSyntax()
-  const tokens = useOptionalThemeTokens()
   const open = useOpenPath(path)
   const fileDiff = useMemo(
     () => parsePierreFileDiffs(normalizeDiffPreviewPatch(patch, path))[0] ?? null,
@@ -44,13 +53,7 @@ export function PlanChangeBlock({ path, patch }: PlanChangeBlockProps) {
       {fileDiff === null ? (
         <pre className="overflow-x-auto px-3 py-2 font-mono text-[11.5px] text-text-body">{patch}</pre>
       ) : (
-        <PierreProvider theme={theme} tokens={tokens ?? FALLBACK_TOKENS}>
-          <PierreFileDiffView
-            label={`Proposed change to ${path}`}
-            fileDiff={fileDiff}
-            options={{ disableFileHeader: true, stickyHeader: false }}
-          />
-        </PierreProvider>
+        <PlanDiff label={`Proposed change to ${path}`} fileDiff={fileDiff} />
       )}
     </figure>
   )
@@ -64,19 +67,9 @@ export interface PlanRevisionDiffProps {
 
 /** What changed in the plan file between the previous review and this one. */
 export function PlanRevisionDiff({ path, before, after }: PlanRevisionDiffProps) {
-  const theme = useThemeSyntax()
-  const tokens = useOptionalThemeTokens()
   const fileDiff = useMemo(
     () => createPierreFileDiff({ status: "modified", path, before, after }),
     [path, before, after]
   )
-  return (
-    <PierreProvider theme={theme} tokens={tokens ?? FALLBACK_TOKENS}>
-      <PierreFileDiffView
-        label="Changes since the previous revision"
-        fileDiff={fileDiff}
-        options={{ disableFileHeader: true, stickyHeader: false, wrap: true }}
-      />
-    </PierreProvider>
-  )
+  return <PlanDiff label="Changes since the previous revision" fileDiff={fileDiff} wrap />
 }
