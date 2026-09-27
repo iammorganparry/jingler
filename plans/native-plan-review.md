@@ -137,12 +137,12 @@ Architecture and flow diagrams can be panned, zoomed, opened fullscreen, and cli
 ### Technical explanation
 Mermaid's native `click` callbacks need `securityLevel: "loose"`, which allows script in agent-written content. Keep `strict` and do the linking ourselves, so plan text can never run code. Mermaid treats `%%` lines as comments, so they don't affect rendering elsewhere.
 
-- [ ] Pan/zoom/reset and fullscreen in `MermaidDiagram`
-- [ ] Parse `%% link` directives and wire node clicks to stage scroll or file open
+- [x] Pan/zoom/reset and fullscreen in `MermaidDiagram`
+- [x] Parse `%% link` directives and wire node clicks to stage scroll or file open (note: hand-drawn flowchart nodes carry no `data-id`, so nodes are matched by their `-flowchart-<id>-<n>` DOM id; the SVG is injected in the wiring effect so React re-renders can't drop the handlers)
 
 ### Acceptance
-- [ ] Link directives map node IDs to stage/file targets. Unsafe or unknown targets are dropped (test[unit]: packages/ui/src/components/mermaid-diagram.test.tsx::parses safe link directives)
-- [ ] Clicking a linked node in review scrolls to the stage or opens the file (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::diagram node opens linked stage)
+- [x] Link directives map node IDs to stage/file targets. Unsafe or unknown targets are dropped (test[unit]: packages/ui/src/components/mermaid-diagram.test.tsx::parses safe link directives)
+- [x] Clicking a linked node in review scrolls to the stage or opens the file (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::diagram node opens linked stage)
 
 ### Files
 - `packages/ui/src/components/mermaid-diagram.tsx` — M

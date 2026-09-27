@@ -1,5 +1,170 @@
-import { useEffect, useId, useMemo, useState } from "react"
+import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from "lucide-react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useOpenAsset } from "../asset/open-asset-context.js"
+import { resolveOpenablePath } from "../asset/path-detect.js"
 import { cn } from "../lib/cn.js"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./dialog.js"
+
+export type DiagramLinkTarget =
+  | { readonly kind: "file"; readonly path: string }
+  | { readonly kind: "stage"; readonly id: string }
+export interface DiagramLink {
+  readonly nodeId: string
+  readonly target: DiagramLinkTarget
+}
+
+const LINK_DIRECTIVE = /^\s*%%\s*link\s+([\w-]+)\s+(file|stage):(\S+)\s*$/
+const ROOTED_PATH = /^([/\\~]|[a-zA-Z]:)/
+const PATH_SEPARATOR = /[/\\]/
+const STAGE_ID = /^[\w-]+$/
+const isSafeRepoPath = (path: string): boolean =>
+  !ROOTED_PATH.test(path) && !path.split(PATH_SEPARATOR).includes("..")
+
+/**
+ * `%% link <nodeId> file:<repo path>` / `%% link <nodeId> stage:<id>`. Mermaid
+ * treats `%%` as a comment, so linking never needs `securityLevel: "loose"`.
+ */
+export const parseLinkDirectives = (source: string): ReadonlyArray<DiagramLink> =>
+  source.split("\n").flatMap((line): DiagramLink[] => {
+    const [, nodeId, kind, value] = LINK_DIRECTIVE.exec(line) ?? []
+    if (nodeId === undefined || value === undefined) return []
+    if (kind === "stage") return STAGE_ID.test(value) ? [{ nodeId, target: { kind: "stage", id: value } }] : []
+    return isSafeRepoPath(value) ? [{ nodeId, target: { kind: "file", path: value } }] : []
+  })
+
+const ZOOM_STEP = 1.25
+const clampScale = (scale: number) => Math.min(4, Math.max(0.25, scale))
+
+const iconButton =
+  "flex size-6 items-center justify-center rounded border border-line bg-panel text-muted-foreground outline-none hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
+
+const FLOWCHART_NODE_ID = /-flowchart-([\w-]+)-\d+$/
+
+/**
+ * Mermaid's hand-drawn flowchart nodes carry no `data-id`; their DOM id is
+ * `<diagram>-flowchart-<nodeId>-<n>`. Other diagram types stamp `data-id`.
+ */
+const findNode = (root: HTMLElement, nodeId: string): SVGGElement | null =>
+  root.querySelector<SVGGElement>(`g[data-id="${nodeId}"]`) ??
+  [...root.querySelectorAll<SVGGElement>("g[id]")].find(
+    (g) => FLOWCHART_NODE_ID.exec(g.id)?.[1] === nodeId
+  ) ??
+  null
+
+/** Turn one rendered node into a keyboard-accessible link; null when the node or target is unknown. */
+const wireLink = (
+  root: HTMLElement,
+  { nodeId, target }: DiagramLink,
+  openAsset: ReturnType<typeof useOpenAsset>,
+  shouldNavigate: () => boolean
+): (() => void) | null => {
+  const node = findNode(root, nodeId)
+  const filePath = target.kind === "file" && openAsset !== null
+    ? resolveOpenablePath(target.path, openAsset.knownFiles, openAsset.worktreeRoot)
+    : null
+  const stage = target.kind === "stage"
+    ? root.ownerDocument.querySelector<HTMLElement>(`[data-stage="${target.id}"]`)
+    : null
+  if (node === null || (filePath === null && stage === null)) return null
+  const go = () => {
+    if (!shouldNavigate()) return
+    if (filePath !== null) openAsset?.open(filePath)
+    stage?.scrollIntoView({ behavior: "smooth", block: "start" })
+  }
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "Enter") go()
+  }
+  node.setAttribute("role", "link")
+  node.setAttribute("tabindex", "0")
+  node.setAttribute("aria-label", target.kind === "file" ? `Open file ${target.path}` : `Open stage ${target.id}`)
+  node.style.cursor = "pointer"
+  node.addEventListener("click", go)
+  node.addEventListener("keydown", onKey)
+  return () => {
+    node.removeEventListener("click", go)
+    node.removeEventListener("keydown", onKey)
+  }
+}
+
+function DiagramCanvas({
+  svg,
+  links,
+  className,
+  onNavigate,
+  onFullscreen
+}: {
+  svg: string
+  links: ReadonlyArray<DiagramLink>
+  className?: string
+  onNavigate?: () => void
+  onFullscreen?: () => void
+}) {
+  const content = useRef<HTMLDivElement | null>(null)
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 })
+  const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null)
+  const dragged = useRef(false)
+  const openAsset = useOpenAsset()
+
+  // The SVG is injected here, not via dangerouslySetInnerHTML: React may
+  // re-apply innerHTML on re-render, which would silently drop the wiring below.
+  useEffect(() => {
+    const root = content.current
+    if (root === null) return
+    // mermaid (strict mode) sanitizes this SVG through DOMPurify before it reaches us.
+    root.innerHTML = svg
+    const cleanups = links.flatMap((link) => {
+      const cleanup = wireLink(root, link, openAsset, () => {
+        if (dragged.current) return false
+        onNavigate?.()
+        return true
+      })
+      return cleanup === null ? [] : [cleanup]
+    })
+    return () => { for (const cleanup of cleanups) cleanup() }
+  }, [svg, links, openAsset, onNavigate])
+
+  const zoom = (factor: number) => setView((current) => ({ ...current, scale: clampScale(current.scale * factor) }))
+
+  return (
+    <div className={cn("group relative my-3", className)}>
+      <div className="absolute right-1 top-1 z-10 flex gap-1 opacity-60 transition-opacity group-hover:opacity-100">
+        <button type="button" aria-label="Zoom in" className={iconButton} onClick={() => zoom(ZOOM_STEP)}><ZoomIn className="size-3.5" /></button>
+        <button type="button" aria-label="Zoom out" className={iconButton} onClick={() => zoom(1 / ZOOM_STEP)}><ZoomOut className="size-3.5" /></button>
+        <button type="button" aria-label="Reset view" className={iconButton} onClick={() => setView({ scale: 1, x: 0, y: 0 })}><RotateCcw className="size-3.5" /></button>
+        {onFullscreen !== undefined && (
+          <button type="button" aria-label="Fullscreen" className={iconButton} onClick={onFullscreen}><Maximize2 className="size-3.5" /></button>
+        )}
+      </div>
+      <div
+        className="h-full cursor-grab overflow-hidden active:cursor-grabbing"
+        onPointerDown={(event) => {
+          drag.current = { x: event.clientX, y: event.clientY, moved: false }
+          dragged.current = false
+        }}
+        onPointerMove={(event) => {
+          const start = drag.current
+          if (start === null) return
+          const dx = event.clientX - start.x
+          const dy = event.clientY - start.y
+          if (!start.moved && Math.hypot(dx, dy) < 4) return
+          start.moved = true
+          dragged.current = true
+          drag.current = { x: event.clientX, y: event.clientY, moved: true }
+          setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
+        }}
+        onPointerUp={() => { drag.current = null }}
+        onPointerLeave={() => { drag.current = null }}
+      >
+        <div
+          ref={content}
+          data-testid="mermaid-canvas"
+          className="sb-mermaid flex justify-center"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`, transformOrigin: "center top" }}
+        />
+      </div>
+    </div>
+  )
+}
 
 /**
  * Renders a fenced ```mermaid block as an actual diagram.
@@ -98,6 +263,9 @@ export function MermaidDiagram({ source, className }: { source: string; classNam
   const domId = useMemo(() => `mermaid-${rawId.replace(/[^a-zA-Z0-9]/g, "")}`, [rawId])
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+  const links = useMemo(() => parseLinkDirectives(source), [source])
+  const closeFullscreen = useMemo(() => () => setFullscreen(false), [])
 
   useEffect(() => {
     let cancelled = false
@@ -148,12 +316,14 @@ export function MermaidDiagram({ source, className }: { source: string; classNam
   if (svg === null) return <DiagramPending />
 
   return (
-    <div
-      // mermaid (strict mode) sanitizes this SVG through DOMPurify before it
-      // reaches us; see the component doc comment.
-      className={cn("sb-mermaid my-3 flex justify-center overflow-x-auto", className)}
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized mermaid SVG output
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    <>
+      <DiagramCanvas svg={svg} links={links} className={className} onFullscreen={() => setFullscreen(true)} />
+      <Dialog open={fullscreen} onOpenChange={setFullscreen}>
+        <DialogContent className="h-[85vh] w-[90vw]">
+          <DialogHeader><DialogTitle>Diagram</DialogTitle></DialogHeader>
+          <DiagramCanvas svg={svg} links={links} className="my-0 min-h-0 flex-1 p-4" onNavigate={closeFullscreen} />
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

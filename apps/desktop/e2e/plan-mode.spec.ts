@@ -128,6 +128,25 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect.poll(() => reviewText(launched)).toContain("Verify the auth change")
 })
 
+test("diagram node opens linked stage", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+
+  const verifyHeading = review(launched).getByRole("heading", { name: "Verify auth", exact: true })
+  await expect(verifyHeading).not.toBeInViewport()
+  await review(launched).getByRole("link", { name: "Open stage verify-auth" }).click()
+  await expect(verifyHeading).toBeInViewport({ timeout: 5_000 })
+})
+
 test("a new review in the same chat is presented and can be approved", async ({
   launchApp
 }) => {
