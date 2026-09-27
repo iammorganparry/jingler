@@ -5,7 +5,7 @@ description: "Plan-mode rules for Jingler's embedded Plannotator extension."
 
 # Jingler Plannotator plan mode
 
-Jingler's pinned Plannotator fork owns one Markdown scratchpad, normally `PLAN.md`. The Plan tab renders the bundled Plannotator review app. Do not start a localhost server or open an external browser.
+Jingler's pinned Plannotator fork owns one Markdown scratchpad, normally `PLAN.md`. The Plan tab renders plans in Jingler's native review screen. Do not start a localhost server or open an external browser.
 
 ## Plan shape
 
@@ -32,7 +32,7 @@ One-line intent. Size each stage so its finished changes could form one reviewab
 Explain current behavior, proposed behavior, relevant files/symbols, and material tradeoffs.
 
 ### Acceptance
-- [ ] Observable check (test: path/to/test.ts::case name)
+- [ ] Observable check (test[unit]: path/to/test.ts::case name)
 
 ### Files
 - `path/to/file.ts` — M
@@ -42,6 +42,8 @@ Explain current behavior, proposed behavior, relevant files/symbols, and materia
 ```
 
 Untagged `##` headings are document sections; only headings with an `id` comment are stages. Each stage is a logical commit boundary, not an instruction to run `git commit`, and must include intent, approach, steps, a technical explanation, acceptance tests, proposed files, and complexity. Keep stage IDs stable across revisions. Dependencies reference those IDs.
+
+Plans that change more than one module or a runtime flow should include a Mermaid diagram; `%% link <nodeId> file:<path>` and `%% link <nodeId> stage:<id>` lines make its nodes clickable. Show non-trivial proposed code as a fenced `diff path=<repo-relative path>` block. Tag test references with a kind (`test[unit|integration|e2e|manual]:`). Every plan with stage IDs needs a top-level `## Test strategy` section, and submission is rejected without it or with an absolute or `..` diff path.
 
 Checkbox markers are durable execution state:
 

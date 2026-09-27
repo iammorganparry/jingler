@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { persistPlanStatuses } from "./plan-status.ts"
+import { createReviewedContent, persistPlanStatuses } from "./plan-status.ts"
 
 const directories: string[] = []
 afterEach(async () => {
@@ -37,5 +37,23 @@ describe("persistPlanStatuses", () => {
     ])
 
     expect(await readFile(path, "utf8")).toBe("- [x] First\n- [~] Second\n")
+  })
+})
+
+describe("createReviewedContent", () => {
+  it("returns the previous reviewed text only when a resubmission changed it", () => {
+    const reviewed = createReviewedContent()
+    expect(reviewed.begin("PLAN.md", "v1")).toBeNull()
+    expect(reviewed.begin("PLAN.md", "v2")).toBe("v1")
+    // An unchanged resubmission has nothing to diff.
+    expect(reviewed.begin("PLAN.md", "v2")).toBeNull()
+    expect(reviewed.begin("PLAN.md", "v3")).toBe("v2")
+  })
+
+  it("tracks each plan file separately", () => {
+    const reviewed = createReviewedContent()
+    reviewed.begin("PLAN.md", "auth v1")
+    expect(reviewed.begin("plans/other.md", "other v1")).toBeNull()
+    expect(reviewed.begin("PLAN.md", "auth v2")).toBe("auth v1")
   })
 })

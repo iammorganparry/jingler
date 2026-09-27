@@ -19,6 +19,8 @@
  * - `### Files` entries `` `path` — A|M|D `` → the stage's file plan
  * - `> complexity: low|medium|high` and `> depends: id, id` → stage metadata
  * - ```mermaid fences → diagrams (stage-level, or overview blocks)
+ * - ```diff path=<repo path> fences → proposed changes (stage or section)
+ * - `(test[unit|integration|e2e|manual]: …)` tags a test reference's kind
  *
  * Every checkbox, at any indent, gets a flat 1-based `step` in document order —
  * the SAME numbering `parseChecklist` produces and `[DONE:n]` markers target.
@@ -39,11 +41,25 @@ export interface PlanStageTask extends PlanStageSubtask {
 	subtasks: PlanStageSubtask[];
 }
 
+export type PlanTestKind = "unit" | "integration" | "e2e" | "manual";
+
+export interface PlanTestReference {
+	path: string;
+	cases: string[];
+	kind?: PlanTestKind;
+}
+
 export interface PlanAcceptanceItem {
 	step: number;
 	text: string;
 	status: "pending" | "passed";
-	testReferences?: Array<{ path: string; cases: string[] }>;
+	testReferences?: PlanTestReference[];
+}
+
+/** A proposed unified diff for one repository-relative file. */
+export interface PlanChange {
+	path: string;
+	patch: string;
 }
 
 export interface PlanStageFile {
@@ -60,6 +76,7 @@ export interface ParsedPlanStage {
 	acceptance: PlanAcceptanceItem[];
 	files: PlanStageFile[];
 	diagrams: string[];
+	changes: PlanChange[];
 	notes: string[];
 	complexity?: "low" | "medium" | "high";
 	dependencies?: string[];
@@ -70,7 +87,8 @@ export type PlanSectionBlock =
 	| { kind: "heading"; level: 2 | 3 | 4; text: string }
 	| { kind: "list"; ordered: boolean; items: string[] }
 	| { kind: "code"; language?: string; code: string }
-	| { kind: "diagram"; source: string };
+	| { kind: "diagram"; source: string }
+	| ({ kind: "change" } & PlanChange);
 
 export interface PlanSection {
 	title: string | null;
@@ -91,11 +109,12 @@ const SUB_HEADING = /^###\s+(.+?)\s*$/;
 const STAGE_ID_COMMENT = /\s*<!--\s*id:\s*([\w-]+)\s*-->\s*$/;
 const BULLET_LINE = /^\s*[-*]\s+(.+)$/;
 const ORDERED_LINE = /^\s*\d+[.)]\s+(.+)$/;
-const FENCE_LINE = /^```([\w-]*)\s*$/;
+const FENCE_LINE = /^```([\w-]*)(?:\s+(.*?))?\s*$/;
+const FENCE_PATH = /(?:^|\s)path=(\S+)/;
 const FILE_LINE = /^\s*[-*]\s+`([^`]+)`\s*[—-]+\s*([AMD])\s*$/;
 const COMPLEXITY_LINE = /^>\s*complexity:\s*(low|medium|high)\s*$/i;
 const DEPENDS_LINE = /^>\s*depends:\s*(.+?)\s*$/i;
-const TEST_REFERENCE_SUFFIX = /\s*\(test:\s*([^)]+)\)\s*$/;
+const TEST_REFERENCE_SUFFIX = /\s*\(test(?:\[(unit|integration|e2e|manual)\])?:\s*([^)]+)\)\s*$/;
 
 const slugOf = (title: string): string => {
 	const slug = title
@@ -114,10 +133,11 @@ const taskStatusOf = (mark: string, completed: boolean): PlanTaskStatus => {
 
 const parseTestReferences = (
 	text: string,
-): { text: string; testReferences?: Array<{ path: string; cases: string[] }> } => {
+): { text: string; testReferences?: PlanTestReference[] } => {
 	const match = TEST_REFERENCE_SUFFIX.exec(text);
 	if (!match) return { text };
-	const [path, casesText] = match[1]!.split("::");
+	const kind = match[1] as PlanTestKind | undefined;
+	const [path, casesText] = match[2]!.split("::");
 	if (!path?.trim()) return { text };
 	const cases = (casesText ?? "")
 		.split(",")
@@ -125,7 +145,7 @@ const parseTestReferences = (
 		.filter((candidate) => candidate.length > 0);
 	return {
 		text: text.slice(0, match.index).trim(),
-		testReferences: [{ path: path.trim(), cases }],
+		testReferences: [{ path: path.trim(), cases, ...(kind === undefined ? {} : { kind }) }],
 	};
 };
 
@@ -202,9 +222,10 @@ class SectionBuilder {
 		this.#paragraph.push(trimmed);
 	}
 
-	code(language: string, code: string): void {
+	code(language: string, code: string, path: string | null): void {
 		this.flush();
 		if (language === "mermaid") this.blocks.push({ kind: "diagram", source: code });
+		else if (path !== null) this.blocks.push({ kind: "change", path, patch: code });
 		else
 			this.blocks.push({
 				kind: "code",
@@ -235,6 +256,7 @@ class StageBuilder {
 			acceptance: [],
 			files: [],
 			diagrams: [],
+			changes: [],
 			notes: [],
 		};
 	}
@@ -350,6 +372,11 @@ class StageBuilder {
 		this.#flushParagraph();
 		this.stage.diagrams.push(source);
 	}
+
+	change(change: PlanChange): void {
+		this.#flushParagraph();
+		this.stage.changes.push(change);
+	}
 }
 
 const isDocumentTitle = (
@@ -357,6 +384,30 @@ const isDocumentTitle = (
 	stage: StageBuilder | null,
 	title: string | null,
 ): match is RegExpExecArray => match !== null && stage === null && title === null;
+
+interface OpenFence {
+	language: string;
+	path: string | null;
+	lines: string[];
+}
+
+const consumeFence = (
+	fence: OpenFence,
+	closing: RegExpExecArray | null,
+	raw: string,
+	stage: StageBuilder | null,
+	section: SectionBuilder,
+): OpenFence | null => {
+	if (closing === null) {
+		fence.lines.push(raw);
+		return fence;
+	}
+	const code = fence.lines.join("\n");
+	if (stage === null) section.code(fence.language, code, fence.path);
+	else if (fence.language === "mermaid") stage.diagram(code);
+	else if (fence.path !== null) stage.change({ path: fence.path, patch: code });
+	return null;
+};
 
 export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
@@ -383,28 +434,20 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	};
 	const stages: ParsedPlanStage[] = [];
 	let stage: StageBuilder | null = null;
-	let fence: { language: string; lines: string[] } | null = null;
+	let fence: OpenFence | null = null;
 
 	for (const [line, raw] of lines.entries()) {
 		const fenceMatch = FENCE_LINE.exec(raw.trim());
 		if (fence !== null) {
-			if (fenceMatch !== null) {
-				const code = fence.lines.join("\n");
-				if (stage !== null) {
-					if (fence.language === "mermaid") stage.diagram(code);
-					// Non-mermaid stage code fences are dropped from the structure
-					// (they stay in the markdown, which remains the source of truth).
-				} else {
-					section.code(fence.language, code);
-				}
-				fence = null;
-			} else {
-				fence.lines.push(raw);
-			}
+			fence = consumeFence(fence, fenceMatch, raw, stage, section);
 			continue;
 		}
 		if (fenceMatch !== null) {
-			fence = { language: fenceMatch[1] ?? "", lines: [] };
+			fence = {
+				language: fenceMatch[1] ?? "",
+				path: FENCE_PATH.exec(fenceMatch[2] ?? "")?.[1] ?? null,
+				lines: [],
+			};
 			continue;
 		}
 

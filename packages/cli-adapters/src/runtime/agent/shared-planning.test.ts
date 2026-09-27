@@ -107,6 +107,32 @@ describe("shared harness planning", () => {
     expect(f.projections().at(-1)?.phase).toBe("planning")
   })
 
+  it("publishes the previously reviewed text only when a resubmission changed it", async () => {
+    const f = await setup(); const spec = specFor(f.root)
+    const runtime = f.wrap(async function* (registry, spec, context) {
+      await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
+      await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
+      await writeFile(join(f.root, "plan.md"), "# Work\n- [ ] first revised\n")
+      await call(registry, spec, context, "plannotator_submit_plan", { filePath: "plan.md" })
+      yield done
+    })
+    const running = f.run(runtime)
+    const decide = async (approved: boolean) => {
+      const reviewId = await f.review()
+      const published = f.projections().at(-1)
+      await Effect.runPromise(runtime.decidePlanReview(ownerFor(spec), "s", "a", { reviewId, approved, ...(approved ? {} : { feedback: "Revise" }) }))
+      await vi.waitFor(() => expect(f.projections().at(-1)?.review).toBeNull())
+      return published
+    }
+    expect((await decide(false))?.previousPlanContent).toBeUndefined()
+    // Unchanged resubmission: nothing to compare against.
+    expect((await decide(false))?.previousPlanContent).toBeUndefined()
+    const revised = await decide(true)
+    expect(revised?.planContent).toBe("# Work\n- [ ] first revised\n")
+    expect(revised?.previousPlanContent).toBe("# Work\n- [ ] first $&\n- [ ] second\n")
+    await running
+  })
+
   it("cancels a pending call without approval and recovers with a fresh review ID after restart/harness change", async () => {
     const f = await setup(); const controller = new AbortController()
     const first = f.wrap(async function* (registry, spec, context) {

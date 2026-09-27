@@ -2,6 +2,7 @@ import type { VisualBlock } from "@jingler/core"
 import type { ReactNode } from "react"
 import { MermaidDiagram } from "../components/mermaid-diagram.js"
 import { Markdown } from "../components/markdown.js"
+import { PlanChangeBlock } from "./plan-change-block.js"
 
 const positionalKey = (index: number, value: string): string => `${index}:${value}`
 
@@ -44,6 +45,8 @@ const renderBlock = (block: VisualBlock): ReactNode => {
       )
     case "diagram":
       return <MermaidDiagram source={block.source} />
+    case "change":
+      return <PlanChangeBlock path={block.path} patch={block.patch} />
   }
 }
 
