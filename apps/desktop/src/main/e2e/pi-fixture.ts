@@ -558,10 +558,19 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     // Outside plan mode pi's markdown-only `write` tool is absent — retry the
     // plan write with the ordinary workspace tool, as a real agent would.
     if (toolResultText(lastMessage).includes("not found")) {
+      // Retry the SAME content (a revision, not the original plan) under a
+      // fresh call id: the run journal rejects a reused id as a duplicate.
+      const failed = context.messages.findLast((message) => message.role === "assistant")
+      const call = failed?.role === "assistant"
+        ? failed.content.find((block) => block.type === "toolCall" && block.id === lastMessage.toolCallId)
+        : undefined
+      const content = call?.type === "toolCall" && typeof call.arguments.content === "string"
+        ? call.arguments.content
+        : STRUCTURED_REVIEW_PLAN
       return callTool(
         WRITE_TOOL,
-        { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
-        "plannotator-write-fallback"
+        { path: "PLAN.md", content },
+        `plannotator-write-fallback-${submitCount + 1}`
       )
     }
     return callTool(

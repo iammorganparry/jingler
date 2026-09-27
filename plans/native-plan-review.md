@@ -107,7 +107,7 @@ The embed needs a second Electron session partition, a custom protocol, a bounds
 ### Acceptance
 - [x] Renders sections, stages, change blocks (with file link), diagrams, and the acceptance table from a fixture plan (test[unit]: packages/ui/src/screens/plan-review.test.tsx::renders stages with diffs diagrams and tests)
 - [x] Deny sends feedback containing each open annotation's quoted anchor and body. Approve calls `onApprove` once (test[unit]: packages/ui/src/screens/plan-review.test.tsx::serializes annotations into deny feedback)
-- [ ] Submit → deny → resubmit → approve works end to end with no `WebContentsView` (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::revises one stage approach through native review feedback) — approve paths pass; the deny→resubmit spec already failed at `d6616ed1`, before this work
+- [x] Submit → deny → resubmit → approve works end to end with no `WebContentsView` (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::revises one stage approach through native review feedback)
 - [x] The packaged app contains no `plannotator/` asset directory (test[integration]: scripts/artifacts/check-packaged-artifacts.mjs)
 
 ### Files
