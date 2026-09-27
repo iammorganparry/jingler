@@ -14,6 +14,7 @@ import { ReasoningEffort } from "./runtime/reasoning-effort.js";
 export { ReasoningEffort } from "./runtime/reasoning-effort.js";
 import {
   AgentEndpointId,
+  AgentModelSelection,
   AgentRuntimeId,
   RuntimeContinuation,
 } from "./runtime/agent-endpoint.js";
@@ -513,8 +514,10 @@ export const Session = Schema.Struct({
   projectId: Schema.optional(Schema.String),
   /** Stable paired-device identity. Absent means this desktop (legacy-safe). */
   environmentId: Schema.optional(Schema.String),
-  /** owner/repo, e.g. "trigify/api". */
+  /** Display/grouping name of the repository. */
   repo: Schema.String,
+  /** Canonical owner/repository identity for GitHub operations without a local checkout. */
+  githubSlug: Schema.optional(Schema.String),
   branch: Schema.String,
   /** Agent-proposed semantic task branch; persisted once Jingler validates and creates it. */
   semanticBranchProposal: Schema.optional(
@@ -794,6 +797,8 @@ export const GithubConfig = Schema.Struct({
   autoAdversarialReview: Schema.optional(Schema.Boolean),
   /** Post minor/nit adversarial findings to the PR. Off keeps every finding local. */
   postAdversarialReviewComments: Schema.optional(Schema.Boolean),
+  /** Desktop runtime and model used for adversarial reviews. The session model is the legacy fallback. */
+  adversarialReviewModel: Schema.optional(AgentModelSelection),
 });
 export type GithubConfig = Schema.Schema.Type<typeof GithubConfig>;
 
@@ -1882,6 +1887,8 @@ export const CreateSessionInput = Schema.Struct({
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
+  /** Canonical owner/repository identity when known at creation time. */
+  githubSlug: Schema.optional(Schema.String),
   /**
    * Optional session title. When omitted/blank the session is auto-named by the
    * agent from a detached fresh-base worktree; when provided it seeds and pins
@@ -1934,6 +1941,8 @@ export const CreateSessionFromPrInput = Schema.Struct({
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
+  /** Canonical owner/repository identity when known at creation time. */
+  githubSlug: Schema.optional(Schema.String),
   /** Canonical, explicitly authenticated runtime route. */
   runtimeId: Schema.optional(AgentRuntimeId),
   endpointId: Schema.optional(AgentEndpointId),
@@ -1972,6 +1981,8 @@ export const CreateSessionFromIssueInput = Schema.Struct({
   repoPath: Schema.String,
   /** The repo's folder name, used for grouping + the worktree directory. */
   repoName: Schema.String,
+  /** Canonical owner/repository identity when known at creation time. */
+  githubSlug: Schema.optional(Schema.String),
   /** Canonical, explicitly authenticated runtime route. */
   runtimeId: Schema.optional(AgentRuntimeId),
   endpointId: Schema.optional(AgentEndpointId),

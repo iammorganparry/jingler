@@ -130,13 +130,18 @@ describe("SessionStore", () => {
 
   it("persists canonical provider identity on a new session and chat", async () => {
     const result = await runExit(
-      SessionStore.create(input()).pipe(Effect.provide(services)),
+      SessionStore.create(input({ githubSlug: "acme/trigify-app" })).pipe(Effect.provide(services)),
       temp.layer
     )
 
     expect(result._tag).toBe("Success")
     if (result._tag !== "Success") return
-    expect(result.value).toMatchObject({ connectionId, providerId, modelId })
+    expect(result.value).toMatchObject({
+      connectionId,
+      providerId,
+      modelId,
+      githubSlug: "acme/trigify-app"
+    })
     expect(activeChat(result.value)).toMatchObject({ connectionId, providerId, modelId })
   })
 
@@ -1445,6 +1450,7 @@ describe("SessionStore", () => {
     expect(s.prNumber).toBe(482)
     expect(s.githubInstallationId).toBe("installation-77")
     expect(s.githubRepositoryId).toBe("repo-301")
+    expect(s.githubSlug).toBe("acme/trigify-app")
     expect(s.branch).toBe("chore/bump")
     expect(s.baseBranch).toBe("main")
     expect(s.title).toBe("Fix Auth Refresh")

@@ -1,5 +1,7 @@
 import type {
   AdversarialReview,
+  AgentEndpointId,
+  AgentRuntimeId,
   ProviderConnectionId,
   ProviderId,
   ProviderModelId,
@@ -7,7 +9,7 @@ import type {
   ReviewSeverity,
   StreamEvent
 } from "@jingler/core"
-import { CURRENT_RUNTIME_CONTRACTS, piEndpointId, ReviewError } from "@jingler/core"
+import { CURRENT_RUNTIME_CONTRACTS, ReviewError } from "@jingler/core"
 import type { FileSystem, Path } from "@effect/platform"
 import { Effect, PubSub, RcMap, Ref, Schema, Stream } from "effect"
 import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
@@ -213,7 +215,9 @@ export interface ReviewInput {
   readonly branch: string
   /** The PR's base branch, or null when the session doesn't record one. */
   readonly baseBranch: string | null
-  readonly connectionId: ProviderConnectionId
+  readonly runtimeId: AgentRuntimeId
+  readonly endpointId: AgentEndpointId
+  readonly connectionId?: ProviderConnectionId
   readonly providerId: ProviderId
   readonly modelId: ProviderModelId
   readonly targetId?: string
@@ -476,9 +480,10 @@ function* prepareReviewTurn(
         const baseSpec: AgentTurnSpec = {
           sessionId: input.sessionId,
           chatId: reviewChatId ?? input.sessionId,
-          runtimeId: "pi",
-          endpointId: piEndpointId(input.targetId ?? "desktop", input.connectionId),
-          connectionId: input.connectionId,
+          runtimeId: input.runtimeId,
+          endpointId: input.endpointId,
+          ...(input.connectionId === undefined ? {} : { connectionId: input.connectionId }),
+          providerId: input.providerId,
           modelId: input.modelId,
           role: "review",
           priorMessages: [],
@@ -582,7 +587,7 @@ function* runReviewTurn(
           sessionId: input.sessionId,
           prNumber: input.prNumber,
           headSha: input.headSha,
-          connectionId: input.connectionId,
+          connectionId: input.connectionId ?? null,
           providerId: input.providerId,
           modelId: input.modelId,
           createdAt: now,

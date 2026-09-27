@@ -651,6 +651,7 @@ function getActiveTabContext(active: Session) {
               onGithubRefresh={onGithubRefresh}
               onGithubDisconnect={onGithubDisconnect}
               github={githubConfig}
+              agentEndpointCatalog={agentEndpointCatalog}
               git={gitConfig}
               context={contextConfig}
               onSaveContext={onSaveContextConfig}

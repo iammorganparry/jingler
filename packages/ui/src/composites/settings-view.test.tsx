@@ -6,7 +6,8 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import type { Environment } from "@jingler/core";
+import type { AgentEndpointCatalog, Environment } from "@jingler/core";
+import { nativeCliEndpointId, ProviderId, ProviderModelId } from "@jingler/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DevicesSection, SettingsView } from "./settings-view.js";
 
@@ -84,6 +85,74 @@ describe("General settings", () => {
     ).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "Ask" }));
     expect(onSaveDefaultMode).toHaveBeenCalledWith("ask");
+  });
+});
+
+describe("GitHub settings", () => {
+  it("persists the selected desktop harness and model for adversarial reviews", () => {
+    const providerId = ProviderId.make("anthropic");
+    const modelId = ProviderModelId.make("anthropic/claude-opus-4-6");
+    const endpointId = nativeCliEndpointId("desktop", "claude");
+    const catalog: AgentEndpointCatalog = {
+      refreshedAt: "2026-09-27T00:00:00.000Z",
+      stale: false,
+      endpoints: [{
+        endpoint: {
+          id: endpointId,
+          runtimeId: "claude",
+          targetId: "desktop",
+          label: "Claude CLI",
+          status: "ready",
+          version: "1.0.0",
+          features: {
+            steer: "none",
+            planReview: false,
+            subagentFleet: false,
+            backgroundTasks: false,
+          },
+        },
+        models: [{
+          providerId,
+          id: modelId,
+          label: "Claude Opus 4.6",
+          capabilities: {
+            contextWindow: 1_000_000,
+            reasoning: [],
+            reasoningCanDisable: true,
+            vision: true,
+          },
+          verification: "certified",
+          selectable: true,
+          certificationKey: "claude-opus-4-6",
+          status: "ready",
+        }],
+      }],
+    };
+    const onSaveGithub = vi.fn();
+    render(
+      <SettingsView
+        initialSection="github"
+        githubConnection={githubDisconnected}
+        github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
+        agentEndpointCatalog={catalog}
+        onSaveGithub={onSaveGithub}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Model: Choose model" }));
+    fireEvent.click(screen.getByRole("option", { name: /Claude Opus 4.6/i }));
+
+    expect(onSaveGithub).toHaveBeenCalledWith({
+      enabled: true,
+      autoCreatePr: false,
+      autoDetectPr: true,
+      adversarialReviewModel: {
+        runtimeId: "claude",
+        endpointId,
+        providerId,
+        modelId,
+      },
+    });
   });
 });
 
