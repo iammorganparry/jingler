@@ -253,6 +253,31 @@ describe("parseDigest", () => {
     preferences: ["Prefers Effect over raw async"]
   })
 
+  it("parses a digest whose strings quote a code fence", () => {
+    // A session about rendering diffs summarises itself with a literal fence in
+    // a string. An unanchored fence match split the block there, so every such
+    // session failed to compact.
+    const reply = JSON.stringify({
+      goal: "Render proposed changes as ```diff path=<file> blocks in the plan view",
+      decisions: ["Parse ```mermaid fences into live diagrams"],
+      filesTouched: [],
+      openThreads: [],
+      preferences: []
+    }, null, 2)
+    const digest = parseDigest(`\`\`\`json\n${reply}\n\`\`\``, "m9", at)
+    expect(digest?.goal).toContain("```diff")
+    expect(digest?.decisions).toEqual(["Parse ```mermaid fences into live diagrams"])
+  })
+
+  it("parses a fence opened and closed on one line", () => {
+    expect(parseDigest(`\`\`\`json ${good} \`\`\``, "m9", at)?.goal).toContain("rate limiting")
+  })
+
+  it("takes the last block that parses, skipping a quoted snippet after it", () => {
+    const text = `\`\`\`json\n${good}\n\`\`\`\n\nFor example:\n\`\`\`ts\nconst x = { a: 1 }\n\`\`\``
+    expect(parseDigest(text, "m9", at)?.goal).toContain("rate limiting")
+  })
+
   it("parses a clean fenced reply", () => {
     const digest = parseDigest(`\`\`\`json\n${good}\n\`\`\``, "m9", at)
     expect(digest).not.toBeNull()

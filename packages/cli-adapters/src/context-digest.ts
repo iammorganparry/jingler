@@ -281,16 +281,35 @@ const readMidFlow = (parsed: unknown): { midFlow: boolean; midFlowReason?: strin
  *
  * Small models are the ones running this, and they garnish: a stray "Here's the
  * summary:" before the fence, or a fence without a language tag. Rather than
- * demand obedience, take the LAST balanced `{…}` span — last, because when a
- * model restates and corrects itself the final answer is the intended one.
+ * demand obedience, try each fenced block from the LAST back — last, because
+ * when a model restates and corrects itself the final answer is the intended
+ * one — then the reply's outermost `{…}` span, and keep the first that parses.
+ *
+ * Fences are anchored to a line start. A digest of a coding session routinely
+ * QUOTES a fence inside a string value ("render ```diff blocks"), and an
+ * unanchored match closed the block right there, handing the parser a fragment:
+ * every such session failed to compact, whatever the harness.
  */
-const extractJson = (raw: string): string | null => {
-  const fenced = [...raw.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)]
-  const candidate = fenced.length > 0 ? fenced[fenced.length - 1]![1]! : raw
-  const start = candidate.indexOf("{")
-  const end = candidate.lastIndexOf("}")
-  if (start === -1 || end === -1 || end <= start) return null
-  return candidate.slice(start, end + 1)
+const FENCED_BLOCK = /^```[ \t]*[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)^```/gm
+
+const outermostObject = (text: string): string | null => {
+  const start = text.indexOf("{")
+  const end = text.lastIndexOf("}")
+  return start === -1 || end <= start ? null : text.slice(start, end + 1)
+}
+
+const extractJson = (raw: string): unknown => {
+  const fenced = [...raw.matchAll(FENCED_BLOCK)].map((match) => outermostObject(match[1]!))
+  const candidates = [...fenced.reverse(), outermostObject(raw)]
+  for (const candidate of candidates) {
+    if (candidate === null) continue
+    try {
+      return JSON.parse(candidate)
+    } catch {
+      // Not this one — a quoted snippet or a truncated block. Try the next.
+    }
+  }
+  return null
 }
 
 /**
@@ -308,10 +327,9 @@ export const parseDigest = (
   throughMessageId: string,
   builtAt: string
 ): ContextDigest | null => {
-  const json = extractJson(raw)
-  if (json === null) return null
+  const parsed = extractJson(raw)
+  if (parsed === null) return null
   try {
-    const parsed: unknown = JSON.parse(json)
     const reply = Schema.decodeUnknownSync(DigestReply)(parsed)
     // A digest with no goal is not a digest. Everything else may legitimately be
     // empty (a short session has made no decisions yet), but a summary that
