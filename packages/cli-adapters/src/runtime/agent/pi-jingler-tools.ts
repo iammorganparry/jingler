@@ -15,6 +15,7 @@ import {
 } from "../tools/mcp-tools.js"
 import {
   ToolError,
+  INTERACTIVE_TOOL_TIMEOUT_MS,
   ToolRegistry,
   type ToolDefinition,
   type ToolRegistryOptions
@@ -41,7 +42,7 @@ const controlTool = <Input, Encoded>(
   version: "1",
   risk: "read",
   modes,
-  timeoutMs: 24 * 60 * 60 * 1_000,
+  timeoutMs: INTERACTIVE_TOOL_TIMEOUT_MS,
   outputBudget: 16_000,
   cancellable: true,
   idempotency: "safe"
@@ -52,6 +53,7 @@ export const createJinglerControlTools = (
   context: AgentRuntimeContext,
   registry = new ToolRegistry()
 ): ToolRegistry => {
+  context.planning?.register(registry, context)
   registry.register(
     controlTool({
       id: "jingler_ask_question",

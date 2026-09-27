@@ -1,3 +1,4 @@
+import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
 
 export type OpenCodeRuntimeOptions = OpenCodeOptions & NativeRuntimeToolsOptions
@@ -15,6 +16,19 @@ const failure = (cause: unknown) => cause instanceof AgentRuntimeError ? cause :
 const unsupported = () => Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "This operation is unavailable in native OpenCode" }))
 const ownerKey = (endpoint: string, session: string) => JSON.stringify([endpoint, session])
 const reads = ["read", "glob", "grep", "list", "lsp"]
+/** Operator review time does not consume the ordinary 30-minute turn budget. */
+export const startOpenCodeTurnDeadline = (reviewPending: () => boolean, expire: () => void) => {
+  let activeElapsed = 0
+  let lastTick = Date.now()
+  const timer = setInterval(() => {
+    const now = Date.now()
+    if (!reviewPending()) activeElapsed += now - lastTick
+    lastTick = now
+    if (activeElapsed >= 30 * 60_000) { clearInterval(timer); expire() }
+  }, 1000)
+  return timer
+}
+
 export const openCodePermissions = (mode: AgentRunSpec["mode"], relayTools: ReadonlySet<string> = new Set()): PermissionRuleset => [
   { permission: "*", pattern: "*", action: mode === "read-only" ? "deny" : "ask" },
   ...[...relayTools].map((permission) => ({ permission, pattern: "*", action: "allow" as const })),
@@ -153,7 +167,9 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       if (pendingKey) reservations.delete(pendingKey)
     }
     setCleanup(cleanup)
-    const timeout = setTimeout(() => { inbox?.fail(new Error("OpenCode turn timed out")); abort.abort() }, 30 * 60_000)
+    const timeout = startOpenCodeTurnDeadline(() => context.isPlanReviewPending?.() ?? false, () => {
+      inbox?.fail(new Error("OpenCode turn timed out")); abort.abort()
+    })
     try {
       directory = await realpath(spec.cwd)
       abort.signal.throwIfAborted()
@@ -161,7 +177,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       if (!models.some((model) => model.providerId === spec.providerId && model.id === spec.modelId && model.selectable)) throw new Error("OpenCode model is unavailable")
       const attachment = prepared.relay.attachment
       const connected = await server.client.mcp.add({ directory, name: attachment.name, config: {
-        type: "remote", url: attachment.url, headers: { ...attachment.headers }, oauth: false
+        type: "remote", url: attachment.url, headers: { ...attachment.headers }, oauth: false, timeout: INTERACTIVE_TOOL_TIMEOUT_MS
       } }, { throwOnError: true, signal: abort.signal })
       if (connected.data.jingler?.status !== "connected") throw new Error("Jingler tool relay did not connect")
       const relayTools = new Set(prepared.registry.capabilitiesFor(spec.role, spec.mode).map(({ id }) => `jingler_${id}`))
@@ -194,7 +210,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
         }
         yield* events.map(event)
       }
-    } finally { clearTimeout(timeout); await cleanup() }
+    } finally { clearInterval(timeout); await cleanup() }
   }
 }
 export const makeOpenCodeRuntimeRegistration = (options?: OpenCodeRuntimeOptions): AgentRuntimeRegistration => ({ runtimeId: "opencode", runtime: makeOpenCodeAgentRuntime(options), ownsEndpoint: (endpointId, targetId) => endpointId === nativeCliEndpointId(targetId, "opencode") })

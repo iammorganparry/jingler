@@ -45,6 +45,7 @@ describe("native Claude registry MCP relay", () => {
       expect((await stat(relay.mcpConfigPath)).mode & 0o777).toBe(0o600)
       expect(serialized).not.toContain(relay.environment.JINGLER_TOOL_RELAY_TOKEN)
       expect(serialized).toContain("${JINGLER_TOOL_RELAY_TOKEN}")
+      expect(JSON.parse(serialized).mcpServers.jingler.timeout).toBe(86_400_000)
       expect((await client.listTools()).tools.map(({ name }) => name)).toEqual(createPiTools(registry, spec, context).map(({ name }) => name))
       for (const value of ["first", "second"]) {
         expect(await client.callTool({ name: "echo", arguments: { value } })).toMatchObject({

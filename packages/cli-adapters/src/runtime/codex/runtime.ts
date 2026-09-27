@@ -1,3 +1,4 @@
+import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { CodexInbox } from "./inbox.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
 
@@ -375,6 +376,7 @@ export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentR
               const attachment = codexMcpConfig({ ...context, mcp: { configured: [prepared.relay.attachment] } }, options.environment ?? process.env)
               // Only our authenticated relay bypasses the vendor prompt; the registry still owns every permission decision.
               attachment.config.mcp_servers.jingler!.default_tools_approval_mode = "approve"
+              attachment.config.mcp_servers.jingler!.tool_timeout_sec = INTERACTIVE_TOOL_TIMEOUT_MS / 1000
               return attachment
             },
             catch: failure

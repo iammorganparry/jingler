@@ -346,8 +346,8 @@ function* editWorkspaceText(
     )
   }
   const next = replaceAll
-    ? current.text.replaceAll(oldText, newText)
-    : current.text.replace(oldText, newText)
+    ? current.text.replaceAll(oldText, () => newText)
+    : current.text.replace(oldText, () => newText)
   yield* assets
     .write(cwd, target.relative, next, current.revision)
     .pipe(Effect.mapError(() => failure(`Could not edit workspace file: ${target.relative}`)))

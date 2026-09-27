@@ -47,13 +47,13 @@ type Fence = { marker: "`" | "~"; length: number };
 
 const openingFence = (line: string): Fence | null => {
   const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-  if (!match || (match[1][0] === "`" && match[2].includes("`"))) return null;
-  return { marker: match[1].startsWith("`") ? "`" : "~", length: match[1].length };
+  if (!match || (match[1]![0] === "`" && match[2]!.includes("`"))) return null;
+  return { marker: match[1]!.startsWith("`") ? "`" : "~", length: match[1]!.length };
 };
 
 const closesFence = (line: string, fence: Fence): boolean => {
   const match = /^ {0,3}(`{3,}|~{3,})[\t ]*$/.exec(line);
-  return match !== null && match[1][0] === fence.marker && match[1].length >= fence.length;
+  return match !== null && match[1]![0] === fence.marker && match[1]!.length >= fence.length;
 };
 
 export function scanChecklist(content: string): ScannedChecklistItem[] {
@@ -70,20 +70,20 @@ export function scanChecklist(content: string): ScannedChecklistItem[] {
     if (fence !== null) continue;
     if (/^##\s+/.test(raw)) acceptance = false;
     const subsection = /^###\s+(.+?)\s*$/.exec(raw)
-    if (subsection) acceptance = subsection[1].toLowerCase().startsWith("acceptance")
+    if (subsection) acceptance = subsection[1]!.toLowerCase().startsWith("acceptance")
     const match = /^(\s*)([-*]\s*\[)([ xX~-])(\]\s+)(.*)$/.exec(raw);
     if (!match) continue;
-    const text = match[5].trim();
+    const text = match[5]!.trim();
     if (text.length === 0) continue;
     items.push({
       step: items.length + 1,
       text,
-      completed: /[xX]/.test(match[3]),
+      completed: /[xX]/.test(match[3]!),
       line,
-      indent: match[1],
-      mark: match[3],
-      prefix: `${match[1]}${match[2]}`,
-      suffix: `${match[4]}${match[5]}`,
+      indent: match[1]!,
+      mark: match[3]!,
+      prefix: `${match[1]!}${match[2]!}`,
+      suffix: `${match[4]!}${match[5]!}`,
       acceptance,
     });
   }
@@ -106,11 +106,11 @@ const STATUS_BY_MARKER = {
 export function extractProgressMarkers(message: string): ProgressMarker[] {
   const markers: ProgressMarker[] = [];
   for (const match of message.matchAll(/\[(ACTIVE|DONE|BLOCKED|SKIPPED|FAILED|INTERRUPTED):(\d+)\]/gi)) {
-    const step = Number(match[2]);
+    const step = Number(match[2]!);
     if (Number.isFinite(step)) {
       markers.push({
         step,
-        status: STATUS_BY_MARKER[match[1].toUpperCase() as keyof typeof STATUS_BY_MARKER],
+        status: STATUS_BY_MARKER[match[1]!.toUpperCase() as keyof typeof STATUS_BY_MARKER],
       });
     }
   }

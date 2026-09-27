@@ -5,16 +5,17 @@ import { promptLayer, runtimeInvariantLayers } from "./role-profiles.js"
 const tool = { id: "workspace_read", version: "1", description: "Read a bounded project file." }
 
 describe("PromptCompiler", () => {
-  it.each(["claude", "codex", "opencode"] as const)("keeps core rules without promising Pi-only tools for %s", (runtimeId) => {
+  it("keeps shared planning rules without promising Pi-only delegation", () => {
     const compiled = new PromptCompiler().compile({
-      layers: runtimeInvariantLayers("conversation", "auto", runtimeId),
+      layers: runtimeInvariantLayers("conversation", "auto"),
       tools: [{ id: "jingler_load_resource", version: "1", description: "Load a managed skill." }],
       tokenBudget: 8_000
     })
     expect(compiled.text).toContain("jingler.identity-and-safety")
     expect(compiled.text).toContain("jingler.engineering-principles")
     expect(compiled.text).toContain("jingler_load_resource")
-    expect(compiled.text).not.toContain("plannotator_submit_plan")
+    expect(compiled.text).toContain("plannotator_submit_plan")
+    expect(compiled.text).not.toContain("bg_wait")
   })
 
   it("compiles immutable policy before role, tools, workspace, preferences, and turn context", () => {
@@ -89,7 +90,7 @@ describe("PromptCompiler", () => {
     expect(result.text).toContain("never use a child named main as its proxy")
     expect(result.text).toContain("Select a catalog agent and name every child")
     expect(result.text).toContain("reserve workflowScript for two or more children")
-    expect(result.text).toContain("use async plus subagent_wait")
+    expect(result.text).toContain("use async plus bg_wait")
     expect(result.text).toContain("Resume only inside runs.run or runs.all")
   })
 

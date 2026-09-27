@@ -42,6 +42,7 @@ const workspacePackages = [
   "@jingler/core",
   "@jingler/contracts",
   "@jingler/cli-adapters",
+  "@jingler/plannotator-ext",
   "@jingler/themes",
   "@jingler/ui",
   "@jingler/plugin-sdk"

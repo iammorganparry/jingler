@@ -1,3 +1,4 @@
+import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer, type ServerResponse } from "node:http"
@@ -51,9 +52,6 @@ export const startRegistryMcpRelay = async (
   const executions = new Set<Promise<unknown>>()
   let expectedHost = ""
   let closing: Promise<void> | undefined
-  // Mutations share worktree snapshots and a journal. Serialize their complete
-  // permission/execution/observation cycle, while reads remain concurrent.
-  let mutationTail: Promise<unknown> = Promise.resolve()
   const capabilities = input.registry.capabilitiesFor(input.spec.role, input.spec.mode)
   const active = new Set(capabilities.map(({ id }) => id))
   const descriptors = capabilities.map(({ id, description }) => ({
@@ -120,10 +118,7 @@ export const startRegistryMcpRelay = async (
           return { content: [{ type: "text" as const, text: output }], isError: true }
         }
       }
-      const risk = input.registry.riskFor(params.name)
-      const mutating = risk === "mutate" || risk === "execute"
-      const result = mutating ? mutationTail.then(execute, execute) : execute()
-      if (mutating) mutationTail = result.catch(() => undefined)
+      const result = execute()
       executions.add(result)
       try { return await result } finally { executions.delete(result) }
     })
@@ -174,6 +169,7 @@ export const startRegistryMcpRelay = async (
     await writeFile(mcpConfigPath, JSON.stringify({
       mcpServers: { jingler: {
         type: "http",
+        timeout: INTERACTIVE_TOOL_TIMEOUT_MS,
         url: `http://${expectedHost}/mcp`,
         headers: { Authorization: `Bearer \${${tokenVariable}}` }
       } }
