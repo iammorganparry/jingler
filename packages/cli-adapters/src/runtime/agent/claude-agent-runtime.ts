@@ -15,6 +15,7 @@ import {
 } from "./agent-runtime.js"
 
 import { trackChild } from "../../child-registry.js"
+import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { type RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
@@ -182,6 +183,9 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
     throw new Error("Claude CLI emitted malformed stream JSON")
   }
   if (!isRecord(value)) return []
+  // The subscription's usage windows ride along with every turn; they feed the
+  // Usage panel and never the conversation.
+  if (recordClaudeCliRateLimits(value)) return []
   if (value.type === "stream_event") return streamEvents(value)
   const content = contentEvents(value)
   if (content.length > 0) return content

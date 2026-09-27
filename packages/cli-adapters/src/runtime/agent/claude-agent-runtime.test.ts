@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process"
+import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { chmod, mkdtemp, writeFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -195,6 +196,21 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:7,o
       "Started", "Assistant", "Usage", "Done"
     ])
     expect(events[0]).toMatchObject({ _tag: "Started", model: "anthropic/opus" })
+  })
+
+  it("hands the CLI's rate-limit report to the Usage panel, not the conversation", async () => {
+    resetClaudeCliRateLimits()
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"rate_limit_event",rate_limit_info:{status:"allowed",unifiedWindows:{five_hour:{utilization:0.2,resetsAt:1790516400}}}}))
+console.log(JSON.stringify({type:"result",is_error:false,usage:{}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events.map(({ _tag }) => _tag)).toEqual(["Started", "Usage", "Done"])
+    expect(latestClaudeCliRateLimits()?.windows.five_hour).toEqual({ utilization: 0.2, resetsAt: 1790516400 })
+    resetClaudeCliRateLimits()
   })
 
   it("reports context from the turn's last request, not the sum over every request", async () => {
