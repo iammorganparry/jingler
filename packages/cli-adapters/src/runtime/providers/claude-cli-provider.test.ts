@@ -156,6 +156,30 @@ console.log(JSON.stringify({type:"result",subtype:leaked?"error":"success",is_er
     })
   })
 
+  it("gives pi the last request's usage, which it reads as context", async () => {
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"result",subtype:"success",is_error:false,result:"Done",usage:{input_tokens:34,output_tokens:536,cache_read_input_tokens:96204,cache_creation_input_tokens:14417,iterations:[{input_tokens:8,output_tokens:54,cache_read_input_tokens:28125,cache_creation_input_tokens:148}]}}))
+`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise(() => {}),
+        close: async () => {}
+      })
+    })(model, context)
+    const done = (await collect(stream)).at(-1)
+    expect(done?.type === "done" ? done.message.usage : null).toMatchObject({
+      input: 8,
+      output: 54,
+      cacheRead: 28_125,
+      cacheWrite: 148,
+      totalTokens: 28_335
+    })
+  })
+
   it("rejects malformed critical stream events", async () => {
     const binary = await executable(`
 process.stdin.resume()

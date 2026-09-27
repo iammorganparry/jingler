@@ -196,6 +196,20 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:7,o
     ])
     expect(events[0]).toMatchObject({ _tag: "Started", model: "anthropic/opus" })
   })
+
+  it("reports context from the turn's last request, not the sum over every request", async () => {
+    // Shape recorded from a real 4-request turn: the top level sums them all,
+    // \`iterations\` holds only the final one.
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:34,output_tokens:536,cache_read_input_tokens:96204,cache_creation_input_tokens:14417,iterations:[{input_tokens:8,output_tokens:54,cache_read_input_tokens:28125,cache_creation_input_tokens:148}]}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events.find(({ _tag }) => _tag === "Usage")).toEqual({ _tag: "Usage", tokens: 28_335 })
+    expect(events.find(({ _tag }) => _tag === "Done")).toMatchObject({ tokens: 111_191 })
+  })
 })
 
 // A real child process drives HTTP MCP twice, consumes each result, and only

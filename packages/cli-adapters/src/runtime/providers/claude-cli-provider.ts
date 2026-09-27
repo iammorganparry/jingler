@@ -40,16 +40,21 @@ const ClaudeStreamDelta = Schema.Struct({
     )
   })
 })
+const ClaudeRequestUsage = Schema.Struct({
+  input_tokens: Schema.optional(Schema.Number),
+  output_tokens: Schema.optional(Schema.Number),
+  cache_read_input_tokens: Schema.optional(Schema.Number),
+  cache_creation_input_tokens: Schema.optional(Schema.Number)
+})
 const ClaudeResult = Schema.Struct({
   type: Schema.Literal("result"),
   subtype: Schema.String,
   is_error: Schema.Boolean,
   result: Schema.optional(Schema.String),
   usage: Schema.optional(Schema.Struct({
-    input_tokens: Schema.optional(Schema.Number),
-    output_tokens: Schema.optional(Schema.Number),
-    cache_read_input_tokens: Schema.optional(Schema.Number),
-    cache_creation_input_tokens: Schema.optional(Schema.Number)
+    ...ClaudeRequestUsage.fields,
+    /** The turn's final model request; the top-level fields sum every request. */
+    iterations: Schema.optional(Schema.Array(ClaudeRequestUsage))
   }))
 })
 
@@ -125,11 +130,19 @@ const zeroUsage = (): Usage => ({
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
 })
 
+/**
+ * pi reads a message's usage as the context it occupies (and compacts on it),
+ * so it must describe the LAST request, not the sum over the CLI's whole turn —
+ * that sum grows with every tool call and reported millions of tokens for a
+ * session a fraction that size. An older CLI without `iterations` falls back
+ * to the sum.
+ */
 const usageFrom = (result: typeof ClaudeResult.Type): Usage => {
-  const input = result.usage?.input_tokens ?? 0
-  const output = result.usage?.output_tokens ?? 0
-  const cacheRead = result.usage?.cache_read_input_tokens ?? 0
-  const cacheWrite = result.usage?.cache_creation_input_tokens ?? 0
+  const usage = result.usage?.iterations?.at(-1) ?? result.usage
+  const input = usage?.input_tokens ?? 0
+  const output = usage?.output_tokens ?? 0
+  const cacheRead = usage?.cache_read_input_tokens ?? 0
+  const cacheWrite = usage?.cache_creation_input_tokens ?? 0
   return {
     input,
     output,
