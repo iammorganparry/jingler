@@ -57,22 +57,22 @@ Plans carry proposed code changes and a test strategy as typed data, not loose m
 ### Approach
 - Widen `FENCE_LINE` in `plan-parse.ts` to accept an info string (`diff path=src/a.ts`). Today non-mermaid stage fences are dropped (`plan-parse.ts:395`); keep them as blocks.
 - Add a `PlanChangeBlock { kind: "change", id, path, patch }` to the `PlanBlock` union. It's valid in stage `notes`/`walkthrough` and in document sections.
-- Add optional `kind: "unit" | "integration" | "e2e" | "manual"` to `PlanAcceptance`, parsed from `(test[unit]: path::case)`. Plain `(test: …)` stays valid.
+- Add optional `kind: "unit" | "integration" | "e2e" | "manual"` to `PlanTestReference` (the tag sits on the reference), parsed from `(test[unit]: path::case)`. Plain `(test: …)` stays valid.
 - A top-level `## Test strategy` section is parsed as an ordinary document section. Nothing new is needed there beyond requiring it in validation.
 - `plan-validation.ts`: a `diff` fence without `path=`, or with an absolute or `..` path, is a stage-specific diagnostic. New structured plans also need a `Test strategy` section. Legacy plans skip both checks.
 
 ### Technical explanation
 Keep diffs as raw unified patch text in the DTO. The renderer already parses patches into `FileDiffMetadata` (`packages/ui/src/diff/parse.ts`), so the core package doesn't take a `@pierre/diffs` dependency. Path validation matters because the path turns into a clickable file link.
 
-- [ ] Add `PlanChangeBlock` and acceptance `kind` to core schemas, with backward-compatible decoding
-- [ ] Parse `diff path=` fences and `test[kind]:` references in `plan-parse.ts`
-- [ ] Add validation diagnostics for bad change paths and a missing test strategy on new plans
+- [x] Add `PlanChangeBlock` and test-reference `kind` to core schemas, with backward-compatible decoding
+- [x] Parse `diff path=` fences and `test[kind]:` references in `plan-parse.ts`
+- [x] Add validation diagnostics for bad change paths and a missing test strategy on new plans
 
 ### Acceptance
-- [ ] A stage with two `diff path=` fences projects two change blocks with exact patch text, and checkbox numbering is unchanged (test[unit]: packages/plannotator-ext/plan-parse.test.ts::parses diff path fences into change blocks)
-- [ ] `test[e2e]:` sets the acceptance kind, and legacy `test:` still decodes (test[unit]: packages/plannotator-ext/plan-parse.test.ts::parses typed test references)
-- [ ] Absolute/`..` paths and a missing Test strategy are rejected on new plans but not on legacy ones (test[unit]: packages/plannotator-ext/plan-validation.test.ts::rejects unsafe change paths and missing test strategy)
-- [ ] Old persisted `PlanDocument`s without the new fields still decode (test[unit]: packages/core/src/plannotator-projection.test.ts::decodes legacy plans without change blocks)
+- [x] A stage with two `diff path=` fences projects two change blocks with exact patch text, and checkbox numbering is unchanged (test[unit]: packages/plannotator-ext/plan-parse.test.ts::parses diff path fences into change blocks)
+- [x] `test[e2e]:` sets the reference kind, and legacy `test:` still decodes (test[unit]: packages/plannotator-ext/plan-parse.test.ts::parses typed test references and keeps untyped ones valid)
+- [x] Absolute/`..` paths and a missing Test strategy are rejected on new plans but not on legacy ones (test[unit]: packages/plannotator-ext/plan-validation.test.ts::rejects unsafe change paths and missing test strategy)
+- [x] Change blocks and typed references project into a decodable `PlanDocument`; legacy payloads still decode (test[unit]: packages/core/src/plannotator-projection.test.ts::projects proposed changes and typed test references into a valid PlanDocument, decodes a legacy flat payload without the structured fields)
 
 ### Files
 - `packages/core/src/plan-document.ts` — M

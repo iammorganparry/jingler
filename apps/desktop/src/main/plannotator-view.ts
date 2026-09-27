@@ -131,6 +131,8 @@ const blockMarkdown = (block: PlanBlock): ReadonlyArray<string> => {
       return block.items.map((item, index) => `${block.ordered ? `${index + 1}.` : "-"} ${item}`)
     case "code":
       return [`\`\`\`${block.language ?? ""}`, block.code, "```"]
+    case "change":
+      return [`\`\`\`diff path=${block.path}`, block.patch, "```"]
     case "table":
       return [
         `| ${block.headers.join(" | ")} |`,

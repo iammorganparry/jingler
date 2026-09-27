@@ -19,11 +19,30 @@ The existing route will call the shared store.
 - \`src/auth.ts\` — M
 
 > complexity: low
+
+## Test strategy
+Unit tests cover sign-in.
 `
 
 describe("validatePlanMarkdown", () => {
   it("accepts complete explicit stages and legacy plans", () => {
     expect(validatePlanMarkdown(validStage)).toEqual([])
+    expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
+  })
+
+  it("rejects unsafe change paths and a missing test strategy", () => {
+    const unsafe = (path: string) =>
+      validStage.replace("### Files", `\`\`\`diff path=${path}\n@@ -1 +1 @@\n\`\`\`\n\n### Files`)
+
+    expect(validatePlanMarkdown(unsafe("src/ok.ts"))).toEqual([])
+    for (const path of ["/etc/passwd", "../outside.ts", "src/../../x.ts", "~/x.ts", "C:/x.ts"]) {
+      expect(validatePlanMarkdown(unsafe(path))).toEqual([
+        `Stage "Ship auth" proposes a change to unsafe path "${path}".`
+      ])
+    }
+    expect(validatePlanMarkdown(validStage.replace(/## Test strategy[\s\S]*/, ""))).toEqual([
+      'Plan needs a "## Test strategy" section.'
+    ])
     expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
   })
 

@@ -16,9 +16,13 @@ export const PlanAcceptanceStatus = Schema.Literal("pending", "passed", "failed"
 export type PlanAcceptanceStatus = Schema.Schema.Type<typeof PlanAcceptanceStatus>
 
 /** One concrete repository test location and the named cases that prove a criterion. */
+export const PlanTestKind = Schema.Literal("unit", "integration", "e2e", "manual")
+export type PlanTestKind = Schema.Schema.Type<typeof PlanTestKind>
+
 export const PlanTestReference = Schema.Struct({
   path: Schema.String,
-  cases: Schema.Array(Schema.String)
+  cases: Schema.Array(Schema.String),
+  kind: Schema.optional(PlanTestKind)
 })
 export type PlanTestReference = Schema.Schema.Type<typeof PlanTestReference>
 
@@ -215,6 +219,13 @@ export const PlanDiagramBlock = Schema.Struct({
   id: Schema.String,
   source: Schema.String
 })
+/** A proposed unified diff for one repository-relative file. */
+export const PlanChangeBlock = Schema.Struct({
+  kind: Schema.Literal("change"),
+  id: Schema.String,
+  path: Schema.String,
+  patch: Schema.String
+})
 
 /**
  * A structured content block. This union IS the generative-UI contract: each
@@ -227,7 +238,8 @@ export const PlanBlock = Schema.Union(
   PlanListBlock,
   PlanCodeBlock,
   PlanTableBlock,
-  PlanDiagramBlock
+  PlanDiagramBlock,
+  PlanChangeBlock
 )
 export type PlanBlock = Schema.Schema.Type<typeof PlanBlock>
 
@@ -396,6 +408,8 @@ export const planBlockText = (block: PlanBlock): string => {
       return block.items.join("\n")
     case "code":
       return block.code
+    case "change":
+      return block.patch
     case "table":
       return [block.headers, ...block.rows].map((row) => row.join(" │ ")).join("\n")
     case "diagram":
