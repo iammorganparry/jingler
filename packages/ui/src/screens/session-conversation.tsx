@@ -117,6 +117,7 @@ export interface SessionConversationProps {
   /** Render the browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  onTrackFile?: (sessionId: string, path: string) => void
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
@@ -299,6 +300,7 @@ export function SessionConversation(props: SessionConversationProps) {
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
             onOpenFile={props.onOpenFile}
+            onTrackFile={props.onTrackFile}
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}

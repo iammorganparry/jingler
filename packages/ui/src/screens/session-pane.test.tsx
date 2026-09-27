@@ -945,16 +945,21 @@ describe("SessionPane", () => {
       })
     )
     const onOpenFile = vi.fn()
+    const onTrackFile = vi.fn()
 
     render(
       <SessionPane
         session={session({ id: "a" })}
         renderFiles={() => <div>restored file</div>}
         onOpenFile={onOpenFile}
+        onTrackFile={onTrackFile}
       />
     )
 
-    await waitFor(() => expect(onOpenFile).toHaveBeenCalledWith("a", "src/restored.ts"))
+    await waitFor(() => expect(onTrackFile).toHaveBeenCalledWith("a", "src/restored.ts"))
+    // Listing a pane's file must not select it in the shared actor: that
+    // retargets the Files view and repaints it on every file open.
+    expect(onOpenFile).not.toHaveBeenCalled()
   })
 
   it("routes a transcript file gesture into this session's Files tab", () => {

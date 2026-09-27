@@ -83,6 +83,7 @@ import {
   closeSessionFile,
   disposeFileBrowserActor,
   openSessionFile,
+  trackSessionFile,
   requestCloseFileSurface,
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
@@ -1563,6 +1564,7 @@ function AuthedApp({
           />
         )}
         onOpenFile={openSessionFile}
+        onTrackFile={trackSessionFile}
         onRequestCloseFile={requestCloseFileSurface}
         renderFileQuickOpen={(session, ctx) => (
           <FileBrowserQuickOpen

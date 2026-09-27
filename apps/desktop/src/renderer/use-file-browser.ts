@@ -126,6 +126,11 @@ export const openSessionFile = (sessionId: string, path: string): void => {
   getFileBrowserActor(sessionId).send({ type: "OPEN", path })
 }
 
+/** List a path among the session's open files without selecting it. */
+export const trackSessionFile = (sessionId: string, path: string): void => {
+  getFileBrowserActor(sessionId).send({ type: "TRACK", path })
+}
+
 export const closeSessionFile = (sessionId: string, path: string): void => {
   getFileBrowserActor(sessionId).send({ type: "CLOSE", path })
 }

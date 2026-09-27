@@ -177,9 +177,14 @@ export function SessionChatTabs({
   }
 
   const selectFile = (path: string) => {
+    // A file surface owns its document. Selecting the path in the shared actor
+    // too would retarget the Files view, which then repaints on every click.
+    if (onSelectSurface) {
+      onSelectSurface({ kind: "file", id: path })
+      return
+    }
     files.open(path)
-    if (onSelectSurface) onSelectSurface({ kind: "file", id: path })
-    else onSelectFiles()
+    onSelectFiles()
   }
   const closeFile = (path: string) => {
     const active = path === files.selectedPath
