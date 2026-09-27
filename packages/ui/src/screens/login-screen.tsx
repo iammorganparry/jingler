@@ -72,13 +72,26 @@ export function LoginScreen({
     setMode(signup ? "signin" : "signup")
   }
 
+  const modeToggle = (
+    <>
+      <span>{signup ? "Already have an account?" : "New to Jingler?"}</span>
+      <button
+        type="button"
+        onClick={toggleMode}
+        className="text-brand hover:underline"
+      >
+        {signup ? "Sign in" : "Create an account"}
+      </button>
+    </>
+  )
+
   return (
-    <div className={embedded ? "flex flex-col bg-canvas" : "flex h-full flex-col bg-canvas"}>
+    <div className={embedded ? "flex flex-col" : "flex h-full flex-col bg-canvas"}>
       {embedded ? null : <TitleBar />}
       <div
         className={
           embedded
-            ? "relative flex items-center justify-center px-10 pb-[74px] pt-10"
+            ? "relative flex items-center justify-center"
             : "relative flex flex-1 items-center justify-center overflow-hidden"
         }
       >
@@ -137,19 +150,20 @@ export function LoginScreen({
               Trouble signing in?
             </a>
           )}
+          {embedded ? (
+            <div className="-mb-1 mt-1 flex w-full items-center justify-center gap-1.5 border-t border-hairline pt-4 text-[12px] text-muted-foreground">
+              {modeToggle}
+            </div>
+          ) : null}
         </AuthCard>
 
-        {/* Footer toggles between sign-in and sign-up. */}
-        <div className="absolute inset-x-0 bottom-0 z-10 flex h-[42px] items-center justify-center gap-1.5 border-t border-hairline bg-panel text-[12px] text-muted-foreground">
-          <span>{signup ? "Already have an account?" : "New to Jingler?"}</span>
-          <button
-            type="button"
-            onClick={toggleMode}
-            className="text-brand hover:underline"
-          >
-            {signup ? "Sign in" : "Create an account"}
-          </button>
-        </div>
+        {/* Footer toggles between sign-in and sign-up. In the dialog it lives
+            inside the card instead (see `modeToggle` above). */}
+        {embedded ? null : (
+          <div className="absolute inset-x-0 bottom-0 z-10 flex h-[42px] items-center justify-center gap-1.5 border-t border-hairline bg-panel text-[12px] text-muted-foreground">
+            {modeToggle}
+          </div>
+        )}
       </div>
     </div>
   )
