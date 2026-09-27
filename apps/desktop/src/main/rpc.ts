@@ -763,6 +763,11 @@ export const createSessionFromIssue = (input: CreateSessionFromIssueInput) =>
   });
 
 /** Resolve or clone one local project on an owned device during session startup. */
+const githubSlugFromRemote = (url: string): string | undefined => {
+  const repository = parseGitHubRemote(url);
+  return repository === null ? undefined : `${repository.owner}/${repository.repo}`;
+};
+
 const ensureProjectOnOwnedEnvironment = (
   project: Project,
   environmentId: string,
@@ -786,14 +791,11 @@ const ensureProjectOnOwnedEnvironment = (
       })
     }),
     Effect.flatMap(Schema.decodeUnknown(ProjectSchema)),
-    Effect.map((remoteProject) => {
-      const repository = parseGitHubRemote(url);
-      return {
-        ...remoteProject,
-        environmentId,
-        ...(repository === null ? {} : { githubSlug: `${repository.owner}/${repository.repo}` }),
-      };
-    }),
+    Effect.map((remoteProject) => ({
+      ...remoteProject,
+      environmentId,
+      githubSlug: githubSlugFromRemote(url),
+    })),
     Effect.mapError((cause) =>
       cause instanceof GitError
         ? cause
@@ -853,7 +855,7 @@ const provisionRemoteSession = (
         projectId: remoteProject.id,
         repoPath: remoteProject.path,
         repoName: remoteProject.name,
-        ...(remoteProject.githubSlug === undefined ? {} : { githubSlug: remoteProject.githubSlug }),
+        githubSlug: remoteProject.githubSlug,
       };
     } else if (environment.kind === "managed") {
       if (!environmentRuntimeIsCurrent(environment)) {
