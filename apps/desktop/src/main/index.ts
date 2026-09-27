@@ -32,6 +32,7 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { startAuthLoopback } from "./auth-loopback.js"
+import { applyDefaultAuthUrl } from "./auth-endpoint.js"
 import { jinglerRoot } from "./app-paths.js"
 import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
@@ -101,6 +102,9 @@ const enablePerfMonitor = (webContentsId: number): void => {
       console.error("[perf-monitor] failed to start", cause)
     })
 }
+
+// Before any service reads it; every auth consumer resolves the URL lazily.
+applyDefaultAuthUrl(app.isPackaged)
 
 const gotPrimaryLock = app.requestSingleInstanceLock()
 if (!gotPrimaryLock) {
