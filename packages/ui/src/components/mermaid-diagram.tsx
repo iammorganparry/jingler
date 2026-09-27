@@ -147,13 +147,17 @@ function DiagramCanvas({
           const dx = event.clientX - start.x
           const dy = event.clientY - start.y
           if (!start.moved && Math.hypot(dx, dy) < 4) return
+          // Capture only once it's a real drag: capturing on pointerdown would
+          // retarget the click away from linked nodes. Capture keeps the pan
+          // alive when the pointer crosses the toolbar or leaves the viewport.
+          if (!start.moved) event.currentTarget.setPointerCapture?.(event.pointerId)
           start.moved = true
           dragged.current = true
           drag.current = { x: event.clientX, y: event.clientY, moved: true }
           setView((current) => ({ ...current, x: current.x + dx, y: current.y + dy }))
         }}
         onPointerUp={() => { drag.current = null }}
-        onPointerLeave={() => { drag.current = null }}
+        onPointerCancel={() => { drag.current = null }}
       >
         <div
           ref={content}

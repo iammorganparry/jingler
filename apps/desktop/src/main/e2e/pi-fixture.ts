@@ -469,6 +469,7 @@ const STRUCTURED_REVIEW_PLAN = [
   "flowchart LR",
   "  implement[Implement auth] --> verify[Verify auth]",
   "  %% link verify stage:verify-auth",
+  "  %% link implement file:README.md",
   "```",
   "### Tasks",
   "- [ ] Implement the auth change",
@@ -484,6 +485,11 @@ const STRUCTURED_REVIEW_PLAN = [
   "- Run focused auth checks",
   "### Technical explanation",
   "Verification checks the existing auth entry point without changing its callers.",
+  "```diff path=README.md",
+  "@@ -1 +1,2 @@",
+  " # e2e repo",
+  "+Auth checks live in src/auth.test.ts.",
+  "```",
   "### Tasks",
   "- [ ] Verify the auth change",
   "### Acceptance",
@@ -499,6 +505,11 @@ const STRUCTURED_REVIEW_PLAN = [
   "## Verification",
   "Run the focused auth checks."
 ].join("\n")
+
+// Breaks both hard submit rules: an escaping diff path and no Test strategy.
+const INVALID_REVIEW_PLAN = STRUCTURED_REVIEW_PLAN
+  .replace("```diff path=src/auth.ts", "```diff path=../outside.ts")
+  .replace("## Test strategy\nUnit tests cover the token format; the e2e flow covers sign-in.\n\n", "")
 
 const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const lastMessage = context.messages.at(-1)
@@ -531,12 +542,34 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
     (message) => message.role === "toolResult" && message.toolName === SUBMIT_PLAN_TOOL
   ).length
   if (lastMessage?.role === "toolResult" && lastMessage.toolName === SUBMIT_PLAN_TOOL) {
-    if (toolResultText(lastMessage).includes("YOUR PLAN WAS NOT APPROVED")) {
+    const denial = toolResultText(lastMessage)
+    if (denial.includes("is not ready for review")) {
+      // Echo the validator's own errors so e2e proves the real submit gate ran.
+      const errors = denial.split("\n").filter((line) => line.startsWith("- "))
       return callTool(
         PLAN_WRITE_TOOL,
         {
           path: "PLAN.md",
           content: STRUCTURED_REVIEW_PLAN.replace(
+            "Replace the auth flow with a deterministic test implementation.",
+            ["Replace the auth flow with a deterministic test implementation.", ...errors.map((line) => `Fixed validation error: ${line.slice(2)}`)].join("\n")
+          )
+        },
+        `plannotator-fix-${submitCount + 1}`
+      )
+    }
+    if (denial.includes("YOUR PLAN WAS NOT APPROVED")) {
+      // Echo each quoted anchor from the reviewer's feedback into the plan, so
+      // e2e can prove selection comments reached the agent verbatim.
+      const quoted = denial.split("\n").filter((line) => line.startsWith("> "))
+      return callTool(
+        PLAN_WRITE_TOOL,
+        {
+          path: "PLAN.md",
+          content: STRUCTURED_REVIEW_PLAN.replace(
+            "Replace the auth flow with a deterministic test implementation.",
+            ["Replace the auth flow with a deterministic test implementation.", ...quoted.map((line) => `Reviewer quoted: ${line.slice(2)}`)].join("\n")
+          ).replace(
             "- Replace the token format",
             "- Revise auth while keeping the existing token format"
           ).replace(
@@ -579,9 +612,10 @@ const planModeResponse = (context: PiContext): ReturnType<typeof fauxAssistantMe
       `plannotator-submit-${submitCount + 1}`
     )
   }
+  const invalid = currentPlanMessages.some((text) => text.includes("[[invalid-plan]]"))
   return callTool(
     PLAN_WRITE_TOOL,
-    { path: "PLAN.md", content: STRUCTURED_REVIEW_PLAN },
+    { path: "PLAN.md", content: invalid ? INVALID_REVIEW_PLAN : STRUCTURED_REVIEW_PLAN },
     "plannotator-write"
   )
 }

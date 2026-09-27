@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, type LaunchedApp, type SeedSession, test } from "./fixtures.js"
+import { appShell, expect, type LaunchedApp, type LaunchOptions, type SeedSession, test } from "./fixtures.js"
 
 const PI_FIXTURE = {
   scenarioId: "plan-mode",
@@ -54,7 +54,7 @@ const reviseReview = async (launched: LaunchedApp) => {
   await review(launched).getByRole("button", { name: "Request changes" }).click()
 }
 
-const startPlanReview = async (launched: LaunchedApp) => {
+const startPlanReview = async (launched: LaunchedApp, prompt = "[[plan]] replace auth") => {
   const skipImport = launched.window.getByRole("button", { name: "Skip import" })
   if (await skipImport.isVisible()) await skipImport.click()
   const composer = launched.window.getByPlaceholder(COMPOSER_PLACEHOLDER)
@@ -62,8 +62,27 @@ const startPlanReview = async (launched: LaunchedApp) => {
   await launched.window.keyboard.press("Shift+Tab")
   await launched.window.keyboard.press("Shift+Tab")
   await expect(launched.window.locator("[data-mode='plan']")).toContainText("Plan")
-  await composer.fill("[[plan]] replace auth")
+  await composer.fill(prompt)
   await composer.press("Enter")
+}
+
+const planFile = (launched: LaunchedApp): string => {
+  const path = join(launched.repoPath, "PLAN.md")
+  return existsSync(path) ? readFileSync(path, "utf8") : ""
+}
+
+const openPlanTab = async (launched: LaunchedApp) => {
+  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  await planTab.click()
+  await expect(review(launched)).toBeVisible()
+  return planTab
+}
+
+const launchPlanMode = async (launchApp: (options?: LaunchOptions) => Promise<LaunchedApp>) => {
+  const launched = await launchApp({ configured: true, withRepo: true, piFixture: PI_FIXTURE, sessions })
+  await expect(appShell(launched.window)).toBeVisible()
+  return launched
 }
 
 test("projects explicit deliverable stages without treating overview headings as work", async ({
@@ -145,6 +164,97 @@ test("diagram node opens linked stage", async ({ launchApp }) => {
   await expect(verifyHeading).not.toBeInViewport()
   await review(launched).getByRole("link", { name: "Open stage verify-auth" }).click()
   await expect(verifyHeading).toBeInViewport({ timeout: 5_000 })
+})
+
+test("selection comments reach the agent and the revision diff shows what changed", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+  // First review: nothing to compare against yet.
+  await expect(review(launched).getByRole("button", { name: /Changes since revision/ })).toHaveCount(0)
+
+  const intent = review(launched)
+    .getByRole("region", { name: "Implement auth", exact: true })
+    .getByText("Implement the auth change.", { exact: true })
+  await intent.click({ clickCount: 3 })
+  await review(launched).getByRole("button", { name: "Add comment" }).click()
+  await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
+  await review(launched).getByRole("button", { name: "Save comment" }).click()
+  await expect(review(launched).getByRole("list", { name: "Review comments" }))
+    .toContainText("Keep the existing token format.")
+  await review(launched).getByRole("button", { name: "Request changes" }).click()
+
+  // The fixture agent echoes every quoted anchor it received into the rewrite.
+  await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 })
+    .toContain("Reviewer quoted: Implement the auth change.")
+
+  const toggle = review(launched).getByRole("button", { name: /Changes since revision/ })
+  await expect(toggle).toBeVisible({ timeout: 30_000 })
+  await toggle.click()
+  const changes = review(launched).getByRole("region", { name: "Changes since the previous revision" })
+  await expect(changes.getByText("Reviewer quoted: Implement the auth change.")).toBeVisible()
+  await expect(changes.getByText("- Replace the token format", { exact: false }).first()).toBeVisible()
+  await review(launched).getByRole("button", { name: "Hide changes" }).click()
+  await expect(changes).toHaveCount(0)
+
+  await approveReview(launched)
+  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
+    .toBeVisible({ timeout: 30_000 })
+})
+
+test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const readmeChange = review(launched).getByRole("region", { name: "Proposed change to README.md" })
+  await expect(readmeChange).toBeVisible()
+  // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
+  await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
+  await review(launched).getByRole("button", { name: "Open README.md" }).click()
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+
+  await openPlanTab(launched)
+  const canvas = review(launched).getByTestId("mermaid-canvas")
+  await expect(canvas).toBeVisible()
+  await review(launched).getByRole("button", { name: "Zoom in" }).click()
+  await expect(canvas).toHaveAttribute("style", /scale\(1\.25\)/)
+  // Drag from the middle of the visible (overflow-hidden) viewport, not the
+  // scaled canvas's corner, which is clipped once zoomed.
+  const box = (await canvas.locator("xpath=..").boundingBox())!
+  const [x, y] = [box.x + box.width / 2, box.y + Math.min(20, box.height / 2)]
+  await launched.window.mouse.move(x, y)
+  await launched.window.mouse.down()
+  await launched.window.mouse.move(x + 60, y + 20, { steps: 5 })
+  await launched.window.mouse.up()
+  await expect(canvas).not.toHaveAttribute("style", /translate\(0px, 0px\)/)
+  await review(launched).getByRole("button", { name: "Reset view" }).click()
+  await expect(canvas).toHaveAttribute("style", /translate\(0px, 0px\) scale\(1\)/)
+
+  await review(launched).getByRole("button", { name: "Fullscreen" }).click()
+  const dialog = launched.window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("link", { name: "Open file README.md" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+})
+
+test("submission rejects a plan with an unsafe diff path and no test strategy", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched, "[[plan]] [[invalid-plan]] replace auth")
+
+  // The fixture agent copies the validator's errors into the fixed plan it resubmits.
+  await expect.poll(() => planFile(launched), { timeout: 30_000 })
+    .toContain('Fixed validation error: Plan needs a "## Test strategy" section.')
+  const fixed = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
+  expect(fixed).toContain('proposes a change to unsafe path "../outside.ts"')
+  expect(fixed).not.toContain("diff path=../outside.ts")
+
+  await openPlanTab(launched)
+  await expect(review(launched).getByRole("heading", { name: "Test strategy" })).toBeVisible()
+  await approveReview(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 })
 
 test("a new review in the same chat is presented and can be approved", async ({
