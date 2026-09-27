@@ -1195,11 +1195,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: UsageReport
   }),
 
-  /** JSON export of the same persisted usage report. */
-  Rpc.make("Usage.export", {
-    success: Schema.String
-  }),
-
   /**
    * A session's context accounting — what the meter renders and what Settings
    * lists. Cheap enough to poll: it reads in-memory state plus the persisted

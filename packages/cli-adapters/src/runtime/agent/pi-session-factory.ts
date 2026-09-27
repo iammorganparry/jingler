@@ -40,7 +40,10 @@ import {
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
 import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
-import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
+import {
+  DELEGATION_DEFAULT_PROMPT_LAYER,
+  runtimeInvariantLayers
+} from "../prompt/role-profiles.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
@@ -286,16 +289,7 @@ const createResources = (
       layers: [
         ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
         ...ponytailPromptLayers(spec.ponytailMode),
-        ...(nativeSubagentsEnabled
-          ? [{
-              id: "runtime.delegation-default",
-              kind: "role" as const,
-              trust: "trusted" as const,
-              required: true,
-              version: "1",
-              content: "Delegate bounded code generation, research, review, and scouting to the configured subagent role by default when it is material work. Keep trivial work local. The parent coordinates and verifies the result."
-            }]
-          : [])
+        ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : [])
       ],
       tools,
       tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET

@@ -469,9 +469,9 @@ function AuthedApp({
 
   // The usage modal loads on open; GitHub refreshes live through its machine.
   const loadUsage = () => Promise.all([usageQuery.refetch(), usageReportQuery.refetch()]).then(() => undefined);
-  const exportUsage = async () => {
-    const json = await rpc.usageExport();
-    const blob = new Blob([json], { type: "application/json" });
+  const exportUsage = () => {
+    if (!usageReportQuery.data) return;
+    const blob = new Blob([JSON.stringify(usageReportQuery.data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;

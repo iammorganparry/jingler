@@ -66,6 +66,15 @@ const COLLABORATION_CONTRACT = [
   "- When no operator is in the loop to answer (unattended or autonomous runs), take ownership: proceed on your best judgment and record what you chose and why. The moment an operator is present, their word wins."
 ].join("\n")
 
+export const DELEGATION_DEFAULT_PROMPT_LAYER: PromptLayer = {
+  id: "runtime.delegation-default",
+  kind: "role",
+  trust: "trusted",
+  required: true,
+  version: "1",
+  content: "Delegate bounded code generation, research, review, and scouting to the configured subagent role by default when it is material work. Keep trivial work local. The parent coordinates and verifies the result."
+}
+
 export const runtimeInvariantLayers = (role: AgentRole, mode: RuntimeMode): ReadonlyArray<PromptLayer> => [
   {
     id: "jingler.identity-and-safety",

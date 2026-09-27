@@ -5266,14 +5266,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       })),
       Effect.orDie
     ),
-  "Usage.export": () =>
-    AppPaths.pipe(
-      Effect.flatMap((paths) => Effect.tryPromise({
-        try: () => new UsageFactStore(join(paths.runJournalsDir, "usage-facts.json")).exportJson(),
-        catch: (cause) => new Error("Could not export execution usage", { cause })
-      })),
-      Effect.orDie
-    ),
   "Context.state": ({ sessionId, chatId }) =>
     ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.snapshot(chatId)),

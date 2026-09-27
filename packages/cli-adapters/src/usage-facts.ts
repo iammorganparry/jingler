@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { dirname } from "node:path"
 import { Schema } from "effect"
-import { UsageFact, UsageReport, usageReportFromFacts, type UsageFact as UsageFactValue, type UsageReport as UsageReportValue } from "@jingler/core"
+import { UsageFact, usageReportFromFacts, type UsageFact as UsageFactValue, type UsageReport as UsageReportValue } from "@jingler/core"
 
 const FactsFile = Schema.Array(UsageFact)
 const writes = new Map<string, Promise<void>>()
@@ -52,11 +52,4 @@ export class UsageFactStore {
     await writes.get(this.#file)?.catch(() => undefined)
     return usageReportFromFacts(await this.list())
   }
-
-  async exportJson(): Promise<string> {
-    return JSON.stringify(await this.report(), null, 2)
-  }
 }
-
-export const decodeUsageReport = (value: unknown): UsageReportValue =>
-  Schema.decodeUnknownSync(UsageReport)(value)

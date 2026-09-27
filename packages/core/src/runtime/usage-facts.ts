@@ -64,22 +64,8 @@ const groupKey = (fact: UsageFact): string => JSON.stringify([
 
 /** Aggregate facts without treating unknown token/cost values as zero spend. */
 type MutableGroup = {
-  runtimeId: UsageReportGroup["runtimeId"]
-  providerId: string | null
-  modelId: string
-  kind: UsageReportGroup["kind"]
-  runCount: number
-  successRate: number | null
-  durationMs: number
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-  reasoningTokens: number
-  totalTokens: number
-  toolCalls: number
-  knownCostUsd: number
-  costCoverage: number
+  -readonly [Key in keyof Omit<UsageReportGroup, "successRate" | "costCoverage">]: UsageReportGroup[Key]
+} & {
   costFacts: number
   successCount: number
 }
@@ -97,7 +83,6 @@ export const usageReportFromFacts = (
       modelId: fact.modelId,
       kind: fact.kind,
       runCount: 0,
-      successRate: null,
       durationMs: 0,
       inputTokens: 0,
       outputTokens: 0,
@@ -107,7 +92,6 @@ export const usageReportFromFacts = (
       totalTokens: 0,
       toolCalls: 0,
       knownCostUsd: 0,
-      costCoverage: 0,
       costFacts: 0,
       successCount: 0
     }

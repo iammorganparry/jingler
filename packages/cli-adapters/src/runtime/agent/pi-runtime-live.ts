@@ -160,10 +160,9 @@ const nativeSubagentModel = (
 ): ProviderModelId | undefined =>
   spec.runtimeId === "claude"
     ? spec.modelId
-    : JINGLER_SUBAGENT_NAMES.flatMap((agent) => {
-        const model = models[agent]
-        return model === undefined ? [] : [model]
-      })[0]
+    : JINGLER_SUBAGENT_NAMES
+        .map((agent) => models[agent])
+        .find((model) => model !== undefined)
 
 const nativeSubagentConnection = (
   spec: AgentRunSpec,

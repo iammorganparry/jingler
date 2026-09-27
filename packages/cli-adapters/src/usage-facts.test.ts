@@ -32,14 +32,15 @@ const makeFact = (over: Partial<UsageFact> = {}): UsageFact => ({
 })
 
 describe("UsageFactStore", () => {
-  it("upserts terminal facts and exports the same report data", async () => {
+  it("upserts terminal facts and reports aggregated data", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-usage-"))
     const store = new UsageFactStore(join(root, "usage.json"))
     await store.record(makeFact())
     await store.record(makeFact({ outcome: "success", durationMs: 2000 }))
     expect((await store.list())).toHaveLength(1)
-    expect((await store.report()).groups[0]?.successRate).toBe(1)
-    expect(JSON.parse(await store.exportJson()).facts[0].durationMs).toBe(2000)
+    const report = await store.report()
+    expect(report.groups[0]?.successRate).toBe(1)
+    expect(report.facts[0]?.durationMs).toBe(2000)
     await Promise.all([
       store.record(makeFact({ id: "run-2", runId: "run-2" })),
       new UsageFactStore(join(root, "usage.json")).record(
