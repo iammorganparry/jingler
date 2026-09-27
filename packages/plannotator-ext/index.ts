@@ -29,7 +29,7 @@ import {
 	extractProgressMarkers,
 	parseChecklist,
 } from "./generated/checklist.ts";
-import { persistPlanStatuses } from "./plan-status.ts";
+import { createReviewedContent, persistPlanStatuses } from "./plan-status.ts";
 
 import { loadConfig, resolveTodoProviderEnabled, resolveUseJina } from "./generated/config.ts";
 import { readImprovementHook } from "./generated/improvement-hooks.ts";
@@ -193,7 +193,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 	let hostChecklist: ChecklistItem[] = [];
 	let lastPlanContent: string | null = null;
 	/** Text of the last review per plan path, so a resubmission can show what changed. */
-	const reviewedContent = new Map<string, string>();
+	const reviewedContent = createReviewedContent();
 	let previousPlanContent: string | null = null;
 	let hostStructure: ParsedPlanMarkdown | null = null;
 
@@ -608,9 +608,7 @@ export default function plannotator(pi: ExtensionAPI): void {
 				details: { approved: false },
 			};
 		}
-		const prior = reviewedContent.get(inputPath);
-		previousPlanContent = prior !== undefined && prior !== planContent ? prior : null;
-		reviewedContent.set(inputPath, planContent);
+		previousPlanContent = reviewedContent.begin(inputPath, planContent);
 		reviewStarting = true;
 		reviewPending = true;
 		persistState();

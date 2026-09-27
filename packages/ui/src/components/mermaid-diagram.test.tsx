@@ -125,3 +125,38 @@ describe("MermaidDiagram links", () => {
     expect(canvas.style.transform).toBe("translate(0px, 0px) scale(1)")
   })
 })
+
+describe("MermaidDiagram link edge cases", () => {
+  const svg = '<svg><g id="mermaid-r1-flowchart-A-0"><text>Parser</text></g><g id="mermaid-r1-flowchart-B-1"><text>Ghost</text></g></svg>'
+
+  it("leaves a node inert when its linked stage does not exist", async () => {
+    render_.mockResolvedValue({ svg })
+    render(
+      <OpenAssetProvider open={vi.fn()} knownFiles={new Set(["src/a.ts"])}>
+        <MermaidDiagram source={"flowchart LR\n  A --> B\n  %% link A file:src/a.ts\n  %% link B stage:missing-stage"} />
+      </OpenAssetProvider>
+    )
+    await screen.findByRole("link", { name: "Open file src/a.ts" })
+    expect(screen.queryByRole("link", { name: "Open stage missing-stage" })).toBeNull()
+  })
+
+  it("closes fullscreen and opens the file when a linked node is clicked there", async () => {
+    render_.mockResolvedValue({ svg })
+    const open = vi.fn()
+    render(
+      <OpenAssetProvider open={open} knownFiles={new Set(["src/a.ts"])}>
+        <MermaidDiagram source={"flowchart LR\n  A --> B\n  %% link A file:src/a.ts"} />
+      </OpenAssetProvider>
+    )
+    fireEvent.click(await screen.findByRole("button", { name: "Fullscreen" }))
+    const dialog = await screen.findByRole("dialog")
+    const links = await waitFor(() => {
+      const found = dialog.querySelectorAll('[role="link"]')
+      expect(found).toHaveLength(1)
+      return found
+    })
+    fireEvent.click(links[0]!)
+    expect(open).toHaveBeenCalledExactlyOnceWith("src/a.ts")
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+  })
+})

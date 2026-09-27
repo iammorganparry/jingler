@@ -44,3 +44,18 @@ export async function persistPlanStatuses(
     if (pendingWrites.get(planFilePath) === operation) pendingWrites.delete(planFilePath)
   }
 }
+
+/**
+ * Remembers the text each plan file had when it was last sent for review.
+ * `begin` returns the previous reviewed text only when the resubmission changed it.
+ */
+export const createReviewedContent = () => {
+  const reviewed = new Map<string, string>()
+  return {
+    begin(path: string, content: string): string | null {
+      const prior = reviewed.get(path)
+      reviewed.set(path, content)
+      return prior !== undefined && prior !== content ? prior : null
+    }
+  }
+}
