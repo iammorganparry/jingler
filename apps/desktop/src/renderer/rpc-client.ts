@@ -84,6 +84,7 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Usage,
+  UsageReport,
   WorkspaceConfig,
   RuntimeDiagnosticSnapshot,
   ModelCertification,
@@ -710,6 +711,8 @@ export const rpc = {
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),
+  usageReport: (): Promise<UsageReport> => run((c) => c.Usage.report()),
+  usageExport: (): Promise<string> => run((c) => c.Usage.export()),
   /** A session's context accounting — drives the meter and the Settings list. */
   contextState: (sessionId: string, chatId: string): Promise<ContextSnapshot> =>
     run((c) => c.Context.state({ sessionId, chatId })),
@@ -827,11 +830,14 @@ export const rpc = {
   /** Turn plan mode's unattended (read-only) command execution on or off. */
   configSetDefaultMode: (defaultMode: ExecutionMode): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setDefaultMode({ defaultMode })),
+  configSetSubagentDelegationEnabled: (enabled: boolean): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setSubagentDelegationEnabled({ enabled })),
   configSetSubagentModel: (
+    providerId: ProviderId,
     agent: JinglerSubagentName,
     modelId: ProviderModelId | null
   ): Promise<WorkspaceConfig> =>
-    run((c) => c.Config.setSubagentModel({ agent, modelId })),
+    run((c) => c.Config.setSubagentModel({ providerId, agent, modelId })),
   configSetPlanAutoRun: (planAutoRun: boolean): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanAutoRun({ planAutoRun })),
   /** Persist ADHD mode; resolves with the whole updated config. */

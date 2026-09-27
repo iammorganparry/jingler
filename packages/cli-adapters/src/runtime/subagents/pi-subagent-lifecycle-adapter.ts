@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto"
 import type { EventBus } from "@earendil-works/pi-coding-agent"
+import type {
+  SubagentDelegationRequest,
+  SubagentDelegationResponse,
+  SubagentDelegationUpdate
+} from "pi-subagents/delegation"
 import {
   SUBAGENT_FLEET_PROTOCOL_VERSION,
   subagentFleetNodeId,
@@ -45,6 +50,10 @@ const ASYNC_COMPLETE_EVENT = "subagent:async-complete"
 const FOREGROUND_COMPLETE_EVENT = "subagent:foreground-complete"
 const PROCESS_TERMINAL_EVENT = "subagent:process-terminal"
 const SUPERVISOR_ATTENTION_EVENT = "pi-intercom:detach-request"
+const DELEGATION_REQUEST_EVENT = "prompt-template:subagent:request"
+const DELEGATION_UPDATE_EVENT = "prompt-template:subagent:update"
+const DELEGATION_RESPONSE_EVENT = "prompt-template:subagent:response"
+const DELEGATION_CANCEL_EVENT = "prompt-template:subagent:cancel"
 const RPC_TIMEOUT_MS = 5_000
 /**
  * How long a non-terminal workflow header may sit unknown to both the harness
@@ -128,7 +137,9 @@ const ResultUsage = Schema.Struct({
   cacheRead: Schema.Number,
   cacheWrite: Schema.Number,
   cost: Schema.Number,
-  turns: Schema.Number
+  turns: Schema.Number,
+  durationMs: Schema.optional(Schema.Number),
+  toolCalls: Schema.optional(Schema.Number)
 })
 const CompletionChild = Schema.Struct({
   index: Schema.optional(Schema.Number),
@@ -288,8 +299,8 @@ const usageFor = (
       outputTokens: usage.output,
       totalTokens: usage.input + usage.output,
       costUsd: usage.cost,
-      durationMs: 0,
-      toolCalls: 0
+      durationMs: usage.durationMs ?? 0,
+      toolCalls: usage.toolCalls ?? 0
     }
   : emptyUsage()
 
@@ -333,6 +344,16 @@ export interface PiSubagentSupervisorAttentionInput {
   readonly deadlineAt: number | null
 }
 
+export interface PiSubagentCompletedInput {
+  readonly runId: string
+  readonly parentRunId: string
+  readonly model: string | null
+  readonly startedAt: number
+  readonly endedAt: number
+  readonly usage: typeof ResultUsage.Type | undefined
+  readonly outcome: "success" | "error" | "cancelled"
+}
+
 export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
   readonly parentRuntimeSessionId: string
@@ -341,6 +362,7 @@ export interface PiSubagentLifecycleAdapterOptions {
   readonly emit: (event: SubagentFleetEvent) => void
   readonly trustedSessionRoots?: ReadonlyArray<string>
   readonly controlJournal?: SubagentControlJournal | null
+  readonly onChildCompleted?: (input: PiSubagentCompletedInput) => void
   readonly now?: () => number
 }
 
@@ -350,6 +372,7 @@ export class PiSubagentLifecycleAdapter {
   readonly #parentRuntimeSessionIds: ReadonlySet<string>
   readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
+  readonly #onChildCompleted: PiSubagentLifecycleAdapterOptions["onChildCompleted"]
   readonly #now: () => number
   readonly #supervision: SubagentSupervisionServiceShape
   readonly #transcripts: PiSubagentTranscriptReaderShape
@@ -364,6 +387,7 @@ export class PiSubagentLifecycleAdapter {
     ])
     this.#asyncRunsDir = options.asyncRunsDir
     this.#emitExternal = options.emit
+    this.#onChildCompleted = options.onChildCompleted
     this.#now = options.now ?? Date.now
     this.#trustedSessionRoots = new Set(options.trustedSessionRoots ?? [])
     this.#supervision = Effect.runSync(
@@ -423,6 +447,55 @@ export class PiSubagentLifecycleAdapter {
       sessionFile,
       trustedRoots: [...this.#trustedSessionRoots]
     }))
+  }
+
+  delegate(
+    request: SubagentDelegationRequest,
+    signal: AbortSignal,
+    onUpdate: (update: SubagentDelegationUpdate) => void = () => undefined
+  ): Promise<SubagentDelegationResponse> {
+    return new Promise((resolve, reject) => {
+      const matches = (value: { requestId: string; ownerRunId: string; nodeId: string }) =>
+        value.requestId === request.requestId &&
+        value.ownerRunId === request.ownerRunId &&
+        value.nodeId === request.nodeId
+      const cancel = () => this.#events.emit(DELEGATION_CANCEL_EVENT, {
+        requestId: request.requestId,
+        ownerRunId: request.ownerRunId,
+        nodeId: request.nodeId
+      })
+      const timeout = setTimeout(() => finish(() => {
+        cancel()
+        reject(new Error("PI subagent delegation timed out"))
+      }), (request.timeoutMs ?? 30 * 60_000) + 5_000)
+      const unsubscribeUpdate = this.#events.on(DELEGATION_UPDATE_EVENT, (payload) => {
+        const update = payload as SubagentDelegationUpdate
+        if (matches(update)) onUpdate(update)
+      })
+      const unsubscribeResponse = this.#events.on(DELEGATION_RESPONSE_EVENT, (payload) => {
+        const response = payload as SubagentDelegationResponse
+        if (
+          response.requestId !== request.requestId ||
+          response.ownerRunId !== undefined && response.ownerRunId !== request.ownerRunId ||
+          response.nodeId !== undefined && response.nodeId !== request.nodeId
+        ) return
+        finish(() => resolve(response))
+      })
+      const onAbort = () => finish(() => {
+        cancel()
+        reject(new Error("PI subagent delegation cancelled"))
+      })
+      const finish = (settle: () => void) => {
+        clearTimeout(timeout)
+        unsubscribeUpdate()
+        unsubscribeResponse()
+        signal.removeEventListener("abort", onAbort)
+        settle()
+      }
+      signal.addEventListener("abort", onAbort, { once: true })
+      if (signal.aborted) onAbort()
+      else this.#events.emit(DELEGATION_REQUEST_EVENT, request)
+    })
   }
 
   replay(afterRevision = 0): ReadonlyArray<SubagentFleetEvent> {
@@ -1256,6 +1329,8 @@ export class PiSubagentLifecycleAdapter {
     const existing = this.#state().tree.nodes.find(
       (node) => node.subagentId === subagentId
     )
+    const startedAt = existing?.startedAt ?? input.startedAt
+    const model = input.child.model ?? existing?.model ?? null
     this.#publish({
       _tag: "Upsert",
       version: SUBAGENT_FLEET_PROTOCOL_VERSION,
@@ -1275,13 +1350,26 @@ export class PiSubagentLifecycleAdapter {
         background: input.background,
         sessionFile: input.child.sessionPath ?? input.child.sessionFile ?? existing?.sessionFile ?? null,
         currentTool: null,
-        startedAt: existing?.startedAt ?? input.startedAt,
+        startedAt,
         updatedAt: input.now,
         completedAt: input.now,
         usage: usageFor(input.child.usage),
         artifacts: artifactsFor(input.child),
         attention: null
       }
+    })
+    this.#onChildCompleted?.({
+      runId: subagentId,
+      parentRunId: input.completion.runId,
+      model,
+      startedAt,
+      endedAt: input.now,
+      usage: input.child.usage,
+      outcome: input.child.stopped || input.child.interrupted || input.child.timedOut
+        ? "cancelled"
+        : input.child.success === false
+          ? "error"
+          : "success"
     })
   }
 

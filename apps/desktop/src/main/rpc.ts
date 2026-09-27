@@ -70,6 +70,7 @@ import {
   isSessionPublishBranchReady,
   runPublishMachineExclusive,
   UsageService,
+  UsageFactStore,
   fetchPiProviderUsage,
   routePeerAgentMessage,
   adoptableChatIdentities,
@@ -98,7 +99,7 @@ import { appendFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   AssetUnsupportedError,
   AuthError,
@@ -5178,6 +5179,22 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
       Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),
     ),
+  "Usage.report": () =>
+    AppPaths.pipe(
+      Effect.flatMap((paths) => Effect.tryPromise({
+        try: () => new UsageFactStore(join(paths.runJournalsDir, "usage-facts.json")).report(),
+        catch: (cause) => new Error("Could not read the execution usage report", { cause })
+      })),
+      Effect.orDie
+    ),
+  "Usage.export": () =>
+    AppPaths.pipe(
+      Effect.flatMap((paths) => Effect.tryPromise({
+        try: () => new UsageFactStore(join(paths.runJournalsDir, "usage-facts.json")).exportJson(),
+        catch: (cause) => new Error("Could not export execution usage", { cause })
+      })),
+      Effect.orDie
+    ),
   "Context.state": ({ sessionId, chatId }) =>
     ContextManager.bindContext(chatId, sessionId).pipe(
       Effect.zipRight(ContextManager.snapshot(chatId)),
@@ -5223,8 +5240,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
     ConfigService.setDefaultMode(defaultMode),
-  "Config.setSubagentModel": ({ agent, modelId }) =>
-    ConfigService.setSubagentModel(agent, modelId),
+  "Config.setSubagentDelegationEnabled": ({ enabled }) =>
+    ConfigService.setSubagentDelegationEnabled(enabled),
+  "Config.setSubagentModel": ({ providerId, agent, modelId }) =>
+    ConfigService.setSubagentModel(providerId, agent, modelId),
   "Config.setPlanAutoRun": ({ planAutoRun }) =>
     ConfigService.setPlanAutoRun(planAutoRun),
   "Config.setAdhdMode": ({ adhdMode }) => ConfigService.setAdhdMode(adhdMode),

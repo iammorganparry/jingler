@@ -20,7 +20,8 @@ import type {
   QuestionRequest,
   ReasoningSetting,
   Session,
-  StreamEvent
+  StreamEvent,
+  UsageFact
 } from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
@@ -76,6 +77,7 @@ import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
+import { UsageFactStore } from "./usage-facts.js"
 import { ExplanationStore } from "./explanation-store.js"
 import {
   appendSteeredReply,
@@ -978,8 +980,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               }))
             )
 
+          const recordUsage = (fact: UsageFact) =>
+            AppPaths.pipe(
+              Effect.flatMap((paths) => Effect.tryPromise({
+                try: () => new UsageFactStore(
+                  join(paths.runJournalsDir, "usage-facts.json")
+                ).record(fact),
+                catch: (cause) => cause
+              })),
+              Effect.provide(env),
+              Effect.catchAll((cause) => Effect.sync(() => {
+                console.error("Failed to persist execution usage", cause)
+              }))
+            )
           const adapterRun = adapter.run(chatId, spec, {
             emit,
+            recordUsage,
             canUseTool,
             askQuestion,
             publishExplanation,

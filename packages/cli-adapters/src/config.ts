@@ -7,14 +7,15 @@ import type {
   OffloadComputeSettings,
   PlanTemplateConfig,
   ProviderConnectionId,
-  ProviderId,
   ProviderModelId,
   JinglerSubagentName,
+  SubagentProviderModelAssignments,
   WebSearchConfig,
 } from "@jingler/core"
 import {
   clampFontScale,
   DEFAULT_THEME_ID,
+  ProviderId,
   WEB_SEARCH_CONFIG_DEFAULT,
   WebSearchConfig as WebSearchConfigSchema,
   WorkspaceConfig
@@ -33,17 +34,34 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   const truthyKeys = [
     "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "subagentModels", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
+    "subagentModels", "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
   const definedKeys = [
-    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "fontScale"
+    "connectionSelectionRequired", "providerSetupCompleted", "planAutoRun", "adhdMode", "fontScale",
+    "subagentDelegationEnabled"
   ] as const
   return Object.fromEntries([
     ...truthyKeys.filter((key) => Boolean(existing[key])).map((key) => [key, existing[key]]),
     ...definedKeys.filter((key) => existing[key] !== undefined).map((key) => [key, existing[key]])
   ])
+}
+
+const scopedSubagentAssignments = (
+  existing: WorkspaceConfig | null
+): SubagentProviderModelAssignments => {
+  const scoped: Record<string, Partial<Record<JinglerSubagentName, ProviderModelId>>> =
+    Object.fromEntries(Object.entries(existing?.subagentModelsByProvider ?? {}).map(
+      ([providerId, assignments]) => [providerId, { ...assignments }]
+    ))
+  for (const [agent, model] of Object.entries(existing?.subagentModels ?? {})) {
+    if (model === undefined) continue
+    const providerId = String(model).split("/", 1)[0]!
+    scoped[providerId] ??= {}
+    scoped[providerId]![agent as JinglerSubagentName] ??= model
+  }
+  return scoped as SubagentProviderModelAssignments
 }
 
 const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
@@ -164,14 +182,23 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       /** Permission mode used when creating chats across every provider model. */
       const setDefaultMode = (defaultMode: ExecutionMode) => patch({ defaultMode })
 
+      const setSubagentDelegationEnabled = (subagentDelegationEnabled: boolean) =>
+        patch({ subagentDelegationEnabled })
+
       const setSubagentModel = (
+        providerId: ProviderId,
         agent: JinglerSubagentName,
         modelId: ProviderModelId | null
       ) => patch((existing) => {
-        const subagentModels = { ...(existing?.subagentModels ?? {}) }
-        if (modelId === null) delete subagentModels[agent]
-        else subagentModels[agent] = modelId
-        return { subagentModels }
+        const subagentModelsByProvider = {
+          ...scopedSubagentAssignments(existing)
+        } as Record<string, Partial<Record<JinglerSubagentName, ProviderModelId>>>
+        const assignments = { ...(subagentModelsByProvider[providerId] ?? {}) }
+        if (modelId === null) delete assignments[agent]
+        else assignments[agent] = modelId
+        if (Object.keys(assignments).length === 0) delete subagentModelsByProvider[providerId]
+        else subagentModelsByProvider[providerId] = assignments
+        return { subagentModels: {}, subagentModelsByProvider }
       })
 
       /** Whether plan mode runs its (read-only) commands without asking. */
@@ -217,17 +244,12 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         defaultProviderId: ProviderId,
         defaultModelId: ProviderModelId
       ) =>
-        patch((existing) => ({
+        patch({
           defaultConnectionId,
           defaultProviderId,
           defaultModelId,
-          subagentModels: Object.fromEntries(
-            Object.entries(existing?.subagentModels ?? {}).filter(([, model]) =>
-              String(model).startsWith(`${defaultProviderId}/`)
-            )
-          ),
           connectionSelectionRequired: false
-        }))
+        })
 
       /**
        * Switch the active colour theme, preserving any `colorCustomizations`
@@ -299,6 +321,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setGit,
         setNotifications,
         setDefaultMode,
+        setSubagentDelegationEnabled,
         setSubagentModel,
         setPlanAutoRun,
         setAdhdMode,

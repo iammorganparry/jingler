@@ -108,11 +108,13 @@ const useAgentSettings = (
     resources,
     models: FLOW_PROVIDER_CATALOG.connections.flatMap(({ models }) => models),
     modelAssignments: {},
+    delegationEnabled: true,
     detection: FLOW_RESOURCE_DETECTION,
     selectedCandidateIds,
     loading: false,
     reviewing,
     onDetect: noop,
+    onSetDelegationEnabled: noop,
     onSetModel: noop,
     onToggleCandidate: (id) => {
       setSelectedCandidateIds((selected) => {

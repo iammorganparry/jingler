@@ -83,16 +83,9 @@ describe("pi credential store", () => {
     expect(await subscriptionStore.read("anthropic")).toMatchObject({ access: "claude-cli" })
   })
 
-  it("exposes only the current Claude CLI marker as non-refreshing OAuth", async () => {
+  it("synthesizes the non-secret Claude CLI marker without a PI connection credential", async () => {
     const claude = connection("claude-setup-token")
     const credentials = new InMemoryProviderCredentialStore()
-    await Effect.runPromise(credentials.write({
-      connectionId: claude.id,
-      authKind: claude.authKind,
-      access: "claude-cli",
-      refresh: null,
-      expiresAt: null
-    }))
     const store = makePiCredentialStore(claude, credentials)
 
     expect(await store.list()).toEqual([{ providerId: "anthropic", type: "oauth" }])

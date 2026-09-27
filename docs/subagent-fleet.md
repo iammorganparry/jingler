@@ -11,6 +11,12 @@ Jingler ships `pi-subagents` with its managed Pi runtime and presents each deleg
 - When a child finishes, its live tab closes automatically. Its transcript and final output remain available from the tab row's **Previous chats** menu.
 - Background children remain visible after the parent turn settles. Missing processes are reconciled to `unknown`, never left falsely running.
 
+## Native harness delegation
+
+Native Claude, Codex, and OpenCode expose the same bounded single-child `subagent` call for foreground work. Claude uses Jingler's bundled PI extension and its non-secret local CLI route marker; it does not require a configured PI provider connection. Codex and OpenCode start fresh native child sessions through their existing authenticated CLIs. Settings store role-to-model overrides per provider, and an empty role inherits that provider's parent model.
+
+This foreground path is deliberately not advertised as fleet parity. Workflows, detached children, restart recovery, transcripts, and post-turn controls still require a retained PI parent session and remain unavailable to native-only parents until the retained-host slice lands.
+
 ## Agent launch contract
 
 Self-implementation stays in the parent chat. An agent must not launch a workflow or a child named `main` as a proxy for work it is doing itself.

@@ -34,7 +34,13 @@ export const prepareNativeRuntimeTools = (
         {
           id: "runtime.tool-transport", kind: "tools", trust: "trusted", required: true, version: "1",
           content: `The active catalog uses canonical Jingler tool IDs. Their callable names in this harness are ${spec.runtimeId === "opencode" ? "jingler_" : "mcp__jingler__"}<tool ID>. These names refer to the same tools, not extra capabilities. Use those callable names. If the harness defers MCP tools, use its native tool discovery to load the matching Jingler tool before calling it.`
-        }
+        },
+        ...(registry.capabilitiesFor(spec.role, spec.mode).some(({ id }) => id === "subagent")
+          ? [{
+              id: "runtime.delegation-default", kind: "role" as const, trust: "trusted" as const, required: true, version: "1",
+              content: "Delegate bounded code generation, research, review, and scouting to the configured subagent role by default when it is material work. Keep trivial work local. The parent coordinates and verifies the result."
+            }]
+          : [])
       ],
       tools: registry.capabilitiesFor(spec.role, spec.mode),
       tokenBudget: 8_000

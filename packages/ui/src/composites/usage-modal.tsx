@@ -1,7 +1,8 @@
 import { Spin } from "../components/spin.js"
-import type { ProviderUsage, Usage, UsageStatus, UsageWindow } from "@jingler/core"
+import type { ProviderUsage, Usage, UsageReport, UsageStatus, UsageWindow } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
 import { Badge } from "../components/badge.js"
+import { Button } from "../components/button.js"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
@@ -93,6 +94,25 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
   )
 }
 
+function ReportSection({ report, onExport }: { report: UsageReport; onExport?: () => Promise<void> | void }) {
+  return (
+    <div className="border-t border-hairline py-[14px]">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-[12px] font-semibold text-text-bright">Execution report</div>
+        {onExport && <Button size="sm" variant="ghost" onClick={() => void onExport()}>Export JSON</Button>}
+      </div>
+      {report.groups.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">No completed parent or child runs recorded.</div>
+      ) : report.groups.map((group) => (
+        <div key={`${group.runtimeId}:${group.providerId}:${group.modelId}:${group.kind}`} className="flex items-center justify-between py-1 text-[11px] text-muted-foreground">
+          <span>{group.runtimeId} · {group.modelId} · {group.kind}</span>
+          <span>{group.runCount} runs · {Math.round((group.successRate ?? 0) * 100)}% ok · {group.totalTokens} tokens · {group.toolCalls} tools · {group.costCoverage === 1 ? `$${group.knownCostUsd.toFixed(2)}` : "cost partial"}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /**
  * The Usage & limits modal: per-provider session/weekly windows as status-tinted
  * bars. Provider connections report usage through their pinned authentication
@@ -101,13 +121,17 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
 export function UsageModal({
   open,
   usage,
+  report,
   loading = false,
+  onExport,
   onClose
 }: {
   open: boolean
   usage?: Usage | null
+  report?: UsageReport | null
   /** A usage fetch is in flight (the live read takes a couple of seconds). */
   loading?: boolean
+  onExport?: () => Promise<void> | void
   onClose?: () => void
 }) {
   const providers = usage?.providers ?? []
@@ -133,6 +157,7 @@ export function UsageModal({
               No provider connections are configured on this machine.
             </div>
           )}
+          {report && <ReportSection report={report} onExport={onExport} />}
         </DialogBody>
         <DialogFooter className="justify-start text-[11px] text-muted-foreground">
           <Spin active={loading}><RefreshCw size={12} /></Spin>

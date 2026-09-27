@@ -10,6 +10,20 @@ import type {
   StoredProviderCredential
 } from "./credential-store.js"
 
+export const claudeCliRouteCredential = (
+  connection: ProviderConnection
+): StoredProviderCredential | null =>
+  connection.authKind === "claude-setup-token" &&
+  connection.subscription.observedRoute === "claude-cli:subscription"
+    ? {
+        connectionId: connection.id,
+        authKind: "claude-setup-token",
+        access: "claude-cli",
+        refresh: null,
+        expiresAt: null
+      }
+    : null
+
 const toPiCredentialValue = (
   credential: StoredProviderCredential
 ): Credential =>
@@ -84,13 +98,13 @@ export const makePiCredentialStore = (
   return {
     read: async (providerId) => {
       if (providerId !== connection.providerId) return 
-      const credential = await Effect.runPromise(credentials.read(connection.id))
-      return credential === null
-        ? undefined
-        : toPiCredential(connection, credential)
+      const credential = await Effect.runPromise(credentials.read(connection.id)) ??
+        claudeCliRouteCredential(connection)
+      return credential === null ? undefined : toPiCredential(connection, credential)
     },
     list: async (): Promise<ReadonlyArray<CredentialInfo>> => {
-      const credential = await Effect.runPromise(credentials.read(connection.id))
+      const credential = await Effect.runPromise(credentials.read(connection.id)) ??
+        claudeCliRouteCredential(connection)
       if (credential === null) return []
       return [{
         providerId: connection.providerId,
@@ -100,16 +114,11 @@ export const makePiCredentialStore = (
     modify: (providerId, change) =>
       serial(async () => {
         if (providerId !== connection.providerId) return 
-        const current = await Effect.runPromise(credentials.read(connection.id))
-        const next = await change(
-          current === null
-            ? undefined
-            : toPiCredential(connection, current)
-        )
-        if (next !== undefined) {
-          await Effect.runPromise(
-            credentials.write(fromPiCredential(connection, next))
-          )
+        const stored = await Effect.runPromise(credentials.read(connection.id))
+        const current = stored ?? claudeCliRouteCredential(connection)
+        const next = await change(current === null ? undefined : toPiCredential(connection, current))
+        if (next !== undefined && stored !== null) {
+          await Effect.runPromise(credentials.write(fromPiCredential(connection, next)))
         }
         return next
       }),

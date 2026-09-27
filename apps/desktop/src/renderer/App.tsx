@@ -21,8 +21,11 @@ import type {
   JinglerSubagentName,
   ProviderCatalog,
   ProviderCatalogModel,
-  ProviderConnectionId,
+  ProviderId,
   ProviderModelId,
+  UsageReport,
+  WorkspaceConfig,
+  SubagentProviderModelAssignments,
   NotificationsConfig,
   OffloadComputeSettings,
   PublishCheckpoint,
@@ -131,11 +134,25 @@ const PR_STATE_STALE_MS = 5 * 60_000;
 
 const subagentModelsFor = (
   catalog: ProviderCatalog | null,
-  connectionId: ProviderConnectionId | null,
-): ReadonlyArray<ProviderCatalogModel> =>
-  catalog?.connections
-    .find(({ connection }) => connection.id === connectionId)
-    ?.models.filter(({ selectable }) => selectable) ?? [];
+  endpoints: AgentEndpointCatalog | null,
+): ReadonlyArray<ProviderCatalogModel> => [
+  ...new Map([
+    ...(catalog?.connections ?? [])
+      .filter(({ connection }) => connection.status === "authenticated")
+      .flatMap(({ models }) => models.filter(({ selectable }) => selectable)),
+    ...(endpoints?.endpoints ?? [])
+      .filter(({ endpoint }) => endpoint.runtimeId !== "pi" && endpoint.status === "ready")
+      .flatMap(({ endpoint, models }) => models.filter(({ selectable }) => selectable).map((model) => ({
+        providerId: model.providerId,
+        id: model.id,
+        label: `${model.label} · ${endpoint.label}`,
+        capabilities: model.capabilities,
+        verification: model.verification,
+        selectable: model.selectable,
+        certificationKey: model.certificationKey
+      })))
+  ].map((model) => [model.id, model] as const)).values(),
+];
 
 /**
  * How long a relay connection must stay troubled before the "reconnecting"
@@ -143,6 +160,20 @@ const subagentModelsFor = (
  * surface; a genuine outage outlasts it and does.
  */
 const RELAY_UNHEALTHY_GRACE_MS = 4_000;
+const delegationEnabled = (configured: boolean | undefined): boolean => configured !== false;
+const subagentAssignments = (
+  config: WorkspaceConfig | null | undefined,
+): SubagentProviderModelAssignments => {
+  if (config?.subagentModelsByProvider) return config.subagentModelsByProvider;
+  const scoped: Record<string, Record<string, ProviderModelId>> = {};
+  for (const [agent, model] of Object.entries(config?.subagentModels ?? {})) {
+    if (!model) continue;
+    const providerId = String(model).split("/", 1)[0]!;
+    scoped[providerId] ??= {};
+    scoped[providerId]![agent] = model;
+  }
+  return scoped as SubagentProviderModelAssignments;
+};
 
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
@@ -391,6 +422,11 @@ function AuthedApp({
     queryFn: () => rpc.usageGet(),
     enabled: false,
   });
+  const usageReportQuery = useQuery<UsageReport>({
+    queryKey: ["usage-report"],
+    queryFn: () => rpc.usageReport(),
+    enabled: false,
+  });
 
   const { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
   useEffect(() => {
@@ -431,7 +467,17 @@ function AuthedApp({
   });
 
   // The usage modal loads on open; GitHub refreshes live through its machine.
-  const loadUsage = () => usageQuery.refetch().then(() => undefined);
+  const loadUsage = () => Promise.all([usageQuery.refetch(), usageReportQuery.refetch()]).then(() => undefined);
+  const exportUsage = async () => {
+    const json = await rpc.usageExport();
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "jingler-usage-report.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
   const saveGithubConfig = (config: GithubConfig) =>
     rpc.configSetGithub(config).then((saved) => {
       qc.setQueryData(["config"], saved);
@@ -451,11 +497,16 @@ function AuthedApp({
     rpc.configSetDefaultMode(value).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
+  const saveSubagentDelegationEnabled = (enabled: boolean) =>
+    rpc.configSetSubagentDelegationEnabled(enabled).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
   const saveSubagentModel = (
+    providerId: ProviderId,
     agent: JinglerSubagentName,
     modelId: ProviderModelId | null,
   ) =>
-    rpc.configSetSubagentModel(agent, modelId).then((saved) => {
+    rpc.configSetSubagentModel(providerId, agent, modelId).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const savePlanAutoRun = (value: boolean) =>
@@ -1323,7 +1374,9 @@ function AuthedApp({
         prStates={prStates}
         liveDiff={liveDiff}
         usage={usage}
+        usageReport={usageReportQuery.data ?? null}
         onLoadUsage={loadUsage}
+        onExportUsage={exportUsage}
         githubConfig={githubConfig}
         onSaveGithubConfig={saveGithubConfig}
         gitConfig={gitConfig}
@@ -1421,8 +1474,9 @@ function AuthedApp({
         }}
         agents={{
           resources: agentsSettings.snapshot.context.resources,
-          models: subagentModelsFor(providerCatalog.catalog, defaultConnectionId),
-          modelAssignments: configQuery.data?.subagentModels ?? {},
+          models: subagentModelsFor(providerCatalog.catalog, agentEndpointCatalog),
+          modelAssignments: subagentAssignments(configQuery.data),
+          delegationEnabled: delegationEnabled(configQuery.data?.subagentDelegationEnabled),
           detection: agentsSettings.snapshot.context.detection,
           selectedCandidateIds:
             agentsSettings.snapshot.context.selectedCandidateIds,
@@ -1434,6 +1488,7 @@ function AuthedApp({
           reviewing: agentsSettings.snapshot.matches("reviewing"),
           error: agentsSettings.snapshot.context.error,
           onDetect: () => agentsSettings.send({ type: "DETECT" }),
+          onSetDelegationEnabled: saveSubagentDelegationEnabled,
           onSetModel: saveSubagentModel,
           onToggleCandidate: (id) =>
             agentsSettings.send({ type: "TOGGLE_CANDIDATE", id }),

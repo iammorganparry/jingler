@@ -7,7 +7,7 @@ import type {
 } from "@jingler/core"
 import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
-import { toPiCredential } from "../auth/pi-credential-store.js"
+import { claudeCliRouteCredential, toPiCredential } from "../auth/pi-credential-store.js"
 
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
 
@@ -57,7 +57,10 @@ export class PiChildCredentials {
     }
     return Effect.all(connections.map((connection) =>
       this.credentials.read(connection.id).pipe(
-        Effect.map((stored) => ({ connection, stored }))
+        Effect.map((stored) => ({
+          connection,
+          stored: stored ?? claudeCliRouteCredential(connection)
+        }))
       )
     )).pipe(
       Effect.mapError(
