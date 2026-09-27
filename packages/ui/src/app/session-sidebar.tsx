@@ -51,6 +51,10 @@ export interface SessionSidebarProps {
   /** Global command search shown below the sidebar header. */
   search?: React.ReactNode
   workspaceView?: "sessions" | "explorer"
+  /** Hold the sidebar as a rail regardless of the pin — review Focus mode. */
+  forceCollapsed?: boolean
+  /** Bump to expand (and pin) the sidebar, e.g. when revealing changes in it. */
+  expandRequest?: number
   onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
   explorer?: React.ReactNode
   sessions: ReadonlyArray<Session>
@@ -974,7 +978,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
   // `shellWidth === 0` is the pre-measurement frame; treat it as roomy so the
   // sidebar doesn't flash a rail on every launch before the observer reports.
   const cramped = shellWidth !== 0 && shellWidth < RAIL_THRESHOLD
-  const expanded = pinned ?? !cramped
+  const expanded = !props.forceCollapsed && (pinned ?? !cramped)
 
   const setPin = React.useCallback((next: boolean) => {
     setPinned(next)
@@ -984,6 +988,14 @@ export function SessionSidebar(props: SessionSidebarProps) {
       /* private mode / quota — the pin is still live for this session */
     }
   }, [])
+
+  const expandRequest = props.expandRequest ?? 0
+  const lastExpandRequest = React.useRef(expandRequest)
+  React.useEffect(() => {
+    if (expandRequest === lastExpandRequest.current) return
+    lastExpandRequest.current = expandRequest
+    setPin(true)
+  }, [expandRequest, setPin])
 
   // ⌘B toggles the pin. Deliberately a PIN and not a one-shot open: a toggle
   // that the next resize silently undoes is a control that lies about its state.

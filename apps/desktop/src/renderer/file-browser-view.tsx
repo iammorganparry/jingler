@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import type { AssetPayload, DebugViewSnapshot, Session } from "@jingler/core"
+import type { AssetPayload, DebugViewSnapshot, PrFileChange, Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
@@ -17,13 +17,17 @@ import {
   DiffView,
   FileQuickOpen,
   parsePierreFileDiffs,
-  PierreEditor
+  PierreEditor,
+  ReviewFileDiff
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { useFileBrowser } from "./use-file-browser.js"
+import { setReviewFilter, useSessionReviewState } from "./review-store.js"
+import { useReview } from "./use-review.js"
+import { ChangesExplorerPanel, ExplorerChangesFilter, useChangesReview } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
@@ -151,6 +155,8 @@ export interface FileBrowserViewProps {
   readonly debugSnapshot?: DebugViewSnapshot
   readonly onSendReference?: (reference: CodeReference) => void
   readonly onSendComment?: (body: string, reference: CodeReference) => void
+  /** Whether GitHub is usable for this session — gates PR review findings and posting. */
+  readonly connected?: boolean
   /** Path-owned mode used by nested file splits. */
   readonly path?: string
   readonly onClosed?: () => void
@@ -158,20 +164,48 @@ export interface FileBrowserViewProps {
 
 export interface FileBrowserExplorerProps {
   readonly session: Session
+  /** Whether GitHub is usable for this session — gates PR review findings. */
+  readonly connected?: boolean
   readonly onOpenPath: (path: string) => void
 }
 
-export function FileBrowserExplorer({ session, onOpenPath }: FileBrowserExplorerProps) {
+export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
   const browser = useFileBrowser(session.id, session.worktreePath)
+  const { filter } = useSessionReviewState(session.id, session.prNumber)
+  // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
+  // falls back to the uncommitted changes, and the control must not claim "PR".
+  const { source } = useReview(session)
+  const shownFilter = filter === "all" ? "all" : source
   useEffect(() => browser.activate(), [browser.activate])
+  // A changed file opens on its diff: that is the point of filtering to it.
+  const openChangedPath = (path: string) => {
+    browser.open(path)
+    browser.showDiff()
+    onOpenPath(path)
+  }
 
   return (
     <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
       <div className="flex-none border-b border-hairline px-3 py-2">
         <div className="truncate font-mono text-[10.5px] text-text">{session.branch}</div>
         <div className="truncate text-[10px] text-dim" title={session.worktreePath}>{session.worktreePath}</div>
+        <div className="mt-2">
+          <ExplorerChangesFilter
+            session={session}
+            value={shownFilter}
+            onChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
+          />
+        </div>
       </div>
       <div className="relative min-h-0 flex-1">
+        {filter !== "all" ? (
+          <ChangesExplorerPanel
+            session={session}
+            connected={connected}
+            activePath={browser.selectedPath}
+            onOpenPath={openChangedPath}
+          />
+        ) : (
         <AssetRepositoryTree
           entries={browser.entries}
           selectedPath={browser.selectedPath}
@@ -183,6 +217,7 @@ export function FileBrowserExplorer({ session, onOpenPath }: FileBrowserExplorer
             onOpenPath(path)
           }}
         />
+        )}
       </div>
     </section>
   )
@@ -221,6 +256,7 @@ export function FileBrowserQuickOpen({
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({
   session,
+  connected = false,
   debugSnapshot,
   onSendReference,
   onSendComment,
@@ -233,6 +269,7 @@ export function FileBrowserView({
     path === undefined ? undefined : `file:${path}`
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
+  const changes = useChangesReview(session, connected)
   const debugFrame = debug.snapshot.session?.status === "stopped"
     ? (debug.snapshot.session.frame ?? null)
     : null
@@ -400,6 +437,9 @@ export function FileBrowserView({
             <div className="min-w-0 flex-1">
               <FileCanvas
                 sessionId={session.id}
+                sessionTitle={session.title}
+                changes={changes}
+                connected={connected}
                 browser={browser}
                 nativeAvailable={nativeAvailable}
                 selection={selection}
@@ -468,6 +508,9 @@ const fileDiffIsLoading = (browser: FileBrowserController): boolean =>
 
 function FileCanvas({
   sessionId,
+  sessionTitle,
+  changes,
+  connected,
   browser,
   nativeAvailable,
   selection,
@@ -481,6 +524,9 @@ function FileCanvas({
   debugRevision
 }: {
   readonly sessionId: string
+  readonly sessionTitle: string
+  readonly changes: ChangesReview
+  readonly connected: boolean
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
   readonly selection: JinglerLineSelection | null
@@ -548,6 +594,20 @@ function FileCanvas({
   )
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
+  }
+  const reviewFile = reviewFileFor(browser, changes)
+  if (reviewFile !== null) {
+    return renderDiffContainer(
+      browser,
+      followedSelection,
+      <ReviewDiffCanvas
+        sessionId={sessionId}
+        sessionTitle={sessionTitle}
+        changes={changes}
+        connected={connected}
+        file={reviewFile}
+      />
+    )
   }
   const oversizedDiff = visibleOversizedDiff(browser)
   const shownFileDiff = visibleFileDiff(browser, fileDiff)
@@ -723,6 +783,77 @@ function FileDiffCanvas({
           stickyHeader: false,
           disableFileHeader: true
         }}
+      />
+      <TokenHoverTooltip hover={tokenHover.hover} />
+    </div>
+  )
+}
+
+type ChangesReview = ReturnType<typeof useChangesReview>
+
+/**
+ * A file in the review's change set shows its REVIEW diff — against the PR or
+ * the uncommitted work, whichever the Explorer is filtered to — with drafts,
+ * threads, findings, viewed and reverts, rather than the bare patch.
+ * Unfiltered, the Files view keeps its live diff (follow-agent, add to chat).
+ */
+const reviewFileFor = (
+  browser: FileBrowserController,
+  changes: ChangesReview
+): PrFileChange | null =>
+  browser.viewMode === "diff" && changes.review.filter !== "all"
+    ? (changes.review.files.find((file) => file.path === browser.selectedPath) ?? null)
+    : null
+
+function ReviewDiffCanvas({
+  sessionId,
+  sessionTitle,
+  changes,
+  connected,
+  file
+}: {
+  readonly sessionId: string
+  readonly sessionTitle: string
+  readonly changes: ChangesReview
+  readonly connected: boolean
+  readonly file: PrFileChange
+}) {
+  const { review, adversarial } = changes
+  const path = file.path
+  const diff = review.fileDiffs.find((entry) => entry.path === path)?.diff ?? ""
+  const query = useCallback(async (token: BrowserToken, signal: AbortSignal): Promise<TokenHoverContent | null> => {
+    const symbol = token.tokenText.trim()
+    if (token.side === "deletions" || !DEBUG_HOVER_IDENTIFIER.test(symbol)) return null
+    return semanticTokenHover(sessionId, path, symbol, token, undefined, signal)
+  }, [path, sessionId])
+  const tokenHover = useDelayedTokenHover(query)
+  // Stable wrappers: Pierre force-redraws a view whose option callbacks change.
+  const { enter, leave } = tokenHover
+  const onTokenEnter = useCallback((token: BrowserToken) => enter(token), [enter])
+  const onTokenLeave = useCallback(() => leave(), [leave])
+  return (
+    <div className="relative h-full min-h-0">
+      <ReviewFileDiff
+        file={file}
+        diff={diff}
+        source={review.source}
+        drafts={review.drafts}
+        reviewThreads={review.reviewThreads}
+        review={review.source === "pr" ? adversarial.review : null}
+        sentFindingIds={adversarial.sentFindingIds}
+        connected={connected}
+        routeTargetSession={sessionTitle}
+        focused={changes.focused}
+        onToggleFocus={changes.toggleFocus}
+        onAddDraft={review.addDraft}
+        onRemoveDraft={review.removeDraft}
+        onToggleViewed={review.toggleViewed}
+        onRevertLines={changes.revertLines}
+        onRevertFile={changes.revertFile}
+        onDeslopFile={changes.deslopFile}
+        onSendFindingToAgent={adversarial.sendFindingToAgent}
+        onTokenEnter={onTokenEnter}
+        onTokenLeave={onTokenLeave}
       />
       <TokenHoverTooltip hover={tokenHover.hover} />
     </div>

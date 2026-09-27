@@ -2,7 +2,8 @@ import { useState } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { PrFileChange, PullRequest as PullRequestData } from "@jingler/core"
 import { LookFor, WidthLadder } from "../story-support.js"
-import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
+import type { ReviewSource } from "./changes-review.js"
+import { ChangesReviewPreview } from "./changes-review-preview.js"
 import { PullRequestView } from "./pull-request-view.js"
 
 const meta: Meta = { title: "Responsive/Panes", parameters: { layout: "fullscreen" } }
@@ -100,10 +101,10 @@ export const CodeReview: Story = {
 }
 
 function CodeReviewPane() {
-  const [source, setSource] = useState<ReviewSource>("pr")
+  const source: ReviewSource = "pr"
   const [activePath, setActivePath] = useState<string | null>(FILES[0]!.path)
   return (
-    <CodeReviewView
+    <ChangesReviewPreview
       files={FILES}
       activePath={activePath}
       fileDiffs={FILE_DIFFS}
@@ -111,14 +112,8 @@ function CodeReviewPane() {
       routeTargetSession="Refactor auth flow"
       connected
       source={source}
-      prAvailable
-      localAvailable
-      onSetSource={setSource}
       onSelectFile={setActivePath}
-      onToggleViewed={() => {}}
       onAddDraft={() => {}}
-      onRemoveDraft={() => {}}
-      onFinishReview={() => {}}
     />
   )
 }

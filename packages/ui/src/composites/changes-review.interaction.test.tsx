@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { CodeView as PierreCodeViewModel } from "@pierre/diffs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
-import { CodeReviewView } from "./code-review-view.js"
+import type { PrFileChange } from "@jingler/core"
+import { ChangedFilesExplorer, ReviewFileDiff } from "./changes-review.js"
 
 const path = "src/session.ts"
 const patch = [
@@ -65,35 +65,36 @@ afterEach(() => {
   }
 })
 
-describe("ReviewCodeView selection", () => {
+const file = (at: string): PrFileChange => ({
+  path: at,
+  additions: 1,
+  deletions: 1,
+  commentCount: 0,
+  viewed: false
+})
+
+const diffProps = {
+  drafts: [],
+  connected: true,
+  routeTargetSession: "Session",
+  focused: false,
+  onToggleFocus: () => {},
+  onAddDraft: () => {},
+  onRemoveDraft: () => {},
+  onToggleViewed: () => {}
+} as const
+
+describe("ReviewFileDiff selection", () => {
   it("uses Pierre's old-side inclusive selection to place and submit the composer", async () => {
     const onAddDraft = vi.fn()
     render(
       <WidthTierValue width={1_240}>
-        <CodeReviewView
-          files={[
-            {
-              path,
-              additions: 1,
-              deletions: 1,
-              commentCount: 0,
-              viewed: false
-            }
-          ]}
-          activePath={path}
-          fileDiffs={[{ path, diff: patch }]}
-          drafts={[]}
-          routeTargetSession="Session"
-          connected
+        <ReviewFileDiff
+          {...diffProps}
+          file={file(path)}
+          diff={patch}
           source="local"
-          prAvailable={false}
-          localAvailable
-          onSetSource={() => {}}
-          onSelectFile={() => {}}
-          onToggleViewed={() => {}}
           onAddDraft={onAddDraft}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
         />
       </WidthTierValue>
     )
@@ -110,51 +111,23 @@ describe("ReviewCodeView selection", () => {
       body: "Keep the legacy contract.",
       routeToAgent: true
     })
-    expect(
-      screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)
-    ).toBeNull()
+    expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull()
   })
 
-  it("renders a hierarchical status-aware tree with model-owned keyboard focus", async () => {
+  it("renders a hierarchical status-aware changed-files tree with model-owned keyboard focus", async () => {
     const otherPath = "src/store.ts"
     const onSelectFile = vi.fn()
-    const scrollTo = vi.spyOn(PierreCodeViewModel.prototype, "scrollTo")
     render(
       <WidthTierValue width={1_240}>
-        <CodeReviewView
-          files={[
-            {
-              path,
-              additions: 1,
-              deletions: 1,
-              commentCount: 0,
-              viewed: false
-            },
-            {
-              path: otherPath,
-              additions: 1,
-              deletions: 1,
-              commentCount: 0,
-              viewed: false
-            }
-          ]}
-          activePath={path}
+        <ChangedFilesExplorer
+          files={[file(path), file(otherPath)]}
           fileDiffs={[
             { path, diff: patch },
             { path: otherPath, diff: patch.replaceAll(path, otherPath) }
           ]}
           drafts={[]}
-          routeTargetSession="Session"
-          connected
-          source="local"
-          prAvailable={false}
-          localAvailable
-          onSetSource={() => {}}
+          activePath={path}
           onSelectFile={onSelectFile}
-          onToggleViewed={() => {}}
-          onAddDraft={() => {}}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
         />
       </WidthTierValue>
     )
@@ -174,7 +147,7 @@ describe("ReviewCodeView selection", () => {
     )!
 
     expect(
-      treeHost.shadowRoot!.querySelector('[data-item-type="folder"]')
+      treeHost.shadowRoot!.querySelector("[data-item-type=folder]")
     ).toBeTruthy()
     expect(first.getAttribute("aria-level")).toBe("2")
     expect(first.dataset.itemGitStatus).toBe("modified")
@@ -185,33 +158,16 @@ describe("ReviewCodeView selection", () => {
     expect(second.getAttribute("role")).toBe("treeitem")
     fireEvent.click(second)
     expect(onSelectFile).toHaveBeenCalledWith(otherPath)
-    await waitFor(() =>
-      expect(scrollTo).toHaveBeenCalledWith({
-        type: "item",
-        id: otherPath,
-        align: "start",
-        behavior: "smooth"
-      })
-    )
-
-    scrollTo.mockClear()
-    await selectOldLineOne()
-    expect(scrollTo).not.toHaveBeenCalled()
   })
 
   it("mounts saved drafts and GitHub threads as persistent Pierre annotations", async () => {
     render(
       <WidthTierValue width={1_240}>
-        <CodeReviewView
-          files={[
-            {
-              path,
-              additions: 1,
-              deletions: 1,
-              commentCount: 0,
-              viewed: false
-            }
-          ]}
+        <ReviewFileDiff
+          {...diffProps}
+          file={file(path)}
+          diff={patch}
+          source="pr"
           reviewThreads={[
             {
               id: "thread-1",
@@ -240,8 +196,6 @@ describe("ReviewCodeView selection", () => {
               ]
             }
           ]}
-          activePath={path}
-          fileDiffs={[{ path, diff: patch }]}
           drafts={[
             {
               id: "draft-1",
@@ -252,24 +206,13 @@ describe("ReviewCodeView selection", () => {
               routeToAgent: false
             }
           ]}
-          routeTargetSession="Session"
-          connected
-          source="pr"
-          prAvailable
-          localAvailable={false}
-          onSetSource={() => {}}
-          onSelectFile={() => {}}
-          onToggleViewed={() => {}}
-          onAddDraft={() => {}}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
         />
       </WidthTierValue>
     )
 
     expect(
       (await screen.findAllByText("This draft stays attached too.")).length
-    ).toBeGreaterThanOrEqual(2)
+    ).toBeGreaterThanOrEqual(1)
     expect(
       await screen.findByText("This thread stays attached to the changed line.")
     ).toBeTruthy()

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { PrFileChange } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
-import { CodeReviewView } from "./code-review-view.js"
+import { ReviewFileDiff } from "./changes-review.js"
 
 /**
  * The per-file "Deslop" button sits in each file's sticky header, beside Revert.
@@ -18,25 +18,21 @@ const file: PrFileChange = {
   viewed: false
 }
 
-const renderView = (props: Partial<React.ComponentProps<typeof CodeReviewView>>) =>
+const renderView = (props: Partial<React.ComponentProps<typeof ReviewFileDiff>>) =>
   render(
     <WidthTierValue width={1_240}>
-      <CodeReviewView
-        files={[file]}
-        activePath={file.path}
-        fileDiffs={[{ path: file.path, diff: "" }]}
+      <ReviewFileDiff
+        file={file}
+        diff=""
+        source="local"
         drafts={[]}
         routeTargetSession="Session"
         connected
-        source="local"
-        prAvailable
-        localAvailable
-        onSetSource={() => {}}
-        onSelectFile={() => {}}
+        focused={false}
+        onToggleFocus={() => {}}
         onToggleViewed={() => {}}
         onAddDraft={() => {}}
         onRemoveDraft={() => {}}
-        onFinishReview={() => {}}
         {...props}
       />
     </WidthTierValue>
@@ -57,7 +53,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("CodeReviewView Deslop button", () => {
+describe("ReviewFileDiff Deslop button", () => {
   it("hides the button when no handler is supplied", () => {
     renderView({})
     expect(screen.queryByRole("button", { name: "Deslop" })).toBeNull()

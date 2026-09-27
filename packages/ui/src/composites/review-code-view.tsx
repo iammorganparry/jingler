@@ -287,6 +287,8 @@ interface ReviewCodeViewProps {
   readonly onRevertFile?: (path: string) => void
   readonly onDeslopFile?: (path: string) => void
   readonly onSendFindingToAgent?: (findingId: string) => void
+  readonly onTokenEnter?: PierreCodeViewProps["onTokenEnter"]
+  readonly onTokenLeave?: PierreCodeViewProps["onTokenLeave"]
 }
 
 export function ReviewCodeView({
@@ -311,7 +313,9 @@ export function ReviewCodeView({
   onRevertLines,
   onRevertFile,
   onDeslopFile,
-  onSendFindingToAgent
+  onSendFindingToAgent,
+  onTokenEnter,
+  onTokenLeave
 }: ReviewCodeViewProps) {
   const entryByPath = useMemo(
     () => new Map(entries.map((entry) => [canonicalPierrePath(entry.file.path), entry])),
@@ -499,6 +503,8 @@ export function ReviewCodeView({
       onActivePathChange={onActivePathChange}
       renderHeader={renderHeader}
       renderAnnotation={renderAnnotation}
+      onTokenEnter={onTokenEnter}
+      onTokenLeave={onTokenLeave}
       options={{
         diffStyle: "unified",
         stickyHeader: true,

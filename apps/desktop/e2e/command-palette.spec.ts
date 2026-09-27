@@ -295,15 +295,15 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
 
   await expect(window.getByTestId("conversation-tab")).toContainText("Alpha session")
 
-  // A worktree with no PR surfaces the Changes tab — see `builtinTabContributions`.
+  // A worktree session surfaces the Terminal tab — see `builtinTabContributions`.
   await window.keyboard.press("Meta+k")
   // Waiting on the row explicitly rather than letting `click()`'s actionability
   // check do it: the card springs in on open, and a click that lands mid-spring
   // reports as a stability timeout on a line that says nothing about animation.
-  const changes = window.getByTestId("palette-item-tab:changes")
-  await expect(changes).toBeVisible()
-  await changes.click()
-  await expect(window.getByTestId("open-view-tab-changes")).toBeVisible()
+  const terminal = window.getByTestId("palette-item-tab:terminal")
+  await expect(terminal).toBeVisible()
+  await terminal.click()
+  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
 
   // Jump to the other session. It must arrive on Conversation.
   await window.keyboard.press("Meta+k")
@@ -311,7 +311,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   await window.keyboard.press("Enter")
 
   await expect(window.getByTestId("conversation-tab")).toContainText("Beta session")
-  await expect(window.getByTestId("open-view-tab-changes")).toHaveCount(0)
+  await expect(window.getByTestId("open-view-tab-terminal")).toHaveCount(0)
 })
 
 test("archives the active session from the palette", async ({ launchApp }) => {

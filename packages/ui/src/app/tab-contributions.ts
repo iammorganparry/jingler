@@ -271,7 +271,7 @@ export const BUILTIN_TAB_META: Record<
     label: "Changes",
     icon: FileDiff,
     order: 40,
-    blurb: "The session worktree's local uncommitted diff."
+    blurb: "Filter the Explorer to this session's uncommitted or pull request changes."
   },
   workflow: {
     label: "Workflow",
@@ -304,8 +304,6 @@ export interface BuiltinTabRenderers {
   readonly browser?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly terminal?: (session: Session, ctx: TabRenderContext) => ReactNode
   readonly pullRequest?: (session: Session, ctx: TabRenderContext) => ReactNode
-  readonly review?: (session: Session, ctx: TabRenderContext) => ReactNode
-  readonly code?: (session: Session, ctx: TabRenderContext) => ReactNode
   /** Drawn for any built-in tab with no renderer wired — stories, milestones. */
   readonly stub: (id: BuiltinTabKey) => ReactNode
 }
@@ -384,23 +382,18 @@ export const builtinTabContributions = (
         renderers.pullRequest?.(session, ctx) ?? renderers.stub("pr")
     },
     {
-      id: BUILTIN_TAB.review,
-      ...meta.review,
-      when: ({ session }) => session.prNumber != null,
-      render: (session, ctx) =>
-        renderers.review?.(session, ctx) ?? renderers.stub("review")
-    },
-    {
+      // A rail ACTION, not a view: the Explorer is where changes are reviewed,
+      // so this button filters it (SessionPane intercepts the selection) and
+      // there is no Changes surface to render. It covers PR sessions too — the
+      // old Code Review tab was the same review against a different diff.
       id: BUILTIN_TAB.changes,
       ...meta.changes,
-      when: ({ session }) =>
-        session.prNumber == null && session.worktreePath != null,
+      when: ({ session }) => session.prNumber != null || session.worktreePath != null,
       badge: ({ diff }) =>
         diff && diff.added + diff.removed > 0
           ? { kind: "diff", added: diff.added, removed: diff.removed }
           : undefined,
-      render: (session, ctx) =>
-        renderers.code?.(session, ctx) ?? renderers.stub("changes")
+      render: () => null
     }
   ]
 }
