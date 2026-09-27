@@ -46,7 +46,9 @@ import type {
 import {
   GitError,
   GitHubApiError,
+  AgentEndpointId,
   DetectedResourceCandidate,
+  ProviderId,
   ProviderModelId,
 } from "@jingler/core";
 import {
@@ -1554,7 +1556,7 @@ describe("RPC handlers", () => {
      * would be dispatched to the scripted stub, and ReviewService rejects that
      * rather than pass stub prose off as a review.
      */
-    const fakeGitHub = (headSha: string) =>
+    const fakeGitHub = (headSha: string, targets?: string[]) =>
       Layer.mergeAll(
         fakeCommandExecutor((cmd, args) => {
           if (cmd === "which" || cmd === "where") {
@@ -1565,8 +1567,14 @@ describe("RPC handlers", () => {
           return { stdout: "2.1.0" };
         }),
         fakeGithubApi({
-          prHeadSha: () => Effect.succeed(headSha),
-          prDiff: () => Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n"),
+          prHeadSha: (cwd: string) => {
+            targets?.push(cwd);
+            return Effect.succeed(headSha);
+          },
+          prDiff: (cwd: string) => {
+            targets?.push(cwd);
+            return Effect.succeed("diff --git a/a.ts b/a.ts\n+x\n");
+          },
         }),
       );
 
@@ -1590,11 +1598,15 @@ describe("RPC handlers", () => {
       return { spawns, layer };
     };
 
-    const envFor = (headSha: string, adapter: Layer.Layer<AgentTurnDriver>) =>
+    const envFor = (
+      headSha: string,
+      adapter: Layer.Layer<AgentTurnDriver>,
+      targets?: string[],
+    ) =>
       Layer.mergeAll(
         Layer.succeed(AppPaths, appPathsFor(root)),
         NodeContext.layer,
-        fakeGitHub(headSha),
+        fakeGitHub(headSha, targets),
       ).pipe((leaf) =>
         Layer.mergeAll(
           ConfigService.Default,
@@ -1619,6 +1631,17 @@ describe("RPC handlers", () => {
       const exit = await Effect.runPromiseExit(
         reviewRun("nope", false).pipe(Effect.provide(envFor("abc", layer))),
       );
+      expect(exit._tag).toBe("Failure");
+      expect(spawns).toHaveLength(0);
+    });
+
+    it("fails closed when a legacy session has no runtime or PI connection", async () => {
+      withSession({ connectionId: undefined, runtimeId: undefined, endpointId: undefined });
+      const { layer, spawns } = countingAdapter();
+      const exit = await Effect.runPromiseExit(
+        reviewRun("s1", false).pipe(Effect.provide(envFor("sha-one", layer))),
+      );
+
       expect(exit._tag).toBe("Failure");
       expect(spawns).toHaveLength(0);
     });
@@ -1831,7 +1854,7 @@ describe("RPC handlers", () => {
       expect(second.headSha).toBe("sha-two");
     });
 
-    it("uses the session's certified provider model", async () => {
+    it("uses the session's certified provider model when no reviewer is configured", async () => {
       withSession();
       const { layer, spawns } = countingAdapter();
       const review = await Effect.runPromise(
@@ -1839,6 +1862,74 @@ describe("RPC handlers", () => {
       );
       expect(review.modelId).toBe("anthropic/claude-sonnet-4-5");
       expect(spawns[0]!.modelId).toBe("anthropic/claude-sonnet-4-5");
+    });
+
+    it("uses the desktop harness and model configured for adversarial review", async () => {
+      withSession();
+      const { layer, spawns } = countingAdapter();
+      const env = envFor("sha-one", layer);
+      const review = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* ConfigService.setGithub({
+            enabled: true,
+            autoCreatePr: false,
+            autoDetectPr: true,
+            adversarialReviewModel: {
+              runtimeId: "claude",
+              endpointId: Schema.decodeUnknownSync(AgentEndpointId)("desktop:claude:default"),
+              providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+              modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus-4-6"),
+            },
+          });
+          return yield* reviewRun("s1", false);
+        }).pipe(Effect.provide(env)),
+      );
+
+      expect(review).toMatchObject({
+        connectionId: null,
+        providerId: "anthropic",
+        modelId: "anthropic/claude-opus-4-6",
+      });
+      expect(spawns[0]).toMatchObject({
+        runtimeId: "claude",
+        endpointId: "desktop:claude:default",
+        modelId: "anthropic/claude-opus-4-6",
+        targetCapabilities: { targetId: "desktop" },
+      });
+    });
+
+    it("reviews a remote PR by slug from an empty desktop workspace", async () => {
+      withSession({
+        environmentId: "device-1",
+        repo: "widget",
+        githubSlug: "acme/widget",
+        worktreePath: "/remote-only/widget",
+      });
+      const { layer, spawns } = countingAdapter();
+      const targets: string[] = [];
+      const env = envFor("sha-one", layer, targets);
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* ConfigService.setGithub({
+            enabled: true,
+            autoCreatePr: false,
+            autoDetectPr: true,
+            postAdversarialReviewComments: false,
+            adversarialReviewModel: {
+              runtimeId: "claude",
+              endpointId: Schema.decodeUnknownSync(AgentEndpointId)("desktop:claude:default"),
+              providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
+              modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-opus-4-6"),
+            },
+          });
+          yield* reviewRun("s1", false);
+        }).pipe(Effect.provide(env)),
+      );
+
+      expect(targets).toEqual(["github-slug:acme/widget", "github-slug:acme/widget"]);
+      expect(spawns[0]?.cwd.startsWith(join(tmpdir(), "jingler-adversarial-review-"))).toBe(true);
+      expect(spawns[0]?.cwd).not.toBe("/remote-only/widget");
+      expect(existsSync(spawns[0]!.cwd)).toBe(false);
     });
 
     /**

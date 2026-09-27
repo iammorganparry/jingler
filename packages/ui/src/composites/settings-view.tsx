@@ -1,5 +1,6 @@
 import * as React from "react"
 import type {
+  AgentEndpointCatalog,
   GitHubConnection,
   GitConfig,
   GithubConfig,
@@ -72,6 +73,7 @@ import {
   WebSearchSettings,
   type WebSearchSettingsProps
 } from "./web-search-settings.js"
+import { ProviderModelBrowser } from "./provider-model-browser.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
 
@@ -207,6 +209,8 @@ export interface SettingsViewProps {
   onGithubRefresh?: () => void
   onGithubDisconnect?: () => void
   github?: GithubConfig | null
+  /** Desktop harnesses and models available to the adversarial reviewer. */
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   git?: GitConfig | null
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
@@ -268,6 +272,7 @@ export function SettingsView({
   onGithubRefresh,
   onGithubDisconnect,
   github,
+  agentEndpointCatalog,
   git,
   onSaveGithub,
   onSaveGit,
@@ -362,6 +367,7 @@ return (<GithubSection
           onManage={onGithubManage}
           onRefresh={onGithubRefresh}
           onDisconnect={onGithubDisconnect}
+          agentEndpointCatalog={agentEndpointCatalog}
           onSaveGithub={onSaveGithub}
           onSaveGit={onSaveGit}
         />)
@@ -1225,6 +1231,7 @@ function GithubSection({
   onManage,
   onRefresh,
   onDisconnect,
+  agentEndpointCatalog,
   onSaveGithub,
   onSaveGit
 }: {
@@ -1236,6 +1243,7 @@ function GithubSection({
   onManage?: () => void
   onRefresh?: () => void
   onDisconnect?: () => void
+  agentEndpointCatalog?: AgentEndpointCatalog | null
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
 }) {
@@ -1444,6 +1452,35 @@ return ("bg-line-strong")
             Adversarial review
           </span>
         </div>
+        {agentEndpointCatalog && (
+          <div className="flex items-center gap-3 py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="text-[12.5px] font-medium text-text-body">Review model</div>
+              <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
+                Desktop harness and model used for read-only adversarial reviews.
+              </div>
+            </div>
+            <ProviderModelBrowser
+              catalog={{
+                ...agentEndpointCatalog,
+                endpoints: agentEndpointCatalog.endpoints.filter(
+                  ({ endpoint }) => endpoint.targetId === "desktop"
+                )
+              }}
+              endpointId={draft.adversarialReviewModel?.endpointId}
+              connectionId={null}
+              providerId={draft.adversarialReviewModel?.providerId}
+              modelId={draft.adversarialReviewModel?.modelId ?? null}
+              onSelect={({ runtimeId, endpointId, providerId, modelId }) =>
+                setGithub({
+                  ...draft,
+                  adversarialReviewModel: { runtimeId, endpointId, providerId, modelId }
+                })
+              }
+              className="max-w-[220px]"
+            />
+          </div>
+        )}
         <div className="divide-y divide-hairline">
           <ToggleRow
             label="Auto-run on new commits"
@@ -1465,10 +1502,8 @@ return ("bg-line-strong")
           />
         </div>
         <p className="text-[11px] leading-[1.6] text-muted-foreground">
-          Reviews run read-only through the session&apos;s pinned provider
-          connection and certified model. Changing the conversation model also
-          changes future reviews; Jingler never falls through to another account
-          or billing route.
+          Reviews run read-only on the selected desktop harness. Until you choose
+          one, Jingler uses each session&apos;s pinned model.
         </p>
 
         <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">

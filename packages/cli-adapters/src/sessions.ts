@@ -694,6 +694,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
+            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: workspace.branch,
             ...propertiesWhen(workspaceMode === "worktree" && input.continueBranch !== true, { semanticBranchPending: true }),
             title,
@@ -880,6 +881,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
+            githubSlug: input.githubSlug ?? repository.fullName,
             branch,
             title: input.pr.title,
             ...propertiesWhen(Boolean(input.initialPrompt?.trim()), {
@@ -997,6 +999,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
+            ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: worktree.branch,
             semanticBranchPending: true,
             // Seed (and pin) the title from the issue.

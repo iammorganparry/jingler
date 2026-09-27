@@ -241,6 +241,12 @@ describe("GithubConfig", () => {
       autoCreatePr: false,
       autoDetectPr: true,
       autoAdversarialReview: true,
+      adversarialReviewModel: {
+        runtimeId: "claude",
+        endpointId: "desktop:claude:default",
+        providerId: "anthropic",
+        modelId: "anthropic/claude-opus-4-6",
+      },
     });
     expect(Either.isRight(result)).toBe(true);
   });

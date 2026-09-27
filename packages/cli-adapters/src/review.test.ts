@@ -1,5 +1,5 @@
 import type { StreamEvent } from "@jingler/core"
-import { AgentRunError, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { AgentRunError, piEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import type { PermissionDecision } from "./agent-turn-driver.js"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
 import type { AgentContext, AgentTurnDriverShape, AgentTurnSpec } from "./agent-turn-driver.js"
@@ -28,6 +28,7 @@ import { fakeCommandExecutor, withTempRoot } from "./test-support.js"
  * still be lost.
  */
 
+const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max")
 const INPUT: ReviewInput = {
   sessionId: "s1",
   prNumber: 42,
@@ -36,7 +37,9 @@ const INPUT: ReviewInput = {
   repo: "acme/widget",
   branch: "feature",
   baseBranch: "main",
-  connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("anthropic-max"),
+  runtimeId: "pi",
+  endpointId: piEndpointId("desktop", connectionId),
+  connectionId,
   providerId: Schema.decodeUnknownSync(ProviderId)("anthropic"),
   modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-fable-5"),
   diff: "diff --git a/a.ts b/a.ts\n+const x = 1\n"
@@ -228,7 +231,12 @@ describe("ReviewService — spec", () => {
       })
     )
     await runReview(adapter)
-    expect(spec?.modelId).toBe("anthropic/claude-fable-5")
+    expect(spec).toMatchObject({
+      runtimeId: "pi",
+      endpointId: "desktop:pi:anthropic-max",
+      providerId: "anthropic",
+      modelId: "anthropic/claude-fable-5"
+    })
   })
 
   it("runs in the session's worktree as a fresh pi conversation", async () => {
