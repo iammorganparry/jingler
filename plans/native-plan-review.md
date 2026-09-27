@@ -186,11 +186,11 @@ Planning agents reliably produce diagrams, proposed diffs, and a test strategy.
 ### Technical explanation
 Validation from `plan-blocks` enforces the hard rules (safe paths, test strategy present). The prompt covers judgment calls, such as when a diagram is worth including. It doesn't force a diagram into every plan.
 
-- [ ] Update planning instructions and the skill
-- [ ] Update the e2e fixture plan to exercise every new block
+- [x] Update planning instructions and the skill
+- [x] Update the e2e fixture plan to exercise every new block (diff, typed test, diagram with `%% link`, Test strategy — added in stages 1 and 3)
 
 ### Acceptance
-- [ ] The compiled planning prompt includes the diagram, diff, and test-strategy rules (test[unit]: packages/plannotator-ext/config.test.ts::planning instructions require diffs diagrams and test strategy)
+- [x] The compiled planning prompt includes the diagram, diff, and test-strategy rules (test[unit]: packages/plannotator-ext/config.test.ts::planning instructions require diffs diagrams and test strategy)
 
 ### Files
 - `packages/plannotator-ext/plannotator.json` — M
