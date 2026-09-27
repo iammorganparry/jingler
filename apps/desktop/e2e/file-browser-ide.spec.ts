@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
 
 const session = (worktreePath: string): SeedSession => ({
@@ -49,17 +50,7 @@ const filesTab = (window: Page) => window.getByTestId("view-tab-files")
 
 const projectRoot = resolve(import.meta.dirname, "../../..")
 
-const showRepositoryTree = async (window: Page) => {
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  ).filter({ visible: true }).first()
-  if ((await tree.count()) === 0) {
-    await window.getByRole("button", { name: "Repository files", exact: true })
-      .filter({ visible: true }).last().click()
-  }
-  await expect(tree).toBeVisible()
-  return tree
-}
+const showRepositoryTree = explorerTree
 
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
   const tree = await showRepositoryTree(window)

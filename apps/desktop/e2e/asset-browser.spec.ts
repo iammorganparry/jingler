@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
 import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
 
@@ -129,17 +130,7 @@ test("keeps a large repository and source file windowed while navigating the per
     timeout: 15_000
   })
 
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  )
-  const treeToggle = window.getByRole("button", {
-    name: "Repository files",
-    exact: true
-  })
-  if ((await treeToggle.count()) > 0 && (await treeToggle.getAttribute("aria-expanded")) !== "true") {
-    await treeToggle.click()
-  }
-  await expect(tree).toBeVisible()
+  const tree = await explorerTree(window)
   await tree.evaluate((element) => element.setAttribute("data-s4-tree", "persistent"))
 
   const treeItems = tree.locator('[role="treeitem"]')

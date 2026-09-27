@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
 import { appShell, expect, type SeedSession, test } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 
 const dragTo = async (
   page: Page,
@@ -71,13 +72,9 @@ test("large chat and file sets collapse into independent tab groups", async ({ l
   await expect(window.getByTitle("4 open chats")).toBeVisible()
 
   await window.getByRole("button", { name: "Files", exact: true }).click()
-  const tree = window.locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
-  const treeToggle = window.getByRole("button", { name: "Repository files", exact: true })
-  if (!(await tree.isVisible())) await treeToggle.click()
-  await expect(tree).toBeVisible()
+  const tree = await explorerTree(window)
   for (let index = 1; index <= 6; index += 1) {
     const path = `file-${index}.ts`
-    if (!(await tree.isVisible())) await treeToggle.click()
     await tree.locator(`[role="treeitem"][data-item-path="${path}"]`).click()
     await expect(window.getByTestId(`file-tab-${path}`)).toBeVisible()
   }
