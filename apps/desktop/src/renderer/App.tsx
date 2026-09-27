@@ -96,7 +96,6 @@ import { reviewQueryKey } from "./review-routing.js";
 import {
   needsSessionRetitle,
   newlyPlannedSessionIds,
-  newlyStartedSessionIds,
 } from "./retitle-triggers.js";
 import { rpc } from "./rpc-client.js";
 import { themeCatalogKey, useTheme } from "./use-theme.js";
@@ -983,15 +982,6 @@ function AuthedApp({
   useEffect(() => {
     const prev = prevLiveRef.current;
     prevLiveRef.current = liveActivity;
-    // Name a fresh task the moment its FIRST run starts — the title pass runs
-    // concurrently on its own runtime session, so the agent never waits on it
-    // and the branch stops sitting on "Naming branch…" through the whole turn.
-    for (const id of newlyStartedSessionIds(prev, liveActivity, sessions)) {
-      void rpc
-        .sessionsRetitle(id)
-        .then((session) => send({ type: "SESSION_UPDATED", session }))
-        .catch(() => {});
-    }
     const completed = completedSessionIds(prev, liveActivity, sessions);
     refreshCompletedSessions(completed, sessions, send, startAutoPublish);
     if (!autoDetect) return;
