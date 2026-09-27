@@ -1,5 +1,4 @@
 import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { listPackage } from "@electron/asar"
@@ -23,10 +22,6 @@ const resourcesPath = requiredPath("JINGLER_DESKTOP_RESOURCES")
 const devicePath = requiredPath("JINGLER_DEVICE_BUNDLE")
 const desktopManifest = JSON.parse(readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"))
 const deviceManifest = JSON.parse(readFileSync(resolve(root, "apps/device-agent/package.json"), "utf8"))
-const plannotatorRoot = resolve(resourcesPath, "plannotator")
-const plannotatorHtml = resolve(plannotatorRoot, "plan-review-v0.27.8.html")
-const plannotatorProvenance = resolve(plannotatorRoot, "PROVENANCE.json")
-const digest = (path) => createHash("sha256").update(readFileSync(path)).digest("hex")
 const deviceEntries = execFileSync("tar", ["-tzf", devicePath], {
   encoding: "utf8",
   maxBuffer: 16 * 1024 * 1024
@@ -67,21 +62,7 @@ const issues = [
     : ["desktop resources are missing the Claude CLI child provider"]),
   ...(existsSync(resolve(resourcesPath, "THIRD-PARTY-LICENSES"))
     ? []
-    : ["desktop resources are missing THIRD-PARTY-LICENSES"]),
-  ...[
-    "plan-review-v0.27.8.html",
-    "PLANNOTATOR-LICENSE-MIT",
-    "PROVENANCE.json",
-    "jingler-embed.patch"
-  ].flatMap((entry) =>
-    existsSync(resolve(plannotatorRoot, entry))
-      ? []
-      : [`desktop resources are missing plannotator/${entry}`]
-  ),
-  ...(existsSync(plannotatorHtml) && existsSync(plannotatorProvenance) &&
-    JSON.parse(readFileSync(plannotatorProvenance, "utf8")).sha256 !== digest(plannotatorHtml)
-    ? ["desktop Plannotator HTML does not match its provenance digest"]
-    : [])
+    : ["desktop resources are missing THIRD-PARTY-LICENSES"])
 ]
 
 if (issues.length > 0) {

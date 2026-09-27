@@ -111,10 +111,11 @@ describe("visibleTabs", () => {
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("files")
   })
 
-  it("swaps Changes for Review once a PR exists", () => {
+  it("offers one Changes action for local and PR sessions alike", () => {
     expect(idsFor(session({ id: "a" }))).toContain("changes")
-    expect(idsFor(session({ id: "a", prNumber: 12 }))).toContain("review")
-    expect(idsFor(session({ id: "a", prNumber: 12 }))).not.toContain("changes")
+    expect(idsFor(session({ id: "a", prNumber: 12 }))).toContain("changes")
+    // Code Review merged into the Explorer's changed-files filter.
+    expect(idsFor(session({ id: "a", prNumber: 12 }))).not.toContain("review")
   })
 
   it("keeps the built-in order the operator already knows", () => {
@@ -686,9 +687,37 @@ describe("mount groups", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(onMount).toHaveBeenCalledTimes(1)
 
-    fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
     fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(onMount).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("SessionPane changes review", () => {
+  it("reveals the Explorer's changed files instead of opening a Changes view", () => {
+    const onRevealChanges = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "a", prNumber: 4 })}
+        renderConversation={() => <div>transcript</div>}
+        onRevealChanges={onRevealChanges}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }))
+    expect(onRevealChanges).toHaveBeenCalledExactlyOnceWith("a")
+    expect(screen.getByText("transcript")).toBeTruthy()
+    expect(screen.getByTestId("surface-view").getAttribute("data-panes")).toBe("1")
+  })
+
+  it("mounts the host's review tray beside the panes", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+        renderReviewTray={(s) => <aside>tray for {s.id}</aside>}
+      />
+    )
+    expect(screen.getByText("tray for a")).toBeTruthy()
   })
 })
 
@@ -1036,7 +1065,7 @@ describe("SessionPane", () => {
             Active chat
           </button>
         )}
-        renderReview={() => <div>review view</div>}
+        renderPullRequest={() => <div>review view</div>}
         {...props}
       />
     )
@@ -1044,7 +1073,7 @@ describe("SessionPane", () => {
     it("switches to the requested tab and reports it handled", () => {
       const onTabRequestHandled = vi.fn()
       render(
-        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1066,7 +1095,7 @@ describe("SessionPane", () => {
     it("does not replay a request into another session", () => {
       const onTabRequestHandled = vi.fn()
       const { unmount } = render(
-        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1076,7 +1105,7 @@ describe("SessionPane", () => {
         <SessionPane
           session={session({ id: "b", prNumber: 6 })}
           renderConversation={(s) => <div>transcript {s.id}</div>}
-          renderReview={() => <div>review view</div>}
+          renderPullRequest={() => <div>review view</div>}
           selectTabRequest={null}
           onTabRequestHandled={onTabRequestHandled}
         />
@@ -1089,7 +1118,7 @@ describe("SessionPane", () => {
     it("fires again for the same tab when the nonce moves", () => {
       const onTabRequestHandled = vi.fn()
       const { rerender } = render(
-        pane({ selectTabRequest: { tabId: "review", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
@@ -1098,7 +1127,7 @@ describe("SessionPane", () => {
 
       // Asking for the SAME tab a second time has to work — that is what the
       // nonce is for, over and above the clearing.
-      rerender(pane({ selectTabRequest: { tabId: "review", nonce: 2 }, onTabRequestHandled }))
+      rerender(pane({ selectTabRequest: { tabId: "pr", nonce: 2 }, onTabRequestHandled }))
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(2)
     })
@@ -1116,19 +1145,19 @@ describe("SessionPane", () => {
       <SessionPane
         session={session({ id: "a", prNumber: 5 })}
         renderConversation={(s) => <div>transcript {s.id}</div>}
-        renderReview={() => <div>review view</div>}
+        renderPullRequest={() => <div>review view</div>}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Code Review" }))
+    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
     expect(screen.getByText("review view")).toBeTruthy()
 
-    // The PR goes away (merged and unlinked) — Review is no longer a visible tab,
+    // The PR goes away (merged and unlinked, no worktree) — the tab is no longer visible,
     // so the pane must not be left showing a tab that isn't in the bar.
     rerender(
       <SessionPane
-        session={session({ id: "a", prNumber: null })}
+        session={session({ id: "a", prNumber: null, worktreePath: undefined })}
         renderConversation={(s) => <div>transcript {s.id}</div>}
-        renderReview={() => <div>review view</div>}
+        renderPullRequest={() => <div>review view</div>}
       />
     )
     await waitFor(() => expect(screen.queryByText("review view")).toBeNull())

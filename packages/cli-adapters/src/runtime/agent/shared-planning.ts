@@ -6,6 +6,7 @@ import type { AgentRunSpec, PlannotatorProjection, PlannotatorReviewDecision, St
 import { extractProgressMarkers, parseChecklist, updateChecklistStatuses, type ChecklistStatus } from "@jingler/plannotator-ext/generated/checklist.ts"
 import { parsePlanMarkdown } from "@jingler/plannotator-ext/plan-parse.ts"
 import { validatePlanMarkdown } from "@jingler/plannotator-ext/plan-validation.ts"
+import { createReviewedContent } from "@jingler/plannotator-ext/plan-status.ts"
 import { isPlanWritePathAllowed } from "@jingler/plannotator-ext/tool-scope.ts"
 import phaseConfig from "@jingler/plannotator-ext/plannotator.json" with { type: "json" }
 import { Effect, Schema, Stream } from "effect"
@@ -79,6 +80,8 @@ class PlanningSession {
   pending: PendingReview | null = null
   private queue: Promise<unknown> = Promise.resolve()
   private text = ""
+  private readonly reviewed = createReviewedContent()
+  private previousContent: string | null = null
   constructor(readonly storage: AtomicJsonFile<State | null>) {}
 
   serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -93,6 +96,7 @@ class PlanningSession {
     const projection: PlannotatorProjection = {
       phase: state.phase, planFilePath: state.path, review: this.pending ? { reviewId: this.pending.id } : null,
       checklist: parseChecklist(state.content), planContent: state.content,
+      ...(this.previousContent === null ? {} : { previousPlanContent: this.previousContent }),
       ...(parsed?.stages.length ? parsed : {})
     }
     if (this.binding) await Effect.runPromise(this.binding.context.publishEvent({ _tag: "PlannotatorStateChanged", state: projection }))
@@ -138,7 +142,9 @@ class PlanningSession {
     const content = await readPlan(this.state.cwd, filePath)
     const errors = submit ? validatePlanMarkdown(content) : []
     if (errors.length) throw new ToolError("invalid-input", errors.join("\n"))
-    this.state = { ...this.state, path: relative(this.state.cwd, resolve(this.state.cwd, filePath)), content,
+    const path = relative(this.state.cwd, resolve(this.state.cwd, filePath))
+    if (submit) this.previousContent = this.reviewed.begin(path, content)
+    this.state = { ...this.state, path, content,
       ...(submit ? { phase: "planning" as const, reviewPending: true } : {}) }
     await this.save()
   }

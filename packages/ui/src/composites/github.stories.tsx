@@ -9,7 +9,8 @@ import type {
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
-import { CodeReviewView, type ReviewSource } from "./code-review-view.js"
+import type { ReviewSource } from "./changes-review.js"
+import { ChangesReviewPreview } from "./changes-review-preview.js"
 import { ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
 
@@ -402,10 +403,10 @@ const fileDiff = [
  */
 export const CodeReviewWithFindings: Story = {
   render: () => {
-    const [source, setSource] = useState<ReviewSource>("pr")
+    const source: ReviewSource = "pr"
     return (
       <div className="flex h-screen bg-editor">
-        <CodeReviewView
+        <ChangesReviewPreview
           files={files}
           activePath="src/auth/session.ts"
           fileDiffs={[
@@ -416,14 +417,8 @@ export const CodeReviewWithFindings: Story = {
           routeTargetSession="Refactor auth flow"
           connected
           source={source}
-          prAvailable
-          localAvailable
-          onSetSource={setSource}
           onSelectFile={() => {}}
-          onToggleViewed={() => {}}
           onAddDraft={() => {}}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
           onRevertLines={() => {}}
           onRevertFile={() => {}}
           review={{
@@ -462,7 +457,7 @@ export const CodeReviewWithFindings: Story = {
  */
 export const CodeReviewFeedbackFilter: Story = {
   render: () => {
-    const [source, setSource] = useState<ReviewSource>("pr")
+    const source: ReviewSource = "pr"
     const [activePath, setActivePath] = useState<string | null>("src/auth/session.ts")
     const withUntouched: ReadonlyArray<PrFileChange> = [
       ...files,
@@ -484,7 +479,7 @@ export const CodeReviewFeedbackFilter: Story = {
     })
     return (
       <div className="flex h-screen bg-editor">
-        <CodeReviewView
+        <ChangesReviewPreview
           files={withUntouched}
           reviewThreads={[thread("src/auth/session.ts", false), thread("src/untouched.ts", true)]}
           activePath={activePath}
@@ -502,14 +497,8 @@ export const CodeReviewFeedbackFilter: Story = {
           routeTargetSession="Refactor auth flow"
           connected
           source={source}
-          prAvailable
-          localAvailable
-          onSetSource={setSource}
           onSelectFile={setActivePath}
-          onToggleViewed={() => {}}
           onAddDraft={() => {}}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
           review={{
             ...adversarialReview,
             findings: [
@@ -527,10 +516,10 @@ export const CodeReviewFeedbackFilter: Story = {
 /** The Code Review tab — a two-source diff (PR / Uncommitted) with revert on local. */
 export const CodeReview: Story = {
   render: () => {
-    const [source, setSource] = useState<ReviewSource>("local")
+    const source: ReviewSource = "local"
     return (
       <div className="flex h-screen bg-editor">
-        <CodeReviewView
+        <ChangesReviewPreview
           files={files}
           activePath="src/auth/session.ts"
           fileDiffs={[
@@ -541,14 +530,8 @@ export const CodeReview: Story = {
           routeTargetSession="Refactor auth flow"
           connected
           source={source}
-          prAvailable
-          localAvailable
-          onSetSource={setSource}
           onSelectFile={() => {}}
-          onToggleViewed={() => {}}
           onAddDraft={() => {}}
-          onRemoveDraft={() => {}}
-          onFinishReview={() => {}}
           onRevertLines={() => {}}
           onRevertFile={() => {}}
         />

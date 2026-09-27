@@ -246,10 +246,17 @@ export interface SessionPaneProps {
   onOpenProviderSettings?: () => void
   /** Render the Pull Request tab; `ctx.onConnectGithub` opens the settings modal. */
   renderPullRequest?: (session: Session, ctx: { onConnectGithub: () => void; onSelectReview: () => void }) => ReactNode
-  /** Render the Code Review tab; `ctx.onConnectGithub` opens the settings modal. */
-  renderReview?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  /** Render the Changes tab — the Code Review view over the local worktree diff. */
-  renderCode?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
+  /**
+   * Changes are reviewed in the Explorer: the Changes rail button (and every
+   * "inspect changes" route) asks the host to show the Explorer filtered to
+   * this session's changed files instead of opening a view.
+   */
+  onRevealChanges?: (sessionId: string) => void
+  /**
+   * The review tray beside this session's panes. The host returns null until
+   * there is something to act on (collected drafts), so it costs no width.
+   */
+  renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /**
    * Tabs contributed by plugins, merged with the built-ins into one list.
    *
@@ -431,6 +438,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             setSurfaceLayout((current) => resizeSessionSurface(current, index, delta))
           }
         />
+        {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
         {viewRailTarget === null ? viewRail : null}
       </div>
     </>)
@@ -763,7 +771,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       }
   }
 
-  const selectTab = useCallback(
+  const selectViewTab = useCallback(
     (nextTab: TabKey) => {
       selectTabIssue(nextTab)
       if (nextTab === BUILTIN_TAB.plan) {
@@ -805,6 +813,19 @@ function SessionPaneBody(props: SessionPaneProps) {
       props.onToggleBrowser,
       props.tabContributions
     ]
+  )
+  // Changes (and the retired Code Review tab) are reviewed in the Explorer, so
+  // selecting them is an action on the host rather than a surface to open.
+  const onRevealChanges = props.onRevealChanges
+  const selectTab = useCallback(
+    (nextTab: TabKey) => {
+      if (nextTab === BUILTIN_TAB.changes || nextTab === BUILTIN_TAB.review) {
+        onRevealChanges?.(active.id)
+        return
+      }
+      selectViewTab(nextTab)
+    },
+    [active.id, onRevealChanges, selectViewTab]
   )
   const planStepTarget = target?.sessionId === active.id ? target.stepId : null
 
@@ -862,11 +883,8 @@ function SessionPaneBody(props: SessionPaneProps) {
       pullRequest: (session, ctx) =>
         props.renderPullRequest?.(session, {
           onConnectGithub: ctx.onConnectGithub,
-          onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.review)
+          onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.changes)
         }),
-      review: (session, ctx) =>
-        props.renderReview?.(session, { onConnectGithub: ctx.onConnectGithub }),
-      code: (session, ctx) => props.renderCode?.(session, { onConnectGithub: ctx.onConnectGithub }),
       files: (session, ctx) =>
         props.renderFiles?.(session, {
           onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation)
@@ -880,7 +898,12 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const tabs = visibleTabs(tabCtx, contributions)
   const allowedViewKeys = tabs.flatMap((contribution) => {
-    if (contribution.id === BUILTIN_TAB.conversation || contribution.id === BUILTIN_TAB.files) {
+    if (
+      contribution.id === BUILTIN_TAB.conversation ||
+      contribution.id === BUILTIN_TAB.files ||
+      // An action, not a view: a restored Changes/Code Review pane is pruned.
+      contribution.id === BUILTIN_TAB.changes
+    ) {
       return []
     }
     if (contribution.id === BUILTIN_TAB.browser) {

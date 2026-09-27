@@ -295,10 +295,7 @@ const runWorkspaceMutation = async (
   await expect(change).toContainText("Created");
 
   await window.getByRole("button", { name: "Changes" }).first().click();
-  const rail = window.getByTestId("review-file-rail");
-  if (!(await rail.isVisible())) {
-    await window.getByRole("button", { name: "Changed files" }).click();
-  }
+  const rail = window.getByTestId("changed-files-explorer");
   await expect(rail.locator(`[data-item-path="${path}"]`)).toHaveAttribute(
     "data-item-git-status",
     "added",

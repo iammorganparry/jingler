@@ -62,6 +62,63 @@ describe("Plannotator native projection", () => {
     expect(document.plan.annotations).toEqual([])
   })
 
+  it("projects proposed changes and typed test references into a valid PlanDocument", () => {
+    const patch = "@@ -1 +1 @@\n-a\n+b"
+    const projection = Schema.decodeUnknownSync(PlannotatorProjection)({
+      phase: "planning",
+      planFilePath: "plans/x.md",
+      review: { reviewId: "r1" },
+      checklist: [{ step: 1, text: "Ship", completed: false }],
+      sections: [{ title: "Overview", blocks: [{ kind: "change", path: "docs/a.md", patch }] }],
+      stages: [{
+        id: "ship",
+        title: "Ship",
+        notes: ["Why."],
+        changes: [{ path: "src/a.ts", patch }],
+        acceptance: [{
+          step: 1,
+          text: "Works",
+          status: "pending",
+          testReferences: [{ path: "e2e/a.spec.ts", cases: ["works"], kind: "e2e" }]
+        }]
+      }]
+    })
+    const document = Schema.decodeUnknownSync(PlanDocument)(
+      plannotatorProjectionToPlanDocument(projection, "s", "c", "2026-09-27T00:00:00.000Z")
+    )
+
+    expect(document.plan.sections[0]?.blocks[0]).toMatchObject({ kind: "change", path: "docs/a.md", patch })
+    expect(document.plan.stages[0]?.notes.map(({ kind }) => kind)).toEqual(["prose", "change"])
+    expect(document.plan.stages[0]?.notes[1]).toMatchObject({ path: "src/a.ts", patch })
+    expect(document.plan.stages[0]?.acceptance[0]?.testReferences).toEqual([
+      { path: "e2e/a.spec.ts", cases: ["works"], kind: "e2e" }
+    ])
+  })
+
+  it("keeps previous source on resubmission", () => {
+    const base = {
+      phase: "planning",
+      planFilePath: "PLAN.md",
+      review: { reviewId: "r2" },
+      checklist: [],
+      planContent: "# Plan\n\n- keep format\n"
+    }
+    const first = plannotatorProjectionToPlanDocument(
+      Schema.decodeUnknownSync(PlannotatorProjection)(base), "s", "c", "2026-09-27T00:00:00.000Z"
+    )
+    expect(first.previousSourceMarkdown).toBeUndefined()
+
+    const resubmitted = plannotatorProjectionToPlanDocument(
+      Schema.decodeUnknownSync(PlannotatorProjection)({ ...base, previousPlanContent: "# Plan\n\n- replace format\n" }),
+      "s", "c", "2026-09-27T00:00:00.000Z"
+    )
+    expect(resubmitted.previousSourceMarkdown).toBe("# Plan\n\n- replace format\n")
+    expect(resubmitted.sourceMarkdown).toBe("# Plan\n\n- keep format\n")
+    // The host decodes over IPC; the new field must survive the core schema.
+    expect(Schema.decodeUnknownSync(PlanDocument)(structuredClone(resubmitted)).previousSourceMarkdown)
+      .toBe("# Plan\n\n- replace format\n")
+  })
+
   it("decodes a legacy flat payload without the structured fields", () => {
     const projection = Schema.decodeUnknownSync(PlannotatorProjection)({
       phase: "executing",

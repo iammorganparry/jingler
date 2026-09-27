@@ -108,6 +108,44 @@ describe("parsePlanMarkdown", () => {
     expect(parsed.stages[0]?.notes).toEqual(["Use the existing path."])
   })
 
+  it("parses diff path fences into change blocks", () => {
+    const patch = "@@ -1 +1 @@\n-old\n+new"
+    const plan = [
+      "Overview.",
+      "```diff path=docs/a.md", patch, "```",
+      "## Ship <!-- id: ship -->",
+      "Deliver it.",
+      "```diff path=src/a.ts", patch, "```",
+      "- [ ] Implement",
+      "```diff path=src/b.ts", patch, "```",
+      "```ts", "const untouched = 1", "```",
+      "- [ ] Verify"
+    ].join("\n")
+    const parsed = parsePlanMarkdown(plan)
+
+    expect(parsed.sections[0]?.blocks).toContainEqual({ kind: "change", path: "docs/a.md", patch })
+    expect(parsed.stages[0]?.changes).toEqual([
+      { path: "src/a.ts", patch },
+      { path: "src/b.ts", patch }
+    ])
+    expect(parsed.checklist.map(({ step }) => step)).toEqual([1, 2])
+    expect(parsed.checklist).toEqual(parseChecklist(plan))
+  })
+
+  it("parses typed test references and keeps untyped ones valid", () => {
+    const stage = parsePlanMarkdown([
+      "## Ship <!-- id: ship -->",
+      "### Acceptance",
+      "- [ ] Flow works (test[e2e]: e2e/a.spec.ts::signs in)",
+      "- [ ] Unit works (test: src/a.test.ts::adds)"
+    ].join("\n")).stages[0]
+
+    expect(stage?.acceptance.map(({ text, testReferences }) => [text, testReferences])).toEqual([
+      ["Flow works", [{ path: "e2e/a.spec.ts", cases: ["signs in"], kind: "e2e" }]],
+      ["Unit works", [{ path: "src/a.test.ts", cases: ["adds"] }]]
+    ])
+  })
+
   it("parses a plain flat checklist exactly as before", () => {
     const flat = "# Steps\n- [ ] One\n- [x] Two\n"
     const parsed = parsePlanMarkdown(flat)
