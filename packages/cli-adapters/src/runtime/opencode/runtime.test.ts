@@ -1,15 +1,17 @@
 import { spawn } from "node:child_process"
 import { fixtureTransport } from "./fixtures/transport.js"
 import { fileURLToPath } from "node:url"
-import { realpath } from "node:fs/promises"
+import { realpath, mkdtemp, mkdir, writeFile, rm, access } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { AgentEndpointCatalogEntry, CURRENT_RUNTIME_CONTRACTS, nativeCliEndpointId, ProviderId, ProviderModelId, type AgentRunSpec } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { liveChildCount } from "../../child-registry.js"
 import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { probeOpenCodeEndpoint } from "./endpoint.js"
 import { OpenCodeServer, boundedResponse, makeOpenCodePool, openCodeEnvironment } from "./server.js"
-import { makeOpenCodeAgentRuntime, openOpenCodeSession } from "./runtime.js"
+import { makeOpenCodeAgentRuntime, openOpenCodeSession, openCodePermissions, startOpenCodeTurnDeadline } from "./runtime.js"
 
 const binary = fileURLToPath(new URL("./fixtures/server.mjs", import.meta.url))
 const endpointId = nativeCliEndpointId("desktop", "opencode")
@@ -73,6 +75,60 @@ describe("native OpenCode 1.18.14", () => {
     expect(two.filter(e => e._tag === 'Assistant')).toEqual([{ _tag: 'Assistant', text: 'OpenCode: two' }])
     expect(liveChildCount()).toBe(0)
   })
+  it("does not exempt competing jingler-prefixed servers in read-only mode", () => {
+    const rules = openCodePermissions("read-only", new Set(["jingler_probe_echo"]))
+    const decision = (tool: string) => rules.findLast(({ permission }) => permission === "*" || permission === tool)?.action
+    expect(decision("jingler_probe_echo")).toBe("allow")
+    expect(decision("jingler_extra_probe_echo")).toBe("deny")
+    expect(rules.some(({ permission }) => permission === "jingler_*")).toBe(false)
+  })
+  it("rejects residual ambient MCP config before provider or MCP initialization", async () => {
+    const requests: string[] = []
+    const isolated = makeOpenCodeAgentRuntime({ ...options, fetch: async (input) => {
+      const path = new URL((input as Request).url).pathname
+      requests.push(path)
+      return path === "/config" ? Response.json({ mcp: { jingler_extra: { type: "local", command: ["untrusted"] } } }) : transport.fetch(input)
+    } })
+    await expect(collect(spec({ mode: "read-only" }), isolated)).rejects.toThrow()
+    expect(requests).not.toContain("/mcp")
+    expect(requests).not.toContain("/provider")
+    expect(liveChildCount()).toBe(0)
+  })
+
+  it.runIf(process.env.JINGLER_TEST_OPENCODE_LIVE === "1")("isolates hostile config on the pinned real server while retaining auth and continuations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-opencode-isolation-"))
+    const home = join(root, "home")
+    const project = join(root, "project")
+    const marker = join(root, "hostile-ran")
+    const data = join(root, "data")
+    const configHome = join(root, "config")
+    const plugin = join(root, "hostile.mjs")
+    const config = { provider: { "ambient-provider": { npm: "@ai-sdk/openai-compatible", name: "Ambient", options: { baseURL: "http://localhost:1" }, models: { "ambient-model": { name: "Ambient model" } } } }, plugin: [plugin], mcp: { jingler_extra: { type: "local", command: [process.execPath, "-e", `require('fs').writeFileSync(${JSON.stringify(marker)}, 'mcp')`] } } }
+    const environment = { ...process.env, HOME: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: data, XDG_CACHE_HOME: join(root, "cache"), XDG_STATE_HOME: join(root, "state") }
+    let server: OpenCodeServer | undefined
+    try {
+      for (const directory of [home, project, join(home, ".opencode"), join(configHome, "opencode"), join(data, "opencode")]) await mkdir(directory, { recursive: true })
+      await writeFile(plugin, `import { writeFileSync } from 'node:fs'; export default async () => { writeFileSync(${JSON.stringify(marker)}, 'plugin'); return {} }`)
+      for (const directory of [project, join(home, ".opencode"), join(configHome, "opencode")]) await writeFile(join(directory, "opencode.json"), JSON.stringify(config))
+      await writeFile(join(data, "opencode", "auth.json"), JSON.stringify({ anthropic: { type: "api", key: "test-not-a-real-key" } }), { mode: 0o600 })
+      server = await OpenCodeServer.start({ environment })
+      const resolved = (await server.client.config.get({ directory: project }, { throwOnError: true })).data
+      expect(Object.keys(resolved.mcp ?? {})).toEqual([])
+      expect(resolved.plugin ?? []).toEqual([])
+      const providers = (await server.client.provider.list({ directory: project }, { throwOnError: true })).data
+      expect(providers.connected).toContain("anthropic")
+      const discovered = await probeOpenCodeEndpoint({ environment })
+      expect(discovered.models.some(({ providerId }) => providerId === "ambient-provider")).toBe(false)
+      expect(discovered.models.some(({ providerId }) => providerId === "anthropic")).toBe(true)
+      expect(await server.client.mcp.status({ directory: project }, { throwOnError: true }).then(({ data }) => Object.keys(data))).toEqual([])
+      const session = (await server.client.session.create({ directory: project, permission: openCodePermissions("read-only") }, { throwOnError: true })).data
+      await server.close()
+      server = await OpenCodeServer.start({ environment })
+      expect((await server.client.session.get({ directory: project, sessionID: session.id }, { throwOnError: true })).data.id).toBe(session.id)
+      await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" })
+    } finally { await server?.close(); await rm(root, { recursive: true, force: true }) }
+  }, 60_000)
+
   it("routes permissions through the gate and never approves read-only writes", async () => {
     const events = await collect(spec({ prompt: 'permission', mode: 'read-only' }))
     expect(events).toContainEqual({ _tag: 'Assistant', text: 'OpenCode: permission reject' })
@@ -199,4 +255,21 @@ it("keeps one completion when interrupt arrives at the terminal event", async ()
   expect(events.filter(event => event._tag === "Done")).toHaveLength(1)
   expect(events.some(event => event._tag === "Failed")).toBe(false)
   expect(liveChildCount()).toBe(0)
+})
+
+it("pauses only operator review time in the OpenCode active-turn deadline", () => {
+  vi.useFakeTimers()
+  const expire = vi.fn()
+  let pending = false
+  const timer = startOpenCodeTurnDeadline(() => pending, expire)
+  try {
+    vi.advanceTimersByTime(29 * 60_000)
+    expect(expire).not.toHaveBeenCalled()
+    pending = true
+    vi.advanceTimersByTime(2 * 60 * 60_000)
+    expect(expire).not.toHaveBeenCalled()
+    pending = false
+    vi.advanceTimersByTime(60_000)
+    expect(expire).toHaveBeenCalledOnce()
+  } finally { clearInterval(timer); vi.useRealTimers() }
 })

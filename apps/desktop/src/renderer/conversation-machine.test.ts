@@ -22,7 +22,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   boundedFleetEvents,
   CONVERSATION_LOAD_TIMEOUT_MS,
-  conversationMachine
+  conversationMachine,
+  persistModelSelection
 } from "./conversation-machine.js"
 import {
   KEEP_RECENT_TEXT_PARTS,
@@ -2658,5 +2659,35 @@ describe("conversationMachine — mid-turn compaction with no tool boundary", ()
     // The recent window is whole.
     expect(texts.at(-2)).toBe(big)
     actor.stop()
+  })
+})
+
+describe("persistModelSelection", () => {
+  it("fails a model switch whose reply never arrives, so the composer unblocks", async () => {
+    vi.useFakeTimers()
+    try {
+      const onSuccess = vi.fn()
+      const onFailure = vi.fn()
+      persistModelSelection("s_hang:c_hang", () => new Promise(() => {}), onSuccess, onFailure, 1_000)
+      await vi.advanceTimersByTimeAsync(1_001)
+      expect(onFailure).toHaveBeenCalledOnce()
+      expect(onSuccess).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not let a hung switch block the next one on the same chat", async () => {
+    vi.useFakeTimers()
+    try {
+      const persisted = { id: "s_next" } as never
+      const onSuccess = vi.fn()
+      persistModelSelection("s_next:c_next", () => new Promise(() => {}), () => {}, () => {}, 1_000)
+      persistModelSelection("s_next:c_next", () => Promise.resolve(persisted), onSuccess, () => {}, 1_000)
+      await vi.advanceTimersByTimeAsync(1_001)
+      expect(onSuccess).toHaveBeenCalledWith(persisted)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

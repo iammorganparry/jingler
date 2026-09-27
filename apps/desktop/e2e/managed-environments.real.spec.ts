@@ -266,15 +266,18 @@ const authenticateProvider = async (
   config: ManagedQaConfig,
 ): Promise<void> => {
   if (config.providerHome) {
-    const signIn = window.getByRole("heading", { name: "Sign in to Jingler" });
-    await expect(appShell(window).or(signIn)).toBeVisible({ timeout: 30_000 });
+    // Sign-in is optional: the account menu always renders, and reads
+    // "Not signed in" until a session exists.
+    const accountMenu = window.getByRole("button", { name: "Account menu" });
+    const signIn = accountMenu.getByText("Not signed in");
+    await expect(accountMenu).toBeVisible({ timeout: 30_000 });
     if (await signIn.isVisible()) {
       if (process.env.JINGLER_E2E_HEADED !== "1") {
         throw new Error(
           "Cloud QA product authentication is missing or expired. Provide a current JINGLER_REAL_AUTH_TOKEN or encrypted auth document.",
         );
       }
-      await expect(appShell(window)).toBeVisible({ timeout: 5 * 60_000 });
+      await expect(signIn).toHaveCount(0, { timeout: 5 * 60_000 });
     }
     return;
   }

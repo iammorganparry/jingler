@@ -104,6 +104,15 @@ describe("workspace mutation tools", () => {
     await expect(readFile(join(workspace, "src/renamed.ts"), "utf8")).rejects.toThrow()
   })
 
+  it.each([false, true])("preserves literal replacement metacharacters (replaceAll=%s)", async (replaceAll) => {
+    await writeFile(join(workspace, "plan.md"), "- [ ] cost $& $$ $` $'\n")
+    const next = "- [x] cost $& $$ $` $'\n"
+    await expect(execute(makeRegistry(), "workspace_edit", {
+      path: "plan.md", oldText: "- [ ] cost $& $$ $` $'\n", newText: next, replaceAll
+    })).resolves.toMatchObject({ status: "success" })
+    expect(await readFile(join(workspace, "plan.md"), "utf8")).toBe(next)
+  })
+
   it("rejects traversal, escaping symlinks, and missing idempotency keys", async () => {
     await writeFile(join(outside, "secret.txt"), "secret")
     await symlink(outside, join(workspace, "escape"))

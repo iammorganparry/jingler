@@ -1,10 +1,10 @@
+import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import {
   type ContextBreakdown,
   type FileChangeSet,
   type Message,
   type AgentRunSpec,
-  type PlannotatorProjection,
   type PlannotatorReviewDecision,
   type StreamEvent,
   type SubagentFleetControlOutcome,
@@ -23,12 +23,8 @@ export interface PiSessionHandle {
   /** Internal Pi session identity used by pi-subagents lifecycle events. */
   readonly parentRuntimeSessionId: string
   readonly modelId: string
+  readonly toolRegistry?: ToolRegistry
   readonly contextWindow: number | null
-  readonly plannotatorPhase?: () => "idle" | "planning" | "executing"
-  readonly subscribePlannotator?: (
-    listener: (state: PlannotatorProjection) => void
-  ) => () => void
-  readonly subscribePlannotatorNotice?: (listener: (message: string) => void) => () => void
   /** Deliver the operator's verdict on a pending native plan review. */
   readonly decidePlanReview?: (decision: PlannotatorReviewDecision) => void
   readonly subscribe: (listener: (event: AgentSessionEvent) => void) => () => void
@@ -156,29 +152,14 @@ const subscribeToSession = (
   sink: EventSink
 ): (() => void) => {
   const unsubscribeFleet = handle.subscribeFleet((event) => sink.emit(event))
-  const unsubscribePlannotator = handle.subscribePlannotator?.((state) =>
-    sink.emit({ _tag: "PlannotatorStateChanged", state })
-  ) ?? (() => {})
-  const unsubscribePlannotatorNotice = handle.subscribePlannotatorNotice?.((message) =>
-    sink.emit({ _tag: "Failed", message })
-  ) ?? (() => {})
   const normalize = createPiEventNormalizer()
-  let previousPlanPhase = handle.plannotatorPhase?.() ?? "idle"
   const unsubscribeSession = handle.subscribe((event) => {
     emitVisibleAgentEvent(false, event, sink, normalize, handle)
     if (event.type !== "agent_settled") return
-    const planPhase = handle.plannotatorPhase?.() ?? "idle"
-    if (planPhase === "executing" && previousPlanPhase !== "executing") {
-      previousPlanPhase = planPhase
-      return
-    }
-    previousPlanPhase = planPhase
     Effect.runFork(settleSession(handle, sink))
   })
   return () => {
     unsubscribeFleet()
-    unsubscribePlannotator()
-    unsubscribePlannotatorNotice()
     unsubscribeSession()
   }
 }
@@ -223,6 +204,7 @@ const lockedCapabilityFingerprint = (
 ): string => JSON.stringify({
   role: spec.role,
   mode: spec.mode,
+  ponytailMode: spec.ponytailMode,
   targetId: spec.targetCapabilities.targetId,
   toolIds: [...spec.targetCapabilities.toolIds].sort(),
   resourceIds: [...spec.targetCapabilities.resourceIds].sort(),
@@ -270,6 +252,7 @@ interface RetainedPiSession {
 const rebindableContext = (
   holder: { current: AgentRuntimeContext }
 ): AgentRuntimeContext => ({
+  get planning() { return holder.current.planning },
   get mcp() {
     return holder.current.mcp
   },
@@ -346,6 +329,7 @@ class PiSessionRegistry {
       // THIS turn's context so interactive emits land in the live mailbox, not
       // the creating turn's ended one.
       retained.contextHolder.current = context
+      if (retained.handle.toolRegistry) context.planning?.attachRegistry(retained.handle.toolRegistry)
       return Effect.succeed(retained)
     }
     return this.#create(spec, context, capabilityFingerprint)

@@ -152,6 +152,9 @@ describe("AgentRuntimeAdapter", () => {
       data: "iVBORw0KGgo="
     }
     await expect(handle!("look at this", [image])).resolves.toBe("unsupported")
+    for (const text of ["/ponytail off", "/deploy staging", "/skill:ponytail-review", "normal mode"]) {
+      await expect(handle!(text, [])).resolves.toBe("unsupported")
+    }
     expect(steer).not.toHaveBeenCalled()
 
     await expect(handle!("plain text", [])).resolves.toBe("accepted")

@@ -1,3 +1,4 @@
+import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 /**
@@ -190,6 +191,7 @@ import type {
   FromServerEncoded,
 } from "@effect/rpc/RpcMessage";
 import {
+  Duration,
   Effect,
   Layer,
   Mailbox,
@@ -331,43 +333,7 @@ export const chooseReposDir = () =>
     return yield* ConfigService.setReposDir(dir);
   }).pipe(Effect.orElseSucceed(() => null));
 
-const BUILTIN_SKILLS = [
-  {
-    name: "/explain",
-    description: "Publish a focused visual explanation of the current technical topic.",
-    source: "skill" as const,
-  },
-  {
-    name: "/ponytail",
-    description: "Set Ponytail mode: lite, full, ultra, off, status, or default <mode>.",
-    source: "command" as const,
-  },
-  {
-    name: "/ponytail-review",
-    description: "Review a diff exclusively for removable over-engineering.",
-    source: "skill" as const,
-  },
-  {
-    name: "/ponytail-audit",
-    description: "Audit the repository for code and dependencies that can be removed.",
-    source: "skill" as const,
-  },
-  {
-    name: "/ponytail-debt",
-    description: "List deliberate Ponytail shortcuts and their upgrade triggers.",
-    source: "skill" as const,
-  },
-  {
-    name: "/ponytail-gain",
-    description: "Show Ponytail's published benchmark impact scoreboard.",
-    source: "skill" as const,
-  },
-  {
-    name: "/ponytail-help",
-    description: "Show Ponytail levels, skills, commands, and deactivation help.",
-    source: "skill" as const,
-  },
-]
+
 
 /** Product-owned skills plus enabled managed skills and prompts. */
 export const skillsList = (sessionId: string) =>
@@ -4044,12 +4010,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }))
     }
     const runner = yield* AgentRunner
+    // The write queues behind the chat lock, which a turn holds while it sets
+    // up or unwinds. Waiting forever there left the composer stuck on "Saving
+    // the selected agent runtime…" with no way out; give up and say why.
+    // Interrupting before the permit is granted writes nothing.
     return yield* runner.setModel(
       sessionId,
       chatId,
       entry.connection.id,
       providerId,
       modelId
+    ).pipe(
+      Effect.timeoutFail({
+        duration: Duration.seconds(10),
+        onTimeout: () => new ProviderConnectionError({
+          message: "This chat is still starting or stopping a turn. Try switching models again in a moment."
+        })
+      })
     )
   }),
   "Provider.list": () => providerOperation((service) => service.list),

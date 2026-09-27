@@ -190,6 +190,12 @@ export interface SessionPaneProps {
   renderTerminal?: (session: Session) => ReactNode
   /** Select a path in the session's persistent file-browser actor. */
   onOpenFile?: (sessionId: string, path: string) => void
+  /**
+   * List a path among the session's open files WITHOUT selecting it. A file
+   * pane owns its own document; selecting its path in the shared actor would
+   * retarget the Files view and repaint it every time another file opens.
+   */
+  onTrackFile?: (sessionId: string, path: string) => void
   /** Dirty-aware close request for a path-owned nested editor. */
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   /**
@@ -542,8 +548,8 @@ function SessionPaneBody(props: SessionPaneProps) {
     [surfaceLayout.panes]
   )
   useEffect(() => {
-    for (const path of filePanePaths) props.onOpenFile?.(props.session.id, path)
-  }, [filePanePaths, props.onOpenFile, props.session.id])
+    for (const path of filePanePaths) props.onTrackFile?.(props.session.id, path)
+  }, [filePanePaths, props.onTrackFile, props.session.id])
   const focusedSurface = surfaceLayout.panes[surfaceLayout.focused]?.surface ?? fallbackSurface
   const [tab, setTab] = useState<TabKey>(() =>
     focusedSurface.kind === "view"

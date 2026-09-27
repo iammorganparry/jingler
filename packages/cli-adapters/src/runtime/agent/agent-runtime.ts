@@ -18,6 +18,7 @@ import type {
 } from "@jingler/core"
 import { piEndpointId } from "@jingler/core"
 import { Context, Data, Effect, Layer, Stream } from "effect"
+import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { JinglerMcpAttachments } from "../tools/mcp-tools.js"
 
 export class AgentRuntimeError extends Data.TaggedError("AgentRuntimeError")<{
@@ -48,6 +49,13 @@ export const inactiveRuntimeActivity = {
 } satisfies Pick<AgentRuntimeContext, "publishEvent" | "registerBackgroundStop">
 
 export interface AgentRuntimeContext {
+  /** Jingler-owned planning tools, bound to the current chat. */
+  readonly isPlanReviewPending?: () => boolean
+  readonly planning?: {
+    readonly register: (registry: ToolRegistry, context: AgentRuntimeContext) => void
+    readonly attachRegistry: (registry: ToolRegistry) => void
+    readonly execute: (filePath: string, submit: boolean, signal: AbortSignal) => Promise<unknown>
+  }
   /** Main-process-only capability attachments for this run. */
   readonly mcp?: JinglerMcpAttachments
   /** Publish Jingler-owned lifecycle events produced by first-class tools. */

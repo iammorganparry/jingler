@@ -1,8 +1,9 @@
-import { readFile } from "node:fs/promises"
 import { ManagedResourceId, type ManagedResource } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import type { AgentResourceServiceShape } from "./agent-resource-service.js"
-import { ToolError, type ToolRegistry } from "../tools/tool-registry.js"
+import { type ToolRegistry } from "../tools/tool-registry.js"
+
+import { portableResourceCatalog, loadPortableResource, type PortableResource } from "./portable-skills.js"
 
 const TOOL_OUTPUT_BYTES = 48 * 1024
 const DESCRIPTION_BYTES = 160
@@ -33,13 +34,13 @@ const boundedInstructions = (content: string) => {
       }
 }
 
-const matches = (resource: ManagedResource, query: string): boolean => {
+const matches = (resource: PortableResource, query: string): boolean => {
   const haystack = `${resource.id}\n${resource.name}\n${resource.description}`.toLowerCase()
   return haystack.includes(query.toLowerCase())
 }
 
 const listResources = (
-  resources: ReadonlyArray<ManagedResource>,
+  resources: ReadonlyArray<PortableResource>,
   query: string | undefined,
   limit: number | undefined
 ) => {
@@ -59,39 +60,13 @@ const listResources = (
   }
 }
 
-const loadResource = (
-  service: AgentResourceServiceShape,
-  availableIds: ReadonlySet<string>,
-  id: ManagedResourceId
-) => {
-  if (!availableIds.has(id)) {
-    return Effect.fail(
-      new ToolError("forbidden", `Managed resource "${id}" is unavailable for this target`)
-    )
-  }
-  return service.reveal(id).pipe(
-    Effect.flatMap((path) =>
-      Effect.tryPromise({
-        try: () => readFile(path, "utf8"),
-        catch: () => new ToolError("execution-failed", "Could not load managed resource")
-      })
-    ),
-    Effect.map(boundedInstructions),
-    Effect.mapError((cause) =>
-      cause instanceof ToolError
-        ? cause
-        : new ToolError("execution-failed", cause.message)
-    )
-  )
-}
-
 /** Register a bounded catalog and loader; catalog size never expands the provider tool surface. */
 export const registerManagedFileTools = (
   registry: ToolRegistry,
   service: AgentResourceServiceShape,
   resources: ReadonlyArray<ManagedResource>
 ): void => {
-  const available = [...resources].sort((left, right) =>
+  const available = [...portableResourceCatalog(resources)].sort((left, right) =>
     left.id.localeCompare(right.id)
   )
   const availableIds = new Set(available.map(({ id }) => id))
@@ -121,6 +96,6 @@ export const registerManagedFileTools = (
     outputBudget: 64 * 1024,
     cancellable: true,
     idempotency: "safe",
-    execute: ({ id }) => Effect.runPromise(loadResource(service, availableIds, id))
+    execute: ({ id }) => Effect.runPromise(loadPortableResource(service, availableIds, id).pipe(Effect.map(boundedInstructions)))
   })
 }

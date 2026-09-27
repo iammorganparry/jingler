@@ -48,6 +48,7 @@ export interface SessionSplitProps {
   ) => ReactNode
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   conversationPane?: ReactNode
   /**
@@ -158,6 +159,7 @@ export function SessionSplit(props: SessionSplitProps) {
         renderBrowser={props.renderBrowser}
         renderTerminal={props.renderTerminalDock}
         onOpenFile={props.onOpenFile}
+        onTrackFile={props.onTrackFile}
         onRequestCloseFile={props.onRequestCloseFile}
         conversationPane={props.conversationPane}
         renderChatTabs={props.renderChatTabs}

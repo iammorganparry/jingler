@@ -5,6 +5,15 @@ appId: app.jingler.desktop
 productName: Jingler
 copyright: Copyright © Jingler
 
+# Declare the sign-in callback scheme. On macOS an app can only claim a URL
+# scheme listed in its Info.plist; without this, setAsDefaultProtocolClient is
+# a no-op in packaged builds and the browser's jingler://auth/callback never
+# reaches the app, so OAuth and magic-link sign-in could not complete.
+protocols:
+  - name: Jingler
+    schemes:
+      - jingler
+
 directories:
   output: release
   buildResources: build-resources

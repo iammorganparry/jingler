@@ -209,9 +209,11 @@ const signInToProduct = async (
   window: Page,
   token: string,
 ): Promise<void> => {
-  const signIn = window.getByRole("heading", { name: "Sign in to Jingler" });
+  // Sign-in is optional: the account menu always renders, and reads
+  // "Not signed in" until a session exists.
   const accountMenu = window.getByRole("button", { name: "Account menu" });
-  await expect(signIn.or(accountMenu)).toBeVisible({ timeout: 30_000 });
+  const signIn = accountMenu.getByText("Not signed in");
+  await expect(accountMenu).toBeVisible({ timeout: 30_000 });
   if (!(await signIn.isVisible())) return;
   await app.evaluate(({ app: electronApp }, value) => {
     electronApp.emit(

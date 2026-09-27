@@ -101,6 +101,8 @@ export interface SessionSidebarProps {
   onOpenSettings?: () => void
   /** Sign out (from the account menu). */
   onSignOut?: () => void
+  /** Open the optional sign-in dialog; the footer offers it while signed out. */
+  onSignIn?: () => void
   /** Whether GitHub is connected (green dot on the Settings item). */
   ghConnected?: boolean
   /** Repo names that are starred — their groups pin to the top (repo grouping). */
@@ -170,6 +172,7 @@ function SidebarBody({
   onOpenUsage,
   onOpenSettings,
   onSignOut,
+  onSignIn,
   ghConnected = false,
   starredRepoNames,
   onToggleStar,
@@ -706,25 +709,18 @@ return (renderExpandedGroupHeading())
         </>
       )}
 
-      {/* Footer: account menu (name / email / avatar → Settings, Usage, Sign out). */}
+      {/* Footer: account menu (→ Settings, Usage, and Sign out — or, signed
+          out, Sign in). Always present: Settings never depends on an account. */}
       <div className="flex-none border-t border-hairline p-1.5">
-        {user ? (
-          <UserMenu
-            user={user}
-            onOpenSettings={onOpenSettings}
-            onOpenUsage={onOpenUsage}
-            onSignOut={onSignOut}
-            ghConnected={ghConnected}
-            version={version}
-          />
-        ) : (
-          <span
-            className="flex h-9 items-center px-2 font-mono text-[11px] text-dim"
-            title={version ? "App version" : undefined}
-          >
-            {version ? `Jingler v${version}` : "Jingler"}
-          </span>
-        )}
+        <UserMenu
+          user={user}
+          onOpenSettings={onOpenSettings}
+          onOpenUsage={onOpenUsage}
+          onSignOut={onSignOut}
+          onSignIn={onSignIn}
+          ghConnected={ghConnected}
+          version={version}
+        />
       </div>
     </AISidebarSurface>
   )

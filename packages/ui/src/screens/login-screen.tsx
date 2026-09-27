@@ -25,6 +25,12 @@ export interface LoginScreenProps {
   onSendMagicLink: (email: string, name?: string) => void
   /** Return from the `sent` state to enter different details. */
   onReset: () => void
+  /**
+   * Render inside a host surface (the sign-in dialog) rather than as the whole
+   * window: no titlebar, and the card sizes to its content instead of filling
+   * the screen.
+   */
+  embedded?: boolean
 }
 
 const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
@@ -33,7 +39,8 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
 }
 
 /**
- * The sign-in wall — the whole app is gated behind this. A macOS titlebar over
+ * The sign-in surface. Sign-in is optional — the app never gates on it — so this
+ * normally renders `embedded` in the sidebar's sign-in dialog. A macOS titlebar over
  * a flat canvas, with the auth card (GitHub + Google OAuth, a divider, and the email
  * magic-link form). The footer toggles between sign-in and sign-up: sign-up adds
  * a name field and a terms notice, and reframes the copy. Both modes share the
@@ -48,7 +55,8 @@ export function LoginScreen({
   onGithub,
   onGoogle,
   onSendMagicLink,
-  onReset
+  onReset,
+  embedded = false
 }: LoginScreenProps) {
   const [mode, setMode] = useState<AuthMode>("signin")
   const [email, setEmail] = useState("")
@@ -64,10 +72,29 @@ export function LoginScreen({
     setMode(signup ? "signin" : "signup")
   }
 
+  const modeToggle = (
+    <>
+      <span>{signup ? "Already have an account?" : "New to Jingler?"}</span>
+      <button
+        type="button"
+        onClick={toggleMode}
+        className="text-brand hover:underline"
+      >
+        {signup ? "Sign in" : "Create an account"}
+      </button>
+    </>
+  )
+
   return (
-    <div className="flex h-full flex-col bg-canvas">
-      <TitleBar />
-      <div className="relative flex flex-1 items-center justify-center overflow-hidden">
+    <div className={embedded ? "flex flex-col" : "flex h-full flex-col bg-canvas"}>
+      {embedded ? null : <TitleBar />}
+      <div
+        className={
+          embedded
+            ? "relative flex items-center justify-center"
+            : "relative flex flex-1 items-center justify-center overflow-hidden"
+        }
+      >
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
           {state === "error" ? (
             <Callout tone="red" glyph={<AlertCircle className="size-3.5" />} className="w-full">
@@ -123,19 +150,20 @@ export function LoginScreen({
               Trouble signing in?
             </a>
           )}
+          {embedded ? (
+            <div className="-mb-1 mt-1 flex w-full items-center justify-center gap-1.5 border-t border-hairline pt-4 text-[12px] text-muted-foreground">
+              {modeToggle}
+            </div>
+          ) : null}
         </AuthCard>
 
-        {/* Footer toggles between sign-in and sign-up. */}
-        <div className="absolute inset-x-0 bottom-0 z-10 flex h-[42px] items-center justify-center gap-1.5 border-t border-hairline bg-panel text-[12px] text-muted-foreground">
-          <span>{signup ? "Already have an account?" : "New to Jingler?"}</span>
-          <button
-            type="button"
-            onClick={toggleMode}
-            className="text-brand hover:underline"
-          >
-            {signup ? "Sign in" : "Create an account"}
-          </button>
-        </div>
+        {/* Footer toggles between sign-in and sign-up. In the dialog it lives
+            inside the card instead (see `modeToggle` above). */}
+        {embedded ? null : (
+          <div className="absolute inset-x-0 bottom-0 z-10 flex h-[42px] items-center justify-center gap-1.5 border-t border-hairline bg-panel text-[12px] text-muted-foreground">
+            {modeToggle}
+          </div>
+        )}
       </div>
     </div>
   )

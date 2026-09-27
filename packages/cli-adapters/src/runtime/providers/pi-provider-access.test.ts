@@ -3,6 +3,7 @@ import type { Api, Model } from "@earendil-works/pi-ai"
 import { describe, expect, it } from "vitest"
 import {
   classifyObservedBillingRoute,
+  isModelUnsupportedError,
   modelReasoningCapabilities,
   registerClaudeCliProvider,
   registerJinglerModels,
@@ -62,6 +63,19 @@ describe("observed provider billing routes", () => {
       api: "anthropic-messages",
       baseUrl: "https://api.anthropic.com"
     })).toBeNull()
+  })
+})
+
+describe("entitlement probe model fallback", () => {
+  it("treats a plan-excluded model as a reason to try the next model", () => {
+    expect(isModelUnsupportedError(
+      '{"detail":"The \'gpt-5.3-codex-spark\' model is not supported when using Codex with a ChatGPT account."}'
+    )).toBe(true)
+  })
+
+  it("still fails the probe on account-level errors", () => {
+    expect(isModelUnsupportedError("401 Unauthorized: invalid token")).toBe(false)
+    expect(isModelUnsupportedError("You have exceeded your quota")).toBe(false)
   })
 })
 

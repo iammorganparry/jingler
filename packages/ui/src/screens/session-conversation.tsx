@@ -117,6 +117,7 @@ export interface SessionConversationProps {
   /** Render the browser inside its owning session pane. */
   renderBrowser?: (session: Session) => ReactNode
   onOpenFile?: (sessionId: string, path: string) => void
+  onTrackFile?: (sessionId: string, path: string) => void
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
@@ -171,6 +172,8 @@ export interface SessionConversationProps {
   onOpenGithubSettings?: () => void
   /** Sign out (from the sidebar account menu). */
   onSignOut?: () => void
+  /** Open the optional sign-in dialog (sidebar footer, while signed out). */
+  onSignIn?: () => void
   /**
    * When set, the Settings view is open: it replaces the main pane (tabs +
    * conversation) while the sidebar stays visible. `onOpenSettings` toggles it.
@@ -297,6 +300,7 @@ export function SessionConversation(props: SessionConversationProps) {
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
             onOpenFile={props.onOpenFile}
+            onTrackFile={props.onTrackFile}
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
@@ -387,6 +391,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onOpenUsage={props.onOpenUsage}
         onOpenSettings={props.onOpenSettings}
         onSignOut={props.onSignOut}
+        onSignIn={props.onSignIn}
         ghConnected={props.ghConnected}
         starredRepoNames={props.starredRepoNames}
         onToggleStar={props.onToggleStar}

@@ -137,7 +137,7 @@ const parseTestReferences = (
 	const match = TEST_REFERENCE_SUFFIX.exec(text);
 	if (!match) return { text };
 	const kind = match[1] as PlanTestKind | undefined;
-	const [path, casesText] = match[2].split("::");
+	const [path, casesText] = match[2]!.split("::");
 	if (!path?.trim()) return { text };
 	const cases = (casesText ?? "")
 		.split(",")
@@ -158,12 +158,12 @@ interface Frontmatter {
 const parseFrontmatter = (lines: string[]): Frontmatter => {
 	if (lines[0]?.trim() !== "---") return { title: null, revision: 1, bodyStart: 0 };
 	for (let index = 1; index < lines.length; index++) {
-		if (lines[index].trim() === "---") {
+		if (lines[index]!.trim() === "---") {
 			let title: string | null = null;
 			let revision = 1;
 			for (const line of lines.slice(1, index)) {
 				const titleMatch = /^title:\s*(.+?)\s*$/.exec(line);
-				if (titleMatch) title = titleMatch[1].replace(/^["']|["']$/g, "");
+				if (titleMatch) title = titleMatch[1]!.replace(/^["']|["']$/g, "");
 				const revisionMatch = /^revision:\s*(\d+)\s*$/.exec(line);
 				if (revisionMatch) revision = Number(revisionMatch[1]);
 			}
@@ -202,7 +202,7 @@ class SectionBuilder {
 			this.blocks.push({
 				kind: "heading",
 				level: raw.startsWith("####") ? 4 : 3,
-				text: heading[1],
+				text: heading[1]!,
 			});
 			return;
 		}
@@ -248,7 +248,7 @@ class StageBuilder {
 		const idMatch = STAGE_ID_COMMENT.exec(heading);
 		const title = idMatch ? heading.slice(0, idMatch.index).trim() : heading.trim();
 		this.stage = {
-			id: idMatch ? idMatch[1] : slugOf(title),
+			id: idMatch ? idMatch[1]! : slugOf(title),
 			title,
 			intent: "",
 			approach: [],
@@ -328,7 +328,7 @@ class StageBuilder {
 		const sub = SUB_HEADING.exec(raw);
 		if (sub) {
 			this.#flushParagraph();
-			const name = sub[1].toLowerCase();
+			const name = sub[1]!.toLowerCase();
 			this.#subsection = name.startsWith("approach")
 				? "approach"
 				: name.startsWith("acceptance")
@@ -340,12 +340,12 @@ class StageBuilder {
 		}
 		const complexity = COMPLEXITY_LINE.exec(trimmed);
 		if (complexity) {
-			this.stage.complexity = complexity[1].toLowerCase() as "low" | "medium" | "high";
+			this.stage.complexity = complexity[1]!.toLowerCase() as "low" | "medium" | "high";
 			return;
 		}
 		const depends = DEPENDS_LINE.exec(trimmed);
 		if (depends) {
-			this.stage.dependencies = depends[1]
+			this.stage.dependencies = depends[1]!
 				.split(",")
 				.map((dependency) => dependency.trim())
 				.filter((dependency) => dependency.length > 0);
@@ -354,15 +354,15 @@ class StageBuilder {
 		if (this.#subsection === "files") {
 			const file = FILE_LINE.exec(raw);
 			if (file) {
-				this.stage.files.push({ path: file[1], change: file[2] as "A" | "M" | "D" });
+				this.stage.files.push({ path: file[1]!, change: file[2]! as "A" | "M" | "D" });
 			}
 			return;
 		}
 		const bullet = BULLET_LINE.exec(raw);
 		if (bullet) {
 			this.#flushParagraph();
-			if (this.#subsection === "approach") this.stage.approach.push(bullet[1].trim());
-			else this.#bodyBullets.push(bullet[1].trim());
+			if (this.#subsection === "approach") this.stage.approach.push(bullet[1]!.trim());
+			else this.#bodyBullets.push(bullet[1]!.trim());
 			return;
 		}
 		if (this.#subsection === "body") this.#paragraph.push(trimmed);
@@ -385,6 +385,30 @@ const isDocumentTitle = (
 	title: string | null,
 ): match is RegExpExecArray => match !== null && stage === null && title === null;
 
+interface OpenFence {
+	language: string;
+	path: string | null;
+	lines: string[];
+}
+
+const consumeFence = (
+	fence: OpenFence,
+	closing: RegExpExecArray | null,
+	raw: string,
+	stage: StageBuilder | null,
+	section: SectionBuilder,
+): OpenFence | null => {
+	if (closing === null) {
+		fence.lines.push(raw);
+		return fence;
+	}
+	const code = fence.lines.join("\n");
+	if (stage === null) section.code(fence.language, code, fence.path);
+	else if (fence.language === "mermaid") stage.diagram(code);
+	else if (fence.path !== null) stage.change({ path: fence.path, patch: code });
+	return null;
+};
+
 export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
 	const frontmatter = parseFrontmatter(allLines);
@@ -392,7 +416,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const checkboxByLine = new Map(scanChecklist(lines.join("\n")).map((item) => [item.line, item]));
 	const explicitStages = lines.some((line) => {
 		const heading = STAGE_HEADING.exec(line);
-		return heading !== null && STAGE_ID_COMMENT.test(heading[1]);
+		return heading !== null && STAGE_ID_COMMENT.test(heading[1]!);
 	});
 
 	let title = frontmatter.title;
@@ -410,25 +434,12 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	};
 	const stages: ParsedPlanStage[] = [];
 	let stage: StageBuilder | null = null;
-	let fence: { language: string; path: string | null; lines: string[] } | null = null;
+	let fence: OpenFence | null = null;
 
 	for (const [line, raw] of lines.entries()) {
 		const fenceMatch = FENCE_LINE.exec(raw.trim());
 		if (fence !== null) {
-			if (fenceMatch !== null) {
-				const code = fence.lines.join("\n");
-				if (stage !== null) {
-					if (fence.language === "mermaid") stage.diagram(code);
-					else if (fence.path !== null) stage.change({ path: fence.path, patch: code });
-					// Other stage code fences are dropped from the structure
-					// (they stay in the markdown, which remains the source of truth).
-				} else {
-					section.code(fence.language, code, fence.path);
-				}
-				fence = null;
-			} else {
-				fence.lines.push(raw);
-			}
+			fence = consumeFence(fence, fenceMatch, raw, stage, section);
 			continue;
 		}
 		if (fenceMatch !== null) {
@@ -442,17 +453,17 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 
 		const stageHeading = STAGE_HEADING.exec(raw);
 		if (stageHeading !== null) {
-			const tagged = STAGE_ID_COMMENT.test(stageHeading[1]);
+			const tagged = STAGE_ID_COMMENT.test(stageHeading[1]!);
 			if (!explicitStages || tagged) {
 				if (stage !== null) stages.push(stage.finish());
 				else finishSection();
-				stage = new StageBuilder(stageHeading[1]);
+				stage = new StageBuilder(stageHeading[1]!);
 			} else {
 				if (stage !== null) {
 					stages.push(stage.finish());
 					stage = null;
 				} else finishSection();
-				sectionTitle = stageHeading[1].trim();
+				sectionTitle = stageHeading[1]!.trim();
 			}
 			continue;
 		}
@@ -476,7 +487,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 
 		const titleHeading = /^#\s+(.+?)\s*$/.exec(raw);
 		if (isDocumentTitle(titleHeading, stage, title)) {
-			title = titleHeading[1];
+			title = titleHeading[1]!;
 			continue;
 		}
 

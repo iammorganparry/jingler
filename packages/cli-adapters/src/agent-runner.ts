@@ -1,3 +1,5 @@
+import { join } from "node:path"
+import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
 import type {
   AgentRosterEntry,
@@ -1385,9 +1387,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       Effect.gen(function* () {
         const session = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
         const chat = session?.chats.find((candidate) => candidate.id === chatId)
+        const paths = yield* AppPaths
+        const pending = yield* Effect.promise(() => sharedPlanReviewPending(join(paths.managedResourcesDir, "plans"), sessionId, chatId))
+        if (pending !== null) return pending
         if (chat?.continuation?.runtimeId !== "pi") return false
         const continuationId = chat.continuation.id
-        const paths = yield* AppPaths
         return yield* Effect.promise(() =>
           plannotatorReviewPending(continuationId, paths.piSessionsDir)
         )
@@ -1417,7 +1421,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
 
 /** Native runtimes without run-scoped MCP support must not receive browser leases. */
 const acquireRuntimeBrowser = (runtimeId: string | undefined, sessionId: string, chatId: string) =>
-  runtimeId === "opencode" ? Effect.succeed(null) : Effect.gen(function* () {
+  Effect.gen(function* () {
     return yield* (yield* BrowserControlMcpService).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
   })
 
@@ -1483,6 +1487,7 @@ function prepareTurnSpec(
       targetId: session.environmentId ?? "desktop"
     },
     cwd: worktreePath,
+    operatorPrompt: promptText,
     // A slash command is only expanded by the harness when it is the FIRST
     // thing in the message. Prefixing a compaction primer or a plan pointer
     // turned `/babysit-pr …` into prose, and the turn came back instantly

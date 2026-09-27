@@ -47,7 +47,7 @@ export function ProviderAuthForms({
           </div>
           <p className="text-[11px] leading-[1.55] text-muted-foreground">
             Install Claude Code and run <code className="font-mono text-text">claude auth login</code>.
-            Jingler uses that login for inference and reads its OAuth token transiently for the usage widget, without storing it.
+            Jingler uses that login for inference and never reads its credentials; usage shows what the CLI reports after each reply.
           </p>
           <div className="flex gap-2">
             <Button

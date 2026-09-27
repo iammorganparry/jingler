@@ -1,5 +1,6 @@
 import type { AuthKind, UsageStatus, UsageWindow } from "@jingler/core"
 import { Option, Schema } from "effect"
+import { latestClaudeCliRateLimits, type ClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
 
 /**
  * Live plan-usage windows read straight from the subscription providers'
@@ -202,6 +203,39 @@ const requestAnthropicUsage = async (
   }
 }
 
+const CLAUDE_CLI_WINDOW_LABELS: Readonly<Record<string, string>> = {
+  five_hour: "Current session",
+  seven_day: "Weekly · all models",
+  seven_day_opus: "Weekly · Opus",
+  seven_day_sonnet: "Weekly · Sonnet"
+}
+
+/** Known windows first, in the order the plan page shows them. */
+const CLAUDE_CLI_WINDOW_ORDER = Object.keys(CLAUDE_CLI_WINDOW_LABELS)
+
+/** Map the CLI's own rate-limit report (0–1 fractions) to usage windows. */
+export const claudeCliRateLimitUsage = (limits: ClaudeCliRateLimits | null): ProviderUsageRead => {
+  if (limits === null) {
+    return unavailable("Usage appears after the first Claude turn — the Claude CLI reports it with each reply.")
+  }
+  const rank = (key: string) => {
+    const index = CLAUDE_CLI_WINDOW_ORDER.indexOf(key)
+    return index === -1 ? CLAUDE_CLI_WINDOW_ORDER.length : index
+  }
+  const windows = Object.entries(limits.windows)
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([key, window]): UsageWindow => {
+      const utilization = window.utilization === null ? null : clampPercent(Math.round(window.utilization * 100))
+      return {
+        label: CLAUDE_CLI_WINDOW_LABELS[key] ?? key.replace(/_/gu, " "),
+        resetsAt: isoFromUnixSeconds(window.resetsAt),
+        utilization,
+        status: statusFor(utilization)
+      }
+    })
+  return { available: true, usage: { plan: null, windows } }
+}
+
 const fetchAnthropicOAuthUsage = async (
   access: string,
   fallbackAccess: (() => Promise<string | null>) | null,
@@ -210,9 +244,9 @@ const fetchAnthropicOAuthUsage = async (
   const borrowed =
     fallbackAccess === null ? null : await fallbackAccess().catch(() => null)
   if (access === "claude-cli") {
-    if (borrowed === null) {
-      return unavailable("Sign in to the Claude CLI on this machine to read subscription usage.")
-    }
+    // The Claude CLI connection holds no token of its own, and production
+    // never reads the CLI's credentials; its usage is what the CLI reported.
+    if (borrowed === null) return claudeCliRateLimitUsage(latestClaudeCliRateLimits())
     const cli = await requestAnthropicUsage(borrowed, signal)
     return cli.kind === "settled"
       ? cli.read

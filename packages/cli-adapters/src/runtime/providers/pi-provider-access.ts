@@ -112,20 +112,24 @@ export const registerClaudeCliProvider = (
   })
 }
 
-const selectEntitlementModel = <Model>(models: ReadonlyArray<Model>): Model => {
-  const model = models[0]
-  if (!model) throw new Error("No authenticated model is available")
-  return model
-}
-
-const entitlementModel = async (
+const entitlementModels = async (
   runtime: ModelRuntime,
   providerId: string,
   signal: AbortSignal
 ) => {
   const models = await runtime.getAvailable(providerId, { signal })
-  return selectEntitlementModel(models)
+  if (models.length === 0) throw new Error("No authenticated model is available")
+  return models
 }
+
+// A plan can authenticate yet exclude a catalogued model (ChatGPT accounts
+// reject the Pro-only codex-spark). That says nothing about entitlement, so the
+// probe moves on to the next model instead of failing the connection.
+const MODEL_UNSUPPORTED = /model is not supported|model_not_supported|unsupported model/i
+
+/** Whether a probe failure is about the model, not the account. */
+export const isModelUnsupportedError = (message: string): boolean =>
+  MODEL_UNSUPPORTED.test(message)
 
 const redactedEndpoint = (baseUrl: string): string => {
   const endpoint = new URL(baseUrl)
@@ -194,7 +198,25 @@ export const probePiEntitlement = async (input: {
     signal: input.signal
   })
   registerJinglerModels(runtime)
-  const model = await entitlementModel(runtime, input.providerId, input.signal)
+  const models = await entitlementModels(runtime, input.providerId, input.signal)
+  let lastError: Error | null = null
+  for (const model of models) {
+    try {
+      // biome-ignore lint/performance/noAwaitInLoops: stop at the first model the plan accepts.
+      return await probeModel(runtime, model, input)
+    } catch (error) {
+      if (!(error instanceof Error) || !isModelUnsupportedError(error.message)) throw error
+      lastError = error
+    }
+  }
+  throw lastError ?? new Error("Provider entitlement probe failed")
+}
+
+const probeModel = async (
+  runtime: ModelRuntime,
+  model: Model<Api>,
+  input: { readonly authKind: AuthKind; readonly signal: AbortSignal }
+): Promise<EntitlementProbeResult> => {
   let providerResponse: ProviderResponse | null = null
   const response = await runtime.completeSimple(
     model,

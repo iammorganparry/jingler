@@ -1,5 +1,3 @@
-import { makeOpenCodeRuntimeRegistration } from "@jingler/cli-adapters/runtime/opencode/runtime"
-import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/codex/runtime"
 /**
  * The main-process Effect runtime. `AppLayer` wires every backend dependency the
  * RPC handlers need — the Node platform (`CommandExecutor` + `FileSystem` +
@@ -11,9 +9,7 @@ import { makeCodexRuntimeRegistration } from "@jingler/cli-adapters/runtime/code
 import {
   AgentRunner,
   AgentResourcesLive,
-  AgentRuntimeRegistry,
   AgentRuntimeRouterLive,
-  makeAgentRuntimeRegistry,
   AgentTurnDriverLive,
   AssetService,
   AuthService,
@@ -51,7 +47,11 @@ import {
   RuntimeDiagnostics,
   RuntimeRecoveryService
 } from "@jingler/cli-adapters"
-import { NodeContext } from "@effect/platform-node"
+// The submodule, never the package root: the root re-exports NodeClusterHttp,
+// which imports the optional peer @effect/cluster. electron-builder does not
+// package peer dependencies, so a root import crashes the packaged app at boot
+// with ERR_MODULE_NOT_FOUND while dev (hoisted node_modules) works fine.
+import { layer as NodeContextLayer } from "@effect/platform-node/NodeContext"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { AppPathsLive } from "./app-paths.js"
 import { PreviewViewServiceLive } from "./preview-view.js"
@@ -105,7 +105,7 @@ const RuntimeRoleLayers = Layer.mergeAll(
 )
 
 const AssetLayer: Layer.Layer<AssetService, never, never> =
-  AssetService.Default.pipe(Layer.provide(NodeContext.layer))
+  AssetService.Default.pipe(Layer.provide(NodeContextLayer))
 const RuntimeDiagnosticsLive = RuntimeDiagnostics.Default
 
 const e2ePiFixture = loadE2ePiFixture()
@@ -152,15 +152,8 @@ const PiRuntimeLayer = EmbeddedPiRuntimeLive.pipe(
   Layer.provide(SecretStoreLayer)
 )
 
-const RuntimeRegistryLayer = Layer.effect(
-  AgentRuntimeRegistry,
-  Effect.map(AgentRuntimeRegistry, (pi) => makeAgentRuntimeRegistry([
-    ...pi.registrations.values(), makeCodexRuntimeRegistration(), makeOpenCodeRuntimeRegistration()
-  ]))
-).pipe(Layer.provide(PiRuntimeLayer))
-
 const AgentRuntimeLayer = AgentRuntimeRouterLive.pipe(
-  Layer.provide(RuntimeRegistryLayer)
+  Layer.provide(PiRuntimeLayer)
 )
 
 const AgentExecutionLayer = AgentTurnDriverLive.pipe(
@@ -179,7 +172,7 @@ const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(WebSearchCredentialService.Default),
   // Merged into one stage to stay inside `pipe`'s 20-argument limit. AssetService
   // captures the command executor used by its NUL-safe repository listing, so its
-  // platform dependencies are provided at construction. Reusing NodeContext.layer
+  // platform dependencies are provided at construction. Reusing NodeContextLayer
   // keeps Effect's memoized platform instance shared with the final app layer.
   Layer.provide(Layer.mergeAll(WorkspaceService.Default, ProjectService.Default, AssetLayer)),
   // Before SessionStore so the stores below satisfy the daemon's requirements —
@@ -266,7 +259,7 @@ const AppLayer = AppServicesLayer.pipe(
   Layer.provideMerge(AppPathsLive),
   // NodeContext bundles CommandExecutor + FileSystem + Path used by git, API,
   // config/workspace/session services.
-  Layer.provideMerge(NodeContext.layer)
+  Layer.provideMerge(NodeContextLayer)
 )
 
 export const runtime = ManagedRuntime.make(AppLayer)

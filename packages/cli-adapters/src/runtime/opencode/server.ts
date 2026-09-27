@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { homedir, tmpdir } from "node:os"
+import { join } from "node:path"
 import { spawn, type ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer } from "node:net"
@@ -22,6 +25,18 @@ export const openCodeEnvironment = (environment: NodeJS.ProcessEnv) => ({
     (name) => environment[name] === undefined ? [] : [[name, environment[name]]]
   ))
 })
+const isolatedEnvironment = (original: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv => {
+  const home = original.HOME ?? homedir()
+  return {
+    ...openCodeEnvironment(original), HOME: root, XDG_CONFIG_HOME: root,
+    XDG_DATA_HOME: original.XDG_DATA_HOME ?? join(home, ".local", "share"),
+    XDG_CACHE_HOME: original.XDG_CACHE_HOME ?? join(home, ".cache"),
+    XDG_STATE_HOME: original.XDG_STATE_HOME ?? join(home, ".local", "state"),
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1", OPENCODE_PURE: "1",
+    OPENCODE_DISABLE_EXTERNAL_SKILLS: "1", OPENCODE_DISABLE_CLAUDE_CODE: "1",
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({ lsp: false, formatter: false, autoupdate: false })
+  }
+}
 export const supportedPlatform = () => {
   if (process.platform === "win32") throw new UnsupportedOpenCode("OpenCode requires owned POSIX process groups; Windows Job Object cleanup is unavailable")
 }
@@ -91,7 +106,8 @@ export class OpenCodeServer {
   private constructor(
     readonly client: ReturnType<typeof createOpencodeClient>,
     private readonly child: ChildProcess,
-    private readonly closed: Promise<void>
+    private readonly closed: Promise<void>,
+    private readonly configRoot: string
   ) {}
   static async start(options: OpenCodeOptions = {}) {
     if (await readOpenCodeVersion(options) !== OPENCODE_VERSION)
@@ -99,10 +115,19 @@ export class OpenCodeServer {
     const port = await (options.port ?? ephemeralPort)()
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid loopback port")
     const password = randomBytes(32).toString("base64url")
-    const child = trackChild((options.spawnProcess ?? spawn)(options.binary ?? process.env.JINGLER_OPENCODE_BINARY ?? "opencode", ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-      env: { ...openCodeEnvironment(options.environment ?? process.env), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
-      stdio: ["ignore", "pipe", "pipe"], detached: true
-    }), true)
+    const original = options.environment ?? process.env
+    const configRoot = await mkdtemp(join(tmpdir(), "jingler-opencode-"))
+    const environment = isolatedEnvironment(original, configRoot)
+    let child: ChildProcess
+    try {
+      child = trackChild((options.spawnProcess ?? spawn)(options.binary ?? process.env.JINGLER_OPENCODE_BINARY ?? "opencode", ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
+        env: { ...environment, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
+        stdio: ["ignore", "pipe", "pipe"], detached: true
+      }), true)
+    } catch (cause) {
+      await rm(configRoot, { recursive: true, force: true })
+      throw cause
+    }
     const spawned = new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve)
       child.once("error", reject)
@@ -124,7 +149,7 @@ export class OpenCodeServer {
         return boundedResponse(await (options.fetch ?? globalThis.fetch)(new Request(request, { signal, redirect: "error" })))
       }
     })
-    server = new OpenCodeServer(client, child, closed)
+    server = new OpenCodeServer(client, child, closed, configRoot)
     child.once("close", () => server.stopped.abort())
     try {
       await waitUntilReady(client, server.stopped.signal, spawned, () => failed, options.timeoutMs ?? 15_000)
@@ -139,6 +164,7 @@ export class OpenCodeServer {
       this.stopped.abort()
       stopChild(this.child, 250)
       await this.closed
+      await rm(this.configRoot, { recursive: true, force: true })
     })()
     return this.closing
   }

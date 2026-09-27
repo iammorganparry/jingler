@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import {
   createAgentSession,
   createEventBus,
@@ -8,7 +7,6 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
-  type EventBus,
   type ExtensionUIContext,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
@@ -18,9 +16,7 @@ import type {
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
-  JINGLER_SUBAGENT_NAMES,
-  PlannotatorProjection,
-  type PlannotatorReviewDecision
+  JINGLER_SUBAGENT_NAMES
 } from "@jingler/core"
 import type {
   Message,
@@ -30,7 +26,7 @@ import type {
   StreamEvent,
   SubagentModelAssignments
 } from "@jingler/core"
-import { Data, Effect, Option, Schema } from "effect"
+import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
 import type { FileChangeTracker, WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
 import { makePiCredentialStore } from "../auth/pi-credential-store.js"
@@ -42,6 +38,7 @@ import {
   PromptCompiler,
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
+import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
 import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
@@ -130,65 +127,6 @@ const makeExtensionUIContext = (): ExtensionUIContext => ({
   setToolsExpanded: () => {}
 })
 
-const PLANNOTATOR_REQUEST_CHANNEL = "plannotator:request"
-const PLANNOTATOR_HOST_STATE_CHANNEL = "plannotator:host-state"
-const PLANNOTATOR_HOST_NOTICE_CHANNEL = "plannotator:host-notice"
-const PLANNOTATOR_REVIEW_DECISION_CHANNEL = "plannotator:review-decision"
-const PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL = "plannotator:review-decision-ack"
-const PLANNOTATOR_TIMEOUT_MS = 5_000
-
-export const deliverPlanReviewDecision = (
-  events: EventBus,
-  decision: PlannotatorReviewDecision
-): void => {
-  let acknowledged = false
-  const unsubscribe = events.on(PLANNOTATOR_REVIEW_DECISION_ACK_CHANNEL, (payload) => {
-    if ((payload as { reviewId?: unknown } | undefined)?.reviewId === decision.reviewId) {
-      acknowledged = true
-    }
-  })
-  try {
-    events.emit(PLANNOTATOR_REVIEW_DECISION_CHANNEL, decision)
-  } finally {
-    unsubscribe()
-  }
-  if (!acknowledged) throw new Error("The plan review is no longer pending")
-}
-
-const decodePlannotatorProjection = Schema.decodeUnknownOption(PlannotatorProjection)
-interface PlannotatorPlanModeResult {
-  readonly phase: "idle" | "planning" | "executing"
-}
-type PlannotatorPlanModeResponse =
-  | { readonly status: "handled"; readonly result: PlannotatorPlanModeResult }
-  | { readonly status: "unavailable" | "error"; readonly error?: string }
-
-const requestPlannotatorPlanMode = (
-  events: EventBus,
-  mode: "enter" | "status"
-): Promise<PlannotatorPlanModeResult> =>
-  new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("Plannotator plan mode did not respond")),
-      PLANNOTATOR_TIMEOUT_MS
-    )
-    events.emit(PLANNOTATOR_REQUEST_CHANNEL, {
-      requestId: randomUUID(),
-      action: "plan-mode",
-      payload: { mode },
-      respond: (response: PlannotatorPlanModeResponse) => {
-        clearTimeout(timer)
-        if (response.status === "handled") resolve(response.result)
-        else reject(new Error(response.error ?? "Plannotator plan mode is unavailable"))
-      }
-    })
-  })
-
-export const enterPlannotatorPlanMode = (
-  events: EventBus
-): Promise<PlannotatorPlanModeResult> =>
-  requestPlannotatorPlanMode(events, "enter")
-
 const NATIVE_SUBAGENT_TOOLS = [
   {
     id: "subagent",
@@ -196,7 +134,7 @@ const NATIVE_SUBAGENT_TOOLS = [
     description: "Delegate support work to a named child agent, or coordinate multiple named children."
   },
   {
-    id: "subagent_wait",
+    id: "bg_wait",
     version: "1",
     description: "Wait for native child-agent work when this turn requires its result."
   }
@@ -233,9 +171,6 @@ export interface PiSessionFactoryOptions {
   /** Internal extension points for deterministic tests; production leaves them unset. */
   readonly configureModelRuntime?: (runtime: ModelRuntime) => void | Promise<void>
   readonly createSession?: (options: CreateAgentSessionOptions) => Promise<CreateAgentSessionResult>
-  readonly enterPlannotatorPlanMode?: (
-    events: EventBus
-  ) => Promise<PlannotatorPlanModeResult>
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
   readonly childCredentials?: PiChildCredentials
   readonly subagentBroker?: SubagentCapabilityBroker
@@ -290,19 +225,6 @@ const seedTranscript = (manager: SessionManager, spec: AgentRunSpec): void => {
   )
 }
 
-type PlannotatorPhase = "idle" | "planning" | "executing"
-
-const plannotatorPhase = (manager: SessionManager): PlannotatorPhase => {
-  const entry = manager.getBranch().findLast(
-    (candidate) => candidate.type === "custom" && candidate.customType === "plannotator"
-  )
-  if (entry?.type !== "custom" || typeof entry.data !== "object" || entry.data === null) {
-    return "idle"
-  }
-  const phase = "phase" in entry.data ? entry.data.phase : undefined
-  return phase === "planning" || phase === "executing" ? phase : "idle"
-}
-
 const sessionManagerFor = (spec: AgentRunSpec, sessionsDir: string): SessionManager => {
   if (spec.continuation !== null && spec.seed === null) {
     return SessionManager.open(spec.continuation.id, sessionsDir, spec.cwd)
@@ -348,30 +270,13 @@ const createResources = (
     ...(registry?.capabilitiesFor(runtimeSpec.role, runtimeSpec.mode) ?? []),
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS : [])
   ]
-  // The plan scratchpad tools are registered by the Plannotator extension, not
-  // the registry, so the prompt's tool list has to name them explicitly.
-  const tools = [
-    ...registryTools,
-    {
-      id: "plannotator_submit_plan",
-      version: "1",
-      description: "Submit a Markdown plan for operator review."
-    },
-    {
-      id: "plannotator_update_plan",
-      version: "1",
-      description: "Refresh the active Markdown plan without requesting review."
-    }
-  ]
-  // Plannotator reapplies this list on approval. Plan mode already has the
-  // Auto tool set, so the phase change must not narrow or replace it.
-  const executionTools = registryTools.map(({ id }) => id)
+  const tools = registryTools
   const eventBus = createEventBus()
   // A thrown compile error would be a defect the run cannot classify, so the
   // operator would see a bare "The agent run failed." with the reason lost.
   return Effect.try({
     try: () => (options.promptCompiler ?? new PromptCompiler()).compile({
-      layers: runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+      layers: [...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode), ...ponytailPromptLayers(spec.ponytailMode)],
       tools,
       tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
     }),
@@ -384,8 +289,7 @@ const createResources = (
     cwd: spec.cwd,
     agentDir: options.agentDir,
     systemPrompt: compiled.text,
-    eventBus,
-    plannotatorExecutionTools: executionTools
+    eventBus
   }).pipe(
     Effect.flatMap((resources) =>
       assertLockedPiResources(resources, compiled.text).pipe(
@@ -410,7 +314,6 @@ interface EmbeddedSessionInput {
   readonly spec: AgentRunSpec
   readonly connection: ProviderConnection
   readonly resources: ResourceLoader
-  readonly events: EventBus
   readonly context: AgentRuntimeContext
   readonly registry: ToolRegistry | undefined
   readonly nativeSubagentsEnabled: boolean
@@ -420,13 +323,7 @@ interface EmbeddedSession {
   readonly result: CreateAgentSessionResult
   readonly connection: ProviderConnection
   readonly contextWindow: number
-  readonly plannotatorPhase: () => PlannotatorPhase
-  readonly subscribePlannotator: (
-    listener: (state: PlannotatorProjection) => void
-  ) => () => void
-  readonly subscribePlannotatorNotice: (listener: (message: string) => void) => () => void
-  readonly decidePlanReview: (decision: PlannotatorReviewDecision) => void
-  readonly stopPlannotatorProjection: () => void
+
 }
 
 const createEmbeddedSession = (
@@ -439,7 +336,6 @@ const createEmbeddedSession = (
         spec,
         connection,
         resources,
-        events,
         context,
         registry,
         nativeSubagentsEnabled
@@ -477,18 +373,13 @@ const createEmbeddedSession = (
         model,
         thinkingLevel,
         resources,
-        sessionManager,
-        events
+        sessionManager
       )
       return {
         result: configured.result,
         connection,
         contextWindow: model.contextWindow,
-        plannotatorPhase: () => plannotatorPhase(sessionManager),
-        subscribePlannotator: configured.subscribePlannotator,
-        subscribePlannotatorNotice: configured.subscribePlannotatorNotice,
-        decidePlanReview: (decision) => deliverPlanReviewDecision(events, decision),
-        stopPlannotatorProjection: configured.stopPlannotatorProjection
+
       }
     },
     catch: (cause) =>
@@ -503,6 +394,7 @@ const createEmbeddedSession = (
   })
 
 interface SessionHandleInput {
+  readonly registry: ToolRegistry
   readonly embedded: EmbeddedSession
   readonly spec: AgentRunSpec
   readonly tracker: FileChangeTracker | undefined
@@ -531,14 +423,11 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
   const { session } = embedded.result
   const subagentTasks = new Map<string, string>()
   return {
+    toolRegistry: input.registry,
     id: session.sessionFile ?? session.sessionId,
     parentRuntimeSessionId: session.sessionId,
     modelId: String(spec.modelId),
     contextWindow: embedded.contextWindow,
-    plannotatorPhase: embedded.plannotatorPhase,
-    subscribePlannotator: embedded.subscribePlannotator,
-    subscribePlannotatorNotice: embedded.subscribePlannotatorNotice,
-    decidePlanReview: embedded.decidePlanReview,
     subscribe: (listener) => {
       const unsubscribeSession = session.subscribe((event) => {
         if (
@@ -585,7 +474,6 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     dispose: async () => {
       try {
         lifecycle.stop()
-        embedded.stopPlannotatorProjection()
         Effect.runSync(fleetEvents.clear)
         session.dispose()
       } finally {
@@ -685,7 +573,6 @@ const createSessionHandle = (
       spec,
       connection,
       resources: prepared.loader,
-      events: prepared.eventBus,
       context,
       registry,
       nativeSubagentsEnabled
@@ -879,6 +766,7 @@ function* observeSessionDiagnostics(
         }
       : undefined
     return toHandle({
+      registry,
       embedded,
       spec,
       tracker,
@@ -918,13 +806,10 @@ async function createConfiguredPiSession(
   model: NonNullable<CreateAgentSessionOptions["model"]>,
   thinkingLevel: CreateAgentSessionOptions["thinkingLevel"],
   resources: ResourceLoader,
-  sessionManager: SessionManager,
-  events: EventBus
+  sessionManager: SessionManager
 ) {
   const initialToolNames = [
     ...customTools.map((tool) => tool.name),
-    "plannotator_submit_plan",
-    "plannotator_update_plan",
     ...(nativeSubagentsEnabled ? NATIVE_SUBAGENT_TOOLS.map(({ id }) => id) : [])
   ]
   const result = await (options.createSession ?? createAgentSession)({
@@ -948,57 +833,12 @@ async function createConfiguredPiSession(
     tools: initialToolNames,
     customTools
   })
-  let latestPlannotatorState: PlannotatorProjection | null = null
-  const plannotatorListeners = new Set<(state: PlannotatorProjection) => void>()
-  const stopPlannotatorState = events.on(PLANNOTATOR_HOST_STATE_CHANNEL, (candidate) => {
-    const decoded = decodePlannotatorProjection(candidate)
-    if (Option.isNone(decoded)) return
-    latestPlannotatorState = decoded.value
-    for (const listener of plannotatorListeners) listener(decoded.value)
-  })
-  const pendingPlannotatorNotices: string[] = []
-  const plannotatorNoticeListeners = new Set<(message: string) => void>()
-  const stopPlannotatorNotice = events.on(PLANNOTATOR_HOST_NOTICE_CHANNEL, (candidate) => {
-    if (
-      typeof candidate !== "object" ||
-      candidate === null ||
-      !("message" in candidate) ||
-      typeof candidate.message !== "string"
-    )
-      return
-    if (plannotatorNoticeListeners.size === 0) {
-      pendingPlannotatorNotices.push(candidate.message)
-      return
-    }
-    for (const listener of plannotatorNoticeListeners) listener(candidate.message)
-  })
   await result.session.bindExtensions({
     uiContext: makeExtensionUIContext(),
     mode: "rpc"
   })
-  if (spec.mode === "plan") {
-    await (options.enterPlannotatorPlanMode ?? enterPlannotatorPlanMode)(events)
-    if (options.enterPlannotatorPlanMode === undefined) {
-      await requestPlannotatorPlanMode(events, "status")
-    }
-  }
-  return {
-    result,
-    subscribePlannotator: (listener: (state: PlannotatorProjection) => void) => {
-      plannotatorListeners.add(listener)
-      if (latestPlannotatorState !== null) listener(latestPlannotatorState)
-      return () => plannotatorListeners.delete(listener)
-    },
-    subscribePlannotatorNotice: (listener: (message: string) => void) => {
-      plannotatorNoticeListeners.add(listener)
-      for (const message of pendingPlannotatorNotices.splice(0)) listener(message)
-      return () => plannotatorNoticeListeners.delete(listener)
-    },
-    stopPlannotatorProjection: () => {
-      stopPlannotatorState()
-      stopPlannotatorNotice()
-    }
-  }
+
+  return { result }
 }
 
 const resolveSessionToolRegistry = (

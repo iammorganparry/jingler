@@ -109,6 +109,7 @@ export class CodexEvents {
     return done && !this.streamed.has(item.id) ? [{ _tag: "Assistant", text: item.text }] : []
   }
   private item(item: ThreadItem, done: boolean): ReadonlyArray<StreamEvent> {
+    if (item.type === "mcpToolCall" && item.server === "jingler") return []
     this.remember(item.id)
     if (this.completed.has(item.id)) return []
     if (!done && this.started.has(item.id)) return []

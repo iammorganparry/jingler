@@ -14,6 +14,7 @@ import {
   type SubagentParentSpec
 } from "./subagent-capability-broker.js"
 import type { SubagentCapability } from "@jingler/core"
+import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
 
 const spec = {
   role: "conversation",
@@ -297,4 +298,32 @@ describe("SubagentCapabilityBroker", () => {
     await Effect.runPromise(broker.unregister("parent"))
     expect((await call(capabilities, {})).status).toBe(403)
   })
+  it("serializes child mutations with parent marker edits in the same registry", async () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => { release = resolve })
+    const events: string[] = []
+    const registry = new ToolRegistry({ observer: {
+      started: (request) => Effect.sync(() => { events.push(`start:${request.callId}`); return { cwd: "/workspace", tree: "before" } }),
+      settled: (request) => Effect.sync(() => {
+        events.push(`end:${request.callId}`)
+        return { id: "receipt", callId: request.callId!, changes: [], totals: { added: 0, removed: 0 }, authoritative: true, reconciledAt: new Date().toISOString() }
+      })
+    } })
+    registry.register({ id: "change", version: "1", description: "change", input: Schema.Struct({ value: Schema.String }), risk: "mutate",
+      roles: ["conversation"], modes: ["auto"], timeoutMs: 5000, outputBudget: 1000, cancellable: true, idempotency: "safe",
+      execute: async ({ value }) => { if (value === "ok") await waiting; return value } })
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker()); brokers.push(broker)
+    const runtimeContext = context()
+    const capabilities = await register(broker, registry, runtimeContext)
+    const child = call(capabilities, { toolId: "change" })
+    await vi.waitFor(() => expect(events).toEqual(["start:child-call"]))
+    const parent = executeRegistryTool({ registry, spec, context: runtimeContext, id: "change", toolCallId: "marker", parameters: { value: "marker" }, signal: undefined, allowed: true, onUpdate: undefined })
+    await Promise.resolve()
+    expect(events).toEqual(["start:child-call"])
+    release()
+    expect((await child).status).toBe(200)
+    expect((await parent).details.status).toBe("success")
+    expect(events).toEqual(["start:child-call", "end:child-call", "start:marker", "end:marker"])
+  })
+
 })

@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process"
+import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { chmod, mkdtemp, writeFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,7 +16,7 @@ import {
   makeClaudeAgentRuntime
 } from "./claude-agent-runtime.js"
 import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
-import * as toolRelay from "../providers/claude-cli-tool-relay.js"
+import * as toolRelay from "../providers/registry-mcp-relay.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
@@ -63,6 +64,27 @@ const context = {
 }
 
 describe("ClaudeAgentRuntime", () => {
+  it.runIf(process.env.JINGLER_CLAUDE_LIVE === "1")("executes a supplied tool and consumes its result through the installed CLI", async () => {
+    const registry = new ToolRegistry()
+    registry.register({
+      id: "probe_echo", version: "1", description: "Return the probe's secret test word.",
+      input: Schema.Struct({}), roles: ["conversation"], modes: ["auto"], risk: "read",
+      timeoutMs: 1000, outputBudget: 1000, cancellable: true, idempotency: "safe",
+      execute: async () => "JINGLER_TOOL_RESULT_73"
+    })
+    const tools: Array<{ _tag: string }> = []
+    const runtime = makeClaudeAgentRuntime({ createToolRegistry: () => Effect.succeed(registry) })
+    const events = [...await Effect.runPromise(runtime.run(spec({
+      modelId: Schema.decodeUnknownSync(ProviderModelId)("anthropic/haiku"),
+      prompt: "Call probe_echo exactly once and reply with only the word it returns. Do not guess the word."
+    }), { ...context, publishEvent: (event) => Effect.sync(() => { tools.push(event) }) }).pipe(
+      Stream.runCollect, Effect.timeout("90 seconds")
+    ))]
+    expect(tools.map(({ _tag }) => _tag)).toEqual(["ToolStart", "ToolEnd"])
+    expect(events.filter((event) => event._tag === "Assistant").map((event) => event.text).join(""))
+      .toContain("JINGLER_TOOL_RESULT_73")
+  }, 100_000)
+
   it("uses native session creation and resume flags", () => {
     expect(claudeAgentArguments(spec(), "new-session")).toContain("--session-id")
     const resumed = claudeAgentArguments(spec({
@@ -70,13 +92,30 @@ describe("ClaudeAgentRuntime", () => {
     }), "ignored")
     expect(resumed).toContain("--resume")
     expect(resumed).toContain("prior-session")
-    expect(resumed).toContain("--safe-mode")
-    expect(resumed).not.toContain("--setting-sources")
+    expect(resumed).not.toContain("--safe-mode")
+    expect(resumed).toContain("--setting-sources")
+    expect(resumed).toContain("--system-prompt-snapshot")
     const reasoned = claudeAgentArguments(spec({
       reasoning: { enabled: true, effort: "xhigh" }
     }), "new-session")
     expect(reasoned.slice(reasoned.indexOf("--effort"), reasoned.indexOf("--effort") + 2))
       .toEqual(["--effort", "max"])
+  })
+
+  it("passes Jingler rules and the actual active tool catalog on every turn", async () => {
+    const binary = await executable(`
+process.stdin.resume();
+const args=process.argv.slice(2); const prompt=args[args.indexOf("--system-prompt")+1];
+const valid=prompt?.includes("jingler.identity-and-safety") && prompt.includes("jingler.engineering-principles") && prompt.includes("jingler_ask_question") && !prompt.includes("plannotator_submit_plan:");
+console.log(JSON.stringify({type:"stream_event",event:{type:"content_block_delta",delta:{type:"text_delta",text:valid?"inherited":"missing"}}}));
+console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
+`)
+    for (const continuation of [null, { runtimeId: "claude", endpointId, id: "prior-session" }] as const) {
+      const events = [...await Effect.runPromise(
+        makeClaudeAgentRuntime({ binary }).run(spec({ continuation }), context).pipe(Stream.runCollect)
+      )]
+      expect(events).toContainEqual({ _tag: "Assistant", text: "inherited" })
+    }
   })
 
   it("passes only non-secret operating environment variables", () => {
@@ -158,6 +197,35 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:7,o
     ])
     expect(events[0]).toMatchObject({ _tag: "Started", model: "anthropic/opus" })
   })
+
+  it("hands the CLI's rate-limit report to the Usage panel, not the conversation", async () => {
+    resetClaudeCliRateLimits()
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"rate_limit_event",rate_limit_info:{status:"allowed",unifiedWindows:{five_hour:{utilization:0.2,resetsAt:1790516400}}}}))
+console.log(JSON.stringify({type:"result",is_error:false,usage:{}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events.map(({ _tag }) => _tag)).toEqual(["Started", "Usage", "Done"])
+    expect(latestClaudeCliRateLimits()?.windows.five_hour).toEqual({ utilization: 0.2, resetsAt: 1790516400 })
+    resetClaudeCliRateLimits()
+  })
+
+  it("reports context from the turn's last request, not the sum over every request", async () => {
+    // Shape recorded from a real 4-request turn: the top level sums them all,
+    // \`iterations\` holds only the final one.
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:34,output_tokens:536,cache_read_input_tokens:96204,cache_creation_input_tokens:14417,iterations:[{input_tokens:8,output_tokens:54,cache_read_input_tokens:28125,cache_creation_input_tokens:148}]}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events.find(({ _tag }) => _tag === "Usage")).toEqual({ _tag: "Usage", tokens: 28_335 })
+    expect(events.find(({ _tag }) => _tag === "Done")).toMatchObject({ tokens: 111_191 })
+  })
 })
 
 // A real child process drives HTTP MCP twice, consumes each result, and only
@@ -214,9 +282,10 @@ it("releases scoped registry resources if preparation fails", async () => {
 
 // Parser/process tests use a socket-free relay; the real two-round MCP test above
 // retains end-to-end relay coverage.
-const stubRelay = () => vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValueOnce({
+const stubRelay = () => vi.spyOn(toolRelay, "startRegistryMcpRelay").mockResolvedValueOnce({
+  attachment: { name: "jingler", url: "http://127.0.0.1/mcp", headers: {} },
   mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
-  environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+  environment: { JINGLER_TOOL_RELAY_TOKEN: "fixture-token" },
   close: async () => {}
 })
 
@@ -298,9 +367,10 @@ it("keeps one result when completion races an interrupt", async () => {
 })
 
 it("rejects concurrent runs for one resumed Claude session", async () => {
-  vi.spyOn(toolRelay, "startClaudeCliToolRelay").mockResolvedValue({
-    mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
-    environment: { JINGLER_CLAUDE_MCP_TOKEN: "fixture-token" },
+  vi.spyOn(toolRelay, "startRegistryMcpRelay").mockResolvedValue({
+    attachment: { name: "jingler", url: "http://127.0.0.1/mcp", headers: {} },
+  mcpConfigPath: "/tmp/unused-claude-protocol-fixture.json",
+    environment: { JINGLER_TOOL_RELAY_TOKEN: "fixture-token" },
     close: async () => {}
   })
   const binary = await executable(`process.stdin.resume(); console.log(JSON.stringify({type:"system"})); setInterval(()=>{},1000)`)

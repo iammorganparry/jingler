@@ -13,6 +13,9 @@ const scalar = (value: string): string => {
   return value
 }
 
+export const skillBody = (content: string): string =>
+  content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/u, "")
+
 const frontmatterField = (content: string, key: string): string | null => {
   const lines = content.split(/\r?\n/)
   const index = lines.findIndex((line) => line.startsWith(`${key}:`))

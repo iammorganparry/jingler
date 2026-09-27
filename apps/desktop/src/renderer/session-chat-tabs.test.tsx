@@ -399,6 +399,28 @@ describe("SessionChatTabs file tabs", () => {
     expect(onSelectFiles).toHaveBeenCalledTimes(2)
   })
 
+  it("opens a file tab as its own surface without retargeting the Files view", () => {
+    mocks.files = controller({ selectedPath: "src/other.ts" })
+    const onSelectSurface = vi.fn()
+    const onSelectFiles = vi.fn()
+    render(
+      <SessionChatTabs
+        session={session}
+        filesActive={false}
+        onSelectConversation={vi.fn()}
+        onSelectFiles={onSelectFiles}
+        onSelectSurface={onSelectSurface}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "src/app.ts" }))
+
+    expect(onSelectSurface).toHaveBeenCalledWith({ kind: "file", id: "src/app.ts" })
+    // The shared actor drives the Files view; selecting here would repaint it.
+    expect(mocks.files.open).not.toHaveBeenCalled()
+    expect(onSelectFiles).not.toHaveBeenCalled()
+  })
+
   it("keeps a dirty active file in Files until discard is resolved", () => {
     mocks.files = controller({
       openPaths: ["src/app.ts"],

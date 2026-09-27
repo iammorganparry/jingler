@@ -323,9 +323,9 @@ export interface LaunchOptions {
     repoPath: string;
   }) => void;
   /**
-   * Whether to boot past the sign-in wall (default true). When true the fixture
-   * seeds a valid token so the app lands signed in; set false to assert the wall
-   * itself (auth.spec).
+   * Whether to boot signed in (default true). When true the fixture seeds a
+   * valid token; set false to boot signed out, where sign-in is optional and
+   * offered from the sidebar (auth.spec).
    */
   readonly signedIn?: boolean;
   /**

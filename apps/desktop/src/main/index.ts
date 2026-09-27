@@ -32,6 +32,7 @@ import {
   registerProtocolClient
 } from "./deep-link.js"
 import { startAuthLoopback } from "./auth-loopback.js"
+import { applyDefaultAuthUrl } from "./auth-endpoint.js"
 import { jinglerRoot } from "./app-paths.js"
 import { isExternallyOpenable, sameOrigin } from "./window-guards.js"
 import { registerPluginProtocolHandler, registerPluginScheme } from "./plugin-protocol.js"
@@ -42,6 +43,8 @@ import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from 
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
+
+app.setName("Jingler")
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
@@ -98,6 +101,9 @@ const enablePerfMonitor = (webContentsId: number): void => {
       console.error("[perf-monitor] failed to start", cause)
     })
 }
+
+// Before any service reads it; every auth consumer resolves the URL lazily.
+applyDefaultAuthUrl(app.isPackaged)
 
 const gotPrimaryLock = app.requestSingleInstanceLock()
 if (!gotPrimaryLock) {

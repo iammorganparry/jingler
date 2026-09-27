@@ -89,6 +89,8 @@ export type FileBrowserEvent =
   | { readonly type: "VIEW_ACTIVATED" }
   | { readonly type: "SYNC_WORKTREE"; readonly worktreePath: string }
   | { readonly type: "OPEN"; readonly path: string }
+  /** List a path among the open files without showing it here (a pane of its own shows it). */
+  | { readonly type: "TRACK"; readonly path: string }
   | { readonly type: "CLOSE"; readonly path: string }
   | { readonly type: "EDIT"; readonly text: string }
   | { readonly type: "SAVE" }
@@ -445,6 +447,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
               : ("edit" as const)
         }
       }),
+      trackPath: assign(({ context, event }) =>
+        event.type === "TRACK" ? { openPaths: appendOpenPath(context.openPaths, event.path) } : {}
+      ),
       closeInactivePath: assign(({ context, event }) =>
         event.type === "CLOSE"
           ? { openPaths: context.openPaths.filter((path) => path !== event.path) }
@@ -571,6 +576,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       agentTargetCompleted: false,
       pendingAgentTarget: null
     }),
+    on: {
+      TRACK: { actions: "trackPath" }
+    },
     states: {
       follow: {
         initial: "disabled",

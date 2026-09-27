@@ -115,9 +115,9 @@ const nonEmpty = (raw: string | null | undefined): string | null => {
  */
 export const parseFindings = (text: string): ReadonlyArray<ReviewFinding> | null => {
   const block = extractJsonBlock(text)
-  if (block === null) return null
+  if (block === null) return parseLineFindings(text)
   const decoded = Schema.decodeUnknownEither(Schema.parseJson(RawReview))(block)
-  if (decoded._tag === "Left") return null
+  if (decoded._tag === "Left") return parseLineFindings(text)
   const raw = decoded.right.findings ?? []
   return raw.flatMap((f, i): ReadonlyArray<ReviewFinding> => {
     const title = nonEmpty(f.title)
@@ -143,6 +143,52 @@ export const parseFindings = (text: string): ReadonlyArray<ReviewFinding> | null
       }
     ]
   })
+}
+
+/**
+ * `path:L42: category: text`, the terse one-finding-per-line shape some
+ * models fall back to in place of the JSON contract. The `L` and the category
+ * are optional; `L42-L48` is a range.
+ */
+const LINE_FINDING = /^\s*(?:[-*]\s+)?`?([\w./@+-]+\.[\w]+)`?:L?(\d+)(?:-L?(\d+))?:\s*(?:([a-z][\w-]*):\s+)?(.+)$/i
+
+const SENTENCE_END = /\.\s/
+const LINE_BREAK = /\r?\n/
+
+/** Categories that describe polish rather than a defect. */
+const POLISH_CATEGORIES = new Set(["shrink", "simplify", "simplification", "style", "nit", "naming", "dead-code"])
+
+const firstSentence = (text: string): string => {
+  const end = text.search(SENTENCE_END)
+  return end === -1 ? text : text.slice(0, end + 1)
+}
+
+/**
+ * Recover findings from a reply that ignored the JSON contract but still named
+ * locations. Dropping them into the "couldn't parse" note loses real, anchored
+ * findings over a formatting slip. Null when no line matches, so a refusal or
+ * free prose still surfaces as the note.
+ */
+export const parseLineFindings = (text: string): ReadonlyArray<ReviewFinding> | null => {
+  const findings = text.split(LINE_BREAK).flatMap((row): ReadonlyArray<Omit<ReviewFinding, "id">> => {
+    const match = LINE_FINDING.exec(row)
+    if (match === null) return []
+    const [, path, start, end, category, body] = match
+    const line = asLine(Number(start))
+    const endLine = line === null ? null : asLine(Number(end))
+    const rationale = body!.trim()
+    return [{
+      path: path!,
+      line,
+      endLine: endLine !== null && line !== null && endLine > line ? endLine : null,
+      severity: category !== undefined && POLISH_CATEGORIES.has(category.toLowerCase()) ? "nit" : "minor",
+      title: firstSentence(rationale),
+      rationale,
+      suggestion: null,
+      resolvedBy: null
+    }]
+  })
+  return findings.length === 0 ? null : findings.map((finding, i) => ({ id: `f${i + 1}`, ...finding }))
 }
 
 /**

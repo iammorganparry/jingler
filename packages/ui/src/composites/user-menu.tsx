@@ -1,20 +1,25 @@
 import type { ReactNode } from "react"
 import type { User } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { ChevronsUpDown, Gauge, LogOut, Settings } from "lucide-react"
+import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Avatar } from "../components/avatar.js"
 import { StatusDot } from "../components/status-dot.js"
 
 export interface UserMenuProps {
-  /** The signed-in user (name / email / avatar). */
-  user: User
+  /**
+   * The signed-in user (name / email / avatar). Absent while signed out — the
+   * menu still opens, since Settings and Usage never depend on an account.
+   */
+  user?: User
   /** Open the Settings view. */
   onOpenSettings?: () => void
   /** Open the Usage & limits modal. */
   onOpenUsage?: () => void
   /** Sign out of the app. */
   onSignOut?: () => void
+  /** Open the optional sign-in dialog. Offered only while signed out. */
+  onSignIn?: () => void
   /** Whether GitHub is connected (green dot on Settings). */
   ghConnected?: boolean
   /** App version, shown at the foot of the menu. */
@@ -28,6 +33,21 @@ const initialOf = (user: User): string => {
 }
 
 const displayNameOf = (user: User): string => user.name.trim() || user.email.split("@")[0] || user.email
+
+/**
+ * What the trigger and menu header say. No user and no `onSignIn` means the
+ * stored session is still being checked: say nothing about auth yet, so a
+ * signed-in boot never flashes "Not signed in".
+ */
+const identityOf = (user: User | undefined, signedOut: boolean, version: string | undefined) => {
+  const versionLabel = version ? `v${version}` : ""
+  if (user) {
+    return { name: displayNameOf(user), detail: user.email, header: user.email, initial: initialOf(user), image: user.image, tone: "blue" as const }
+  }
+  return signedOut
+    ? { name: "Not signed in", detail: versionLabel, header: "Sign in for GitHub and paired devices.", initial: "?", image: null, tone: "dim" as const }
+    : { name: "Jingler", detail: versionLabel, header: versionLabel, initial: "?", image: null, tone: "dim" as const }
+}
 
 function MenuItem({
   icon,
@@ -70,11 +90,11 @@ export function UserMenu({
   onOpenSettings,
   onOpenUsage,
   onSignOut,
+  onSignIn,
   ghConnected = false,
   version
 }: UserMenuProps) {
-  const displayName = displayNameOf(user)
-  const initial = initialOf(user)
+  const { name: displayName, detail, header, initial, image, tone } = identityOf(user, onSignIn !== undefined, version)
 
   return (
     <DropdownMenu.Root>
@@ -84,10 +104,10 @@ export function UserMenu({
           aria-label="Account menu"
           className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Avatar initial={initial} src={user.image} size={28} />
+          <Avatar initial={initial} src={image} tone={tone} size={28} />
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-[12.5px] font-semibold text-text-bright">{displayName}</span>
-            <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+            <span className="truncate text-[11px] text-muted-foreground">{detail}</span>
           </span>
           <ChevronsUpDown size={14} className="flex-none text-dim" />
         </button>
@@ -100,10 +120,12 @@ export function UserMenu({
           className="z-50 flex w-[242px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
         >
           <div className="flex items-center gap-2.5 px-2 py-1.5">
-            <Avatar initial={initial} src={user.image} size={32} />
+            <Avatar initial={initial} src={image} tone={tone} size={32} />
             <span className="flex min-w-0 flex-col">
               <span className="truncate text-[12.5px] font-semibold text-text-bright">{displayName}</span>
-              <span className="truncate text-[11px] text-muted-foreground">{user.email}</span>
+              <span className="truncate text-[11px] text-muted-foreground">
+                {header}
+              </span>
             </span>
           </div>
 
@@ -122,10 +144,16 @@ export function UserMenu({
             <MenuItem icon={<Gauge size={14} />} label="Usage & limits" onSelect={onOpenUsage} />
           )}
 
-          {onSignOut && (
+          {user && onSignOut && (
             <>
               <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
               <MenuItem icon={<LogOut size={14} />} label="Sign out" onSelect={onSignOut} danger />
+            </>
+          )}
+          {!user && onSignIn && (
+            <>
+              <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
+              <MenuItem icon={<LogIn size={14} />} label="Sign in" onSelect={onSignIn} />
             </>
           )}
 

@@ -41,7 +41,7 @@ import {
   ConfirmDialog,
   ExplanationView,
   LoadingScreen,
-  LoginScreen,
+  SignInDialog,
   SetupScreen,
   JinglerApp,
   PullRequestInbox,
@@ -83,6 +83,7 @@ import {
   closeSessionFile,
   disposeFileBrowserActor,
   openSessionFile,
+  trackSessionFile,
   requestCloseFileSurface,
 } from "./use-file-browser.js";
 import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
@@ -149,9 +150,8 @@ const RELAY_UNHEALTHY_GRACE_MS = 4_000;
  * GitHub App connection, persisted preferences, and usage — so there are no ad-hoc
  * `useEffect` + `useState` fetches here; a mutation just updates the cache.
  *
- * Only mounted once signed in (see the `App` auth gate below), so none of its
- * queries/effects run behind the sign-in wall. Receives the signed-in `user` and
- * `onSignOut` to drive the sidebar account menu.
+ * Always mounted — sign-in is optional. Receives the signed-in `user` and
+ * `onSignOut` (or, signed out, `onSignIn`) to drive the sidebar footer.
  */
 function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
   const explanation = useExplanationDocument(sessionId)
@@ -168,9 +168,11 @@ function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
 function AuthedApp({
   user,
   onSignOut,
+  onSignIn,
 }: {
   user?: User;
   onSignOut?: () => void;
+  onSignIn?: () => void;
 }) {
   const [state, send] = useMachine(appMachine);
   const github = useGitHubConnection();
@@ -1293,6 +1295,7 @@ function AuthedApp({
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
         onSignOut={onSignOut}
+        onSignIn={onSignIn}
         repos={repos}
         projects={projectController.projects}
         projectsLoading={projectController.loading}
@@ -1561,6 +1564,7 @@ function AuthedApp({
           />
         )}
         onOpenFile={openSessionFile}
+        onTrackFile={trackSessionFile}
         onRequestCloseFile={requestCloseFileSurface}
         renderFileQuickOpen={(session, ctx) => (
           <FileBrowserQuickOpen
@@ -1881,8 +1885,8 @@ function loginStateOf(
 }
 
 /**
- * The auth gate. Drives the dedicated `authMachine` and renders the sign-in wall
- * until it reaches `signedIn`, at which point the real app (`AuthedApp`) mounts.
+ * The app root. Drives the dedicated `authMachine`; sign-in is optional, so the
+ * app (`AuthedApp`) mounts regardless and sign-in happens from the sidebar.
  * The `jingler://` deep-link callback arrives from the main process via the
  * preload bridge and re-validates the freshly-stored token.
  */
@@ -1890,13 +1894,12 @@ export function App() {
   const [authState, authSend] = useMachine(authMachine);
 
   /**
-   * The theme is applied ABOVE the sign-in wall, not inside it.
+   * The theme is applied ABOVE the auth flow, not inside it.
    *
-   * The loading splash and the login screen are the first things an operator
-   * sees, and they are on screen for the longest at the moment the app has the
-   * least state. Theming only the signed-in app would mean launching into a
-   * dark login screen and having it turn light the instant auth resolved —
-   * exactly the flash `boot-theme.ts` exists to prevent, just moved later.
+   * The loading splash is the first thing an operator sees, at the moment the
+   * app has the least state. Theming below it would mean launching into a dark
+   * splash and having it turn light the instant the app mounted — exactly the
+   * flash `boot-theme.ts` exists to prevent, just moved later.
    *
    * Sharing the `["config"]` query key with `AuthedApp` means React Query
    * dedupes this: it is the same in-flight request, not a second read.
@@ -1924,10 +1927,8 @@ export function App() {
     >
       {/*
         Inside ThemeProvider so a plugin's tab renders against the operator's
-        theme tokens from its first frame, and OUTSIDE the sign-in wall for the
-        same reason the theme is: the plugin catalog is read from disk and has
-        nothing to do with who is signed in, so loading it here means the tabs
-        are ready the instant auth resolves rather than a beat afterwards.
+        theme tokens from its first frame. The plugin catalog is read from disk
+        and has nothing to do with who is signed in.
       */}
       <PluginProvider>
         <AppContent authState={authState} authSend={authSend} />
@@ -1947,18 +1948,34 @@ function AppContent({
   // app start rather than from mount — so the auth check and the boot machine
   // share one hold between them instead of queueing two.
   const splashHeld = useSplashHold();
+  const [signInOpen, setSignInOpen] = useState(false);
+  const signedIn = authState.matches("signedIn");
+  const signedOut = authState.matches("signedOut");
 
-  if (
-    splashHeld ||
-    authState.matches("checking") ||
-    authState.matches("signingOut")
-  ) {
-    return <LoadingScreen />;
-  }
+  // The dialog is a view of the auth flow, not a second state: once the
+  // browser or magic-link callback lands, it has nothing left to show.
+  useEffect(() => {
+    if (signedIn) setSignInOpen(false);
+  }, [signedIn]);
 
-  if (!authState.matches("signedIn")) {
-    return (
-      <LoginScreen
+  if (splashHeld) return <LoadingScreen />;
+
+  // Sign-in is optional: the app always mounts. Auth only decides whether the
+  // sidebar shows the account menu or a Sign in button — and neither while the
+  // stored token is still being checked, so a signed-in boot never flashes one.
+  return (
+    <>
+      <AuthedApp
+        user={signedIn ? authState.context.session?.user : undefined}
+        onSignOut={signedIn ? () => authSend({ type: "SIGN_OUT" }) : undefined}
+        onSignIn={signedOut ? () => setSignInOpen(true) : undefined}
+      />
+      <SignInDialog
+        open={signInOpen && signedOut}
+        onOpenChange={(open) => {
+          setSignInOpen(open);
+          if (!open) authSend({ type: "RESET" });
+        }}
         state={loginStateOf((value) => authState.matches(value as never))}
         sentEmail={authState.context.sentEmail ?? undefined}
         errorMessage={authState.context.error ?? undefined}
@@ -1969,14 +1986,7 @@ function AppContent({
         }
         onReset={() => authSend({ type: "RESET" })}
       />
-    );
-  }
-
-  return (
-    <AuthedApp
-      user={authState.context.session?.user}
-      onSignOut={() => authSend({ type: "SIGN_OUT" })}
-    />
+    </>
   );
 }
 

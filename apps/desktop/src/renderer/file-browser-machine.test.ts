@@ -81,6 +81,24 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.entries).toEqual([{ path: "src/app.ts", status: "clean" }])
   })
 
+  it("lists a tracked path without selecting or loading it", async () => {
+    const { actor, api } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    const before = actor.getSnapshot()
+
+    actor.send({ type: "TRACK", path: "src/other.ts" })
+    actor.send({ type: "TRACK", path: "src/other.ts" })
+
+    const after = actor.getSnapshot()
+    expect(after.context.openPaths).toEqual(["src/app.ts", "src/other.ts"])
+    // The Files view stays on its document: same selection, same payload object.
+    expect(after.context.selectedPath).toBe("src/app.ts")
+    expect(after.context.payload).toBe(before.context.payload)
+    expect(after.matches({ document: { ready: "clean" } })).toBe(true)
+    expect(api.read).toHaveBeenCalledTimes(1)
+  })
+
   it("skips duplicate repository scans for path-owned split editors", async () => {
     const { actor, api } = start({}, { sessionId: "session-a", documentOnly: true })
     await waitFor(actor, (snapshot) =>
