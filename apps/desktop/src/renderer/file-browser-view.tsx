@@ -253,6 +253,39 @@ export function FileBrowserQuickOpen({
   )
 }
 
+function FileBrowserToolbar({ browser }: { browser: FileBrowserController }) {
+  const path = browser.selectedPath
+  return (
+    <>
+      {path === null ? (
+        <span className="flex-1" />
+      ) : (
+        <span className="flex min-w-0 flex-1 items-baseline font-mono text-[10.5px]" title={path}>
+          {path.includes("/") ? (
+            <span className="truncate text-dim">{path.slice(0, path.lastIndexOf("/") + 1)}</span>
+          ) : null}
+          <span className="flex-none text-text">{path.slice(path.lastIndexOf("/") + 1)}</span>
+        </span>
+      )}
+      <div className="ml-auto flex min-w-0 flex-none items-center gap-2">
+        <button
+          type="button"
+          className={[
+            "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
+            browser.followEnabled ? "is-active" : "text-muted-foreground hover:text-text"
+          ].join(" ")}
+          aria-pressed={browser.followEnabled}
+          onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
+          title="Follow files edited by the active chat's agent"
+        >
+          <MousePointer2 className="jingler-mode-toggle__mark size-3" aria-hidden />
+          <span className="jingler-mode-toggle__label">Follow agent</span>
+        </button>
+      </div>
+    </>
+  )
+}
+
 /** Renderer-owned binding from a session's persistent actor to the Files tab. */
 export function FileBrowserView({
   session,
@@ -385,51 +418,7 @@ export function FileBrowserView({
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         hideTree
-        toolbar={
-          <>
-            {/* The open file, filename-first: the directory clips, the name
-                never does. It used to sit right-aligned with a tail-truncate,
-                which is exactly backwards — the ellipsis ate the filename and
-                kept the least useful half of the path. */}
-            {browser.selectedPath !== null ? (
-              <span
-                className="flex min-w-0 flex-1 items-baseline font-mono text-[10.5px]"
-                title={browser.selectedPath}
-              >
-                {browser.selectedPath.includes("/") ? (
-                  <span className="truncate text-dim">
-                    {browser.selectedPath.slice(0, browser.selectedPath.lastIndexOf("/") + 1)}
-                  </span>
-                ) : null}
-                <span className="flex-none text-text">
-                  {browser.selectedPath.slice(browser.selectedPath.lastIndexOf("/") + 1)}
-                </span>
-              </span>
-            ) : (
-              <span className="flex-1" />
-            )}
-          <div className="ml-auto flex min-w-0 flex-none items-center gap-2">
-            <button
-              type="button"
-              className={[
-                "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
-                browser.followEnabled
-                  ? "is-active"
-                  : "text-muted-foreground hover:text-text"
-              ].join(" ")}
-              aria-pressed={browser.followEnabled}
-              onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
-              title="Follow files edited by the active chat's agent"
-            >
-              <MousePointer2
-                className="jingler-mode-toggle__mark size-3"
-                aria-hidden
-              />
-              <span className="jingler-mode-toggle__label">Follow agent</span>
-            </button>
-          </div>
-          </>
-        }
+        toolbar={<FileBrowserToolbar browser={browser} />}
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
