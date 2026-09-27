@@ -25,7 +25,6 @@ import type {
   ProviderModelId,
   UsageReport,
   WorkspaceConfig,
-  SubagentProviderModelAssignments,
   NotificationsConfig,
   OffloadComputeSettings,
   PublishCheckpoint,
@@ -143,13 +142,8 @@ const subagentModelsFor = (
     ...(endpoints?.endpoints ?? [])
       .filter(({ endpoint }) => endpoint.runtimeId !== "pi" && endpoint.status === "ready")
       .flatMap(({ endpoint, models }) => models.filter(({ selectable }) => selectable).map((model) => ({
-        providerId: model.providerId,
-        id: model.id,
-        label: `${model.label} · ${endpoint.label}`,
-        capabilities: model.capabilities,
-        verification: model.verification,
-        selectable: model.selectable,
-        certificationKey: model.certificationKey
+        ...model,
+        label: `${model.label} · ${endpoint.label}`
       })))
   ].map((model) => [model.id, model] as const)).values(),
 ];
@@ -161,20 +155,8 @@ const subagentModelsFor = (
  */
 const RELAY_UNHEALTHY_GRACE_MS = 4_000;
 const delegationEnabled = (configured: boolean | undefined): boolean => configured !== false;
-const subagentAssignments = (
-  config: WorkspaceConfig | null | undefined,
-): SubagentProviderModelAssignments => {
-  if (config?.subagentModelsByProvider) return config.subagentModelsByProvider;
-  const scoped: Record<string, Record<string, ProviderModelId>> = {};
-  for (const [agent, model] of Object.entries(config?.subagentModels ?? {})) {
-    if (!model) continue;
-    const providerId = String(model).split("/", 1)[0]!;
-    scoped[providerId] ??= {};
-    scoped[providerId]![agent] = model;
-  }
-  return scoped as SubagentProviderModelAssignments;
-};
-
+const subagentAssignments = (config: WorkspaceConfig | null | undefined) =>
+  config?.subagentModelsByProvider ?? {};
 /**
  * Thin view over `appMachine` (which drives the first-run/loading/session flow).
  * Everything else the shell needs is read through machines/react-query — the

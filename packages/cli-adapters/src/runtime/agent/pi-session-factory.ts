@@ -16,7 +16,8 @@ import type {
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
-  JINGLER_SUBAGENT_NAMES
+  JINGLER_SUBAGENT_NAMES,
+  makeUsageFact
 } from "@jingler/core"
 import type {
   Message,
@@ -526,7 +527,7 @@ const childUsageFact = (
 ): UsageFact => {
   const modelId = child.model ?? "unknown"
   const usage = child.usage
-  return {
+  return makeUsageFact({
     id: `${spec.runId}:child:${child.runId}`,
     runId: child.runId,
     sessionId: spec.sessionId,
@@ -536,22 +537,21 @@ const childUsageFact = (
     providerId: connection.providerId,
     modelId,
     kind: "child",
-    startedAt: new Date(child.startedAt).toISOString(),
-    endedAt: new Date(child.endedAt).toISOString(),
-    durationMs: usage?.durationMs ?? Math.max(0, child.endedAt - child.startedAt),
-    inputTokens: usage?.input ?? null,
-    outputTokens: usage?.output ?? null,
-    cacheReadTokens: usage?.cacheRead ?? null,
-    cacheWriteTokens: usage?.cacheWrite ?? null,
-    reasoningTokens: null,
+    startedAt: child.startedAt,
+    endedAt: child.endedAt,
+    durationMs: usage?.durationMs,
+    inputTokens: usage?.input,
+    outputTokens: usage?.output,
+    cacheReadTokens: usage?.cacheRead,
+    cacheWriteTokens: usage?.cacheWrite,
     totalTokens: usage === undefined
       ? null
       : usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
-    costUsd: usesClaudeCli(connection) ? null : (usage?.cost ?? null),
-    toolCalls: usage?.toolCalls ?? null,
+    costUsd: usesClaudeCli(connection) ? null : usage?.cost,
+    toolCalls: usage?.toolCalls,
     outcome: child.outcome,
     provenance: "pi-subagents.completion"
-  }
+  })
 }
 
 const createSessionHandle = (

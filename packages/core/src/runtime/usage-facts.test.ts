@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { usageReportFromFacts, type UsageFact } from "./usage-facts.js"
+import { makeUsageFact, usageReportFromFacts, type UsageFact } from "./usage-facts.js"
 
 const fact = (over: Partial<UsageFact> = {}): UsageFact => ({
   id: "run-1",
@@ -27,7 +27,32 @@ const fact = (over: Partial<UsageFact> = {}): UsageFact => ({
   ...over
 })
 
-describe("usageReportFromFacts", () => {
+describe("usage facts", () => {
+  it("fills shared timing and nullable counters", () => {
+    expect(makeUsageFact({
+      id: "run-1",
+      runId: "run-1",
+      sessionId: "session-1",
+      chatId: "chat-1",
+      parentRunId: null,
+      runtimeId: "claude",
+      providerId: "anthropic",
+      modelId: "claude-sonnet",
+      kind: "parent",
+      startedAt: 1_000,
+      endedAt: 2_500,
+      outcome: "success",
+      provenance: "test"
+    })).toMatchObject({
+      startedAt: "1970-01-01T00:00:01.000Z",
+      endedAt: "1970-01-01T00:00:02.500Z",
+      durationMs: 1_500,
+      inputTokens: null,
+      costUsd: null,
+      toolCalls: null
+    })
+  })
+
   it("groups by harness identity and keeps unknown spend out of known cost", () => {
     const report = usageReportFromFacts([
       fact(),

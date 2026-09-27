@@ -5,12 +5,10 @@ import type {
   ManagedResource,
   AgentRunSpec,
   ProviderConnection,
-  ProviderModelId,
   SubagentModelAssignments,
   WorkspaceConfig
 } from "@jingler/core"
 import {
-  JINGLER_SUBAGENT_NAMES,
   piEndpointId,
   piEndpointTargets,
   ProviderConnectionId,
@@ -120,10 +118,7 @@ const nativeClaudeSubagentConnection = (targetId: string): ProviderConnection =>
 const modelsForProvider = (
   saved: WorkspaceConfig | null,
   providerId: ProviderId
-): SubagentModelAssignments => saved?.subagentModelsByProvider?.[providerId] ??
-  Object.fromEntries(Object.entries(saved?.subagentModels ?? {}).filter(([, model]) =>
-    String(model).startsWith(`${providerId}/`)
-  ))
+): SubagentModelAssignments => saved?.subagentModelsByProvider?.[providerId] ?? {}
 
 const assignedSubagentConnections = (
   models: SubagentModelAssignments,
@@ -153,46 +148,6 @@ const assignedSubagentConnections = (
   }
   return Effect.succeed(assigned)
 }
-
-const nativeSubagentModel = (
-  spec: AgentRunSpec,
-  models: SubagentModelAssignments
-): ProviderModelId | undefined =>
-  spec.runtimeId === "claude"
-    ? spec.modelId
-    : JINGLER_SUBAGENT_NAMES
-        .map((agent) => models[agent])
-        .find((model) => model !== undefined)
-
-const nativeSubagentConnection = (
-  spec: AgentRunSpec,
-  connections: ReadonlyArray<ProviderConnection>,
-  providerId: string
-): ProviderConnection | undefined =>
-  spec.runtimeId === "claude"
-    ? nativeClaudeSubagentConnection(spec.targetCapabilities.targetId)
-    : connections.find((candidate) =>
-        candidate.providerId === providerId &&
-        candidate.targetId === spec.targetCapabilities.targetId
-      )
-
-const nativeSubagentSidecarSpec = (
-  spec: AgentRunSpec,
-  connection: ProviderConnection,
-  modelId: ProviderModelId
-): AgentRunSpec => ({
-  ...spec,
-  runId: `${spec.runId}:delegation-host`,
-  runtimeId: "pi",
-  endpointId: piEndpointId(spec.targetCapabilities.targetId, connection.id),
-  connectionId: connection.id,
-  providerId: connection.providerId,
-  modelId,
-  prompt: "",
-  priorMessages: [],
-  continuation: null,
-  seed: null
-})
 
 export interface PluginToolSuccessfulResult
   extends Omit<ToolSuccessfulResult, "origin"> {
@@ -593,21 +548,9 @@ export const makePiAgentRuntimeLive = (
     const prepareClaudeSubagentRegistry = (
       spec: AgentRunSpec,
       context: AgentRuntimeContext,
-      registry: ToolRegistry,
-      subagents: { models: SubagentModelAssignments; connections: ReadonlyArray<ProviderConnection> }
+      registry: ToolRegistry
     ) => Effect.gen(function* () {
-      const assignment = nativeSubagentModel(spec, subagents.models)
-      if (assignment === undefined) return registry
-      const providerId = String(assignment).includes("/")
-        ? String(assignment).split("/", 1)[0]!
-        : String(spec.providerId)
-      const connection = nativeSubagentConnection(spec, subagents.connections, providerId)
-      if (connection === undefined) {
-        return yield* Effect.fail(new AgentRuntimeError({
-          reason: "authentication",
-          message: `The ${providerId} subagent provider connection is unavailable`
-        }))
-      }
+      const connection = nativeClaudeSubagentConnection(spec.targetCapabilities.targetId)
       const sidecar = makePiSessionFactory({
         ...factoryOptions,
         resolveConnection: () => Effect.succeed(connection),
@@ -617,7 +560,18 @@ export const makePiAgentRuntimeLive = (
         delegationOnly: true
       })
       const handle = yield* Effect.acquireRelease(
-        sidecar.create(nativeSubagentSidecarSpec(spec, connection, assignment), context),
+        sidecar.create({
+          ...spec,
+          runId: `${spec.runId}:delegation-host`,
+          runtimeId: "pi",
+          endpointId: piEndpointId(spec.targetCapabilities.targetId, connection.id),
+          connectionId: connection.id,
+          providerId: connection.providerId,
+          prompt: "",
+          priorMessages: [],
+          continuation: null,
+          seed: null
+        }, context),
         (owned) => Effect.promise(async () => { await owned.dispose() })
       )
       yield* Effect.acquireRelease(
@@ -659,7 +613,7 @@ export const makePiAgentRuntimeLive = (
           ))
           return registry
         }
-        return yield* prepareClaudeSubagentRegistry(spec, context, registry, subagents)
+        return yield* prepareClaudeSubagentRegistry(spec, context, registry)
       })
     }
     const planning = makeSharedPlanningRuntime(join(paths.managedResourcesDir, "plans"), paths.piSessionsDir)

@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto"
-import type {
-  AgentRunSpec,
-  ProviderModelId,
-  StreamEvent,
-  SubagentModelAssignments
+import {
+  makeUsageFact,
+  type AgentRunSpec,
+  type ProviderModelId,
+  type StreamEvent,
+  type SubagentModelAssignments
 } from "@jingler/core"
 import { Chunk, Effect, Stream } from "effect"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
@@ -41,9 +42,6 @@ export const directNativeChildSpec = (
   }
 }
 
-const childText = (events: ReadonlyArray<StreamEvent>): string =>
-  events.flatMap((event) => event._tag === "Assistant" ? [event.text] : []).join("")
-
 function assertSupportedChild(
   child: AgentRunSpec,
   agent: string
@@ -59,22 +57,6 @@ function assertSupportedChild(
   ) throw new Error("Writable Codex subagents require Auto mode")
 }
 
-const collectChildEvents = async (input: {
-  readonly runtime: AgentRuntimeShape
-  readonly spec: AgentRunSpec
-  readonly context: AgentRuntimeContext
-  readonly signal: AbortSignal
-  readonly onTool: (name: string) => void
-}): Promise<ReadonlyArray<StreamEvent>> => Chunk.toReadonlyArray(await Effect.runPromise(
-  input.runtime.run(input.spec, input.context).pipe(
-    Stream.tap((event) => Effect.sync(() => {
-      if (event._tag === "ToolStart") input.onTool(event.name)
-    })),
-    Stream.runCollect
-  ),
-  { signal: input.signal }
-))
-
 const boundedSignal = (signal: AbortSignal, timeoutMs?: number): AbortSignal =>
   timeoutMs === undefined ? signal : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
 
@@ -87,7 +69,7 @@ const recordChildUsage = async (input: {
   readonly outcome: "success" | "error" | "cancelled"
   readonly done?: Extract<StreamEvent, { _tag: "Done" }>
 }) => {
-  await Effect.runPromise(input.context.recordUsage?.({
+  await Effect.runPromise(input.context.recordUsage?.(makeUsageFact({
     id: `${input.parent.runId}:child:${input.child.runId}`,
     runId: input.child.runId,
     sessionId: input.parent.sessionId,
@@ -97,20 +79,13 @@ const recordChildUsage = async (input: {
     providerId: input.child.providerId ?? null,
     modelId: String(input.child.modelId),
     kind: "child",
-    startedAt: new Date(input.startedAt).toISOString(),
-    endedAt: new Date(input.endedAt).toISOString(),
-    durationMs: input.endedAt - input.startedAt,
-    inputTokens: null,
-    outputTokens: null,
-    cacheReadTokens: null,
-    cacheWriteTokens: null,
-    reasoningTokens: null,
+    startedAt: input.startedAt,
+    endedAt: input.endedAt,
     totalTokens: input.done?.tokens ?? null,
     costUsd: input.child.runtimeId === "opencode" ? (input.done?.costUsd ?? null) : null,
-    toolCalls: null,
     outcome: input.outcome,
     provenance: `${input.child.runtimeId}.foreground-child`
-  }) ?? Effect.void)
+  })) ?? Effect.void)
 }
 
 export const makeDirectNativeSubagentDelegate = (input: {
@@ -132,18 +107,21 @@ export const makeDirectNativeSubagentDelegate = (input: {
   const childSignal = boundedSignal(signal, request.timeoutMs)
   let events: ReadonlyArray<StreamEvent>
   try {
-    events = await collectChildEvents({
-      runtime: input.makeRuntime(childSpec.runtimeId),
-      spec: childSpec,
-      context: input.context,
-      signal: childSignal,
-      onTool: (currentTool) => onUpdate?.({
-        requestId: request.requestId,
-        ownerRunId: request.ownerRunId,
-        nodeId: request.nodeId,
-        currentTool
-      })
-    })
+    events = Chunk.toReadonlyArray(await Effect.runPromise(
+      input.makeRuntime(childSpec.runtimeId).run(childSpec, input.context).pipe(
+        Stream.tap((event) => Effect.sync(() => {
+          if (event._tag !== "ToolStart") return
+          onUpdate?.({
+            requestId: request.requestId,
+            ownerRunId: request.ownerRunId,
+            nodeId: request.nodeId,
+            currentTool: event.name
+          })
+        })),
+        Stream.runCollect
+      ),
+      { signal: childSignal }
+    ))
   } catch (cause) {
     await recordChildUsage({
       parent: input.spec,
@@ -192,7 +170,10 @@ export const makeDirectNativeSubagentDelegate = (input: {
     runId: childSpec.runId,
     agent: request.agent,
     model: String(childSpec.modelId),
-    result: { kind: "text", text: childText(events) },
+    result: {
+      kind: "text",
+      text: events.flatMap((event) => event._tag === "Assistant" ? [event.text] : []).join("")
+    },
     usage: {
       input: 0,
       output: done.tokens,

@@ -9,13 +9,14 @@ import type {
   ProviderConnectionId,
   ProviderModelId,
   JinglerSubagentName,
-  SubagentProviderModelAssignments,
   WebSearchConfig,
 } from "@jingler/core"
 import {
   clampFontScale,
   DEFAULT_THEME_ID,
   ProviderId,
+  SubagentModelAssignments,
+  SubagentProviderModelAssignments,
   WEB_SEARCH_CONFIG_DEFAULT,
   WebSearchConfig as WebSearchConfigSchema,
   WorkspaceConfig
@@ -34,7 +35,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   const truthyKeys = [
     "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
-    "subagentModels", "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
+    "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
   ] as const
   // A saved false (or zero) is a real value, not an absent section.
@@ -48,22 +49,6 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   ])
 }
 
-const scopedSubagentAssignments = (
-  existing: WorkspaceConfig | null
-): SubagentProviderModelAssignments => {
-  const scoped: Record<string, Partial<Record<JinglerSubagentName, ProviderModelId>>> =
-    Object.fromEntries(Object.entries(existing?.subagentModelsByProvider ?? {}).map(
-      ([providerId, assignments]) => [providerId, { ...assignments }]
-    ))
-  for (const [agent, model] of Object.entries(existing?.subagentModels ?? {})) {
-    if (model === undefined) continue
-    const providerId = String(model).split("/", 1)[0]!
-    scoped[providerId] ??= {}
-    scoped[providerId]![agent as JinglerSubagentName] ??= model
-  }
-  return scoped as SubagentProviderModelAssignments
-}
-
 const decodePlanTemplate = Schema.decodeUnknownEither(Schema.parseJson(PlanPrd))
 
 type ConfigEnv = FileSystem.FileSystem | AppPaths
@@ -75,6 +60,27 @@ const LegacyWebSearchConfig = Schema.Struct({ webSearch: Schema.Unknown })
 const LegacyProviderConfig = Schema.Struct({
   providers: Schema.Record({ key: Schema.String, value: Schema.Unknown })
 })
+const LegacySubagentConfig = Schema.Struct({
+  subagentModels: Schema.optional(SubagentModelAssignments),
+  subagentModelsByProvider: Schema.optional(SubagentProviderModelAssignments)
+})
+
+export const migrateConfigSubagentModels = (value: unknown): unknown => {
+  if (!Schema.is(LegacySubagentConfig)(value) || value.subagentModels === undefined) return value
+  const scoped = Object.fromEntries(
+    Object.entries(value.subagentModelsByProvider ?? {}).map(([providerId, assignments]) => [
+      providerId,
+      { ...assignments }
+    ])
+  ) as Record<string, Partial<Record<JinglerSubagentName, ProviderModelId>>>
+  for (const [agent, model] of Object.entries(value.subagentModels)) {
+    if (model === undefined) continue
+    const providerId = String(model).split("/", 1)[0]!
+    scoped[providerId] ??= {}
+    scoped[providerId]![agent as JinglerSubagentName] ??= model
+  }
+  return { ...value, subagentModels: undefined, subagentModelsByProvider: scoped }
+}
 
 const migrateProviderReasoning = (value: unknown): unknown => {
   if (!Schema.is(LegacyReasoningSettings)(value)) return value
@@ -138,8 +144,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
             Effect.mapError((cause) => new ConfigError({ message: "Config file is malformed", cause }))
           )
           return yield* Schema.decodeUnknown(WorkspaceConfig)(
-            migrateLegacyConfigIdentity(
-              migrateConfigWebSearch(migrateConfigReasoning(parsed))
+            migrateConfigSubagentModels(
+              migrateLegacyConfigIdentity(
+                migrateConfigWebSearch(migrateConfigReasoning(parsed))
+              )
             )
           ).pipe(
             Effect.mapError(
@@ -191,14 +199,14 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         modelId: ProviderModelId | null
       ) => patch((existing) => {
         const subagentModelsByProvider = {
-          ...scopedSubagentAssignments(existing)
+          ...(existing?.subagentModelsByProvider ?? {})
         } as Record<string, Partial<Record<JinglerSubagentName, ProviderModelId>>>
         const assignments = { ...(subagentModelsByProvider[providerId] ?? {}) }
         if (modelId === null) delete assignments[agent]
         else assignments[agent] = modelId
         if (Object.keys(assignments).length === 0) delete subagentModelsByProvider[providerId]
         else subagentModelsByProvider[providerId] = assignments
-        return { subagentModels: {}, subagentModelsByProvider }
+        return { subagentModelsByProvider }
       })
 
       /** Whether plan mode runs its (read-only) commands without asking. */

@@ -69,6 +69,29 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value.subagentDelegationEnabled).toBe(false)
   })
 
+  it("migrates legacy subagent assignments into provider scopes", async () => {
+    mkdirSync(temp.root, { recursive: true })
+    writeFileSync(`${temp.root}/config.json`, JSON.stringify({
+      reposDir: "/repos/original",
+      createdAt: "2026-01-01",
+      subagentModels: {
+        worker: "openai-codex/legacy-worker",
+        reviewer: "anthropic/claude-haiku"
+      },
+      subagentModelsByProvider: {
+        "openai-codex": { worker: "openai-codex/current-worker" }
+      }
+    }))
+    const exit = await provided(ConfigService.get())
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value?.subagentModels).toBeUndefined()
+    expect(exit.value?.subagentModelsByProvider).toEqual({
+      "openai-codex": { worker: "openai-codex/current-worker" },
+      anthropic: { reviewer: "anthropic/claude-haiku" }
+    })
+  })
+
   it("persists and clears a subagent model assignment", async () => {
     const model = ProviderModelId.make("openai-codex/gpt-5.6-sol")
     const exit = await provided(

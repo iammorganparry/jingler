@@ -28,6 +28,44 @@ export const UsageFact = Schema.Struct({
 })
 export type UsageFact = Schema.Schema.Type<typeof UsageFact>
 
+type UsageFactCounters = Pick<
+  UsageFact,
+  | "inputTokens"
+  | "outputTokens"
+  | "cacheReadTokens"
+  | "cacheWriteTokens"
+  | "reasoningTokens"
+  | "totalTokens"
+  | "costUsd"
+  | "toolCalls"
+>
+type UsageFactInput = Omit<
+  UsageFact,
+  keyof UsageFactCounters | "startedAt" | "endedAt" | "durationMs"
+> & Partial<UsageFactCounters> & {
+  readonly startedAt: number
+  readonly endedAt?: number
+  readonly durationMs?: number
+}
+
+export const makeUsageFact = (input: UsageFactInput): UsageFact => {
+  const endedAt = input.endedAt ?? Date.now()
+  return {
+    ...input,
+    startedAt: new Date(input.startedAt).toISOString(),
+    endedAt: new Date(endedAt).toISOString(),
+    durationMs: input.durationMs ?? Math.max(0, endedAt - input.startedAt),
+    inputTokens: input.inputTokens ?? null,
+    outputTokens: input.outputTokens ?? null,
+    cacheReadTokens: input.cacheReadTokens ?? null,
+    cacheWriteTokens: input.cacheWriteTokens ?? null,
+    reasoningTokens: input.reasoningTokens ?? null,
+    totalTokens: input.totalTokens ?? null,
+    costUsd: input.costUsd ?? null,
+    toolCalls: input.toolCalls ?? null
+  }
+}
+
 export const UsageReportGroup = Schema.Struct({
   runtimeId: AgentRuntimeId,
   providerId: Schema.NullOr(Schema.String),

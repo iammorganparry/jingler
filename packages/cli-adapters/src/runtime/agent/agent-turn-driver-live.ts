@@ -1,4 +1,10 @@
-import { AgentRunError, type RuntimeContinuation, type UsageFact, type StreamEvent } from "@jingler/core"
+import {
+  AgentRunError,
+  makeUsageFact,
+  type RuntimeContinuation,
+  type UsageFact,
+  type StreamEvent
+} from "@jingler/core"
 import { Effect, Layer, Ref, Stream } from "effect"
 import {
   type AgentContext,
@@ -48,7 +54,7 @@ const usageFactFor = (
   event: StreamEvent
 ): UsageFact | null => {
   if (event._tag !== "Done" && event._tag !== "Failed") return null
-  return {
+  return makeUsageFact({
     id: `${runId}:parent`,
     runId,
     sessionId: spec.sessionId,
@@ -58,24 +64,16 @@ const usageFactFor = (
     providerId: spec.providerId ?? null,
     modelId: String(spec.modelId),
     kind: "parent",
-    startedAt: new Date(startedAt).toISOString(),
-    endedAt: new Date().toISOString(),
-    durationMs: Math.max(0, Date.now() - startedAt),
-    inputTokens: null,
-    outputTokens: null,
-    cacheReadTokens: null,
-    cacheWriteTokens: null,
-    reasoningTokens: null,
+    startedAt,
     totalTokens: event._tag === "Done" ? event.tokens : null,
     // OpenCode reports message cost. PI can be API or subscription-backed, so
     // its generic terminal event cannot prove whether a numeric zero is known.
     costUsd: event._tag === "Done" && spec.runtimeId === "opencode"
       ? event.costUsd
       : null,
-    toolCalls: null,
     outcome: event._tag === "Done" ? "success" : "error",
     provenance: `${spec.runtimeId}.stream`
-  }
+  })
 }
 
 /**
