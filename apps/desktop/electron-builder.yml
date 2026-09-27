@@ -52,8 +52,6 @@ extraResources:
     to: icon.png
   - from: ../../THIRD-PARTY-LICENSES
     to: THIRD-PARTY-LICENSES
-  - from: ../../packages/plannotator-ext/assets
-    to: plannotator
   - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-child-tools.mjs
     to: subagent-runtime/jingler-child-tools.mjs
   - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-claude-cli-provider.mjs

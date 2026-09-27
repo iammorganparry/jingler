@@ -1718,7 +1718,6 @@ function AuthedApp({
           setSessionMutationError(null);
           try {
             await deleteSession(pendingDelete.id);
-            window.jingler.closePlannotatorSession(pendingDelete.id);
           } catch (error) {
             setSessionMutationError(
               error instanceof Error

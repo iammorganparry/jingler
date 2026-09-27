@@ -139,7 +139,6 @@ export function SessionChatTabs({
       () => rpc.sessionsCloseChat(session.id, chatId),
       (updated) => {
         clearDraft(chatId)
-        window.jingler.closePlannotator({ sessionId: session.id, chatId })
         disposeChatActor(session.id, chatId)
         publishSessionUpdate(updated)
         onCloseSurface?.({ kind: "chat", id: chatId })
@@ -162,7 +161,6 @@ export function SessionChatTabs({
           try {
             updated = await rpc.sessionsCloseChat(session.id, chat.id)
             clearDraft(chat.id)
-            window.jingler.closePlannotator({ sessionId: session.id, chatId: chat.id })
             disposeChatActor(session.id, chat.id)
             onCloseSurface?.({ kind: "chat", id: chat.id })
           } catch {}

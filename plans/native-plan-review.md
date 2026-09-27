@@ -99,16 +99,16 @@ Reviewers read, annotate, approve, and deny plans in a native screen that render
 ### Technical explanation
 The embed needs a second Electron session partition, a custom protocol, a bounds-sync rAF loop, and string patches against minified code that break on any rebuild. Native rendering removes all of that and puts plans on the same theme, diff, and Mermaid components as the rest of the app. The decision path doesn't change: `rpc.ts` `decidePlanReview` → `native-review.ts` decision channel. Stale-proposal detection (a patch that no longer applies to HEAD) is **skipped**. Add it when agents start producing diffs that drift during review.
 
-- [ ] Restore and adapt comment layer, thread, and step card from `58a521e9^`
-- [ ] Rewrite `PlanReview` natively, including change blocks and the acceptance table
-- [ ] Route approve/deny with serialized annotations through the existing RPC
-- [ ] Delete the embed view, protocol, preload channels, packaged assets, and dead generated modules; update NOTICE and third-party licenses
+- [x] Selection comments as local drafts (deviation: the persisted-thread layer at `58a521e9^` was built for replies/mentions/delivery state; review comments only ship in deny feedback, so a small draft list replaced ~700 restored lines)
+- [x] Rewrite `PlanReview` natively, including change blocks and the acceptance table
+- [x] Route approve/deny with serialized annotations through the existing RPC
+- [x] Delete the embed view, protocol, preload channels, and packaged assets; update NOTICE (deviation: `generated/html-assets.ts`/`favicon.ts` are still imported and the THIRD-PARTY-LICENSES entry still covers the forked extension, so both stay)
 
 ### Acceptance
-- [ ] Renders sections, stages, change blocks (with file link), diagrams, and the acceptance table from a fixture plan (test[unit]: packages/ui/src/screens/plan-review.test.tsx::renders stages with diffs diagrams and tests)
-- [ ] Deny sends feedback containing each open annotation's quoted anchor and body. Approve calls `onApprove` once (test[unit]: packages/ui/src/screens/plan-review.test.tsx::serializes annotations into deny feedback)
-- [ ] Submit → annotate → deny → resubmit → approve works end to end with no `WebContentsView` (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::reviews and approves a plan natively)
-- [ ] The packaged app contains no `plannotator/` asset directory (test[integration]: scripts/artifacts/check-packaged-artifacts.mjs)
+- [x] Renders sections, stages, change blocks (with file link), diagrams, and the acceptance table from a fixture plan (test[unit]: packages/ui/src/screens/plan-review.test.tsx::renders stages with diffs diagrams and tests)
+- [x] Deny sends feedback containing each open annotation's quoted anchor and body. Approve calls `onApprove` once (test[unit]: packages/ui/src/screens/plan-review.test.tsx::serializes annotations into deny feedback)
+- [ ] Submit → deny → resubmit → approve works end to end with no `WebContentsView` (test[e2e]: apps/desktop/e2e/plan-mode.spec.ts::revises one stage approach through native review feedback) — approve paths pass; the deny→resubmit spec already failed at `d6616ed1`, before this work
+- [x] The packaged app contains no `plannotator/` asset directory (test[integration]: scripts/artifacts/check-packaged-artifacts.mjs)
 
 ### Files
 - `packages/ui/src/screens/plan-review.tsx` — M
