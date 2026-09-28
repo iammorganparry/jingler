@@ -54,7 +54,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   const { window, home, repoPath, githubServer } = first
 
   await expect(appShell(window)).toBeVisible()
-  await createWorkspace(window, "Ship deterministic publish")
+  await createWorkspace(window, "Ship deterministic publish", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
   // A fresh task is detached until the first understanding/retitle pass. The
@@ -173,7 +173,7 @@ test("auto-create preference uses the same semantic publish flow", async ({ laun
   const { window, home, repoPath, githubServer } = launched
 
   await expect(appShell(window)).toBeVisible()
-  await createWorkspace(window, "Publish automatically")
+  await createWorkspace(window, "Publish automatically", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
   const detached = sessionsAt(home)[0]!

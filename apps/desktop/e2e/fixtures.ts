@@ -100,11 +100,19 @@ export const createWorkspace = async (
   window: Page,
   _taskDescription: string,
   checkout: "worktree" | "direct" = "worktree",
+  /** The repository to register as a project when none exists yet. */
+  projectPath?: string,
 ): Promise<void> => {
   await window.getByTestId("new-session").click();
   await expect(
     window.getByRole("heading", { name: "New session" }),
   ).toBeVisible();
+  // Sessions belong to projects. A launch with no seeded sessions has no
+  // project to backfill, so register the repository the way a new user would.
+  const view = window.getByTestId("new-session-view");
+  if (projectPath !== undefined && (await view.getByText("Add a project before starting a session.").count()) > 0) {
+    await addProject(window, projectPath);
+  }
   if (checkout === "direct") {
     await window.getByRole("button", { name: "Checkout" }).click();
     await window.getByRole("option", { name: "Local" }).click();
@@ -112,6 +120,22 @@ export const createWorkspace = async (
   const create = window.getByRole("button", { name: "Create workspace" });
   await expect(create).toBeEnabled();
   await create.click();
+};
+
+const LOCAL_REPOSITORY_OPTION = /^Local repository/;
+
+/** Register a local repository as a project from the New session view. */
+export const addProject = async (window: Page, projectPath: string): Promise<void> => {
+  await window.getByTestId("new-session-view").getByRole("button", { name: "Add project" }).click();
+  await expect(window.getByRole("heading", { name: "Add project" })).toBeVisible();
+  await window.getByRole("option", { name: LOCAL_REPOSITORY_OPTION }).click();
+  const directorySearch = window.getByPlaceholder("Search folders or enter an absolute path…");
+  await directorySearch.fill(projectPath);
+  await directorySearch.press("Enter");
+  await expect(window.getByText(projectPath, { exact: true })).toBeVisible();
+  await window.getByRole("button", { name: "Choose current folder" }).click();
+  await window.getByRole("dialog").getByRole("button", { name: "Add project" }).click();
+  await expect(window.getByRole("heading", { name: "Add project" })).toHaveCount(0);
 };
 
 /**

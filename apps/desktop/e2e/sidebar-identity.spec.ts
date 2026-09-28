@@ -67,7 +67,9 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
     sessions: ({ repoPath }) =>
       sessions.map((session) =>
         session.id === "s_running"
-          ? { ...session, repo: "widget", worktreePath: repoPath }
+          // `repoPath` is what projects are backfilled from; a real session
+          // always records it alongside its worktree.
+          ? { ...session, repo: "widget", repoPath, worktreePath: repoPath }
           : session
       )
   })

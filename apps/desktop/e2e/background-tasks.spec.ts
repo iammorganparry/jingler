@@ -48,6 +48,9 @@ const expandDock = async (window: LaunchedApp["window"]) => {
   await window.getByRole("button", { name: /expand background tasks/i }).click()
 }
 
+/** A sub-agent tab of the "Explore" type — but not the sidebar's "Explorer" tab. */
+const EXPLORE_AGENT_TAB = /explore(?!r)/i
+
 test("a background task appears in the dock and survives the turn ending", async ({ launchApp }) => {
   const { window } = await launch(launchApp)
   await sessionRow(window, "Background session").click()
@@ -80,7 +83,8 @@ test("a backgrounded sub-agent gets a dock row, not an agent tab", async ({ laun
   await expandDock(window)
   await expect(window.locator("[data-testid^='bg-task-']").first()).toContainText("Surveying the codebase")
   // No agent tab bar at all — the only sub-agent this turn spawned was retracted.
-  await expect(window.getByRole("tab", { name: /explore/i })).toHaveCount(0)
+  // (Not "Explorer": that is the sidebar's own Sessions / Explorer switcher.)
+  await expect(window.getByRole("tab", { name: EXPLORE_AGENT_TAB })).toHaveCount(0)
 })
 
 test("the dock reports a running task's live progress", async ({ launchApp }) => {

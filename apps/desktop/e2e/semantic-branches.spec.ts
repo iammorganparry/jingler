@@ -39,7 +39,7 @@ test("a fresh task starts detached and becomes a visible collision-safe semantic
   expect(updatedBaseSha).not.toBe(staleLocalBase)
 
   await expect(appShell(window)).toBeVisible()
-  await createWorkspace(window, "Fix token refresh")
+  await createWorkspace(window, "Fix token refresh", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
   const composerBranch = window.getByTestId("composer-branch")
   await expect(composerBranch).toHaveText("Naming branch…")
