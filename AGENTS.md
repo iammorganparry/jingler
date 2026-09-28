@@ -50,7 +50,11 @@ for the full architecture guide; this file is the short list of standing rules.
   offers it through the auto-update widget.
 
   1. **Add a changeset** on `main`: `pnpm changeset` (pick patch/minor/major,
-     write the user-facing summary), commit it. The release refuses to run
+     write the user-facing summary), commit it. Every user-facing change
+     should carry one with its PR — the summary line is what users read in
+     the "Updated to Jingler X" card after they relaunch on the new version
+     (`apps/desktop/src/renderer/use-release-notes.ts` shows the bundled
+     `apps/desktop/CHANGELOG.md` entries since the last version they ran). The release refuses to run
      without at least one pending `.changeset/*.md`. All `@jingler/*` packages
      version in lockstep; the app version lives only in
      `apps/desktop/package.json` (`scripts/sync-app-version.mjs` mirrors it to
