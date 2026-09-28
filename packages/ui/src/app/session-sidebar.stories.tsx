@@ -78,6 +78,32 @@ export const UpgradeAvailable: Story = {
   )
 }
 
+/** Relaunched on a new version: what changed since the last one that ran. */
+export const UpdatedReleaseNotes: Story = {
+  args: {
+    sessions: SESSIONS,
+    activeSessionId: "s1",
+    onSelect: () => {},
+    version: "0.3.0",
+    releaseNotes: {
+      version: "0.3.0",
+      notes: [
+        "Review changes in the Explorer, filtered to uncommitted or pull request files.",
+        "Send review comments to the agent with the code they point at.",
+        "Follow the agent into newly created files on their diff.",
+        "Lay out split panes for their own width.",
+        "Truncate long model names in the composer."
+      ],
+      onDismiss: () => {}
+    }
+  },
+  render: (args) => (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar {...args} />
+    </div>
+  )
+}
+
 export const AllStates: Story = {
   args: {
     sessions: SESSIONS,

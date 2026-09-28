@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
@@ -538,5 +538,33 @@ describe("SessionSidebar optional sign-in", () => {
     expect(screen.getByRole("menuitem", { name: "Settings" })).toBeTruthy()
     expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull()
     expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull()
+  })
+})
+
+describe("SessionSidebar release notes", () => {
+  const notes = ["One", "Two", "Three", "Four", "Five", "Six"]
+
+  it("says which version it updated to and lists the first changes", () => {
+    const onDismiss = vi.fn()
+    render(
+      <SessionSidebar
+        sessions={[]}
+        activeSessionId={null}
+        onSelect={() => {}}
+        releaseNotes={{ version: "0.3.0", notes, onDismiss }}
+      />
+    )
+    const card = screen.getByRole("region", { name: "Updated to Jingler 0.3.0" })
+    expect(within(card).getByText("Four")).toBeTruthy()
+    expect(within(card).queryByText("Five")).toBeNull()
+    expect(within(card).getByText("and 2 more changes")).toBeTruthy()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Dismiss Jingler 0.3.0 release notes" }))
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
+
+  it("renders nothing when there is nothing new", () => {
+    render(<SessionSidebar sessions={[]} activeSessionId={null} onSelect={() => {}} />)
+    expect(screen.queryByTestId("release-notes-card")).toBeNull()
   })
 })

@@ -17,6 +17,7 @@ import {
   Search,
   Server,
   SlidersHorizontal,
+  Sparkles,
   Star,
   X
 } from "lucide-react"
@@ -56,6 +57,14 @@ export interface SidebarUpdate {
   readonly error?: string
   readonly dismissed: boolean
   readonly onAction: () => void
+  readonly onDismiss: () => void
+}
+
+/** What changed in the version the app just updated to, shown once after relaunch. */
+export interface SidebarReleaseNotes {
+  readonly version: string
+  /** One-line changes, newest version first. */
+  readonly notes: readonly string[]
   readonly onDismiss: () => void
 }
 
@@ -136,6 +145,8 @@ export interface SessionSidebarProps {
   version?: string
   /** Available packaged-app update shown above the footer. */
   update?: SidebarUpdate
+  /** "Updated to vX" notes, shown once after the app relaunches on a new version. */
+  releaseNotes?: SidebarReleaseNotes
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -251,6 +262,57 @@ function UpdateButton({ update, compact = false }: { update: SidebarUpdate; comp
   )
 }
 
+/** How many notes the card lists before summarising the rest. */
+const RELEASE_NOTES_SHOWN = 4
+
+/**
+ * "Updated to Jingler X" — confirms an update landed and says what changed.
+ * The notes are the Changesets CHANGELOG entries between the old and new
+ * version; dismissing acknowledges the version so it never shows again.
+ */
+function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes }) {
+  const { version, notes, onDismiss } = releaseNotes
+  const shown = notes.slice(0, RELEASE_NOTES_SHOWN)
+  const hidden = notes.length - shown.length
+  return (
+    <section
+      aria-label={`Updated to Jingler ${version}`}
+      data-testid="release-notes-card"
+      className="relative mx-2 mb-2 flex flex-none flex-col gap-2 rounded-xl border border-green/30 bg-gradient-to-br from-green/10 via-surface to-panel p-3 shadow-sm"
+    >
+      <div className="flex items-center gap-2 pr-6">
+        <span className="flex size-7 flex-none items-center justify-center rounded-lg bg-green/15 text-green">
+          <Sparkles size={14} />
+        </span>
+        <strong className="text-[13px] font-semibold text-text-bright">
+          Updated to Jingler {version}
+        </strong>
+      </div>
+      {shown.length > 0 ? (
+        <ul className="flex flex-col gap-1.5 pl-1 text-[11.5px] leading-[1.45] text-muted-foreground">
+          {shown.map((note) => (
+            <li key={note} className="flex gap-1.5">
+              <span aria-hidden className="mt-[7px] size-1 flex-none rounded-full bg-green/70" />
+              <span className="line-clamp-2">{note}</span>
+            </li>
+          ))}
+          {hidden > 0 ? (
+            <li className="pl-2.5 text-dim">and {hidden} more {hidden === 1 ? "change" : "changes"}</li>
+          ) : null}
+        </ul>
+      ) : null}
+      <button
+        type="button"
+        aria-label={`Dismiss Jingler ${version} release notes`}
+        onClick={onDismiss}
+        className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-dim outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X size={14} />
+      </button>
+    </section>
+  )
+}
+
 /**
  * The sidebar's full contents.
  *
@@ -296,6 +358,7 @@ function SidebarBody({
   onToggleCollapsed,
   version,
   update,
+  releaseNotes,
   defaultFilters,
   pullRequestsActive = false,
   onOpenPullRequests,
@@ -825,6 +888,8 @@ return (renderExpandedGroupHeading())
       {renderSessionList()}
         </>
       )}
+
+      {releaseNotes && <ReleaseNotesCard releaseNotes={releaseNotes} />}
 
       {update && (update.dismissed
         ? <div className="flex flex-none justify-end px-2 pb-1"><UpdateButton update={update} compact /></div>

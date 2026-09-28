@@ -111,6 +111,7 @@ import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
 import { useAutoUpdate } from "./use-auto-update.js";
+import { useReleaseNotes } from "./use-release-notes.js";
 import {
   PluginProvider,
   usePluginCatalog,
@@ -191,6 +192,9 @@ function AuthedApp({
   const [state, send] = useMachine(appMachine);
   const reviewFocused = useReviewFocused();
   const update = useAutoUpdate();
+  // The build-time version: Changesets keys the CHANGELOG on it, and unlike
+  // Electron's runtime version it is right in unpackaged builds too.
+  const releaseNotes = useReleaseNotes(__APP_VERSION__);
   const github = useGitHubConnection();
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
@@ -1319,6 +1323,7 @@ function AuthedApp({
         sessions={sessions}
         user={user}
         update={update}
+        releaseNotes={releaseNotes}
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
