@@ -43,6 +43,62 @@ for the full architecture guide; this file is the short list of standing rules.
   Full workflow and how to read the numbers (StrictMode double-mounts, GC
   sawtooth vs ratchet): `skills/perf-monitor/SKILL.md`.
 
+- **Releasing the desktop app is a manual, three-workflow process — and it
+  ships to every installed copy.** Never trigger any of it without the
+  operator's explicit go-ahead: a release pushes a version commit and tag to
+  `main`, publishes a GitHub Release marked *latest*, and every running app
+  offers it through the auto-update widget.
+
+  1. **Add a changeset** on `main`: `pnpm changeset` (pick patch/minor/major,
+     write the user-facing summary), commit it. The release refuses to run
+     without at least one pending `.changeset/*.md`. All `@jingler/*` packages
+     version in lockstep; the app version lives only in
+     `apps/desktop/package.json` (`scripts/sync-app-version.mjs` mirrors it to
+     the root `package.json`).
+  2. **Certify that exact commit** — both must succeed on the same SHA the
+     release will build:
+     - *Pi provider certification* (`.github/workflows/pi-provider-evals.yml`,
+       `workflow_dispatch`, input `max_cost_usd`, default 25). Runs the live
+       provider matrix against real APIs, so it **spends money**; it uploads the
+       `pi-provider-certification` artifact (the release manifest of selectable
+       models).
+     - *Native runtime certification*
+       (`.github/workflows/native-runtime-certification.yml`, `workflow_dispatch`
+       from the default branch). Runs claude / codex / opencode at their
+       minimum and current versions on the **self-hosted**
+       `native-runtime-certification` runner, so that runner must be online.
+  3. **Run *Release*** (`.github/workflows/release.yml`, `workflow_dispatch`)
+     with both run IDs: `native_certification_run_id` and
+     `certification_run_id`. Its jobs:
+     - **gate** — lint, typecheck, unit tests, deterministic pi eval, license
+       check, verifies both certification runs succeeded *for `GITHUB_SHA`*,
+       then runs the full Electron e2e suite under xvfb. Any red e2e blocks the
+       release, so the local e2e suite has to be green first.
+     - **version** — `pnpm version-packages`, commits `release: vX.Y.Z`, tags
+       `vX.Y.Z`, pushes both to `main` (uses `RELEASE_TOKEN` when set).
+     - **build** — macOS arm64 + x64, Linux x64, Windows x64 installers via
+       `electron-builder --publish never`, then `pnpm artifacts:check` on each.
+       macOS is signed and notarized only when all five `APPLE_*` secrets
+       exist; otherwise it ships unsigned.
+     - **publish** — merges the two per-arch `latest-mac.yml` feeds into one,
+       creates the GitHub Release as a draft, uploads every asset, then flips
+       it to published + latest.
+
+  **How updates reach users:** `electron-builder.yml`'s `publish` block
+  (GitHub provider, `iammorganparry/jingler`) is the update feed.
+  `apps/desktop/src/main/updater.ts` checks on launch and every two hours,
+  never auto-downloads, and publishes state to the sidebar update widget;
+  the operator downloads from the widget, then confirms a restart.
+
+  **Testing the update widget:** it only works in an app installed *from a
+  published release* — electron-builder writes `app-update.yml` into those
+  builds, and the updater reads it to find the feed. A local
+  `pnpm --filter @jingler/desktop dist` build has no `app-update.yml` (its log
+  shows `ENOENT … app-update.yml`) and never sees an update. To exercise the
+  widget: install release N from GitHub Releases, publish N+1, relaunch N.
+  On macOS, Squirrel only *installs* a signed update, so an unsigned release
+  can show and download in the widget but fail at restart-to-install.
+
 - **When renderer state starts adding up, model it as an XState machine.** A
   couple of independent `useState`s is fine. Reach for a machine in
   `apps/desktop/src/renderer/*-machine.ts` as soon as any of these is true:
