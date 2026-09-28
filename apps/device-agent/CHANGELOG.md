@@ -1,5 +1,12 @@
 # @jingler/device-agent
 
+## 0.3.5
+
+### Patch Changes
+
+- @jingler/cli-adapters@0.3.5
+- @jingler/core@0.3.5
+
 ## 0.3.4
 
 ### Patch Changes

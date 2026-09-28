@@ -1,5 +1,11 @@
 # @jingler/managed-runtime
 
+## 0.3.5
+
+### Patch Changes
+
+- @jingler/core@0.3.5
+
 ## 0.3.4
 
 ### Patch Changes

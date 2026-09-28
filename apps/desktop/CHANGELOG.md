@@ -1,5 +1,13 @@
 # @jingler/desktop
 
+## 0.3.5
+
+### Patch Changes
+
+- 9628e6d: On a Mac build that can't install updates itself, the update card now opens the new version's installer instead of offering a restart that does nothing.
+- b44f729: Jingler for Mac is now signed and notarized by Apple, so it opens without a security warning and future updates install when you restart.
+  - @jingler/plannotator-ext@0.3.5
+
 ## 0.3.4
 
 ### Patch Changes
