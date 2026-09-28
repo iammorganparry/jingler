@@ -1,6 +1,7 @@
 import { measureSessionSwitch } from "./session-switch-latency.js"
 import { writeFile } from "node:fs/promises"
 import { expect, sessionRow, test } from "./fixtures.js"
+import { showPullRequestDetails } from "./pull-request.js"
 
 test("switch sessions with PR view and a running reviewer visible", async ({ launchApp }, testInfo) => {
   test.setTimeout(180_000)
@@ -23,6 +24,7 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   await window.reload()
   await sessionRow(window, "review session").click()
   await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await showPullRequestDetails(window)
   await window.getByRole("button", { name: /Adversarial review/ }).click()
   const running = window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   await expect(running).toBeVisible({ timeout: 20_000 })
@@ -41,6 +43,9 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
       switchLatencies.push(await measureSessionSwitch(window, "s_other", 'textarea[placeholder="Message the agent…"]'))
       await expect(window.locator('[data-session="s_other"]:visible')).toHaveCount(1, { timeout: 5_000 })
       switchLatencies.push(await measureSessionSwitch(window, "s_review", 'textarea[disabled]'))
+      // The PR pane is narrow beside the chat, so its details are a floating
+      // sheet that starts closed when the session is shown again.
+      await showPullRequestDetails(window)
       await expect(running).toBeVisible({ timeout: 5_000 })
       await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible({ timeout: 5_000 })
       durations.push(Date.now() - start)

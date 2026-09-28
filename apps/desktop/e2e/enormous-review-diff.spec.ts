@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, test, type SeedSession } from "./fixtures.js"
+import { openChangedFile } from "./explorer.js"
 
 const SESSION_ID = "s_enormous_review_diff"
 /** Five times the per-file review limit — the shape of a generated changeset. */
@@ -48,18 +49,18 @@ test("the Changes review stays responsive when one file's diff is enormous", asy
   if (await terminalClose.isVisible()) await terminalClose.click()
   await sessionRow(window, "Enormous review diff").click()
 
-  await window.getByRole("button", { name: "Changes" }).first().click()
-  const region = window.getByRole("region", { name: "Code review changes" })
+  // …the ordinary edit opens as a real diff…
+  const region = (await openChangedFile(window, "src/edit.ts"))
+    .getByRole("region", { name: "Code review changes" })
   await expect(region).toBeVisible({ timeout: 30_000 })
 
-  // The generated file is listed with its real size, and named as omitted…
-  const omitted = window.getByTestId("review-omitted-files")
+  // …and the generated file is listed with its real size, named as omitted.
+  const omitted = window.getByTestId("changed-files-explorer").getByTestId("review-omitted-files")
   await expect(omitted).toBeVisible({ timeout: 30_000 })
   await expect(omitted).toContainText("generated.txt")
   await expect(omitted).toContainText("+100,000")
   await expect(omitted).toContainText("20,000")
 
-  // …while the ordinary edit still renders as a real diff.
   await expect(region.locator('[data-line-type="change-addition"]').first()).toBeVisible({
     timeout: 30_000
   })

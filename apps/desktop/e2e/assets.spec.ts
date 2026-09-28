@@ -86,13 +86,17 @@ const filesTab = (window: Page) =>
   window.getByRole("button", { name: "Files", exact: true })
 const conversationTab = (window: Page) =>
   window.getByRole("button", { name: "Chat 1", exact: true })
+// The sidebar Explorer's tree; the Files view keeps a hidden one mounted too.
 const tree = (window: Page) =>
-  window.locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
+  window
+    .locator('[data-jingler-pierre-file-tree][aria-label="Repository files"]')
+    .filter({ visible: true })
+    .first()
 const showTree = async (window: Page): Promise<void> => {
   await explorerTree(window)
 }
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
-  const host = tree(window).filter({ visible: true }).first()
+  const host = tree(window)
   const target = host.locator(`[role="treeitem"][data-item-path="${path}"]`)
   for (let attempt = 0; attempt < 24; attempt += 1) {
     if ((await target.count()) > 0 && (await target.isVisible())) {
@@ -382,11 +386,13 @@ test("switches a changed file between diff and edit and saves the edited revisio
     "export const answer = 44\n"
   )
 
+  // Back on the diff, the SAVED revision is what differs from HEAD — not the
+  // pre-save buffer the diff first opened on.
   await diff.click()
   await expect(diff).toHaveAttribute("aria-pressed", "true")
-  await expect(window.getByTestId("asset-content-canvas")).toContainText(
-    "export const answer = 43"
-  )
+  const canvas = window.getByTestId("asset-content-canvas")
+  await expect(canvas).toContainText("export const answer = 44")
+  await expect(canvas).not.toContainText("export const answer = 43")
 })
 
 test("forwards selected current-buffer lines to the active chat with Cmd-J", async ({

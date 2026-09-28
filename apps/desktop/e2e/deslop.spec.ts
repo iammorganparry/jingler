@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { expect, sessionRow, test } from "./fixtures.js"
+import { openChangedFile } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
- * The per-file "Deslop" button in the Code Review file list hands that file to
+ * The per-file "Deslop" button in a changed file's review diff hands that file to
  * the session's agent for an in-place cleanup pass — a normal turn on the
  * session's OWN worktree, so it works for committed and uncommitted changes
  * alike. This drives the real path a user takes; the deterministic pi provider
@@ -30,8 +31,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
     configured: true,
     withRepo: true,
     sessions: ({ repoPath }) => [seeded(repoPath)],
-    // Give the worktree an uncommitted change so the local Code Review source
-    // ("Changes" tab) has a file to list.
+    // Give the worktree an uncommitted change so Changes has a file to list.
     seed: ({ repoPath }) => {
       writeFileSync(
         join(repoPath, "README.md"),
@@ -41,11 +41,11 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
   })
 
   await sessionRow(window, "Deslop source session").click()
-  // No PR yet, so the local worktree diff lives on the "Changes" tab.
-  await window.getByRole("button", { name: "Changes" }).first().click()
+  // No PR yet, so Changes lists the uncommitted work; open the file's diff.
+  const diff = await openChangedFile(window, "README.md")
 
-  // The Deslop button sits in each file's sticky header, beside Revert file.
-  const deslop = window.getByRole("button", { name: "Deslop" }).first()
+  // The Deslop button sits in the file's sticky header, beside Revert file.
+  const deslop = diff.getByRole("button", { name: "Deslop" }).first()
   await expect(deslop).toBeVisible({ timeout: 30_000 })
   await deslop.click()
 

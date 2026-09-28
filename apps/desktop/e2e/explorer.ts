@@ -17,3 +17,22 @@ export const explorerTree = async (window: Page): Promise<Locator> => {
   await expect(tree).toBeVisible()
   return tree
 }
+
+/**
+ * Review one changed file the way the app offers it now: the Changes rail
+ * button filters the Explorer to changed files, and a file opens in Files on
+ * its review diff. Returns that diff.
+ */
+export const openChangedFile = async (window: Page, path: string): Promise<Locator> => {
+  await window.getByRole("button", { name: "Changes" }).first().click()
+  const explorer = window.getByTestId("changed-files-explorer")
+  await expect(explorer).toBeVisible({ timeout: 30_000 })
+  const item = explorer.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  const diff = window.getByTestId("review-file-diff")
+  // The changed-files tree is virtualized; retry a click it swallows mid-render.
+  await expect(async () => {
+    await item.click()
+    await expect(diff).toBeVisible({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
+  return diff
+}

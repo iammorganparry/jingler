@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import { explorerTree } from "./explorer.js"
 import type { SeedSession } from "./fixtures.js"
@@ -54,6 +54,9 @@ const showRepositoryTree = explorerTree
 
 const selectTreePath = async (window: Page, path: string): Promise<void> => {
   const tree = await showRepositoryTree(window)
+  // Start from the top: an earlier open may have scrolled the virtualized tree
+  // past the target, and the search below only ever scrolls down.
+  if (await scrollTree(tree, "top")) await window.waitForTimeout(50)
   const target = tree.locator(`[role="treeitem"][data-item-path="${path}"]`)
   const segments = path.split("/")
   const ancestorPaths = segments
@@ -70,30 +73,7 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
     if (collapsedUnrelated) continue
     let expanded = await expandMatchingTreeFolder(tree, path)
     if (!expanded) {
-      const advanced = await tree.evaluate((node) => {
-        const ancestors: HTMLElement[] = []
-        let ancestor = node.parentElement
-        while (ancestor !== null) {
-          ancestors.push(ancestor)
-          ancestor = ancestor.parentElement
-        }
-        const elements = [node, ...node.querySelectorAll<HTMLElement>("*"), ...ancestors]
-        const scroller = elements.find((element) => {
-          const style = getComputedStyle(element)
-          return (
-            element.scrollHeight > element.clientHeight + 1 &&
-            (style.overflowY === "auto" || style.overflowY === "scroll")
-          )
-        })
-        if (scroller === undefined) return false
-        const previous = scroller.scrollTop
-        scroller.scrollTop = Math.min(
-          scroller.scrollHeight - scroller.clientHeight,
-          previous + Math.max(1, Math.floor(scroller.clientHeight * 0.8))
-        )
-        scroller.dispatchEvent(new Event("scroll", { bubbles: true }))
-        return scroller.scrollTop > previous
-      })
+      const advanced = await scrollTree(tree, "down")
       if (!advanced) break
       await window.waitForTimeout(25)
     }
@@ -108,6 +88,41 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
     `Could not reveal repository path ${path}; mounted=${JSON.stringify(mountedPaths)}`
   )
 }
+
+/** Scroll the tree's scroll owner to the top, or one page down. True if it moved. */
+const scrollTree = (tree: Locator, direction: "top" | "down"): Promise<boolean> =>
+  tree.evaluate((node, direction) => {
+    const ancestors: HTMLElement[] = []
+    let ancestor = node.parentElement
+    while (ancestor !== null) {
+      ancestors.push(ancestor)
+      ancestor = ancestor.parentElement
+    }
+    // The tree virtualizes inside its own shadow root; look there first.
+    const inside = [
+      ...(node.shadowRoot?.querySelectorAll<HTMLElement>("*") ?? []),
+      ...node.querySelectorAll<HTMLElement>("*")
+    ]
+    const elements = [node, ...inside, ...ancestors]
+    const scroller = elements.find((element) => {
+      const style = getComputedStyle(element)
+      return (
+        element.scrollHeight > element.clientHeight + 1 &&
+        (style.overflowY === "auto" || style.overflowY === "scroll")
+      )
+    })
+    if (scroller === undefined) return false
+    const previous = scroller.scrollTop
+    scroller.scrollTop =
+      direction === "top"
+        ? 0
+        : Math.min(
+            scroller.scrollHeight - scroller.clientHeight,
+            previous + Math.max(1, Math.floor(scroller.clientHeight * 0.8))
+          )
+    scroller.dispatchEvent(new Event("scroll", { bubbles: true }))
+    return scroller.scrollTop !== previous
+  }, direction)
 
 const splitChatBesideFiles = async (window: Page): Promise<void> => {
   await window.evaluate(() => {
@@ -498,9 +513,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
     movedDiff.getByText("export const mode = 'modern'", { exact: true })
   ).toBeVisible()
 
-  const tree = window.locator(
-    '[data-jingler-pierre-file-tree][aria-label="Repository files"]'
-  )
+  const tree = await explorerTree(window)
   await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
   await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
@@ -589,7 +602,12 @@ test("reveals the followed mutation diff and sends selected feedback with contex
 })
 
 async function selectVisibleTreeItem(target: import("@playwright/test").Locator) {
-  await target.click()
+  // A virtualized row can be re-rendered under the pointer right after a
+  // scroll, swallowing the click; retry until the tree reports the selection.
+  await expect(async () => {
+    await target.click()
+    await expect(target).toHaveAttribute("aria-selected", "true", { timeout: 1_000 })
+  }).toPass({ timeout: 10_000 })
 }
 
 async function expandTreeAncestor(ancestorPaths: string[], tree: import("@playwright/test").Locator) {

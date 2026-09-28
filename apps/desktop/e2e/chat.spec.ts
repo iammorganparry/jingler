@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { showPullRequestDetails } from "./pull-request.js"
 import type { Page } from "@playwright/test"
 import type { SeedSession } from "./fixtures.js"
 
@@ -19,6 +20,12 @@ import type { SeedSession } from "./fixtures.js"
  * button does now that the Code Review view is merged into the Explorer.
  */
 const SEND_ONE_TO_AGENT = /Send 1 to agent/
+
+/** Open the Pull Request tab with its details rail showing. */
+const openPullRequestDetails = async (window: Page) => {
+  await window.getByTestId("view-tab-pr").click()
+  await showPullRequestDetails(window)
+}
 
 const revealChanges = async (window: Page) => {
   await window.getByRole("button", { name: "Changes" }).first().click()
@@ -104,20 +111,13 @@ test("streams a turn, pauses at a HITL gate, and resumes on approval", async ({ 
   await expect(window.getByText("Approval needed · run a command")).toBeVisible({ timeout: 20_000 })
   await expect(window.getByRole("button", { name: /Allow once/ })).toBeVisible()
 
-  // Paused for approval → the live status reaches BOTH surfaces: the sidebar row
-  // and the tab-bar pill. They now speak ONE vocabulary — the five reported
-  // states, Title Case — so the same session gives the same answer wherever you
-  // look. The pill used to render the activity's own prose label ("Needs input",
-  // "Searching the web"), which made the two surfaces disagree and let the pill
-  // grow with every tool call; that detail lives on the pill's hover title now.
-  //
-  // Each is still scoped to its surface — an unscoped matcher would prove
-  // neither. The sidebar appends a live age ("Needs Input now", then "1m"), so
-  // match the stable status prefix rather than freezing the timestamp.
+  // Paused for approval → the sidebar row reports it, in the shared Title Case
+  // vocabulary (Thinking, Running, Needs Input, Monitoring, Idle). The title-bar
+  // tab strip no longer repeats the word: since the chrome was simplified it
+  // shows the session title, and the row a few hundred pixels left owns status.
+  // The row appends a live age ("Needs Input now", then "1m"), so match the
+  // stable prefix rather than freezing the timestamp.
   await expect(row.getByText(/^Needs Input\b/)).toBeVisible()
-  await expect(
-    window.getByTestId("session-tab-bar").getByText("Needs Input", { exact: true })
-  ).toBeVisible()
 
   await window.getByRole("button", { name: /Allow once/ }).click()
 
@@ -560,7 +560,7 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
       ]
     }
   })
-  await window.getByTestId("view-tab-pr").click()
+  await openPullRequestDetails(window)
 
   // Default is a merge commit — the picker must not silently change what the
   // button already did.
@@ -598,7 +598,7 @@ test("an out-of-date branch offers Update branch, not just a blocker", async ({ 
       ]
     }
   })
-  await window.getByTestId("view-tab-pr").click()
+  await openPullRequestDetails(window)
 
   await expect(window.getByText("Branch is out of date with the base")).toBeVisible({
     timeout: 20_000
@@ -629,7 +629,7 @@ test("a passing check still links to its run", async ({ launchApp }) => {
       ]
     }
   })
-  await window.getByTestId("view-tab-pr").click()
+  await openPullRequestDetails(window)
 
   const details = window.getByRole("link", { name: "Details for build" })
   await expect(details).toBeVisible({ timeout: 20_000 })
@@ -968,7 +968,7 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
   const browser = window.getByRole("button", { name: "Browser", exact: true })
   if ((await browser.getAttribute("aria-pressed")) === "true") await browser.click()
 
-  await window.getByTestId("view-tab-pr").click()
+  await openPullRequestDetails(window)
   const runButton = window.getByRole("button", { name: /Adversarial review/ })
   await expect(runButton).toBeEnabled()
   await runButton.click()

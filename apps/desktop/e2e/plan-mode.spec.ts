@@ -126,7 +126,9 @@ test("projects explicit deliverable stages without treating overview headings as
     .getByText("Implemented and verified the approved plan.")
     .first()
   await expect(completion).toBeVisible({ timeout: 30_000 })
-  await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
+  // The composer is back in Auto. Asserted on its mode attribute: split beside
+  // the plan, the chat pane is narrow and the mode chip drops its word label.
+  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "auto")
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
 
   const planRow = transcriptCard.locator("xpath=ancestor::*[@data-index][1]")

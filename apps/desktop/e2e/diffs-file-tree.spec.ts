@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
+import { openChangedFile } from "./explorer.js"
 
 
 const seeded = (worktreePath: string): SeedSession => ({
@@ -20,7 +21,7 @@ const seeded = (worktreePath: string): SeedSession => ({
   worktreePath
 })
 
-test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", async ({
+test("uses the shared legacy Jingler Pierre skin in the Changes review diff", async ({
   launchApp
 }) => {
   const originalLines = [
@@ -67,9 +68,9 @@ test("uses the shared legacy Jingler Pierre skin in Changes and Code Review", as
     await closeTerminal.click()
     await expect(closeTerminal).toBeHidden()
   }
-  await window.getByRole("button", { name: "Changes" }).first().click()
-  await expect(window.getByRole("region", { name: "Code review changes" })).toBeVisible()
-  const review = window.getByRole("region", { name: "Code review changes" })
+  const review = (await openChangedFile(window, "src/auth/login.ts"))
+    .getByRole("region", { name: "Code review changes" })
+  await expect(review).toBeVisible()
   const diff = review.locator("diffs-container").first()
   await expect(review).toHaveAttribute("data-jingler-pierre-view", "code-view")
   await expect(review).toHaveClass(PIERRE_HOST_CLASS)
