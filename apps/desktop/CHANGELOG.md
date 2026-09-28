@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.3.3
+
+### Patch Changes
+
+- 017cf3e: Name the Linux app binary `jingler` in every package, and ship Linux arm64 as an AppImage.
+  - @jingler/plannotator-ext@0.3.3
+
 ## 0.3.2
 
 ### Patch Changes
