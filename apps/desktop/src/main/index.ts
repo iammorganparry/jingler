@@ -43,8 +43,10 @@ import { bootBackgroundColor, registerBootThemeChannel, resolveBootTheme } from 
 import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
+import { registerAppVersionChannel } from "./app-version.js"
 
 app.setName("Jingler")
+registerAppVersionChannel()
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
 let mainWindow: BrowserWindow | null = null
@@ -482,7 +484,7 @@ if (!gotPrimaryLock) {
       app.isPackaged &&
       process.env.JINGLER_DISABLE_AUTO_UPDATE !== "1"
     ) {
-      initAutoUpdater()
+      initAutoUpdater(() => mainWindow)
     }
 
     app.on("activate", () => {

@@ -7,6 +7,7 @@ import {
   CircleAlert,
   Cloud,
   Columns2,
+  Download,
   GitBranch,
   GitPullRequest,
   Layers,
@@ -16,7 +17,8 @@ import {
   Search,
   Server,
   SlidersHorizontal,
-  Star
+  Star,
+  X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
@@ -46,6 +48,16 @@ import {
   sessionFilterAxes,
   type SessionFilters
 } from "./session-filters.js"
+
+export interface SidebarUpdate {
+  readonly version: string
+  readonly status: "available" | "downloading" | "downloaded"
+  readonly percent?: number
+  readonly error?: string
+  readonly dismissed: boolean
+  readonly onAction: () => void
+  readonly onDismiss: () => void
+}
 
 export interface SessionSidebarProps {
   /** Global command search shown below the sidebar header. */
@@ -122,6 +134,8 @@ export interface SessionSidebarProps {
   onToggleCollapsed?: (repoName: string) => void | Promise<void>
   /** App version (from `__APP_VERSION__`), shown in the footer. */
   version?: string
+  /** Available packaged-app update shown above the footer. */
+  update?: SidebarUpdate
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -138,7 +152,105 @@ export interface SessionSidebarProps {
   defaultFilters?: SessionFilters
 }
 
-/** Left rail: sessions grouped by repository, with a first-run empty hint. */
+const updateAccessibleLabel = (update: SidebarUpdate): string => {
+  if (update.status === "downloaded") return `Restart to install Jingler ${update.version}`
+  if (update.status === "downloading") return `Downloading Jingler ${update.version}, ${Math.round(update.percent ?? 0)}%`
+  return `Download Jingler ${update.version}`
+}
+
+const updateActionLabel = (update: SidebarUpdate): string => {
+  if (update.status === "downloaded") return "Restart to update"
+  if (update.status === "downloading") return `Downloading ${Math.round(update.percent ?? 0)}%`
+  return update.error ? "Try download again" : "Upgrade now"
+}
+
+const updateDescription = (update: SidebarUpdate): string => {
+  if (update.error) return update.error
+  if (update.status === "downloaded") return "The update is downloaded and ready to install."
+  if (update.status === "downloading") return "Downloading the update in the background."
+  return "A new version is available."
+}
+
+function UpdateButton({ update, compact = false }: { update: SidebarUpdate; compact?: boolean }) {
+  const downloading = update.status === "downloading"
+  const label = updateAccessibleLabel(update)
+
+  if (compact) {
+    return (
+      <div className="relative flex size-8 flex-none">
+        <button
+          type="button"
+          aria-label={label}
+          title={label}
+          disabled={downloading}
+          onClick={update.onAction}
+          className="flex size-8 items-center justify-center rounded-md text-blue outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
+        >
+          <Download size={16} />
+        </button>
+        {downloading && (
+          <span
+            role="progressbar"
+            aria-label="Update download progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(update.percent ?? 0)}
+            className="pointer-events-none absolute bottom-0.5 left-1 right-1 h-0.5 overflow-hidden rounded-full bg-line"
+          >
+            <span className="block h-full bg-blue" style={{ width: `${update.percent ?? 0}%` }} />
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative mx-2 mb-2 aspect-square overflow-hidden rounded-xl border border-blue/30 bg-gradient-to-br from-blue/15 via-surface to-panel shadow-sm">
+      <button
+        type="button"
+        aria-label={label}
+        disabled={downloading}
+        onClick={update.onAction}
+        className="flex size-full flex-col items-start justify-between p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait"
+      >
+        <span className="flex size-10 items-center justify-center rounded-xl bg-blue text-white shadow-sm">
+          <Download size={20} />
+        </span>
+        <span>
+          <strong className="block text-[15px] font-semibold text-text-bright">Jingler {update.version}</strong>
+          <span className="mt-1 block text-[12px] leading-5 text-muted-foreground">
+            {updateDescription(update)}
+          </span>
+        </span>
+        <span className="w-full rounded-lg bg-blue px-3 py-2 text-center text-[12px] font-semibold text-white">
+          {updateActionLabel(update)}
+        </span>
+      </button>
+      {downloading && (
+        <span
+          role="progressbar"
+          aria-label="Update download progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(update.percent ?? 0)}
+          className="pointer-events-none absolute bottom-14 left-4 right-4 h-1 overflow-hidden rounded-full bg-line"
+        >
+          <span className="block h-full bg-blue transition-[width]" style={{ width: `${update.percent ?? 0}%` }} />
+        </span>
+      )}
+      <span className="sr-only" aria-live="polite">Update status: {updateActionLabel(update)}</span>
+      <button
+        type="button"
+        aria-label={`Dismiss Jingler ${update.version} update`}
+        onClick={update.onDismiss}
+        className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-dim outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <X size={14} />
+      </button>
+    </div>
+  )
+}
+
 /**
  * The sidebar's full contents.
  *
@@ -183,6 +295,7 @@ function SidebarBody({
   collapsedRepoNames,
   onToggleCollapsed,
   version,
+  update,
   defaultFilters,
   pullRequestsActive = false,
   onOpenPullRequests,
@@ -713,6 +826,10 @@ return (renderExpandedGroupHeading())
         </>
       )}
 
+      {update && (update.dismissed
+        ? <div className="flex flex-none justify-end px-2 pb-1"><UpdateButton update={update} compact /></div>
+        : <UpdateButton update={update} />)}
+
       {/* Footer: account menu (→ Settings, Usage, and Sign out — or, signed
           out, Sign in). Always present: Settings never depends on an account. */}
       <div className="flex-none border-t border-hairline p-1.5">
@@ -780,6 +897,7 @@ function SessionRail({
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive,
   onSelectPendingEnvironmentSession,
+  update,
   onExpand
 }: {
   sessions: ReadonlyArray<Session>
@@ -793,6 +911,7 @@ function SessionRail({
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   pendingEnvironmentSessionActive?: boolean
   onSelectPendingEnvironmentSession?: () => void
+  update?: SidebarUpdate
   /** Re-dock the sidebar (the top button). */
   onExpand: () => void
 }) {
@@ -941,6 +1060,7 @@ function SessionRail({
         )}
         {live.map(renderCell)}
       </div>
+      {update && <UpdateButton update={update} compact />}
     </div>
   )
 }
@@ -1036,6 +1156,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
       pendingEnvironmentSession={props.pendingEnvironmentSession}
       pendingEnvironmentSessionActive={props.pendingEnvironmentSessionActive}
       onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}
+      update={props.update}
       onExpand={() => setPin(true)}
     />
   )

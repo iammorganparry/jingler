@@ -454,6 +454,55 @@ describe("SessionSidebar split placement", () => {
   })
 })
 
+describe("SessionSidebar updates", () => {
+  it("starts the download from the upgrade card and collapses to an icon when dismissed", () => {
+    localStorage.removeItem("sb.sidebar.pinned")
+    const onAction = vi.fn()
+    const onDismiss = vi.fn()
+    const update = {
+      version: "1.2.3",
+      status: "available" as const,
+      dismissed: false,
+      onAction,
+      onDismiss
+    }
+    const { rerender } = render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS} update={update} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Download Jingler 1.2.3" }))
+    expect(onAction).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss Jingler 1.2.3 update" }))
+    expect(onDismiss).toHaveBeenCalledOnce()
+
+    rerender(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS} update={{ ...update, dismissed: true }} />
+    )
+    expect(screen.getByTitle("Download Jingler 1.2.3")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Dismiss Jingler 1.2.3 update" })).toBeNull()
+  })
+
+  it("shows download progress and the restart action", () => {
+    localStorage.removeItem("sb.sidebar.pinned")
+    const base = { version: "1.2.3", dismissed: false, onAction: () => {}, onDismiss: () => {} }
+    const { rerender } = render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloading", percent: 42 }} />
+    )
+    expect(screen.getByText("Downloading 42%")).toBeTruthy()
+    expect(screen.getByRole("progressbar", { name: "Update download progress" }).getAttribute("aria-valuenow")).toBe("42")
+    expect(screen.getByText("Downloading the update in the background.")).toBeTruthy()
+
+    rerender(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloaded" }} />
+    )
+    expect(screen.getByText("Restart to update")).toBeTruthy()
+  })
+})
+
 describe("SessionSidebar optional sign-in", () => {
   const openAccountMenu = () =>
     fireEvent.keyDown(screen.getByRole("button", { name: "Account menu" }), { key: "Enter" })

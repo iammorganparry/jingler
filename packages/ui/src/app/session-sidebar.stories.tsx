@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { Session, SessionActivity } from "@jingler/core"
 import { SessionSidebar } from "./session-sidebar.js"
-import { DEFAULT_FILTERS } from "./session-filters.js"
 
 const meta = {
   title: "App/SessionSidebar",
@@ -58,6 +57,27 @@ const ACTIVITY: Record<string, SessionActivity> = {
 }
 
 /** Grouped by repo (the default) — every state visible at once. */
+export const UpgradeAvailable: Story = {
+  args: {
+    sessions: SESSIONS,
+    activeSessionId: "s1",
+    onSelect: () => {},
+    version: "0.2.1",
+    update: {
+      version: "0.3.0",
+      status: "available",
+      dismissed: false,
+      onAction: () => {},
+      onDismiss: () => {}
+    }
+  },
+  render: (args) => (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar {...args} />
+    </div>
+  )
+}
+
 export const AllStates: Story = {
   args: {
     sessions: SESSIONS,

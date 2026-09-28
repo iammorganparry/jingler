@@ -110,6 +110,7 @@ import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
+import { useAutoUpdate } from "./use-auto-update.js";
 import {
   PluginProvider,
   usePluginCatalog,
@@ -189,6 +190,7 @@ function AuthedApp({
 }) {
   const [state, send] = useMachine(appMachine);
   const reviewFocused = useReviewFocused();
+  const update = useAutoUpdate();
   const github = useGitHubConnection();
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
@@ -1316,6 +1318,7 @@ function AuthedApp({
         onVisibleSessionsChange={onVisibleSessionsChange}
         sessions={sessions}
         user={user}
+        update={update}
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
@@ -1704,7 +1707,7 @@ function AuthedApp({
         renderBrowser={(session) => (
           <PreviewDockView session={session} dock={browserDock} />
         )}
-        version={__APP_VERSION__}
+        version={window.jingler.appVersion}
       />
       {sessionMutationError !== null && (
         <div
