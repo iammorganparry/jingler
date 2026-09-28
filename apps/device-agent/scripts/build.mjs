@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process"
-import { chmod, cp, mkdir, open, readdir, readFile, rm } from "node:fs/promises"
+import { chmod, cp, mkdir, open, readdir, readFile, rm, stat } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { build } from "esbuild"
@@ -97,6 +97,8 @@ await cp(resolve(payload, "node_modules"), resolve(dist, "node_modules"), {
 // and names it in JINGLER_CODESIGN_IDENTITY; everywhere else this is a no-op.
 const MACH_O_MAGIC = new Set([0xfeedfacf, 0xcffaedfe, 0xfeedface, 0xcefaedfe, 0xcafebabe, 0xbebafeca])
 
+const NATIVE_EXTENSION = /\.(node|dylib)$/
+
 const isMachO = async (path) => {
   const file = await open(path, "r")
   try {
@@ -111,8 +113,15 @@ const identity = process.env.JINGLER_CODESIGN_IDENTITY
 if (identity) {
   const entries = await readdir(payload, { recursive: true, withFileTypes: true })
   const files = entries.filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name))
-  const machO = await Promise.all(files.map(isMachO))
-  const binaries = files.filter((_, index) => machO[index])
+  // Opening every payload file at once exhausts the runner's descriptors
+  // (EMFILE), so only read the magic of plausible binaries: native addons,
+  // dylibs, and anything executable. stat holds no descriptor.
+  const modes = await Promise.all(files.map((path) => stat(path).then(({ mode }) => mode)))
+  const candidates = files.filter(
+    (path, index) => NATIVE_EXTENSION.test(path) || ((modes[index] ?? 0) & 0o111) !== 0
+  )
+  const machO = await Promise.all(candidates.map(isMachO))
+  const binaries = candidates.filter((_, index) => machO[index])
   await Promise.all(
     binaries.map((path) =>
       run("codesign", ["--force", "--timestamp", "--options", "runtime", "--sign", identity, path])
