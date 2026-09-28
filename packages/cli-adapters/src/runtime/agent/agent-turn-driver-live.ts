@@ -1,4 +1,10 @@
-import { AgentRunError, type RuntimeContinuation } from "@jingler/core"
+import {
+  AgentRunError,
+  makeUsageFact,
+  type RuntimeContinuation,
+  type UsageFact,
+  type StreamEvent
+} from "@jingler/core"
 import { Effect, Layer, Ref, Stream } from "effect"
 import {
   type AgentContext,
@@ -14,6 +20,7 @@ const runtimeFailure = (spec: AgentTurnSpec, message: string): AgentRunError =>
 const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   ...(spec.mcp === undefined ? {} : { mcp: spec.mcp }),
   publishEvent: context.emit,
+  recordUsage: context.recordUsage,
   registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: (request: {
     readonly toolId: string
@@ -38,6 +45,35 @@ const piSpec = (runId: string, spec: AgentTurnSpec) => {
     runId,
     ...runtime
   }
+}
+
+const usageFactFor = (
+  runId: string,
+  spec: ReturnType<typeof piSpec>,
+  startedAt: number,
+  event: StreamEvent
+): UsageFact | null => {
+  if (event._tag !== "Done" && event._tag !== "Failed") return null
+  return makeUsageFact({
+    id: `${runId}:parent`,
+    runId,
+    sessionId: spec.sessionId,
+    chatId: spec.chatId,
+    parentRunId: null,
+    runtimeId: spec.runtimeId,
+    providerId: spec.providerId ?? null,
+    modelId: String(spec.modelId),
+    kind: "parent",
+    startedAt,
+    totalTokens: event._tag === "Done" ? event.tokens : null,
+    // OpenCode reports message cost. PI can be API or subscription-backed, so
+    // its generic terminal event cannot prove whether a numeric zero is known.
+    costUsd: event._tag === "Done" && spec.runtimeId === "opencode"
+      ? event.costUsd
+      : null,
+    outcome: event._tag === "Done" ? "success" : "error",
+    provenance: `${spec.runtimeId}.stream`
+  })
 }
 
 /**
@@ -68,9 +104,17 @@ export const AgentTurnDriverLive = Layer.effect(
     return AgentTurnDriver.of({
       run: (runId, spec, context) => {
         const canonical = piSpec(runId, spec)
-        return runtime.run(canonical, runtimeContext(spec, context)).pipe(
+        const startedAt = Date.now()
+        let recorded = false
+        const runContext = runtimeContext(spec, context)
+        return runtime.run(canonical, runContext).pipe(
           Stream.runForEach((event) =>
             Effect.gen(function* () {
+              const fact = recorded ? null : usageFactFor(runId, canonical, startedAt, event)
+              if (fact !== null) {
+                recorded = true
+                yield* runContext.recordUsage?.(fact) ?? Effect.void
+              }
               if (event._tag === "Started") {
                 const continuation: RuntimeContinuation = {
                   runtimeId: canonical.runtimeId,
@@ -98,7 +142,25 @@ export const AgentTurnDriverLive = Layer.effect(
             })
           ),
           Effect.mapError((error) => runtimeFailure(spec, error.message)),
-          Effect.onInterrupt(() => interruptRun(runId).pipe(Effect.ignore)),
+          Effect.onInterrupt(() => Effect.gen(function* () {
+            if (!recorded) {
+              const fact = usageFactFor(
+                runId,
+                canonical,
+                startedAt,
+                { _tag: "Failed", message: "Turn cancelled" }
+              )
+              if (fact !== null) {
+                recorded = true
+                yield* (runContext.recordUsage?.({
+                  ...fact,
+                  outcome: "cancelled",
+                  provenance: `${canonical.runtimeId}.interrupt`
+                }) ?? Effect.void)
+              }
+            }
+            yield* interruptRun(runId).pipe(Effect.ignore)
+          })),
           Effect.ensuring(context.registerTurnSteer?.(null) ?? Effect.void),
           Effect.ensuring(
             Ref.update(active, (current) => {

@@ -75,17 +75,10 @@ const capability = (parentRuntimeSessionId: string, agent = "worker") => ({
 })
 
 describe("PiChildCredentials", () => {
-  it("materializes only the non-secret Claude CLI route marker", async () => {
+  it("materializes only the non-secret Claude CLI route marker without stored PI auth", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-child-claude-auth-"))
     roots.push(root)
     const credentials = new InMemoryProviderCredentialStore()
-    await Effect.runPromise(credentials.write({
-      connectionId: claudeCliConnection.id,
-      authKind: "claude-setup-token",
-      access: "claude-cli",
-      refresh: null,
-      expiresAt: null
-    }))
     const children = new PiChildCredentials(root, credentials)
 
     const directory = await Effect.runPromise(children.materialize(

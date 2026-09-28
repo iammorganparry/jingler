@@ -14,7 +14,8 @@ import type {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
-  SubagentFleetSnapshot
+  SubagentFleetSnapshot,
+  UsageFact
 } from "@jingler/core"
 import { piEndpointId } from "@jingler/core"
 import { Context, Data, Effect, Layer, Stream } from "effect"
@@ -60,6 +61,8 @@ export interface AgentRuntimeContext {
   readonly mcp?: JinglerMcpAttachments
   /** Publish Jingler-owned lifecycle events produced by first-class tools. */
   readonly publishEvent: (event: StreamEvent) => Effect.Effect<void>
+  /** Persist one terminal parent/child accounting fact when available. */
+  readonly recordUsage?: (fact: UsageFact) => Effect.Effect<void>
   /** Publish a task-local stop handle for the background-task dock. */
   readonly registerBackgroundStop: (stop: RuntimeBackgroundStop) => Effect.Effect<void>
   readonly canUseTool: (

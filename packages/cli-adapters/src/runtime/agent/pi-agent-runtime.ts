@@ -1,5 +1,10 @@
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
+import type {
+  SubagentDelegationRequest,
+  SubagentDelegationResponse,
+  SubagentDelegationUpdate
+} from "pi-subagents/delegation"
 import {
   type ContextBreakdown,
   type FileChangeSet,
@@ -34,6 +39,11 @@ export interface PiSessionHandle {
   ) => Promise<SubagentFleetControlOutcome>
   readonly subagentFleetSnapshot: () => Promise<SubagentFleetSnapshot>
   readonly subagentTranscript: (runId: string) => Promise<ReadonlyArray<Message>>
+  readonly delegateSubagent?: (
+    request: SubagentDelegationRequest,
+    signal: AbortSignal,
+    onUpdate?: (update: SubagentDelegationUpdate) => void
+  ) => Promise<SubagentDelegationResponse>
   readonly prompt: (text: string, images?: AgentRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>

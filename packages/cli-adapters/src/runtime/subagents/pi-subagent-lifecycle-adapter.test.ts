@@ -10,6 +10,70 @@ import {
   PiSubagentLifecycleAdapter
 } from "./pi-subagent-lifecycle-adapter.js"
 
+describe("PI delegation bridge", () => {
+  it("correlates a foreground native-harness delegation response", async () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: "parent-1",
+      controlJournal: null,
+      emit: () => undefined
+    })
+    const unsubscribe = events.on("prompt-template:subagent:request", (payload) => {
+      const request = payload as { requestId: string; ownerRunId: string; nodeId: string }
+      events.emit("prompt-template:subagent:response", {
+        ...request,
+        status: "completed",
+        result: { kind: "text", text: "done" }
+      })
+    })
+    try {
+      const response = await adapter.delegate({
+        requestId: "request-1",
+        ownerRunId: "owner-1",
+        nodeId: "node-1",
+        agent: "researcher",
+        task: "Research",
+        context: "fresh",
+        cwd: "/workspace",
+        result: { kind: "text" }
+      }, new AbortController().signal)
+      expect(response).toMatchObject({ status: "completed", result: { text: "done" } })
+    } finally {
+      unsubscribe()
+      adapter.stop()
+    }
+  })
+
+  it("cancels the PI child when foreground delegation times out", async () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: "parent-1",
+      controlJournal: null,
+      emit: () => undefined
+    })
+    const cancelled = vi.fn()
+    const unsubscribe = events.on("prompt-template:subagent:cancel", cancelled)
+    await expect(adapter.delegate({
+      requestId: "request-timeout",
+      ownerRunId: "owner-1",
+      nodeId: "node-1",
+      agent: "researcher",
+      task: "Research",
+      context: "fresh",
+      cwd: "/workspace",
+      timeoutMs: -4_990,
+      result: { kind: "text" }
+    }, new AbortController().signal)).rejects.toThrow("timed out")
+    expect(cancelled).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: "request-timeout"
+    }))
+    unsubscribe()
+    adapter.stop()
+  })
+})
+
 describe("fleet identity cleanup", () => {
   it("keeps genuine agent and workflow names, relabelling only bare collapse tokens", () => {
     expect(cleanAgentLabel("scout")).toBe("scout")

@@ -1,5 +1,6 @@
 import {
   JINGLER_SUBAGENT_NAMES,
+  ProviderId,
   ProviderModelId,
   type DetectedResourceCandidate,
   type ManagedResource,
@@ -7,7 +8,7 @@ import {
   type ProviderCatalogModel,
   type ResourceDetectionResult,
   type JinglerSubagentName,
-  type SubagentModelAssignments
+  type SubagentProviderModelAssignments
 } from "@jingler/core"
 import { Boxes, Check, FolderOpen, RefreshCw, Trash2 } from "lucide-react"
 import { Button } from "../components/button.js"
@@ -17,14 +18,20 @@ import { Toggle } from "../components/toggle.js"
 export interface AgentsSettingsProps {
   readonly resources: ReadonlyArray<ManagedResource>
   readonly models: ReadonlyArray<ProviderCatalogModel>
-  readonly modelAssignments: SubagentModelAssignments
+  readonly modelAssignments: SubagentProviderModelAssignments
+  readonly delegationEnabled: boolean
   readonly detection: ResourceDetectionResult | null
   readonly selectedCandidateIds: ReadonlySet<string>
   readonly loading: boolean
   readonly reviewing: boolean
   readonly error?: string | null
   readonly onDetect: () => void
-  readonly onSetModel: (agent: JinglerSubagentName, modelId: ProviderModelId | null) => void
+  readonly onSetDelegationEnabled: (enabled: boolean) => void
+  readonly onSetModel: (
+    providerId: ProviderId,
+    agent: JinglerSubagentName,
+    modelId: ProviderModelId | null
+  ) => void
   readonly onToggleCandidate: (id: string) => void
   readonly onImportSelected: () => void
   readonly onCancelDetection: () => void
@@ -76,6 +83,7 @@ export function AgentsSettings(props: AgentsSettingsProps) {
   const selectedCount = props.detection?.candidates.filter(({ id }) =>
     props.selectedCandidateIds.has(id)
   ).length ?? 0
+  const providerIds = [...new Set(props.models.map(({ providerId }) => providerId))]
 
   return (
     <section aria-label="Agents and skills" className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6 text-text">
@@ -93,38 +101,58 @@ export function AgentsSettings(props: AgentsSettingsProps) {
         </header>
 
         <div className="overflow-hidden rounded-lg border border-line bg-panel">
-          <div className="border-b border-hairline px-4 py-3">
-            <strong className="text-[12px] text-text-bright">Subagent models</strong>
-            <p className="mt-1 text-[10.5px] text-muted-foreground">
-              Pin a role to a certified model from the default provider, or inherit the orchestrator.
-            </p>
+          <div className="flex items-center justify-between gap-4 border-b border-hairline px-4 py-3">
+            <div>
+              <strong className="text-[12px] text-text-bright">Subagent models</strong>
+              <p className="mt-1 text-[10.5px] text-muted-foreground">
+                Pin each task role to a certified model from any connected provider, or inherit the orchestrator.
+              </p>
+            </div>
+            <Toggle
+              checked={props.delegationEnabled}
+              onCheckedChange={props.onSetDelegationEnabled}
+              aria-label="Enable subagent delegation"
+              disabled={props.loading}
+            />
           </div>
-          {JINGLER_SUBAGENT_NAMES.map((agent) => {
-            const assigned = props.modelAssignments[agent]
-            const unavailable = assigned && !props.models.some(({ id }) => id === assigned)
+          {providerIds.map((providerId) => {
+            const providerModels = props.models.filter((model) => model.providerId === providerId)
+            const assignments = props.modelAssignments[providerId] ?? {}
             return (
-              <label
-                key={agent}
-                className="grid grid-cols-[120px_minmax(0,1fr)] items-center gap-3 border-b border-hairline px-4 py-2.5 last:border-b-0"
-              >
-                <span className="text-[11.5px] font-medium text-text-bright">{agentLabel(agent)}</span>
-                <select
-                  aria-label={`${agentLabel(agent)} model`}
-                  value={assigned ?? ""}
-                  disabled={props.loading}
-                  onChange={(event) => props.onSetModel(
-                    agent,
-                    event.target.value === "" ? null : ProviderModelId.make(event.target.value)
-                  )}
-                  className="min-w-0 rounded-md border border-line bg-sunken px-2 py-1.5 text-[11px] text-text-body"
-                >
-                  <option value="">Inherit orchestrator</option>
-                  {unavailable && assigned && <option value={assigned}>Unavailable · {assigned}</option>}
-                  {props.models.map((model) => (
-                    <option key={model.id} value={model.id}>{model.label} · {model.id}</option>
-                  ))}
-                </select>
-              </label>
+              <div key={providerId} className="border-b border-hairline last:border-b-0">
+                <div className="bg-sunken px-4 py-2 text-[10.5px] font-semibold text-muted-foreground">
+                  {providerId}
+                </div>
+                {JINGLER_SUBAGENT_NAMES.map((agent) => {
+                  const assigned = assignments[agent]
+                  const unavailable = assigned && !providerModels.some(({ id }) => id === assigned)
+                  return (
+                    <label
+                      key={agent}
+                      className="grid grid-cols-[120px_minmax(0,1fr)] items-center gap-3 border-t border-hairline px-4 py-2.5"
+                    >
+                      <span className="text-[11.5px] font-medium text-text-bright">{agentLabel(agent)}</span>
+                      <select
+                        aria-label={`${providerId} ${agentLabel(agent)} model`}
+                        value={assigned ?? ""}
+                        disabled={props.loading || !props.delegationEnabled}
+                        onChange={(event) => props.onSetModel(
+                          ProviderId.make(providerId),
+                          agent,
+                          event.target.value === "" ? null : ProviderModelId.make(event.target.value)
+                        )}
+                        className="min-w-0 rounded-md border border-line bg-sunken px-2 py-1.5 text-[11px] text-text-body"
+                      >
+                        <option value="">Inherit orchestrator</option>
+                        {unavailable && assigned && <option value={assigned}>Unavailable · {assigned}</option>}
+                        {providerModels.map((model) => (
+                          <option key={model.id} value={model.id}>{model.label} · {model.id}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                })}
+              </div>
             )
           })}
         </div>

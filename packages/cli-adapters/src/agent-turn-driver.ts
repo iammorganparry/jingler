@@ -6,7 +6,8 @@ import type {
   AgentRunSpec,
   QuestionAnswer,
   QuestionRequest,
-  StreamEvent
+  StreamEvent,
+  UsageFact
 } from "@jingler/core"
 import type { AgentRunError } from "@jingler/core"
 import { Context, Effect, Layer } from "effect"
@@ -90,6 +91,7 @@ export type SteerTurn = (
 
 export interface AgentContext {
   readonly emit: (event: StreamEvent) => Effect.Effect<void>
+  readonly recordUsage?: (fact: UsageFact) => Effect.Effect<void>
   readonly canUseTool: CanUseTool
   readonly askQuestion: AskQuestion
   /** Publish a durable visual explanation for the current session. */

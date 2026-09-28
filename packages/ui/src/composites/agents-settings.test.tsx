@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { ManagedResourceId, ProviderId, ProviderModelId } from "@jingler/core"
+import { JINGLER_SUBAGENT_NAMES, ManagedResourceId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { AgentsSettings } from "./agents-settings.js"
@@ -16,6 +16,7 @@ describe("AgentsSettings", () => {
     const onSetModel = vi.fn()
     const sol = ProviderModelId.make("openai-codex/gpt-5.6-sol")
     const unavailable = ProviderModelId.make("openai-codex/retired")
+    const haiku = ProviderModelId.make("anthropic/claude-haiku")
     render(<AgentsSettings
       models={[{
         providerId: ProviderId.make("openai-codex"),
@@ -25,8 +26,17 @@ describe("AgentsSettings", () => {
         verification: "certified",
         selectable: true,
         certificationKey: "sol"
+      }, {
+        providerId: ProviderId.make("anthropic"),
+        id: haiku,
+        label: "Claude Haiku",
+        capabilities: { contextWindow: 200_000, reasoning: [], vision: true },
+        verification: "certified",
+        selectable: true,
+        certificationKey: "haiku"
       }]}
-      modelAssignments={{ reviewer: unavailable }}
+      modelAssignments={{ [ProviderId.make("openai-codex")]: { reviewer: unavailable } }}
+      delegationEnabled
       resources={[{
         id: resourceId, kind: "prompt", name: "Review", description: "Review", enabled: true,
         trust: "operator-approved", scope: { kind: "portable", allowedTargets: [] },
@@ -41,6 +51,7 @@ describe("AgentsSettings", () => {
       loading={false}
       reviewing
       onDetect={vi.fn()}
+      onSetDelegationEnabled={vi.fn()}
       onSetModel={onSetModel}
       onToggleCandidate={vi.fn()}
       onImportSelected={onImportSelected}
@@ -50,14 +61,15 @@ describe("AgentsSettings", () => {
       onRemove={vi.fn()}
       onRetry={vi.fn()}
     />)
-    expect((screen.getByRole("combobox", { name: "Reviewer model" }) as HTMLSelectElement).value)
+    expect((screen.getByRole("combobox", { name: "openai-codex Reviewer model" }) as HTMLSelectElement).value)
       .toBe(unavailable)
-    fireEvent.change(screen.getByRole("combobox", { name: "Worker model" }), {
-      target: { value: sol }
+    expect(screen.getAllByRole("combobox")).toHaveLength(JINGLER_SUBAGENT_NAMES.length * 2)
+    fireEvent.change(screen.getByRole("combobox", { name: "anthropic Worker model" }), {
+      target: { value: haiku }
     })
     fireEvent.click(screen.getByRole("button", { name: "Import 1" }))
     fireEvent.click(screen.getByRole("switch", { name: "Disable Review" }))
-    expect(onSetModel).toHaveBeenCalledWith("worker", sol)
+    expect(onSetModel).toHaveBeenCalledWith(ProviderId.make("anthropic"), "worker", haiku)
     expect(onImportSelected).toHaveBeenCalledOnce()
     expect(onSetEnabled).toHaveBeenCalledWith({ id: resourceId }, false)
   })

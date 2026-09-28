@@ -5,9 +5,15 @@ import type {
   ManagedResource,
   AgentRunSpec,
   ProviderConnection,
+  SubagentModelAssignments,
   WorkspaceConfig
 } from "@jingler/core"
-import { piEndpointTargets } from "@jingler/core"
+import {
+  piEndpointId,
+  piEndpointTargets,
+  ProviderConnectionId,
+  ProviderId
+} from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
 import { AppPaths } from "../../app-paths.js"
@@ -64,12 +70,14 @@ import {
 } from "./agent-runtime.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { makeClaudeRuntimeRegistration } from "./claude-agent-runtime.js"
-import { makeCodexRuntimeRegistration } from "../codex/runtime.js"
-import { makeOpenCodeRuntimeRegistration } from "../opencode/runtime.js"
+import { makeCodexAgentRuntime, makeCodexRuntimeRegistration } from "../codex/runtime.js"
+import { makeOpenCodeAgentRuntime, makeOpenCodeRuntimeRegistration } from "../opencode/runtime.js"
 import type { NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
+import { registerNativeSubagentTool } from "./native-subagent-tool.js"
+import { makeDirectNativeSubagentDelegate } from "./direct-native-subagent.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import { makeSubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
@@ -87,24 +95,58 @@ const managedSecretDigest = (values: Readonly<Record<string, string>>): string =
 // Typed failures, not throws: a throw inside the resolving Effect is a defect,
 // which the session factory's `mapError` cannot classify, and the operator
 // then sees a bare "The agent run failed." instead of which setting is wrong.
-const assignedSubagentConnections = (
+const nativeClaudeSubagentConnection = (targetId: string): ProviderConnection => ({
+  id: ProviderConnectionId.make(`native-claude-${targetId}`),
+  providerId: ProviderId.make("anthropic"),
+  authKind: "claude-setup-token",
+  account: null,
+  targetId,
+  status: "authenticated",
+  subscription: {
+    entitlement: "active",
+    planLabel: "Claude Code",
+    expiresAt: null,
+    quotaLabel: null,
+    rateLimitLabel: null,
+    confirmedBillingRoute: "subscription",
+    observedRoute: "claude-cli:subscription"
+  },
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString()
+})
+
+const modelsForProvider = (
   saved: WorkspaceConfig | null,
-  connections: ReadonlyArray<ProviderConnection>
+  providerId: ProviderId
+): SubagentModelAssignments => saved?.subagentModelsByProvider?.[providerId] ?? {}
+
+const assignedSubagentConnections = (
+  models: SubagentModelAssignments,
+  saved: WorkspaceConfig | null,
+  connections: ReadonlyArray<ProviderConnection>,
+  targetId: string,
+  activeProviderId: ProviderId
 ): Effect.Effect<ReadonlyArray<ProviderConnection>, Error> => {
-  if (Object.keys(saved?.subagentModels ?? {}).length === 0) return Effect.succeed([])
-  if (!saved?.defaultConnectionId) {
-    return Effect.fail(new Error("Subagent models require a default provider connection"))
+  const providers = [...new Set(Object.values(models).map((model) =>
+    String(model).includes("/") ? String(model).split("/", 1)[0]! : String(activeProviderId)
+  ))]
+  if (providers.length === 0) return Effect.succeed([])
+  const assigned: ProviderConnection[] = []
+  for (const providerId of providers) {
+    const candidates = connections.filter((connection) =>
+      connection.providerId === providerId &&
+      connection.status === "authenticated" &&
+      connection.targetId === targetId
+    )
+    const connection = candidates.find(({ id }) => id === saved?.defaultConnectionId) ??
+      [...candidates].sort((left, right) => String(left.id).localeCompare(String(right.id)))[0] ??
+      (providerId === "anthropic" ? nativeClaudeSubagentConnection(targetId) : undefined)
+    if (!connection) {
+      return Effect.fail(new Error(`The ${providerId} subagent provider connection is unavailable`))
+    }
+    assigned.push(connection)
   }
-  const assigned = connections.find(({ id }) => id === saved.defaultConnectionId)
-  if (!assigned) {
-    return Effect.fail(new Error("The subagent provider connection is unavailable"))
-  }
-  if (Object.values(saved.subagentModels ?? {}).some((model) =>
-    !String(model).startsWith(`${assigned.providerId}/`)
-  )) {
-    return Effect.fail(new Error("Subagent models must use the default provider connection"))
-  }
-  return Effect.succeed([assigned])
+  return Effect.succeed(assigned)
 }
 
 export interface PluginToolSuccessfulResult
@@ -208,13 +250,24 @@ export const makePiAgentRuntimeLive = (
       childCredentials,
       subagentBroker,
       resolveConnection: (spec) => validateProviderConnection(providers, spec),
-      resolveSubagentConfig: () => Effect.gen(function* () {
+      resolveSubagentConfig: (spec) => Effect.gen(function* () {
         const saved = yield* config.get()
+        const enabled = saved?.subagentDelegationEnabled ?? true
+        const models = enabled && spec.providerId !== undefined
+          ? modelsForProvider(saved, spec.providerId)
+          : {}
         return {
-          models: saved?.subagentModels ?? {},
-          connections: Object.keys(saved?.subagentModels ?? {}).length === 0
+          enabled,
+          models,
+          connections: Object.keys(models).length === 0
             ? []
-            : yield* assignedSubagentConnections(saved, yield* providers.status)
+            : yield* assignedSubagentConnections(
+                models,
+                saved,
+                yield* providers.status,
+                spec.targetCapabilities.targetId,
+                spec.providerId!
+              )
         }
       }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
@@ -486,11 +539,82 @@ export const makePiAgentRuntimeLive = (
 
     const factory = makePiSessionFactory(factoryOptions)
     const runtime = yield* makePiAgentRuntime(factory)
-    const nativeTools: NativeRuntimeToolsOptions = {
+    const baseNativeTools: NativeRuntimeToolsOptions = {
       createToolRegistry: (spec, context) => Effect.acquireRelease(
         Effect.sync(() => factoryOptions.terminalTracker(spec)),
         (tracker) => tracker.dispose().pipe(Effect.orDie)
       ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
+    }
+    const prepareClaudeSubagentRegistry = (
+      spec: AgentRunSpec,
+      context: AgentRuntimeContext,
+      registry: ToolRegistry
+    ) => Effect.gen(function* () {
+      const connection = nativeClaudeSubagentConnection(spec.targetCapabilities.targetId)
+      const sidecar = makePiSessionFactory({
+        ...factoryOptions,
+        resolveConnection: () => Effect.succeed(connection),
+        createToolRegistry: undefined,
+        toolRegistry: registry,
+        terminalTracker: undefined,
+        delegationOnly: true
+      })
+      const handle = yield* Effect.acquireRelease(
+        sidecar.create({
+          ...spec,
+          runId: `${spec.runId}:delegation-host`,
+          runtimeId: "pi",
+          endpointId: piEndpointId(spec.targetCapabilities.targetId, connection.id),
+          connectionId: connection.id,
+          providerId: connection.providerId,
+          prompt: "",
+          priorMessages: [],
+          continuation: null,
+          seed: null
+        }, context),
+        (owned) => Effect.promise(async () => { await owned.dispose() })
+      )
+      yield* Effect.acquireRelease(
+        Effect.sync(() => handle.subscribeFleet((event) => {
+          Effect.runFork(context.publishEvent(event))
+        })),
+        (unsubscribe) => Effect.sync(unsubscribe)
+      )
+      yield* Effect.sync(() => registerNativeSubagentTool(
+        registry,
+        spec,
+        handle.delegateSubagent!
+      ))
+      return registry
+    })
+    const nativeTools: NativeRuntimeToolsOptions = {
+      createToolRegistry: (spec, context) => Effect.gen(function* () {
+        const registry = yield* baseNativeTools.createToolRegistry!(spec, context)
+        const subagents = yield* factoryOptions.resolveSubagentConfig(spec).pipe(
+          Effect.mapError((cause) => new AgentRuntimeError({
+            reason: "runtime",
+            message: cause.message,
+            cause
+          }))
+        )
+        if (subagents.enabled === false) return registry
+        if (spec.runtimeId === "codex" || spec.runtimeId === "opencode") {
+          yield* Effect.sync(() => registerNativeSubagentTool(
+            registry,
+            spec,
+            makeDirectNativeSubagentDelegate({
+              spec,
+              context,
+              models: subagents.models,
+              makeRuntime: (runtimeId) => runtimeId === "codex"
+                ? makeCodexAgentRuntime(baseNativeTools)
+                : makeOpenCodeAgentRuntime(baseNativeTools)
+            })
+          ))
+          return registry
+        }
+        return yield* prepareClaudeSubagentRegistry(spec, context, registry)
+      })
     }
     const planning = makeSharedPlanningRuntime(join(paths.managedResourcesDir, "plans"), paths.piSessionsDir)
     const portable = makePortableRuntime(managedResources, join(paths.managedResourcesDir, "portable-modes.json"), paths.piSessionsDir)

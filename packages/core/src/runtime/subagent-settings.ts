@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { ProviderModelId } from "./provider-connection.js"
+import { ProviderId, ProviderModelId } from "./provider-connection.js"
 
 export const JINGLER_SUBAGENT_NAMES = [
   "delegate",
@@ -24,3 +24,9 @@ export const SubagentModelAssignments = Schema.Struct({
   fanout: Schema.optional(ProviderModelId)
 })
 export type SubagentModelAssignments = typeof SubagentModelAssignments.Type
+
+export const SubagentProviderModelAssignments = Schema.Record({
+  key: ProviderId,
+  value: SubagentModelAssignments
+})
+export type SubagentProviderModelAssignments = typeof SubagentProviderModelAssignments.Type

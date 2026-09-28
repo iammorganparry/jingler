@@ -16,7 +16,8 @@ import type {
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
-  JINGLER_SUBAGENT_NAMES
+  JINGLER_SUBAGENT_NAMES,
+  makeUsageFact
 } from "@jingler/core"
 import type {
   Message,
@@ -24,7 +25,8 @@ import type {
   ProviderConnection,
   RuntimeDiagnosticSnapshot,
   StreamEvent,
-  SubagentModelAssignments
+  SubagentModelAssignments,
+  UsageFact
 } from "@jingler/core"
 import { Data, Effect } from "effect"
 import type { ProviderCredentialStore } from "../auth/credential-store.js"
@@ -39,7 +41,10 @@ import {
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
 import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
-import { runtimeInvariantLayers } from "../prompt/role-profiles.js"
+import {
+  DELEGATION_DEFAULT_PROMPT_LAYER,
+  runtimeInvariantLayers
+} from "../prompt/role-profiles.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
@@ -62,7 +67,10 @@ import {
   subagentCapabilityToolIds,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
-import { PiSubagentLifecycleAdapter } from "../subagents/pi-subagent-lifecycle-adapter.js"
+import {
+  PiSubagentLifecycleAdapter,
+  type PiSubagentCompletedInput
+} from "../subagents/pi-subagent-lifecycle-adapter.js"
 import {
   makeSubagentFleetEventHub,
   type SubagentFleetEventHubShape
@@ -154,7 +162,8 @@ export interface PiSessionFactoryOptions {
   readonly resolveConnection: (
     spec: AgentRunSpec
   ) => Effect.Effect<ProviderConnection, AgentRuntimeError>
-  readonly resolveSubagentConfig?: () => Effect.Effect<{
+  readonly resolveSubagentConfig?: (spec: AgentRunSpec) => Effect.Effect<{
+    readonly enabled?: boolean
     readonly models: SubagentModelAssignments
     readonly connections: ReadonlyArray<ProviderConnection>
   }, Error>
@@ -174,6 +183,8 @@ export interface PiSessionFactoryOptions {
   readonly recordDiagnostic?: (snapshot: RuntimeDiagnosticSnapshot) => Effect.Effect<void>
   readonly childCredentials?: PiChildCredentials
   readonly subagentBroker?: SubagentCapabilityBroker
+  /** Extension host only: the parent model never executes registry tools itself. */
+  readonly delegationOnly?: boolean
 }
 
 const usesClaudeCli = (connection: ProviderConnection): boolean =>
@@ -276,7 +287,11 @@ const createResources = (
   // operator would see a bare "The agent run failed." with the reason lost.
   return Effect.try({
     try: () => (options.promptCompiler ?? new PromptCompiler()).compile({
-      layers: [...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode), ...ponytailPromptLayers(spec.ponytailMode)],
+      layers: [
+        ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+        ...ponytailPromptLayers(spec.ponytailMode),
+        ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : [])
+      ],
       tools,
       tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
     }),
@@ -466,6 +481,8 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     },
     subagentFleetSnapshot: () => lifecycle.refresh(),
     subagentTranscript: (runId) => lifecycle.transcript(runId),
+    delegateSubagent: (request, signal, onUpdate) =>
+      lifecycle.delegate(request, signal, onUpdate),
     prompt: (text, images) => session.prompt(text, {
       images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
     }),
@@ -503,6 +520,40 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
   }
 }
 
+const childUsageFact = (
+  spec: AgentRunSpec,
+  connection: ProviderConnection,
+  child: PiSubagentCompletedInput
+): UsageFact => {
+  const modelId = child.model ?? "unknown"
+  const usage = child.usage
+  return makeUsageFact({
+    id: `${spec.runId}:child:${child.runId}`,
+    runId: child.runId,
+    sessionId: spec.sessionId,
+    chatId: spec.chatId,
+    parentRunId: spec.runId,
+    runtimeId: "pi",
+    providerId: connection.providerId,
+    modelId,
+    kind: "child",
+    startedAt: child.startedAt,
+    endedAt: child.endedAt,
+    durationMs: usage?.durationMs,
+    inputTokens: usage?.input,
+    outputTokens: usage?.output,
+    cacheReadTokens: usage?.cacheRead,
+    cacheWriteTokens: usage?.cacheWrite,
+    totalTokens: usage === undefined
+      ? null
+      : usage.input + usage.output + usage.cacheRead + usage.cacheWrite,
+    costUsd: usesClaudeCli(connection) ? null : usage?.cost,
+    toolCalls: usage?.toolCalls,
+    outcome: child.outcome,
+    provenance: "pi-subagents.completion"
+  })
+}
+
 const createSessionHandle = (
   options: PiSessionFactoryOptions,
   spec: AgentRunSpec,
@@ -514,7 +565,7 @@ const createSessionHandle = (
     yield* validateConnection(spec, connection)
     const registry = yield* resolveSessionToolRegistry(options, spec, context, tracker)
     const toolSpec = effectiveRuntimeSpec(spec)
-    if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker) {
+    if (registry.hasMutatingTools(toolSpec.role, toolSpec.mode) && !tracker && !options.delegationOnly) {
       return yield* Effect.fail(
         new AgentRuntimeError({
           reason: "runtime",
@@ -523,14 +574,14 @@ const createSessionHandle = (
       )
     }
     const subagentConfig = options.resolveSubagentConfig
-      ? yield* options.resolveSubagentConfig().pipe(
+      ? yield* options.resolveSubagentConfig(spec).pipe(
           Effect.mapError((cause) => new AgentRuntimeError({
             reason: "authentication",
             message: "Could not resolve subagent configuration",
             cause
           }))
         )
-      : { models: {}, connections: [] }
+      : { enabled: true, models: {}, connections: [] }
     const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.map((agent) => [
       agent,
       subagentCapabilityToolIds(registry, spec, agent)
@@ -550,6 +601,7 @@ const createSessionHandle = (
       )
     )
     const nativeSubagentsEnabled =
+      subagentConfig.enabled !== false &&
       options.childCredentials !== undefined && options.subagentBroker !== undefined
     const prepared = yield* createResources(
       options,
@@ -590,7 +642,12 @@ const createSessionHandle = (
       },
       trustedSessionRoots: embedded.result.session.sessionFile
         ? piSubagentTrustedSessionRoots(embedded.result.session.sessionFile)
-        : []
+        : [],
+      onChildCompleted: (child) => {
+        if (context.recordUsage !== undefined) {
+          Effect.runFork(context.recordUsage(childUsageFact(spec, connection, child)))
+        }
+      }
     })
     return yield* bindSubagentCapabilities(
       lifecycle,
@@ -604,7 +661,8 @@ const createSessionHandle = (
       prepared,
       tracker,
       snapshot,
-      fleetEvents
+      fleetEvents,
+      nativeSubagentsEnabled
     )
   })
 
@@ -636,7 +694,8 @@ function* bindSubagentCapabilities(
   prepared: Effect.Effect.Success<ReturnType<typeof createResources>>,
   tracker: FileChangeTracker | undefined,
   snapshot: WorktreeSnapshot | null,
-  fleetEvents: SubagentFleetEventHubShape
+  fleetEvents: SubagentFleetEventHubShape,
+  nativeSubagentsEnabled: boolean
 ) {
   lifecycle.start()
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
@@ -650,7 +709,7 @@ function* bindSubagentCapabilities(
       )
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
-    if (options.childCredentials && options.subagentBroker) {
+    if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
       const parentRuntimeSessionId = embedded.result.session.sessionId
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,

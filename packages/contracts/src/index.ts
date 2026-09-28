@@ -87,6 +87,7 @@ import {
   ThemeCatalog,
   ThemeSummary,
   Usage,
+  UsageReport,
   VsCodeTheme,
   WorkspaceConfig,
   WebSearchConfig,
@@ -106,6 +107,7 @@ import {
   ConnectClaudeTokenInput,
   StartCodexLoginInput,
   ProviderConnectionInput,
+  ProviderId,
   ProviderModelId,
   JinglerSubagentName,
   SetProviderApiKeyInput,
@@ -1188,6 +1190,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Usage
   }),
 
+  /** Persisted parent/child execution accounting grouped across harnesses. */
+  Rpc.make("Usage.report", {
+    success: UsageReport
+  }),
+
   /**
    * A session's context accounting — what the meter renders and what Settings
    * lists. Cheap enough to poll: it reads in-memory state plus the persisted
@@ -1326,10 +1333,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: Schema.Struct({ defaultMode: ExecutionMode })
   }),
 
+  Rpc.make("Config.setSubagentDelegationEnabled", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: Schema.Struct({ enabled: Schema.Boolean })
+  }),
+
   Rpc.make("Config.setSubagentModel", {
     success: WorkspaceConfig,
     error: ConfigError,
     payload: Schema.Struct({
+      providerId: ProviderId,
       agent: JinglerSubagentName,
       modelId: Schema.NullOr(ProviderModelId)
     })

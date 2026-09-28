@@ -40,6 +40,9 @@ describe("Jingler model additions", () => {
       contextWindow: 1_000_000,
       maxTokens: 128_000
     })
+    expect(subscriptionRuntime.getModel("anthropic", "opus")).toMatchObject({
+      name: "Claude Opus (latest)"
+    })
   })
 })
 

@@ -50,6 +50,7 @@ const spec = (): AgentTurnSpec => ({
 
 const context = (): AgentContext => ({
   emit: vi.fn((_event: StreamEvent) => Effect.void),
+  recordUsage: vi.fn(() => Effect.void),
   canUseTool: vi.fn(() => Effect.succeed("allow" as const)),
   askQuestion: vi.fn(() => Effect.succeed([])),
   registerBackgroundStop: vi.fn(() => Effect.void),
@@ -83,6 +84,7 @@ describe("AgentRuntimeAdapter", () => {
     const ctx = context()
     const emit = vi.mocked(ctx.emit)
     const registerTurnSteer = vi.mocked(ctx.registerTurnSteer!)
+    const recordUsage = vi.mocked(ctx.recordUsage!)
 
     await Effect.runPromise(
       withRuntime(
@@ -110,6 +112,16 @@ describe("AgentRuntimeAdapter", () => {
     expect(run.mock.calls[0]?.[1].publishEvent).toBe(ctx.emit)
     expect(run.mock.calls[0]?.[1].registerBackgroundStop).toBe(ctx.registerBackgroundStop)
     expect(emit.mock.calls.map(([event]) => event._tag)).toEqual(["Started", "Assistant", "Done"])
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "run-1:parent",
+      runtimeId: "pi",
+      kind: "parent",
+      outcome: "success",
+      sessionId: "session-1",
+      chatId: "chat-1",
+      totalTokens: 2,
+      costUsd: null
+    }))
     expect(registerTurnSteer).toHaveBeenCalled()
   })
 
@@ -197,9 +209,10 @@ describe("AgentRuntimeAdapter", () => {
     const layer = AgentTurnDriverLive.pipe(
       Layer.provide(Layer.succeed(AgentRuntime, AgentRuntime.of(runtime)))
     )
+    const ctx = context()
     const program = Effect.gen(function* () {
       const adapter = yield* AgentTurnDriver
-      const fiber = yield* Effect.fork(adapter.run("run-1", spec(), context()))
+      const fiber = yield* Effect.fork(adapter.run("run-1", spec(), ctx))
       yield* Effect.promise(() => started)
       return yield* Fiber.interrupt(fiber)
     }).pipe(Effect.provide(layer))
@@ -209,5 +222,10 @@ describe("AgentRuntimeAdapter", () => {
       { runtimeId: "pi", endpointId: spec().endpointId, id: "pi-session" },
       "desktop"
     )
+    expect(ctx.recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "run-1:parent",
+      outcome: "cancelled",
+      provenance: "pi.interrupt"
+    }))
   })
 })
