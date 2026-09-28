@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { basename, dirname, resolve } from "node:path"
 import { listPackage } from "@electron/asar"
 import {
   auditDesktopArchive,
@@ -22,14 +22,18 @@ const resourcesPath = requiredPath("JINGLER_DESKTOP_RESOURCES")
 const devicePath = requiredPath("JINGLER_DEVICE_BUNDLE")
 const desktopManifest = JSON.parse(readFileSync(resolve(root, "apps/desktop/package.json"), "utf8"))
 const deviceManifest = JSON.parse(readFileSync(resolve(root, "apps/device-agent/package.json"), "utf8"))
-const deviceEntries = execFileSync("tar", ["-tzf", devicePath], {
-  encoding: "utf8",
+// Read the bundle from its own directory by bare file name: GNU tar on the
+// Windows runner parses a drive-letter path (`D:\\…`) as `host:file` and fails.
+const tarAt = { cwd: dirname(devicePath), encoding: "utf8" }
+const deviceFile = basename(devicePath)
+const deviceEntries = execFileSync("tar", ["-tzf", deviceFile], {
+  ...tarAt,
   maxBuffer: 16 * 1024 * 1024
 }).split(/\r?\n/u)
 const deviceSource = execFileSync(
   "tar",
-  ["-xOzf", devicePath, "./jingler-device.mjs"],
-  { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
+  ["-xOzf", deviceFile, "./jingler-device.mjs"],
+  { ...tarAt, maxBuffer: 64 * 1024 * 1024 }
 )
 const requiredDeviceEntries = [
   "./jingler-device.mjs",
