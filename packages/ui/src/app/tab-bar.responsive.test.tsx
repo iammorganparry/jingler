@@ -54,6 +54,15 @@ describe("TabBar at width", () => {
     expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
   })
 
+  it("names the status when a tiny pane shrinks it to a dot", () => {
+    renderAt(240, {
+      sessionTitle: "Refresh expired sessions",
+      status: { label: "Needs Input", tone: "yellow", detail: "Waiting for approval" }
+    })
+    const dot = screen.getByRole("img", { name: "Status: Needs Input" })
+    expect(dot.getAttribute("title")).toBe("Waiting for approval")
+  })
+
   it("shows the session title separately from the Conversation tab", () => {
     renderAt(1200, {
       repoName: "jingler",

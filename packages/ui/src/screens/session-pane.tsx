@@ -1189,9 +1189,12 @@ function SessionPaneBody(props: SessionPaneProps) {
           <X className="size-4" />
         </button>
       </div>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {/* Each surface measures its OWN width: a view split beside the chat must
+          lay out for its half, not the session's whole width (a PR view read
+          "wide", docked its 352px rail, and crushed the description to 0px). */}
+      <WidthTierProvider className="flex-col">
         {renderSurfaceContent(pane, index)}
-      </div>
+      </WidthTierProvider>
     </>
   )
   const paneFocused = props.pane === undefined || props.pane.focused

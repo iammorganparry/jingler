@@ -301,7 +301,18 @@ function renderEditableTitle() {
               <span className={cn("truncate", titleWidth)}>{title}</span>
             )
           ) : (
-            status && <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
+            // In the title bar the status word is dropped for a dot; the dot
+            // still has to SAY the status to assistive tech and on hover.
+            status && (
+              <span
+                role="img"
+                aria-label={`Status: ${status.label}`}
+                title={status.detail ?? status.label}
+                className="flex flex-none items-center"
+              >
+                <StatusDot tone={DOT_TONE[status.tone]} pulse size={7} />
+              </span>
+            )
           ))
            }
 
