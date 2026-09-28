@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.3.1
+
+### Patch Changes
+
+- f0f0f79: Publish the Windows installer again: the release's packaged-artifact check no longer misreads Windows drive-letter paths.
+  - @jingler/plannotator-ext@0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

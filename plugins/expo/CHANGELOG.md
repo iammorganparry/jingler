@@ -1,5 +1,7 @@
 # @jingler/plugin-expo
 
+## 0.3.1
+
 ## 0.3.0
 
 ### Minor Changes

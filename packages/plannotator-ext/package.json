@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plannotator-ext",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "description": "Jingler's fork of the Plannotator Pi extension (plan slice): file-based plan mode with visual review, host-state projection, and embedded-host integration.",
