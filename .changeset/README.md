@@ -38,7 +38,7 @@ One-line summary of the user-facing change.
 ## Cutting a release
 
 Releases are cut **from `main`** by manually running the **Release** GitHub
-Action (`workflow_dispatch`, no inputs). It gates on lint + typecheck + unit
+Action (`workflow_dispatch`, `channel: stable`). It gates on lint + typecheck + unit
 tests, then runs
 `pnpm version-packages` (applies pending changesets, writes CHANGELOGs, and
 mirrors the version into the root `package.json`), commits `release: vX.Y.Z`,

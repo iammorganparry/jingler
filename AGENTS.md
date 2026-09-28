@@ -64,17 +64,37 @@ for the full architecture guide; this file is the short list of standing rules.
   2. **Run the local e2e suite** (`pnpm --filter @jingler/desktop e2e`). The
      release does not run it, so a red e2e is only caught here.
   3. **Run *Release*** (`.github/workflows/release.yml`, `workflow_dispatch`,
-     no inputs): `gh workflow run release.yml --ref main`. Its jobs:
-     - **gate** — lint, typecheck, unit tests, license check.
-     - **version** — `pnpm version-packages`, commits `release: vX.Y.Z`, tags
-       `vX.Y.Z`, pushes both to `main` (uses `RELEASE_TOKEN` when set).
-     - **build** — macOS arm64 + x64, Linux x64, Windows x64 installers via
-       `electron-builder --publish never`, then `pnpm artifacts:check` on each.
-       macOS is signed and notarized only when all five `APPLE_*` secrets
-       exist; otherwise it ships unsigned.
-     - **publish** — merges the two per-arch `latest-mac.yml` feeds into one,
-       creates the GitHub Release as a draft, uploads every asset, then flips
-       it to published + latest.
+     `channel: stable`): `gh workflow run release.yml --ref main -f channel=stable`.
+     Its jobs:
+     - **preflight** — resolves the channel; a scheduled nightly skips itself
+       when `main` has not moved since the last nightly.
+     - **gate** — lint, typecheck, unit tests, license check, on the same
+       self-hosted runner and environment as CI (a hosted ubuntu runner runs
+       out of memory in the monorepo typecheck).
+     - **version** — stable: `pnpm version-packages`, commits `release: vX.Y.Z`,
+       tags, pushes to `main`. Nightly: `<next patch>-nightly.<date>.<run>`,
+       stamped into the build only — never committed.
+     - **build** — macOS arm64 + x64, Linux x64 + arm64, Windows x64 + arm64
+       via `electron-builder --publish never` (arm64 Linux/Windows are
+       `optional`: `continue-on-error`, published only when they built). Each
+       leg runs `pnpm artifacts:check` and `scripts/distribution/smoke-packaged-app.mjs`
+       (boots the packaged app for 20s). Signing: macOS when all five `APPLE_*`
+       secrets exist, Windows via Azure Trusted Signing when the `AZURE_*`
+       secrets exist; otherwise unsigned — never a failure.
+     - **publish** — merges each channel's per-arch manifests
+       (`scripts/distribution/merge-update-manifests.mjs`), writes `SHA256SUMS`,
+       publishes the GitHub Release (stable: *latest*; nightly: prerelease).
+     - **aur** — repackages the x86_64 AppImage as `jingler-bin` /
+       `jingler-nightly-bin` (`packaging/aur/release.sh`) when
+       `AUR_SSH_PRIVATE_KEY` is set; otherwise skipped.
+
+     Nightlies need no changeset: `gh workflow run release.yml --ref main -f channel=nightly`,
+     or wait for the daily schedule.
+
+     Installers are named `Jingler-<version>-<arch>.<ext>` (T3 Code's
+     convention). Stable builds read `latest*.yml`; builds whose version
+     contains `-nightly.` read `nightly*.yml` and accept prereleases
+     (`updateChannelFor` in `apps/desktop/src/main/updater.ts`).
 
   There is no provider or model certification step: Jingler drives the
   operator's own harnesses and credentials. The *Pi provider certification*

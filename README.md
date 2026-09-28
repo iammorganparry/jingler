@@ -16,6 +16,22 @@ the coding CLIs already installed on your machine and keeps its desktop state in
 - Start work from a project checkout or a new isolated worktree.
 - Use built-in terminals, browser previews, themes, MCP servers, and agent skills.
 
+## Install
+
+Download the installer for your platform from the
+[latest release](https://github.com/iammorganparry/jingler/releases/latest):
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `Jingler-<version>-arm64.dmg` |
+| macOS (Intel) | `Jingler-<version>-x64.dmg` |
+| Windows | `Jingler-<version>-x64.exe` (or `-arm64.exe`) |
+| Linux | `Jingler-<version>-x86_64.AppImage` / `-amd64.deb` (or the arm64 builds) |
+| Arch Linux | `yay -S jingler-bin` (nightly: `jingler-nightly-bin`) |
+
+Verify a download against `SHA256SUMS` on the same release. Jingler updates itself from the
+sidebar; nightly builds follow the nightly channel.
+
 ## Requirements
 
 - macOS, Windows, or Linux
@@ -167,22 +183,34 @@ Webhook relay deployment, replay, and incident recovery are documented in
 
 ## Desktop releases
 
-Run the **Release** workflow from GitHub Actions to build downloadable desktop installers. The
-selected commit must be on `main`, have at least one pending Changeset, and have a successful
-`pi-provider-evals` run for that exact commit; paste that run ID into `certification_run_id`.
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) on two
+channels, each with its own auto-update feed:
 
-A successful run creates a GitHub Release and also keeps four downloadable workflow artifacts:
+| Channel | How it starts | Version | Feed |
+|---|---|---|---|
+| Stable | Run **Release** manually (`channel: stable`) with at least one pending Changeset | `X.Y.Z` from Changesets | `latest*.yml`, marked *latest* |
+| Nightly | Daily schedule (skipped when `main` has not moved), or **Release** with `channel: nightly` | `<next patch>-nightly.<date>.<run>` | `nightly*.yml`, prerelease |
 
-- `desktop-mac-arm64` — Apple Silicon DMG and ZIP
-- `desktop-mac-x64` — Intel DMG and ZIP
-- `desktop-linux-x64` — AppImage and Debian package
-- `desktop-win-x64` — NSIS installer
+Each run gates on lint, typecheck, unit tests and licenses, then builds macOS arm64 + x64, Linux
+x64 + arm64 and Windows x64 + arm64 installers. Every build passes the packaged-artifact check and
+boots the packaged app for 20 seconds before anything publishes. The arm64 Linux and Windows
+builds are best-effort and never block a release. The release carries every installer, merged
+per-channel update manifests, blockmaps for differential updates, and `SHA256SUMS`.
 
-Signing is optional. If all five Apple secrets (`APPLE_CERTIFICATE`,
-`APPLE_CERTIFICATE_PASSWORD`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`) are
-configured, macOS builds are signed and notarized. Otherwise every platform still builds and
-publishes unsigned installers. On macOS, open an unsigned app once by right-clicking **Jingler** and
-choosing **Open**, or approve it under **System Settings → Privacy & Security**.
+Signing is optional per platform and never blocks a build:
+
+- **macOS** — signed and notarized when `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` are all set. Unsigned apps open
+  via right-click → **Open** (or **System Settings → Privacy & Security**), but cannot
+  auto-install updates.
+- **Windows** — Azure Trusted Signing when `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`,
+  `AZURE_CLIENT_SECRET`, `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
+  `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME` and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME` are
+  all set.
+- **Linux** — unsigned.
+
+After publishing, the AUR job repackages the x86_64 AppImage as `jingler-bin` (stable) or
+`jingler-nightly-bin` (nightly) when `AUR_SSH_PRIVATE_KEY` is set; otherwise it is skipped.
 
 ## Continuous deployment
 
