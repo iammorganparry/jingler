@@ -6,7 +6,7 @@ import type {
 } from "@jingler/core"
 import type { SessionFileDiff } from "@jingler/contracts"
 import { Cause, Option, Runtime } from "effect"
-import { assign, fromPromise, raise, setup } from "xstate"
+import { assign, enqueueActions, fromPromise, raise, setup } from "xstate"
 import { resolveAgentFollowPath } from "./file-diff-context.js"
 
 export interface FileBrowserApi {
@@ -355,6 +355,19 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             context.pendingAgentTarget === null || resolvedPath === null
               ? context.pendingAgentTarget
               : { ...context.pendingAgentTarget, path: resolvedPath }
+        }
+      }),
+      // Following the agent to ANOTHER file opens it on the diff, so that file's
+      // patch has to load like an OPEN's does; without it the view kept the
+      // previous file's patch and fell back to the editor. (The same file is
+      // already reloading: a completed edit raises REFRESH_DIFF.) Queued before
+      // the selection clears the pending target, while its path is known.
+      loadPendingAgentDiff: enqueueActions(({ context, enqueue }) => {
+        const target = context.pendingAgentTarget
+        // Only a completed edit opens on the diff; an in-flight one opens in
+        // the editor and needs no patch yet.
+        if (target?.completed === true && target.path !== context.selectedPath) {
+          enqueue.raise({ type: "LOAD_DIFF", path: target.path })
         }
       }),
       selectPendingAgentTarget: assign(({ context }) => {
@@ -874,7 +887,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 {
                   guard: "pendingAgentTargetIsSelectedAndCompleted",
                   target: "loading",
-                  actions: "selectPendingAgentTarget"
+                  actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                 },
                 {
                   guard: "pendingAgentTargetIsSelected",
@@ -883,7 +896,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 {
                   guard: "pendingAgentTargetCanOpen",
                   target: "loading",
-                  actions: "selectPendingAgentTarget"
+                  actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                 },
                 {
                   guard: "pendingAgentTargetNeedsRefresh",
@@ -967,7 +980,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetIsSelectedAndCompleted",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
@@ -976,7 +989,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetCanOpen",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetNeedsRefresh",
@@ -999,7 +1012,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetIsSelectedAndCompleted",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
@@ -1008,7 +1021,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetCanOpen",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetNeedsRefresh",
@@ -1044,7 +1057,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetIsSelectedAndCompleted",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
@@ -1053,7 +1066,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     {
                       guard: "pendingAgentTargetCanOpen",
                       target: "#fileBrowser.document.loading",
-                      actions: "selectPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "selectPendingAgentTarget"]
                     },
                     {
                       guard: "pendingAgentTargetNeedsRefresh",

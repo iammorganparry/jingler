@@ -483,6 +483,46 @@ describe("fileBrowserMachine", () => {
     expect(actor.getSnapshot().context.openPaths).toEqual(["src/other.ts"])
   })
 
+  it("loads a newly created file's own diff when the agent moves on to it", async () => {
+    let created = false
+    const list = vi.fn(async () => [
+      { path: "src/config.ts", status: "modified" as const },
+      ...(created ? [{ path: "src/created.ts", status: "untracked" as const }] : [])
+    ])
+    const diff = vi.fn(async (_sessionId: string, path: string) => ({
+      kind: "patch" as const,
+      patch: `patch for ${path}`
+    }))
+    const read = vi.fn(async (_sessionId: string, path: string) => ({
+      ...payload(path, `sha256:${path}`),
+      path
+    }))
+    const { actor } = start({ list, diff, read })
+    await waitFor(actor, (snapshot) => snapshot.matches({ tree: "ready" }))
+    actor.send({ type: "OPEN", path: "src/config.ts" })
+    await waitFor(actor, (snapshot) => snapshot.context.patch === "patch for src/config.ts")
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "AGENT_TARGET", path: "src/config.ts", eventId: "edit-1", completed: true })
+    created = true
+    actor.send({ type: "AGENT_TARGET", path: "src/created.ts", eventId: "edit-2", completed: true })
+
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.context.selectedPath === "src/created.ts" &&
+        snapshot.matches({ changes: "ready" }) &&
+        snapshot.matches({ document: { ready: "clean" } })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(actor.getSnapshot().context).toMatchObject({
+      selectedPath: "src/created.ts",
+      viewMode: "diff",
+      diffPath: "src/created.ts",
+      patch: "patch for src/created.ts"
+    })
+  })
+
   it("reloads the selected file and diff when the followed mutation completes", async () => {
     const diff = vi
       .fn()
