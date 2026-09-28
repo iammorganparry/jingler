@@ -83,6 +83,34 @@ const availableReviewSource = (
   return source
 }
 
+type LocalReview = Awaited<ReturnType<typeof rpc.sessionsDiff>>
+
+const reviewContent = (
+  source: ReviewSource,
+  prFiles: ReadonlyArray<PrFileChange>,
+  prDiff: string,
+  localFiles: ReadonlyArray<PrFileChange>,
+  localDiff: string
+): { readonly files: ReadonlyArray<PrFileChange>; readonly diff: string } =>
+  source === "local" ? { files: localFiles, diff: localDiff } : { files: prFiles, diff: prDiff }
+
+const omittedReviewFiles = (
+  source: ReviewSource,
+  review: LocalReview | undefined
+): ReadonlyArray<ReviewOmittedFile> =>
+  source === "local"
+    ? (review?.files ?? []).flatMap((file) =>
+        file.omitted === null
+          ? []
+          : [{ path: file.path, added: file.added, removed: file.removed, reason: file.omitted }]
+      )
+    : []
+
+const reviewThreadsFor = (
+  source: ReviewSource,
+  threads: ReadonlyArray<PrReviewThread> | undefined
+): ReadonlyArray<PrReviewThread> => source === "pr" ? (threads ?? []) : []
+
 export function useReview(session: Session): ReviewState {
   const qc = useQueryClient()
   // Filter, drafts and viewed markers are shared across the Explorer, the Files
@@ -166,13 +194,13 @@ export function useReview(session: Session): ReviewState {
   // Fall back to whichever source actually has data.
   const effective = availableReviewSource(source, prAvailable, localAvailable)
 
-  const sourceFiles = effective === "local" ? localFiles : prFiles
+  const content = reviewContent(effective, prFiles, prDiff, localFiles, localDiff)
   // Overlay the reviewer's local "viewed" markers onto the source's file list.
   const files = useMemo(
-    () => sourceFiles.map((f) => (viewedPaths.has(f.path) ? { ...f, viewed: true } : f)),
-    [sourceFiles, viewedPaths]
+    () => content.files.map((f) => (viewedPaths.has(f.path) ? { ...f, viewed: true } : f)),
+    [content.files, viewedPaths]
   )
-  const fullDiff = effective === "local" ? localDiff : prDiff
+  const fullDiff = content.diff
   const activePath = selectedPath ?? files[0]?.path ?? null
   // Every file's diff, from ONE split of the full diff — the continuous scroll
   // view renders them all stacked rather than one active file at a time.
@@ -181,15 +209,8 @@ export function useReview(session: Session): ReviewState {
     () => files.map((f) => ({ path: f.path, diff: diffForPath(blocks, f.path) })),
     [files, blocks]
   )
-  const omittedFiles = useMemo<ReadonlyArray<ReviewOmittedFile>>(
-    () =>
-      effective === "local"
-        ? (localReview?.files ?? []).flatMap((file) =>
-            file.omitted === null
-              ? []
-              : [{ path: file.path, added: file.added, removed: file.removed, reason: file.omitted }]
-          )
-        : [],
+  const omittedFiles = useMemo(
+    () => omittedReviewFiles(effective, localReview),
     [effective, localReview]
   )
 
@@ -296,7 +317,7 @@ export function useReview(session: Session): ReviewState {
     drafts,
     // Threads belong to the PR. On the local (uncommitted) diff they'd anchor to
     // lines that don't correspond, so the source decides whether they exist.
-    reviewThreads: effective === "pr" ? (threadsQuery.data?.reviewThreads ?? []) : [],
+    reviewThreads: reviewThreadsFor(effective, threadsQuery.data?.reviewThreads),
     busy: prQuery.isPending || localQuery.isPending,
     selectFile: setSelectedPath,
     toggleViewed,
