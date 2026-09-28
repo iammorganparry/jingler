@@ -151,9 +151,9 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
-  # Per-arch installers. The arm64 Linux and Windows legs are `optional`: a
-  # runner shortage or native-module gap there must not hold back the release,
-  # so they continue on error and publish includes them only when they built.
+  # Per-arch installers. The arm64 Linux leg is `optional`: a runner shortage
+  # or native-module gap there must not hold back the release, so it continues
+  # on error and publish includes it only when it built.
   build:
     name: Build ${{ matrix.label }}
     needs: [preflight, version]
@@ -177,9 +177,11 @@ jobs:
             args: "--linux --x64"
             artifact: desktop-linux-x64
             optional: false
+          # AppImage only: electron-builder's bundled fpm (the .deb builder)
+          # ships x86 binaries and cannot run on an arm64 runner.
           - label: Linux arm64
             os: ubuntu-24.04-arm
-            args: "--linux --arm64"
+            args: "--linux AppImage --arm64"
             artifact: desktop-linux-arm64
             optional: true
           - label: Windows x64
@@ -187,11 +189,9 @@ jobs:
             args: "--win --x64"
             artifact: desktop-win-x64
             optional: false
-          - label: Windows arm64
-            os: windows-11-arm
-            args: "--win --arm64"
-            artifact: desktop-win-arm64
-            optional: true
+          # No Windows arm64 leg yet: @homebridge/node-pty-prebuilt-multiarch has
+          # no win32-arm64 prebuild and compiling it on the runner fails. Windows
+          # on ARM runs the x64 build under emulation until node-pty builds there.
     runs-on: ${{ matrix.os }}
     env:
       CHANNEL: ${{ needs.preflight.outputs.channel }}

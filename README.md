@@ -25,8 +25,8 @@ Download the installer for your platform from the
 |---|---|
 | macOS (Apple Silicon) | `Jingler-<version>-arm64.dmg` |
 | macOS (Intel) | `Jingler-<version>-x64.dmg` |
-| Windows | `Jingler-<version>-x64.exe` (or `-arm64.exe`) |
-| Linux | `Jingler-<version>-x86_64.AppImage` / `-amd64.deb` (or the arm64 builds) |
+| Windows | `Jingler-<version>-x64.exe` (also runs on Windows on ARM) |
+| Linux | `Jingler-<version>-x86_64.AppImage` / `-amd64.deb` (arm64: `-arm64.AppImage`) |
 | Arch Linux | `yay -S jingler-bin` (nightly: `jingler-nightly-bin`) |
 
 Verify a download against `SHA256SUMS` on the same release. Jingler updates itself from the
@@ -192,9 +192,9 @@ channels, each with its own auto-update feed:
 | Nightly | Daily schedule (skipped when `main` has not moved), or **Release** with `channel: nightly` | `<next patch>-nightly.<date>.<run>` | `nightly*.yml`, prerelease |
 
 Each run gates on lint, typecheck, unit tests and licenses, then builds macOS arm64 + x64, Linux
-x64 + arm64 and Windows x64 + arm64 installers. Every build passes the packaged-artifact check and
-boots the packaged app for 20 seconds before anything publishes. The arm64 Linux and Windows
-builds are best-effort and never block a release. The release carries every installer, merged
+x64 + arm64 (AppImage) and Windows x64 installers. Every build passes the packaged-artifact check and
+boots the packaged app for 20 seconds before anything publishes. The arm64 Linux build is
+best-effort and never blocks a release. The release carries every installer, merged
 per-channel update manifests, blockmaps for differential updates, and `SHA256SUMS`.
 
 Signing is optional per platform and never blocks a build:

@@ -156,6 +156,9 @@ nsis:
   allowToChangeInstallationDirectory: true
 
 linux:
+  # Pinned so every Linux artifact, the release smoke test and the AUR
+  # package's /usr/bin/jingler agree on one binary name.
+  executableName: jingler
   icon: build-resources/icon.png
   category: Development
   target:

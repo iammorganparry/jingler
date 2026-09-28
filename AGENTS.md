@@ -74,8 +74,8 @@ for the full architecture guide; this file is the short list of standing rules.
      - **version** — stable: `pnpm version-packages`, commits `release: vX.Y.Z`,
        tags, pushes to `main`. Nightly: `<next patch>-nightly.<date>.<run>`,
        stamped into the build only — never committed.
-     - **build** — macOS arm64 + x64, Linux x64 + arm64, Windows x64 + arm64
-       via `electron-builder --publish never` (arm64 Linux/Windows are
+     - **build** — macOS arm64 + x64, Linux x64 + arm64 (AppImage), Windows x64
+       via `electron-builder --publish never` (arm64 Linux is
        `optional`: `continue-on-error`, published only when they built). Each
        leg runs `pnpm artifacts:check` and `scripts/distribution/smoke-packaged-app.mjs`
        (boots the packaged app for 20s). Signing: macOS when all five `APPLE_*`
