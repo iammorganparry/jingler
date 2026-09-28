@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     name: Lint, typecheck & unit tests
+    # Self-hosted runner: never run code from a fork's pull request on it. A
+    # public repo accepts PRs from anyone; those run only after a maintainer
+    # pushes the branch here (or via the repo's approval gate).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, ARM64, jingler]
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +58,10 @@ jobs:
 
   electron:
     name: Electron package gates
+    # Self-hosted runner: never run code from a fork's pull request on it. A
+    # public repo accepts PRs from anyone; those run only after a maintainer
+    # pushes the branch here (or via the repo's approval gate).
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, ARM64, jingler]
     steps:
       - uses: actions/checkout@v4
