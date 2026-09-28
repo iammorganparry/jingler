@@ -35,7 +35,9 @@ export const auditDeviceBundle = (source) => [
 ]
 
 export const auditDesktopArchive = (entries) => {
-  const normalized = entries.map((entry) => entry.replace(LEADING_SLASH, ""))
+  // `@electron/asar` lists entries with the host separator, so a Windows build
+  // reports `\\node_modules\\…`; compare on forward slashes everywhere.
+  const normalized = entries.map((entry) => entry.replaceAll("\\", "/").replace(LEADING_SLASH, ""))
   return [
     ...[
       PONYTAIL_PACKAGE,

@@ -27,6 +27,17 @@ describe("package artifact policy", () => {
     ])).toEqual([])
   })
 
+  it("reads a Windows archive listing, which uses backslashes", () => {
+    expect(auditDesktopArchive([
+      "\\node_modules\\@dietrichgebert\\ponytail\\package.json",
+      "\\node_modules\\@earendil-works\\pi-ai\\package.json",
+      "\\node_modules\\@earendil-works\\pi-coding-agent\\package.json",
+      "\\node_modules\\pi-subagents\\package.json",
+      "\\node_modules\\jiti\\package.json",
+      "\\node_modules\\@jingler\\plannotator-ext\\package.json"
+    ])).toEqual([])
+  })
+
   it("rejects deleted harness SDKs, missing native SDKs, and plaintext pi auth files", () => {
     expect(auditDeviceBundle(piBundle.replace("node_modules/@opencode-ai/sdk/dist/index.js", "")))
       .toContain("device bundle is missing @opencode-ai/sdk")
