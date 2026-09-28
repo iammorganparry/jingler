@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => {
     autoUpdater: {
       autoDownload: true,
       autoInstallOnAppQuit: false,
+      currentVersion: { version: "0.3.1" },
+      channel: null as string | null,
+      allowPrerelease: true,
+      allowDowngrade: true,
       on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
         listeners.set(event, listener)
       }),
@@ -34,11 +38,35 @@ vi.mock("electron-updater", () => ({
 
 import {
   initAutoUpdater,
+  updateChannelFor,
   UPDATE_DOWNLOAD_CHANNEL,
   UPDATE_GET_STATE_CHANNEL,
   UPDATE_INSTALL_CHANNEL,
   UPDATE_STATE_CHANNEL
 } from "./updater.js"
+
+describe("update channels", () => {
+  it("keeps stable builds on the stable feed and nightlies on the nightly feed", () => {
+    expect(updateChannelFor("0.3.1")).toBe("latest")
+    expect(updateChannelFor("0.4.0-nightly.20260928.12")).toBe("nightly")
+  })
+
+  it("never lets a stable build pick up a prerelease or downgrade", () => {
+    mocks.autoUpdater.currentVersion = { version: "0.3.1" }
+    initAutoUpdater(() => null)
+    expect(mocks.autoUpdater.channel).toBe("latest")
+    expect(mocks.autoUpdater.allowPrerelease).toBe(false)
+    expect(mocks.autoUpdater.allowDowngrade).toBe(false)
+  })
+
+  it("points a nightly build at the nightly feed", () => {
+    mocks.autoUpdater.currentVersion = { version: "0.4.0-nightly.20260928.12" }
+    initAutoUpdater(() => null)
+    expect(mocks.autoUpdater.channel).toBe("nightly")
+    expect(mocks.autoUpdater.allowPrerelease).toBe(true)
+    mocks.autoUpdater.currentVersion = { version: "0.3.1" }
+  })
+})
 
 describe("initAutoUpdater", () => {
   beforeEach(() => {

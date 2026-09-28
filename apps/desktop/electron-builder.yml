@@ -14,6 +14,11 @@ protocols:
     schemes:
       - jingler
 
+# One naming scheme for every installer and arch (T3 Code's convention), so
+# the per-arch builds never collide and a download link reads its own target:
+# Jingler-0.3.1-arm64.dmg, Jingler-0.3.1-x64.exe, Jingler-0.3.1-x86_64.AppImage.
+artifactName: ${productName}-${version}-${arch}.${ext}
+
 directories:
   output: release
   buildResources: build-resources
@@ -142,6 +147,10 @@ win:
   verifyUpdateCodeSignature: false
 
 nsis:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  # Blockmap-backed differential downloads: an update fetches only the
+  # changed blocks of the installer instead of the whole file.
+  differentialPackage: true
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -152,4 +161,3 @@ linux:
   target:
     - AppImage
     - deb
-  artifactName: ${productName}-${version}-${arch}.${ext}

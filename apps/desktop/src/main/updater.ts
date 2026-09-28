@@ -10,6 +10,15 @@ export const UPDATE_DOWNLOAD_CHANNEL = "jingler/update/download"
 export const UPDATE_INSTALL_CHANNEL = "jingler/update/install"
 
 const TWO_HOURS = 2 * 60 * 60 * 1000
+const NIGHTLY_VERSION = /-nightly\./
+
+/**
+ * Which release feed this build follows. Nightly builds carry a
+ * `-nightly.<date>.<run>` version and read the `nightly*.yml` manifests; every
+ * other build stays on stable (`latest*.yml`) and never sees a prerelease.
+ */
+export const updateChannelFor = (version: string): "latest" | "nightly" =>
+  NIGHTLY_VERSION.test(version) ? "nightly" : "latest"
 
 export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   let state: UpdateState | null = null
@@ -23,6 +32,12 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
 
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
+  const channel = updateChannelFor(autoUpdater.currentVersion.version)
+  autoUpdater.channel = channel
+  autoUpdater.allowPrerelease = channel === "nightly"
+  // A stable build must never step down to an older version, and a nightly
+  // build moving to the stable channel is a user choice we do not make here.
+  autoUpdater.allowDowngrade = false
 
   const confirmInstall = async () => {
     if (state?.status !== "downloaded") return
