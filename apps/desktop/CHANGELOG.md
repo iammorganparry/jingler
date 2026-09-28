@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.3.4
+
+### Patch Changes
+
+- 9c34f2e: Deliver in-app updates: the sidebar now offers new releases and shows what changed after you relaunch.
+  - @jingler/plannotator-ext@0.3.4
+
 ## 0.3.3
 
 ### Patch Changes

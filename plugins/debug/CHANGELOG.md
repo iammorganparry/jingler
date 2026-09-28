@@ -1,5 +1,11 @@
 # @jingler/plugin-debug
 
+## 0.3.4
+
+### Patch Changes
+
+- @jingler/core@0.3.4
+
 ## 0.3.3
 
 ### Patch Changes

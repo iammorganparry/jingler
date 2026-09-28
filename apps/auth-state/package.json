@@ -1,6 +1,6 @@
 {
   "name": "@jingler/auth-state",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "description": "Per-user authorization state and revocable provider capabilities for managed execution.",

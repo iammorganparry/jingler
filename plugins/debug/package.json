@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plugin-debug",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "type": "module",
   "description": "DAP debugging and live runtime state for Jingler.",
