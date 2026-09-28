@@ -181,9 +181,11 @@ export function ProviderModelBrowser({
     >
       <SelectTrigger
         ariaLabel={`Model: ${selected?.label ?? modelId ?? "Choose model"}`}
-        className={cn("h-8 w-auto min-w-0 rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", inlineContent && "w-full")}
+        // `max-w-full` so a long model name truncates inside the caller's cap
+        // instead of pushing the trigger past it (it overflowed a 112px composer slot).
+        className={cn("h-8 w-auto min-w-0 max-w-full rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", inlineContent && "w-full")}
       >
-        <span className="truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
+        <span className="min-w-0 truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
       </SelectTrigger>
       <SelectContent
         inline={inlineContent}
