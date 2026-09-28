@@ -229,6 +229,31 @@ jobs:
         run: |
           node -e 'const f="apps/desktop/package.json",fs=require("fs"),p=JSON.parse(fs.readFileSync(f));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")'
 
+      # The device-runtime tarball is packed before electron-builder signs
+      # anything, and notarization rejects the native modules inside it unless
+      # they are signed too — so import the certificate first and let
+      # apps/device-agent/scripts/build.mjs sign them.
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != '' && env.APPLE_CERTIFICATE_PASSWORD != ''
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/jingler-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 24)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/Developer ID Application/ { print $2; exit }')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "No Developer ID Application identity in APPLE_CERTIFICATE" >&2
+            exit 1
+          fi
+          echo "JINGLER_CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
       - name: Build bundled resources
         run: |
           pnpm --filter @jingler/desktop run build:bundled-plugins
