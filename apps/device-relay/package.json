@@ -1,6 +1,6 @@
 {
   "name": "@jingler/device-relay",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "description": "Per-user device identity coordination and encrypted remote-session tunnels.",
