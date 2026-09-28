@@ -1,14 +1,18 @@
 import { assign, setup } from "xstate"
 
 export type ReviewFileKind = "all" | "code" | "tests" | "json" | "docs" | "styles"
-export type ReviewSheet = "files" | "tray" | null
 
+/**
+ * The changed-files Explorer's filters. Layout (docking, sheets, focus) left
+ * with the stacked Changes view: the Explorer is the sidebar, and Focus is an
+ * app-wide review flag, not this list's concern.
+ */
 export interface CodeReviewViewContext {
   readonly query: string
   readonly kind: ReviewFileKind
   readonly feedbackOnly: boolean
-  readonly collapseViewed: boolean
-  readonly sheet: ReviewSheet
+  /** Drop files already marked viewed, so the list shrinks to what's left. */
+  readonly hideViewed: boolean
 }
 
 export type CodeReviewViewEvent =
@@ -16,13 +20,8 @@ export type CodeReviewViewEvent =
   | { type: "SET_KIND"; kind: ReviewFileKind }
   | { type: "TOGGLE_FEEDBACK" }
   | { type: "FEEDBACK_EMPTY" }
-  | { type: "TOGGLE_COLLAPSE_VIEWED" }
+  | { type: "TOGGLE_HIDE_VIEWED" }
   | { type: "CLEAR_FILTERS" }
-  | { type: "TOGGLE_FOCUS" }
-  | { type: "TOGGLE_SHEET"; sheet: Exclude<ReviewSheet, null> }
-  | { type: "CLOSE_SHEET" }
-  | { type: "DOCK" }
-  | { type: "UNDOCK" }
 
 export const codeReviewViewMachine = setup({
   types: {
@@ -30,7 +29,6 @@ export const codeReviewViewMachine = setup({
     events: {} as CodeReviewViewEvent
   },
   actions: {
-    closeSheet: assign(() => ({ sheet: null })),
     setQuery: assign(({ event }) =>
       event.type === "SET_QUERY" ? { query: event.query } : {}
     ),
@@ -41,63 +39,30 @@ export const codeReviewViewMachine = setup({
       feedbackOnly: !context.feedbackOnly
     })),
     clearFeedback: assign(() => ({ feedbackOnly: false })),
-    toggleCollapseViewed: assign(({ context }) => ({
-      collapseViewed: !context.collapseViewed
+    toggleHideViewed: assign(({ context }) => ({
+      hideViewed: !context.hideViewed
     })),
     clearFilters: assign(() => ({
       query: "",
       kind: "all" as const,
-      feedbackOnly: false
-    })),
-    toggleSheet: assign(({ context, event }) =>
-      event.type === "TOGGLE_SHEET"
-        ? { sheet: context.sheet === event.sheet ? null : event.sheet }
-        : {}
-    )
+      feedbackOnly: false,
+      hideViewed: false
+    }))
   }
 }).createMachine({
   id: "codeReviewView",
-  type: "parallel",
   context: {
     query: "",
     kind: "all",
     feedbackOnly: false,
-    collapseViewed: true,
-    sheet: null
+    hideViewed: false
   },
   on: {
     SET_QUERY: { actions: "setQuery" },
     SET_KIND: { actions: "setKind" },
     TOGGLE_FEEDBACK: { actions: "toggleFeedback" },
     FEEDBACK_EMPTY: { actions: "clearFeedback" },
-    TOGGLE_COLLAPSE_VIEWED: { actions: "toggleCollapseViewed" },
-    CLEAR_FILTERS: { actions: "clearFilters" },
-    TOGGLE_SHEET: { actions: "toggleSheet" },
-    CLOSE_SHEET: { actions: "closeSheet" }
-  },
-  states: {
-    presentation: {
-      initial: "browsing",
-      states: {
-        browsing: {
-          on: { TOGGLE_FOCUS: "focused" }
-        },
-        focused: {
-          entry: "closeSheet",
-          on: { TOGGLE_FOCUS: "browsing" }
-        }
-      }
-    },
-    layout: {
-      initial: "docked",
-      states: {
-        docked: {
-          on: { UNDOCK: "sheets" }
-        },
-        sheets: {
-          on: { DOCK: { target: "docked", actions: "closeSheet" } }
-        }
-      }
-    }
+    TOGGLE_HIDE_VIEWED: { actions: "toggleHideViewed" },
+    CLEAR_FILTERS: { actions: "clearFilters" }
   }
 })

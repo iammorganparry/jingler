@@ -20,12 +20,15 @@ export const filterReviewFiles = (
     readonly query: string
     readonly kind: ReviewFileKind
     readonly feedbackPaths?: ReadonlySet<string>
+    /** Leave out files already marked viewed. */
+    readonly hideViewed?: boolean
   }
 ): readonly PrFileChange[] => {
   const query = options.query.trim().toLocaleLowerCase()
   return files.filter((file) => {
     if (query.length > 0 && !file.path.toLocaleLowerCase().includes(query)) return false
     if (options.kind !== "all" && reviewFileKindOf(file.path) !== options.kind) return false
+    if (options.hideViewed === true && file.viewed) return false
     return options.feedbackPaths === undefined || options.feedbackPaths.has(file.path)
   })
 }

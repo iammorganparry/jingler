@@ -32,4 +32,12 @@ describe("review file filters", () => {
       }).map((entry) => entry.path)
     ).toEqual(["src/auth.test.ts"])
   })
+
+  it("hides viewed files only when asked", () => {
+    const files = [file("src/a.ts"), { ...file("src/b.ts"), viewed: true }]
+    const paths = (hideViewed: boolean) =>
+      filterReviewFiles(files, { query: "", kind: "all", hideViewed }).map((entry) => entry.path)
+    expect(paths(false)).toEqual(["src/a.ts", "src/b.ts"])
+    expect(paths(true)).toEqual(["src/a.ts"])
+  })
 })

@@ -70,6 +70,8 @@ export interface ReviewState {
 }
 
 const localKey = (sessionId: string) => ["local", "diff", sessionId] as const
+const threadsKey = (sessionId: string, prNumber: number | null) =>
+  ["github", "review-threads", sessionId, prNumber] as const
 
 const availableReviewSource = (
   source: ReviewSource,
@@ -97,8 +99,14 @@ export function useReview(session: Session): ReviewState {
     [session.id, session.prNumber]
   )
 
+  // Only fetch while changes are being reviewed. This hook is mounted in every
+  // session pane (the review tray, the Explorer, the Files view), so unfiltered
+  // it would diff every open session in the background for nothing.
+  const reviewing = filter !== "all" || drafts.length > 0
+
   const prQuery = useQuery({
     queryKey: ["github", "review", session.id, session.prNumber],
+    enabled: reviewing && session.prNumber != null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
       // with separate permission surfaces, and a diff failure must not blank an
@@ -118,19 +126,20 @@ export function useReview(session: Session): ReviewState {
 
   // The PR's inline review threads, for the file list's feedback count.
   //
-  // Deliberately a bare `useQuery` on the SAME key `usePullRequest` uses rather
-  // than a call to that hook: it carries auto-detect-and-link side effects in its
-  // queryFn, and running those from a second mounted pane would race the Pull
-  // Request tab's. Sharing the key means react-query dedupes — when the PR tab
-  // has already fetched, this resolves from cache and costs nothing.
+  // Its OWN key, never `usePullRequest`'s: that hook's queryFn also detects and
+  // links a replacement PR. Sharing its key let this plain read fill the cache
+  // first (this hook is always mounted), so the Pull Request tab reused it
+  // within the stale window and never re-detected — a session stayed on its
+  // old PR after a new one was opened.
   const threadsQuery = useQuery({
-    queryKey: prKey(session.id, session.prNumber),
+    queryKey: threadsKey(session.id, session.prNumber),
     queryFn: () => rpc.githubPr(session.id),
-    enabled: session.prNumber != null
+    enabled: reviewing && filter === "pr" && session.prNumber != null
   })
   const localQuery = useQuery({
     queryKey: localKey(session.id),
-    queryFn: () => rpc.sessionsDiff(session.id)
+    queryFn: () => rpc.sessionsDiff(session.id),
+    enabled: reviewing
   })
 
   const prFiles = prQuery.data?.files ?? []
@@ -238,13 +247,13 @@ export function useReview(session: Session): ReviewState {
               body: d.body
             }))
           )
-          // The new threads only exist on GitHub until the PR is refetched, and
-          // this key is shared with the Pull Request tab — so both panes pick
-          // them up from one invalidation.
+          // The new threads only exist on GitHub until the PR is refetched —
+          // here and in the Pull Request tab.
           .then(() =>
-            qc.invalidateQueries({
-              queryKey: prKey(session.id, session.prNumber)
-            })
+            Promise.all([
+              qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) }),
+              qc.invalidateQueries({ queryKey: threadsKey(session.id, session.prNumber) })
+            ])
           )
           .catch(() => {})
       }

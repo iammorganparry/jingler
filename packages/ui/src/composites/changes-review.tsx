@@ -16,7 +16,7 @@ import type {
 } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { Maximize2, Minimize2 } from "lucide-react"
-import { useCallback, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { SegmentedControl } from "../components/segmented-control.js"
@@ -202,10 +202,16 @@ export function ChangedFilesExplorer({
         kind: controls.kind,
         feedbackPaths: controls.feedbackOnly
           ? new Set(feedback.byPath.keys())
-          : undefined
+          : undefined,
+        hideViewed: controls.hideViewed
       }),
-    [allFiles, controls.feedbackOnly, controls.kind, controls.query, feedback]
+    [allFiles, controls.feedbackOnly, controls.hideViewed, controls.kind, controls.query, feedback]
   )
+  // "With feedback" with nothing left to show would strand an empty list.
+  const { feedbackOnly, clearFeedback } = controls
+  useEffect(() => {
+    if (feedbackOnly && !feedback.any) clearFeedback()
+  }, [clearFeedback, feedback.any, feedbackOnly])
   const statusByPath = useMemo(
     () =>
       new Map(
@@ -238,6 +244,14 @@ export function ChangedFilesExplorer({
             onSelectFile={onSelectFile}
           />
         )}
+        {allFiles.length > 0 && files.length === 0 ? (
+          <div className="flex flex-col items-start gap-2 p-4 text-[12px] text-dim">
+            No files match these filters.
+            <Button variant="secondary" size="sm" onClick={controls.clearFilters}>
+              Clear filters
+            </Button>
+          </div>
+        ) : null}
       </div>
     </ReviewPierre>
   )

@@ -189,6 +189,31 @@ describe("ReviewFileDiff selection", () => {
     expect(onSelectFile).toHaveBeenCalledWith(otherPath)
   })
 
+  it("hides viewed files and offers to clear filters that leave nothing", () => {
+    render(
+      <WidthTierValue width={1_240}>
+        <ChangedFilesExplorer
+          files={[{ ...file(path), viewed: true }]}
+          fileDiffs={[{ path, diff: patch }]}
+          drafts={[]}
+          activePath={null}
+          onSelectFile={() => {}}
+        />
+      </WidthTierValue>
+    )
+    const hide = screen.getByRole("button", { name: "Hide viewed files" })
+    expect(hide.getAttribute("aria-pressed")).toBe("false")
+    expect(screen.queryByText("No files match these filters.")).toBeNull()
+
+    fireEvent.click(hide)
+    expect(hide.getAttribute("aria-pressed")).toBe("true")
+    expect(screen.getByText("No files match these filters.")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(hide.getAttribute("aria-pressed")).toBe("false")
+    expect(screen.queryByText("No files match these filters.")).toBeNull()
+  })
+
   it("mounts saved drafts and GitHub threads as persistent Pierre annotations", async () => {
     render(
       <WidthTierValue width={1_240}>

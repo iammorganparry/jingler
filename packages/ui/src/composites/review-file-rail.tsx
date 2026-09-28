@@ -96,17 +96,13 @@ export function ReviewFileRail({
           </Select>
           <button
             type="button"
-            aria-pressed={controls.collapseViewed}
-            aria-label="Collapse viewed files"
-            title={
-              controls.collapseViewed
-                ? "Keep viewed code collapsed"
-                : "Keep viewed code expanded"
-            }
-            onClick={controls.toggleCollapseViewed}
+            aria-pressed={controls.hideViewed}
+            aria-label="Hide viewed files"
+            title={controls.hideViewed ? "Show viewed files" : "Hide viewed files"}
+            onClick={controls.toggleHideViewed}
             className={cn(
               "flex size-[30px] flex-none items-center justify-center rounded-lg border bg-sunken transition-[background-color,border-color,color,scale] duration-150 ease-out active:scale-[0.96]",
-              controls.collapseViewed
+              controls.hideViewed
                 ? "border-blue/40 bg-blue/[0.12] text-blue"
                 : "border-line text-dim hover:border-line-strong hover:text-text"
             )}

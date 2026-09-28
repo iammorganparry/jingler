@@ -6,7 +6,7 @@ import type { PropsWithChildren, ReactElement } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChangesReview } from "./changes-review.js"
 import { getConversationActor } from "./conversation-registry.js"
-import { resetReviewStore } from "./review-store.js"
+import { resetReviewStore, setReviewFilter } from "./review-store.js"
 import { rpc } from "./rpc-client.js"
 
 vi.mock("./rpc-client.js", () => ({
@@ -59,6 +59,8 @@ const wrapper = ({ children }: PropsWithChildren): ReactElement => (
 )
 
 const renderReview = async () => {
+  // Reviewing is what turns the diff queries on.
+  setReviewFilter(session.id, session.prNumber, "local")
   const hook = renderHook(() => useChangesReview(session, true), { wrapper })
   // The uncommitted diff is what comments are written against.
   await waitFor(() => expect(hook.result.current.review.files).toHaveLength(1))
@@ -88,6 +90,28 @@ beforeEach(() => {
 afterEach(() => {
   resetReviewStore()
   vi.clearAllMocks()
+})
+
+describe("review data fetching", () => {
+  it("fetches nothing for a session nobody is reviewing", async () => {
+    const { result } = renderHook(() => useChangesReview(session, true), { wrapper })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(result.current.review.files).toHaveLength(0)
+    expect(rpc.sessionsDiff).not.toHaveBeenCalled()
+    expect(rpc.githubPr).not.toHaveBeenCalled()
+    expect(rpc.githubFiles).not.toHaveBeenCalled()
+  })
+
+  it("reads PR threads on their own key, never the Pull Request tab's", async () => {
+    const prSession = { ...session, prNumber: 7 } as Session
+    vi.mocked(rpc.githubPr).mockResolvedValue({ reviewThreads: [] } as never)
+    setReviewFilter(prSession.id, 7, "pr")
+    renderHook(() => useChangesReview(prSession, true), { wrapper })
+    await waitFor(() => expect(rpc.githubPr).toHaveBeenCalled())
+    // The PR tab's key carries its detect-and-relink queryFn; if this read
+    // filled it, the tab would reuse it and never notice a replacement PR.
+    expect(queryClient.getQueryData(["github", "pr", prSession.id, 7])).toBeUndefined()
+  })
 })
 
 describe("sending review comments to the agent", () => {
