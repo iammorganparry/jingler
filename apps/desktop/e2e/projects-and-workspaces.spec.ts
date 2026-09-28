@@ -288,7 +288,9 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   await expect(
     launched.window.getByText("Implemented and verified the approved plan.").first()
   ).toBeVisible({ timeout: 30_000 })
-  await expect(launched.window.locator("[data-mode='auto']")).toContainText("Auto")
+  // Back in Auto. Asserted on the mode attribute: split beside the Plan tab the
+  // chat pane is narrow, and the mode chip drops its word label.
+  await expect(launched.window.locator("[data-mode]").first()).toHaveAttribute("data-mode", "auto")
 })
 
 for (const entry of ["sidebar", "shortcut", "palette"] as const) {
