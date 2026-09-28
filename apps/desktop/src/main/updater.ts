@@ -1,4 +1,6 @@
-import { dialog, ipcMain, type BrowserWindow } from "electron"
+import { execFile } from "node:child_process"
+import { dirname } from "node:path"
+import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron"
 import electronUpdater from "electron-updater"
 import type { UpdateState } from "../shared/update.js"
 
@@ -20,8 +22,39 @@ const NIGHTLY_VERSION = /-nightly\./
 export const updateChannelFor = (version: string): "latest" | "nightly" =>
   NIGHTLY_VERSION.test(version) ? "nightly" : "latest"
 
-export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
+const RELEASES = "https://github.com/iammorganparry/jingler/releases"
+const DEVELOPER_ID_TEAM = /^TeamIdentifier=(?!not set)\S+/m
+
+/**
+ * Whether this build can install an update in place. macOS's Squirrel only
+ * replaces an app signed with a Developer ID; an ad-hoc or unsigned build
+ * downloads the update and then silently fails to restart into it.
+ */
+export const canAutoInstall = (): Promise<boolean> => {
+  if (process.platform !== "darwin") return Promise.resolve(true)
+  const bundle = dirname(dirname(dirname(app.getPath("exe"))))
+  return new Promise((resolve) => {
+    execFile("codesign", ["-dv", "--verbose=2", bundle], (error, _stdout, stderr) => {
+      resolve(error === null && DEVELOPER_ID_TEAM.test(stderr))
+    })
+  })
+}
+
+/** The installer a build that cannot update itself should open instead. */
+export const manualInstallerUrl = (version: string, arch: string = process.arch): string =>
+  `${RELEASES}/download/v${version}/Jingler-${version}-${arch}.dmg`
+
+export interface AutoUpdaterOptions {
+  /** Injected for tests; defaults to inspecting the running app's signature. */
+  readonly canAutoInstall?: () => Promise<boolean>
+}
+
+export function initAutoUpdater(
+  getWindow: () => BrowserWindow | null,
+  options: AutoUpdaterOptions = {}
+): void {
   let state: UpdateState | null = null
+  const autoInstall = (options.canAutoInstall ?? canAutoInstall)().catch(() => false)
 
   const publish = (next: UpdateState) => {
     state = next
@@ -54,8 +87,14 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   }
 
   autoUpdater.on("update-available", (info) => {
-    if (state?.status === "downloading" || state?.status === "downloaded") return
-    publish({ status: "available", version: info.version })
+    void autoInstall.then((auto) => {
+      if (state?.status === "downloading" || state?.status === "downloaded") return
+      publish(
+        auto
+          ? { status: "available", version: info.version }
+          : { status: "available", version: info.version, manual: true }
+      )
+    })
   })
 
   autoUpdater.on("download-progress", (progress) => {
@@ -78,6 +117,10 @@ export function initAutoUpdater(getWindow: () => BrowserWindow | null): void {
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, () => state)
   ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
     if (state?.status !== "available") return
+    if (state.manual) {
+      await shell.openExternal(manualInstallerUrl(state.version))
+      return
+    }
     publish({ status: "downloading", version: state.version, percent: 0 })
     try {
       await autoUpdater.downloadUpdate()

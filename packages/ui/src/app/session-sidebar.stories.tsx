@@ -78,6 +78,29 @@ export const UpgradeAvailable: Story = {
   )
 }
 
+/** An unsigned build: the update opens the installer instead of restarting. */
+export const UpgradeManual: Story = {
+  args: {
+    sessions: SESSIONS,
+    activeSessionId: "s1",
+    onSelect: () => {},
+    version: "0.3.3",
+    update: {
+      version: "0.3.4",
+      status: "available",
+      manual: true,
+      dismissed: false,
+      onAction: () => {},
+      onDismiss: () => {}
+    }
+  },
+  render: (args) => (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar {...args} />
+    </div>
+  )
+}
+
 /** Relaunched on a new version: what changed since the last one that ran. */
 export const UpdatedReleaseNotes: Story = {
   args: {

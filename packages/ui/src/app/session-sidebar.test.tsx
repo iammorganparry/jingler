@@ -568,3 +568,23 @@ describe("SessionSidebar release notes", () => {
     expect(screen.queryByTestId("release-notes-card")).toBeNull()
   })
 })
+
+const CANNOT_SELF_UPDATE = /can't update itself/
+
+describe("SessionSidebar manual updates", () => {
+  it("offers the installer when the build cannot update itself", () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar
+        sessions={[]}
+        activeSessionId={null}
+        onSelect={() => {}}
+        update={{ version: "0.3.4", status: "available", manual: true, dismissed: false, onAction, onDismiss: () => {} }}
+      />
+    )
+    expect(screen.getByText("Download installer")).toBeTruthy()
+    expect(screen.getByText(CANNOT_SELF_UPDATE)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Download the Jingler 0.3.4 installer" }))
+    expect(onAction).toHaveBeenCalledOnce()
+  })
+})

@@ -55,6 +55,8 @@ export interface SidebarUpdate {
   readonly status: "available" | "downloading" | "downloaded"
   readonly percent?: number
   readonly error?: string
+  /** This build cannot install updates itself; the action opens the installer. */
+  readonly manual?: boolean
   readonly dismissed: boolean
   readonly onAction: () => void
   readonly onDismiss: () => void
@@ -166,12 +168,14 @@ export interface SessionSidebarProps {
 const updateAccessibleLabel = (update: SidebarUpdate): string => {
   if (update.status === "downloaded") return `Restart to install Jingler ${update.version}`
   if (update.status === "downloading") return `Downloading Jingler ${update.version}, ${Math.round(update.percent ?? 0)}%`
+  if (update.manual) return `Download the Jingler ${update.version} installer`
   return `Download Jingler ${update.version}`
 }
 
 const updateActionLabel = (update: SidebarUpdate): string => {
   if (update.status === "downloaded") return "Restart to update"
   if (update.status === "downloading") return `Downloading ${Math.round(update.percent ?? 0)}%`
+  if (update.manual) return "Download installer"
   return update.error ? "Try download again" : "Upgrade now"
 }
 
@@ -179,6 +183,7 @@ const updateDescription = (update: SidebarUpdate): string => {
   if (update.error) return update.error
   if (update.status === "downloaded") return "The update is downloaded and ready to install."
   if (update.status === "downloading") return "Downloading the update in the background."
+  if (update.manual) return "This build can't update itself. Open the installer and drag Jingler into Applications."
   return "A new version is available."
 }
 
