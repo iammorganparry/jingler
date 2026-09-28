@@ -1,5 +1,41 @@
 # @jingler/contracts
 
+## 0.3.0
+
+### Minor Changes
+
+- f3e1fe6: Add first-class WebSearch with encrypted EXA and Firecrawl credentials, managed-cloud capability sync, verified native-search seams, and desktop-only browser fallback. Headless daemons now omit client-backed browser tools entirely.
+- 781db25: Add Java and TypeScript semantic hover to Pierre file and diff views, backed by shared worktree language intelligence.
+- eb82608: Fork Plannotator into `packages/plannotator-ext` and make the plan a first-class, always-available scratchpad. The plan tools now ride in every permission mode: `plannotator_update_plan` adopts or refreshes the Markdown plan silently, and `plannotator_submit_plan` opens operator review when the agent judges a change needs sign-off. Reviews are decided natively — the Plan tab mounts Jingler's own PlanReview document editor and sends the verdict over a `Plan.decide` RPC onto the session's event bus; the embedded review webview, its loopback HTTP server, and the 21MB SPA bundle are gone. Plans are structured Markdown (stages, nested tasks with in-progress/blocked marks, acceptance criteria with test references, file plans, complexity/dependency metadata, mermaid diagrams) parsed into a rich native document, the Plan tab persists for as long as a plan exists, and checklist progress ticks live during execution in any mode.
+
+### Patch Changes
+
+- 52fb0d5: Let operators choose the desktop harness and model used for adversarial pull-request reviews in GitHub settings.
+- ddcd679: Add inferred, durable technical explanations with an explicit `/explain` skill, a live Explanation session tab, responsive Storybook design surfaces, and shared structured visual rendering in Plan Guide. Bundle Ponytail v4.9.0 as an official Pi extension with lite/full/ultra/off controls and its six built-in skills.
+- 1b0bc36: Support GitHub without an App installation by routing every non-realtime pull-request and issue operation through an authenticated `gh` CLI, while retaining the App as fallback and for realtime webhooks.
+
+  Add a GitHub setting that keeps adversarial review feedback local: low-severity findings are no longer posted to the pull request and every finding is sent to the session agent instead.
+
+- 47fca9e: Add a global pull-request inbox with viewer filters, responsive list/detail navigation, deduplicated CI checks, and Overview, Commits, Checks, and Files changed evidence tabs.
+- f96735d: Add a Pull Requests inbox action that opens an existing linked session or starts the prefilled session creation flow.
+- 618239a: Unblock queued GitHub feedback during long tool calls and stop workflow headers accumulating in the Fleet. "Send now" on queued external feedback now interrupts the turn and replays it through Agent.run (which is the durable identity-acceptance boundary, so relay replay stays idempotent) — previously the button was dead while a long-running tool held the turn. A renderer fast-refresh no longer fires a held message into a chat whose previous turn is still streaming in main (which returned only the single-flight refusal as its reply): the load now asks main whether the chat is busy via the new `Agent.chatBusy` RPC and holds the queue until the live turn settles. Settled foreground workflow runs now leave the Fleet dock exactly as async completions do (their finished children stay reachable through the completed-agents retention), and a refresh sweep clears never-settling workflow headers left behind by dead runs.
+- a8492a8: Fix mid-turn steering and GitHub feedback delivery wedges. "Send now" on a queued message carrying code-reference context now interrupts the turn and replays the message through Agent.run instead of appearing dead; Stop parks the queue (rows stay on screen, inert) instead of silently deleting queued messages; a late steer reply landing while observing a remote turn no longer latches the steering guard forever. GitHub relay deliveries are no longer able to freeze a session's event stream until an app restart: acknowledgements are bounded by a timeout, the renderer sends an explicit retry nack when it cannot route a delivery, dropped acceptance callbacks (duplicate replays, unqueued rows) now settle their dispatch promises, and claimed-but-undispatched feedback outbox entries are recovered or reaped at relay stream start.
+- Updated dependencies [fb08963]
+- Updated dependencies [52fb0d5]
+- Updated dependencies [f3e1fe6]
+- Updated dependencies [58a521e]
+- Updated dependencies [ddcd679]
+- Updated dependencies [1b0bc36]
+- Updated dependencies [89fd27c]
+- Updated dependencies [32188e9]
+- Updated dependencies [eb82608]
+- Updated dependencies [db0ecb9]
+- Updated dependencies [47fca9e]
+- Updated dependencies [bd65fa1]
+- Updated dependencies [2d669cd]
+- Updated dependencies [5544fd8]
+  - @jingler/core@0.3.0
+
 ## 0.2.1
 
 ### Patch Changes

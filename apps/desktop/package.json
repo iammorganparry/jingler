@@ -1,9 +1,9 @@
 {
   "name": "@jingler/desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "description": "Jingler \u2014 an agent-session manager for coding CLIs.",
+  "description": "Jingler — an agent-session manager for coding CLIs.",
   "main": "./out/main/index.js",
   "author": {
     "name": "Morgan Parry",

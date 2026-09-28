@@ -1,6 +1,10 @@
-# @jingler/device-relay
+# @jingler/plugin-debug
 
 ## 0.3.0
+
+### Minor Changes
+
+- fb08963: Add an official DAP debugger agent tool. The Files view follows stopped source locations, exposes stack and variables, evaluates identifier hovers, and provides debugger controls.
 
 ### Patch Changes
 
@@ -19,15 +23,3 @@
 - Updated dependencies [2d669cd]
 - Updated dependencies [5544fd8]
   - @jingler/core@0.3.0
-
-## 0.2.1
-
-### Patch Changes
-
-- @jingler/core@0.2.1
-
-## 0.2.0
-
-### Patch Changes
-
-- @jingler/core@0.2.0

@@ -1,5 +1,11 @@
 # @jingler/plugin-sdk
 
+## 0.3.0
+
+### Minor Changes
+
+- 0b17f93: Add the official Expo iOS Simulator preview with native lifecycle tools and semantic XCTest automation. Resolve renderer session ids through main-owned plugin host state before executing worktree-local commands.
+
 ## 0.2.1
 
 ### Patch Changes

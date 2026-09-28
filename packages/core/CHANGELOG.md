@@ -1,5 +1,30 @@
 # @jingler/core
 
+## 0.3.0
+
+### Minor Changes
+
+- fb08963: Add an official DAP debugger agent tool. The Files view follows stopped source locations, exposes stack and variables, evaluates identifier hovers, and provides debugger controls.
+- f3e1fe6: Add first-class WebSearch with encrypted EXA and Firecrawl credentials, managed-cloud capability sync, verified native-search seams, and desktop-only browser fallback. Headless daemons now omit client-backed browser tools entirely.
+- 58a521e: Replace Jingler's native Steps/Guide/Workflow plan workspace with the pinned Plannotator review app embedded directly in the Plan tab. Structured Markdown stages and checkbox progress now remain authoritative in `PLAN.md`, including atomic `[DONE:n]` persistence, restart recovery, and native progress projections without a localhost server.
+- eb82608: Fork Plannotator into `packages/plannotator-ext` and make the plan a first-class, always-available scratchpad. The plan tools now ride in every permission mode: `plannotator_update_plan` adopts or refreshes the Markdown plan silently, and `plannotator_submit_plan` opens operator review when the agent judges a change needs sign-off. Reviews are decided natively — the Plan tab mounts Jingler's own PlanReview document editor and sends the verdict over a `Plan.decide` RPC onto the session's event bus; the embedded review webview, its loopback HTTP server, and the 21MB SPA bundle are gone. Plans are structured Markdown (stages, nested tasks with in-progress/blocked marks, acceptance criteria with test references, file plans, complexity/dependency metadata, mermaid diagrams) parsed into a rich native document, the Plan tab persists for as long as a plan exists, and checklist progress ticks live during execution in any mode.
+- bd65fa1: Replace Enhanced Plan with the pinned Plannotator Pi extension, embedded plan review, automatic same-session execution, and read-only native checklist projections.
+- 2d669cd: Add explicit Settled sessions, compact final reconciliation file lists, deterministic structured plan stages, and plan-mode submit tool visibility.
+
+### Patch Changes
+
+- 52fb0d5: Let operators choose the desktop harness and model used for adversarial pull-request reviews in GitHub settings.
+- ddcd679: Add inferred, durable technical explanations with an explicit `/explain` skill, a live Explanation session tab, responsive Storybook design surfaces, and shared structured visual rendering in Plan Guide. Bundle Ponytail v4.9.0 as an official Pi extension with lite/full/ultra/off controls and its six built-in skills.
+- 1b0bc36: Support GitHub without an App installation by routing every non-realtime pull-request and issue operation through an authenticated `gh` CLI, while retaining the App as fallback and for realtime webhooks.
+
+  Add a GitHub setting that keeps adversarial review feedback local: low-severity findings are no longer posted to the pull request and every finding is sent to the session agent instead.
+
+- 89fd27c: Add no-PI-provider foreground delegation for native harnesses, provider-scoped subagent model settings, and persisted cross-harness usage reporting with JSON export.
+- 32188e9: Make Plan mode feel native with safe repository inspection, richer generated plan structure, persistent Plannotator layout preferences, Jingler theme synchronization, and native execution-status chips.
+- db0ecb9: Upgrade pi-subagents to 0.65.0 for stale-context-safe session replacement while retaining Jingler's supervisor replies, foreground intercom handoff, and credential-scoped child process isolation. Add GPT-6 Astra to the Codex runtime with its published reasoning, pricing, and context limits.
+- 47fca9e: Add a global pull-request inbox with viewer filters, responsive list/detail navigation, deduplicated CI checks, and Overview, Commits, Checks, and Files changed evidence tabs.
+- 5544fd8: Live plan progress from delegated workers, and Follow for Fleet agents. Worker sub-agents executing plan stages now update the plan panel in real time: their PLAN_TASK / PLAN_RESULT checkpoints are parsed from each worker's own stream through the same validated pipeline as the main agent's (id validation, dedupe, dropped-marker steer), where previously sub-agent events returned before the parser ran and the plan sat frozen at "0 of N completed" for the whole delegation; the plan-execution prompts now require delegations to pass the checkpoint contract into each worker's task prompt. Selecting an agent in the Fleet drawer now redirects the file browser's Follow to that agent: its file activity is derived from its own transcript with the existing deriver and published as a session-level override, so Follow's rename resolution, sandboxing, and scroll-to-hunk all work unchanged — deselecting returns Follow to the main chat.
+
 ## 0.2.1
 
 ## 0.2.0

@@ -1,5 +1,11 @@
 # @jingler/plugin-linear
 
+## 0.3.0
+
+### Minor Changes
+
+- 8c387a9: Expose mapped Linear issue workflow tools to agents. Automatically link created, updated, or commented issues, plus issues explicitly referenced by the user; discovery searches remain side-effect free.
+
 ## 0.2.1
 
 ## 0.2.0

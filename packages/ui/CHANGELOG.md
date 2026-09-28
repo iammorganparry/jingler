@@ -1,5 +1,70 @@
 # @jingler/ui
 
+## 0.3.0
+
+### Minor Changes
+
+- fb08963: Add an official DAP debugger agent tool. The Files view follows stopped source locations, exposes stack and variables, evaluates identifier hovers, and provides debugger controls.
+- ef6f8b4: Run Claude subscription models through the locally authenticated Claude Code CLI while keeping Pi's Jingler tools, permissions, plans, transcripts, normalized events, and native subagents. Claude setup now checks `claude auth login` instead of collecting a setup token. Legacy setup tokens and unsupported managed handoffs fail closed instead of falling back to Anthropic API traffic.
+- f3e1fe6: Add first-class WebSearch with encrypted EXA and Firecrawl credentials, managed-cloud capability sync, verified native-search seams, and desktop-only browser fallback. Headless daemons now omit client-backed browser tools entirely.
+- 58a521e: Replace Jingler's native Steps/Guide/Workflow plan workspace with the pinned Plannotator review app embedded directly in the Plan tab. Structured Markdown stages and checkbox progress now remain authoritative in `PLAN.md`, including atomic `[DONE:n]` persistence, restart recovery, and native progress projections without a localhost server.
+- 781db25: Add Java and TypeScript semantic hover to Pierre file and diff views, backed by shared worktree language intelligence.
+- eb82608: Fork Plannotator into `packages/plannotator-ext` and make the plan a first-class, always-available scratchpad. The plan tools now ride in every permission mode: `plannotator_update_plan` adopts or refreshes the Markdown plan silently, and `plannotator_submit_plan` opens operator review when the agent judges a change needs sign-off. Reviews are decided natively — the Plan tab mounts Jingler's own PlanReview document editor and sends the verdict over a `Plan.decide` RPC onto the session's event bus; the embedded review webview, its loopback HTTP server, and the 21MB SPA bundle are gone. Plans are structured Markdown (stages, nested tasks with in-progress/blocked marks, acceptance criteria with test references, file plans, complexity/dependency metadata, mermaid diagrams) parsed into a rich native document, the Plan tab persists for as long as a plan exists, and checklist progress ticks live during execution in any mode.
+- bd65fa1: Replace Enhanced Plan with the pinned Plannotator Pi extension, embedded plan review, automatic same-session execution, and read-only native checklist projections.
+- 2d669cd: Add explicit Settled sessions, compact final reconciliation file lists, deterministic structured plan stages, and plan-mode submit tool visibility.
+
+### Patch Changes
+
+- 52fb0d5: Let operators choose the desktop harness and model used for adversarial pull-request reviews in GitHub settings.
+- 0fc45a3: Add a stop button to running command tool calls (Bash and friends) in the transcript — a hung command that would otherwise block a turn for minutes can now be interrupted right from its card. It reuses the turn's stop, shown only while the command is running.
+- 4f422ea: Make a drifted direct session recoverable instead of a dead end. When a direct session's shared checkout moves off the branch it is pinned to (typically the agent running `git switch -c`), the turn now stops on a recovery banner in the transcript rather than repeating a "switch the repository back" error. From the banner the operator can **Fork new session** — hand the work off to a fresh isolated worktree session forked from the live branch, carrying the transcript and uncommitted changes, leaving the original pinned to its branch — or **Adopt** the live branch into the current session. Backed by two new RPCs (`Sessions.adoptBranch`, `Sessions.forkOntoBranch`) and a typed `BranchDrift` conversation event.
+- c7a8b65: Add permanent project navigation with project-scoped sessions and a focused-worktree Explorer, remove pinned-session controls, and support cloning projects from GitHub or arbitrary Git URLs. Keep visible native browser previews rendered when Jingler loses focus.
+- 40e55c6: Replace the stacked plan dock and fleet dock above the composer with one tabbed drawer — a Plan | Fleet tab strip (with live counts) whose tab is the header and whose panel swaps between the plan task list and the Fleet agent grid. This removes the dead band that appeared between the two docks. Also fixes a Fleet display bug where a single-child workflow showed both its container and its one step as separate cards (they now dedupe to the one agent), and drops the redundant right-hand detail panel.
+- 4ebdbbf: Keep the real composer when a Fleet agent is selected. Selecting a sub-agent no longer swaps the composer for the drawer's mini steer input: the full composer stays, aimed at the selected agent — sends steer it (or reply to its pending question), Stop halts it, and the composer's existing follow toggle points Follow at its file edits. Model, reasoning, mode, and environment pickers are omitted in this state (they are main-turn choices). The per-row follow icon from the Fleet tree is gone — the composer's follow toggle is the one affordance. Child transcripts also now open scrolled to the END (the latest activity) and stay pinned while they grow, instead of loading at the greeting.
+- ea7eae2: Polish the composer-owned subagent flow. The child-view composer now sits in the same gutter and centered max-width column as the conversation instead of spanning full-bleed; a busy composer respects an explicit placeholder (the child view says "Steer worker…" while live, not the main queue copy); a paused agent's send resumes it with the typed continuation; and the Fleet drawer's redundant mini steer input is gone — its details pane keeps summary, lifecycle controls (Stop stays available for paused agents), attention display, and dismiss, while the composer is the single way to message a selected agent.
+- ddcd679: Add inferred, durable technical explanations with an explicit `/explain` skill, a live Explanation session tab, responsive Storybook design surfaces, and shared structured visual rendering in Plan Guide. Bundle Ponytail v4.9.0 as an official Pi extension with lite/full/ultra/off controls and its six built-in skills.
+- 82fcd80: Clean up the code view header. The floating square over the top-left of every file — actually the collapsed file-tree toggle, universally read as a useless copy button — no longer floats over the code: it sits inline at the left of the toolbar (still labeled "Repository files"). The open file's path now sits on the LEFT of the toolbar, filename-first: the directory clips with an ellipsis, the filename itself never truncates — previously the path was right-aligned with a tail-truncate that ate the filename and kept the least useful half.
+- 1462ef3: Add a per-row follow quick-switch to the Fleet tree. Each agent row now carries a follow button (same pointer icon as the file browser's Follow toggle): one click selects the agent and points Follow at its file edits — no round trip through the row then the Files tab — and clicking the followed agent again turns Follow off. The button shows a pressed state on the agent Follow is currently tracking.
+- 77737b3: Fork a drifted direct session onto a CLEAN worktree. `forkOntoBranch` no longer replays the source checkout's working-tree handoff into the new session — a direct session's shared checkout usually carries the developer's own uncommitted changes, and dragging that dirty tree into the fork made it "look like main". The fork now forks from the drifted branch's committed tip (keeping any commits) and carries only the conversation; the agent re-derives its edits in a clean tree. Also drops the now-impossible `EnvironmentHandoffError` from the `Sessions.forkOntoBranch` error channel.
+- 1b0bc36: Support GitHub without an App installation by routing every non-realtime pull-request and issue operation through an authenticated `gh` CLI, while retaining the App as fallback and for realtime webhooks.
+
+  Add a GitHub setting that keeps adversarial review feedback local: low-severity findings are no longer posted to the pull request and every finding is sent to the session agent instead.
+
+- 3241415: Make new-session creation composer-first with searchable BeUI controls for project, task source, checkout mode, and branch. Move shared production atoms onto current BeUI implementations, standardize squircle buttons, and remove unused BeUI and legacy atom code.
+- 89fd27c: Add no-PI-provider foreground delegation for native harnesses, provider-scoped subagent model settings, and persisted cross-harness usage reporting with JSON export.
+- 32188e9: Make Plan mode feel native with safe repository inspection, richer generated plan structure, persistent Plannotator layout preferences, Jingler theme synchronization, and native execution-status chips.
+- 0adaae8: Make agent-driven surfaces reliable in retained pi sessions. Tool callbacks (ask-question, submit-plan, permission gates) were captured once at pi-session creation, so every turn after the first emitted its interactive events into the previous turn's already-ended mailbox — the QuestionCard, Plan Review, and approval prompts never appeared while the run parked forever on an answer the operator could not see ("This chat is already running"). The retained-session registry now rebinds those callbacks to the current turn's context on every acquire. Plan Review also presents from the proposal itself (and from a gated revision), not only from the racy streamed-draft nonce, and the Fleet drawer learns about async subagent spawns from the tool acknowledgment plus a steady durable-status poll instead of depending solely on a bus event that can be missed.
+- 627585a: Refresh plan chat with an AI CSS-inspired approval card grounded in canonical plan stages and nested tasks, a canonical task list embedded in the composer, and a Markdown-preserving streaming caret for active assistant text.
+- 8b5ccb9: Add an extend button to the composer's Plan drawer. It swaps the compact task list for the full plan overview inline — each stage with its nested subtasks and their status — without leaving the composer. Toggle back with the same button.
+- 47fca9e: Add a global pull-request inbox with viewer filters, responsive list/detail navigation, deduplicated CI checks, and Overview, Commits, Checks, and Files changed evidence tabs.
+- f96735d: Add a Pull Requests inbox action that opens an existing linked session or starts the prefilled session creation flow.
+- 41f3411: Remove the blinking caret from streaming (animated) agent text. The live Markdown tail still drives streaming state, but no longer renders a blinking cursor at the end.
+- 7d26fee: Replace the composer Fleet drawer with live subagent tabs beside the parent chat. Finished agents now move into the existing Previous chats menu, while transcript-less worker and reviewer completions retain and render their final output.
+- a7f2aaf: Give every Fleet subagent genuine identity and visible output, and lay them out in a grid. A running child with no readable transcript now shows a live activity panel (agent, task, current tool, running totals) instead of a dead "not available yet". The pi vendor collapses an unresolved child onto its default "main" workflow key ("run main"); the `subagent` tool now instructs the model to always name a catalogue agent (scout/worker/reviewer/…) so children resolve to real names end-to-end, and the adapter relabels any remaining collapse honestly instead of surfacing a "main" agent. The Fleet dock is now a 4-column card grid that wraps to new rows — the dead right-hand detail panel is gone; clicking a card swaps the transcript output and the selected card carries the lifecycle controls.
+- d26bd1d: Register a workflow's child agents in the Fleet and make the workflow row an unselectable group header. A foreground scripted workflow reports its children only through the workflow call trace (live) and the final results array (at completion) — neither carried a `progress` array, so no child ever registered and the Fleet showed a lone workflow container with nothing to select. Children are now synthesized from both signals (with each step's `sessionFile` attached at completion so its transcript opens), the live path keeps the workflow container and nests children beneath it, the Fleet tree renders workflow rows as non-interactive group headers, and a selection landing on a workflow resolves to its first child.
+- aff8a33: Surface workflow subagent output in the Fleet pane. A workflow run is an orchestrator with no pi session of its own, but it was projected as a lone transcript-less node: its steps were dropped once they completed (exactly when their transcripts exist), so opening it showed "the transcript is not available yet" forever and the root decayed to UNKNOWN when the process ended. The durable projection now renders the workflow root as a container with its steps nested beneath it — keeping completed steps selectable for their transcripts — the root settles to completed when every registered child finished, and the workflow node's own view now explains that its output lives in its step agents.
+- Updated dependencies [fb08963]
+- Updated dependencies [52fb0d5]
+- Updated dependencies [f3e1fe6]
+- Updated dependencies [58a521e]
+- Updated dependencies [ddcd679]
+- Updated dependencies [1b0bc36]
+- Updated dependencies [781db25]
+- Updated dependencies [89fd27c]
+- Updated dependencies [32188e9]
+- Updated dependencies [eb82608]
+- Updated dependencies [db0ecb9]
+- Updated dependencies [47fca9e]
+- Updated dependencies [f96735d]
+- Updated dependencies [bd65fa1]
+- Updated dependencies [618239a]
+- Updated dependencies [2d669cd]
+- Updated dependencies [a8492a8]
+- Updated dependencies [5544fd8]
+  - @jingler/core@0.3.0
+  - @jingler/contracts@0.3.0
+  - @jingler/themes@0.3.0
+
 ## 0.2.1
 
 ### Patch Changes
