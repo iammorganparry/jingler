@@ -1,18 +1,68 @@
 name: Release
 
-# Cut a release from main, by hand. Gate → version+tag → per-platform build →
-# one GitHub Release. Requires at least one pending changeset (pnpm changeset).
+# Desktop releases, modelled on T3 Code's pipeline.
+#
+#   stable  — manual (workflow_dispatch, channel: stable). Applies pending
+#             changesets, commits `release: vX.Y.Z`, tags, and publishes the
+#             GitHub Release marked *latest*. Feeds: latest*.yml.
+#   nightly — daily schedule (skipped when main has not moved since the last
+#             nightly) or manual. Version `<next patch>-nightly.<date>.<run>`,
+#             never committed; published as a prerelease. Feeds: nightly*.yml,
+#             which only nightly builds read (see src/main/updater.ts).
 #
 # No provider certification: Jingler drives the operator's own harnesses and
-# credentials, so a release ships without a live model matrix. The committed
-# (empty) release-certification manifest is what builds embed.
+# credentials. Signing is optional per platform — each build signs when its
+# secrets exist and otherwise ships unsigned, never failing for want of them.
 on:
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        type: choice
+        options: [stable, nightly]
+        default: stable
+  schedule:
+    - cron: "17 4 * * *"
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  # Decide the channel and whether a scheduled nightly has anything new to ship.
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.plan.outputs.channel }}
+      skip: ${{ steps.plan.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+        run: |
+          CHANNEL="${INPUT_CHANNEL:-nightly}"
+          SKIP=false
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            LAST=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 \
+              --json tagName --jq '[.[] | select(.tagName | test("-nightly\\."))][0].tagName // ""')
+            if [ -n "$LAST" ] && git rev-parse -q --verify "refs/tags/$LAST^{commit}" >/dev/null; then
+              if [ "$(git rev-parse "$LAST^{commit}")" = "$GITHUB_SHA" ]; then
+                echo "main has not moved since $LAST; skipping the nightly."
+                SKIP=true
+              fi
+            fi
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+
   # Nothing ships unless lint, typecheck and unit tests are green. The Electron
   # e2e suite runs locally before merging (see AGENTS.md), not here.
   #
@@ -20,6 +70,8 @@ jobs:
   # typecheck exhausts a hosted ubuntu runner's memory and is killed mid-run.
   gate:
     name: Gate (typecheck + tests)
+    needs: preflight
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: [self-hosted, macOS, ARM64, jingler]
     env:
       BETTER_AUTH_SECRET: ci-only-better-auth-placeholder-at-least-32-bytes
@@ -41,18 +93,17 @@ jobs:
       - run: pnpm test
       - run: pnpm license:check
 
-  # Apply pending changesets, bump every @jingler/* package in lockstep, sync the
-  # root version, commit `release: vX.Y.Z`, tag, and push both back to main.
+  # Stable: apply pending changesets, bump every @jingler/* package in lockstep,
+  # commit `release: vX.Y.Z`, tag, push. Nightly: derive a prerelease version
+  # from the next patch; nothing is committed, the release creates the tag.
   version:
     name: Version & tag
-    needs: gate
+    needs: [preflight, gate]
     runs-on: ubuntu-latest
-    concurrency:
-      group: release-version
-      cancel-in-progress: false
     outputs:
-      version: ${{ steps.bump.outputs.version }}
-      tag: ${{ steps.bump.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      ref: ${{ steps.resolve.outputs.ref }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,33 +118,46 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Require a pending changeset
+        if: needs.preflight.outputs.channel == 'stable'
         run: |
           if [ -z "$(find .changeset -maxdepth 1 -name '*.md' ! -name 'README.md')" ]; then
             echo "::error::No changesets found — add one with 'pnpm changeset' before releasing."
             exit 1
           fi
-      - name: Version, commit, tag, push
-        id: bump
+      - name: Resolve version
+        id: resolve
+        env:
+          CHANNEL: ${{ needs.preflight.outputs.channel }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          pnpm version-packages
-          VERSION=$(node -p "require('./apps/desktop/package.json').version")
-          TAG="v$VERSION"
-          git add -A
-          git commit -m "release: $TAG"
-          git tag "$TAG"
-          git push origin HEAD:main
-          git push origin "$TAG"
+          if [ "$CHANNEL" = "stable" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            pnpm version-packages
+            VERSION=$(node -p "require('./apps/desktop/package.json').version")
+            TAG="v$VERSION"
+            git add -A
+            git commit -m "release: $TAG"
+            git tag "$TAG"
+            git push origin HEAD:main
+            git push origin "$TAG"
+            REF="$TAG"
+          else
+            BASE=$(node -p "const [a,b,c]=require('./apps/desktop/package.json').version.split('-')[0].split('.').map(Number); [a,b,c+1].join('.')")
+            VERSION="$BASE-nightly.$(date -u +%Y%m%d).$GITHUB_RUN_NUMBER"
+            TAG="v$VERSION"
+            REF="$GITHUB_SHA"
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
-  # Build native installers without requiring signing credentials. When the
-  # complete Apple secret set exists, macOS builds are signed and notarized;
-  # otherwise they remain installable through macOS's normal manual override.
+  # Per-arch installers. The arm64 Linux and Windows legs are `optional`: a
+  # runner shortage or native-module gap there must not hold back the release,
+  # so they continue on error and publish includes them only when they built.
   build:
     name: Build ${{ matrix.label }}
-    needs: version
+    needs: [preflight, version]
+    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,29 +166,52 @@ jobs:
             os: macos-14
             args: "--mac --arm64"
             artifact: desktop-mac-arm64
+            optional: false
           - label: macOS x64
             os: macos-15-intel
             args: "--mac --x64"
             artifact: desktop-mac-x64
+            optional: false
           - label: Linux x64
             os: ubuntu-22.04
             args: "--linux --x64"
             artifact: desktop-linux-x64
+            optional: false
+          - label: Linux arm64
+            os: ubuntu-24.04-arm
+            args: "--linux --arm64"
+            artifact: desktop-linux-arm64
+            optional: true
           - label: Windows x64
             os: windows-latest
             args: "--win --x64"
             artifact: desktop-win-x64
+            optional: false
+          - label: Windows arm64
+            os: windows-11-arm
+            args: "--win --arm64"
+            artifact: desktop-win-arm64
+            optional: true
     runs-on: ${{ matrix.os }}
     env:
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+      VERSION: ${{ needs.version.outputs.version }}
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
       APPLE_API_KEY_ID_SECRET: ${{ secrets.APPLE_API_KEY_ID }}
       APPLE_API_ISSUER_SECRET: ${{ secrets.APPLE_API_ISSUER }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
+      AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.version.outputs.tag }}
+          ref: ${{ needs.version.outputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: 10.7.0
@@ -134,6 +221,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Nightly versions are never committed: stamp this checkout so the build
+      # (electron-vite's __APP_VERSION__, electron-builder, the updater) agrees.
+      - name: Stamp nightly version
+        if: env.CHANNEL == 'nightly'
+        shell: bash
+        run: |
+          node -e 'const f="apps/desktop/package.json",fs=require("fs"),p=JSON.parse(fs.readFileSync(f));p.version=process.env.VERSION;fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")'
+
       - name: Build bundled resources
         run: |
           pnpm --filter @jingler/desktop run build:bundled-plugins
@@ -141,9 +236,18 @@ jobs:
           node apps/desktop/scripts/materialize-plannotator-ext.mjs
           pnpm --filter @jingler/desktop run build
 
+      - name: Install Azure Trusted Signing
+        if: runner.os == 'Windows' && env.AZURE_CLIENT_SECRET != ''
+        shell: pwsh
+        run: Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -Repository PSGallery
+
       - name: Package desktop installers
         shell: bash
         run: |
+          EXTRA=()
+          if [[ "$CHANNEL" == "nightly" ]]; then
+            EXTRA+=("-c.publish.channel=nightly")
+          fi
           if [[ "$RUNNER_OS" == "macOS" ]] &&
              [[ -n "$APPLE_CERTIFICATE" ]] &&
              [[ -n "$APPLE_CERTIFICATE_PASSWORD" ]] &&
@@ -158,11 +262,24 @@ jobs:
             export APPLE_API_KEY_ID="$APPLE_API_KEY_ID_SECRET"
             export APPLE_API_ISSUER="$APPLE_API_ISSUER_SECRET"
             echo "macOS signing and notarization enabled."
+          elif [[ "$RUNNER_OS" == "Windows" ]] &&
+               [[ -n "$AZURE_CLIENT_SECRET" ]] &&
+               [[ -n "$AZURE_TRUSTED_SIGNING_ENDPOINT" ]] &&
+               [[ -n "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" ]] &&
+               [[ -n "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" ]] &&
+               [[ -n "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME" ]]; then
+            EXTRA+=(
+              "-c.win.azureSignOptions.endpoint=$AZURE_TRUSTED_SIGNING_ENDPOINT"
+              "-c.win.azureSignOptions.codeSigningAccountName=$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME"
+              "-c.win.azureSignOptions.certificateProfileName=$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME"
+              "-c.win.azureSignOptions.publisherName=$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"
+            )
+            echo "Windows Azure Trusted Signing enabled."
           else
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
-            echo "Building unsigned installers."
+            echo "Signing disabled for $RUNNER_OS: building unsigned installers."
           fi
-          pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish never
+          pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish never "${EXTRA[@]}"
 
       - name: Inspect desktop and device artifacts
         shell: bash
@@ -174,12 +291,23 @@ jobs:
           JINGLER_DEVICE_BUNDLE="$RESOURCES_PATH/device-agent/jingler-device-runtime.tgz" \
           pnpm artifacts:check
 
+      - name: Smoke-test the packaged app
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb >/dev/null
+            xvfb-run -a node scripts/distribution/smoke-packaged-app.mjs apps/desktop/release 20
+          else
+            node scripts/distribution/smoke-packaged-app.mjs apps/desktop/release 20
+          fi
+
       - name: Collect release files
         shell: bash
         run: |
           mkdir -p .artifacts/release
           find apps/desktop/release -maxdepth 1 -type f \
             ! -name 'builder-debug.yml' \
+            ! -name 'builder-effective-config.yaml' \
             -exec cp {} .artifacts/release/ \;
           test -n "$(find .artifacts/release -type f -print -quit)"
 
@@ -190,12 +318,29 @@ jobs:
           path: .artifacts/release/*
           if-no-files-found: error
 
-  # Publish only after every native installer passed the packaged-artifact check.
+  # Publish once every required installer passed the artifact check and smoke
+  # test. Per-arch update manifests are merged so each channel has one feed.
   publish:
     name: Publish release
-    needs: [version, build]
+    needs: [preflight, version, build]
+    if: always() && needs.build.result == 'success'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.version.outputs.version }}
+    env:
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+      VERSION: ${{ needs.version.outputs.version }}
+      TAG: ${{ needs.version.outputs.tag }}
+      REF: ${{ needs.version.outputs.ref }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/distribution
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Download release files
         uses: actions/download-artifact@v4
         with:
@@ -205,33 +350,66 @@ jobs:
       - name: Assemble release assets
         shell: bash
         run: |
+          FEED=$([ "$CHANNEL" = "nightly" ] && echo nightly || echo latest)
           mkdir publish-assets
-          find release-assets -type f ! -name 'latest-mac.yml' -exec cp {} publish-assets/ \;
+          find release-assets -type f ! -name "$FEED-mac.yml" ! -name "$FEED.yml" \
+            -exec cp {} publish-assets/ \;
 
-          arm=release-assets/desktop-mac-arm64/latest-mac.yml
-          intel=release-assets/desktop-mac-x64/latest-mac.yml
-          test "$(sed -n 's/^version: //p' "$arm")" = "$(sed -n 's/^version: //p' "$intel")"
-          {
-            sed -n '1,/^files:/p' "$arm"
-            sed -n '/^files:/,/^path:/p' "$arm" | sed '1d;$d'
-            sed -n '/^files:/,/^path:/p' "$intel" | sed '1d;$d'
-            sed -n '/^path:/,$p' "$arm"
-          } > publish-assets/latest-mac.yml
-          test "$(grep -c '^  - url:' publish-assets/latest-mac.yml)" -ge 4
+          node scripts/distribution/merge-update-manifests.mjs "publish-assets/$FEED-mac.yml" \
+            release-assets/desktop-mac-arm64/$FEED-mac.yml \
+            release-assets/desktop-mac-x64/$FEED-mac.yml
+          WIN=(release-assets/desktop-win-x64/$FEED.yml)
+          if [ -f "release-assets/desktop-win-arm64/$FEED.yml" ]; then
+            WIN+=("release-assets/desktop-win-arm64/$FEED.yml")
+          fi
+          node scripts/distribution/merge-update-manifests.mjs "publish-assets/$FEED.yml" "${WIN[@]}"
 
-      - name: Create or update GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.version.outputs.tag }}
+          (cd publish-assets && find . -maxdepth 1 -type f ! -name '*.yml' ! -name '*.blockmap' \
+            -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS)
+          ls -1 publish-assets
+
+      - name: Create GitHub Release
         shell: bash
         run: |
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --verify-tag \
-              --generate-notes \
-              --title "Jingler $TAG" \
-              --draft
+          if [ "$CHANNEL" = "stable" ]; then
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+                --generate-notes --title "Jingler $TAG" --draft
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$REF" \
+              --generate-notes --title "Jingler $TAG" --prerelease --draft
           fi
           gh release upload "$TAG" publish-assets/* --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          if [ "$CHANNEL" = "stable" ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          else
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          fi
+
+  # Arch Linux: repackage the x86_64 AppImage as jingler-bin / jingler-nightly-bin.
+  # Skipped until an AUR account's SSH key is stored as AUR_SSH_PRIVATE_KEY.
+  aur:
+    name: Publish to the AUR
+    needs: [preflight, publish]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      CHANNEL: ${{ needs.preflight.outputs.channel }}
+      VERSION: ${{ needs.publish.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        with:
+          sparse-checkout: packaging/aur
+      - name: Publish package
+        if: env.AUR_SSH_PRIVATE_KEY != ''
+        run: |
+          pacman -Syu --noconfirm --needed git openssh namcap curl sudo >/dev/null
+          useradd -m builder
+          install -o builder -m 755 packaging/aur/release.sh /home/builder/release.sh
+          # makepkg refuses to run as root; -E carries the key and repo through.
+          cd /home/builder && sudo -E -u builder bash /home/builder/release.sh "$VERSION" "$CHANNEL"
+      - name: Skipped
+        if: env.AUR_SSH_PRIVATE_KEY == ''
+        run: echo "AUR_SSH_PRIVATE_KEY is not set; skipping the AUR publish."
