@@ -8,6 +8,8 @@ declare const __APP_VERSION__: string
 // shuttles opaque RPC frames — no business logic lives here. See
 // `src/preload/index.ts` and `src/renderer/rpc-client.ts`.
 interface JinglerBridge {
+  /** Electron's runtime version for the loaded packaged application. */
+  readonly appVersion: string
   /**
    * The active theme's `:root` block, fetched synchronously by the preload so
    * `main.tsx` can inject it before the document's first paint. Empty string
@@ -56,6 +58,14 @@ interface JinglerBridge {
   readonly onPlanFlushRequested: (cb: () => void) => () => void
   /** Complete the close handshake after every live plan actor settles. */
   readonly planFlushComplete: () => void
+  /** Current packaged-app update, if one has been found. */
+  readonly getUpdateState: () => Promise<import("../shared/update.js").UpdateState | null>
+  /** Subscribe to update availability, progress, and completion. */
+  readonly onUpdateState: (
+    cb: (state: import("../shared/update.js").UpdateState) => void
+  ) => () => void
+  readonly downloadUpdate: () => Promise<void>
+  readonly installUpdate: () => Promise<void>
 }
 
 interface Window {

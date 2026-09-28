@@ -4,18 +4,24 @@
  * process's `RpcServer`. No business logic lives here — see `src/main/rpc.ts`.
  */
 import { contextBridge, ipcRenderer } from "electron"
+import type { UpdateState } from "../shared/update.js"
 
 const RPC_CHANNEL = "jingler/rpc"
 const AUTH_COMPLETE_CHANNEL = "jingler/auth-complete"
 const GITHUB_COMPLETE_CHANNEL = "jingler/github-complete"
 const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
 const BOOT_THEME_CHANNEL = "jingler/boot-theme"
+const APP_VERSION_CHANNEL = "jingler/app-version"
 // Must match the preview channels in main/preview-view.ts (kept as literals
 // here so the preload doesn't import the main bundle).
 const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
 const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
+const UPDATE_STATE_CHANNEL = "jingler/update-state"
+const UPDATE_GET_STATE_CHANNEL = "jingler/update/get-state"
+const UPDATE_DOWNLOAD_CHANNEL = "jingler/update/download"
+const UPDATE_INSTALL_CHANNEL = "jingler/update/install"
 
 /**
  * The active theme's `:root` block, fetched SYNCHRONOUSLY at preload time.
@@ -33,6 +39,14 @@ const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
  * then applies, which is the pre-theming behaviour and strictly better than a
  * hung window.
  */
+const appVersion: string = (() => {
+  try {
+    return (ipcRenderer.sendSync(APP_VERSION_CHANNEL) as string) || __APP_VERSION__
+  } catch {
+    return __APP_VERSION__
+  }
+})()
+
 const initialThemeCss: string = (() => {
   try {
     return (ipcRenderer.sendSync(BOOT_THEME_CHANNEL) as string) ?? ""
@@ -53,6 +67,8 @@ interface PreviewEventPayload {
 }
 
 contextBridge.exposeInMainWorld("jingler", {
+  /** The packaged application's runtime version from Electron. */
+  appVersion,
   /** The active theme's `:root` block, for `main.tsx` to inject pre-paint. */
   initialThemeCss,
   /** Ship one client→server RPC frame to main. */
@@ -119,5 +135,13 @@ contextBridge.exposeInMainWorld("jingler", {
     ipcRenderer.on(PLAN_FLUSH_REQUEST_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PLAN_FLUSH_REQUEST_CHANNEL, listener)
   },
-  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL)
+  planFlushComplete: () => ipcRenderer.send(PLAN_FLUSH_COMPLETE_CHANNEL),
+  getUpdateState: (): Promise<UpdateState | null> => ipcRenderer.invoke(UPDATE_GET_STATE_CHANNEL),
+  onUpdateState: (cb: (state: UpdateState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: UpdateState) => cb(state)
+    ipcRenderer.on(UPDATE_STATE_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, listener)
+  },
+  downloadUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL)
 })

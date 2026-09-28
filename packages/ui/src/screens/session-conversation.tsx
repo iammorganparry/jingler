@@ -10,7 +10,7 @@ import type {
   User
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
-import { SessionSidebar } from "../app/session-sidebar.js"
+import { SessionSidebar, type SidebarUpdate } from "../app/session-sidebar.js"
 import { ProjectSidebar } from "../app/project-sidebar.js"
 import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
@@ -224,6 +224,8 @@ export interface SessionConversationProps {
   renderTerminalDock?: (session: Session) => ReactNode
   /** App version, shown in the sidebar footer. */
   version?: string
+  /** Available packaged-app update shown in the sidebar. */
+  update?: SidebarUpdate
   /**
    * A command-palette request to switch tabs. Passed straight through to the
    * split, which hands it to the focused pane only.
@@ -419,6 +421,7 @@ export function SessionConversation(props: SessionConversationProps) {
         collapsedRepoNames={props.collapsedRepoNames}
         onToggleCollapsed={props.onToggleCollapsed}
         version={props.version}
+        update={props.update}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
         pendingEnvironmentSession={props.pendingEnvironmentSession}
