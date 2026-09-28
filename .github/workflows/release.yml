@@ -15,9 +15,17 @@ permissions:
 jobs:
   # Nothing ships unless lint, typecheck and unit tests are green. The Electron
   # e2e suite runs locally before merging (see AGENTS.md), not here.
+  #
+  # Same runner and environment as CI (ci.yml): the monorepo's parallel
+  # typecheck exhausts a hosted ubuntu runner's memory and is killed mid-run.
   gate:
     name: Gate (typecheck + tests)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64, jingler]
+    env:
+      BETTER_AUTH_SECRET: ci-only-better-auth-placeholder-at-least-32-bytes
+      BETTER_AUTH_URL: https://ci.invalid
+      CRON_SECRET: ci-only-cron-placeholder-at-least-32-bytes
+      VITEST_MAX_WORKERS: 4
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
