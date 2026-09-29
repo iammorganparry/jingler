@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.3.6
+
+### Patch Changes
+
+- cb6f2e9: Detect Homebrew-installed Claude Code from macOS app launches and report missing CLI authentication accurately.
+  - @jingler/plannotator-ext@0.3.6
+
 ## 0.3.5
 
 ### Patch Changes
