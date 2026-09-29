@@ -5,11 +5,10 @@ export const isSafeRepoPath = (path: string): boolean =>
   !/^([/\\~]|[a-zA-Z]:)/.test(path) &&
   !path.split(/[/\\]/).includes("..")
 
-/** Validate the explicit, ID-tagged plan format without rejecting legacy plans. */
-export const validatePlanMarkdown = (content: string): string[] => {
-  if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) return []
-
-  const { stages, sections } = parsePlanMarkdown(content)
+const validateDocumentShape = (
+  content: string,
+  sections: ReturnType<typeof parsePlanMarkdown>["sections"]
+): string[] => {
   const errors: string[] = []
   const pathlessDiffs = [...content.matchAll(/^\s*```diff(?:\s+(.*))?\s*$/gm)]
     .filter((match) => !/(?:^|\s)path=\S+/.test(match[1] ?? ""))
@@ -20,6 +19,15 @@ export const validatePlanMarkdown = (content: string): string[] => {
   if (!sections.some(({ blocks }) => blocks.some(({ kind }) => kind === "diagram"))) {
     errors.push("Plan needs a top-level Mermaid flow diagram.")
   }
+  return errors
+}
+
+/** Validate the explicit, ID-tagged plan format without rejecting legacy plans. */
+export const validatePlanMarkdown = (content: string): string[] => {
+  if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) return []
+
+  const { stages, sections } = parsePlanMarkdown(content)
+  const errors = validateDocumentShape(content, sections)
   const changePaths = [
     ...sections.flatMap(({ blocks }) => blocks.flatMap((b) => (b.kind === "change" ? [b.path] : []))),
     ...stages.flatMap(({ changes }) => changes.map(({ path }) => path))
