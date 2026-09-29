@@ -22,6 +22,8 @@ const reviewPrompt = (kind: ReviewSubmitKind, body: string): string => {
   return `A reviewer ${verb} on this pull request:\n\n${body}\n\nPlease address this feedback.`
 }
 
+export const PR_REFRESH_MS = 10_000
+
 export const prKey = (sessionId: string, prNumber: number | null) =>
   ["github", "pr", sessionId, prNumber] as const
 
@@ -66,6 +68,10 @@ export function usePullRequest(
 
   const query = useQuery({
     queryKey: prKey(session.id, session.prNumber),
+    // Checks and review state change outside Jingler. Keep the visible PR current
+    // without polling hidden/background windows.
+    refetchInterval: PR_REFRESH_MS,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       // Re-detect even when linked: a session can outlive one PR and open another.
       if (autoDetect) {

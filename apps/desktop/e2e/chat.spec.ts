@@ -488,8 +488,16 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   await expect(window.getByTestId("view-tab-pr").first()).toBeVisible()
   // Code Review is no longer a tab: its review lives in the Explorer's filter.
   await expect(window.getByRole("button", { name: "Code Review" })).toHaveCount(0)
+  await window.setViewportSize({ width: 900, height: 700 })
   await revealChanges(window)
   await expect(window.getByText("Next milestone")).toHaveCount(0)
+
+  const prFilter = window.getByRole("tab", { name: "Pull request", exact: true })
+  const filterBar = prFilter.locator("..").locator("..")
+  const [filterBox, prFilterBox] = await Promise.all([filterBar.boundingBox(), prFilter.boundingBox()])
+  expect(filterBox).not.toBeNull()
+  expect(prFilterBox).not.toBeNull()
+  expect(prFilterBox!.x + prFilterBox!.width).toBeLessThanOrEqual(filterBox!.x + filterBox!.width)
 })
 
 test("the Pull Request tab leads with the description, in the conversation's column", async ({
@@ -535,6 +543,9 @@ test("the Pull Request tab leads with the description, in the conversation's col
   await expect(column).toBeVisible()
   const box = await column.boundingBox()
   expect(box?.width).toBeLessThanOrEqual(760)
+
+  await window.setViewportSize({ width: 900, height: 700 })
+  await expect(window.getByRole("button", { name: "Pull request details", exact: true })).toBeVisible()
 })
 
 test("the merge box offers a strategy, and merges with the one chosen", async ({ launchApp }) => {
