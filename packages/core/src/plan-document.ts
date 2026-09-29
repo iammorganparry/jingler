@@ -250,6 +250,15 @@ export const PlanPrdSection = Schema.Struct({
 })
 export type PlanPrdSection = Schema.Schema.Type<typeof PlanPrdSection>
 
+/** The stakeholder value a stage delivers, expressed as a compact ticket story. */
+export const PlanUserStory = Schema.Struct({
+  article: Schema.optional(Schema.Literal("a", "an")),
+  role: Schema.String,
+  capability: Schema.String,
+  benefit: Schema.String
+})
+export type PlanUserStory = Schema.Schema.Type<typeof PlanUserStory>
+
 /** Planner-owned estimate of implementation complexity. */
 export const PlanStageComplexity = Schema.Literal("low", "medium", "high")
 export type PlanStageComplexity = Schema.Schema.Type<typeof PlanStageComplexity>
@@ -279,6 +288,12 @@ const PlanPrdStageFields = {
   title: Schema.String,
   /** One-line summary of what the stage does. */
   intent: Schema.String,
+  /** User-valued outcome for ticket-shaped stages; absent on legacy plans. */
+  deliverable: Schema.optional(Schema.String),
+  /** Stakeholder story for the deliverable; absent on legacy plans. */
+  userStory: Schema.optional(PlanUserStory),
+  /** Completion contract; tests belong here rather than in separate stages. */
+  definitionOfDone: Schema.optional(Schema.Array(Schema.String)),
   /** Ordered approach steps (was the stage's `<h3>Approach</h3>` list). */
   approach: Schema.Array(Schema.String),
   /** Missing on legacy plans; decoded to an empty list for safe consumers. */
@@ -421,7 +436,15 @@ export const planBlockText = (block: PlanBlock): string => {
 
 const planStageTextProjection = (stage: PlanPrdStage): ReadonlyArray<string> => [
   stage.title,
-  stage.intent,
+  stage.deliverable ?? stage.intent,
+  ...(stage.userStory === undefined
+    ? []
+    : [
+        `As ${stage.userStory.article ?? "a"} ${stage.userStory.role}`,
+        `I want ${stage.userStory.capability}`,
+        `So that ${stage.userStory.benefit}`
+      ]),
+  ...(stage.definitionOfDone ?? []),
   ...stage.approach,
   ...(stage.tasks ?? []).map((task) => task.text),
   ...stage.notes.map(planBlockText),

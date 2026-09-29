@@ -10,7 +10,8 @@
  * - when any `##` heading has `<!-- id: ... -->`, only tagged headings are
  *   stages and untagged `##` headings are document sections
  * - legacy plans without tagged headings keep treating every `##` as a stage
- * - the first paragraph under a stage → its intent; later paragraphs → notes
+ * - `### Deliverable`, `### User story`, and `### Definition of Done` → ticket fields
+ * - the first legacy body paragraph under a stage → its intent; later paragraphs → notes
  * - `### Approach` bullets (or the stage's first plain bullet list) → approach
  * - checkboxes → tasks; indentation nests one level of subtasks;
  *   `[ ]` pending, `[x]` completed, `[~]` in-progress, `[-]` blocked
@@ -71,6 +72,9 @@ export interface ParsedPlanStage {
 	id: string;
 	title: string;
 	intent: string;
+	deliverable?: string;
+	userStory?: { article: "a" | "an"; role: string; capability: string; benefit: string };
+	definitionOfDone?: string[];
 	approach: string[];
 	tasks: PlanStageTask[];
 	acceptance: PlanAcceptanceItem[];
@@ -114,6 +118,9 @@ const FENCE_PATH = /(?:^|\s)path=(\S+)/;
 const FILE_LINE = /^\s*[-*]\s+`([^`]+)`\s*[—-]+\s*([AMD])\s*$/;
 const COMPLEXITY_LINE = /^>\s*complexity:\s*(low|medium|high)\s*$/i;
 const DEPENDS_LINE = /^>\s*depends:\s*(.+?)\s*$/i;
+const USER_ROLE_LINE = /^\*{0,2}As (a|an)\*{0,2}\s+(.+?)\s*$/i;
+const USER_CAPABILITY_LINE = /^\*{0,2}I want\*{0,2}\s+(.+?)\s*$/i;
+const USER_BENEFIT_LINE = /^\*{0,2}So that\*{0,2}\s+(.+?)\s*$/i;
 const TEST_REFERENCE_SUFFIX = /\s*\(test(?:\[(unit|integration|e2e|manual)\])?:\s*([^)]+)\)\s*$/;
 
 const slugOf = (title: string): string => {
@@ -235,7 +242,26 @@ class SectionBuilder {
 	}
 }
 
-type StageSubsection = "body" | "approach" | "acceptance" | "files";
+const parseUserStory = (text: string): ParsedPlanStage["userStory"] => {
+	const lines = text.split("\n");
+	const roleMatch = lines.map((line) => USER_ROLE_LINE.exec(line)).find((match) => match !== null);
+	const article = roleMatch?.[1]?.toLowerCase();
+	const role = roleMatch?.[2];
+	const capability = lines.flatMap((line) => USER_CAPABILITY_LINE.exec(line)?.[1] ?? []).at(0);
+	const benefit = lines.flatMap((line) => USER_BENEFIT_LINE.exec(line)?.[1] ?? []).at(0);
+	return (article === "a" || article === "an") && role && capability && benefit
+		? { article, role, capability, benefit }
+		: undefined;
+};
+
+type StageSubsection =
+	| "body"
+	| "deliverable"
+	| "user-story"
+	| "approach"
+	| "acceptance"
+	| "definition-of-done"
+	| "files";
 
 class StageBuilder {
 	readonly stage: ParsedPlanStage;
@@ -265,6 +291,18 @@ class StageBuilder {
 		if (this.#paragraph.length === 0) return;
 		const text = this.#paragraph.join("\n");
 		this.#paragraph = [];
+		if (this.#subsection === "deliverable") {
+			this.stage.deliverable = text;
+			if (!this.#sawIntent) {
+				this.stage.intent = text;
+				this.#sawIntent = true;
+			}
+			return;
+		}
+		if (this.#subsection === "user-story") {
+			this.stage.userStory = parseUserStory(text);
+			return;
+		}
 		if (this.#sawIntent) this.stage.notes.push(text);
 		else {
 			this.stage.intent = text;
@@ -329,13 +367,19 @@ class StageBuilder {
 		if (sub) {
 			this.#flushParagraph();
 			const name = sub[1]!.toLowerCase();
-			this.#subsection = name.startsWith("approach")
-				? "approach"
-				: name.startsWith("acceptance")
-					? "acceptance"
-					: name.startsWith("file")
-						? "files"
-						: "body";
+			this.#subsection = name.startsWith("deliverable")
+				? "deliverable"
+				: name.startsWith("user story")
+					? "user-story"
+					: name.startsWith("approach")
+						? "approach"
+						: name.startsWith("acceptance")
+							? "acceptance"
+							: name.startsWith("definition of done")
+								? "definition-of-done"
+								: name.startsWith("file")
+									? "files"
+									: "body";
 			return;
 		}
 		const complexity = COMPLEXITY_LINE.exec(trimmed);
@@ -362,10 +406,14 @@ class StageBuilder {
 		if (bullet) {
 			this.#flushParagraph();
 			if (this.#subsection === "approach") this.stage.approach.push(bullet[1]!.trim());
-			else this.#bodyBullets.push(bullet[1]!.trim());
+			else if (this.#subsection === "definition-of-done") {
+				(this.stage.definitionOfDone ??= []).push(bullet[1]!.trim());
+			} else this.#bodyBullets.push(bullet[1]!.trim());
 			return;
 		}
-		if (this.#subsection === "body") this.#paragraph.push(trimmed);
+		if (["body", "deliverable", "user-story"].includes(this.#subsection)) {
+			this.#paragraph.push(trimmed);
+		}
 	}
 
 	diagram(source: string): void {

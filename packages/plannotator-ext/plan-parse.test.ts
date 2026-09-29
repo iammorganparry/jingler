@@ -13,7 +13,14 @@ graph TD; A-->B
 \`\`\`
 
 ## Auth service <!-- id: stage-auth -->
-Stand up the new auth service behind the existing route.
+
+### Deliverable
+Users authenticate through the replacement service behind the existing route.
+
+### User story
+**As an** authenticated user
+**I want** authentication to use the replacement service
+**So that** my session remains reliable during migration
 
 ### Approach
 - Add the module
@@ -25,6 +32,10 @@ Stand up the new auth service behind the existing route.
 
 ### Acceptance
 - [ ] Service tests green (test: src/auth.test.ts::issues tokens, rejects expired)
+
+### Definition of Done
+- Acceptance criteria verified
+- Focused tests and typecheck pass
 
 ### Files
 - \`src/auth.ts\` — A
@@ -69,7 +80,18 @@ describe("parsePlanMarkdown", () => {
     expect(parsed.stages.map(({ id }) => id)).toEqual(["stage-auth", "stage-db"])
     const auth = parsed.stages[0]
     expect(auth.title).toBe("Auth service")
-    expect(auth.intent).toBe("Stand up the new auth service behind the existing route.")
+    expect(auth.intent).toBe("Users authenticate through the replacement service behind the existing route.")
+    expect(auth.deliverable).toBe("Users authenticate through the replacement service behind the existing route.")
+    expect(auth.userStory).toEqual({
+      article: "an",
+      role: "authenticated user",
+      capability: "authentication to use the replacement service",
+      benefit: "my session remains reliable during migration"
+    })
+    expect(auth.definitionOfDone).toEqual([
+      "Acceptance criteria verified",
+      "Focused tests and typecheck pass"
+    ])
     expect(auth.approach).toEqual(["Add the module", "Delete the legacy flow"])
     expect(auth.tasks).toEqual([
       {

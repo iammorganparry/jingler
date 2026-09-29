@@ -37,6 +37,14 @@ const document: PlanDocument = {
       id: "implement-auth",
       title: "Implement auth",
       intent: "Implement the auth change.",
+      deliverable: "Returning users can authenticate with the replacement token format.",
+      userStory: {
+        article: "an",
+        role: "authenticated user",
+        capability: "sign in with my existing session",
+        benefit: "I can continue my work without interruption"
+      },
+      definitionOfDone: ["Acceptance criteria verified", "Focused tests and typecheck pass"],
       approach: ["Replace the token format"],
       tasks: [{ id: "task-1", text: "Implement the auth change", status: "pending" }],
       files: [{ path: "src/auth.ts", change: "M" }],
@@ -110,9 +118,16 @@ describe("PlanReview", () => {
 
     expect(screen.getByRole("heading", { name: "Test strategy" })).toBeTruthy()
     expect(screen.getByRole("heading", { name: "Implement auth" })).toBeTruthy()
+    expect(screen.getByText("Returning users can authenticate with the replacement token format.")).toBeTruthy()
+    expect(screen.getByRole("region", { name: "Implement auth user story" }).textContent)
+      .toContain("As an authenticated user")
+    expect(screen.getByRole("region", { name: "Implement auth user story" }).textContent)
+      .toContain("sign in with my existing session")
+    expect(screen.getByRole("region", { name: "Implement auth definition of done" }).textContent)
+      .toContain("Focused tests and typecheck pass")
     expect(screen.getByRole("region", { name: "Implement auth tasks" }).textContent).toContain("Implement the auth change")
     expect(screen.getByRole("region", { name: "Implement auth files" }).textContent).toContain("src/auth.ts")
-    expect(screen.getByRole("region", { name: "Implement auth tests" }).textContent).toContain("e2e · src/auth.test.ts::implements auth")
+    expect(screen.getByRole("region", { name: "Implement auth acceptance criteria" }).textContent).toContain("e2e · src/auth.test.ts::implements auth")
     expect(screen.getByText("medium", { exact: false })).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId("stage-diagram")).toBeTruthy())
 
@@ -139,7 +154,7 @@ describe("PlanReview", () => {
     const onApprove = vi.fn()
     renderReview({ onRevise, onApprove })
 
-    addComment("Implement the auth change.", "Keep the existing token format.")
+    addComment("Returning users can authenticate with the replacement token format.", "Keep the existing token format.")
     fireEvent.change(screen.getByRole("textbox", { name: "General feedback" }), {
       target: { value: "Otherwise fine." }
     })
@@ -148,7 +163,7 @@ describe("PlanReview", () => {
     await waitFor(() => expect(onRevise).toHaveBeenCalledTimes(1))
     const feedback = onRevise.mock.calls[0]?.[0] as string
     expect(feedback).toContain("## 1. Implement auth (implement-auth)")
-    expect(feedback).toContain("> Implement the auth change.")
+    expect(feedback).toContain("> Returning users can authenticate with the replacement token format.")
     expect(feedback).toContain("Keep the existing token format.")
     expect(feedback).toContain("## General\nOtherwise fine.")
     expect(onApprove).not.toHaveBeenCalled()
@@ -170,7 +185,7 @@ describe("PlanReview", () => {
 
   it("persists replies and resolution across remounts", async () => {
     const first = renderReview()
-    addComment("Implement the auth change.", "Keep this behavior.")
+    addComment("Returning users can authenticate with the replacement token format.", "Keep this behavior.")
     const reply = screen.getByRole("textbox", { name: REPLY_TEXTBOX })
     fireEvent.change(reply, { target: { value: "Agreed." } })
     fireEvent.click(screen.getByRole("button", { name: "Reply" }))
@@ -186,7 +201,7 @@ describe("PlanReview", () => {
 
   it("isolates persisted comments by session and plan identity", async () => {
     const first = renderReview()
-    addComment("Implement the auth change.", "Only session one.")
+    addComment("Returning users can authenticate with the replacement token format.", "Only session one.")
     await waitFor(() => expect(loadPlanComments("session-1:chat-1:plannotator:PLAN.md")).toHaveLength(1))
 
     const other = { ...document, sessionId: "session-2" }
@@ -203,7 +218,7 @@ describe("PlanReview", () => {
 
   it("reanchors selection comments and reports detached anchors after a revision", async () => {
     const first = renderReview()
-    addComment("Implement the auth change.", "Keep this behavior.")
+    addComment("Returning users can authenticate with the replacement token format.", "Keep this behavior.")
     await waitFor(() => expect(globalThis.document.querySelector("[data-comment-highlight]")).toBeTruthy())
     await waitFor(() => expect(loadPlanComments("session-1:chat-1:plannotator:PLAN.md")).toHaveLength(1))
     first.unmount()
@@ -222,7 +237,7 @@ describe("PlanReview", () => {
     const onRevise = vi.fn().mockRejectedValueOnce(new Error("Review is stale.")).mockResolvedValueOnce(undefined)
     renderReview({ onRevise })
 
-    addComment("Implement the auth change.", "Keep the token format.")
+    addComment("Returning users can authenticate with the replacement token format.", "Keep the token format.")
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
     expect((await screen.findByRole("alert")).textContent).toBe("Review is stale.")
     expect(screen.getByRole("button", { name: "Request changes" }).hasAttribute("disabled")).toBe(false)

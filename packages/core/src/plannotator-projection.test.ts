@@ -164,6 +164,13 @@ describe("Plannotator native projection", () => {
         id: "stage-auth",
         title: "Auth service",
         intent: "Stand up the new auth service.",
+        deliverable: "Users authenticate through the replacement service.",
+        userStory: {
+          role: "signed-in user",
+          capability: "use the replacement service",
+          benefit: "my session remains reliable"
+        },
+        definitionOfDone: ["Acceptance criteria verified", "Focused tests pass"],
         approach: ["Add the module", "Delete the old one"],
         tasks: [
           {
@@ -206,6 +213,9 @@ describe("Plannotator native projection", () => {
     ])
     const stage = document.plan.stages[0]!
     expect(stage.id).toBe("stage-auth")
+    expect(stage.deliverable).toBe("Users authenticate through the replacement service.")
+    expect(stage.userStory?.role).toBe("signed-in user")
+    expect(stage.definitionOfDone).toEqual(["Acceptance criteria verified", "Focused tests pass"])
     expect(stage.tasks!.map((task) => [task.text, task.status])).toEqual([
       ["Add the service", "completed"],
       ["Wire the route", "in-progress"]
