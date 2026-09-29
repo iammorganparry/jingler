@@ -543,10 +543,10 @@ return (evidence === "checks" ? (
   // the loading and no-PR states, and a hook after those runs on some renders
   // and not others, which is the one thing React's hook order cannot survive.
   //
-  // Below `mid` the 352px rail floats instead of docking: the centre column is a
+  // Below `wide` the 352px rail floats instead of docking: the centre column is a
   // 760px reading measure with 60px of gutter, so a docked rail in a 500px pane
   // left roughly 88px of it — narrower than the PR title.
-  const roomy = atLeast(useWidthTier(), "mid")
+  const roomy = atLeast(useWidthTier(), "wide")
   const [railOpen, setRailOpen] = useState(false)
   const [evidence, setEvidence] = useState<PrEvidence>("overview")
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)

@@ -54,6 +54,11 @@ describe("PullRequestView evidence navigation", () => {
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
   })
 
+  it("floats the details rail when the PR pane is medium width", () => {
+    render(<WidthTierValue width={700}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
+    expect(screen.getByRole("button", { name: "Pull request details" })).toBeTruthy()
+  })
+
   it("closes the compact details sheet by button or Escape", () => {
     render(<WidthTierValue width={480}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
     fireEvent.click(screen.getByRole("button", { name: "Pull request details" }))

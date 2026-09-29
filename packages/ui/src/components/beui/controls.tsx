@@ -19,10 +19,13 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
     ? "inline-flex items-center gap-1 rounded-full bg-panel p-1"
     : variant === "underline"
       ? "inline-flex items-center gap-1 border-b border-line"
-      : "inline-flex items-center gap-0 rounded-lg bg-panel p-0.5"
+      : "flex w-full min-w-0 items-center gap-0 rounded-lg bg-panel p-0.5"
+  const segmentRootClass = variant === "segment" ? "min-w-0" : undefined
+  const segmentItemClass = variant === "segment" ? "min-w-0 flex-1" : undefined
+  const segmentButtonClass = variant === "segment" ? "w-full min-w-0 overflow-hidden text-ellipsis" : undefined
 
   return <MotionConfig transition={reduce ? { duration: 0 } : TAB_TRANSITION}>
-    <m.div layoutRoot className={className}>
+    <m.div layoutRoot className={cn(segmentRootClass, className)}>
       <div role="tablist" className={listClass}>
         {items.map((item) => {
           const active = item.value === value
@@ -44,7 +47,7 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
           </button>
 
           const radius = variant === "pill" ? "rounded-full" : "rounded-md"
-          return <div key={item.value} className="relative">
+          return <div key={item.value} className={cn("relative", segmentItemClass)}>
             {active && <m.span layoutId={id} layout="position" style={{ borderRadius: variant === "pill" ? 9999 : 8 }} className={cn("absolute inset-0 bg-brand", radius)} />}
             <button
               type="button"
@@ -54,6 +57,7 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
               onClick={() => !item.disabled && onChange?.(item.value)}
               className={cn(
                 "relative z-10 inline-flex items-center justify-center whitespace-nowrap bg-transparent px-3.5 py-1.5 text-sm font-medium outline-none transition-colors",
+                segmentButtonClass,
                 active ? "text-white" : "text-muted-foreground hover:text-text-bright",
                 item.disabled && "cursor-not-allowed opacity-50",
                 radius
