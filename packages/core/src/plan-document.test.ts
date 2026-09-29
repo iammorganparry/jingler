@@ -36,6 +36,13 @@ describe("plan document schemas", () => {
   it("decodes progressable tasks and named test references", () => {
     const decoded = Schema.decodeUnknownEither(PlanPrdStage)({
       ...structuredStage,
+      deliverable: "Operators can dispatch independent work as one reviewable capability.",
+      userStory: {
+        role: "operator",
+        capability: "dispatch independent work",
+        benefit: "large changes finish without losing reviewability"
+      },
+      definitionOfDone: ["Acceptance criteria verified", "Focused tests pass"],
       tasks: [
         { id: "02.task.1", text: "Dispatch independent workers", status: "in-progress" },
         { id: "02.task.2", text: "Collect verification evidence", status: "blocked" }
@@ -72,6 +79,9 @@ describe("plan document schemas", () => {
 
     expect(Either.isRight(decoded)).toBe(true)
     if (Either.isLeft(decoded)) return
+    expect(decoded.right.deliverable).toContain("reviewable capability")
+    expect(decoded.right.userStory?.role).toBe("operator")
+    expect(decoded.right.definitionOfDone).toEqual(["Acceptance criteria verified", "Focused tests pass"])
     expect(decoded.right.tasks).toEqual([
       { id: "02.task.1", text: "Dispatch independent workers", status: "in-progress" },
       { id: "02.task.2", text: "Collect verification evidence", status: "blocked" }

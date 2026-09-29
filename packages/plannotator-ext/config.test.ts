@@ -55,6 +55,10 @@ describe("bundled planning instructions", () => {
   it("planning instructions require concise structured plans", () => {
     expect(instructions).toContain("Keep the plan scan-first");
     expect(instructions).toContain("Up to three concrete implementation choices");
+    expect(instructions).toContain("Each stage should read like a compact ticket");
+    expect(instructions).toContain("### Deliverable");
+    expect(instructions).toContain("### User story");
+    expect(instructions).toContain("### Definition of Done");
     expect(instructions).toContain("Do not add separate global file, reuse, approach, or verification sections");
     expect(instructions).toContain("For every staged plan, include one top-level Mermaid flow");
     expect(instructions).not.toContain("Skip diagrams for trivial");
@@ -67,6 +71,14 @@ describe("bundled planning instructions", () => {
     expect(example).not.toBe("");
     expect(validatePlanMarkdown(example)).toEqual([]);
     const parsed = parsePlanMarkdown(example);
+    expect(parsed.stages[0]?.deliverable).toContain("user-valued outcome");
+    expect(parsed.stages[0]?.userStory).toEqual({
+      article: "a",
+      role: "reviewer",
+      capability: "a concrete capability",
+      benefit: "I receive a clear benefit",
+    });
+    expect(parsed.stages[0]?.definitionOfDone).toHaveLength(3);
     expect(parsed.stages[0]?.changes).toEqual([
       expect.objectContaining({ path: "path/to/file.ts" }),
     ]);

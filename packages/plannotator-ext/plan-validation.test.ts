@@ -8,7 +8,14 @@ flowchart LR
 \`\`\`
 
 ## Ship auth <!-- id: ship-auth -->
+
+### Deliverable
 Users can sign in.
+
+### User story
+**As a** returning user
+**I want** to sign in with my existing session
+**So that** I can continue my work
 
 ### Approach
 - Reuse the session store.
@@ -20,6 +27,10 @@ The existing route will call the shared store.
 
 ### Acceptance
 - [ ] Sign-in succeeds (test: src/auth.test.ts::signs in)
+
+### Definition of Done
+- Acceptance criteria verified
+- Focused tests and typecheck pass
 
 ### Files
 - \`src/auth.ts\` — M
@@ -67,6 +78,9 @@ describe("validatePlanMarkdown", () => {
     expect(errors).toContain('Stage "Again" duplicates id "same".')
     expect(errors).toContain('Stage "Again" depends on unknown id "missing".')
     expect(errors).toContain("Stage dependencies contain a cycle.")
+    expect(errors.some((error) => error.includes("Deliverable"))).toBe(true)
+    expect(errors.some((error) => error.includes("User story"))).toBe(true)
+    expect(errors.some((error) => error.includes("Definition of Done"))).toBe(true)
     expect(errors.some((error) => error.includes("Technical explanation"))).toBe(true)
     expect(errors.some((error) => error.includes("test path and named case"))).toBe(false)
   })

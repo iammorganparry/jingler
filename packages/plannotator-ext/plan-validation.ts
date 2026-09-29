@@ -22,6 +22,18 @@ const validateDocumentShape = (
   return errors
 }
 
+const validateTicketShape = (
+  stage: ReturnType<typeof parsePlanMarkdown>["stages"][number],
+  label: string,
+  errors: string[]
+): void => {
+  if (!stage.deliverable?.trim()) errors.push(`${label} needs a Deliverable.`)
+  if (stage.userStory === undefined) errors.push(`${label} needs a complete User story.`)
+  if ((stage.definitionOfDone?.length ?? 0) === 0) {
+    errors.push(`${label} needs a Definition of Done.`)
+  }
+}
+
 /** Validate the explicit, ID-tagged plan format without rejecting legacy plans. */
 export const validatePlanMarkdown = (content: string): string[] => {
   if (!/^##\s+.+?<!--\s*id:\s*[\w-]+\s*-->\s*$/m.test(content)) return []
@@ -40,6 +52,7 @@ export const validatePlanMarkdown = (content: string): string[] => {
     const label = `Stage "${stage.title}"`
     if (ids.has(stage.id)) errors.push(`${label} duplicates id "${stage.id}".`)
     ids.add(stage.id)
+    validateTicketShape(stage, label, errors)
     if (stage.intent.trim().length === 0) errors.push(`${label} needs a one-line intent.`)
     if (stage.approach.length === 0) errors.push(`${label} needs an Approach list.`)
     if (stage.tasks.length === 0) errors.push(`${label} needs implementation steps.`)

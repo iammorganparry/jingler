@@ -80,6 +80,14 @@ export const PlannotatorStage = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
   intent: Schema.optionalWith(Schema.String, { default: () => "" }),
+  deliverable: Schema.optional(Schema.String),
+  userStory: Schema.optional(Schema.Struct({
+    article: Schema.optional(Schema.Literal("a", "an")),
+    role: Schema.String,
+    capability: Schema.String,
+    benefit: Schema.String
+  })),
+  definitionOfDone: Schema.optional(Schema.Array(Schema.String)),
   approach: Schema.optionalWith(Schema.Array(Schema.String), { default: () => [] }),
   tasks: Schema.optionalWith(Schema.Array(PlannotatorStageTask), { default: () => [] }),
   acceptance: Schema.optionalWith(Schema.Array(PlannotatorAcceptanceItem), {
@@ -224,6 +232,9 @@ const structuredStageToPlanStage = (
   id: stage.id,
   title: stage.title,
   intent: stage.intent,
+  deliverable: stage.deliverable,
+  userStory: stage.userStory,
+  definitionOfDone: stage.definitionOfDone,
   approach: stage.approach,
   tasks: stage.tasks.flatMap((task) => [
     {

@@ -23,6 +23,36 @@ const acceptanceIcon = {
   pending: Circle
 } as const
 
+const deliverableOf = (stage: PlanPrdStage): string => stage.deliverable ?? stage.intent
+
+function TicketUserStory({ stage }: { readonly stage: PlanPrdStage }) {
+  if (stage.userStory === undefined) return null
+  return (
+    <section aria-label={`${stage.title} user story`} className="mt-3 rounded-md border border-line bg-sunken px-3 py-2 text-[12px] text-text-body">
+      <span className="font-semibold text-text-bright">As {stage.userStory.article ?? "a"}</span> {stage.userStory.role},{" "}
+      <span className="font-semibold text-text-bright">I want</span> {stage.userStory.capability},{" "}
+      <span className="font-semibold text-text-bright">so that</span> {stage.userStory.benefit}.
+    </section>
+  )
+}
+
+function DefinitionOfDone({ stage }: { readonly stage: PlanPrdStage }) {
+  if ((stage.definitionOfDone?.length ?? 0) === 0) return null
+  return (
+    <section className="mt-4" aria-label={`${stage.title} definition of done`}>
+      <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Definition of done</h3>
+      <ul className="m-0 space-y-1 p-0">
+        {stage.definitionOfDone?.map((item) => (
+          <li key={item} className="flex items-start gap-2 text-[12px] text-text-body">
+            <Circle className="mt-0.5 size-3.5 flex-none text-dim" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export function PlanStageCard({
   stage,
   number,
@@ -34,6 +64,7 @@ export function PlanStageCard({
 }) {
   const assets = useOpenAsset()
   const status = planStageExecutionStatus(stage)
+  const deliverable = deliverableOf(stage)
   const details = [...stage.notes, ...(stage.walkthrough ?? [])]
 
   return (
@@ -46,7 +77,7 @@ export function PlanStageCard({
         <span className="font-mono text-[10px] text-dim">{String(number).padStart(2, "0")}</span>
         <div className="min-w-0 flex-1">
           <h2 id={`stage-${stage.id}`} className="m-0 text-[14px] font-semibold text-text-bright">{stage.title}</h2>
-          {stage.intent.length > 0 && <div className="mt-1 text-[12.5px] text-text-body"><Markdown>{stage.intent}</Markdown></div>}
+          {deliverable.length > 0 && <div className="mt-1 text-[12.5px] text-text-body"><Markdown>{deliverable}</Markdown></div>}
         </div>
         {stage.complexity && <Badge tone={stage.complexity === "high" ? "red" : stage.complexity === "medium" ? "yellow" : "blue"} size="xs">{stage.complexity}</Badge>}
         <Badge tone={statusTone[status]} size="xs">{status}</Badge>
@@ -56,6 +87,8 @@ export function PlanStageCard({
           </button>
         )}
       </header>
+
+      <TicketUserStory stage={stage} />
 
       {stage.dependencies && stage.dependencies.length > 0 && (
         <section className="mt-3 flex flex-wrap gap-1.5" aria-label="Dependencies">
@@ -109,8 +142,8 @@ export function PlanStageCard({
       ))}
 
       {stage.acceptance.length > 0 && (
-        <section className="mt-4" aria-label={`${stage.title} tests`}>
-          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Tests</h3>
+        <section className="mt-4" aria-label={`${stage.title} acceptance criteria`}>
+          <h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Acceptance criteria</h3>
           <ul className="m-0 space-y-2 p-0">
             {stage.acceptance.map((criterion) => {
               const Icon = acceptanceIcon[criterion.status]
@@ -131,6 +164,8 @@ export function PlanStageCard({
           </ul>
         </section>
       )}
+
+      <DefinitionOfDone stage={stage} />
 
       {details.length > 0 && (
         <details className="group mt-4 border-t border-line pt-3">
