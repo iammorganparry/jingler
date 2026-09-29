@@ -583,7 +583,8 @@ export const makePiAgentRuntimeLive = (
       yield* Effect.sync(() => registerNativeSubagentTool(
         registry,
         spec,
-        handle.delegateSubagent!
+        handle.delegateSubagent!,
+        handle.spawnSubagent
       ))
       return registry
     })

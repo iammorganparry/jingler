@@ -20,6 +20,7 @@ import { Effect, Queue, Stream } from "effect"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
+import type { PiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
 import { RetainedPiSessionRegistry } from "./retained-pi-session-registry.js"
 
 export interface PiSessionHandle {
@@ -44,6 +45,7 @@ export interface PiSessionHandle {
     signal: AbortSignal,
     onUpdate?: (update: SubagentDelegationUpdate) => void
   ) => Promise<SubagentDelegationResponse>
+  readonly spawnSubagent?: PiSubagentAsyncDelegate
   readonly prompt: (text: string, images?: AgentRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>

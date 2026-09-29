@@ -7,6 +7,7 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
+  type EventBus,
   type ExtensionUIContext,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
@@ -54,6 +55,7 @@ import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
+import { makePiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   preparePiSubagentsRuntime,
@@ -410,6 +412,7 @@ const createEmbeddedSession = (
 
 interface SessionHandleInput {
   readonly registry: ToolRegistry
+  readonly eventBus: EventBus
   readonly embedded: EmbeddedSession
   readonly spec: AgentRunSpec
   readonly tracker: FileChangeTracker | undefined
@@ -483,6 +486,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     subagentTranscript: (runId) => lifecycle.transcript(runId),
     delegateSubagent: (request, signal, onUpdate) =>
       lifecycle.delegate(request, signal, onUpdate),
+    spawnSubagent: makePiSubagentAsyncDelegate(input.eventBus),
     prompt: (text, images) => session.prompt(text, {
       images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
     }),
@@ -826,6 +830,7 @@ function* observeSessionDiagnostics(
       : undefined
     return toHandle({
       registry,
+      eventBus: prepared.eventBus,
       embedded,
       spec,
       tracker,
