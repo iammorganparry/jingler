@@ -131,26 +131,47 @@ const executeDelegation = async (
   }
 }
 
-const taskOptions = (task: AsyncTask): Record<string, unknown> => ({
-  agent: task.agent,
+const asyncAgent = (
+  agent: string,
+  names: Readonly<Record<string, string>> | undefined
+): string => {
+  if (names === undefined) return agent
+  const resolved = names[agent]
+  if (resolved === undefined) {
+    throw new ToolError("execution-failed", `Background ${agent} is unavailable for this native runtime`)
+  }
+  return resolved
+}
+
+const taskOptions = (
+  task: AsyncTask,
+  names?: Readonly<Record<string, string>>
+): Record<string, unknown> => ({
+  agent: asyncAgent(task.agent, names),
   task: task.task,
   context: task.context ?? "fresh",
   ...(task.thinking === undefined ? {} : { thinking: task.thinking }),
   ...(task.timeoutMs === undefined ? {} : { timeoutMs: task.timeoutMs })
 })
 
-const parallelWorkflow = (tasks: ReadonlyArray<AsyncTask>): string =>
+const parallelWorkflow = (
+  tasks: ReadonlyArray<AsyncTask>,
+  names?: Readonly<Record<string, string>>
+): string =>
   `return runs.all(${JSON.stringify(tasks.map((task, index) => ({
     key: `step-${index + 1}`,
-    ...taskOptions(task)
+    ...taskOptions(task, names)
   })))});`
 
-const chainWorkflow = (tasks: ReadonlyArray<AsyncTask>): string => {
+const chainWorkflow = (
+  tasks: ReadonlyArray<AsyncTask>,
+  names?: Readonly<Record<string, string>>
+): string => {
   const lines = ["const results = [];"]
   tasks.forEach((task, index) => {
     const key = `step-${index + 1}`
     const variable = `step${index + 1}`
-    const { task: prompt, ...options } = taskOptions(task)
+    const { task: prompt, ...options } = taskOptions(task, names)
     const chainedPrompt = index === 0
       ? JSON.stringify(prompt)
       : `${JSON.stringify(prompt)} + "\\n\\nPrevious result:\\n" + step${index}.output`
@@ -165,19 +186,20 @@ const chainWorkflow = (tasks: ReadonlyArray<AsyncTask>): string => {
 
 const asyncRequest = (
   spec: AgentRunSpec,
-  input: typeof AsyncSingleInput.Type | typeof AsyncWorkflowInput.Type
+  input: typeof AsyncSingleInput.Type | typeof AsyncWorkflowInput.Type,
+  names?: Readonly<Record<string, string>>
 ): PiSubagentAsyncSpawnRequest => {
   if ("workflow" in input) {
     return {
       cwd: spec.cwd,
       workflowScript: input.workflow.mode === "parallel"
-        ? parallelWorkflow(input.workflow.tasks)
-        : chainWorkflow(input.workflow.tasks)
+        ? parallelWorkflow(input.workflow.tasks, names)
+        : chainWorkflow(input.workflow.tasks, names)
     }
   }
   return {
     cwd: spec.cwd,
-    agent: input.agent,
+    agent: asyncAgent(input.agent, names),
     task: input.task,
     context: input.context ?? "fresh",
     ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
@@ -189,12 +211,13 @@ const executeAsync = async (
   delegate: PiSubagentAsyncDelegate | undefined,
   spec: AgentRunSpec,
   input: typeof AsyncSingleInput.Type | typeof AsyncWorkflowInput.Type,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
+  names?: Readonly<Record<string, string>>
 ) => {
   if (delegate === undefined) {
     throw new ToolError("execution-failed", "Background subagents are unavailable for this session")
   }
-  const result = await delegate(asyncRequest(spec, input), context.signal)
+  const result = await delegate(asyncRequest(spec, input, names), context.signal)
   return {
     status: "running",
     runId: result.runId,
@@ -207,7 +230,8 @@ export const registerNativeSubagentTool = (
   registry: ToolRegistry,
   spec: AgentRunSpec,
   delegate: NativeSubagentDelegate,
-  asyncDelegate?: PiSubagentAsyncDelegate
+  asyncDelegate?: PiSubagentAsyncDelegate,
+  asyncAgentNames?: Readonly<Record<string, string>>
 ): void => {
   if (!registry.canRegister("subagent")) return
   registry.register({
@@ -228,7 +252,7 @@ export const registerNativeSubagentTool = (
     idempotency: "unsafe",
     execute: (input: NativeSubagentInput, context) =>
       input.async === true
-        ? executeAsync(asyncDelegate, spec, input, context)
+        ? executeAsync(asyncDelegate, spec, input, context, asyncAgentNames)
         : executeDelegation(delegate, spec, input, context)
   })
 }

@@ -46,6 +46,7 @@ export interface PiSessionHandle {
     onUpdate?: (update: SubagentDelegationUpdate) => void
   ) => Promise<SubagentDelegationResponse>
   readonly spawnSubagent?: PiSubagentAsyncDelegate
+  readonly subagentAgentNames?: Readonly<Record<string, string>>
   readonly prompt: (text: string, images?: AgentRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>

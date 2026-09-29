@@ -187,6 +187,13 @@ export interface PiSessionFactoryOptions {
   readonly subagentBroker?: SubagentCapabilityBroker
   /** Extension host only: the parent model never executes registry tools itself. */
   readonly delegationOnly?: boolean
+  readonly configureNativeAsyncSubagents?: (input: {
+    readonly eventBus: EventBus
+    readonly parentPiSessionId: string
+  }) => Effect.Effect<{
+    readonly agentNames: Readonly<Record<string, string>>
+    readonly dispose: () => void
+  }, AgentRuntimeError>
 }
 
 const usesClaudeCli = (connection: ProviderConnection): boolean =>
@@ -423,6 +430,10 @@ interface SessionHandleInput {
   readonly subagentCeiling?: SubagentCapabilityCeilingHandle
   readonly lifecycle: PiSubagentLifecycleAdapter
   readonly fleetEvents: SubagentFleetEventHubShape
+  readonly nativeAsyncSubagents?: {
+    readonly agentNames: Readonly<Record<string, string>>
+    readonly dispose: () => void
+  }
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
@@ -487,6 +498,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     delegateSubagent: (request, signal, onUpdate) =>
       lifecycle.delegate(request, signal, onUpdate),
     spawnSubagent: makePiSubagentAsyncDelegate(input.eventBus),
+    ...(input.nativeAsyncSubagents
+      ? { subagentAgentNames: input.nativeAsyncSubagents.agentNames }
+      : {}),
     prompt: (text, images) => session.prompt(text, {
       images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
     }),
@@ -499,6 +513,7 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
         session.dispose()
       } finally {
         subagentCeiling?.dispose()
+        input.nativeAsyncSubagents?.dispose()
         await Promise.all([
           tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
           childCredentials
@@ -785,6 +800,12 @@ function* bindSubagentCapabilities(
           ))
         )
     }
+  const nativeAsyncSubagents = options.configureNativeAsyncSubagents
+    ? yield* options.configureNativeAsyncSubagents({
+        eventBus: prepared.eventBus,
+        parentPiSessionId: embedded.result.session.sessionId
+      })
+    : undefined
   return yield* observeSessionDiagnostics(
     spec,
     connection,
@@ -796,7 +817,8 @@ function* bindSubagentCapabilities(
     snapshot,
     lifecycle,
     fleetEvents,
-    subagentCeiling
+    subagentCeiling,
+    nativeAsyncSubagents
   )
 }
 
@@ -811,7 +833,8 @@ function* observeSessionDiagnostics(
   snapshot: WorktreeSnapshot | null,
   lifecycle: PiSubagentLifecycleAdapter,
   fleetEvents: SubagentFleetEventHubShape,
-  subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+  subagentCeiling: SubagentCapabilityCeilingHandle | undefined,
+  nativeAsyncSubagents: SessionHandleInput["nativeAsyncSubagents"]
 ) {
   const diagnostic = makeRuntimeDiagnosticObserver({
       runId: spec.runId,
@@ -840,7 +863,8 @@ function* observeSessionDiagnostics(
       subagentBroker: options.subagentBroker,
       lifecycle,
       fleetEvents,
-      ...(subagentCeiling ? { subagentCeiling } : {})
+      ...(subagentCeiling ? { subagentCeiling } : {}),
+      ...(nativeAsyncSubagents ? { nativeAsyncSubagents } : {})
     })
   }
 

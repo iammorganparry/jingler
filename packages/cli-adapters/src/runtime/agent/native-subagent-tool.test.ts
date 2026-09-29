@@ -90,13 +90,17 @@ describe("native PI-backed subagent tool", () => {
     )
   })
 
-  const asyncTool = (spawnSubagent: PiSubagentAsyncDelegate) => {
+  const asyncTool = (
+    spawnSubagent: PiSubagentAsyncDelegate,
+    asyncAgentNames?: Readonly<Record<string, string>>
+  ) => {
     const registry = new ToolRegistry()
     registerNativeSubagentTool(
       registry,
       spec,
       vi.fn<NativeSubagentDelegate>(),
-      spawnSubagent
+      spawnSubagent,
+      asyncAgentNames
     )
     return registry
   }
@@ -128,6 +132,25 @@ describe("native PI-backed subagent tool", () => {
       cwd: "/workspace",
       context: "fork"
     }, expect.any(AbortSignal))
+  })
+
+  it("routes a native async role through its session-owned external profile", async () => {
+    const spawnSubagent = vi.fn<PiSubagentAsyncDelegate>(async () => ({
+      runId: "async-native",
+      asyncDir: "/tmp/async-native",
+      text: "started"
+    }))
+    await Effect.runPromise(asyncTool(spawnSubagent, {
+      worker: "jingler-codex-binding-worker"
+    }).execute({
+      id: "subagent",
+      arguments: { async: true, agent: "worker", task: "Implement it" },
+      role: "conversation",
+      mode: "auto"
+    }))
+    expect(spawnSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      agent: "jingler-codex-binding-worker"
+    }), expect.any(AbortSignal))
   })
 
   it.each(["parallel", "chain"] as const)("generates a bounded %s workflow script", async (mode) => {

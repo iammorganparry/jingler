@@ -76,8 +76,13 @@ import type { NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 import { makePiAgentRuntime } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
-import { registerNativeSubagentTool } from "./native-subagent-tool.js"
+import { registerNativeSubagentTool, type NativeSubagentDelegate } from "./native-subagent-tool.js"
 import { makeDirectNativeSubagentDelegate } from "./direct-native-subagent.js"
+import {
+  ensureNativeExternalJobProvider,
+  isNativeExternalJobRuntime,
+  registerNativeExternalJobProfiles
+} from "./native-external-job-provider.js"
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import { makeSubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
@@ -231,6 +236,9 @@ export const makePiAgentRuntimeLive = (
     const childCredentials = new PiChildCredentials(
       join(paths.managedResourcesDir, "subagent-credentials"),
       credentials
+    )
+    const nativeExternalJobs = ensureNativeExternalJobProvider(
+      join(paths.runJournalsDir, "native-external-jobs")
     )
     yield* childCredentials.clear().pipe(
       Effect.mapError((cause) =>
@@ -545,19 +553,57 @@ export const makePiAgentRuntimeLive = (
         (tracker) => tracker.dispose().pipe(Effect.orDie)
       ).pipe(Effect.flatMap((tracker) => factoryOptions.createToolRegistry(spec, context, tracker)))
     }
-    const prepareClaudeSubagentRegistry = (
+    const prepareNativeSubagentRegistry = (
       spec: AgentRunSpec,
       context: AgentRuntimeContext,
-      registry: ToolRegistry
+      registry: ToolRegistry,
+      models: SubagentModelAssignments,
+      foregroundDelegate?: NativeSubagentDelegate
     ) => Effect.gen(function* () {
       const connection = nativeClaudeSubagentConnection(spec.targetCapabilities.targetId)
+      const nativeLeaf = isNativeExternalJobRuntime(spec.runtimeId)
+        ? spec as AgentRunSpec & { readonly runtimeId: "codex" | "opencode" }
+        : undefined
       const sidecar = makePiSessionFactory({
         ...factoryOptions,
         resolveConnection: () => Effect.succeed(connection),
         createToolRegistry: undefined,
         toolRegistry: registry,
         terminalTracker: undefined,
-        delegationOnly: true
+        delegationOnly: true,
+        ...(nativeLeaf
+          ? {
+              configureNativeAsyncSubagents: ({ eventBus, parentPiSessionId }) =>
+                Effect.try({
+                  try: () => {
+                    const profiles = nativeExternalJobs.bind({
+                      parentPiSessionId,
+                      spec: nativeLeaf,
+                      context,
+                      models,
+                      makeRuntime: (runtimeId) => runtimeId === "codex"
+                        ? makeCodexAgentRuntime(baseNativeTools)
+                        : makeOpenCodeAgentRuntime(baseNativeTools)
+                    })
+                    const registered = registerNativeExternalJobProfiles(
+                      eventBus,
+                      profiles,
+                      models,
+                      nativeLeaf.modelId
+                    )
+                    return {
+                      agentNames: registered.names,
+                      dispose: registered.dispose
+                    }
+                  },
+                  catch: (cause) => new AgentRuntimeError({
+                    reason: "runtime",
+                    message: "Could not register native async subagent profiles",
+                    cause
+                  })
+                })
+            }
+          : {})
       })
       const handle = yield* Effect.acquireRelease(
         sidecar.create({
@@ -583,8 +629,9 @@ export const makePiAgentRuntimeLive = (
       yield* Effect.sync(() => registerNativeSubagentTool(
         registry,
         spec,
-        handle.delegateSubagent!,
-        handle.spawnSubagent
+        foregroundDelegate ?? handle.delegateSubagent!,
+        handle.spawnSubagent,
+        handle.subagentAgentNames
       ))
       return registry
     })
@@ -600,9 +647,11 @@ export const makePiAgentRuntimeLive = (
         )
         if (subagents.enabled === false) return registry
         if (spec.runtimeId === "codex" || spec.runtimeId === "opencode") {
-          yield* Effect.sync(() => registerNativeSubagentTool(
-            registry,
+          return yield* prepareNativeSubagentRegistry(
             spec,
+            context,
+            registry,
+            subagents.models,
             makeDirectNativeSubagentDelegate({
               spec,
               context,
@@ -611,10 +660,14 @@ export const makePiAgentRuntimeLive = (
                 ? makeCodexAgentRuntime(baseNativeTools)
                 : makeOpenCodeAgentRuntime(baseNativeTools)
             })
-          ))
-          return registry
+          )
         }
-        return yield* prepareClaudeSubagentRegistry(spec, context, registry)
+        return yield* prepareNativeSubagentRegistry(
+          spec,
+          context,
+          registry,
+          subagents.models
+        )
       })
     }
     const planning = makeSharedPlanningRuntime(join(paths.managedResourcesDir, "plans"), paths.piSessionsDir)
