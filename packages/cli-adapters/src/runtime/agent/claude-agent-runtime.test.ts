@@ -17,6 +17,7 @@ import {
 } from "./claude-agent-runtime.js"
 import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
 import * as toolRelay from "../providers/registry-mcp-relay.js"
+import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
@@ -125,11 +126,11 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
       JINGLER_PROVIDER_ACCESS: "secret",
       OPENAI_API_KEY: "secret",
       CUSTOM_TOKEN: "secret"
-    }, "linux")).toEqual({ PATH: "/bin", HOME: "/home/test" })
+    })).toEqual({ PATH: "/bin", HOME: "/home/test" })
   })
 
   it("adds Homebrew binary directories for a macOS GUI environment", () => {
-    expect(nativeCliEnvironment({ PATH: "/usr/bin", HOME: "/Users/test" }, "darwin").PATH?.split(delimiter))
+    expect(claudeCliEnvironment({ PATH: "/usr/bin", HOME: "/Users/test" }, "darwin").PATH?.split(delimiter))
       .toEqual(["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
   })
 

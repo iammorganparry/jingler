@@ -17,7 +17,7 @@ import {
 import { trackChild } from "../../child-registry.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { type RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
-import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
+import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 
 export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
@@ -317,7 +317,7 @@ async function* runClaude(
 ): AsyncGenerator<StreamEvent> {
   const sessionId = spec.continuation?.id ?? randomUUID()
   const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
-  const environment = nativeCliEnvironment(options.environment ?? process.env)
+  const environment = claudeCliEnvironment(options.environment ?? process.env)
   const scope = await Effect.runPromise(Scope.make())
   await reserveClaudeSession(reserved, sessionId, scope)
   let relay: RegistryMcpRelay | undefined

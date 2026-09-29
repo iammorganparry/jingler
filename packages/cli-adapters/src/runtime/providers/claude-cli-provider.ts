@@ -23,7 +23,7 @@ import {
   type RelayedToolCall
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
-import { withNativeCliPath } from "./native-cli-environment.js"
+import { withClaudeCliPath } from "./claude-cli-environment.js"
 import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
@@ -77,7 +77,7 @@ export interface ClaudeCliProviderOptions {
 const subscriptionEnvironment = (
   environment: NodeJS.ProcessEnv
 ): NodeJS.ProcessEnv => {
-  const sanitized = withNativeCliPath(environment)
+  const sanitized = withClaudeCliPath(environment)
   for (const key of [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
