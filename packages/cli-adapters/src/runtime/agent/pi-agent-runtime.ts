@@ -14,14 +14,18 @@ import type {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
-  SubagentFleetSnapshot
+  SubagentFleetSnapshot,
+  SubagentModelAssignments
 } from "@jingler/core"
 import { Effect, Queue, Stream } from "effect"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
 import type { PiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
-import { RetainedPiSessionRegistry } from "./retained-pi-session-registry.js"
+import {
+  retainedPiFleetHandlers,
+  RetainedPiSessionRegistry
+} from "./retained-pi-session-registry.js"
 
 export interface PiSessionHandle {
   /** Resumable Pi session file/id persisted by Jingler. */
@@ -47,6 +51,10 @@ export interface PiSessionHandle {
   ) => Promise<SubagentDelegationResponse>
   readonly spawnSubagent?: PiSubagentAsyncDelegate
   readonly subagentAgentNames?: Readonly<Record<string, string>>
+  readonly rebindNativeAsyncSubagents?: (
+    spec: AgentRunSpec,
+    models: SubagentModelAssignments
+  ) => void
   readonly prompt: (text: string, images?: AgentRunSpec["images"]) => Promise<void>
   readonly steer: (text: string) => Promise<void>
   readonly interrupt: () => Promise<void>
@@ -294,11 +302,7 @@ export const makePiAgentRuntime = (
         continuation.id,
         (session) => session.interrupt()
       ),
-      controlSubagent: (_owner, sessionId, chatId, request) => sessionOperation(
-        sessions.lookupOwned(sessionId, chatId, request.parentRuntimeSessionId),
-        request.parentRuntimeSessionId,
-        (session) => session.controlSubagent(request)
-      ),
+      ...retainedPiFleetHandlers(sessions),
       decidePlanReview: (_owner, sessionId, chatId, decision) => sessionOperation(
         sessions.lookupByChat(sessionId, chatId),
         `${sessionId}/${chatId}`,
@@ -311,39 +315,7 @@ export const makePiAgentRuntime = (
           session.decidePlanReview(decision)
           return Promise.resolve()
         }
-      ),
-      subagentFleetSnapshot: (_owner, sessionId, chatId, parentRuntimeSessionId) =>
-        sessionOperation(
-          sessions.lookupOwned(sessionId, chatId, parentRuntimeSessionId),
-          parentRuntimeSessionId,
-          (session) => session.subagentFleetSnapshot()
-        ),
-      subagentTranscript: (
-        _owner,
-        sessionId,
-        chatId,
-        parentRuntimeSessionId,
-        runId
-      ) => {
-        const read = sessions.lookupTranscriptOwned(
-          sessionId,
-          chatId,
-          parentRuntimeSessionId
-        )
-        return read
-          ? Effect.tryPromise({
-              try: () => read(runId),
-              catch: (cause) => new AgentRuntimeError({
-                reason: "runtime",
-                message: "pi session operation failed",
-                cause
-              })
-            })
-          : Effect.fail(new AgentRuntimeError({
-              reason: "runtime",
-              message: `pi session is not active: ${parentRuntimeSessionId}`
-            }))
-      }
+      )
     }
   })
 

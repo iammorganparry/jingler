@@ -1,7 +1,7 @@
 import type { AgentRunSpec } from "@jingler/core"
 import { Effect } from "effect"
 import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
-import type { AgentRuntimeContext } from "./agent-runtime.js"
+import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 
@@ -54,15 +54,18 @@ export const rebindablePiSessionContext = (
   holder: { current: AgentRuntimeContext }
 ): AgentRuntimeContext => ({
   get planning() { return holder.current.planning },
-  get mcp() {
-    return holder.current.mcp
-  },
+  get mcp() { return holder.current.mcp },
+  isPlanReviewPending: () => holder.current.isPlanReviewPending?.() ?? false,
   publishEvent: (event) => holder.current.publishEvent(event),
+  recordUsage: (fact) => holder.current.recordUsage?.(fact) ?? Effect.void,
   registerBackgroundStop: (stop) => holder.current.registerBackgroundStop(stop),
   canUseTool: (request) => holder.current.canUseTool(request),
   askQuestion: (request) => holder.current.askQuestion(request),
   publishExplanation: (explanation) =>
     holder.current.publishExplanation?.(explanation) ?? Effect.void,
+  listPeerAgents: () => holder.current.listPeerAgents?.() ?? Effect.succeed([]),
+  messagePeerAgent: (chatId, text) => holder.current.messagePeerAgent?.(chatId, text) ??
+    Effect.die(new Error("Peer agent messaging is unavailable"))
 })
 
 /** Session/chat-owned PI handles retained until their final detached child settles. */
@@ -80,25 +83,50 @@ export class RetainedPiSessionRegistry {
     spec: AgentRunSpec,
     context: AgentRuntimeContext
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
-    const dynamicCatalog = this.factory.lockedCapabilityFingerprint?.(spec, context) ??
+    return this.#acquireWithFactory(spec, context, this.factory, false)
+  }
+
+  /** Native parent continuations are not PI IDs, so retained sidecars match by chat. */
+  acquireByChat(
+    spec: AgentRunSpec,
+    context: AgentRuntimeContext,
+    factory: PiSessionFactory
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    return this.#acquireWithFactory(spec, context, factory, true)
+  }
+
+  #acquireWithFactory(
+    spec: AgentRunSpec,
+    context: AgentRuntimeContext,
+    factory: PiSessionFactory,
+    byChat: boolean
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    const dynamicCatalog = factory.lockedCapabilityFingerprint?.(spec, context) ??
       Effect.succeed("")
     return dynamicCatalog.pipe(
       Effect.flatMap((dynamic) => this.#acquire(
         spec,
         context,
-        lockedCapabilityFingerprint(spec, context, dynamic)
+        factory,
+        lockedCapabilityFingerprint(spec, context, dynamic),
+        byChat
       ))
     )
   }
 
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: ownership, activity, and capability checks form one atomic acquisition gate.
   #acquire(
     spec: AgentRunSpec,
     context: AgentRuntimeContext,
-    capabilityFingerprint: string
+    factory: PiSessionFactory,
+    capabilityFingerprint: string,
+    byChat: boolean
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
-    const retained = spec.continuation === null
-      ? undefined
-      : this.#aliases.get(spec.continuation.id)
+    const retained = byChat
+      ? this.#recordByChat(spec.sessionId, spec.chatId)
+      : spec.continuation === null
+        ? undefined
+        : this.#aliases.get(spec.continuation.id)
     if (retained) {
       if (retained.sessionId !== spec.sessionId || retained.chatId !== spec.chatId) {
         return Effect.fail(new AgentRuntimeError({
@@ -109,7 +137,7 @@ export class RetainedPiSessionRegistry {
       if (retained.disposing || retained.activeTurns !== 0) {
         return Effect.fail(new AgentRuntimeError({
           reason: "runtime",
-          message: `pi session is already active: ${spec.continuation?.id}`
+          message: `pi session is already active: ${spec.continuation?.id ?? retained.handle.id}`
         }))
       }
       if (
@@ -117,8 +145,17 @@ export class RetainedPiSessionRegistry {
         retained.modelId !== spec.modelId ||
         retained.capabilityFingerprint !== capabilityFingerprint
       ) {
+        if (byChat) {
+          return this.#replaceIdleNativeHost(
+            retained,
+            spec,
+            context,
+            factory,
+            capabilityFingerprint
+          )
+        }
         return Effect.promise(() => this.#dispose(retained)).pipe(
-          Effect.flatMap(() => this.#create(spec, context, capabilityFingerprint))
+          Effect.flatMap(() => this.#create(spec, context, factory, capabilityFingerprint))
         )
       }
       if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
@@ -128,16 +165,72 @@ export class RetainedPiSessionRegistry {
       if (retained.handle.toolRegistry) context.planning?.attachRegistry(retained.handle.toolRegistry)
       return Effect.succeed(retained)
     }
-    return this.#create(spec, context, capabilityFingerprint)
+    return this.#create(spec, context, factory, capabilityFingerprint)
+  }
+
+  #replaceIdleNativeHost(
+    retained: RetainedPiSession,
+    spec: AgentRunSpec,
+    context: AgentRuntimeContext,
+    factory: PiSessionFactory,
+    capabilityFingerprint: string
+  ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    retained.activeTurns = 1
+    return Effect.tryPromise({
+      try: async () => {
+        let active = true
+        try {
+          active = (await retained.handle.subagentFleetSnapshot()).totalActive > 0
+        } catch {
+          // An unreadable Fleet is not safe to replace.
+        }
+        if (active) {
+          retained.activeTurns = 0
+          await this.#reconcileLifetime(retained)
+          throw new AgentRuntimeError({
+            reason: "runtime",
+            message: "Native subagent host capabilities changed while detached work is active"
+          })
+        }
+        const continuationId = retained.handle.id
+        await this.#dispose(retained)
+        return await Effect.runPromise(this.#create(
+          spec,
+          context,
+          factory,
+          capabilityFingerprint,
+          continuationId
+        ))
+      },
+      catch: (cause) => cause instanceof AgentRuntimeError
+        ? cause
+        : new AgentRuntimeError({
+            reason: "runtime",
+            message: "Could not replace idle native subagent host",
+            cause
+          })
+    })
   }
 
   #create(
     spec: AgentRunSpec,
     context: AgentRuntimeContext,
-    capabilityFingerprint: string
+    factory: PiSessionFactory,
+    capabilityFingerprint: string,
+    continuationId?: string
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const contextHolder = { current: context }
-    return this.factory.create(spec, rebindablePiSessionContext(contextHolder)).pipe(
+    const createSpec = continuationId === undefined
+      ? spec
+      : {
+          ...spec,
+          continuation: {
+            runtimeId: spec.runtimeId,
+            endpointId: spec.endpointId,
+            id: continuationId
+          }
+        }
+    return factory.create(createSpec, rebindablePiSessionContext(contextHolder)).pipe(
       Effect.map((handle) => {
         const aliases = new Set([handle.id, handle.parentRuntimeSessionId])
         const record: RetainedPiSession = {
@@ -177,13 +270,17 @@ export class RetainedPiSessionRegistry {
       : undefined
   }
 
-  lookupByChat(sessionId: string, chatId: string): PiSessionHandle | undefined {
+  #recordByChat(sessionId: string, chatId: string): RetainedPiSession | undefined {
     for (const record of this.#aliases.values()) {
       if (record.sessionId === sessionId && record.chatId === chatId && !record.disposing) {
-        return record.handle
+        return record
       }
     }
     return undefined
+  }
+
+  lookupByChat(sessionId: string, chatId: string): PiSessionHandle | undefined {
+    return this.#recordByChat(sessionId, chatId)?.handle
   }
 
   lookupTranscriptOwned(
@@ -254,6 +351,71 @@ export class RetainedPiSessionRegistry {
           }
         }
       }
+    }
+  }
+}
+
+export type RetainedPiFleetHandlers = Pick<
+  AgentRuntimeShape,
+  "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
+>
+
+/** Owner-checked Fleet operations shared by PI and retained native sidecars. */
+export const retainedPiFleetHandlers = (
+  sessions: RetainedPiSessionRegistry
+): RetainedPiFleetHandlers => {
+  const operation = <Value>(
+    available: boolean,
+    id: string,
+    action: () => Promise<Value>
+  ): Effect.Effect<Value, AgentRuntimeError> => available
+    ? Effect.tryPromise({
+        try: action,
+        catch: (cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: "pi session operation failed",
+          cause
+        })
+      })
+    : Effect.fail(new AgentRuntimeError({
+        reason: "runtime",
+        message: `pi session is not active: ${id}`
+      }))
+
+  return {
+    controlSubagent: (_owner, sessionId, chatId, request) => {
+      const session = sessions.lookupOwned(sessionId, chatId, request.parentRuntimeSessionId)
+      return operation(
+        session !== undefined,
+        request.parentRuntimeSessionId,
+        () => session!.controlSubagent(request)
+      )
+    },
+    subagentFleetSnapshot: (_owner, sessionId, chatId, parentRuntimeSessionId) => {
+      const session = sessions.lookupOwned(sessionId, chatId, parentRuntimeSessionId)
+      return operation(
+        session !== undefined,
+        parentRuntimeSessionId,
+        () => session!.subagentFleetSnapshot()
+      )
+    },
+    subagentTranscript: (
+      _owner,
+      sessionId,
+      chatId,
+      parentRuntimeSessionId,
+      runId
+    ) => {
+      const read = sessions.lookupTranscriptOwned(
+        sessionId,
+        chatId,
+        parentRuntimeSessionId
+      )
+      return operation(
+        read !== undefined,
+        parentRuntimeSessionId,
+        () => read!(runId)
+      )
     }
   }
 }

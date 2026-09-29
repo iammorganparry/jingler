@@ -203,6 +203,29 @@ describe("native external-job provider", () => {
     }
   )
 
+  it("rebinds later same-chat launches to the current parent turn", async () => {
+    const host = makeNativeExternalJobProvider(await stateRoot())
+    const seen: AgentRunSpec[] = []
+    const recordUsage = vi.fn(() => Effect.void)
+    const modelId = ProviderModelId.make("codex/cheap")
+    const binding = host.bind({
+      parentPiSessionId: "pi-session",
+      spec: spec("codex"),
+      context: context(recordUsage),
+      models: { worker: modelId },
+      makeRuntime: () => runtime(seen)
+    })
+    binding.rebind({ ...spec("codex"), runId: "codex-current-parent" }, { worker: modelId })
+
+    const started = await host.provider.start(startInput(binding.bindingId, modelId))
+    await terminalResult(host.provider, started.providerJobId)
+
+    expect(seen[0]?.runId).toContain("codex-current-parent:child:")
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      parentRunId: "codex-current-parent"
+    }))
+  })
+
   it("continues follow-ups in the native conversation and reattaches without redispatch", async () => {
     const host = makeNativeExternalJobProvider(await stateRoot())
     const seen: AgentRunSpec[] = []

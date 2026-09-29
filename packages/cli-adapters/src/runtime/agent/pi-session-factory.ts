@@ -190,8 +190,10 @@ export interface PiSessionFactoryOptions {
   readonly configureNativeAsyncSubagents?: (input: {
     readonly eventBus: EventBus
     readonly parentPiSessionId: string
+    readonly context: AgentRuntimeContext
   }) => Effect.Effect<{
     readonly agentNames: Readonly<Record<string, string>>
+    readonly rebind?: (spec: AgentRunSpec, models: SubagentModelAssignments) => void
     readonly dispose: () => void
   }, AgentRuntimeError>
 }
@@ -432,6 +434,7 @@ interface SessionHandleInput {
   readonly fleetEvents: SubagentFleetEventHubShape
   readonly nativeAsyncSubagents?: {
     readonly agentNames: Readonly<Record<string, string>>
+    readonly rebind?: (spec: AgentRunSpec, models: SubagentModelAssignments) => void
     readonly dispose: () => void
   }
 }
@@ -499,7 +502,12 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
       lifecycle.delegate(request, signal, onUpdate),
     spawnSubagent: makePiSubagentAsyncDelegate(input.eventBus),
     ...(input.nativeAsyncSubagents
-      ? { subagentAgentNames: input.nativeAsyncSubagents.agentNames }
+      ? {
+          subagentAgentNames: input.nativeAsyncSubagents.agentNames,
+          ...(input.nativeAsyncSubagents.rebind
+            ? { rebindNativeAsyncSubagents: input.nativeAsyncSubagents.rebind }
+            : {})
+        }
       : {}),
     prompt: (text, images) => session.prompt(text, {
       images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
@@ -820,7 +828,8 @@ function* bindSubagentCapabilities(
   const nativeAsyncSubagents = options.configureNativeAsyncSubagents
     ? yield* options.configureNativeAsyncSubagents({
         eventBus: prepared.eventBus,
-        parentPiSessionId: parentRuntimeSessionId
+        parentPiSessionId: parentRuntimeSessionId,
+        context
       }).pipe(Effect.onError(() => rollbackSession))
     : undefined
   return yield* observeSessionDiagnostics(

@@ -70,6 +70,7 @@ interface NativeExternalJobRecord {
 export interface NativeExternalJobProfileSet {
   readonly bindingId: string
   readonly names: Readonly<Record<string, string>>
+  rebind(spec: NativeExternalJobBinding["spec"], models: SubagentModelAssignments): void
   dispose(): void
 }
 
@@ -469,6 +470,10 @@ export const makeNativeExternalJobProvider = (
       return {
         bindingId,
         names,
+        rebind: (spec, models) => {
+          const current = bindings.get(bindingId)
+          if (current !== undefined) bindings.set(bindingId, { ...current, spec, models })
+        },
         dispose: () => { bindings.delete(bindingId) }
       }
     }

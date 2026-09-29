@@ -12,7 +12,8 @@ import {
   piEndpointId,
   piEndpointTargets,
   ProviderConnectionId,
-  ProviderId
+  ProviderId,
+  ProviderModelId
 } from "@jingler/core"
 import { FileSystem, Path } from "@effect/platform"
 import { Effect, Layer, Option } from "effect"
@@ -73,7 +74,7 @@ import { makeClaudeRuntimeRegistration } from "./claude-agent-runtime.js"
 import { makeCodexAgentRuntime, makeCodexRuntimeRegistration } from "../codex/runtime.js"
 import { makeOpenCodeAgentRuntime, makeOpenCodeRuntimeRegistration } from "../opencode/runtime.js"
 import type { NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
-import { makePiAgentRuntime } from "./pi-agent-runtime.js"
+import { makePiAgentRuntime, type PiSessionFactory } from "./pi-agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
 import { makePiSessionFactory } from "./pi-session-factory.js"
 import { registerNativeSubagentTool, type NativeSubagentDelegate } from "./native-subagent-tool.js"
@@ -86,6 +87,10 @@ import {
 import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import { makeSubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
+import {
+  retainedPiFleetHandlers,
+  RetainedPiSessionRegistry
+} from "./retained-pi-session-registry.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
@@ -547,6 +552,8 @@ export const makePiAgentRuntimeLive = (
 
     const factory = makePiSessionFactory(factoryOptions)
     const runtime = yield* makePiAgentRuntime(factory)
+    const nativeSessions = new RetainedPiSessionRegistry(factory, 1_000)
+    const nativeFleet = retainedPiFleetHandlers(nativeSessions)
     const baseNativeTools: NativeRuntimeToolsOptions = {
       createToolRegistry: (spec, context) => Effect.acquireRelease(
         Effect.sync(() => factoryOptions.terminalTracker(spec)),
@@ -571,15 +578,22 @@ export const makePiAgentRuntimeLive = (
         toolRegistry: registry,
         terminalTracker: undefined,
         delegationOnly: true,
+        lockedCapabilityFingerprint: (lockedSpec, _lockedContext) =>
+          (factoryOptions.lockedCapabilityFingerprint?.(lockedSpec) ??
+            Effect.succeed("")).pipe(Effect.map((base) => JSON.stringify({
+              base,
+              nativeRuntimeId: spec.runtimeId,
+              models: Object.entries(models).sort(([left], [right]) => left.localeCompare(right))
+            }))),
         ...(nativeLeaf
           ? {
-              configureNativeAsyncSubagents: ({ eventBus, parentPiSessionId }) =>
+              configureNativeAsyncSubagents: ({ eventBus, parentPiSessionId, context: liveContext }) =>
                 Effect.try({
                   try: () => {
                     const profiles = nativeExternalJobs.bind({
                       parentPiSessionId,
                       spec: nativeLeaf,
-                      context,
+                      context: liveContext,
                       models,
                       makeRuntime: (runtimeId) => runtimeId === "codex"
                         ? makeCodexAgentRuntime(baseNativeTools)
@@ -593,6 +607,14 @@ export const makePiAgentRuntimeLive = (
                     )
                     return {
                       agentNames: registered.names,
+                      rebind: (nextSpec, nextModels) => {
+                        if (isNativeExternalJobRuntime(nextSpec.runtimeId)) {
+                          registered.rebind(
+                            nextSpec as AgentRunSpec & { readonly runtimeId: "codex" | "opencode" },
+                            nextModels
+                          )
+                        }
+                      },
                       dispose: registered.dispose
                     }
                   },
@@ -605,27 +627,42 @@ export const makePiAgentRuntimeLive = (
             }
           : {})
       })
-      const handle = yield* Effect.acquireRelease(
-        sidecar.create({
-          ...spec,
-          runId: `${spec.runId}:delegation-host`,
-          runtimeId: "pi",
-          endpointId: piEndpointId(spec.targetCapabilities.targetId, connection.id),
-          connectionId: connection.id,
-          providerId: connection.providerId,
-          prompt: "",
-          priorMessages: [],
-          continuation: null,
-          seed: null
-        }, context),
-        (owned) => Effect.promise(async () => { await owned.dispose() })
+      const retainedFactory: PiSessionFactory = {
+        ...sidecar,
+        create: (sidecarSpec, liveContext) => sidecar.create(sidecarSpec, liveContext).pipe(
+          Effect.map((handle) => {
+            const unsubscribe = handle.subscribeFleet((event) => {
+              Effect.runFork(liveContext.publishEvent(event))
+            })
+            return {
+              ...handle,
+              dispose: async () => {
+                unsubscribe()
+                await handle.dispose()
+              }
+            }
+          })
+        )
+      }
+      const sidecarSpec: AgentRunSpec = {
+        ...spec,
+        runId: `${spec.runId}:delegation-host`,
+        runtimeId: "pi",
+        endpointId: piEndpointId(spec.targetCapabilities.targetId, connection.id),
+        connectionId: connection.id,
+        providerId: connection.providerId,
+        modelId: ProviderModelId.make("anthropic/sonnet"),
+        prompt: "",
+        priorMessages: [],
+        continuation: null,
+        seed: null
+      }
+      const retained = yield* Effect.acquireRelease(
+        nativeSessions.acquireByChat(sidecarSpec, context, retainedFactory),
+        (owned) => Effect.promise(() => nativeSessions.release(owned))
       )
-      yield* Effect.acquireRelease(
-        Effect.sync(() => handle.subscribeFleet((event) => {
-          Effect.runFork(context.publishEvent(event))
-        })),
-        (unsubscribe) => Effect.sync(unsubscribe)
-      )
+      const handle = retained.handle
+      if (nativeLeaf) handle.rebindNativeAsyncSubagents?.(nativeLeaf, models)
       yield* Effect.sync(() => registerNativeSubagentTool(
         registry,
         spec,
@@ -636,6 +673,7 @@ export const makePiAgentRuntimeLive = (
       return registry
     })
     const nativeTools: NativeRuntimeToolsOptions = {
+      subagentFleet: nativeFleet,
       createToolRegistry: (spec, context) => Effect.gen(function* () {
         const registry = yield* baseNativeTools.createToolRegistry!(spec, context)
         const subagents = yield* factoryOptions.resolveSubagentConfig(spec).pipe(
