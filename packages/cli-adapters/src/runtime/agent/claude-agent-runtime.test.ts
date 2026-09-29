@@ -2,7 +2,7 @@ import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process"
 import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { chmod, mkdtemp, writeFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   nativeCliEndpointId,
@@ -125,7 +125,12 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
       JINGLER_PROVIDER_ACCESS: "secret",
       OPENAI_API_KEY: "secret",
       CUSTOM_TOKEN: "secret"
-    })).toEqual({ PATH: "/bin", HOME: "/home/test" })
+    }, "linux")).toEqual({ PATH: "/bin", HOME: "/home/test" })
+  })
+
+  it("adds Homebrew binary directories for a macOS GUI environment", () => {
+    expect(nativeCliEnvironment({ PATH: "/usr/bin", HOME: "/Users/test" }, "darwin").PATH?.split(delimiter))
+      .toEqual(["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
   })
 
   it("seeds transcript text and images into a fresh native session", async () => {

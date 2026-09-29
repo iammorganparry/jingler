@@ -98,6 +98,12 @@ console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firs
     )
   })
 
+  it("distinguishes a missing CLI from a signed-out CLI", async () => {
+    await expect(checkClaudeSubscription("/nonexistent/claude", process.env)).rejects.toThrow(
+      "Claude CLI is not installed"
+    )
+  })
+
   it("does not create a relay when cancellation arrives during authentication", async () => {
     const controller = new AbortController()
     let relayStarted = false
