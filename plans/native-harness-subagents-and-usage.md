@@ -12,8 +12,8 @@
 
 ## Retained background and workflow slice
 
-- [~] Extract the existing retained PI session registry into a reusable session/chat-owned host that keeps delegation-only PI handles alive while detached work is active, rebinds each live turn context, archives transcripts, and disposes exactly once after the final child settles.
-- [ ] Extend the native `subagent` tool with bounded async single, parallel, and chain requests while preserving the current foreground single-child path; translate the structured request into pi-subagents' public async RPC instead of adding a second workflow engine.
+- [x] Extract the existing retained PI session registry into a reusable session/chat-owned host that keeps delegation-only PI handles alive while detached work is active, rebinds each live turn context, archives transcripts, and disposes exactly once after the final child settles.
+- [~] Extend the native `subagent` tool with bounded async single, parallel, and chain requests while preserving the current foreground single-child path; translate the structured request into pi-subagents' public async RPC instead of adding a second workflow engine.
 - [ ] Register Jingler-owned native external-job profiles/provider bindings for Codex and OpenCode async leaves, keyed by parent PI session and role/model assignment, while Claude continues through its bundled PI provider route. Persist provider-job identity, terminal output, usage provenance, and transcript material needed for reattachment without redispatch.
 - [ ] Route native Claude, Codex, and OpenCode fleet snapshots, transcripts, and controls through the retained host after the parent turn ends. Support stop and follow-up everywhere; use live steer/reply only where the underlying runtime supports it, returning explicit unsupported outcomes elsewhere.
 - [ ] Recover retained hosts and terminal transcripts from durable lifecycle artifacts after reload/restart. Proven-active PI children remain attached; native jobs that cannot be proven live fail closed and are never silently restarted or double-counted.
