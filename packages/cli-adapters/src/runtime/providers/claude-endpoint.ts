@@ -6,7 +6,7 @@ import {
   type AgentEndpointCatalogEntry,
   type AgentEndpointStatus
 } from "@jingler/core"
-import { nativeCliEnvironment } from "./native-cli-environment.js"
+import { claudeCliEnvironment } from "./claude-cli-environment.js"
 
 interface ClaudeAuthStatus {
   readonly loggedIn?: boolean
@@ -94,7 +94,7 @@ export const probeClaudeEndpoint = async (
   options: ClaudeEndpointProbeOptions = {}
 ): Promise<AgentEndpointCatalogEntry> => {
   const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
-  const environment = nativeCliEnvironment(options.environment ?? process.env)
+  const environment = claudeCliEnvironment(options.environment ?? process.env)
   const targetId = options.targetId ?? "desktop"
   let version: string | null = null
   let status: AgentEndpointStatus = "error"

@@ -2,7 +2,7 @@ import { spawn, type SpawnOptionsWithoutStdio } from "node:child_process"
 import { latestClaudeCliRateLimits, resetClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import { chmod, mkdtemp, writeFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { delimiter, join } from "node:path"
 import {
   CURRENT_RUNTIME_CONTRACTS,
   nativeCliEndpointId,
@@ -17,6 +17,7 @@ import {
 } from "./claude-agent-runtime.js"
 import { probeClaudeEndpoint } from "../providers/claude-endpoint.js"
 import * as toolRelay from "../providers/registry-mcp-relay.js"
+import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import { AgentRuntimeError, inactiveRuntimeActivity } from "./agent-runtime.js"
@@ -126,6 +127,11 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
       OPENAI_API_KEY: "secret",
       CUSTOM_TOKEN: "secret"
     })).toEqual({ PATH: "/bin", HOME: "/home/test" })
+  })
+
+  it("adds Homebrew binary directories for a macOS GUI environment", () => {
+    expect(claudeCliEnvironment({ PATH: "/usr/bin", HOME: "/Users/test" }, "darwin").PATH?.split(delimiter))
+      .toEqual(["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
   })
 
   it("seeds transcript text and images into a fresh native session", async () => {

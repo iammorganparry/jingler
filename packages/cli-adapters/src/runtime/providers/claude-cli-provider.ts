@@ -23,6 +23,7 @@ import {
   type RelayedToolCall
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
+import { withClaudeCliPath } from "./claude-cli-environment.js"
 import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
@@ -76,7 +77,7 @@ export interface ClaudeCliProviderOptions {
 const subscriptionEnvironment = (
   environment: NodeJS.ProcessEnv
 ): NodeJS.ProcessEnv => {
-  const sanitized = { ...environment }
+  const sanitized = withClaudeCliPath(environment)
   for (const key of [
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -97,7 +98,10 @@ export const checkClaudeSubscription = async (
   let stdout: string
   try {
     stdout = await execFileText(binary, ["auth", "status"], { env: environment, timeout: 5_000, signal })
-  } catch {
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+      throw new Error("Claude CLI is not installed")
+    }
     throw new Error("Claude CLI is not authenticated with a subscription")
   }
   let parsed: unknown
