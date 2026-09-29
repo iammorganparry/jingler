@@ -93,6 +93,21 @@ describe("MessageTurn streaming text", () => {
     expect(view.container.textContent).not.toContain("[DONE:8]")
   })
 
+  it("renders complete progress markers as chips while the message is streaming", () => {
+    const view = render(
+      <PlanProgressContext.Provider value={planDocument}>
+        <MessageTurn message={assistant({
+          parts: [{ _tag: "Text", text: "Starting. [ACTIVE:8] [BLOCKED:8]" }]
+        })} />
+      </PlanProgressContext.Provider>
+    )
+
+    expect(screen.getByLabelText("Step 8: In progress")).toBeTruthy()
+    expect(screen.getByLabelText("Step 8: Blocked")).toBeTruthy()
+    expect(view.container.textContent).not.toContain("[ACTIVE:8]")
+    expect(view.container.textContent).not.toContain("[blocked]")
+  })
+
   it("does not mark completed messages or a text part followed by another part", () => {
     const completed = render(<MessageTurn message={assistant({ streaming: false })} />)
     expect(completed.container.querySelector(".jingler-streaming-text")).toBeNull()

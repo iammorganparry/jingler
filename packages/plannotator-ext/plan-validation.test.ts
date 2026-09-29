@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { validatePlanMarkdown } from "./plan-validation.ts"
 
-const validStage = `## Ship auth <!-- id: ship-auth -->
+const validStage = `## Proposed flow
+\`\`\`mermaid
+flowchart LR
+  input --> auth
+\`\`\`
+
+## Ship auth <!-- id: ship-auth -->
 Users can sign in.
 
 ### Approach
@@ -30,6 +36,13 @@ describe("validatePlanMarkdown", () => {
     expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
   })
 
+  it("rejects a pathless diff fence", () => {
+    for (const fence of ["```diff", "  ```diff"]) {
+      const plan = validStage.replace("### Files", `${fence}\n@@ -1 +1 @@\n-old\n+new\n  \`\`\`\n\n### Files`)
+      expect(validatePlanMarkdown(plan)).toContain('Every ```diff fence needs a repository-relative "path=".')
+    }
+  })
+
   it("rejects unsafe change paths and a missing test strategy", () => {
     const unsafe = (path: string) =>
       validStage.replace("### Files", `\`\`\`diff path=${path}\n@@ -1 +1 @@\n\`\`\`\n\n### Files`)
@@ -43,6 +56,9 @@ describe("validatePlanMarkdown", () => {
     expect(validatePlanMarkdown(validStage.replace(/## Test strategy[\s\S]*/, ""))).toEqual([
       'Plan needs a "## Test strategy" section.'
     ])
+    expect(validatePlanMarkdown(validStage.replace(/## Proposed flow[\s\S]*?## Ship auth/, "## Ship auth"))).toContain(
+      "Plan needs a top-level Mermaid flow diagram."
+    )
     expect(validatePlanMarkdown("## Legacy stage\n- [ ] Do it\n")).toEqual([])
   })
 

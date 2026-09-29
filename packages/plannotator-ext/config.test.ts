@@ -52,7 +52,12 @@ describe("bundled planning instructions", () => {
   const instructions = bundled.phases.planning.instructions;
   const example = /````md\n([\s\S]*?)\n````/.exec(instructions)?.[1] ?? "";
 
-  it("planning instructions require diffs diagrams and test strategy", () => {
+  it("planning instructions require concise structured plans", () => {
+    expect(instructions).toContain("Keep the plan scan-first");
+    expect(instructions).toContain("Up to three concrete implementation choices");
+    expect(instructions).toContain("Do not add separate global file, reuse, approach, or verification sections");
+    expect(instructions).toContain("For every staged plan, include one top-level Mermaid flow");
+    expect(instructions).not.toContain("Skip diagrams for trivial");
     expect(instructions).toContain("%% link <nodeId> file:");
     expect(instructions).toContain("diff path=<repo-relative path>");
     expect(instructions).toContain("test[unit|integration|e2e|manual]");
@@ -67,12 +72,12 @@ describe("bundled planning instructions", () => {
     ]);
     expect(parsed.stages[0]?.acceptance[0]?.testReferences?.[0]?.kind).toBe("unit");
     expect(parsed.sections.some((section) =>
-      section.blocks.some((block) => block.kind === "diagram" && block.source.includes("%% link review stage:stable-stage-id")),
+      section.blocks.some((block) => block.kind === "diagram" && block.source.includes("%% link change stage:stable-stage-id")),
     )).toBe(true);
   });
 
   it("the example would be rejected without its test strategy", () => {
-    const withoutStrategy = example.replace(/## Test strategy\n[^\n]*\n/, "");
+    const withoutStrategy = example.replace(/## Test strategy[\s\S]*$/, "");
     expect(validatePlanMarkdown(withoutStrategy)).toContain('Plan needs a "## Test strategy" section.');
   });
 });

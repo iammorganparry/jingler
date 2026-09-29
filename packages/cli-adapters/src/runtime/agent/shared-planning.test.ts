@@ -153,6 +153,21 @@ describe("shared harness planning", () => {
     expect(await sharedPlanReviewPending(join(f.root, "state"), "s", "a")).toBe(false)
   })
 
+  it("publishes parsed sections without stages", async () => {
+    const f = await setup()
+    await writeFile(join(f.root, "prose.md"), "# Design notes\n\nThis plan is prose only.\n")
+    const runtime = f.wrap(async function* (registry, spec, context) {
+      await call(registry, spec, context, "plannotator_update_plan", { filePath: "prose.md" })
+      yield done
+    })
+    await f.run(runtime)
+    expect(f.projections().at(-1)).toMatchObject({
+      title: "Design notes",
+      stages: [],
+      sections: [{ title: null, blocks: [{ kind: "prose", text: "This plan is prose only." }] }]
+    })
+  })
+
   it("isolates chat plans and denies progress writes in read-only mode", async () => {
     const f = await setup()
     const runtime = f.wrap(async function* (registry, spec, context) {

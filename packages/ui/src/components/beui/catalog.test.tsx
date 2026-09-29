@@ -19,6 +19,23 @@ describe("BeUI motion catalog", () => {
     expect(onChange).toHaveBeenCalledWith("two")
   })
 
+  it("lets segmented tabs shrink inside narrow panels", () => {
+    const view = render(<MotionTabs
+      variant="segment"
+      value="all"
+      items={[
+        { value: "all", label: "All files" },
+        { value: "local", label: "Uncommitted" },
+        { value: "pr", label: "Pull request" }
+      ]}
+    />)
+
+    expect(view.container.querySelector("[role='tablist']")?.className).toContain("min-w-0")
+    const tab = screen.getByRole("tab", { name: "Pull request" })
+    expect(tab.parentElement?.className).toContain("flex-1")
+    expect(tab.className).toContain("overflow-hidden")
+  })
+
   it("keeps the official BeUI control geometry and behavior", () => {
     const onClick = vi.fn()
     const onCheckedChange = vi.fn()

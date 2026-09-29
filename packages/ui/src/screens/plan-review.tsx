@@ -1,10 +1,12 @@
-import type { PlanDocument, PlanPrd, PlanPrdStage } from "@jingler/core"
-import { MessageSquarePlus, X } from "lucide-react"
+import type { PlanAnnotation, PlanAnnotationAnchor, PlanDocument, PlanPrd } from "@jingler/core"
+import { MessageSquarePlus } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Button } from "../components/button.js"
-import { Markdown } from "../components/markdown.js"
-import { MermaidDiagram } from "../components/mermaid-diagram.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
+import { PlanCommentLayer } from "../composites/plan-comment-layer.js"
+import { loadPlanComments, savePlanComments } from "../composites/plan-comment-store.js"
+import { buildAnchorFromRange } from "../composites/plan-doc/plan-anchor-dom.js"
+import { PlanStageCard } from "../composites/plan-stage-card.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
 
 export interface PlanReviewComment {
@@ -50,80 +52,48 @@ export const planFeedbackMarkdown = (
   return parts.join("\n")
 }
 
-function AcceptanceTable({ stage }: { stage: PlanPrdStage }) {
-  if (stage.acceptance.length === 0) return null
-  return (
-    <>
-    <h3 className="sb-plan-heading">Acceptance</h3>
-    <div className="overflow-x-auto">
-      <table aria-label={`${stage.title} acceptance`}>
-        <thead><tr><th>Kind</th><th>Criterion</th><th>Test</th></tr></thead>
-        <tbody>
-          {stage.acceptance.map((criterion) => {
-            const references = criterion.testReferences ?? []
-            return (
-              <tr key={criterion.id}>
-                <td>{references.map((ref) => ref.kind ?? "—").join(", ") || "—"}</td>
-                <td><Markdown>{criterion.text}</Markdown></td>
-                <td className="font-mono text-[11px]">
-                  {references.map((ref) => `${ref.path}::${ref.cases.join(", ")}`).join("; ") || "—"}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
-    </>
-  )
+type Selection = {
+  readonly quote: string
+  readonly stageId?: string
+  readonly anchor?: PlanAnnotationAnchor
+  readonly top: number
+  readonly left: number
 }
 
-function StageView({ stage }: { stage: PlanPrdStage }) {
-  const tasks = stage.tasks ?? []
-  const body = [...stage.notes, ...(stage.walkthrough ?? [])]
-  return (
-    <section data-stage={stage.id} aria-labelledby={`stage-${stage.id}`} className="border-t border-line pt-4">
-      <h2 id={`stage-${stage.id}`} className="sb-plan-heading">{stage.title}</h2>
-      {stage.intent.length > 0 && <Markdown>{stage.intent}</Markdown>}
-      {stage.approach.length > 0 && (
-        <>
-          <h3 className="sb-plan-heading">Approach</h3>
-          <ul>{stage.approach.map((step, index) => <li key={index}><Markdown>{step}</Markdown></li>)}</ul>
-        </>
-      )}
-      {body.length > 0 && <VisualBlocks blocks={body} />}
-      {stage.diagrams.map((diagram) => <MermaidDiagram key={diagram.id} source={diagram.source} />)}
-      {tasks.length > 0 && (
-        <>
-          <h3 className="sb-plan-heading">Tasks</h3>
-          <ul>
-            {tasks.map((task) => (
-              <li key={task.id} data-task-status={task.status}>
-                {task.status === "completed" ? "☑" : "☐"} {task.text}
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-      <AcceptanceTable stage={stage} />
-      {stage.files.length > 0 && (
-        <>
-          <h3 className="sb-plan-heading">Files</h3>
-          <ul>{stage.files.map((file) => <li key={file.path}><code>{file.path}</code> — {file.change}</li>)}</ul>
-        </>
-      )}
-    </section>
-  )
+const currentSelection = (root: HTMLElement, scroller: HTMLElement | null): Selection | null => {
+  const selected = root.ownerDocument.getSelection()
+  if (selected === null || selected.rangeCount === 0) return null
+  const quote = selected.toString().trim()
+  if (quote.length === 0) return null
+  const range = selected.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) return null
+  const anchor = buildAnchorFromRange(root, range)
+  if (anchor === null) return null
+  const node = range.commonAncestorContainer
+  const element = node.nodeType === 1 ? (node as Element) : node.parentElement
+  const base = (scroller ?? root).getBoundingClientRect()
+  const rect = range.getBoundingClientRect()
+  return {
+    quote,
+    anchor,
+    stageId: element?.closest("[data-stage]")?.getAttribute("data-stage") ?? undefined,
+    top: rect.bottom - base.top + (scroller?.scrollTop ?? 0) + 4,
+    left: rect.left - base.left + (scroller?.scrollLeft ?? 0)
+  }
 }
-
-type Selection = { readonly quote: string; readonly stageId?: string; readonly top: number; readonly left: number }
 
 export function PlanReview({ document, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
   const container = useRef<HTMLDivElement | null>(null)
+  const content = useRef<HTMLElement | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
   const [draft, setDraft] = useState<Selection | null>(null)
   const [draftBody, setDraftBody] = useState("")
-  const [comments, setComments] = useState<ReadonlyArray<PlanReviewComment>>([])
+  const commentIdentity = `${document.sessionId}:${document.producingChatId}:${document.id}`
+  const commentIdentityRef = useRef(commentIdentity)
+  const [comments, setComments] = useState<ReadonlyArray<PlanAnnotation>>(() => {
+    const saved = loadPlanComments(commentIdentity)
+    return saved.length > 0 ? saved : document.plan.annotations
+  })
   const [general, setGeneral] = useState("")
   const [busy, setBusy] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -135,25 +105,19 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const { plan } = document
 
   useEffect(() => {
-    const root = container.current
-    if (root === null || !canDecide) return
-    const onMouseUp = () => {
-      const current = root.ownerDocument.getSelection()
-      const quote = current?.toString().trim() ?? ""
-      if (current === null || current.rangeCount === 0 || quote.length === 0) return setSelection(null)
-      const range = current.getRangeAt(0)
-      if (!root.contains(range.commonAncestorContainer)) return setSelection(null)
-      const node = range.commonAncestorContainer
-      const element = node.nodeType === 1 ? (node as Element) : node.parentElement
-      const base = root.getBoundingClientRect()
-      const rect = range.getBoundingClientRect()
-      setSelection({
-        quote,
-        stageId: element?.closest("[data-stage]")?.getAttribute("data-stage") ?? undefined,
-        top: rect.bottom - base.top + root.scrollTop + 4,
-        left: rect.left - base.left + root.scrollLeft
-      })
+    if (commentIdentityRef.current !== commentIdentity) {
+      commentIdentityRef.current = commentIdentity
+      const saved = loadPlanComments(commentIdentity)
+      setComments(saved.length > 0 ? saved : document.plan.annotations)
+      return
     }
+    savePlanComments(commentIdentity, comments)
+  }, [commentIdentity, comments, document.plan.annotations])
+
+  useEffect(() => {
+    const root = content.current
+    if (root === null || !canDecide) return
+    const onMouseUp = () => setSelection(currentSelection(root, container.current))
     root.addEventListener("mouseup", onMouseUp)
     return () => root.removeEventListener("mouseup", onMouseUp)
   }, [canDecide])
@@ -163,7 +127,15 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     setDecisionError(null)
     try {
       if (approved) await onApprove?.()
-      else await onRevise?.(planFeedbackMarkdown(plan, comments, general))
+      else await onRevise?.(planFeedbackMarkdown(
+        plan,
+        comments.filter((comment) => comment.status === "open").map((comment) => ({
+          stageId: comment.stageId ?? undefined,
+          quote: comment.anchor?.quote ?? plan.stages.find((stage) => stage.id === comment.stageId)?.title ?? plan.title,
+          body: comment.messages.map((message) => message.body).join("\n\n")
+        })),
+        general
+      ))
     } catch (error) {
       setDecisionError(error instanceof Error ? error.message : "Could not send your decision.")
     } finally {
@@ -172,19 +144,53 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   }
 
   const saveDraft = () => {
-    if (draft === null || draftBody.trim().length === 0) return
-    setComments((current) => [
-      ...current,
-      { stageId: draft.stageId, quote: draft.quote, body: draftBody }
-    ])
+    const body = draftBody.trim()
+    if (draft === null || body.length === 0) return
+    const createdAt = new Date().toISOString()
+    const id = crypto.randomUUID()
+    setComments((current) => [...current, {
+      id,
+      stageId: draft.stageId ?? null,
+      body,
+      author: "user",
+      createdAt,
+      status: "open",
+      ...(draft.anchor === undefined ? {} : { anchor: draft.anchor }),
+      messages: [{
+        id: crypto.randomUUID(), body, authorKind: "user", authorId: "operator", createdAt,
+        mentionedParticipantIds: [], deliveryState: "sent"
+      }]
+    }])
     setDraft(null)
     setDraftBody("")
   }
 
+  const commentOnStage = (stageId: string) => {
+    const root = container.current
+    const stage = root?.querySelector<HTMLElement>(`[data-stage="${stageId}"]`)
+    const base = root?.getBoundingClientRect()
+    const rect = stage?.getBoundingClientRect()
+    setDraft({ stageId, quote: stageId, top: rect && base ? rect.top - base.top + (root?.scrollTop ?? 0) + 28 : 16, left: rect && base ? rect.left - base.left + 28 : 16 })
+  }
+
+  const reply = (id: string, body: string) => setComments((current) => current.map((comment) =>
+    comment.id !== id ? comment : {
+      ...comment,
+      messages: [...comment.messages, {
+        id: crypto.randomUUID(), body: body.trim(), authorKind: "user" as const, authorId: "operator",
+        createdAt: new Date().toISOString(), mentionedParticipantIds: [], deliveryState: "sent" as const
+      }]
+    }
+  ))
+
+  const resolve = (id: string, resolved: boolean) => setComments((current) => current.map((comment) =>
+    comment.id === id ? { ...comment, status: resolved ? "resolved" as const : "open" as const } : comment
+  ))
+
   return (
     <section aria-label="Plan review" data-testid="plan-review" className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
       <div ref={container} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <article className="sb-plan mx-auto flex max-w-3xl flex-col gap-4 text-[13px] text-text-body">
+        <article ref={content} className="sb-plan mx-auto flex max-w-3xl flex-col gap-4 text-[13px] text-text-body">
           <h1 className="text-xl font-semibold text-text-bright">{plan.title}</h1>
           {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
             <div className="flex flex-col gap-2">
@@ -212,8 +218,12 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               <VisualBlocks blocks={section.blocks} />
             </section>
           ))}
-          {plan.stages.map((stage) => <StageView key={stage.id} stage={stage} />)}
+          {plan.stages.map((stage, index) => (
+            <PlanStageCard key={stage.id} stage={stage} number={index + 1} onComment={canDecide ? commentOnStage : undefined} />
+          ))}
         </article>
+
+        <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} onReply={reply} onResolve={resolve} />
 
         {selection !== null && draft === null && (
           <button
@@ -235,7 +245,6 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
             style={{ top: draft.top, left: Math.max(8, draft.left) }}
           >
             <textarea
-              autoFocus
               aria-label="Comment"
               value={draftBody}
               onChange={(event) => setDraftBody(event.target.value)}
@@ -252,25 +261,6 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
 
       {canDecide && (
         <footer className="flex flex-col gap-2 border-t border-line bg-panel px-4 py-3">
-          {comments.length > 0 && (
-            <ul aria-label="Review comments" className="flex max-h-40 flex-col gap-1 overflow-y-auto text-[11.5px]">
-              {comments.map((comment, index) => (
-                <li key={index} className="flex items-start gap-2">
-                  <span className="min-w-0 flex-1">
-                    <q className="text-muted-foreground">{comment.quote}</q> — {comment.body}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label={`Remove comment on ${comment.quote}`}
-                    onClick={() => setComments((current) => current.filter((_, i) => i !== index))}
-                    className="text-dim hover:text-text-bright"
-                  >
-                    <X className="size-3.5" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
           {decisionError !== null && <p role="alert" className="text-[11.5px] text-red">{decisionError}</p>}
           <div className="flex items-end gap-2">
             <textarea

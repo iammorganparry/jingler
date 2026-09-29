@@ -46,7 +46,7 @@ describe("locked pi resources", () => {
     expect(prompt).toContain("### Files")
     expect(prompt).toContain("complexity:")
     expect(prompt).toContain("depends:")
-    expect(prompt).toContain("Optional substep")
+    expect(prompt).toContain("Up to three concrete implementation choices")
   })
 
   it("ignores ambient prompts skills extensions themes and context files", async () => {

@@ -148,7 +148,11 @@ const progressTarget = (
   return null
 }
 
-function renderProgressMarkers(text: string, planDocument: PlanDocument | null): ReactNode {
+function renderProgressMarkers(
+  text: string,
+  planDocument: PlanDocument | null,
+  streaming: boolean
+): ReactNode {
     const rendered: ReactNode[] = []
     const seen = new Set<string>()
     let cursor = 0
@@ -161,7 +165,7 @@ function renderProgressMarkers(text: string, planDocument: PlanDocument | null):
       if (!target) continue
       const prose = text.slice(cursor, index).replace(/[ \t]+$/, "")
       if (prose.length > 0) {
-        rendered.push(<StreamingText key={`text-${index}`} text={prose} className={WIDTH} />)
+        rendered.push(<StreamingText key={`text-${index}`} text={prose} streaming={streaming} className={WIDTH} />)
       }
       const status = MARKER_STATUS[match[1] as keyof typeof MARKER_STATUS]
       const key = `${target.taskId}:${status}`
@@ -178,7 +182,7 @@ function renderProgressMarkers(text: string, planDocument: PlanDocument | null):
     }
     if (cursor > 0) {
       const prose = text.slice(cursor).replace(/^[ \t]+/, "")
-      if (prose.length > 0) rendered.push(<StreamingText key="text-tail" text={prose} className={WIDTH} />)
+      if (prose.length > 0) rendered.push(<StreamingText key="text-tail" text={prose} streaming={streaming} className={WIDTH} />)
       return <div className={cn("flex flex-col items-start gap-2", WIDTH)}>{rendered}</div>
     }
   return null
@@ -195,8 +199,8 @@ function MessageText({
 }) {
   const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
-  if (markdown && !streaming) {
-    const progress = renderProgressMarkers(text, planDocument)
+  if (markdown) {
+    const progress = renderProgressMarkers(text, planDocument, streaming)
     if (progress !== null) return progress
   }
   return markdown ? (

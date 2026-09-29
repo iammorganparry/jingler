@@ -8,4 +8,5 @@ description: Use when adding or changing user-visible Electron behavior in Jingl
 2. Keep privileged work in main/plugin host and expose the smallest typed preload contract.
 3. Add one Electron E2E test that exercises the visible behavior, not implementation existence.
 4. Run the focused E2E test and inspect the visible Jingler preview when the feature has a browser surface.
-5. Verify keyboard/accessibility basics and report the exact test command and observed result.
+5. Treat that local QA as the product gate; do not wait for or require a remote `QA Verify` check or bot verdict.
+6. Verify keyboard/accessibility basics and report the exact test command and observed result.
