@@ -300,11 +300,34 @@ jobs:
               "-c.win.azureSignOptions.publisherName=$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"
             )
             echo "Windows Azure Trusted Signing enabled."
+          elif [[ "$RUNNER_OS" == "macOS" ]] && [[ "$CHANNEL" == "stable" ]]; then
+            # An unsigned Mac build is only trusted by its own cdhash: every
+            # update would re-prompt for the "Jingler Safe Storage" keychain
+            # item and Squirrel could not install it. Never ship one as stable.
+            echo "::error::Stable macOS builds must be signed: set all five APPLE_* secrets." >&2
+            exit 1
           else
             unset CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
             echo "Signing disabled for $RUNNER_OS: building unsigned installers."
           fi
           pnpm --filter @jingler/desktop exec electron-builder ${{ matrix.args }} --publish never "${EXTRA[@]}"
+
+      # The keychain trusts the app by its designated requirement. A Developer
+      # ID one (team + bundle id) survives every update; an ad-hoc cdhash one
+      # prompts for the login password after each. Check the shipped bundle.
+      - name: Verify macOS signature
+        if: runner.os == 'macOS' && env.JINGLER_CODESIGN_IDENTITY != ''
+        shell: bash
+        run: |
+          APP=$(find apps/desktop/release -maxdepth 2 -name Jingler.app -type d | head -n 1)
+          codesign --verify --deep --strict "$APP"
+          REQUIREMENT=$(codesign -d -r- "$APP" 2>&1)
+          echo "$REQUIREMENT"
+          if ! grep -q 'anchor apple generic' <<<"$REQUIREMENT" || grep -q 'cdhash' <<<"$REQUIREMENT"; then
+            echo "::error::Jingler.app is not Developer ID signed" >&2
+            exit 1
+          fi
+          spctl -a -vv "$APP"
 
       - name: Inspect desktop and device artifacts
         shell: bash

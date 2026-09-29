@@ -80,7 +80,12 @@ for the full architecture guide; this file is the short list of standing rules.
        leg runs `pnpm artifacts:check` and `scripts/distribution/smoke-packaged-app.mjs`
        (boots the packaged app for 20s). Signing: macOS when all five `APPLE_*`
        secrets exist, Windows via Azure Trusted Signing when the `AZURE_*`
-       secrets exist; otherwise unsigned — never a failure.
+       secrets exist; otherwise unsigned — except a **stable macOS build, which
+       fails without the `APPLE_*` secrets**. An unsigned Mac app is trusted by
+       its cdhash alone, so every update re-prompts for the login keychain
+       password ("Jingler Safe Storage") and Squirrel cannot install it; the
+       *Verify macOS signature* step checks the shipped bundle's designated
+       requirement is Developer ID (team + bundle id), not a cdhash.
      - **publish** — merges each channel's per-arch manifests
        (`scripts/distribution/merge-update-manifests.mjs`), writes `SHA256SUMS`,
        publishes the GitHub Release (stable: *latest*; nightly: prerelease).
