@@ -5,34 +5,26 @@ description: "Plan-mode rules for Jingler's embedded Plannotator extension."
 
 # Jingler Plannotator plan mode
 
-Jingler's pinned Plannotator fork owns one Markdown scratchpad, normally `PLAN.md`. The Plan tab renders plans in Jingler's native review screen. Do not start a localhost server or open an external browser.
+Use one Markdown scratchpad, normally `PLAN.md`. Jingler renders it in the Plan tab; do not start a server or open an external browser.
 
 ## Plan shape
 
-Use ordinary Markdown with this constrained structure:
+Keep plans scan-first. Use a two-to-three sentence outcome, one overview flow when multiple modules or a runtime path change, then reviewable stages:
 
 ```md
----
-title: Short plan title
-revision: 1
----
-
-Context and approach.
-
 ## Stage title <!-- id: stable-stage-id -->
-One-line intent. Size each stage so its finished changes could form one reviewable commit.
+One-sentence outcome.
 
 ### Approach
-- Ordered implementation detail
+- Up to three implementation choices.
 
 - [ ] Concrete step
-  - [ ] Optional substep
 
 ### Technical explanation
-Explain current behavior, proposed behavior, relevant files/symbols, and material tradeoffs.
+One short paragraph for non-obvious behavior or tradeoffs.
 
 ### Acceptance
-- [ ] Observable check (test[unit]: path/to/test.ts::case name)
+- [ ] Observable behavior (test[unit]: path/to/test.ts::case name)
 
 ### Files
 - `path/to/file.ts` — M
@@ -41,27 +33,17 @@ Explain current behavior, proposed behavior, relevant files/symbols, and materia
 > depends: earlier-stage-id
 ```
 
-Untagged `##` headings are document sections; only headings with an `id` comment are stages. Each stage is a logical commit boundary, not an instruction to run `git commit`, and must include intent, approach, steps, a technical explanation, acceptance tests, proposed files, and complexity. Keep stage IDs stable across revisions. Dependencies reference those IDs.
+Every stage needs intent, steps, files, acceptance tests, and complexity. Keep IDs and checkbox order stable. Do not repeat stage facts in global file, reuse, approach, or verification sections.
 
-Plans that change more than one module or a runtime flow should include a Mermaid diagram; `%% link <nodeId> file:<path>` and `%% link <nodeId> stage:<id>` lines make its nodes clickable. Show non-trivial proposed code as a fenced `diff path=<repo-relative path>` block. Tag test references with a kind (`test[unit|integration|e2e|manual]:`). Every plan with stage IDs needs a top-level `## Test strategy` section, and submission is rejected without it or with an absolute or `..` diff path.
+For every staged plan, add one Mermaid overview with `%% link <nodeId> file:<path>` or `%% link <nodeId> stage:<id>`. Add stage diagrams only when their local flow differs. Put non-trivial edits in `diff path=<repo-relative path>` fences. Tag tests with `test[unit|integration|e2e|manual]: path::case`. Plans with stage IDs need `## Test strategy`.
 
-Checkbox markers are durable execution state:
-
-| Marker | State |
-| --- | --- |
-| `[ ]` | pending |
-| `[~]` | in progress |
-| `[-]` | blocked |
-| `[x]` | completed or acceptance passed |
-
-Use `[~]` and `[-]` only for implementation steps. Acceptance criteria are binary checks and use `[ ]` or `[x]` only. Update the same plan file in place as work advances. Do not create a second status file or reorder existing checkboxes during execution: document-order numbering is how legacy `[DONE:n]` progress markers find their step.
+Markers are durable execution state: `[ ]` pending, `[~]` in progress, `[-]` blocked, `[x]` completed. Use `[~]` and `[-]` only for implementation steps; acceptance is binary.
 
 ## Review loop
 
-1. Write or revise the same Markdown plan file.
-2. Submit it for review through the Plannotator tool.
-3. If denied, apply the feedback to that file and resubmit it.
-4. If approved, execute stages in dependency order and update checkbox markers as status changes.
-5. Keep the plan as the scratchpad until every step and acceptance check is complete.
+1. Write or revise the same plan file.
+2. Submit it with `plannotator_submit_plan`.
+3. Apply feedback in place and resubmit.
+4. After approval, execute stages in dependency order and update markers.
 
-The review decision is correlated by `reviewId`. Ignore stale or duplicate decisions. A missing or empty plan on recovery fails closed.
+Ignore stale review decisions. Missing or empty recovery plans fail closed.

@@ -97,7 +97,7 @@ class PlanningSession {
       phase: state.phase, planFilePath: state.path, review: this.pending ? { reviewId: this.pending.id } : null,
       checklist: parseChecklist(state.content), planContent: state.content,
       ...(this.previousContent === null ? {} : { previousPlanContent: this.previousContent }),
-      ...(parsed?.stages.length ? parsed : {})
+      ...(parsed ?? {})
     }
     if (this.binding) await Effect.runPromise(this.binding.context.publishEvent({ _tag: "PlannotatorStateChanged", state: projection }))
   }

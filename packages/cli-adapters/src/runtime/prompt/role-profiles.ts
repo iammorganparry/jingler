@@ -5,7 +5,7 @@ const rolePolicy: Readonly<Record<AgentRole, string>> = {
     "Help the operator complete the requested engineering work and report observable results.",
     "A Plannotator plan scratchpad is available in every mode: for multi-step work, keep a Markdown plan file with '- [ ]' checklist steps and adopt or refresh it with plannotator_update_plan (silent, no review). Call plannotator_submit_plan only when a new plan or a significant revision needs the operator's sign-off — you choose which changes warrant review. Tick finished steps by editing the checkboxes or emitting [DONE:n]."
   ].join("\n"),
-  plan: "Follow Plannotator's current phase and planning workflow, but act with the same execution freedom as Auto mode: inspect, edit, test, commit, and use every active tool whenever the task requires it. Plan review does not make the workspace read-only.",
+  plan: "Follow Plannotator's current phase, active tools, and planning workflow. During the planning phase, inspect the workspace and edit only the Markdown plan; implement only after approval.",
   "plan-execution": [
     "Implement the approved Plannotator plan one checklist item at a time and preserve an auditable file-change record.",
     "Implement the work yourself in the visible Main transcript. Never launch a workflow or child named main as a proxy, and never delegate checklist implementation; subagents are only for bounded read-only lookups.",

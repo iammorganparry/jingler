@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
-import type { PlanDocument } from "@jingler/core"
+import type { PlanAnnotation, PlanDocument } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { OpenAssetProvider } from "../asset/open-asset-context.js"
 import { ThemeProvider } from "../theme-provider.js"
+import { loadPlanComments } from "../composites/plan-comment-store.js"
 import { PlanReview, planFeedbackMarkdown } from "./plan-review.js"
 
 const mermaidRender = vi.fn(async () => ({ svg: '<svg data-testid="stage-diagram"></svg>' }))
 vi.mock("mermaid", () => ({ default: { initialize: vi.fn(), render: () => mermaidRender() } }))
+
+const REPLY_TEXTBOX = /Reply to/
+const REVISION_BUTTON = /Changes since revision/
 
 const patch = [
   "@@ -1 +1 @@",
@@ -38,6 +42,7 @@ const document: PlanDocument = {
       files: [{ path: "src/auth.ts", change: "M" }],
       diagrams: [{ id: "d1", source: "flowchart LR\n  A --> B" }],
       notes: [{ kind: "change", id: "ch1", path: "src/auth.ts", patch }],
+      complexity: "medium",
       acceptance: [{
         id: "a1",
         text: "Auth implementation passes",
@@ -55,6 +60,7 @@ const document: PlanDocument = {
 const noop = class { observe() {} unobserve() {} disconnect() {} }
 
 beforeEach(() => {
+  localStorage.clear()
   vi.stubGlobal("ResizeObserver", noop)
   vi.stubGlobal("IntersectionObserver", noop)
   // jsdom has no layout, so Range geometry is missing; the popover only needs a position.
@@ -98,22 +104,34 @@ const addComment = (quote: string, body: string) => {
 }
 
 describe("PlanReview", () => {
-  it("renders stages with diffs diagrams and tests", async () => {
+  it("renders a compact stage summary and discloses technical detail on demand", async () => {
     const open = vi.fn()
     renderReview({}, open)
 
     expect(screen.getByRole("heading", { name: "Test strategy" })).toBeTruthy()
-    expect(screen.getByText("Unit tests cover the token format.")).toBeTruthy()
     expect(screen.getByRole("heading", { name: "Implement auth" })).toBeTruthy()
+    expect(screen.getByRole("region", { name: "Implement auth tasks" }).textContent).toContain("Implement the auth change")
+    expect(screen.getByRole("region", { name: "Implement auth files" }).textContent).toContain("src/auth.ts")
+    expect(screen.getByRole("region", { name: "Implement auth tests" }).textContent).toContain("e2e · src/auth.test.ts::implements auth")
+    expect(screen.getByText("medium", { exact: false })).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId("stage-diagram")).toBeTruthy())
 
-    const table = screen.getByRole("table", { name: "Implement auth acceptance" })
-    expect(table.textContent).toContain("e2e")
-    expect(table.textContent).toContain("src/auth.test.ts::implements auth")
-
+    const disclosure = screen.getByText("Technical details").closest("details")
+    expect(disclosure?.hasAttribute("open")).toBe(false)
+    fireEvent.click(screen.getByText("Technical details"))
+    expect(disclosure?.hasAttribute("open")).toBe(true)
     expect(screen.getByRole("region", { name: "Proposed change to src/auth.ts" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Open src/auth.ts" }))
+    fireEvent.click(screen.getAllByRole("button", { name: "Open src/auth.ts" })[0]!)
     expect(open).toHaveBeenCalledWith("src/auth.ts")
+  })
+
+  it("adds a comment to a whole stage", () => {
+    renderReview()
+    fireEvent.click(screen.getByRole("button", { name: "Comment on Implement auth" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep this stage small." } })
+    fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+    expect(screen.getByText("Keep this stage small.")).toBeTruthy()
+    expect(screen.getByRole("complementary", { name: "Plan comments" }).textContent).toContain("implement-auth")
   })
 
   it("serializes annotations into deny feedback", async () => {
@@ -136,18 +154,68 @@ describe("PlanReview", () => {
     expect(onApprove).not.toHaveBeenCalled()
   })
 
-  it("approves once and drops removed comments from feedback", async () => {
+  it("approves once and excludes resolved comments from feedback", async () => {
     const onApprove = vi.fn()
     const onRevise = vi.fn()
     renderReview({ onApprove, onRevise })
 
-    addComment("Replace the auth flow.", "Drop this one.")
-    fireEvent.click(screen.getByRole("button", { name: "Remove comment on Replace the auth flow." }))
+    addComment("Replace the auth flow.", "Resolved note.")
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }))
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
     await waitFor(() => expect(onRevise).toHaveBeenCalledWith(undefined))
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }))
     await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
+  })
+
+  it("persists replies and resolution across remounts", async () => {
+    const first = renderReview()
+    addComment("Implement the auth change.", "Keep this behavior.")
+    const reply = screen.getByRole("textbox", { name: REPLY_TEXTBOX })
+    fireEvent.change(reply, { target: { value: "Agreed." } })
+    fireEvent.click(screen.getByRole("button", { name: "Reply" }))
+    fireEvent.click(screen.getByRole("button", { name: "Resolve" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reopen" })).toBeTruthy())
+    first.unmount()
+
+    renderReview()
+    expect(screen.getByText("Keep this behavior.")).toBeTruthy()
+    expect(screen.getByText("Agreed.")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Reopen" })).toBeTruthy()
+  })
+
+  it("isolates persisted comments by session and plan identity", async () => {
+    const first = renderReview()
+    addComment("Implement the auth change.", "Only session one.")
+    await waitFor(() => expect(loadPlanComments("session-1:chat-1:plannotator:PLAN.md")).toHaveLength(1))
+
+    const other = { ...document, sessionId: "session-2" }
+    first.rerender(
+      <ThemeProvider tokens={toTokens(jinglerDark)}>
+        <OpenAssetProvider open={vi.fn()} knownFiles={new Set(["src/auth.ts"])}>
+          <PlanReview document={other} />
+        </OpenAssetProvider>
+      </ThemeProvider>
+    )
+    await waitFor(() => expect(screen.queryByText("Only session one.")).toBeNull())
+    expect(loadPlanComments("session-2:chat-1:plannotator:PLAN.md")).toEqual([])
+  })
+
+  it("reanchors selection comments and reports detached anchors after a revision", async () => {
+    const first = renderReview()
+    addComment("Implement the auth change.", "Keep this behavior.")
+    await waitFor(() => expect(globalThis.document.querySelector("[data-comment-highlight]")).toBeTruthy())
+    await waitFor(() => expect(loadPlanComments("session-1:chat-1:plannotator:PLAN.md")).toHaveLength(1))
+    first.unmount()
+    localStorage.clear()
+    const detached: PlanAnnotation = {
+      id: "detached", stageId: "implement-auth", body: "Old note", author: "user",
+      createdAt: "2026-09-29T00:00:00.000Z", status: "open",
+      anchor: { quote: "Text removed by revision.", prefix: "", suffix: "" },
+      messages: [{ id: "m", body: "Old note", authorKind: "user", authorId: "operator", createdAt: "2026-09-29T00:00:00.000Z", mentionedParticipantIds: [], deliveryState: "sent" }]
+    }
+    renderReview({ document: { ...document, id: "plannotator:revised", revision: 2, plan: { ...document.plan, annotations: [detached] } } })
+    await waitFor(() => expect(screen.getByText("Detached from changed text")).toBeTruthy())
   })
 
   it("shows a failed decision and keeps comments for a retry", async () => {
@@ -167,7 +235,7 @@ describe("PlanReview", () => {
 
   it("shows revision diff after resubmission", async () => {
     const first = renderReview({ document: { ...document, sourceMarkdown: "# Auth\n- keep\n" } })
-    expect(screen.queryByRole("button", { name: /Changes since revision/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: REVISION_BUTTON })).toBeNull()
     first.unmount()
 
     renderReview({

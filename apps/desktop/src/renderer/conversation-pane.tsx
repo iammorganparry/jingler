@@ -1523,7 +1523,7 @@ function renderPlanSurface(
   return plannotatorDocument !== null
     ? (
       <PlanReview
-        key={pendingReviewId ?? "plan"}
+        key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}:${pendingReviewId ?? "plan"}`}
         document={plannotatorDocument}
         canApprove={pendingReviewId !== null}
         onApprove={() => decideReview(true)}

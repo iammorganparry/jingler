@@ -11,8 +11,14 @@ export const validatePlanMarkdown = (content: string): string[] => {
 
   const { stages, sections } = parsePlanMarkdown(content)
   const errors: string[] = []
+  const pathlessDiffs = [...content.matchAll(/^\s*```diff(?:\s+(.*))?\s*$/gm)]
+    .filter((match) => !/(?:^|\s)path=\S+/.test(match[1] ?? ""))
+  if (pathlessDiffs.length > 0) errors.push('Every ```diff fence needs a repository-relative "path=".')
   if (!sections.some(({ title }) => title?.trim().toLowerCase() === "test strategy")) {
     errors.push('Plan needs a "## Test strategy" section.')
+  }
+  if (!sections.some(({ blocks }) => blocks.some(({ kind }) => kind === "diagram"))) {
+    errors.push("Plan needs a top-level Mermaid flow diagram.")
   }
   const changePaths = [
     ...sections.flatMap(({ blocks }) => blocks.flatMap((b) => (b.kind === "change" ? [b.path] : []))),
