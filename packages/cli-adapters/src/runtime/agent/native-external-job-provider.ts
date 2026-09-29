@@ -203,7 +203,13 @@ export const makeNativeExternalJobProvider = (
       throw new ExternalJobProviderError("Unknown Jingler native external job", { code: "not-found" })
     }
     try {
-      return safeRecord(JSON.parse(await readFile(recordPath(id), "utf8")))
+      const record = safeRecord(JSON.parse(await readFile(recordPath(id), "utf8")))
+      if (record.providerJobId !== id) {
+        throw new ExternalJobProviderError("Jingler native external-job identity does not match its state file", {
+          code: "state-unreadable"
+        })
+      }
+      return record
     } catch (cause) {
       if (cause instanceof ExternalJobProviderError) throw cause
       throw new ExternalJobProviderError("Jingler native external-job state is missing or unreadable", {
@@ -233,7 +239,7 @@ export const makeNativeExternalJobProvider = (
     binding: NativeExternalJobBinding,
     prompt: string,
     continuationId?: string
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: native execution, terminal persistence, and usage attribution settle in one auditable lifecycle.
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one lifecycle must settle persistence and usage exactly once.
   ): Promise<void> => {
     const child = directNativeChildSpec(
       binding.spec,
@@ -256,86 +262,127 @@ export const makeNativeExternalJobProvider = (
       state: "running",
       updatedAt: Date.now()
     }
-    await persist(current)
-    let events: ReadonlyArray<StreamEvent>
-    try {
-      events = Chunk.toReadonlyArray(await Effect.runPromise(
-        binding.makeRuntime(binding.spec.runtimeId).run(childSpec, binding.context).pipe(Stream.runCollect)
-      ))
-    } catch (cause) {
+    let usageAttempted = false
+    const recordTerminalUsage = async (
+      outcome: "success" | "error",
+      done?: Extract<StreamEvent, { readonly _tag: "Done" }>
+    ): Promise<void> => {
+      usageAttempted = true
+      const costUsd = outcome === "success" && binding.spec.runtimeId === "opencode"
+        ? (done?.costUsd ?? null)
+        : null
+      await Effect.runPromise(binding.context.recordUsage?.(makeUsageFact({
+        id: `${binding.spec.runId}:external-job:${record.providerJobId}`,
+        runId: childSpec.runId,
+        sessionId: binding.spec.sessionId,
+        chatId: binding.spec.chatId,
+        parentRunId: binding.spec.runId,
+        runtimeId: binding.spec.runtimeId,
+        providerId: binding.spec.providerId ?? null,
+        modelId: record.modelId,
+        kind: "child",
+        startedAt: record.startedAt,
+        endedAt: Date.now(),
+        totalTokens: outcome === "success" ? (done?.tokens ?? null) : null,
+        costUsd,
+        outcome,
+        provenance: `${binding.spec.runtimeId}.external-job`
+      })) ?? Effect.void)
+    }
+    const settleFailed = async (cause: unknown): Promise<void> => {
+      const endedAt = Date.now()
       current = {
         ...current,
         state: "failed",
-        updatedAt: Date.now(),
-        endedAt: Date.now(),
+        updatedAt: endedAt,
+        endedAt,
         failureCode: "runtime-failed",
-        failureMessage: cause instanceof Error ? cause.message : String(cause)
+        failureMessage: cause instanceof Error ? cause.message : String(cause),
+        usage: {
+          totalTokens: null,
+          costUsd: null,
+          provenance: `${binding.spec.runtimeId}.external-job`
+        }
       }
-      await persist(current)
-      return
+      try {
+        await persist(current)
+      } catch {
+        // The queued record remains recoverable when the terminal write itself fails.
+      }
+      if (!usageAttempted) {
+        try {
+          await recordTerminalUsage("error")
+        } catch {
+          // Usage attribution is attempted once; retrying could double-count a partial write.
+        }
+      }
     }
-    const started = events.find((event) => event._tag === "Started")
-    const failure = events.find((event) => event._tag === "Failed")
-    const done = events.findLast((event) => event._tag === "Done")
-    const output = events.flatMap((event) => event._tag === "Assistant" ? [event.text] : [])
-      .join("").slice(-MAX_TRANSCRIPT_CHARS)
-    const transcript = events.map((event) => JSON.stringify(
-      event._tag === "Assistant"
-        ? { tag: event._tag, text: event.text.slice(0, MAX_TRANSCRIPT_CHARS) }
-        : { tag: event._tag }
-    )).join("\n").slice(-MAX_TRANSCRIPT_CHARS)
-    await writeFile(transcriptPath(record.providerJobId), `${transcript}\n`, {
-      mode: 0o600,
-      flag: "wx"
-    })
-    const runtimeSessionId = started?._tag === "Started" ? started.sessionId : undefined
-    if (failure?._tag === "Failed" || done?._tag !== "Done") {
+
+    try {
+      await persist(current)
+      const events = Chunk.toReadonlyArray(await Effect.runPromise(
+        binding.makeRuntime(binding.spec.runtimeId).run(childSpec, binding.context).pipe(Stream.runCollect)
+      ))
+      const started = events.find((event) => event._tag === "Started")
+      const failure = events.find((event) => event._tag === "Failed")
+      const done = events.findLast((event) => event._tag === "Done")
+      const output = events.flatMap((event) => event._tag === "Assistant" ? [event.text] : [])
+        .join("").slice(-MAX_TRANSCRIPT_CHARS)
+      const transcript = events.map((event) => JSON.stringify(
+        event._tag === "Assistant"
+          ? { tag: event._tag, text: event.text.slice(0, MAX_TRANSCRIPT_CHARS) }
+          : { tag: event._tag }
+      )).join("\n").slice(-MAX_TRANSCRIPT_CHARS)
+      await writeFile(transcriptPath(record.providerJobId), `${transcript}\n`, {
+        mode: 0o600,
+        flag: "wx"
+      })
+      const runtimeSessionId = started?._tag === "Started" ? started.sessionId : undefined
+      if (failure?._tag === "Failed" || done?._tag !== "Done") {
+        const endedAt = Date.now()
+        current = {
+          ...current,
+          ...(runtimeSessionId ? { runtimeSessionId } : {}),
+          state: "failed",
+          output,
+          artifactPath: transcriptPath(record.providerJobId),
+          usage: {
+            totalTokens: null,
+            costUsd: null,
+            provenance: `${binding.spec.runtimeId}.external-job`
+          },
+          updatedAt: endedAt,
+          endedAt,
+          failureCode: "runtime-failed",
+          failureMessage: failure?._tag === "Failed"
+            ? failure.message
+            : "Native runtime ended without usage"
+        }
+        await persist(current)
+        await recordTerminalUsage("error")
+        return
+      }
+      const usage: NonNullable<NativeExternalJobRecord["usage"]> = {
+        totalTokens: done.tokens,
+        costUsd: binding.spec.runtimeId === "opencode" ? done.costUsd : null,
+        provenance: `${binding.spec.runtimeId}.external-job`
+      }
+      const endedAt = Date.now()
       current = {
         ...current,
         ...(runtimeSessionId ? { runtimeSessionId } : {}),
-        state: "failed",
+        state: "completed",
         output,
-        updatedAt: Date.now(),
-        endedAt: Date.now(),
-        failureCode: "runtime-failed",
-        failureMessage: failure?._tag === "Failed" ? failure.message : "Native runtime ended without usage"
+        artifactPath: transcriptPath(record.providerJobId),
+        usage,
+        updatedAt: endedAt,
+        endedAt
       }
       await persist(current)
-      return
+      await recordTerminalUsage("success", done)
+    } catch (cause) {
+      await settleFailed(cause)
     }
-    const usage: NonNullable<NativeExternalJobRecord["usage"]> = {
-      totalTokens: done.tokens,
-      costUsd: binding.spec.runtimeId === "opencode" ? done.costUsd : null,
-      provenance: `${binding.spec.runtimeId}.external-job`
-    }
-    current = {
-      ...current,
-      ...(runtimeSessionId ? { runtimeSessionId } : {}),
-      state: "completed",
-      output,
-      artifactPath: transcriptPath(record.providerJobId),
-      usage,
-      updatedAt: Date.now(),
-      endedAt: Date.now()
-    }
-    await persist(current)
-    await Effect.runPromise(binding.context.recordUsage?.(makeUsageFact({
-      id: `${binding.spec.runId}:external-job:${record.providerJobId}`,
-      runId: childSpec.runId,
-      sessionId: binding.spec.sessionId,
-      chatId: binding.spec.chatId,
-      parentRunId: binding.spec.runId,
-      runtimeId: binding.spec.runtimeId,
-      providerId: binding.spec.providerId ?? null,
-      modelId: record.modelId,
-      kind: "child",
-      startedAt: record.startedAt,
-      endedAt: current.endedAt!,
-      totalTokens: done.tokens,
-      costUsd: usage.costUsd,
-      outcome: "success",
-      provenance: usage.provenance
-    })) ?? Effect.void)
   }
 
   const launch = async (
@@ -372,6 +419,7 @@ export const makeNativeExternalJobProvider = (
     }
     await persist(record)
     const running = execute(record, binding, input.prompt, continuationId)
+      .catch(() => undefined)
       .finally(() => active.delete(providerJobId))
     active.set(providerJobId, running)
     return { providerJobId, state: "running" }

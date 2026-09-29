@@ -27,6 +27,7 @@ import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
+import { AgentRuntimeError } from "./agent-runtime.js"
 import {
   makePiSessionFactory
 } from "./pi-session-factory.js"
@@ -322,6 +323,49 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(captured[0]?.thinkingLevel).toBe("high")
+  })
+
+  it("rolls back PI session resources when native async profile registration fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-profile-failure-"))
+    roots.push(root)
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId: connection.id,
+      authKind: "api-key",
+      access: "secret",
+      refresh: null,
+      expiresAt: null
+    }))
+    const session = fakeSession()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    const unregister = vi.fn(broker.unregister)
+    const childCredentials = new PiChildCredentials(join(root, "child-credentials"), credentials)
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials,
+      childCredentials,
+      subagentBroker: { ...broker, unregister },
+      resolveConnection: () => Effect.succeed(connection),
+      createSession: async () => ({ session, extensionsResult: {} as never }),
+      configureNativeAsyncSubagents: () => Effect.fail(new AgentRuntimeError({
+        reason: "runtime",
+        message: "profile registration failed"
+      }))
+    })
+
+    const result = await Effect.runPromise(Effect.either(factory.create(makeSpec(root), {} as never)))
+
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: { message: "profile registration failed" }
+    })
+    expect(unregister).toHaveBeenCalledWith("pi-session")
+    expect(session.dispose).toHaveBeenCalledOnce()
+    await expect(readdir(childCredentials.directory("pi-session"))).rejects.toMatchObject({
+      code: "ENOENT"
+    })
   })
 
   it("disposes the terminal tracker when embedded session creation fails", async () => {

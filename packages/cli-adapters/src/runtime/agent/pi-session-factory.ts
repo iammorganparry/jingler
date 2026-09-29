@@ -717,6 +717,7 @@ function* bindSubagentCapabilities(
   nativeSubagentsEnabled: boolean
 ) {
   lifecycle.start()
+    const parentRuntimeSessionId = embedded.result.session.sessionId
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
       lifecycle.stop()
       embedded.result.session.dispose()
@@ -729,7 +730,6 @@ function* bindSubagentCapabilities(
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
     if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
-      const parentRuntimeSessionId = embedded.result.session.sessionId
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,
         agents: JINGLER_SUBAGENT_NAMES,
@@ -800,11 +800,28 @@ function* bindSubagentCapabilities(
           ))
         )
     }
+  const rollbackSession = Effect.all([
+    (options.childCredentials?.remove(parentRuntimeSessionId) ?? Effect.void).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    (options.subagentBroker?.unregister(parentRuntimeSessionId) ?? Effect.void).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => subagentCeiling?.dispose()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => lifecycle.stop()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => embedded.result.session.dispose()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    )
+  ], { discard: true })
   const nativeAsyncSubagents = options.configureNativeAsyncSubagents
     ? yield* options.configureNativeAsyncSubagents({
         eventBus: prepared.eventBus,
-        parentPiSessionId: embedded.result.session.sessionId
-      })
+        parentPiSessionId: parentRuntimeSessionId
+      }).pipe(Effect.onError(() => rollbackSession))
     : undefined
   return yield* observeSessionDiagnostics(
     spec,

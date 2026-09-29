@@ -263,12 +263,117 @@ describe("native external-job provider", () => {
     })).rejects.toMatchObject({ code: "binding-mismatch" })
   })
 
+  it.each(["exception", "event"] as const)(
+    "records one terminal error usage fact for a runtime %s",
+    async (failureKind) => {
+      const host = makeNativeExternalJobProvider(await stateRoot())
+      const modelId = ProviderModelId.make("codex/cheap")
+      const recordUsage = vi.fn(() => Effect.void)
+      const failedRuntime: AgentRuntimeShape = {
+        ...runtime([]),
+        run: () => failureKind === "exception"
+          ? Stream.die(new Error("runtime exploded"))
+          : Stream.make({ _tag: "Failed" as const, message: "runtime refused" })
+      }
+      const binding = host.bind({
+        parentPiSessionId: "pi-session",
+        spec: spec("codex"),
+        context: context(recordUsage),
+        models: { worker: modelId },
+        makeRuntime: () => failedRuntime
+      })
+
+      const started = await host.provider.start(startInput(binding.bindingId, modelId))
+      const result = await terminalResult(host.provider, started.providerJobId)
+
+      expect(result).toMatchObject({ state: "failed", failureCode: "runtime-failed" })
+      expect(recordUsage).toHaveBeenCalledTimes(1)
+      expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+        outcome: "error",
+        totalTokens: null,
+        costUsd: null,
+        provenance: "codex.external-job"
+      }))
+    }
+  )
+
+  it("settles durably when transcript persistence fails", async () => {
+    const root = await stateRoot()
+    const host = makeNativeExternalJobProvider(root)
+    const modelId = ProviderModelId.make("codex/cheap")
+    const recordUsage = vi.fn(() => Effect.void)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const gatedRuntime: AgentRuntimeShape = {
+      ...runtime([]),
+      run: (child) => Stream.fromEffect(Effect.promise(() => gate)).pipe(
+        Stream.flatMap(() => runtime([]).run(child, context()))
+      )
+    }
+    const binding = host.bind({
+      parentPiSessionId: "pi-session",
+      spec: spec("codex"),
+      context: context(recordUsage),
+      models: { worker: modelId },
+      makeRuntime: () => gatedRuntime
+    })
+
+    const started = await host.provider.start(startInput(binding.bindingId, modelId))
+    await writeFile(join(root, `${started.providerJobId}.transcript.jsonl`), "occupied\n")
+    release()
+    const result = await terminalResult(host.provider, started.providerJobId)
+
+    expect(result).toMatchObject({ state: "failed", failureCode: "runtime-failed" })
+    expect(recordUsage).toHaveBeenCalledTimes(1)
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ outcome: "error" }))
+  })
+
+  it("fails durably without retrying a rejected usage write", async () => {
+    const host = makeNativeExternalJobProvider(await stateRoot())
+    const modelId = ProviderModelId.make("opencode/cheap")
+    const recordUsage = vi.fn(() => Effect.die(new Error("usage unavailable")))
+    const binding = host.bind({
+      parentPiSessionId: "pi-session",
+      spec: spec("opencode"),
+      context: context(recordUsage),
+      models: { worker: modelId },
+      makeRuntime: () => runtime([])
+    })
+
+    const started = await host.provider.start(startInput(binding.bindingId, modelId))
+    await vi.waitFor(async () => {
+      await expect(host.provider.result(started.providerJobId)).resolves.toMatchObject({
+        state: "failed"
+      })
+    })
+
+    expect(recordUsage).toHaveBeenCalledTimes(1)
+  })
+
   it("fails closed for malformed and stale active durable state", async () => {
     const root = await stateRoot()
     const host = makeNativeExternalJobProvider(root)
     const malformedId = "11111111-1111-4111-8111-111111111111"
     await writeFile(join(root, `${malformedId}.json`), "{}\n")
     await expect(host.provider.reattach(malformedId)).rejects.toMatchObject({ code: "state-unreadable" })
+
+    const tamperedId = "33333333-3333-4333-8333-333333333333"
+    await writeFile(join(root, `${tamperedId}.json`), `${JSON.stringify({
+      version: 1,
+      providerJobId: "44444444-4444-4444-8444-444444444444",
+      bindingId: "ended-binding",
+      parentPiSessionId: "pi-session",
+      runtimeId: "codex",
+      role: "worker",
+      modelId: "codex/cheap",
+      promptDigest: "digest",
+      startedAt: 1,
+      updatedAt: 1,
+      state: "completed"
+    })}\n`)
+    await expect(host.provider.result(tamperedId)).rejects.toMatchObject({
+      code: "state-unreadable"
+    })
 
     const staleId = "22222222-2222-4222-8222-222222222222"
     await writeFile(join(root, `${staleId}.json`), `${JSON.stringify({
