@@ -31,7 +31,11 @@ describe("native OpenCode 1.18.14", () => {
   it("discovers two providers with overlapping model IDs under one target-local endpoint", async () => {
     const entry = await probeOpenCodeEndpoint({ ...options, targetId: "device-1" })
     Schema.decodeUnknownSync(AgentEndpointCatalogEntry)(entry)
-    expect(entry.endpoint).toMatchObject({ id: "device-1:opencode:default", status: "ready" })
+    expect(entry.endpoint).toMatchObject({
+      id: "device-1:opencode:default",
+      status: "ready",
+      features: { subagentFleet: true, backgroundTasks: true }
+    })
     expect(entry.models.map(m => [m.providerId, m.id])).toEqual([["alpha", "fixture-model"], ["beta", "fixture-model"]])
     expect(liveChildCount()).toBe(0)
   })

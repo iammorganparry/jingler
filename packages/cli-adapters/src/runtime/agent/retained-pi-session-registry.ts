@@ -1,9 +1,20 @@
-import type { AgentRunSpec } from "@jingler/core"
+import type { AgentRunSpec, SubagentModelAssignments } from "@jingler/core"
 import { Effect } from "effect"
 import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
+
+export const nativeSidecarCapabilityFingerprint = (
+  base: string,
+  nativeSpec: AgentRunSpec,
+  models: SubagentModelAssignments
+): string => JSON.stringify({
+  base,
+  nativeRuntimeId: nativeSpec.runtimeId,
+  nativeParentModelId: nativeSpec.modelId,
+  models: Object.entries(models).sort(([left], [right]) => left.localeCompare(right))
+})
 
 interface ArchivedPiTranscript {
   readonly sessionId: string
@@ -38,7 +49,9 @@ export interface RetainedPiSession {
   readonly aliases: ReadonlySet<string>
   /** The turn context every session-lifetime closure delegates to. */
   readonly contextHolder: { current: AgentRuntimeContext }
+  readonly retainedByChat: boolean
   activeTurns: number
+  idleSince: number | null
   reapTimer: ReturnType<typeof setTimeout> | null
   disposing: boolean
 }
@@ -50,6 +63,18 @@ export interface RetainedPiSession {
  * lease belong to one turn. Each acquire repoints this stable facade so a
  * retained session never calls the ended turn's mailbox or stale MCP endpoint.
  */
+const detachedPiSessionContext = (context: AgentRuntimeContext): AgentRuntimeContext => ({
+  mcp: context.mcp === undefined
+    ? undefined
+    : { browser: null, configured: context.mcp.configured },
+  publishEvent: () => Effect.void,
+  recordUsage: context.recordUsage,
+  registerBackgroundStop: () => Effect.void,
+  canUseTool: context.canUseTool,
+  askQuestion: () => Effect.succeed([]),
+  publishExplanation: () => Effect.void
+})
+
 export const rebindablePiSessionContext = (
   holder: { current: AgentRuntimeContext }
 ): AgentRuntimeContext => ({
@@ -76,7 +101,8 @@ export class RetainedPiSessionRegistry {
 
   constructor(
     readonly factory: PiSessionFactory,
-    readonly reapIntervalMs: number
+    readonly reapIntervalMs: number,
+    readonly nativeIdleRetentionMs = 0
   ) {}
 
   acquire(
@@ -155,17 +181,18 @@ export class RetainedPiSessionRegistry {
           )
         }
         return Effect.promise(() => this.#dispose(retained)).pipe(
-          Effect.flatMap(() => this.#create(spec, context, factory, capabilityFingerprint))
+          Effect.flatMap(() => this.#create(spec, context, factory, capabilityFingerprint, undefined, byChat))
         )
       }
       if (retained.reapTimer !== null) clearTimeout(retained.reapTimer)
       retained.reapTimer = null
       retained.activeTurns = 1
+      retained.idleSince = null
       retained.contextHolder.current = context
       if (retained.handle.toolRegistry) context.planning?.attachRegistry(retained.handle.toolRegistry)
       return Effect.succeed(retained)
     }
-    return this.#create(spec, context, factory, capabilityFingerprint)
+    return this.#create(spec, context, factory, capabilityFingerprint, undefined, byChat)
   }
 
   #replaceIdleNativeHost(
@@ -199,7 +226,8 @@ export class RetainedPiSessionRegistry {
           context,
           factory,
           capabilityFingerprint,
-          continuationId
+          continuationId,
+          true
         ))
       },
       catch: (cause) => cause instanceof AgentRuntimeError
@@ -217,7 +245,8 @@ export class RetainedPiSessionRegistry {
     context: AgentRuntimeContext,
     factory: PiSessionFactory,
     capabilityFingerprint: string,
-    continuationId?: string
+    continuationId?: string,
+    retainedByChat = false
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
     const contextHolder = { current: context }
     const createSpec = continuationId === undefined
@@ -242,7 +271,9 @@ export class RetainedPiSessionRegistry {
           capabilityFingerprint,
           aliases,
           contextHolder,
+          retainedByChat,
           activeTurns: 1,
+          idleSince: null,
           reapTimer: null,
           disposing: false
         }
@@ -301,26 +332,47 @@ export class RetainedPiSessionRegistry {
   async release(record: RetainedPiSession): Promise<void> {
     record.activeTurns = Math.max(0, record.activeTurns - 1)
     if (record.activeTurns > 0 || record.disposing) return
+    record.contextHolder.current = detachedPiSessionContext(record.contextHolder.current)
     await this.#reconcileLifetime(record)
   }
 
-  async #reconcileLifetime(record: RetainedPiSession): Promise<void> {
-    if (record.activeTurns > 0 || record.disposing) return
-    try {
-      const snapshot = await record.handle.subagentFleetSnapshot()
-      if (snapshot.totalActive === 0) {
-        await this.#dispose(record)
-        return
-      }
-    } catch {
-      // A failed status read is not evidence that detached children are gone.
-    }
+  #isCurrent(record: RetainedPiSession): boolean {
+    return [...record.aliases].some((alias) => this.#aliases.get(alias) === record)
+  }
+
+  #scheduleReconcile(record: RetainedPiSession, delay = this.reapIntervalMs): void {
     if (record.reapTimer !== null) clearTimeout(record.reapTimer)
     record.reapTimer = setTimeout(() => {
       record.reapTimer = null
       void this.#reconcileLifetime(record)
-    }, this.reapIntervalMs)
+    }, delay)
     record.reapTimer.unref?.()
+  }
+
+  async #reconcileLifetime(record: RetainedPiSession): Promise<void> {
+    if (record.activeTurns > 0 || record.disposing || !this.#isCurrent(record)) return
+    try {
+      const snapshot = await record.handle.subagentFleetSnapshot()
+      if (record.activeTurns > 0 || record.disposing || !this.#isCurrent(record)) return
+      if (snapshot.totalActive === 0) {
+        if (record.retainedByChat && this.nativeIdleRetentionMs > 0) {
+          record.idleSince ??= Date.now()
+          const remaining = this.nativeIdleRetentionMs - (Date.now() - record.idleSince)
+          if (remaining > 0) {
+            this.#scheduleReconcile(record, Math.min(this.reapIntervalMs, remaining))
+            return
+          }
+        }
+        await this.#dispose(record)
+        return
+      }
+      record.idleSince = null
+    } catch {
+      // A failed status read is not evidence that detached children are gone.
+    }
+    if (record.activeTurns === 0 && !record.disposing && this.#isCurrent(record)) {
+      this.#scheduleReconcile(record)
+    }
   }
 
   async #dispose(record: RetainedPiSession): Promise<void> {

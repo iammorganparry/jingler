@@ -373,6 +373,42 @@ describe("native external-job provider", () => {
     expect(recordUsage).toHaveBeenCalledTimes(1)
   })
 
+  it("aborts the underlying native stream when Fleet stops its async run", async () => {
+    const host = makeNativeExternalJobProvider(await stateRoot())
+    const modelId = ProviderModelId.make("codex/cheap")
+    const recordUsage = vi.fn(() => Effect.void)
+    const cancelled = vi.fn()
+    const blockingRuntime: AgentRuntimeShape = {
+      ...runtime([]),
+      run: (child) => Stream.concat(
+        Stream.make({
+          _tag: "Started" as const,
+          sessionId: `${child.runtimeId}-session`,
+          model: child.modelId
+        }),
+        Stream.never
+      ).pipe(Stream.ensuring(Effect.sync(cancelled)))
+    }
+    const binding = host.bind({
+      parentPiSessionId: "pi-session",
+      spec: spec("codex"),
+      context: context(recordUsage),
+      models: { worker: modelId },
+      makeRuntime: () => blockingRuntime
+    })
+
+    const started = await host.provider.start(startInput(binding.bindingId, modelId))
+    await expect(host.stop("async-run", "another-pi-session")).resolves.toBe(0)
+    expect(cancelled).not.toHaveBeenCalled()
+    await expect(host.stop("async-run", "pi-session")).resolves.toBe(1)
+    await expect(host.provider.result(started.providerJobId)).resolves.toMatchObject({
+      state: "stopped",
+      failureCode: "stopped"
+    })
+    expect(cancelled).toHaveBeenCalledOnce()
+    expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ outcome: "cancelled" }))
+  })
+
   it("fails closed for malformed and stale active durable state", async () => {
     const root = await stateRoot()
     const host = makeNativeExternalJobProvider(root)
@@ -390,6 +426,7 @@ describe("native external-job provider", () => {
       role: "worker",
       modelId: "codex/cheap",
       promptDigest: "digest",
+      sourceRunId: "stale-run",
       startedAt: 1,
       updatedAt: 1,
       state: "completed"
@@ -408,6 +445,7 @@ describe("native external-job provider", () => {
       role: "worker",
       modelId: "opencode/cheap",
       promptDigest: "digest",
+      sourceRunId: "stale-run",
       startedAt: 1,
       updatedAt: 1,
       state: "running"

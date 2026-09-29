@@ -318,7 +318,7 @@ const registerTool = (
         )
       }
       return Effect.runPromise(
-        withClient(factory, source.resolveServer?.() ?? source.server, (client) =>
+        withClient(factory, resolvedServer(source), (client) =>
           client.callTool(tool.name, checked.data, context.signal)
         ).pipe(
           Effect.map(callResult),
@@ -336,7 +336,13 @@ const discoverSource = (
   factory: McpToolClientFactory,
   source: McpToolSource
 ): Effect.Effect<McpDiscovery> =>
-  discoverTools(factory, source.server).pipe(
+  Effect.try({
+    try: () => resolvedServer(source),
+    catch: (cause) => cause instanceof McpToolBridgeError
+      ? cause
+      : clientFailure(source.server.name, `MCP server is unavailable for this turn: ${source.server.name}`, cause)
+  }).pipe(
+    Effect.flatMap((server) => discoverTools(factory, server)),
     Effect.match({
       onFailure: (error) => ({ source, error, tools: null }),
       onSuccess: (tools) => ({ source, error: null, tools })
@@ -413,6 +419,15 @@ export const registerMcpTools = (
       )
     }))
   )
+
+const resolvedServer = (source: McpToolSource): RuntimeMcpServer => {
+  if (source.resolveServer === undefined) return source.server
+  const current = source.resolveServer()
+  if (current === null) {
+    throw clientFailure(source.server.name, `MCP server is unavailable for this turn: ${source.server.name}`)
+  }
+  return current
+}
 
 const sourceByName = (
   sources: ReadonlyArray<McpToolSource>,
@@ -527,7 +542,7 @@ export const registerProgressiveMcpTools = (
     execute: async ({ server: serverName, tool: toolName, arguments: args }, context) => {
       const source = sourceByName(sources, serverName)
       try {
-        const tools = await Effect.runPromise(discoverTools(factory, source.resolveServer?.() ?? source.server))
+        const tools = await Effect.runPromise(discoverTools(factory, resolvedServer(source)))
         updateHealth(serverName, "healthy")
         const tool = tools.find((candidate) => candidate.name === toolName)
         if (tool === undefined) throw new ToolError("invalid-input", `Unknown MCP tool: ${serverName}/${toolName}`)
@@ -535,7 +550,7 @@ export const registerProgressiveMcpTools = (
         if (!checked.valid) throw new ToolError("invalid-input", checked.errorMessage ?? `Invalid arguments for MCP tool ${toolName}`)
         const result = await Effect.runPromise(withClient(
           factory,
-          source.resolveServer?.() ?? source.server,
+          resolvedServer(source),
           (client) => client.callTool(toolName, checked.data, context.signal)
         ))
         return callResult(result)

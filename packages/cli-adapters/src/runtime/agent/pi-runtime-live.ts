@@ -88,6 +88,7 @@ import { PiChildCredentials } from "../subagents/pi-child-credentials.js"
 import { makeSubagentCapabilityBroker } from "../subagents/subagent-capability-broker.js"
 import type { PiSessionFactoryOptions } from "./pi-session-factory.js"
 import {
+  nativeSidecarCapabilityFingerprint,
   retainedPiFleetHandlers,
   RetainedPiSessionRegistry
 } from "./retained-pi-session-registry.js"
@@ -552,8 +553,29 @@ export const makePiAgentRuntimeLive = (
 
     const factory = makePiSessionFactory(factoryOptions)
     const runtime = yield* makePiAgentRuntime(factory)
-    const nativeSessions = new RetainedPiSessionRegistry(factory, 1_000)
-    const nativeFleet = retainedPiFleetHandlers(nativeSessions)
+    const nativeSessions = new RetainedPiSessionRegistry(factory, 1_000, 5 * 60_000)
+    const retainedNativeFleet = retainedPiFleetHandlers(nativeSessions)
+    const nativeFleet = {
+      ...retainedNativeFleet,
+      controlSubagent: (owner, sessionId, chatId, request) =>
+        retainedNativeFleet.controlSubagent(owner, sessionId, chatId, request).pipe(
+          Effect.tap((outcome) =>
+            request.action === "stop" && outcome.status === "accepted"
+              ? Effect.tryPromise({
+                  try: () => nativeExternalJobs.stop(
+                    request.runId,
+                    request.parentRuntimeSessionId
+                  ),
+                  catch: (cause) => new AgentRuntimeError({
+                    reason: "runtime",
+                    message: "Could not stop native subagent execution",
+                    cause
+                  })
+                }).pipe(Effect.asVoid)
+              : Effect.void
+          )
+        )
+    } satisfies NativeRuntimeToolsOptions["subagentFleet"]
     const baseNativeTools: NativeRuntimeToolsOptions = {
       createToolRegistry: (spec, context) => Effect.acquireRelease(
         Effect.sync(() => factoryOptions.terminalTracker(spec)),
@@ -580,11 +602,9 @@ export const makePiAgentRuntimeLive = (
         delegationOnly: true,
         lockedCapabilityFingerprint: (lockedSpec, _lockedContext) =>
           (factoryOptions.lockedCapabilityFingerprint?.(lockedSpec) ??
-            Effect.succeed("")).pipe(Effect.map((base) => JSON.stringify({
-              base,
-              nativeRuntimeId: spec.runtimeId,
-              models: Object.entries(models).sort(([left], [right]) => left.localeCompare(right))
-            }))),
+            Effect.succeed("")).pipe(Effect.map((base) =>
+              nativeSidecarCapabilityFingerprint(base, spec, models)
+            )),
         ...(nativeLeaf
           ? {
               configureNativeAsyncSubagents: ({ eventBus, parentPiSessionId, context: liveContext }) =>

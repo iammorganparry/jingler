@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import {
+  nativeSidecarCapabilityFingerprint,
   retainedPiFleetHandlers,
   RetainedPiSessionRegistry
 } from "./retained-pi-session-registry.js"
@@ -197,5 +198,99 @@ describe("retained native PI sidecars", () => {
     expect(firstHandle.dispose).toHaveBeenCalledOnce()
     expect(createdSpecs[0]?.continuation?.id).toBe("/sessions/native-sidecar.jsonl")
     await sessions.release(rebuilt)
+  })
+
+  it("detaches turn-scoped callbacks and browser MCP until the next live acquire", async () => {
+    let capturedContext!: AgentRuntimeContext
+    const retainedHandle = handle(() => true)
+    const factory: PiSessionFactory = {
+      create: (_createdSpec, liveContext) => {
+        capturedContext = liveContext
+        return Effect.succeed(retainedHandle)
+      }
+    }
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000)
+    const endedPublish = vi.fn(() => Effect.void)
+    const durablePermission = vi.fn(() => Effect.succeed("allow" as const))
+    const firstContext: AgentRuntimeContext = {
+      ...context(),
+      mcp: {
+        browser: { name: "browser", url: "http://127.0.0.1:1", headers: {} },
+        configured: []
+      },
+      publishEvent: endedPublish,
+      canUseTool: durablePermission
+    }
+    const first = await Effect.runPromise(sessions.acquireByChat(spec, firstContext, factory))
+    await sessions.release(first)
+
+    expect(capturedContext.mcp?.browser).toBeNull()
+    await Effect.runPromise(capturedContext.publishEvent({ _tag: "Assistant", text: "late" }))
+    expect(endedPublish).not.toHaveBeenCalled()
+    await expect(Effect.runPromise(capturedContext.canUseTool({
+      toolId: "read",
+      risk: "network"
+    }))).resolves.toBe("allow")
+    expect(durablePermission).toHaveBeenCalledOnce()
+
+    const nextBrowser = { name: "browser", url: "http://127.0.0.1:2", headers: {} }
+    const second = await Effect.runPromise(sessions.acquireByChat(spec, {
+      ...context(),
+      mcp: { browser: nextBrowser, configured: [] }
+    }, factory))
+    expect(capturedContext.mcp?.browser).toBe(nextBrowser)
+    await sessions.release(second)
+  })
+
+  it("does not dispose a host reacquired while an awaited snapshot settles", async () => {
+    let resolveSnapshot!: (value: ReturnType<typeof snapshot>) => void
+    const delayed = new Promise<ReturnType<typeof snapshot>>((resolve) => { resolveSnapshot = resolve })
+    const dispose = vi.fn()
+    const retainedHandle = {
+      ...handle(() => false, dispose),
+      subagentFleetSnapshot: vi.fn(() => delayed)
+    }
+    const factory: PiSessionFactory = { create: () => Effect.succeed(retainedHandle) }
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000)
+    const first = await Effect.runPromise(sessions.acquireByChat(spec, context(), factory))
+    const releasing = sessions.release(first)
+    await Promise.resolve()
+    const reacquired = await Effect.runPromise(sessions.acquireByChat(spec, context(), factory))
+    resolveSnapshot(snapshot(false))
+    await releasing
+    expect(dispose).not.toHaveBeenCalled()
+    await sessions.release(reacquired)
+  })
+
+  it("retains an idle native host for bounded follow-up and fingerprints fallback model changes", async () => {
+    const dispose = vi.fn()
+    const retainedHandle = handle(() => false, dispose)
+    const factory: PiSessionFactory = { create: vi.fn(() => Effect.succeed(retainedHandle)) }
+    const sessions = new RetainedPiSessionRegistry(factory, 5, 40)
+    const first = await Effect.runPromise(sessions.acquireByChat(spec, context(), factory))
+    await sessions.release(first)
+    await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).controlSubagent(
+      owner,
+      "session-1",
+      "chat-1",
+      control("follow-up")
+    ))).resolves.toMatchObject({ status: "accepted" })
+    const followUp = await Effect.runPromise(sessions.acquireByChat(spec, context(), factory))
+    expect(followUp.handle).toBe(retainedHandle)
+    expect(factory.create).toHaveBeenCalledOnce()
+    await sessions.release(followUp)
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+
+    const firstFingerprint = nativeSidecarCapabilityFingerprint("base", {
+      ...spec,
+      runtimeId: "codex",
+      modelId: ProviderModelId.make("openai/first")
+    }, {})
+    const secondFingerprint = nativeSidecarCapabilityFingerprint("base", {
+      ...spec,
+      runtimeId: "codex",
+      modelId: ProviderModelId.make("openai/second")
+    }, {})
+    expect(firstFingerprint).not.toBe(secondFingerprint)
   })
 })

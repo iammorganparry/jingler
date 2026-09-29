@@ -51,6 +51,7 @@ interface NativeExternalJobRecord {
   readonly role: string
   readonly modelId: string
   readonly promptDigest: string
+  readonly sourceRunId: string
   readonly startedAt: number
   readonly updatedAt: number
   readonly endedAt?: number
@@ -123,6 +124,7 @@ export const registerNativeExternalJobProfiles = (
 export interface NativeExternalJobProviderHost {
   readonly provider: ExternalJobProvider
   bind(input: NativeExternalJobBinding): NativeExternalJobProfileSet
+  stop(sourceRunId: string, parentPiSessionId?: string): Promise<number>
 }
 
 const optionsFor = (input: ExternalJobStartInput): {
@@ -159,6 +161,7 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
     typeof candidate.role !== "string" ||
     typeof candidate.modelId !== "string" ||
     typeof candidate.promptDigest !== "string" ||
+    typeof candidate.sourceRunId !== "string" ||
     typeof candidate.startedAt !== "number" ||
     typeof candidate.updatedAt !== "number" ||
     !["queued", "running", "completed", "failed", "stopped", "blocked"].includes(candidate.state ?? "")
@@ -182,7 +185,12 @@ export const makeNativeExternalJobProvider = (
 ): NativeExternalJobProviderHost => {
   const root = resolve(stateRoot)
   const bindings = new Map<string, NativeExternalJobBinding>()
-  const active = new Map<string, Promise<void>>()
+  const active = new Map<string, {
+    readonly sourceRunId: string
+    readonly parentPiSessionId: string
+    readonly controller: AbortController
+    readonly settled: Promise<void>
+  }>()
   const recordPath = (id: string) => join(root, `${id}.json`)
   const transcriptPath = (id: string) => join(root, `${id}.transcript.jsonl`)
 
@@ -239,6 +247,7 @@ export const makeNativeExternalJobProvider = (
     record: NativeExternalJobRecord,
     binding: NativeExternalJobBinding,
     prompt: string,
+    signal: AbortSignal,
     continuationId?: string
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one lifecycle must settle persistence and usage exactly once.
   ): Promise<void> => {
@@ -265,7 +274,7 @@ export const makeNativeExternalJobProvider = (
     }
     let usageAttempted = false
     const recordTerminalUsage = async (
-      outcome: "success" | "error",
+      outcome: "success" | "error" | "cancelled",
       done?: Extract<StreamEvent, { readonly _tag: "Done" }>
     ): Promise<void> => {
       usageAttempted = true
@@ -290,15 +299,19 @@ export const makeNativeExternalJobProvider = (
         provenance: `${binding.spec.runtimeId}.external-job`
       })) ?? Effect.void)
     }
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: terminal cancellation and failure share one exactly-once persistence boundary.
     const settleFailed = async (cause: unknown): Promise<void> => {
       const endedAt = Date.now()
+      const stopped = signal.aborted
       current = {
         ...current,
-        state: "failed",
+        state: stopped ? "stopped" : "failed",
         updatedAt: endedAt,
         endedAt,
-        failureCode: "runtime-failed",
-        failureMessage: cause instanceof Error ? cause.message : String(cause),
+        failureCode: stopped ? "stopped" : "runtime-failed",
+        failureMessage: stopped
+          ? "The native job was stopped by the operator."
+          : cause instanceof Error ? cause.message : String(cause),
         usage: {
           totalTokens: null,
           costUsd: null,
@@ -312,7 +325,7 @@ export const makeNativeExternalJobProvider = (
       }
       if (!usageAttempted) {
         try {
-          await recordTerminalUsage("error")
+          await recordTerminalUsage(stopped ? "cancelled" : "error")
         } catch {
           // Usage attribution is attempted once; retrying could double-count a partial write.
         }
@@ -322,7 +335,8 @@ export const makeNativeExternalJobProvider = (
     try {
       await persist(current)
       const events = Chunk.toReadonlyArray(await Effect.runPromise(
-        binding.makeRuntime(binding.spec.runtimeId).run(childSpec, binding.context).pipe(Stream.runCollect)
+        binding.makeRuntime(binding.spec.runtimeId).run(childSpec, binding.context).pipe(Stream.runCollect),
+        { signal }
       ))
       const started = events.find((event) => event._tag === "Started")
       const failure = events.find((event) => event._tag === "Failed")
@@ -414,15 +428,22 @@ export const makeNativeExternalJobProvider = (
       role: options.role,
       modelId: options.modelId,
       promptDigest: input.promptDigest,
+      sourceRunId: input.runId,
       startedAt: now,
       updatedAt: now,
       state: "queued"
     }
     await persist(record)
-    const running = execute(record, binding, input.prompt, continuationId)
+    const controller = new AbortController()
+    const settled = execute(record, binding, input.prompt, controller.signal, continuationId)
       .catch(() => undefined)
       .finally(() => active.delete(providerJobId))
-    active.set(providerJobId, running)
+    active.set(providerJobId, {
+      sourceRunId: input.runId,
+      parentPiSessionId: binding.parentPiSessionId,
+      controller,
+      settled
+    })
     return { providerJobId, state: "running" }
   }
 
@@ -458,6 +479,15 @@ export const makeNativeExternalJobProvider = (
 
   return {
     provider,
+    stop: async (sourceRunId, parentPiSessionId) => {
+      const matches = [...active.values()].filter((entry) =>
+        entry.sourceRunId === sourceRunId &&
+        (parentPiSessionId === undefined || entry.parentPiSessionId === parentPiSessionId)
+      )
+      for (const entry of matches) entry.controller.abort(new Error("Stopped by operator"))
+      await Promise.all(matches.map((entry) => entry.settled))
+      return matches.length
+    },
     bind: (binding) => {
       const bindingId = randomUUID()
       bindings.set(bindingId, binding)

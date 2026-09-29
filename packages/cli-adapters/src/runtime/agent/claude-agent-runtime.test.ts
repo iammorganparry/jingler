@@ -350,7 +350,12 @@ it.each([
 ])("probes version %s and auth case %#", async (version, auth, status) => {
   const binary = await executable(`console.log(process.argv.includes("--version") ? ${JSON.stringify(version)} : ${JSON.stringify(JSON.stringify(auth))})`)
   const entry = await probeClaudeEndpoint({ binary, targetId: "device" })
-  expect(entry.endpoint).toMatchObject({ status, targetId: "device", id: "device:claude:default" })
+  expect(entry.endpoint).toMatchObject({
+    status,
+    targetId: "device",
+    id: "device:claude:default",
+    features: { subagentFleet: true, backgroundTasks: true }
+  })
   expect(entry.models.every(model => model.selectable === (status === "ready"))).toBe(true)
 })
 
