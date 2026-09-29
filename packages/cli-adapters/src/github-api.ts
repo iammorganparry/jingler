@@ -1,4 +1,5 @@
 import type {
+  GitHubCloneRepository,
   GitHubRateLimit,
   Issue,
   IssueSummary,
@@ -1209,32 +1210,17 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       cliAvailable: () => wrap(() => run(cli.available())),
       cloneRepository: (repository: string, destination: string) =>
         wrap(() => run(cli.cloneRepository(repository, destination))),
-      repositories: () =>
-        wrap(async () => {
-          try {
-            const installed = await run(auth.repositories())
-            if (installed.length > 0 || !(await run(cli.available()))) return installed
-          } catch (appError) {
-            if (!(await run(cli.available()))) throw appError
-          }
-          return run(cli.repositories())
-        }),
+      repositories: () => preferCli<ReadonlyArray<GitHubCloneRepository>>(
+        cli.repositories(),
+        () => run(auth.repositories())
+      ),
       inbox: () => preferCli(cli.inbox(), async () => {
         const repositories = await run(auth.repositories())
         const groups = await Promise.all(repositories.map((repository) => client.listInboxPrsBySlug(repository.fullName)))
         return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       }),
-      // Installation identity exists only through the App and enables realtime.
-      // Prefer it when present; fall back to CLI metadata for no-App operation.
       repository: (cwd: string) =>
-        wrap(async () => {
-          try {
-            return await client.repository(cwd)
-          } catch (appError) {
-            if (await run(cli.available())) return run(cli.repository(cwd))
-            throw appError
-          }
-        }),
+        preferCli(cli.repository(cwd), () => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),
       prForBranch: (cwd: string, branch: string) =>
         preferCli(cli.prForBranch(cwd, branch), () => client.prForBranch(cwd, branch)),

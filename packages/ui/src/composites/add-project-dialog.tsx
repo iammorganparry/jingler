@@ -215,7 +215,7 @@ function GitHubRepositoryPicker(props: {
           </div>
         )}
         {!(props.loading || props.error) && (
-          <CommandEmpty>No repositories are available to this GitHub App.</CommandEmpty>
+          <CommandEmpty>No repositories are available through GitHub CLI or the GitHub App.</CommandEmpty>
         )}
         {!props.loading && props.repositories.map((repository) => {
           const [owner, name] = repository.fullName.split("/")
@@ -256,7 +256,11 @@ function CloneConfirmation(props: {
         <span className="min-w-0 flex-1">
           <span className="block text-[13px] font-medium text-text-bright">{props.repository?.fullName ?? props.remoteUrl}</span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
-            {props.repository ? "Authenticated through your GitHub App connection" : "Git will use your configured local credentials"}
+            {props.repository?.installationId
+              ? "Authenticated through your GitHub App connection"
+              : props.repository
+                ? "Authenticated through GitHub CLI"
+                : "Git will use your configured local credentials"}
           </span>
         </span>
       </div>

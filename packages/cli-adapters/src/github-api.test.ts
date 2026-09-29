@@ -1,7 +1,11 @@
 import { GitHubApiError } from "@jingler/core"
+import { Effect, Layer } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { makeGitHubApiClient, parseGitHubRemote, preferGitHubCli } from "./github-api.js"
+import { GitHubApi, makeGitHubApiClient, parseGitHubRemote, preferGitHubCli } from "./github-api.js"
 import type { GitHubApiClientOptions } from "./github-api.js"
+import { GitHubAuth } from "./github-auth.js"
+import { GitHubCli } from "./github-cli.js"
+import { fakeCommandExecutor } from "./test-support.js"
 
 interface SeenRequest {
   readonly method: string
@@ -104,6 +108,22 @@ const makeClient = (
 const pathIs = (request: SeenRequest, pathname: string): boolean =>
   request.url.pathname === pathname
 
+const runApi = <A>(
+  effect: Effect.Effect<A, unknown, GitHubApi>,
+  cli: object,
+  auth: object
+): Promise<A> => {
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(GitHubCli, cli as never),
+    Layer.succeed(GitHubAuth, auth as never),
+    fakeCommandExecutor(() => undefined)
+  )
+  return Effect.runPromise(effect.pipe(
+    Effect.provide(GitHubApi.Default),
+    Effect.provide(dependencies)
+  ) as Effect.Effect<A>)
+}
+
 describe("preferGitHubCli", () => {
   it("falls back to the App when an authenticated CLI operation fails", async () => {
     const app = vi.fn().mockResolvedValue("app")
@@ -121,6 +141,50 @@ describe("preferGitHubCli", () => {
     await expect(preferGitHubCli(async () => true, async () => { throw error }, app))
       .rejects.toBe(error)
     expect(app).not.toHaveBeenCalled()
+  })
+})
+
+describe("GitHubApi backend selection", () => {
+  it("lists CLI repositories before checking App installations", async () => {
+    const appRepositories = vi.fn(() => Effect.succeed([{
+      installationId: "77", repositoryId: "8", fullName: "app/widget"
+    }]))
+    const result = await runApi(GitHubApi.repositories(), {
+      available: () => Effect.succeed(true),
+      repositories: () => Effect.succeed([{ repositoryId: "7", fullName: "cli/widget" }])
+    }, { repositories: appRepositories })
+
+    expect(result).toEqual([{ repositoryId: "7", fullName: "cli/widget" }])
+    expect(appRepositories).not.toHaveBeenCalled()
+  })
+
+  it("falls back to App repositories when CLI authentication is unavailable", async () => {
+    const appRepositories = vi.fn(() => Effect.succeed([{
+      installationId: "77", repositoryId: "8", fullName: "app/widget"
+    }]))
+    const result = await runApi(GitHubApi.repositories(), {
+      available: () => Effect.succeed(false),
+      repositories: () => Effect.die("CLI repositories should not run")
+    }, { repositories: appRepositories })
+
+    expect(result).toEqual([{
+      installationId: "77", repositoryId: "8", fullName: "app/widget"
+    }])
+    expect(appRepositories).toHaveBeenCalledOnce()
+  })
+
+  it("resolves session repository identity through CLI before the App", async () => {
+    const credentialsForOwner = vi.fn()
+    const result = await runApi(GitHubApi.repository("/repo"), {
+      available: () => Effect.succeed(true),
+      repository: () => Effect.succeed({
+        id: "7", nodeId: "R_7", owner: "acme", name: "widget", fullName: "acme/widget"
+      })
+    }, { credentialsForOwner })
+
+    expect(result).toMatchObject({ fullName: "acme/widget" })
+    expect(result).not.toHaveProperty("installationId")
+    expect(credentialsForOwner).not.toHaveBeenCalled()
   })
 })
 
