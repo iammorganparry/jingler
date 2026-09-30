@@ -5,4 +5,4 @@
 - [x] Run focused Codex and Claude tests plus typecheck.
 - [x] Load bounded root AGENTS.md and CLAUDE.md guidance into Pi prompts.
 - [x] Test project guidance ordering, containment, and Pi integration.
-- [ ] Review the final diff.
+- [x] Review the final diff.

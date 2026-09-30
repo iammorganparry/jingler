@@ -1,9 +1,12 @@
+import { execFile } from "node:child_process"
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
+import { promisify } from "node:util"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { projectInstructionsLayer } from "./project-instructions.js"
 
+const execFileAsync = promisify(execFile)
 const roots: string[] = []
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
@@ -31,15 +34,38 @@ describe("Pi project instructions", () => {
     )
   })
 
-  it("ignores missing files and symlinks outside the workspace", async () => {
+  it("ignores directories and symlinks instead of reading or blocking on them", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-project-instructions-"))
     const outside = await mkdtemp(join(tmpdir(), "jingler-project-instructions-outside-"))
     roots.push(root, outside)
-    await writeFile(join(outside, "AGENTS.md"), "outside secret")
-    await symlink(join(outside, "AGENTS.md"), join(root, "AGENTS.md"))
-    await mkdir(join(root, "nested"))
-    await writeFile(join(root, "nested", "CLAUDE.md"), "nested rule")
+    await mkdir(join(root, "AGENTS.md"))
+    await writeFile(join(outside, "CLAUDE.md"), "outside secret")
+    await symlink(join(outside, "CLAUDE.md"), join(root, "CLAUDE.md"))
 
     expect(await projectInstructionsLayer(root)).toBeNull()
+  })
+
+  it.runIf(process.platform !== "win32")(
+    "ignores a FIFO without waiting for a writer",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "jingler-project-instructions-"))
+      roots.push(root)
+      await execFileAsync("mkfifo", [join(root, "AGENTS.md")])
+
+      expect(await projectInstructionsLayer(root)).toBeNull()
+    },
+    1_000
+  )
+
+  it("marks oversized content and keeps a valid UTF-8 prefix", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-project-instructions-"))
+    roots.push(root)
+    await writeFile(join(root, "AGENTS.md"), `${"a".repeat(32 * 1024 - 1)}😀tail`)
+
+    const content = (await projectInstructionsLayer(root))!.content
+
+    expect(content).toContain("[TRUNCATED: AGENTS.md exceeds 32768 bytes]")
+    expect(content).not.toContain("�")
+    expect(content).not.toContain("😀")
   })
 })

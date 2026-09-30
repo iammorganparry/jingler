@@ -193,6 +193,7 @@ describe("pi session creation", () => {
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
+    await writeFile(join(root, "AGENTS.md"), "x".repeat(32 * 1024))
     const credentials = new InMemoryProviderCredentialStore()
     await Effect.runPromise(
       credentials.write({

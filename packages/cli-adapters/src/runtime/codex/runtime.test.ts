@@ -214,6 +214,15 @@ describe("native Codex protocol", () => {
     expect(codexEnvironment({ CODEX_HOME: undefined }, "linux")).toEqual({})
     expect(codexEnvironment({ PATH: "/usr/bin" }, "darwin").PATH?.split(delimiter))
       .toEqual(["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
+    expect(codexEnvironment({ HOME: "/Users/test" }, "darwin").PATH?.split(delimiter))
+      .toEqual([
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin"
+      ])
   })
   it.each(["ask", "accept-edits"] as const)("rejects %s before spawning rather than bypassing required approvals", async (mode) => {
     const spawnProcess = vi.fn()
