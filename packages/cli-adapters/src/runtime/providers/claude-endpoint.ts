@@ -123,8 +123,8 @@ export const probeClaudeEndpoint = async (
       features: {
         steer: "none",
         planReview: false,
-        subagentFleet: false,
-        backgroundTasks: false
+        subagentFleet: true,
+        backgroundTasks: true
       }
     },
     models: models(version).map((model) => ({

@@ -16,7 +16,7 @@ import {
 
 import { trackChild } from "../../child-registry.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
-import { type RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
+import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 
@@ -432,10 +432,12 @@ export const makeClaudeAgentRuntime = (
         ? unsupported("interrupting an inactive session")
         : Effect.promise(() => stopProcess(child))
     },
-    controlSubagent: () => unsupported("subagent control"),
+    controlSubagent: options.subagentFleet?.controlSubagent ?? (() => unsupported("subagent control")),
     decidePlanReview: () => unsupported("native plan review"),
-    subagentFleetSnapshot: () => unsupported("subagent fleet snapshots"),
-    subagentTranscript: () => unsupported("subagent transcripts")
+    subagentFleetSnapshot: options.subagentFleet?.subagentFleetSnapshot ??
+      (() => unsupported("subagent fleet snapshots")),
+    subagentTranscript: options.subagentFleet?.subagentTranscript ??
+      (() => unsupported("subagent transcripts"))
   }
 }
 

@@ -45,7 +45,9 @@ const workspacePackages = [
   "@jingler/plannotator-ext",
   "@jingler/themes",
   "@jingler/ui",
-  "@jingler/plugin-sdk"
+  "@jingler/plugin-sdk",
+  // This package also exports raw TypeScript from node_modules.
+  "pi-subagents"
 ]
 
 export default defineConfig(({ command }) => {

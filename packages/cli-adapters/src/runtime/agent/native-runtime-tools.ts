@@ -8,11 +8,21 @@ import {
 } from "../prompt/role-profiles.js"
 import { startRegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
-import { AgentRuntimeError, type AgentRuntimeContext } from "./agent-runtime.js"
+import {
+  AgentRuntimeError,
+  type AgentRuntimeContext,
+  type AgentRuntimeShape
+} from "./agent-runtime.js"
 import { createJinglerTools } from "./pi-jingler-tools.js"
+
+export type NativeSubagentFleetHandlers = Pick<
+  AgentRuntimeShape,
+  "controlSubagent" | "subagentFleetSnapshot" | "subagentTranscript"
+>
 
 export interface NativeRuntimeToolsOptions {
   readonly createToolRegistry?: (spec: AgentRunSpec, context: AgentRuntimeContext) => Effect.Effect<ToolRegistry, AgentRuntimeError, Scope.Scope>
+  readonly subagentFleet?: NativeSubagentFleetHandlers
 }
 
 const failure = (cause: unknown) => new AgentRuntimeError({

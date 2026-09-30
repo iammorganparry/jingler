@@ -68,6 +68,20 @@ const configList = (pattern: RegExp, label: string): string[] => {
   return [...match![1]!.matchAll(QUOTED_ENTRY)].map((m) => m[1]!)
 }
 
+it("bundles raw TypeScript dependencies used by the Electron main process", () => {
+  const config = readFileSync(configPath, "utf-8")
+  expect(config).toContain('"@jingler/cli-adapters"')
+  expect(config).toContain('"pi-subagents"')
+})
+
+it("ships a compiled process worker instead of spawning pi-subagents TypeScript", () => {
+  const main = readFileSync(resolve(import.meta.dirname, "src/main/index.ts"), "utf-8")
+  const builder = readFileSync(resolve(import.meta.dirname, "electron-builder.yml"), "utf-8")
+  expect(main).toContain("JINGLER_SUBAGENT_PROCESS_WORKER")
+  expect(main).toContain('"../../../device-agent/dist/runtime-payload/runtime-assets/jingler-subagent-process-worker.mjs"')
+  expect(builder).toContain("subagent-runtime/jingler-subagent-process-worker.mjs")
+})
+
 it("pre-bundles and dedupes every @pierre package the renderer graph imports", () => {
   const include = new Set(
     configList(OPTIMIZE_DEPS_INCLUDE, "renderer optimizeDeps.include")

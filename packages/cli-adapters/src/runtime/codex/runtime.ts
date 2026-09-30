@@ -411,10 +411,10 @@ export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentR
       ),
     steer: (continuation, targetId, text) => control(continuation, targetId, text),
     interrupt: (continuation, targetId) => control(continuation, targetId),
-    controlSubagent: unsupported,
+    controlSubagent: options.subagentFleet?.controlSubagent ?? unsupported,
     decidePlanReview: unsupported,
-    subagentFleetSnapshot: unsupported,
-    subagentTranscript: unsupported
+    subagentFleetSnapshot: options.subagentFleet?.subagentFleetSnapshot ?? unsupported,
+    subagentTranscript: options.subagentFleet?.subagentTranscript ?? unsupported
   }
 
   async function* run(

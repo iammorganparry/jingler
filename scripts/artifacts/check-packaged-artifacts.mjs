@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync } from "node:fs"
-import { basename, dirname, resolve } from "node:path"
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, dirname, join, resolve } from "node:path"
 import { listPackage } from "@electron/asar"
 import {
   auditDesktopArchive,
@@ -26,6 +27,11 @@ const deviceManifest = JSON.parse(readFileSync(resolve(root, "apps/device-agent/
 // Windows runner parses a drive-letter path (`D:\\…`) as `host:file` and fails.
 const tarAt = { cwd: dirname(devicePath), encoding: "utf8" }
 const deviceFile = basename(devicePath)
+const packagedWorker = resolve(
+  resourcesPath,
+  "subagent-runtime",
+  "jingler-subagent-process-worker.mjs"
+)
 const deviceEntries = execFileSync("tar", ["-tzf", deviceFile], {
   ...tarAt,
   maxBuffer: 16 * 1024 * 1024
@@ -35,6 +41,28 @@ const deviceSource = execFileSync(
   ["-xOzf", deviceFile, "./jingler-device.mjs"],
   { ...tarAt, maxBuffer: 64 * 1024 * 1024 }
 )
+const auditPackagedWorker = () => {
+  if (!existsSync(packagedWorker)) return []
+  const isolatedRoot = mkdtempSync(join(tmpdir(), "jingler-worker-smoke-"))
+  const isolatedWorker = join(isolatedRoot, "worker.mjs")
+  copyFileSync(packagedWorker, isolatedWorker)
+  try {
+    const output = execFileSync(process.execPath, [isolatedWorker], {
+      encoding: "utf8",
+      input: "{}\n",
+      timeout: 10_000
+    }).trim()
+    const message = JSON.parse(output)
+    return message.type === "fatal" && message.error === "Child session is not initialized"
+      ? []
+      : ["desktop subagent process worker returned an unexpected smoke response"]
+  } catch (cause) {
+    return [`desktop subagent process worker failed its smoke run: ${cause.message}`]
+  } finally {
+    rmSync(isolatedRoot, { recursive: true, force: true })
+  }
+}
+
 const requiredDeviceEntries = [
   "./jingler-device.mjs",
   "./runtime-assets/jingler-child-tools.mjs",
@@ -58,12 +86,16 @@ const issues = [
   ),
   ...auditRuntimeDependencies(desktopManifest, "desktop"),
   ...auditRuntimeDependencies(deviceManifest, "device agent"),
+  ...auditPackagedWorker(),
   ...(existsSync(resolve(resourcesPath, "subagent-runtime", "jingler-child-tools.mjs"))
     ? []
     : ["desktop resources are missing the Jingler child tool bridge"]),
   ...(existsSync(resolve(resourcesPath, "subagent-runtime", "jingler-claude-cli-provider.mjs"))
     ? []
     : ["desktop resources are missing the Claude CLI child provider"]),
+  ...(existsSync(packagedWorker)
+    ? []
+    : ["desktop resources are missing the bundled subagent process worker"]),
   ...(existsSync(resolve(resourcesPath, "THIRD-PARTY-LICENSES"))
     ? []
     : ["desktop resources are missing THIRD-PARTY-LICENSES"])

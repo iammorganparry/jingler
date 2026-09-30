@@ -134,7 +134,11 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       await run.server.client.session.abort({ sessionID: continuation.id, directory: run.directory }, { throwOnError: true })
       run.inbox.fail(new AgentRuntimeError({ reason: "interrupted", message: "OpenCode turn interrupted" }))
     }, catch: failure }),
-    steer: unsupported, controlSubagent: unsupported, decidePlanReview: unsupported, subagentFleetSnapshot: unsupported, subagentTranscript: unsupported
+    steer: unsupported,
+    controlSubagent: options?.subagentFleet?.controlSubagent ?? unsupported,
+    decidePlanReview: unsupported,
+    subagentFleetSnapshot: options?.subagentFleet?.subagentFleetSnapshot ?? unsupported,
+    subagentTranscript: options?.subagentFleet?.subagentTranscript ?? unsupported
   }
 
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one scoped turn owns the reservation, event stream, and abort cleanup.

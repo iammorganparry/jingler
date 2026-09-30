@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Effect } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
 import { RunJournal } from "../journal/run-journal.js"
@@ -96,6 +96,29 @@ describe("MCP source policy", () => {
       ["configured", "execute"]
     ])
   })
+})
+
+it("never falls back to stale MCP credentials when a live resolver returns null", async () => {
+  const registry = new ToolRegistry()
+  const factory = vi.fn<McpToolClientFactory>(() => Effect.die("stale endpoint used"))
+  registerProgressiveMcpTools(
+    registry,
+    [{ server, risk: "execute", resolveServer: () => null }],
+    factory
+  )
+
+  const result = await Effect.runPromise(registry.execute({
+    id: "mcp_search",
+    arguments: { query: "navigate" },
+    role: "conversation",
+    mode: "auto"
+  }))
+  expect(result).toMatchObject({ status: "success" })
+  expect(result.value).toEqual({ matches: [{
+    server: "jingler-browser",
+    error: "MCP server is unavailable for this turn: jingler-browser"
+  }] })
+  expect(factory).not.toHaveBeenCalled()
 })
 
 it("keeps configured MCP catalogs out of the provider prompt until searched", async () => {

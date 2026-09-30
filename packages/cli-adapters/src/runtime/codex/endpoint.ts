@@ -24,8 +24,8 @@ export { CODEX_PROTOCOL_VERSION } from "./client.js"
 export const codexFeatures = {
   steer: "text",
   planReview: false,
-  subagentFleet: false,
-  backgroundTasks: false
+  subagentFleet: true,
+  backgroundTasks: true
 } as const
 export interface CodexProbeOptions extends CodexClientOptions {
   readonly targetId?: string

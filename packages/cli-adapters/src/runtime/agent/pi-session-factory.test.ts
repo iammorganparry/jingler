@@ -2,10 +2,10 @@ import { execFileSync } from "node:child_process"
 import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  type AgentSession,
-  type CreateAgentSessionOptions,
-  type CreateAgentSessionResult,
+import type {
+  AgentSession,
+  CreateAgentSessionOptions,
+  CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent"
 import {
   CURRENT_RUNTIME_CONTRACTS,
@@ -13,7 +13,8 @@ import {
   ProviderConnectionId,
   ProviderModelId,
   piEndpointId,
-  type AgentRunSpec
+  type AgentRunSpec,
+  type SubagentCapability
 } from "@jingler/core"
 import { Effect, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -27,6 +28,7 @@ import {
   makeSubagentCapabilityBroker,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
+import { AgentRuntimeError } from "./agent-runtime.js"
 import {
   makePiSessionFactory
 } from "./pi-session-factory.js"
@@ -328,6 +330,129 @@ describe("pi session creation", () => {
     }, {} as never))
 
     expect(captured[0]?.thinkingLevel).toBe("high")
+  })
+
+  it("rolls back PI session resources when native async profile registration fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-profile-failure-"))
+    roots.push(root)
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId: connection.id,
+      authKind: "api-key",
+      access: "secret",
+      refresh: null,
+      expiresAt: null
+    }))
+    const session = fakeSession()
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    const unregister = vi.fn(broker.unregister)
+    const childCredentials = new PiChildCredentials(join(root, "child-credentials"), credentials)
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials,
+      childCredentials,
+      subagentBroker: { ...broker, unregister },
+      resolveConnection: () => Effect.succeed(connection),
+      createSession: async () => ({ session, extensionsResult: {} as never }),
+      configureNativeAsyncSubagents: () => Effect.fail(new AgentRuntimeError({
+        reason: "runtime",
+        message: "profile registration failed"
+      }))
+    })
+
+    const result = await Effect.runPromise(Effect.either(factory.create(makeSpec(root), {} as never)))
+
+    expect(result).toMatchObject({
+      _tag: "Left",
+      left: { message: "profile registration failed" }
+    })
+    expect(unregister).toHaveBeenCalledWith("pi-session")
+    expect(session.dispose).toHaveBeenCalledOnce()
+    await expect(readdir(childCredentials.directory("pi-session"))).rejects.toMatchObject({
+      code: "ENOENT"
+    })
+  })
+
+  it("disposes profiles, credentials, and capability ceiling exactly once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-pi-final-child-cleanup-"))
+    roots.push(root)
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId: connection.id,
+      authKind: "api-key",
+      access: "secret",
+      refresh: null,
+      expiresAt: null
+    }))
+    execFileSync("git", ["init", "--quiet", root])
+    const shadowRoot = await mkdtemp(join(tmpdir(), "jingler-pi-disposal-shadow-"))
+    roots.push(shadowRoot)
+    const tracker = new FileChangeTracker({
+      artifactDir: join(root, "artifacts"),
+      sessionId: "session-1",
+      shadowIndexRoot: shadowRoot
+    })
+    const disposeTracker = vi.spyOn(tracker, "dispose")
+    const session = fakeSession()
+    vi.mocked(session.dispose).mockImplementation(() => { throw new Error("session disposal failed") })
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    let capabilities: ReadonlyArray<SubagentCapability> = []
+    const unregister = vi.fn(broker.unregister)
+    const childCredentials = new PiChildCredentials(join(root, "child-credentials"), credentials)
+    const removeCredentials = vi.spyOn(childCredentials, "remove")
+    const disposeProfiles = vi.fn(() => { throw new Error("profile disposal failed") })
+    const factory = makePiSessionFactory({
+      agentDir: join(root, "agent"),
+      sessionsDir: join(root, "sessions"),
+      credentials,
+      childCredentials,
+      terminalTracker: tracker,
+      subagentBroker: {
+        ...broker,
+        register: (input) => broker.register(input).pipe(Effect.tap((created) => Effect.sync(() => {
+          capabilities = created
+        }))),
+        unregister
+      },
+      resolveConnection: () => Effect.succeed(connection),
+      createSession: async () => ({ session, extensionsResult: {} as never }),
+      configureNativeAsyncSubagents: () => Effect.succeed({
+        agentNames: {},
+        dispose: disposeProfiles
+      })
+    })
+    const handle = await Effect.runPromise(factory.create(makeSpec(root), {} as never))
+    const worker = capabilities.find(({ agent }) => agent === "worker")
+    if (worker === undefined) throw new Error("worker capability was not created")
+    const credentialRemovalsBeforeDispose = removeCredentials.mock.calls.length
+    const unregistersBeforeDispose = unregister.mock.calls.length
+
+    await expect(handle.dispose()).rejects.toThrow("session disposal failed")
+
+    expect(session.dispose).toHaveBeenCalledOnce()
+    expect(disposeProfiles).toHaveBeenCalledOnce()
+    expect(disposeTracker).toHaveBeenCalledOnce()
+    expect(removeCredentials).toHaveBeenCalledTimes(credentialRemovalsBeforeDispose + 1)
+    expect(unregister).toHaveBeenCalledTimes(unregistersBeforeDispose + 1)
+    await expect(readdir(childCredentials.directory("pi-session"))).rejects.toMatchObject({
+      code: "ENOENT"
+    })
+    const response = await fetch(worker.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: 1,
+        token: worker.token,
+        parentRuntimeSessionId: worker.parentRuntimeSessionId,
+        callId: "after-dispose",
+        toolId: "supervisor_state",
+        arguments: {}
+      })
+    })
+    expect(response.status).toBe(403)
   })
 
   it("disposes the terminal tracker when embedded session creation fails", async () => {

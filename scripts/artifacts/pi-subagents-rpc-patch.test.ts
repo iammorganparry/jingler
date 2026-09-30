@@ -26,6 +26,7 @@ describe("Jingler pi-subagents compatibility patch", () => {
       "src/runs/shared/process-child-session-worker.ts",
       "src/runs/shared/process-child-session.ts"
     ])
+    expect(patch).toContain("resolveFleetControlParams")
     expect(patch.split("\n").filter((line) => CHANGED_PATCH_LINE.test(line)).join("\n"))
       .not.toMatch(REMOVED_PROMPT_PATCH)
   })

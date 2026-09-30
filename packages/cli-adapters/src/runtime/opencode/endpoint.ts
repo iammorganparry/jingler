@@ -2,7 +2,7 @@ import { nativeCliEndpointId, ProviderId, ProviderModelId, type AgentEndpointCat
 import type { ConfigProvidersResponse, ProviderListResponse } from "@opencode-ai/sdk/v2/client"
 import { acquireOpenCode, makeOpenCodePool, OPENCODE_VERSION, UnsupportedOpenCode, type OpenCodeOptions, type OpenCodeServer } from "./server.js"
 
-export const openCodeFeatures = { steer: "none", planReview: false, subagentFleet: false, backgroundTasks: false } as const
+export const openCodeFeatures = { steer: "none", planReview: false, subagentFleet: true, backgroundTasks: true } as const
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: validates bounded provider and model identities in one catalog pass.
 export const catalogModels = (providers: ProviderListResponse, config: ConfigProvidersResponse): AgentEndpointCatalogEntry["models"] => {
   const connected = new Set(providers.connected)

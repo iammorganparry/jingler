@@ -48,7 +48,7 @@ index 63d2f7bff0ad178ef5b6434b5d9c68425d65164d..6e8a846cfc7400b5d3a6d92c199bdf94
  
  
 diff --git a/src/extension/rpc.ts b/src/extension/rpc.ts
-index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..6c88bb35d8da2ac34f9df4c8f6f89008ef06d6b9 100644
+index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..1795963590c7594826bb350926e5482494c2a284 100644
 --- a/src/extension/rpc.ts
 +++ b/src/extension/rpc.ts
 @@ -31,7 +31,7 @@ export const SUBAGENT_RPC_REQUEST_EVENT = "subagents:rpc:v1:request";
@@ -60,7 +60,37 @@ index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..6c88bb35d8da2ac34f9df4c8f6f89008
  export type SubagentRpcMethod = typeof SUBAGENT_RPC_METHODS[number];
  
  export interface SubagentRpcRequestEnvelope {
-@@ -317,6 +317,7 @@ interface RegisterSubagentRpcBridgeOptions {
+@@ -301,6 +301,29 @@ function buildFleetStatus(
+ 	return { version: 1, entries, totalActive, topLevelAsyncCapacity: state.activeAsyncCapacity ?? { used: 0, limit: 0 }, omitted };
+ }
+ 
++function resolveFleetControlParams(
++	params: unknown,
++	keyState: FleetKeyState,
++): unknown {
++	if (!isRecord(params)) return params;
++	const target = typeof params.id === "string"
++		? params.id
++		: typeof params.runId === "string"
++			? params.runId
++			: undefined;
++	if (!target) return params;
++	const internalKey = [...keyState.keys].find(([, publicKey]) => publicKey === target)?.[0];
++	if (!internalKey) return params;
++	const match = /^(?:async|foreground):([^:]+)(?::(\d+))?$/.exec(internalKey);
++	if (!match) return params;
++	const { id: _id, runId: _runId, index: _index, ...rest } = params;
++	return {
++		...rest,
++		runId: match[1],
++		...(match[2] === undefined ? {} : { index: Number(match[2]) }),
++	};
++}
++
+ interface RegisterSubagentRpcBridgeOptions {
+ 	events: EventBus;
+ 	getContext: () => ExtensionContext | null;
+@@ -317,6 +340,7 @@ interface RegisterSubagentRpcBridgeOptions {
  	now?: () => number;
  	/** Native live state, projected into the optional public fleet-status capability. */
  	state?: SubagentState;
@@ -68,7 +98,7 @@ index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..6c88bb35d8da2ac34f9df4c8f6f89008
  }
  
  class SubagentRpcError extends Error {
-@@ -720,6 +721,17 @@ async function handleRequest(
+@@ -720,6 +744,17 @@ async function handleRequest(
  ): Promise<unknown> {
  	const ctx = options.getContext();
  	if (request.method === "ping") return pingData(ctx);
@@ -86,6 +116,29 @@ index 845e7e1e8bf27bcdd3d8fd3c608e6e13d2b36f00..6c88bb35d8da2ac34f9df4c8f6f89008
  	if (!ctx) throw new SubagentRpcError("no_active_session", "No active extension context for subagent RPC.");
  
  	if (request.method === "manage") {
+@@ -766,17 +801,18 @@ async function handleRequest(
+ 			asyncSnapshot: buildAsyncStatusSnapshotForState(options.state, sessionId),
+ 		};
+ 	}
++	const controlParams = resolveFleetControlParams(request.params, fleetKeys);
+ 	if (request.method === "steer") {
+-		return executeChecked(options, ctx, request.requestId, request.method, steerParams(request.params));
++		return executeChecked(options, ctx, request.requestId, request.method, steerParams(controlParams));
+ 	}
+ 	if (request.method === "interrupt") {
+-		return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(request.params, "interrupt") });
++		return executeChecked(options, ctx, request.requestId, request.method, { action: "interrupt", ...normalizeTargetParams(controlParams, "interrupt") });
+ 	}
+ 	if (request.method === "stop") {
+-		return stopAsyncRun(request.params, options, ctx);
++		return stopAsyncRun(controlParams, options, ctx);
+ 	}
+ 	if (request.method === "resume") {
+-		return executeChecked(options, ctx, request.requestId, request.method, resumeParams(request.params));
++		return executeChecked(options, ctx, request.requestId, request.method, resumeParams(controlParams));
+ 	}
+ 	throw new SubagentRpcError("unsupported_method", `Unsupported subagent RPC method: ${String(request.method)}`);
+ }
 diff --git a/src/intercom/native-supervisor-channel.ts b/src/intercom/native-supervisor-channel.ts
 index 868d66d3f5501e0bc45d709d81f02808ba1aa2a0..c8505e11c673cfd5b0763038e57aa7b14c134c4d 100644
 --- a/src/intercom/native-supervisor-channel.ts
@@ -203,7 +256,7 @@ index 868d66d3f5501e0bc45d709d81f02808ba1aa2a0..c8505e11c673cfd5b0763038e57aa7b1
  			if (!started) return;
  			poll();
 diff --git a/src/runs/background/async-execution.ts b/src/runs/background/async-execution.ts
-index d243ce0e80a490cf4c6479a8aa58348f2acd75b7..17d120226742a1a44da7e4ac8b5985fa733bcf51 100644
+index d243ce0e80a490cf4c6479a8aa58348f2acd75b7..8eb4ea94cc6f0c1bdfd7d45afbdd6e4712216145 100644
 --- a/src/runs/background/async-execution.ts
 +++ b/src/runs/background/async-execution.ts
 @@ -560,7 +560,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
@@ -368,7 +421,7 @@ index 0000000000000000000000000000000000000000..b74f34a6b96f13721a755c8fdfc054c0
 +})
 diff --git a/src/runs/shared/process-child-session.ts b/src/runs/shared/process-child-session.ts
 new file mode 100644
-index 0000000000000000000000000000000000000000..84c1137923b9c6a73e11424fc9457fa4d39fffec
+index 0000000000000000000000000000000000000000..19d11952c3ddb7274424d9763629719927cedf70
 --- /dev/null
 +++ b/src/runs/shared/process-child-session.ts
 @@ -0,0 +1,228 @@

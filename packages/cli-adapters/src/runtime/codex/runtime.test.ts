@@ -77,7 +77,8 @@ describe("native Codex protocol", () => {
     expect(entry.endpoint).toMatchObject({
       status: "ready",
       targetId: "device-1",
-      label: "Codex CLI"
+      label: "Codex CLI",
+      features: { subagentFleet: true, backgroundTasks: true }
     })
     expect(entry.models.map((model) => model.id)).toEqual(["first", "second"])
     expect(entry.models[0]!.capabilities.contextWindow).toBeNull()

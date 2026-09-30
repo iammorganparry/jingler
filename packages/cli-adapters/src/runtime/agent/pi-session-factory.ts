@@ -7,6 +7,7 @@ import {
   type AgentSessionEvent,
   type CreateAgentSessionOptions,
   type CreateAgentSessionResult,
+  type EventBus,
   type ExtensionUIContext,
   type ResourceLoader
 } from "@earendil-works/pi-coding-agent"
@@ -55,6 +56,7 @@ import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
+import { makePiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   preparePiSubagentsRuntime,
@@ -186,6 +188,15 @@ export interface PiSessionFactoryOptions {
   readonly subagentBroker?: SubagentCapabilityBroker
   /** Extension host only: the parent model never executes registry tools itself. */
   readonly delegationOnly?: boolean
+  readonly configureNativeAsyncSubagents?: (input: {
+    readonly eventBus: EventBus
+    readonly parentRuntimeSessionId: string
+    readonly context: AgentRuntimeContext
+  }) => Effect.Effect<{
+    readonly agentNames: Readonly<Record<string, string>>
+    readonly rebind?: (spec: AgentRunSpec, models: SubagentModelAssignments) => void
+    readonly dispose: () => void
+  }, AgentRuntimeError>
 }
 
 const usesClaudeCli = (connection: ProviderConnection): boolean =>
@@ -415,6 +426,7 @@ const createEmbeddedSession = (
 
 interface SessionHandleInput {
   readonly registry: ToolRegistry
+  readonly eventBus: EventBus
   readonly embedded: EmbeddedSession
   readonly spec: AgentRunSpec
   readonly tracker: FileChangeTracker | undefined
@@ -425,6 +437,24 @@ interface SessionHandleInput {
   readonly subagentCeiling?: SubagentCapabilityCeilingHandle
   readonly lifecycle: PiSubagentLifecycleAdapter
   readonly fleetEvents: SubagentFleetEventHubShape
+  readonly nativeAsyncSubagents?: {
+    readonly agentNames: Readonly<Record<string, string>>
+    readonly rebind?: (spec: AgentRunSpec, models: SubagentModelAssignments) => void
+    readonly dispose: () => void
+  }
+}
+
+const disposeAll = async (actions: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
+  let firstFailure: unknown
+  for (const dispose of actions) {
+    try {
+      // biome-ignore lint/performance/noAwaitInLoops: cleanup order is deliberate and every action must still be attempted.
+      await dispose()
+    } catch (cause) {
+      firstFailure ??= cause
+    }
+  }
+  if (firstFailure !== undefined) throw firstFailure
 }
 
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
@@ -488,29 +518,34 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     subagentTranscript: (runId) => lifecycle.transcript(runId),
     delegateSubagent: (request, signal, onUpdate) =>
       lifecycle.delegate(request, signal, onUpdate),
+    spawnSubagent: makePiSubagentAsyncDelegate(input.eventBus),
+    ...(input.nativeAsyncSubagents
+      ? {
+          subagentAgentNames: input.nativeAsyncSubagents.agentNames,
+          ...(input.nativeAsyncSubagents.rebind
+            ? { rebindNativeAsyncSubagents: input.nativeAsyncSubagents.rebind }
+            : {})
+        }
+      : {}),
     prompt: (text, images) => session.prompt(text, {
       images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
     }),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
-    dispose: async () => {
-      try {
-        lifecycle.stop()
-        Effect.runSync(fleetEvents.clear)
-        session.dispose()
-      } finally {
-        subagentCeiling?.dispose()
-        await Promise.all([
-          tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
-          childCredentials
-            ? Effect.runPromise(childCredentials.remove(session.sessionId))
-            : Promise.resolve(),
-          subagentBroker
-            ? Effect.runPromise(subagentBroker.unregister(session.sessionId))
-            : Promise.resolve()
-        ])
-      }
-    },
+    dispose: () => disposeAll([
+      () => lifecycle.stop(),
+      () => Effect.runSync(fleetEvents.clear),
+      () => session.dispose(),
+      () => subagentCeiling?.dispose(),
+      () => input.nativeAsyncSubagents?.dispose(),
+      () => tracker ? Effect.runPromise(tracker.dispose()) : undefined,
+      () => childCredentials
+        ? Effect.runPromise(childCredentials.remove(session.sessionId))
+        : undefined,
+      () => subagentBroker
+        ? Effect.runPromise(subagentBroker.unregister(session.sessionId))
+        : undefined
+    ]),
     usage: () => {
       const stats = session.getSessionStats()
       return { costUsd: stats.cost, tokens: stats.tokens.total }
@@ -703,6 +738,7 @@ function* bindSubagentCapabilities(
   nativeSubagentsEnabled: boolean
 ) {
   lifecycle.start()
+    const parentRuntimeSessionId = embedded.result.session.sessionId
     if ((options.childCredentials === undefined) !== (options.subagentBroker === undefined)) {
       lifecycle.stop()
       embedded.result.session.dispose()
@@ -715,7 +751,6 @@ function* bindSubagentCapabilities(
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
     if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
-      const parentRuntimeSessionId = embedded.result.session.sessionId
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,
         agents: JINGLER_SUBAGENT_NAMES,
@@ -786,6 +821,30 @@ function* bindSubagentCapabilities(
           ))
         )
     }
+  const rollbackSession = Effect.all([
+    (options.childCredentials?.remove(parentRuntimeSessionId) ?? Effect.void).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    (options.subagentBroker?.unregister(parentRuntimeSessionId) ?? Effect.void).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => subagentCeiling?.dispose()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => lifecycle.stop()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    ),
+    Effect.sync(() => embedded.result.session.dispose()).pipe(
+      Effect.catchAllCause(() => Effect.void)
+    )
+  ], { discard: true })
+  const nativeAsyncSubagents = options.configureNativeAsyncSubagents
+    ? yield* options.configureNativeAsyncSubagents({
+        eventBus: prepared.eventBus,
+        parentRuntimeSessionId: parentRuntimeSessionId,
+        context
+      }).pipe(Effect.onError(() => rollbackSession))
+    : undefined
   return yield* observeSessionDiagnostics(
     spec,
     connection,
@@ -797,7 +856,8 @@ function* bindSubagentCapabilities(
     snapshot,
     lifecycle,
     fleetEvents,
-    subagentCeiling
+    subagentCeiling,
+    nativeAsyncSubagents
   )
 }
 
@@ -812,7 +872,8 @@ function* observeSessionDiagnostics(
   snapshot: WorktreeSnapshot | null,
   lifecycle: PiSubagentLifecycleAdapter,
   fleetEvents: SubagentFleetEventHubShape,
-  subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+  subagentCeiling: SubagentCapabilityCeilingHandle | undefined,
+  nativeAsyncSubagents: SessionHandleInput["nativeAsyncSubagents"]
 ) {
   const diagnostic = makeRuntimeDiagnosticObserver({
       runId: spec.runId,
@@ -831,6 +892,7 @@ function* observeSessionDiagnostics(
       : undefined
     return toHandle({
       registry,
+      eventBus: prepared.eventBus,
       embedded,
       spec,
       tracker,
@@ -840,7 +902,8 @@ function* observeSessionDiagnostics(
       subagentBroker: options.subagentBroker,
       lifecycle,
       fleetEvents,
-      ...(subagentCeiling ? { subagentCeiling } : {})
+      ...(subagentCeiling ? { subagentCeiling } : {}),
+      ...(nativeAsyncSubagents ? { nativeAsyncSubagents } : {})
     })
   }
 

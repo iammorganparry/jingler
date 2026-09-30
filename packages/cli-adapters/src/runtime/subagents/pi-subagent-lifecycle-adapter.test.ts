@@ -794,6 +794,49 @@ describe("PiSubagentLifecycleAdapter", () => {
     adapter.stop()
   })
 
+  it("returns the internal async run id for a successful stop", async () => {
+    const events = createEventBus()
+    const adapter = new PiSubagentLifecycleAdapter({
+      events,
+      parentRuntimeSessionId: parent,
+      controlJournal: null,
+      emit: () => undefined,
+      now: () => 35
+    })
+    adapter.start()
+    events.emit("subagent:async-started", {
+      id: "public-child-id",
+      sessionId: parent,
+      agent: "worker"
+    })
+    const unsubscribe = events.on("subagents:rpc:v1:request", (request) => {
+      if (!request || typeof request !== "object" || !("requestId" in request)) return
+      events.emit(`subagents:rpc:v1:reply:${String(request.requestId)}`, {
+        version: 1,
+        requestId: request.requestId,
+        method: "stop",
+        success: true,
+        data: { runId: "internal-async-run-id", stopped: true }
+      })
+    })
+
+    await expect(adapter.control({
+      version: 2,
+      requestId: "stop-public-child",
+      parentRuntimeSessionId: parent,
+      runId: "public-child-id",
+      action: "stop",
+      message: null,
+      replyTo: null
+    })).resolves.toMatchObject({
+      acknowledged: true,
+      status: "accepted",
+      nativeRequestId: "internal-async-run-id"
+    })
+    unsubscribe()
+    adapter.stop()
+  })
+
   it("settles a delivered control deterministically across child completion", async () => {
     const events = createEventBus()
     const adapter = new PiSubagentLifecycleAdapter({
