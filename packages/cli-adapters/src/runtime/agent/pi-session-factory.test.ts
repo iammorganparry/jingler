@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, readdir, rm } from "node:fs/promises"
+import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -119,6 +119,8 @@ const fakeSession = (): AgentSession =>
 describe("pi session creation", () => {
   it("uses only registry-owned planning tools with tracked Auto tools in plan mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-planning-session-")); roots.push(root)
+    await writeFile(join(root, "AGENTS.md"), "Run the project checks before completion.")
+    await writeFile(join(root, "CLAUDE.md"), "Preserve the repository conventions.")
     const captured: CreateAgentSessionOptions[] = []
     const registry = new ToolRegistry()
     for (const id of ["auto_only", "plannotator_submit_plan", "plannotator_update_plan"]) registry.register({
@@ -132,7 +134,10 @@ describe("pi session creation", () => {
     await Effect.runPromise(factory.create({ ...makeSpec(root), role: "plan", mode: "plan" }, {} as never))
     expect(captured[0]?.tools).toEqual(["auto_only", "plannotator_submit_plan", "plannotator_update_plan"])
     expect(captured[0]?.customTools?.map(({ name }) => name)).toEqual(captured[0]?.tools)
-    expect(captured[0]?.resourceLoader?.getSystemPrompt()).toContain("- plannotator_submit_plan: Shared registry tool")
+    const prompt = captured[0]?.resourceLoader?.getSystemPrompt()
+    expect(prompt).toContain("- plannotator_submit_plan: Shared registry tool")
+    expect(prompt).toContain("Run the project checks before completion.")
+    expect(prompt).toContain("Preserve the repository conventions.")
   })
 
   it.each(["api-key", "claude-setup-token"] as const)(
@@ -188,6 +193,7 @@ describe("pi session creation", () => {
   it("pins credentials, compiles a locked prompt, and seeds visible history once", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-pi-session-"))
     roots.push(root)
+    await writeFile(join(root, "AGENTS.md"), "x".repeat(32 * 1024))
     const credentials = new InMemoryProviderCredentialStore()
     await Effect.runPromise(
       credentials.write({

@@ -40,6 +40,7 @@ import {
   PromptCompiler,
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
+import { projectInstructionsLayer } from "../prompt/project-instructions.js"
 import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
 import {
   DELEGATION_DEFAULT_PROMPT_LAYER,
@@ -285,16 +286,20 @@ const createResources = (
   const eventBus = createEventBus()
   // A thrown compile error would be a defect the run cannot classify, so the
   // operator would see a bare "The agent run failed." with the reason lost.
-  return Effect.try({
-    try: () => (options.promptCompiler ?? new PromptCompiler()).compile({
-      layers: [
-        ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
-        ...ponytailPromptLayers(spec.ponytailMode),
-        ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : [])
-      ],
-      tools,
-      tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
-    }),
+  return Effect.tryPromise({
+    try: async () => {
+      const workspaceInstructions = await projectInstructionsLayer(spec.cwd)
+      return (options.promptCompiler ?? new PromptCompiler()).compile({
+        layers: [
+          ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
+          ...ponytailPromptLayers(spec.ponytailMode),
+          ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : []),
+          ...(workspaceInstructions === null ? [] : [workspaceInstructions])
+        ],
+        tools,
+        tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
+      })
+    },
     catch: (cause) => new AgentRuntimeError({
       reason: "runtime",
       message: cause instanceof Error ? cause.message : "Could not compile the system prompt",
