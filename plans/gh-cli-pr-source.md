@@ -1,0 +1,3 @@
+- [ ] Add strict authenticated-CLI source selection for targeted PR reads
+- [ ] Cover PR detail and worktree linking behavior with focused tests
+- [ ] Run focused tests and review the diff
