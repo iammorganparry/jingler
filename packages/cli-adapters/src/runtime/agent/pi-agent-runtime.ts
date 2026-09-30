@@ -18,6 +18,7 @@ import type {
   SubagentModelAssignments
 } from "@jingler/core"
 import { Effect, Queue, Stream } from "effect"
+import { describeCause } from "../auth/auth-broker.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { AgentRuntimeError } from "./agent-runtime.js"
 import { createPiEventNormalizer, piProviderFailure } from "./pi-events.js"
@@ -185,6 +186,11 @@ const subscribeToSession = (
   }
 }
 
+const promptFailureMessage = (cause: unknown): string => {
+  const detail = describeCause(cause)
+  return detail === null ? "pi prompt failed" : `pi prompt failed: ${detail}`
+}
+
 const startPrompt = (
   handle: PiSessionHandle,
   prompt: string,
@@ -197,7 +203,7 @@ const startPrompt = (
       catch: (cause) =>
         new AgentRuntimeError({
           reason: "provider",
-          message: "pi prompt failed",
+          message: promptFailureMessage(cause),
           cause
         })
     }).pipe(

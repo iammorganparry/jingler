@@ -2,7 +2,12 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { plannotatorProjectionToPlanDocument, type Message } from "@jingler/core"
-import { ConversationView, latestAssistantMessageIndex, planTranscriptAnchorIndex } from "./conversation-view.js"
+import {
+  ConversationView,
+  isRetryablePromptFailure,
+  latestAssistantMessageIndex,
+  planTranscriptAnchorIndex
+} from "./conversation-view.js"
 
 const textMessage = (id: string, role: Message["role"], text: string): Message => ({
   id,
@@ -10,6 +15,16 @@ const textMessage = (id: string, role: Message["role"], text: string): Message =
   streaming: false,
   createdAt: `2026-08-13T00:00:0${id}.000Z`,
   parts: [{ _tag: "Text", text }]
+})
+
+describe("ConversationView prompt recovery", () => {
+  it("offers recovery only for the latest failed Pi prompt", () => {
+    const prompt = textMessage("1", "user", "Try this again")
+    const failed = textMessage("2", "assistant", "pi prompt failed: Provider is not configured")
+
+    expect(isRetryablePromptFailure([prompt, failed], 1)).toBe(true)
+    expect(isRetryablePromptFailure([prompt, failed, textMessage("3", "user", "newer")], 1)).toBe(false)
+  })
 })
 
 describe("ConversationView message navigation", () => {

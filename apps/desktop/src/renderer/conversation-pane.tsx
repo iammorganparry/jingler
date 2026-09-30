@@ -1099,6 +1099,13 @@ function renderFleetComposer({
     focusKey={fleet.selectedNode!.id} />
 }
 
+const availableRetryPrompt = (
+  archived: boolean | undefined,
+  disabledReason: string | undefined,
+  retryPrompt: (() => void) | null
+): (() => void) | undefined =>
+  archived || disabledReason !== undefined ? undefined : (retryPrompt ?? undefined)
+
 function renderMainConversation({
   convo,
   addLocalMcp,
@@ -1238,6 +1245,7 @@ function renderMainConversation({
     onSetModel={({ runtimeId, endpointId, connectionId, providerId, modelId }) =>
       convo.setModel(runtimeId, endpointId, connectionId, providerId, modelId)}
     onSend={sendPrompt}
+    onRetryPrompt={availableRetryPrompt(session.archived, composerDisabledReason, convo.retryPrompt)}
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}
