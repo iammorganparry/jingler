@@ -40,6 +40,17 @@ const owner = (value: unknown): NativeSidecarOwner | null => {
 const key = (value: Pick<NativeSidecarOwner, "sessionId" | "chatId" | "parentRuntimeSessionId">): string =>
   `${value.sessionId}\u0000${value.chatId}\u0000${value.parentRuntimeSessionId}`
 
+const sameOwner = (left: NativeSidecarOwner, right: NativeSidecarOwner): boolean =>
+  left.version === right.version &&
+  left.sessionId === right.sessionId &&
+  left.chatId === right.chatId &&
+  left.runtimeId === right.runtimeId &&
+  left.targetId === right.targetId &&
+  left.cwd === right.cwd &&
+  left.continuationAlias === right.continuationAlias &&
+  left.parentRuntimeSessionId === right.parentRuntimeSessionId &&
+  left.updatedAt === right.updatedAt
+
 type StoredOwner = Omit<NativeSidecarOwner, "version" | "updatedAt">
 
 /** Atomic, secret-free ownership index for native delegation PI sidecars. */
@@ -66,19 +77,27 @@ export class NativeSidecarOwnerStore {
     }
   }
 
-  put(value: StoredOwner): Promise<void> {
-    return this.#mutate((entries) => [
-      ...entries.filter((entry) => key(entry) !== key(value)),
-      {
+  put(value: StoredOwner): Promise<NativeSidecarOwner> {
+    let persisted: NativeSidecarOwner | undefined
+    return this.#mutate((entries) => {
+      const previousGeneration = entries.reduce(
+        (latest, entry) => Math.max(latest, entry.updatedAt),
+        0
+      )
+      persisted = {
         version: VERSION,
         ...value,
-        updatedAt: Date.now()
+        updatedAt: Math.max(Date.now(), previousGeneration + 1)
       }
-    ]).then(() => undefined)
+      return [
+        ...entries.filter((entry) => key(entry) !== key(value)),
+        persisted
+      ]
+    }).then(() => persisted!)
   }
 
-  removeExact(value: Pick<NativeSidecarOwner, "sessionId" | "chatId" | "parentRuntimeSessionId">): Promise<void> {
-    return this.#mutate((entries) => entries.filter((entry) => key(entry) !== key(value)))
+  removeExact(value: NativeSidecarOwner): Promise<void> {
+    return this.#mutate((entries) => entries.filter((entry) => !sameOwner(entry, value)))
       .then(() => undefined)
   }
 

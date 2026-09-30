@@ -14,6 +14,7 @@ import {
   type AgentRuntimeContext
 } from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
+import type { NativeSidecarOwner } from "./native-sidecar-owner-store.js"
 import {
   nativeSidecarCapabilityFingerprint,
   retainedPiFleetHandlers,
@@ -98,6 +99,15 @@ const handle = (active: () => boolean, dispose = vi.fn()): PiSessionHandle => ({
 })
 
 const owner = { runtimeId: "codex" as const, endpointId: AgentEndpointId.make("desktop:codex:default"), targetId: "desktop" }
+
+const ownerStore = () => ({
+  put: vi.fn(async (value: Omit<NativeSidecarOwner, "version" | "updatedAt">) => ({
+    version: 1 as const,
+    ...value,
+    updatedAt: Date.now()
+  })),
+  removeExact: vi.fn(async (_value: NativeSidecarOwner) => undefined)
+})
 
 const control = (action: "stop" | "follow-up" | "steer") => ({
   version: 2 as const,
@@ -304,10 +314,7 @@ describe("retained native PI sidecars", () => {
   it("persists owner aliases on native sidecar creation and reuse", async () => {
     const retainedHandle = handle(() => true)
     const factory: PiSessionFactory = { create: () => Effect.succeed(retainedHandle) }
-    const owners = {
-      put: vi.fn(async () => undefined),
-      removeExact: vi.fn(async () => undefined)
-    }
+    const owners = ownerStore()
     const sessions = new RetainedPiSessionRegistry(factory, 60_000, 60_000, owners)
 
     const first = await Effect.runPromise(sessions.acquireByChat(
@@ -434,10 +441,7 @@ describe("retained native PI sidecars", () => {
         return Effect.succeed(handle(() => false, dispose))
       }
     }
-    const owners = {
-      put: vi.fn(async () => undefined),
-      removeExact: vi.fn(async () => undefined)
-    }
+    const owners = ownerStore()
     const sessions = new RetainedPiSessionRegistry(factory, 5, 15, owners)
     const persisted = {
       version: 1 as const,
@@ -491,6 +495,106 @@ describe("retained native PI sidecars", () => {
     expect(owners.removeExact).not.toHaveBeenCalled()
   })
 
+  it("expires idle recovery descriptors at runtime without opening them", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_000)
+    try {
+      const persisted = {
+        version: 1 as const,
+        sessionId: "session-1",
+        chatId: "chat-1",
+        runtimeId: "codex" as const,
+        targetId: "desktop",
+        cwd: "/workspace",
+        continuationAlias: "/sessions/native-sidecar.jsonl",
+        parentRuntimeSessionId: "pi-native-parent",
+        updatedAt: Date.now()
+      }
+      const owners = ownerStore()
+      const factory: PiSessionFactory = { create: vi.fn(() => Effect.succeed(handle(() => false))) }
+      const sessions = new RetainedPiSessionRegistry(factory, 5, 15, owners, 100)
+      sessions.registerRecovery(persisted, spec, context(), factory)
+
+      await vi.advanceTimersByTimeAsync(101)
+
+      expect(owners.removeExact).toHaveBeenCalledOnce()
+      expect(owners.removeExact).toHaveBeenCalledWith(persisted)
+      await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).subagentFleetSnapshot(
+        owner,
+        "session-1",
+        "chat-1",
+        "pi-native-parent"
+      ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
+      expect(factory.create).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("cannot remove a newer owner when an older recovery fails late", async () => {
+    const stale = {
+      version: 1 as const,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex" as const,
+      targetId: "desktop",
+      cwd: "/workspace",
+      continuationAlias: "/sessions/stale.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      updatedAt: Date.now()
+    }
+    const current = {
+      ...stale,
+      continuationAlias: "/sessions/current.jsonl",
+      updatedAt: stale.updatedAt + 1
+    }
+    let stored: NativeSidecarOwner | undefined = stale
+    const owners = {
+      put: vi.fn(async (value: Omit<NativeSidecarOwner, "version" | "updatedAt">) => {
+        stored = { version: 1, ...value, updatedAt: 3_000 }
+        return stored
+      }),
+      removeExact: vi.fn(async (value: NativeSidecarOwner) => {
+        if (stored !== undefined && JSON.stringify(stored) === JSON.stringify(value)) stored = undefined
+      })
+    }
+    let rejectRecovery!: (cause: unknown) => void
+    const pending = new Promise<PiSessionHandle>((_resolve, reject) => { rejectRecovery = reject })
+    const staleFactory: PiSessionFactory = {
+      create: () => Effect.tryPromise({
+        try: () => pending,
+        catch: (cause) => new AgentRuntimeError({
+          reason: "runtime",
+          message: "missing continuation",
+          cause
+        })
+      })
+    }
+    const currentFactory: PiSessionFactory = { create: () => Effect.succeed(handle(() => false)) }
+    const sessions = new RetainedPiSessionRegistry(staleFactory, 60_000, 60_000, owners)
+    sessions.registerRecovery(stale, spec, context(), staleFactory)
+    const opening = Effect.runPromise(retainedPiFleetHandlers(sessions).subagentFleetSnapshot(
+      owner,
+      "session-1",
+      "chat-1",
+      "pi-native-parent"
+    ))
+    await Promise.resolve()
+    sessions.registerRecovery(current, spec, context(), currentFactory)
+    stored = current
+    rejectRecovery({ code: "ENOENT" })
+
+    await expect(opening).rejects.toMatchObject({ message: "pi session operation failed" })
+    expect(owners.removeExact).toHaveBeenCalledWith(stale)
+    expect(stored).toEqual(current)
+    await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).subagentFleetSnapshot(
+      owner,
+      "session-1",
+      "chat-1",
+      "pi-native-parent"
+    ))).resolves.toMatchObject({ totalActive: 0 })
+  })
+
   it("removes definitive missing recovery but keeps transient failures retryable", async () => {
     const persisted = {
       version: 1 as const,
@@ -503,10 +607,7 @@ describe("retained native PI sidecars", () => {
       parentRuntimeSessionId: "pi-native-parent",
       updatedAt: Date.now()
     }
-    const owners = {
-      put: vi.fn(async () => undefined),
-      removeExact: vi.fn(async () => undefined)
-    }
+    const owners = ownerStore()
     const missingFactory: PiSessionFactory = {
       create: vi.fn(() => Effect.fail(new AgentRuntimeError({
         reason: "runtime",

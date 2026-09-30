@@ -25,12 +25,16 @@ interface ArchivedPiTranscript {
   readonly read: PiSessionHandle["subagentTranscript"]
 }
 
+const NATIVE_RECOVERY_RETENTION_MS = 30 * 24 * 60 * 60_000
+const MAX_TIMER_MS = 2_147_483_647
+
 interface NativeRecoveryDescriptor {
   readonly owner: NativeSidecarOwner
   readonly spec: AgentRunSpec
   readonly context: AgentRuntimeContext
   readonly factory: PiSessionFactory
   opening?: Promise<RetainedPiSession>
+  expiryTimer?: ReturnType<typeof setTimeout>
 }
 
 const lockedCapabilityFingerprint = (
@@ -117,7 +121,8 @@ export class RetainedPiSessionRegistry {
     readonly factory: PiSessionFactory,
     readonly reapIntervalMs: number,
     readonly nativeIdleRetentionMs = 0,
-    readonly nativeOwners?: Pick<NativeSidecarOwnerStore, "put" | "removeExact">
+    readonly nativeOwners?: Pick<NativeSidecarOwnerStore, "put" | "removeExact">,
+    readonly nativeRecoveryRetentionMs = NATIVE_RECOVERY_RETENTION_MS
   ) {}
 
   acquire(
@@ -150,8 +155,58 @@ export class RetainedPiSessionRegistry {
       context: detachedPiSessionContext(context),
       factory
     }
-    this.#recoveries.set(owner.continuationAlias, descriptor)
-    this.#recoveries.set(owner.parentRuntimeSessionId, descriptor)
+    this.#replaceRecovery(owner.continuationAlias, descriptor)
+    this.#replaceRecovery(owner.parentRuntimeSessionId, descriptor)
+    this.#scheduleRecoveryExpiry(descriptor)
+  }
+
+  #replaceRecovery(alias: string, descriptor: NativeRecoveryDescriptor): void {
+    const previous = this.#recoveries.get(alias)
+    if (previous !== undefined && previous !== descriptor) {
+      if (this.#recoveries.get(previous.owner.continuationAlias) === previous) {
+        this.#recoveries.delete(previous.owner.continuationAlias)
+      }
+      if (this.#recoveries.get(previous.owner.parentRuntimeSessionId) === previous) {
+        this.#recoveries.delete(previous.owner.parentRuntimeSessionId)
+      }
+      if (previous.expiryTimer !== undefined) clearTimeout(previous.expiryTimer)
+    }
+    this.#recoveries.set(alias, descriptor)
+  }
+
+  #scheduleRecoveryExpiry(
+    descriptor: NativeRecoveryDescriptor,
+    delay = descriptor.owner.updatedAt + this.nativeRecoveryRetentionMs - Date.now()
+  ): void {
+    if (descriptor.expiryTimer !== undefined) clearTimeout(descriptor.expiryTimer)
+    descriptor.expiryTimer = setTimeout(() => {
+      descriptor.expiryTimer = undefined
+      void this.#expireRecovery(descriptor)
+    }, Math.max(0, Math.min(MAX_TIMER_MS, delay)))
+    descriptor.expiryTimer.unref?.()
+  }
+
+  async #expireRecovery(descriptor: NativeRecoveryDescriptor): Promise<void> {
+    if (
+      this.#recoveries.get(descriptor.owner.continuationAlias) !== descriptor &&
+      this.#recoveries.get(descriptor.owner.parentRuntimeSessionId) !== descriptor
+    ) return
+    const remaining = descriptor.owner.updatedAt + this.nativeRecoveryRetentionMs - Date.now()
+    if (remaining > 0) {
+      this.#scheduleRecoveryExpiry(descriptor)
+      return
+    }
+    const live = this.#ownedRecord(
+      descriptor.owner.sessionId,
+      descriptor.owner.chatId,
+      descriptor.owner.parentRuntimeSessionId,
+      descriptor.owner.runtimeId
+    )
+    if (live !== undefined) {
+      this.#scheduleRecoveryExpiry(descriptor, Math.min(MAX_TIMER_MS, this.reapIntervalMs))
+      return
+    }
+    await this.#removeRecovery(descriptor)
   }
 
   /** Reopen one persisted native sidecar without prompting or spawning work. */
@@ -519,9 +574,9 @@ export class RetainedPiSessionRegistry {
       continuationAlias: record.handle.id,
       parentRuntimeSessionId: record.handle.parentRuntimeSessionId
     }
-    await this.nativeOwners.put(value)
+    const persisted = await this.nativeOwners.put(value)
     if (spec !== undefined && context !== undefined && factory !== undefined) {
-      this.registerRecovery({ version: 1, ...value, updatedAt: Date.now() }, spec, context, factory)
+      this.registerRecovery(persisted, spec, context, factory)
     }
   }
 
@@ -603,6 +658,10 @@ export class RetainedPiSessionRegistry {
   }
 
   async #removeRecovery(descriptor: NativeRecoveryDescriptor): Promise<void> {
+    if (descriptor.expiryTimer !== undefined) {
+      clearTimeout(descriptor.expiryTimer)
+      descriptor.expiryTimer = undefined
+    }
     for (const alias of [
       descriptor.owner.continuationAlias,
       descriptor.owner.parentRuntimeSessionId

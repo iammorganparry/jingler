@@ -466,6 +466,64 @@ describe("native external-job provider", () => {
     expect(await readFile(join(root, `${staleId}.json`), "utf8")).toBe(failedState)
   })
 
+  it("retains malformed optional terminal fields instead of pruning them", async () => {
+    const root = await stateRoot()
+    const host = makeNativeExternalJobProvider(root)
+    const now = Date.now()
+    const old = now - 31 * 24 * 60 * 60_000
+    const malformed: ReadonlyArray<Readonly<Record<string, unknown>>> = [
+      { providerJobId: "" },
+      { bindingId: "" },
+      { parentPiSessionId: "" },
+      { role: "" },
+      { modelId: "" },
+      { promptDigest: "" },
+      { sourceRunId: "" },
+      { role: "x".repeat(4_097) },
+      { startedAt: null },
+      { updatedAt: "old" },
+      { runtimeSessionId: 1 },
+      { output: {} },
+      { artifactPath: null },
+      { failureCode: [] },
+      { failureMessage: false },
+      { endedAt: undefined },
+      { endedAt: null },
+      { usage: null },
+      { usage: [] },
+      { usage: { totalTokens: -1, costUsd: null, provenance: "codex.external-job" } },
+      { usage: { totalTokens: 1, costUsd: -0.01, provenance: "codex.external-job" } },
+      { usage: { totalTokens: 1, costUsd: null, provenance: "opencode.external-job" } }
+    ]
+    const ids = malformed.map((_, index) =>
+      `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`)
+    await Promise.all(malformed.map((fields, index) => writeFile(
+      join(root, `${ids[index]}.json`),
+      `${JSON.stringify({
+        version: 1,
+        providerJobId: ids[index],
+        bindingId: "ended-binding",
+        parentPiSessionId: "pi-session",
+        runtimeId: "codex",
+        role: "worker",
+        modelId: "codex/cheap",
+        promptDigest: "digest",
+        sourceRunId: "stale-run",
+        startedAt: 1,
+        updatedAt: old,
+        endedAt: old,
+        state: "completed",
+        ...fields
+      })}\n`
+    )))
+
+    await expect(host.recoverAndPrune(now)).resolves.toEqual({ failed: 0, pruned: 0 })
+    await Promise.all(ids.map((id) =>
+      expect(host.provider.result(id)).rejects.toMatchObject({ code: "state-unreadable" })
+    ))
+    await expect(readdir(root)).resolves.toHaveLength(ids.length)
+  })
+
   it("recovers ambiguous jobs without dispatch or usage and prunes only old terminal pairs", async () => {
     const root = await stateRoot()
     const host = makeNativeExternalJobProvider(root)

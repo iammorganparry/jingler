@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { NativeSidecarOwnerStore } from "./native-sidecar-owner-store.js"
+import { type NativeSidecarOwner, NativeSidecarOwnerStore } from "./native-sidecar-owner-store.js"
 
 const roots: string[] = []
 const root = async () => {
@@ -69,7 +69,7 @@ describe("native sidecar owner store", () => {
   it("prunes expired owners and removes one exact sidecar without deleting siblings", async () => {
     const directory = await root()
     const file = join(directory, "owners.json")
-    const entry = (parentRuntimeSessionId: string, updatedAt: number) => ({
+    const entry = (parentRuntimeSessionId: string, updatedAt: number): NativeSidecarOwner => ({
       version: 1,
       sessionId: "session-1",
       chatId: "chat-1",
@@ -93,6 +93,25 @@ describe("native sidecar owner store", () => {
     ])
     await store.removeExact(entry("current", 100))
     await expect(store.list()).resolves.toEqual([entry("sibling", 100)])
+  })
+
+  it("does not let a stale generation remove its newer replacement", async () => {
+    const directory = await root()
+    const store = new NativeSidecarOwnerStore(join(directory, "owners.json"))
+    const base = {
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex" as const,
+      targetId: "desktop",
+      cwd: "/workspace",
+      parentRuntimeSessionId: "pi-parent"
+    }
+    const stale = await store.put({ ...base, continuationAlias: "/pi/stale.jsonl" })
+    const current = await store.put({ ...base, continuationAlias: "/pi/current.jsonl" })
+
+    expect(current.updatedAt).toBeGreaterThan(stale.updatedAt)
+    await store.removeExact(stale)
+    await expect(store.list()).resolves.toEqual([current])
   })
 
   it("fails closed on unreadable ownership and keeps the file", async () => {

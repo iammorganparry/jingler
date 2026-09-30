@@ -28,6 +28,10 @@ import { directNativeChildSpec } from "./direct-native-subagent.js"
 
 export const JINGLER_NATIVE_EXTERNAL_JOB_PROVIDER = "jingler-native"
 const MAX_TRANSCRIPT_CHARS = 128_000
+const MAX_ID_CHARS = 4_096
+const MAX_PATH_CHARS = 16_384
+const MAX_FAILURE_CODE_CHARS = 128
+const MAX_FAILURE_MESSAGE_CHARS = 4_096
 const NATIVE_JOB_RETENTION_MS = 30 * 24 * 60 * 60_000
 const PROVIDER_JOB_ID = /^[a-f0-9-]{36}$/u
 const PROVIDER_JOB_RECORD = /^([a-f0-9-]{36})\.json$/u
@@ -148,6 +152,29 @@ const optionsFor = (input: ExternalJobStartInput): {
   return { bindingId, role: role as JinglerSubagentName, modelId }
 }
 
+const boundedText = (value: unknown, maxLength: number): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= maxLength
+
+const optionalText = (value: unknown, maxLength: number): value is string | undefined =>
+  value === undefined || (typeof value === "string" && value.length <= maxLength)
+
+const optionalFinite = (value: unknown): value is number | undefined =>
+  value === undefined || (typeof value === "number" && Number.isFinite(value))
+
+const nullableNonnegative = (value: unknown): value is number | null =>
+  value === null || (typeof value === "number" && Number.isFinite(value) && value >= 0)
+
+const validUsage = (
+  value: unknown,
+  runtimeId: NativeExternalJobRecord["runtimeId"]
+): value is NonNullable<NativeExternalJobRecord["usage"]> => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const usage = value as Record<string, unknown>
+  return nullableNonnegative(usage.totalTokens) &&
+    nullableNonnegative(usage.costUsd) &&
+    usage.provenance === `${runtimeId}.external-job`
+}
+
 const safeRecord = (value: unknown): NativeExternalJobRecord => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ExternalJobProviderError("Malformed Jingler native external-job state", {
@@ -161,18 +188,24 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
     candidate.state === "blocked"
   if (
     candidate.version !== 1 ||
-    typeof candidate.providerJobId !== "string" ||
-    typeof candidate.bindingId !== "string" ||
+    !boundedText(candidate.providerJobId, MAX_ID_CHARS) ||
+    !PROVIDER_JOB_ID.test(candidate.providerJobId) ||
+    !boundedText(candidate.bindingId, MAX_ID_CHARS) ||
     (candidate.runtimeId !== "codex" && candidate.runtimeId !== "opencode") ||
-    typeof candidate.parentPiSessionId !== "string" ||
-    typeof candidate.role !== "string" ||
-    typeof candidate.modelId !== "string" ||
-    typeof candidate.promptDigest !== "string" ||
-    typeof candidate.sourceRunId !== "string" ||
+    !boundedText(candidate.parentPiSessionId, MAX_ID_CHARS) ||
+    !boundedText(candidate.role, MAX_ID_CHARS) ||
+    !boundedText(candidate.modelId, MAX_ID_CHARS) ||
+    !boundedText(candidate.promptDigest, MAX_ID_CHARS) ||
+    !boundedText(candidate.sourceRunId, MAX_ID_CHARS) ||
     typeof candidate.startedAt !== "number" || !Number.isFinite(candidate.startedAt) ||
     typeof candidate.updatedAt !== "number" || !Number.isFinite(candidate.updatedAt) ||
-    (candidate.endedAt !== undefined &&
-      (typeof candidate.endedAt !== "number" || !Number.isFinite(candidate.endedAt))) ||
+    !optionalFinite(candidate.endedAt) ||
+    !optionalText(candidate.runtimeSessionId, MAX_ID_CHARS) ||
+    !optionalText(candidate.output, MAX_TRANSCRIPT_CHARS) ||
+    !optionalText(candidate.artifactPath, MAX_PATH_CHARS) ||
+    !optionalText(candidate.failureCode, MAX_FAILURE_CODE_CHARS) ||
+    !optionalText(candidate.failureMessage, MAX_FAILURE_MESSAGE_CHARS) ||
+    (candidate.usage !== undefined && !validUsage(candidate.usage, candidate.runtimeId)) ||
     (terminal && candidate.endedAt === undefined) ||
     !["queued", "running", "completed", "failed", "stopped", "blocked"].includes(candidate.state ?? "")
   ) {
