@@ -173,6 +173,9 @@ describe("retained native PI sidecars", () => {
       owner, "session-1", "another-chat", "pi-native-parent"
     ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
     await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
+      owner, "another-session", "chat-1", "pi-native-parent"
+    ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
+    await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
       { ...owner, runtimeId: "opencode" },
       "session-1",
       "chat-1",
@@ -182,9 +185,45 @@ describe("retained native PI sidecars", () => {
     await sessions.release(second)
     childActive = false
     await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    await sessions.release(second)
+    expect(dispose).toHaveBeenCalledOnce()
     await expect(Effect.runPromise(fleet.subagentTranscript(
       owner, "session-1", "chat-1", "pi-native-parent", "child-1"
     ))).resolves.toHaveLength(1)
+  })
+
+  it("serializes same-chat acquisition while allowing independent chats", async () => {
+    const create = vi.fn((createdSpec: AgentRunSpec) => Effect.succeed({
+      ...handle(() => true),
+      id: `/sessions/${createdSpec.chatId}.jsonl`,
+      parentRuntimeSessionId: `pi-${createdSpec.chatId}`
+    }))
+    const factory: PiSessionFactory = { create }
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000)
+
+    const sameChat = await Promise.allSettled([
+      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex")),
+      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex"))
+    ])
+    expect(sameChat.filter(({ status }) => status === "fulfilled")).toHaveLength(1)
+    expect(sameChat.filter(({ status }) => status === "rejected")).toHaveLength(1)
+    expect(sameChat.find(({ status }) => status === "rejected")).toMatchObject({
+      reason: { message: expect.stringContaining("pi session is already active") }
+    })
+    expect(create).toHaveBeenCalledOnce()
+
+    const first = sameChat.find((result) => result.status === "fulfilled")
+    if (first?.status !== "fulfilled") throw new Error("same-chat acquire did not succeed")
+    await sessions.release(first.value)
+    const otherSpec = { ...spec, chatId: "chat-2", runId: "native-parent-2" }
+    const [firstChat, secondChat] = await Promise.all([
+      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex")),
+      Effect.runPromise(sessions.acquireByChat(otherSpec, context(), factory, "codex"))
+    ])
+    expect(firstChat.handle.parentRuntimeSessionId).toBe("pi-chat-1")
+    expect(secondChat.handle.parentRuntimeSessionId).toBe("pi-chat-2")
+    expect(create).toHaveBeenCalledTimes(2)
+    await Promise.all([sessions.release(firstChat), sessions.release(secondChat)])
   })
 
   it("rejects a changed profile while work is active and rebuilds it only after idle", async () => {

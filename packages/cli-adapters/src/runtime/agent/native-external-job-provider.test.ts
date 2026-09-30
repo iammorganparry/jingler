@@ -177,6 +177,9 @@ describe("native external-job provider", () => {
       })
       const started = await host.provider.start(startInput(binding.bindingId, modelId))
       const result = await terminalResult(host.provider, started.providerJobId)
+      await host.provider.status(started.providerJobId)
+      await host.provider.reattach(started.providerJobId)
+      await host.provider.result(started.providerJobId)
       const persisted = JSON.parse(await readFile(join(root, `${started.providerJobId}.json`), "utf8"))
       const transcript = await readFile(join(root, `${started.providerJobId}.transcript.jsonl`), "utf8")
 
@@ -193,6 +196,7 @@ describe("native external-job provider", () => {
         }
       })
       expect(transcript).toContain(`${runtimeId} terminal output`)
+      expect(recordUsage).toHaveBeenCalledTimes(1)
       expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({
         runtimeId,
         modelId,
@@ -401,12 +405,42 @@ describe("native external-job provider", () => {
     await expect(host.stop("async-run", "another-pi-session")).resolves.toBe(0)
     expect(cancelled).not.toHaveBeenCalled()
     await expect(host.stop("async-run", "pi-session")).resolves.toBe(1)
+    await expect(host.stop("async-run", "pi-session")).resolves.toBe(0)
     await expect(host.provider.result(started.providerJobId)).resolves.toMatchObject({
       state: "stopped",
       failureCode: "stopped"
     })
     expect(cancelled).toHaveBeenCalledOnce()
+    expect(recordUsage).toHaveBeenCalledTimes(1)
     expect(recordUsage).toHaveBeenCalledWith(expect.objectContaining({ outcome: "cancelled" }))
+  })
+
+  it("never persists prompts, provider credentials, or capability tokens in job state", async () => {
+    const root = await stateRoot()
+    const host = makeNativeExternalJobProvider(root)
+    const modelId = ProviderModelId.make("codex/cheap")
+    const binding = host.bind({
+      parentPiSessionId: "pi-session",
+      spec: spec("codex"),
+      context: context(),
+      models: { worker: modelId },
+      makeRuntime: () => runtime([])
+    })
+    const secret = "sk-secret-provider-value"
+    const capability = "capability-token-secret"
+    const input = startInput(binding.bindingId, modelId)
+    const started = await host.provider.start({
+      ...input,
+      prompt: `Inspect without persisting ${secret}`,
+      options: { ...input.options, credential: secret, capabilityToken: capability }
+    })
+    await terminalResult(host.provider, started.providerJobId)
+
+    const raw = await readFile(join(root, `${started.providerJobId}.json`), "utf8")
+    expect(raw).not.toContain(secret)
+    expect(raw).not.toContain(capability)
+    expect(raw).not.toContain("capabilityToken")
+    expect(raw).not.toContain("credential")
   })
 
   it("fails closed for malformed and stale active durable state", async () => {

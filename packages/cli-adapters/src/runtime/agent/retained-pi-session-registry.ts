@@ -116,6 +116,7 @@ export class RetainedPiSessionRegistry {
   readonly #transcriptArchives = new Map<string, ArchivedPiTranscript>()
   readonly #archiveOrder: ArchivedPiTranscript[] = []
   readonly #recoveries = new Map<string, NativeRecoveryDescriptor>()
+  readonly #chatAcquires = new Map<string, Promise<void>>()
 
   constructor(
     readonly factory: PiSessionFactory,
@@ -139,7 +140,23 @@ export class RetainedPiSessionRegistry {
     factory: PiSessionFactory,
     nativeRuntimeId?: AgentRuntimeId
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
-    return this.#acquireWithFactory(spec, context, factory, true, nativeRuntimeId)
+    const key = `${spec.sessionId}\u0000${spec.chatId}`
+    return Effect.acquireUseRelease(
+      Effect.promise(async () => {
+        const previous = this.#chatAcquires.get(key) ?? Promise.resolve()
+        let unlock!: () => void
+        const lock = new Promise<void>((resolve) => { unlock = resolve })
+        const queued = previous.then(() => lock)
+        this.#chatAcquires.set(key, queued)
+        await previous
+        return { queued, unlock }
+      }),
+      () => this.#acquireWithFactory(spec, context, factory, true, nativeRuntimeId),
+      ({ queued, unlock }) => Effect.sync(() => {
+        unlock()
+        if (this.#chatAcquires.get(key) === queued) this.#chatAcquires.delete(key)
+      })
+    )
   }
 
   /** Index one persisted owner for on-demand reopen without retaining credentials. */
