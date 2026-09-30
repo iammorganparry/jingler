@@ -439,6 +439,19 @@ interface SessionHandleInput {
   }
 }
 
+const disposeAll = async (actions: ReadonlyArray<() => void | Promise<void>>): Promise<void> => {
+  let firstFailure: unknown
+  for (const dispose of actions) {
+    try {
+      // biome-ignore lint/performance/noAwaitInLoops: cleanup order is deliberate and every action must still be attempted.
+      await dispose()
+    } catch (cause) {
+      firstFailure ??= cause
+    }
+  }
+  if (firstFailure !== undefined) throw firstFailure
+}
+
 const toHandle = (input: SessionHandleInput): PiSessionHandle => {
   const {
     embedded,
@@ -514,25 +527,20 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
     }),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),
-    dispose: async () => {
-      try {
-        lifecycle.stop()
-        Effect.runSync(fleetEvents.clear)
-        session.dispose()
-      } finally {
-        subagentCeiling?.dispose()
-        input.nativeAsyncSubagents?.dispose()
-        await Promise.all([
-          tracker ? Effect.runPromise(tracker.dispose()) : Promise.resolve(),
-          childCredentials
-            ? Effect.runPromise(childCredentials.remove(session.sessionId))
-            : Promise.resolve(),
-          subagentBroker
-            ? Effect.runPromise(subagentBroker.unregister(session.sessionId))
-            : Promise.resolve()
-        ])
-      }
-    },
+    dispose: () => disposeAll([
+      () => lifecycle.stop(),
+      () => Effect.runSync(fleetEvents.clear),
+      () => session.dispose(),
+      () => subagentCeiling?.dispose(),
+      () => input.nativeAsyncSubagents?.dispose(),
+      () => tracker ? Effect.runPromise(tracker.dispose()) : undefined,
+      () => childCredentials
+        ? Effect.runPromise(childCredentials.remove(session.sessionId))
+        : undefined,
+      () => subagentBroker
+        ? Effect.runPromise(subagentBroker.unregister(session.sessionId))
+        : undefined
+    ]),
     usage: () => {
       const stats = session.getSessionStats()
       return { costUsd: stats.cost, tokens: stats.tokens.total }

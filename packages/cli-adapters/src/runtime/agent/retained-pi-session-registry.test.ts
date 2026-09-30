@@ -181,6 +181,12 @@ describe("retained native PI sidecars", () => {
       "chat-1",
       "pi-native-parent"
     ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
+    await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
+      { ...owner, targetId: "remote-device" },
+      "session-1",
+      "chat-1",
+      "pi-native-parent"
+    ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
 
     await sessions.release(second)
     childActive = false
@@ -190,40 +196,72 @@ describe("retained native PI sidecars", () => {
     await expect(Effect.runPromise(fleet.subagentTranscript(
       owner, "session-1", "chat-1", "pi-native-parent", "child-1"
     ))).resolves.toHaveLength(1)
+    await expect(Effect.runPromise(fleet.subagentTranscript(
+      { ...owner, targetId: "remote-device" },
+      "session-1",
+      "chat-1",
+      "pi-native-parent",
+      "child-1"
+    ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
   })
 
-  it("serializes same-chat acquisition while allowing independent chats", async () => {
-    const create = vi.fn((createdSpec: AgentRunSpec) => Effect.succeed({
-      ...handle(() => true),
-      id: `/sessions/${createdSpec.chatId}.jsonl`,
-      parentRuntimeSessionId: `pi-${createdSpec.chatId}`
+  it("serializes pending same-chat creation, cleans interrupted waiters, and allows two chats concurrently", async () => {
+    const gates = new Map<string, { promise: Promise<void>; release: () => void }>()
+    const gateFor = (chatId: string) => {
+      let release!: () => void
+      const promise = new Promise<void>((resolve) => { release = resolve })
+      const gate = { promise, release }
+      gates.set(chatId, gate)
+      return gate
+    }
+    const create = vi.fn((createdSpec: AgentRunSpec) => Effect.promise(async () => {
+      await gates.get(createdSpec.chatId)!.promise
+      return {
+        ...handle(() => true),
+        id: `/sessions/${createdSpec.chatId}.jsonl`,
+        parentRuntimeSessionId: `pi-${createdSpec.chatId}`
+      }
     }))
     const factory: PiSessionFactory = { create }
     const sessions = new RetainedPiSessionRegistry(factory, 60_000)
 
-    const sameChat = await Promise.allSettled([
-      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex")),
-      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex"))
-    ])
-    expect(sameChat.filter(({ status }) => status === "fulfilled")).toHaveLength(1)
-    expect(sameChat.filter(({ status }) => status === "rejected")).toHaveLength(1)
-    expect(sameChat.find(({ status }) => status === "rejected")).toMatchObject({
-      reason: { message: expect.stringContaining("pi session is already active") }
-    })
+    gateFor("chat-1")
+    const firstPromise = Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex"))
+    await vi.waitFor(() => expect(create).toHaveBeenCalledOnce())
+    const waiterAbort = new AbortController()
+    const waiter = Effect.runPromise(
+      sessions.acquireByChat(spec, context(), factory, "codex"),
+      { signal: waiterAbort.signal }
+    )
+    waiterAbort.abort()
     expect(create).toHaveBeenCalledOnce()
+    gates.get("chat-1")!.release()
+    const first = await firstPromise
+    await expect(waiter).rejects.toBeDefined()
+    await sessions.release(first)
+    const afterInterruptedWaiter = await Effect.runPromise(sessions.acquireByChat(
+      spec,
+      context(),
+      factory,
+      "codex"
+    ))
+    expect(afterInterruptedWaiter.handle).toBe(first.handle)
+    await sessions.release(afterInterruptedWaiter)
 
-    const first = sameChat.find((result) => result.status === "fulfilled")
-    if (first?.status !== "fulfilled") throw new Error("same-chat acquire did not succeed")
-    await sessions.release(first.value)
-    const otherSpec = { ...spec, chatId: "chat-2", runId: "native-parent-2" }
-    const [firstChat, secondChat] = await Promise.all([
-      Effect.runPromise(sessions.acquireByChat(spec, context(), factory, "codex")),
-      Effect.runPromise(sessions.acquireByChat(otherSpec, context(), factory, "codex"))
-    ])
-    expect(firstChat.handle.parentRuntimeSessionId).toBe("pi-chat-1")
-    expect(secondChat.handle.parentRuntimeSessionId).toBe("pi-chat-2")
-    expect(create).toHaveBeenCalledTimes(2)
-    await Promise.all([sessions.release(firstChat), sessions.release(secondChat)])
+    gateFor("chat-2")
+    gateFor("chat-3")
+    const parallelSessions = new RetainedPiSessionRegistry(factory, 60_000)
+    const firstSpec = { ...spec, chatId: "chat-2", runId: "native-parent-2" }
+    const secondSpec = { ...spec, chatId: "chat-3", runId: "native-parent-3" }
+    const firstChatPromise = Effect.runPromise(parallelSessions.acquireByChat(firstSpec, context(), factory, "codex"))
+    const secondChatPromise = Effect.runPromise(parallelSessions.acquireByChat(secondSpec, context(), factory, "codex"))
+    await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(3))
+    gates.get("chat-2")!.release()
+    gates.get("chat-3")!.release()
+    const [firstChat, secondChat] = await Promise.all([firstChatPromise, secondChatPromise])
+    expect(firstChat.handle.parentRuntimeSessionId).toBe("pi-chat-2")
+    expect(secondChat.handle.parentRuntimeSessionId).toBe("pi-chat-3")
+    await Promise.all([parallelSessions.release(firstChat), parallelSessions.release(secondChat)])
   })
 
   it("rejects a changed profile while work is active and rebuilds it only after idle", async () => {
@@ -422,7 +460,7 @@ describe("retained native PI sidecars", () => {
     expect(sessions.lookupOwned("session-1", "chat-1", "pi-native-parent")).toBe(recoveredHandle)
     expect(sessions.lookupOwned("session-1", "chat-1", "/sessions/reopened.jsonl")).toBe(recoveredHandle)
     await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).subagentTranscript(
-      { ...owner, runtimeId: "claude" },
+      { ...owner, runtimeId: "claude", targetId: "device:recovery" },
       "session-1",
       "chat-1",
       "pi-native-parent",
@@ -499,13 +537,14 @@ describe("retained native PI sidecars", () => {
       targetCapabilities: { ...spec.targetCapabilities, targetId: persisted.targetId }
     }, context(), factory)
     const fleet = retainedPiFleetHandlers(sessions)
+    const remoteOwner = { ...owner, targetId: persisted.targetId }
 
     const [first, duplicate] = await Promise.all([
       Effect.runPromise(fleet.subagentFleetSnapshot(
-        owner, "session-1", "chat-1", "pi-native-parent"
+        remoteOwner, "session-1", "chat-1", "pi-native-parent"
       )),
       Effect.runPromise(fleet.subagentFleetSnapshot(
-        owner, "session-1", "chat-1", "pi-native-parent"
+        remoteOwner, "session-1", "chat-1", "pi-native-parent"
       ))
     ])
     expect(first.totalActive).toBe(0)
@@ -519,16 +558,16 @@ describe("retained native PI sidecars", () => {
     await vi.waitFor(() => expect(disposals[0]).toHaveBeenCalledOnce())
 
     await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
-      owner, "session-1", "chat-1", "pi-native-parent"
+      remoteOwner, "session-1", "chat-1", "pi-native-parent"
     ))).resolves.toMatchObject({ totalActive: 0 })
     expect(createdSpecs).toHaveLength(2)
     await expect(Effect.runPromise(fleet.subagentTranscript(
-      owner, "session-1", "chat-1", "pi-native-parent", "child-1"
+      remoteOwner, "session-1", "chat-1", "pi-native-parent", "child-1"
     ))).resolves.toHaveLength(1)
     await vi.waitFor(() => expect(disposals[1]).toHaveBeenCalledOnce())
 
     await expect(Effect.runPromise(fleet.controlSubagent(
-      owner, "session-1", "chat-1", control("stop")
+      remoteOwner, "session-1", "chat-1", control("stop")
     ))).resolves.toMatchObject({ status: "accepted" })
     expect(createdSpecs).toHaveLength(3)
     expect(owners.removeExact).not.toHaveBeenCalled()

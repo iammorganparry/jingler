@@ -20,6 +20,7 @@ export const nativeSidecarCapabilityFingerprint = (
 interface ArchivedPiTranscript {
   readonly sessionId: string
   readonly chatId: string
+  readonly targetId: string
   readonly nativeRuntimeId?: AgentRuntimeId
   readonly aliases: ReadonlySet<string>
   readonly read: PiSessionHandle["subagentTranscript"]
@@ -605,11 +606,13 @@ export class RetainedPiSessionRegistry {
     sessionId: string,
     chatId: string,
     id: string,
-    runtimeId?: AgentRuntimeId
+    runtimeId?: AgentRuntimeId,
+    targetId?: string
   ): RetainedPiSession | undefined {
     const record = this.#aliases.get(id)
     return record?.sessionId === sessionId &&
       record.chatId === chatId &&
+      (targetId === undefined || record.targetId === targetId) &&
       (record.nativeRuntimeId === undefined || runtimeId === undefined || record.nativeRuntimeId === runtimeId)
       ? record
       : undefined
@@ -628,16 +631,18 @@ export class RetainedPiSessionRegistry {
     sessionId: string,
     chatId: string,
     id: string,
-    runtimeId: AgentRuntimeId
+    runtimeId: AgentRuntimeId,
+    targetId: string
   ): Promise<PiSessionHandle | undefined> {
-    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId)
+    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId, targetId)
     if (live !== undefined) return live.handle
     const descriptor = this.#recoveries.get(id)
     if (
       descriptor === undefined ||
       descriptor.owner.sessionId !== sessionId ||
       descriptor.owner.chatId !== chatId ||
-      descriptor.owner.runtimeId !== runtimeId
+      descriptor.owner.runtimeId !== runtimeId ||
+      descriptor.owner.targetId !== targetId
     ) return undefined
     if (descriptor.opening === undefined) {
       descriptor.opening = Effect.runPromise(this.recoverByChat(
@@ -706,13 +711,15 @@ export class RetainedPiSessionRegistry {
     sessionId: string,
     chatId: string,
     id: string,
-    runtimeId?: AgentRuntimeId
+    runtimeId?: AgentRuntimeId,
+    targetId?: string
   ): PiSessionHandle["subagentTranscript"] | undefined {
-    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId)
+    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId, targetId)
     if (live !== undefined) return live.handle.subagentTranscript
     const archived = this.#transcriptArchives.get(id)
     return archived?.sessionId === sessionId &&
       archived.chatId === chatId &&
+      (targetId === undefined || archived.targetId === targetId) &&
       (archived.nativeRuntimeId === undefined || runtimeId === undefined || archived.nativeRuntimeId === runtimeId)
       ? archived.read
       : undefined
@@ -722,11 +729,12 @@ export class RetainedPiSessionRegistry {
     sessionId: string,
     chatId: string,
     id: string,
-    runtimeId: AgentRuntimeId
+    runtimeId: AgentRuntimeId,
+    targetId: string
   ): Promise<PiSessionHandle["subagentTranscript"] | undefined> {
-    const read = this.lookupTranscriptOwned(sessionId, chatId, id, runtimeId)
+    const read = this.lookupTranscriptOwned(sessionId, chatId, id, runtimeId, targetId)
     if (read !== undefined) return read
-    return (await this.resolveOwned(sessionId, chatId, id, runtimeId))?.subagentTranscript
+    return (await this.resolveOwned(sessionId, chatId, id, runtimeId, targetId))?.subagentTranscript
   }
 
   async release(record: RetainedPiSession): Promise<void> {
@@ -786,6 +794,7 @@ export class RetainedPiSessionRegistry {
       const archive: ArchivedPiTranscript = {
         sessionId: record.sessionId,
         chatId: record.chatId,
+        targetId: record.targetId,
         ...(record.nativeRuntimeId === undefined ? {} : { nativeRuntimeId: record.nativeRuntimeId }),
         aliases: record.aliases,
         read: record.handle.subagentTranscript
@@ -845,7 +854,8 @@ export const retainedPiFleetHandlers = (
         sessionId,
         chatId,
         request.parentRuntimeSessionId,
-        owner.runtimeId
+        owner.runtimeId,
+        owner.targetId
       ))?.controlSubagent(request)
     ),
     subagentFleetSnapshot: (owner, sessionId, chatId, parentRuntimeSessionId) => operation(
@@ -854,7 +864,8 @@ export const retainedPiFleetHandlers = (
         sessionId,
         chatId,
         parentRuntimeSessionId,
-        owner.runtimeId
+        owner.runtimeId,
+        owner.targetId
       ))?.subagentFleetSnapshot()
     ),
     subagentTranscript: (
@@ -869,7 +880,8 @@ export const retainedPiFleetHandlers = (
         sessionId,
         chatId,
         parentRuntimeSessionId,
-        owner.runtimeId
+        owner.runtimeId,
+        owner.targetId
       ))?.(runId)
     )
   }

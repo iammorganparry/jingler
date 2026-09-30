@@ -94,6 +94,7 @@ import {
   RetainedPiSessionRegistry
 } from "./retained-pi-session-registry.js"
 import { NativeSidecarOwnerStore } from "./native-sidecar-owner-store.js"
+import { registerPersistedNativeSidecarRecoveries } from "./native-sidecar-recovery.js"
 
 const NATIVE_SIDECAR_OWNER_RETENTION_MS = 30 * 24 * 60 * 60_000
 
@@ -723,54 +724,52 @@ export const makePiAgentRuntimeLive = (
         cause
       })
     })
-    yield* Effect.sync(() => {
-      for (const owner of persistedNativeOwners) {
+    yield* Effect.sync(() => registerPersistedNativeSidecarRecoveries(
+      nativeSessions,
+      persistedNativeOwners,
+      (owner) => {
         const connection = nativeClaudeSubagentConnection(owner.targetId)
-        const recoveryFactory = makePiSessionFactory({
-          ...factoryOptions,
-          resolveConnection: () => Effect.succeed(connection),
-          createToolRegistry: undefined,
-          toolRegistry: new ToolRegistry(),
-          terminalTracker: undefined,
-          delegationOnly: true
-        })
-        const recoverySpec: AgentRunSpec = {
-          runId: `native-sidecar-recovery:${owner.sessionId}:${owner.chatId}`,
-          sessionId: owner.sessionId,
-          chatId: owner.chatId,
-          runtimeId: "pi",
-          endpointId: piEndpointId(owner.targetId, connection.id),
-          connectionId: connection.id,
-          providerId: connection.providerId,
-          modelId: ProviderModelId.make("anthropic/sonnet"),
-          role: "conversation",
-          mode: "auto",
-          cwd: owner.cwd,
-          prompt: "",
-          priorMessages: [],
-          continuation: null,
-          seed: null,
-          targetCapabilities: {
-            versions: CURRENT_RUNTIME_CONTRACTS,
-            toolIds: [],
-            resourceIds: [],
-            targetId: owner.targetId
+        return {
+          factory: makePiSessionFactory({
+            ...factoryOptions,
+            resolveConnection: () => Effect.succeed(connection),
+            createToolRegistry: undefined,
+            toolRegistry: new ToolRegistry(),
+            terminalTracker: undefined,
+            delegationOnly: true
+          }),
+          spec: {
+            runId: `native-sidecar-recovery:${owner.sessionId}:${owner.chatId}`,
+            sessionId: owner.sessionId,
+            chatId: owner.chatId,
+            runtimeId: "pi",
+            endpointId: piEndpointId(owner.targetId, connection.id),
+            connectionId: connection.id,
+            providerId: connection.providerId,
+            modelId: ProviderModelId.make("anthropic/sonnet"),
+            role: "conversation",
+            mode: "auto",
+            cwd: owner.cwd,
+            prompt: "",
+            priorMessages: [],
+            continuation: null,
+            seed: null,
+            targetCapabilities: {
+              versions: CURRENT_RUNTIME_CONTRACTS,
+              toolIds: [],
+              resourceIds: [],
+              targetId: owner.targetId
+            }
+          },
+          context: {
+            publishEvent: () => Effect.void,
+            registerBackgroundStop: () => Effect.void,
+            canUseTool: () => Effect.succeed("deny"),
+            askQuestion: () => Effect.succeed([])
           }
         }
-        const recoveryContext: AgentRuntimeContext = {
-          publishEvent: () => Effect.void,
-          registerBackgroundStop: () => Effect.void,
-          canUseTool: () => Effect.succeed("deny"),
-          askQuestion: () => Effect.succeed([])
-        }
-        nativeSessions.registerRecovery(
-          owner,
-          recoverySpec,
-          recoveryContext,
-          recoveryFactory
-        )
       }
-    })
+    ))
 
     const nativeTools: NativeRuntimeToolsOptions = {
       subagentFleet: nativeFleet,

@@ -81,6 +81,18 @@ export interface NativeExternalJobProfileSet {
   dispose(): void
 }
 
+const disposeAll = (actions: ReadonlyArray<() => void>): void => {
+  let firstFailure: unknown
+  for (const dispose of actions) {
+    try {
+      dispose()
+    } catch (cause) {
+      firstFailure ??= cause
+    }
+  }
+  if (firstFailure !== undefined) throw firstFailure
+}
+
 export const registerNativeExternalJobProfiles = (
   events: EventBus,
   profiles: NativeExternalJobProfileSet,
@@ -114,16 +126,19 @@ export const registerNativeExternalJobProfiles = (
       }))
     }
   } catch (cause) {
-    for (const registration of registrations) registration.dispose()
-    profiles.dispose()
+    try {
+      disposeAll([...registrations.map((registration) => () => registration.dispose()), profiles.dispose])
+    } catch {
+      // Registration failure remains the primary error.
+    }
     throw cause
   }
   return {
     ...profiles,
-    dispose: () => {
-      for (const registration of registrations) registration.dispose()
-      profiles.dispose()
-    }
+    dispose: () => disposeAll([
+      ...registrations.map((registration) => () => registration.dispose()),
+      profiles.dispose
+    ])
   }
 }
 

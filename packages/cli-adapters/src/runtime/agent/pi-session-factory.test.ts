@@ -380,19 +380,30 @@ describe("pi session creation", () => {
       refresh: null,
       expiresAt: null
     }))
+    execFileSync("git", ["init", "--quiet", root])
+    const shadowRoot = await mkdtemp(join(tmpdir(), "jingler-pi-disposal-shadow-"))
+    roots.push(shadowRoot)
+    const tracker = new FileChangeTracker({
+      artifactDir: join(root, "artifacts"),
+      sessionId: "session-1",
+      shadowIndexRoot: shadowRoot
+    })
+    const disposeTracker = vi.spyOn(tracker, "dispose")
     const session = fakeSession()
+    vi.mocked(session.dispose).mockImplementation(() => { throw new Error("session disposal failed") })
     const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)
     let capabilities: ReadonlyArray<SubagentCapability> = []
     const unregister = vi.fn(broker.unregister)
     const childCredentials = new PiChildCredentials(join(root, "child-credentials"), credentials)
     const removeCredentials = vi.spyOn(childCredentials, "remove")
-    const disposeProfiles = vi.fn()
+    const disposeProfiles = vi.fn(() => { throw new Error("profile disposal failed") })
     const factory = makePiSessionFactory({
       agentDir: join(root, "agent"),
       sessionsDir: join(root, "sessions"),
       credentials,
       childCredentials,
+      terminalTracker: tracker,
       subagentBroker: {
         ...broker,
         register: (input) => broker.register(input).pipe(Effect.tap((created) => Effect.sync(() => {
@@ -413,10 +424,11 @@ describe("pi session creation", () => {
     const credentialRemovalsBeforeDispose = removeCredentials.mock.calls.length
     const unregistersBeforeDispose = unregister.mock.calls.length
 
-    await handle.dispose()
+    await expect(handle.dispose()).rejects.toThrow("session disposal failed")
 
     expect(session.dispose).toHaveBeenCalledOnce()
     expect(disposeProfiles).toHaveBeenCalledOnce()
+    expect(disposeTracker).toHaveBeenCalledOnce()
     expect(removeCredentials).toHaveBeenCalledTimes(credentialRemovalsBeforeDispose + 1)
     expect(unregister).toHaveBeenCalledTimes(unregistersBeforeDispose + 1)
     await expect(readdir(childCredentials.directory("pi-session"))).rejects.toMatchObject({

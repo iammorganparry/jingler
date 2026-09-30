@@ -160,6 +160,34 @@ describe("native external-job provider", () => {
     }
   )
 
+  it("disposes every external profile and the binding after one disposer throws", () => {
+    const first = vi.fn(() => { throw new Error("first disposal failed") })
+    const second = vi.fn()
+    const disposeBinding = vi.fn()
+    let registration = 0
+    const events = {
+      on: () => () => undefined,
+      emit: (_event: string, raw: unknown) => {
+        const request = raw as { result?: unknown }
+        request.result = {
+          ok: true,
+          registration: { dispose: registration++ === 0 ? first : second }
+        }
+      }
+    } as EventBus
+    const profiles = registerNativeExternalJobProfiles(events, {
+      bindingId: "binding-1",
+      names: { worker: "worker-profile", reviewer: "reviewer-profile" },
+      rebind: vi.fn(),
+      dispose: disposeBinding
+    }, {}, ProviderModelId.make("codex/parent"))
+
+    expect(() => profiles.dispose()).toThrow("first disposal failed")
+    expect(first).toHaveBeenCalledOnce()
+    expect(second).toHaveBeenCalledOnce()
+    expect(disposeBinding).toHaveBeenCalledOnce()
+  })
+
   it.each(["codex", "opencode"] as const)(
     "persists terminal %s output, transcript, and attributable usage",
     async (runtimeId) => {
