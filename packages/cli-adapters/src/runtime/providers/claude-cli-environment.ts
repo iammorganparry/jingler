@@ -1,19 +1,9 @@
-import { delimiter } from "node:path"
-import { nativeCliEnvironment } from "./native-cli-environment.js"
-
-const macCliDirectories = ["/opt/homebrew/bin", "/usr/local/bin"] as const
+import { nativeCliEnvironment, withMacCliPath } from "./native-cli-environment.js"
 
 export const withClaudeCliPath = (
   environment: NodeJS.ProcessEnv,
   platform = process.platform
-): NodeJS.ProcessEnv => {
-  if (platform !== "darwin") return { ...environment }
-  const entries = (environment.PATH ?? "").split(delimiter).filter(Boolean)
-  return {
-    ...environment,
-    PATH: [...entries, ...macCliDirectories.filter((entry) => !entries.includes(entry))].join(delimiter)
-  }
-}
+): NodeJS.ProcessEnv => withMacCliPath(environment, platform)
 
 export const claudeCliEnvironment = (
   environment: NodeJS.ProcessEnv,

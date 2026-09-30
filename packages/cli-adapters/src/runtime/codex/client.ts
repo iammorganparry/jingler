@@ -1,11 +1,14 @@
-import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
+import { nativeCliEnvironment, withMacCliPath } from "../providers/native-cli-environment.js"
 import { execFileText, stopChild, trackChild } from "../../child-registry.js"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import type { InitializeParams } from "./generated/InitializeParams.js"
 
 /** Explicit system allowlist: native credentials come from Codex's own home. */
-export const codexEnvironment = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({
-  ...nativeCliEnvironment(environment),
+export const codexEnvironment = (
+  environment: NodeJS.ProcessEnv,
+  platform = process.platform
+): NodeJS.ProcessEnv => ({
+  ...nativeCliEnvironment(withMacCliPath(environment, platform)),
   ...Object.fromEntries(
     ["CODEX_HOME", "CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"].flatMap((name) =>
       environment[name] === undefined ? [] : [[name, environment[name]]]

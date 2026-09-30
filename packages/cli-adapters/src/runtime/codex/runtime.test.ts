@@ -1,5 +1,6 @@
 import { makeCodexEndpointLogin } from "./login.js"
 import { liveChildCount } from "../../child-registry.js"
+import { delimiter } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
   AgentEndpointCatalogEntry,
@@ -205,12 +206,14 @@ describe("native Codex protocol", () => {
       AZURE_OPENAI_API_KEY: "x", AWS_SECRET_ACCESS_KEY: "x", JINGLER_AUTH_TOKEN: "x",
       JINGLER_DEVICE_GRANT: "x", GH_TOKEN: "x", NODE_OPTIONS: "x", MCP_KEY: "x",
       CODEX_API_KEY: "x", USERPROFILE: "/not-in-shared-allowlist"
-    })).toEqual({
+    }, "linux")).toEqual({
       PATH: "/bin", HOME: "/home/test", APPDATA: "/app", LOCALAPPDATA: "/local",
       SystemRoot: "/system", CODEX_HOME: "/codex", CODEX_CA_CERTIFICATE: "/ca.pem",
       SSL_CERT_FILE: "/ssl.pem"
     })
-    expect(codexEnvironment({ CODEX_HOME: undefined })).toEqual({})
+    expect(codexEnvironment({ CODEX_HOME: undefined }, "linux")).toEqual({})
+    expect(codexEnvironment({ PATH: "/usr/bin" }, "darwin").PATH?.split(delimiter))
+      .toEqual(["/usr/bin", "/opt/homebrew/bin", "/usr/local/bin"])
   })
   it.each(["ask", "accept-edits"] as const)("rejects %s before spawning rather than bypassing required approvals", async (mode) => {
     const spawnProcess = vi.fn()
