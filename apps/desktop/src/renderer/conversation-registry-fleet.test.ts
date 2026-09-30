@@ -154,6 +154,44 @@ describe("conversation registry fleet recovery", () => {
     )).toBe(true)
   })
 
+  it("restores a durable native terminal Snapshot before a new parent turn", async () => {
+    vi.useFakeTimers()
+    const terminalNode: SubagentFleetNode = {
+      ...node,
+      registryRevision: 21,
+      status: "completed",
+      health: "disconnected",
+      blocking: null,
+      currentTool: null,
+      updatedAt: 21,
+      completedAt: 21,
+      terminal: { reason: "completed", summary: "Recovered after restart", at: 21, retryable: false }
+    }
+    mocks.snapshot.mockResolvedValue(snapshot({ registryRevision: 21, nodes: [terminalNode] }))
+    const nativeEndpoint = AgentEndpointId.make("desktop:codex:default")
+    const nativeSession = {
+      ...session,
+      chats: [{
+        ...session.chats[0]!,
+        runtimeId: "codex" as const,
+        endpointId: nativeEndpoint,
+        continuation: { runtimeId: "codex" as const, endpointId: nativeEndpoint, id: "codex-parent" }
+      }]
+    }
+    const actor = getConversationActor(nativeSession)
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [upsert] })
+
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(mocks.snapshot).toHaveBeenCalledWith("session-1", "chat-1", "parent")
+    expect(actor.getSnapshot().context.subagentFleetEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        _tag: "Upsert",
+        node: expect.objectContaining({ status: "completed", terminal: terminalNode.terminal })
+      })
+    ]))
+  })
+
   it("reconciles immediately when the window regains focus", async () => {
     vi.useFakeTimers()
     mocks.snapshot.mockResolvedValue(snapshot())

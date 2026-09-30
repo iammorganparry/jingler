@@ -9,6 +9,7 @@ import type {
   WorkspaceConfig
 } from "@jingler/core"
 import {
+  CURRENT_RUNTIME_CONTRACTS,
   piEndpointId,
   piEndpointTargets,
   ProviderConnectionId,
@@ -54,10 +55,10 @@ import {
   registerPreparedPluginAgentTools,
   type PreparedPluginAgentTools
 } from "../tools/plugin-agent-tools.js"
-import type {
-  PluginToolOrigin,
+import {
   ToolRegistry,
-  ToolSuccessfulResult
+  type PluginToolOrigin,
+  type ToolSuccessfulResult
 } from "../tools/tool-registry.js"
 import { makeWorkspaceInspectionPort } from "../tools/workspace-tools.js"
 import {
@@ -92,6 +93,7 @@ import {
   retainedPiFleetHandlers,
   RetainedPiSessionRegistry
 } from "./retained-pi-session-registry.js"
+import { NativeSidecarOwnerStore } from "./native-sidecar-owner-store.js"
 
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
@@ -246,6 +248,14 @@ export const makePiAgentRuntimeLive = (
     const nativeExternalJobs = ensureNativeExternalJobProvider(
       join(paths.runJournalsDir, "native-external-jobs")
     )
+    yield* Effect.tryPromise({
+      try: () => nativeExternalJobs.recoverAndPrune(),
+      catch: (cause) => new AgentRuntimeError({
+        reason: "runtime",
+        message: "Could not recover native external jobs",
+        cause
+      })
+    })
     yield* childCredentials.clear().pipe(
       Effect.mapError((cause) =>
         new AgentRuntimeError({
@@ -553,7 +563,15 @@ export const makePiAgentRuntimeLive = (
 
     const factory = makePiSessionFactory(factoryOptions)
     const runtime = yield* makePiAgentRuntime(factory)
-    const nativeSessions = new RetainedPiSessionRegistry(factory, 1_000, 5 * 60_000)
+    const nativeOwners = new NativeSidecarOwnerStore(
+      join(paths.runJournalsDir, "native-sidecars", "owners.json")
+    )
+    const nativeSessions = new RetainedPiSessionRegistry(
+      factory,
+      1_000,
+      5 * 60_000,
+      nativeOwners
+    )
     const retainedNativeFleet = retainedPiFleetHandlers(nativeSessions)
     const nativeFleet = {
       ...retainedNativeFleet,
@@ -678,7 +696,7 @@ export const makePiAgentRuntimeLive = (
         seed: null
       }
       const retained = yield* Effect.acquireRelease(
-        nativeSessions.acquireByChat(sidecarSpec, context, retainedFactory),
+        nativeSessions.acquireByChat(sidecarSpec, context, retainedFactory, spec.runtimeId),
         (owned) => Effect.promise(() => nativeSessions.release(owned))
       )
       const handle = retained.handle
@@ -692,6 +710,62 @@ export const makePiAgentRuntimeLive = (
       ))
       return registry
     })
+
+    const persistedNativeOwners = yield* Effect.tryPromise({
+      try: () => nativeOwners.list(),
+      catch: (cause) => new AgentRuntimeError({
+        reason: "runtime",
+        message: "Could not read native subagent host ownership",
+        cause
+      })
+    })
+    yield* Effect.forEach(persistedNativeOwners, (owner) => {
+      const connection = nativeClaudeSubagentConnection("desktop")
+      const recoveryFactory = makePiSessionFactory({
+        ...factoryOptions,
+        resolveConnection: () => Effect.succeed(connection),
+        createToolRegistry: undefined,
+        toolRegistry: new ToolRegistry(),
+        terminalTracker: undefined,
+        delegationOnly: true
+      })
+      const recoverySpec: AgentRunSpec = {
+        runId: `native-sidecar-recovery:${owner.sessionId}:${owner.chatId}`,
+        sessionId: owner.sessionId,
+        chatId: owner.chatId,
+        runtimeId: "pi",
+        endpointId: piEndpointId("desktop", connection.id),
+        connectionId: connection.id,
+        providerId: connection.providerId,
+        modelId: ProviderModelId.make("anthropic/sonnet"),
+        role: "conversation",
+        mode: "auto",
+        cwd: process.cwd(),
+        prompt: "",
+        priorMessages: [],
+        continuation: null,
+        seed: null,
+        targetCapabilities: {
+          versions: CURRENT_RUNTIME_CONTRACTS,
+          toolIds: [],
+          resourceIds: [],
+          targetId: "desktop"
+        }
+      }
+      const recoveryContext: AgentRuntimeContext = {
+        publishEvent: () => Effect.void,
+        registerBackgroundStop: () => Effect.void,
+        canUseTool: () => Effect.succeed("deny"),
+        askQuestion: () => Effect.succeed([])
+      }
+      return nativeSessions.recoverByChat(
+        owner,
+        recoverySpec,
+        recoveryContext,
+        recoveryFactory
+      ).pipe(Effect.either, Effect.asVoid)
+    }, { concurrency: 1, discard: true })
+
     const nativeTools: NativeRuntimeToolsOptions = {
       subagentFleet: nativeFleet,
       createToolRegistry: (spec, context) => Effect.gen(function* () {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import type { EventBus } from "@earendil-works/pi-coding-agent"
@@ -454,7 +454,66 @@ describe("native external-job provider", () => {
       state: "failed",
       failureCode: "ambiguous-active-job"
     })
-    const persisted = JSON.parse(await readFile(join(root, `${staleId}.json`), "utf8"))
-    expect(persisted).toMatchObject({ state: "failed", failureCode: "ambiguous-active-job" })
+    const failedState = await readFile(join(root, `${staleId}.json`), "utf8")
+    expect(JSON.parse(failedState)).toMatchObject({
+      state: "failed",
+      failureCode: "ambiguous-active-job"
+    })
+    await expect(host.provider.reattach(staleId)).resolves.toMatchObject({
+      state: "failed",
+      failureCode: "ambiguous-active-job"
+    })
+    expect(await readFile(join(root, `${staleId}.json`), "utf8")).toBe(failedState)
+  })
+
+  it("recovers ambiguous jobs without dispatch or usage and prunes only old terminal pairs", async () => {
+    const root = await stateRoot()
+    const host = makeNativeExternalJobProvider(root)
+    const now = Date.now()
+    const activeId = "55555555-5555-4555-8555-555555555555"
+    const terminalId = "66666666-6666-4666-8666-666666666666"
+    const unreadableId = "77777777-7777-4777-8777-777777777777"
+    const record = (providerJobId: string, state: "running" | "completed", endedAt?: number) => ({
+      version: 1,
+      providerJobId,
+      bindingId: "ended-binding",
+      parentPiSessionId: "pi-session",
+      runtimeId: "codex",
+      role: "worker",
+      modelId: "codex/cheap",
+      promptDigest: "digest",
+      sourceRunId: "stale-run",
+      startedAt: 1,
+      updatedAt: endedAt ?? 1,
+      ...(endedAt === undefined ? {} : { endedAt }),
+      state
+    })
+    await writeFile(join(root, `${activeId}.json`), `${JSON.stringify(record(activeId, "running"))}\n`)
+    await writeFile(join(root, `${terminalId}.json`), `${JSON.stringify(record(
+      terminalId,
+      "completed",
+      now - 31 * 24 * 60 * 60_000
+    ))}\n`)
+    await writeFile(join(root, `${terminalId}.transcript.jsonl`), "terminal\n")
+    await writeFile(join(root, `${unreadableId}.json`), "{}\n")
+    const staleNext = join(root, "orphan.next")
+    await writeFile(staleNext, "partial")
+    const old = new Date(now - 31 * 24 * 60 * 60_000)
+    await utimes(staleNext, old, old)
+
+    await expect(host.recoverAndPrune(now)).resolves.toEqual({ failed: 1, pruned: 2 })
+    await expect(host.provider.reattach(activeId)).resolves.toMatchObject({
+      state: "failed",
+      failureCode: "ambiguous-active-job"
+    })
+    await expect(readdir(root)).resolves.toEqual(expect.arrayContaining([
+      `${activeId}.json`,
+      `${unreadableId}.json`
+    ]))
+    expect((await readdir(root))).not.toEqual(expect.arrayContaining([
+      `${terminalId}.json`,
+      `${terminalId}.transcript.jsonl`,
+      "orphan.next"
+    ]))
   })
 })

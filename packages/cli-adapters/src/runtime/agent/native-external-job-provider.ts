@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import {
   JINGLER_SUBAGENT_NAMES,
@@ -28,7 +28,9 @@ import { directNativeChildSpec } from "./direct-native-subagent.js"
 
 export const JINGLER_NATIVE_EXTERNAL_JOB_PROVIDER = "jingler-native"
 const MAX_TRANSCRIPT_CHARS = 128_000
+const NATIVE_JOB_RETENTION_MS = 30 * 24 * 60 * 60_000
 const PROVIDER_JOB_ID = /^[a-f0-9-]{36}$/u
+const PROVIDER_JOB_RECORD = /^([a-f0-9-]{36})\.json$/u
 
 export const isNativeExternalJobRuntime = (
   runtimeId: AgentRunSpec["runtimeId"]
@@ -125,6 +127,7 @@ export interface NativeExternalJobProviderHost {
   readonly provider: ExternalJobProvider
   bind(input: NativeExternalJobBinding): NativeExternalJobProfileSet
   stop(sourceRunId: string, parentPiSessionId?: string): Promise<number>
+  recoverAndPrune(now?: number): Promise<{ readonly failed: number; readonly pruned: number }>
 }
 
 const optionsFor = (input: ExternalJobStartInput): {
@@ -477,8 +480,66 @@ export const makeNativeExternalJobProvider = (
     }
   }
 
+  const pruneStaleNext = async (name: string, cutoff: number): Promise<number> => {
+    if (!name.endsWith(".next")) return 0
+    try {
+      if ((await stat(join(root, name))).mtimeMs >= cutoff) return 0
+      await rm(join(root, name), { force: true })
+      return 1
+    } catch {
+      // Concurrent cleanup is harmless.
+      return 0
+    }
+  }
+
+  const recoverRecord = async (
+    name: string,
+    cutoff: number
+  ): Promise<{ readonly failed: number; readonly pruned: number }> => {
+    const id = PROVIDER_JOB_RECORD.exec(name)?.[1]
+    if (id === undefined) return { failed: 0, pruned: 0 }
+    let record: NativeExternalJobRecord
+    try {
+      record = await read(id)
+    } catch {
+      // Unreadable state is retained so recovery fails closed without data loss.
+      return { failed: 0, pruned: 0 }
+    }
+    const recovered = await failAmbiguous(record)
+    const failed = recovered === record ? 0 : 1
+    if (
+      recovered.endedAt === undefined ||
+      recovered.endedAt >= cutoff ||
+      recovered.state === "queued" ||
+      recovered.state === "running"
+    ) return { failed, pruned: 0 }
+    await Promise.all([
+      rm(recordPath(id), { force: true }),
+      rm(transcriptPath(id), { force: true })
+    ])
+    return { failed, pruned: 1 }
+  }
+
+  const recoverAndPrune = async (
+    now = Date.now()
+  ): Promise<{ readonly failed: number; readonly pruned: number }> => {
+    await mkdir(root, { recursive: true, mode: 0o700 })
+    const cutoff = now - NATIVE_JOB_RETENTION_MS
+    const results = await Promise.all((await readdir(root)).map(async (name) => {
+      const staleNext = await pruneStaleNext(name, cutoff)
+      return staleNext > 0
+        ? { failed: 0, pruned: staleNext }
+        : recoverRecord(name, cutoff)
+    }))
+    return results.reduce((total, result) => ({
+      failed: total.failed + result.failed,
+      pruned: total.pruned + result.pruned
+    }), { failed: 0, pruned: 0 })
+  }
+
   return {
     provider,
+    recoverAndPrune,
     stop: async (sourceRunId, parentPiSessionId) => {
       const matches = [...active.values()].filter((entry) =>
         entry.sourceRunId === sourceRunId &&

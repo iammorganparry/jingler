@@ -262,6 +262,141 @@ describe("retained native PI sidecars", () => {
     await sessions.release(reacquired)
   })
 
+  it("rejects a recovered continuation whose internal parent ownership changed", async () => {
+    const dispose = vi.fn()
+    const factory: PiSessionFactory = {
+      create: () => Effect.succeed(handle(() => false, dispose))
+    }
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000, 60_000)
+
+    await expect(Effect.runPromise(sessions.recoverByChat({
+      version: 1,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "different-parent",
+      updatedAt: Date.now()
+    }, spec, context(), factory))).rejects.toMatchObject({
+      message: "Recovered native subagent host ownership does not match"
+    })
+    expect(dispose).toHaveBeenCalledOnce()
+    expect(sessions.lookup("different-parent")).toBeUndefined()
+  })
+
+  it("persists owner aliases on native sidecar creation and reuse", async () => {
+    const retainedHandle = handle(() => true)
+    const factory: PiSessionFactory = { create: () => Effect.succeed(retainedHandle) }
+    const owners = { put: vi.fn(async () => undefined) }
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000, 60_000, owners)
+
+    const first = await Effect.runPromise(sessions.acquireByChat(
+      spec,
+      context(),
+      factory,
+      "codex"
+    ))
+    await sessions.release(first)
+    const second = await Effect.runPromise(sessions.acquireByChat(
+      spec,
+      context(),
+      factory,
+      "codex"
+    ))
+
+    expect(owners.put).toHaveBeenCalledTimes(2)
+    expect(owners.put).toHaveBeenLastCalledWith({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "pi-native-parent"
+    })
+    await sessions.release(second)
+  })
+
+  it("recovers both persisted aliases without prompting, spawning, or recording usage", async () => {
+    const prompt = vi.fn(async () => undefined)
+    const spawnSubagent = vi.fn()
+    const recoveredHandle = {
+      ...handle(() => false),
+      id: "/sessions/reopened.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      prompt,
+      spawnSubagent
+    }
+    const createdSpecs: AgentRunSpec[] = []
+    const factory: PiSessionFactory = {
+      create: (createdSpec) => {
+        createdSpecs.push(createdSpec)
+        return Effect.succeed(recoveredHandle)
+      }
+    }
+    const usage = vi.fn((_fact: UsageFact) => Effect.void)
+    const sessions = new RetainedPiSessionRegistry(factory, 60_000, 60_000)
+    const recovered = await Effect.runPromise(sessions.recoverByChat({
+      version: 1,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "claude",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      updatedAt: Date.now()
+    }, spec, context(usage), factory))
+
+    expect(recovered.activeTurns).toBe(0)
+    expect(createdSpecs[0]?.continuation?.id).toBe("/sessions/native-sidecar.jsonl")
+    expect(prompt).not.toHaveBeenCalled()
+    expect(spawnSubagent).not.toHaveBeenCalled()
+    expect(usage).not.toHaveBeenCalled()
+    expect(sessions.lookupOwned("session-1", "chat-1", "pi-native-parent")).toBe(recoveredHandle)
+    expect(sessions.lookupOwned("session-1", "chat-1", "/sessions/reopened.jsonl")).toBe(recoveredHandle)
+    await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).subagentTranscript(
+      owner,
+      "session-1",
+      "chat-1",
+      "pi-native-parent",
+      "child-1"
+    ))).resolves.toHaveLength(1)
+  })
+
+  it("starts a fresh turn host while a recovered host keeps proven-live work", async () => {
+    const recoveredHandle = handle(() => true)
+    const currentHandle = {
+      ...handle(() => false),
+      id: "/sessions/current.jsonl",
+      parentRuntimeSessionId: "pi-current-parent"
+    }
+    const recoveryFactory: PiSessionFactory = { create: () => Effect.succeed(recoveredHandle) }
+    const currentFactory: PiSessionFactory = {
+      create: () => Effect.succeed(currentHandle),
+      lockedCapabilityFingerprint: () => Effect.succeed("models:current")
+    }
+    const sessions = new RetainedPiSessionRegistry(recoveryFactory, 60_000, 60_000)
+    await Effect.runPromise(sessions.recoverByChat({
+      version: 1,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "claude",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      updatedAt: Date.now()
+    }, spec, context(), recoveryFactory))
+
+    const current = await Effect.runPromise(sessions.acquireByChat(
+      spec,
+      context(),
+      currentFactory,
+      "claude"
+    ))
+
+    expect(current.handle).toBe(currentHandle)
+    expect(sessions.lookupOwned("session-1", "chat-1", "pi-native-parent")).toBe(recoveredHandle)
+    expect(sessions.lookupByChat("session-1", "chat-1")).toBe(currentHandle)
+    expect(recoveredHandle.dispose).not.toHaveBeenCalled()
+    await sessions.release(current)
+  })
+
   it("retains an idle native host for bounded follow-up and fingerprints fallback model changes", async () => {
     const dispose = vi.fn()
     const retainedHandle = handle(() => false, dispose)

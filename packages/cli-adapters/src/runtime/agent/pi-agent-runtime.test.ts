@@ -429,6 +429,7 @@ describe("PiAgentRuntime", () => {
     // reach the NEW turn's askQuestion — the creating turn's mailbox has ended.
     let listener: ((event: AgentSessionEvent) => void) | null = null
     let toolContext: AgentRuntimeContext | null = null
+    const observedMcp: Array<AgentRuntimeContext["mcp"]> = []
     let childActive = true
     const handle: PiSessionHandle = {
       ...fleetSeams,
@@ -443,6 +444,7 @@ describe("PiAgentRuntime", () => {
       // Each prompt simulates the agent invoking jingler_ask_question through
       // the tools the factory captured at CREATE time.
       prompt: async () => {
+        observedMcp.push(toolContext!.mcp)
         await Effect.runPromise(
           toolContext!.askQuestion({ id: "q-1", questions: [] })
         )
@@ -493,7 +495,8 @@ describe("PiAgentRuntime", () => {
       )
     )
     expect(firstAsk).toHaveBeenCalledOnce()
-    expect(toolContext!.mcp).toBe(firstMcp)
+    expect(observedMcp[0]).toBe(firstMcp)
+    expect(toolContext!.mcp?.browser).toBeNull()
 
     await Effect.runPromise(
       Stream.runCollect(
@@ -515,7 +518,8 @@ describe("PiAgentRuntime", () => {
     expect(secondPublish).toHaveBeenCalledOnce()
     // Per-run attachments (the browser lease) must read through to the
     // CURRENT turn — a snapshot of turn 1's lease is a dead endpoint.
-    expect(toolContext!.mcp).toBe(secondMcp)
+    expect(observedMcp[1]).toBe(secondMcp)
+    expect(toolContext!.mcp?.browser).toBeNull()
     childActive = false
   })
 
