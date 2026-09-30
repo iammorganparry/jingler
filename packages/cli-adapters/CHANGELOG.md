@@ -1,5 +1,14 @@
 # @jingler/cli-adapters
 
+## 0.4.0
+
+### Patch Changes
+
+- cb901f3: Detect Homebrew-installed Codex CLI from the packaged macOS app, and apply root AGENTS.md and CLAUDE.md guidance to Pi sessions.
+  - @jingler/core@0.4.0
+  - @jingler/plannotator-ext@0.4.0
+  - @jingler/themes@0.4.0
+
 ## 0.3.6
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@jingler/server",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Jingler auth backend, hosted on Next.js with BetterAuth and Effect.",

@@ -1,5 +1,16 @@
 # @jingler/desktop
 
+## 0.4.0
+
+### Minor Changes
+
+- bc45a32: Keep Claude, Codex, and OpenCode detached subagents alive after parent turns with shared Fleet controls, durable transcripts, fail-closed restart recovery, and provider-scoped native execution.
+
+### Patch Changes
+
+- cb901f3: Detect Homebrew-installed Codex CLI from the packaged macOS app, and apply root AGENTS.md and CLAUDE.md guidance to Pi sessions.
+  - @jingler/plannotator-ext@0.4.0
+
 ## 0.3.6
 
 ### Patch Changes
