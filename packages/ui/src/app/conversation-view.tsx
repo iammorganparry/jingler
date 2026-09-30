@@ -95,6 +95,13 @@ export const isRetryablePromptFailure = (
     messages[index - 1]?.role === "user"
 }
 
+const retryPromptForMessage = (
+  messages: ReadonlyArray<Message>,
+  index: number,
+  retryPrompt: (() => void) | undefined
+): (() => void) | undefined =>
+  retryPrompt !== undefined && isRetryablePromptFailure(messages, index) ? retryPrompt : undefined
+
 export const latestAssistantMessageIndex = (messages: ReadonlyArray<Message>): number =>
   messages.findLastIndex((message) => message.role === "assistant")
 
@@ -738,7 +745,7 @@ function renderSessionAnalytics() {
           >
             {virtualizer.getVirtualItems().map((item) => {
               const m = messages[item.index]!
-              const retry = onRetryPrompt !== undefined && isRetryablePromptFailure(messages, item.index)
+              const retry = retryPromptForMessage(messages, item.index, onRetryPrompt)
               return (
                 <div
                   key={item.key}
