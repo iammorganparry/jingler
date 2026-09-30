@@ -11,6 +11,8 @@ export interface NativeSidecarOwner {
   readonly sessionId: string
   readonly chatId: string
   readonly runtimeId: AgentRuntimeId
+  readonly targetId: string
+  readonly cwd: string
   readonly continuationAlias: string
   readonly parentRuntimeSessionId: string
   readonly updatedAt: number
@@ -26,6 +28,8 @@ const owner = (value: unknown): NativeSidecarOwner | null => {
     text(candidate.sessionId) &&
     text(candidate.chatId) &&
     (candidate.runtimeId === "claude" || candidate.runtimeId === "codex" || candidate.runtimeId === "opencode") &&
+    text(candidate.targetId) &&
+    text(candidate.cwd) &&
     text(candidate.continuationAlias) &&
     text(candidate.parentRuntimeSessionId) &&
     typeof candidate.updatedAt === "number" && Number.isFinite(candidate.updatedAt)
@@ -35,6 +39,8 @@ const owner = (value: unknown): NativeSidecarOwner | null => {
 
 const key = (value: Pick<NativeSidecarOwner, "sessionId" | "chatId" | "parentRuntimeSessionId">): string =>
   `${value.sessionId}\u0000${value.chatId}\u0000${value.parentRuntimeSessionId}`
+
+type StoredOwner = Omit<NativeSidecarOwner, "version" | "updatedAt">
 
 /** Atomic, secret-free ownership index for native delegation PI sidecars. */
 export class NativeSidecarOwnerStore {
@@ -60,35 +66,38 @@ export class NativeSidecarOwnerStore {
     }
   }
 
-  put(value: Omit<NativeSidecarOwner, "version" | "updatedAt">): Promise<void> {
+  put(value: StoredOwner): Promise<void> {
     return this.#mutate((entries) => [
       ...entries.filter((entry) => key(entry) !== key(value)),
       {
         version: VERSION,
-        sessionId: value.sessionId,
-        chatId: value.chatId,
-        runtimeId: value.runtimeId,
-        continuationAlias: value.continuationAlias,
-        parentRuntimeSessionId: value.parentRuntimeSessionId,
+        ...value,
         updatedAt: Date.now()
       }
-    ])
+    ]).then(() => undefined)
   }
 
-  remove(sessionId: string, chatId: string): Promise<void> {
-    return this.#mutate((entries) =>
-      entries.filter((entry) => entry.sessionId !== sessionId || entry.chatId !== chatId))
+  removeExact(value: Pick<NativeSidecarOwner, "sessionId" | "chatId" | "parentRuntimeSessionId">): Promise<void> {
+    return this.#mutate((entries) => entries.filter((entry) => key(entry) !== key(value)))
+      .then(() => undefined)
+  }
+
+  /** Remove expired descriptors atomically and return only recoverable owners. */
+  pruneExpired(cutoff: number): Promise<ReadonlyArray<NativeSidecarOwner>> {
+    return this.#mutate((entries) => entries.filter((entry) => entry.updatedAt >= cutoff))
   }
 
   #mutate(
     update: (entries: ReadonlyArray<NativeSidecarOwner>) => ReadonlyArray<NativeSidecarOwner>
-  ): Promise<void> {
+  ): Promise<ReadonlyArray<NativeSidecarOwner>> {
+    let result: ReadonlyArray<NativeSidecarOwner> = []
     const operation = this.#writes.then(async () => {
       const entries = await this.list()
+      result = update(entries)
       await mkdir(dirname(this.#file), { recursive: true, mode: 0o700 })
       const temporary = `${this.#file}.${process.pid}.${randomUUID()}.next`
       try {
-        await writeFile(temporary, `${JSON.stringify(update(entries))}\n`, {
+        await writeFile(temporary, `${JSON.stringify(result)}\n`, {
           mode: 0o600,
           flag: "wx"
         })
@@ -97,8 +106,9 @@ export class NativeSidecarOwnerStore {
         await rm(temporary, { force: true })
         throw cause
       }
+      return result
     })
-    this.#writes = operation.catch(() => undefined)
+    this.#writes = operation.then(() => undefined, () => undefined)
     return operation
   }
 }

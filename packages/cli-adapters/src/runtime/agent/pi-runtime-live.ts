@@ -95,6 +95,8 @@ import {
 } from "./retained-pi-session-registry.js"
 import { NativeSidecarOwnerStore } from "./native-sidecar-owner-store.js"
 
+const NATIVE_SIDECAR_OWNER_RETENTION_MS = 30 * 24 * 60 * 60_000
+
 const connectionFailure = (message: string, cause?: unknown) =>
   new AgentRuntimeError({ reason: "authentication", message, cause })
 
@@ -712,59 +714,63 @@ export const makePiAgentRuntimeLive = (
     })
 
     const persistedNativeOwners = yield* Effect.tryPromise({
-      try: () => nativeOwners.list(),
+      try: () => nativeOwners.pruneExpired(
+        Date.now() - NATIVE_SIDECAR_OWNER_RETENTION_MS
+      ),
       catch: (cause) => new AgentRuntimeError({
         reason: "runtime",
         message: "Could not read native subagent host ownership",
         cause
       })
     })
-    yield* Effect.forEach(persistedNativeOwners, (owner) => {
-      const connection = nativeClaudeSubagentConnection("desktop")
-      const recoveryFactory = makePiSessionFactory({
-        ...factoryOptions,
-        resolveConnection: () => Effect.succeed(connection),
-        createToolRegistry: undefined,
-        toolRegistry: new ToolRegistry(),
-        terminalTracker: undefined,
-        delegationOnly: true
-      })
-      const recoverySpec: AgentRunSpec = {
-        runId: `native-sidecar-recovery:${owner.sessionId}:${owner.chatId}`,
-        sessionId: owner.sessionId,
-        chatId: owner.chatId,
-        runtimeId: "pi",
-        endpointId: piEndpointId("desktop", connection.id),
-        connectionId: connection.id,
-        providerId: connection.providerId,
-        modelId: ProviderModelId.make("anthropic/sonnet"),
-        role: "conversation",
-        mode: "auto",
-        cwd: process.cwd(),
-        prompt: "",
-        priorMessages: [],
-        continuation: null,
-        seed: null,
-        targetCapabilities: {
-          versions: CURRENT_RUNTIME_CONTRACTS,
-          toolIds: [],
-          resourceIds: [],
-          targetId: "desktop"
+    yield* Effect.sync(() => {
+      for (const owner of persistedNativeOwners) {
+        const connection = nativeClaudeSubagentConnection(owner.targetId)
+        const recoveryFactory = makePiSessionFactory({
+          ...factoryOptions,
+          resolveConnection: () => Effect.succeed(connection),
+          createToolRegistry: undefined,
+          toolRegistry: new ToolRegistry(),
+          terminalTracker: undefined,
+          delegationOnly: true
+        })
+        const recoverySpec: AgentRunSpec = {
+          runId: `native-sidecar-recovery:${owner.sessionId}:${owner.chatId}`,
+          sessionId: owner.sessionId,
+          chatId: owner.chatId,
+          runtimeId: "pi",
+          endpointId: piEndpointId(owner.targetId, connection.id),
+          connectionId: connection.id,
+          providerId: connection.providerId,
+          modelId: ProviderModelId.make("anthropic/sonnet"),
+          role: "conversation",
+          mode: "auto",
+          cwd: owner.cwd,
+          prompt: "",
+          priorMessages: [],
+          continuation: null,
+          seed: null,
+          targetCapabilities: {
+            versions: CURRENT_RUNTIME_CONTRACTS,
+            toolIds: [],
+            resourceIds: [],
+            targetId: owner.targetId
+          }
         }
+        const recoveryContext: AgentRuntimeContext = {
+          publishEvent: () => Effect.void,
+          registerBackgroundStop: () => Effect.void,
+          canUseTool: () => Effect.succeed("deny"),
+          askQuestion: () => Effect.succeed([])
+        }
+        nativeSessions.registerRecovery(
+          owner,
+          recoverySpec,
+          recoveryContext,
+          recoveryFactory
+        )
       }
-      const recoveryContext: AgentRuntimeContext = {
-        publishEvent: () => Effect.void,
-        registerBackgroundStop: () => Effect.void,
-        canUseTool: () => Effect.succeed("deny"),
-        askQuestion: () => Effect.succeed([])
-      }
-      return nativeSessions.recoverByChat(
-        owner,
-        recoverySpec,
-        recoveryContext,
-        recoveryFactory
-      ).pipe(Effect.either, Effect.asVoid)
-    }, { concurrency: 1, discard: true })
+    })
 
     const nativeTools: NativeRuntimeToolsOptions = {
       subagentFleet: nativeFleet,

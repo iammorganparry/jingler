@@ -20,8 +20,17 @@ export const nativeSidecarCapabilityFingerprint = (
 interface ArchivedPiTranscript {
   readonly sessionId: string
   readonly chatId: string
+  readonly nativeRuntimeId?: AgentRuntimeId
   readonly aliases: ReadonlySet<string>
   readonly read: PiSessionHandle["subagentTranscript"]
+}
+
+interface NativeRecoveryDescriptor {
+  readonly owner: NativeSidecarOwner
+  readonly spec: AgentRunSpec
+  readonly context: AgentRuntimeContext
+  readonly factory: PiSessionFactory
+  opening?: Promise<RetainedPiSession>
 }
 
 const lockedCapabilityFingerprint = (
@@ -51,6 +60,8 @@ export interface RetainedPiSession {
   /** The turn context every session-lifetime closure delegates to. */
   readonly contextHolder: { current: AgentRuntimeContext }
   readonly retainedByChat: boolean
+  readonly targetId: string
+  readonly cwd: string
   nativeRuntimeId?: AgentRuntimeId
   activeTurns: number
   idleSince: number | null
@@ -100,12 +111,13 @@ export class RetainedPiSessionRegistry {
   readonly #aliases = new Map<string, RetainedPiSession>()
   readonly #transcriptArchives = new Map<string, ArchivedPiTranscript>()
   readonly #archiveOrder: ArchivedPiTranscript[] = []
+  readonly #recoveries = new Map<string, NativeRecoveryDescriptor>()
 
   constructor(
     readonly factory: PiSessionFactory,
     readonly reapIntervalMs: number,
     readonly nativeIdleRetentionMs = 0,
-    readonly nativeOwners?: Pick<NativeSidecarOwnerStore, "put">
+    readonly nativeOwners?: Pick<NativeSidecarOwnerStore, "put" | "removeExact">
   ) {}
 
   acquire(
@@ -125,6 +137,23 @@ export class RetainedPiSessionRegistry {
     return this.#acquireWithFactory(spec, context, factory, true, nativeRuntimeId)
   }
 
+  /** Index one persisted owner for on-demand reopen without retaining credentials. */
+  registerRecovery(
+    owner: NativeSidecarOwner,
+    spec: AgentRunSpec,
+    context: AgentRuntimeContext,
+    factory: PiSessionFactory
+  ): void {
+    const descriptor: NativeRecoveryDescriptor = {
+      owner,
+      spec,
+      context: detachedPiSessionContext(context),
+      factory
+    }
+    this.#recoveries.set(owner.continuationAlias, descriptor)
+    this.#recoveries.set(owner.parentRuntimeSessionId, descriptor)
+  }
+
   /** Reopen one persisted native sidecar without prompting or spawning work. */
   recoverByChat(
     owner: NativeSidecarOwner,
@@ -132,6 +161,9 @@ export class RetainedPiSessionRegistry {
     context: AgentRuntimeContext,
     factory: PiSessionFactory
   ): Effect.Effect<RetainedPiSession, AgentRuntimeError> {
+    if (!this.#recoveries.has(owner.parentRuntimeSessionId)) {
+      this.registerRecovery(owner, spec, context, factory)
+    }
     const existing = this.#aliases.get(owner.parentRuntimeSessionId)
     if (existing?.sessionId === owner.sessionId && existing.chatId === owner.chatId) {
       return Effect.succeed(existing)
@@ -142,6 +174,11 @@ export class RetainedPiSessionRegistry {
       ...spec,
       sessionId: owner.sessionId,
       chatId: owner.chatId,
+      cwd: owner.cwd,
+      targetCapabilities: {
+        ...spec.targetCapabilities,
+        targetId: owner.targetId
+      },
       continuation: {
         runtimeId: spec.runtimeId,
         endpointId: spec.endpointId,
@@ -177,6 +214,8 @@ export class RetainedPiSessionRegistry {
           aliases,
           contextHolder,
           retainedByChat: true,
+          targetId: owner.targetId,
+          cwd: owner.cwd,
           nativeRuntimeId: owner.runtimeId,
           activeTurns: 0,
           idleSince: null,
@@ -281,7 +320,7 @@ export class RetainedPiSessionRegistry {
       return Effect.tryPromise({
         try: async () => {
           try {
-            await this.#persistNativeOwner(retained)
+            await this.#persistNativeOwner(retained, spec, context, factory)
             return retained
           } catch (cause) {
             retained.activeTurns = 0
@@ -399,6 +438,8 @@ export class RetainedPiSessionRegistry {
           aliases,
           contextHolder,
           retainedByChat,
+          targetId: spec.targetCapabilities.targetId,
+          cwd: spec.cwd,
           ...(nativeRuntimeId === undefined ? {} : { nativeRuntimeId }),
           activeTurns: 1,
           idleSince: null,
@@ -409,7 +450,7 @@ export class RetainedPiSessionRegistry {
         return Effect.tryPromise({
           try: async () => {
             try {
-              await this.#persistNativeOwner(record)
+              await this.#persistNativeOwner(record, spec, context, factory)
               return record
             } catch (cause) {
               for (const alias of record.aliases) {
@@ -456,36 +497,119 @@ export class RetainedPiSessionRegistry {
     }
   }
 
-  #persistNativeOwner(record: RetainedPiSession): Promise<void> {
+  async #persistNativeOwner(
+    record: RetainedPiSession,
+    spec?: AgentRunSpec,
+    context?: AgentRuntimeContext,
+    factory?: PiSessionFactory
+  ): Promise<void> {
     if (
       !record.retainedByChat ||
       this.nativeOwners === undefined ||
       (record.nativeRuntimeId !== "claude" &&
         record.nativeRuntimeId !== "codex" &&
         record.nativeRuntimeId !== "opencode")
-    ) return Promise.resolve()
-    return this.nativeOwners.put({
+    ) return
+    const value = {
       sessionId: record.sessionId,
       chatId: record.chatId,
       runtimeId: record.nativeRuntimeId,
+      targetId: record.targetId,
+      cwd: record.cwd,
       continuationAlias: record.handle.id,
       parentRuntimeSessionId: record.handle.parentRuntimeSessionId
-    })
+    }
+    await this.nativeOwners.put(value)
+    if (spec !== undefined && context !== undefined && factory !== undefined) {
+      this.registerRecovery({ version: 1, ...value, updatedAt: Date.now() }, spec, context, factory)
+    }
   }
 
   lookup(id: string): PiSessionHandle | undefined {
     return this.#aliases.get(id)?.handle
   }
 
+  #ownedRecord(
+    sessionId: string,
+    chatId: string,
+    id: string,
+    runtimeId?: AgentRuntimeId
+  ): RetainedPiSession | undefined {
+    const record = this.#aliases.get(id)
+    return record?.sessionId === sessionId &&
+      record.chatId === chatId &&
+      (record.nativeRuntimeId === undefined || runtimeId === undefined || record.nativeRuntimeId === runtimeId)
+      ? record
+      : undefined
+  }
+
   lookupOwned(
     sessionId: string,
     chatId: string,
-    id: string
+    id: string,
+    runtimeId?: AgentRuntimeId
   ): PiSessionHandle | undefined {
-    const record = this.#aliases.get(id)
-    return record?.sessionId === sessionId && record.chatId === chatId
-      ? record.handle
-      : undefined
+    return this.#ownedRecord(sessionId, chatId, id, runtimeId)?.handle
+  }
+
+  async resolveOwned(
+    sessionId: string,
+    chatId: string,
+    id: string,
+    runtimeId: AgentRuntimeId
+  ): Promise<PiSessionHandle | undefined> {
+    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId)
+    if (live !== undefined) return live.handle
+    const descriptor = this.#recoveries.get(id)
+    if (
+      descriptor === undefined ||
+      descriptor.owner.sessionId !== sessionId ||
+      descriptor.owner.chatId !== chatId ||
+      descriptor.owner.runtimeId !== runtimeId
+    ) return undefined
+    if (descriptor.opening === undefined) {
+      descriptor.opening = Effect.runPromise(this.recoverByChat(
+        descriptor.owner,
+        descriptor.spec,
+        descriptor.context,
+        descriptor.factory
+      ).pipe(
+        Effect.tapError((cause) => this.#isDefinitiveRecoveryFailure(cause)
+          ? Effect.promise(() => this.#removeRecovery(descriptor))
+          : Effect.void)
+      )).finally(() => {
+        descriptor.opening = undefined
+      })
+    }
+    return (await descriptor.opening).handle
+  }
+
+  #isDefinitiveRecoveryFailure(cause: unknown): boolean {
+    let current: unknown = cause
+    for (let depth = 0; depth < 8 && current !== undefined; depth += 1) {
+      if (
+        current instanceof AgentRuntimeError &&
+        current.message === "Recovered native subagent host ownership does not match"
+      ) return true
+      if (typeof current === "object" && current !== null) {
+        const candidate = current as { readonly code?: unknown; readonly cause?: unknown }
+        if (candidate.code === "ENOENT") return true
+        current = candidate.cause
+      } else {
+        break
+      }
+    }
+    return false
+  }
+
+  async #removeRecovery(descriptor: NativeRecoveryDescriptor): Promise<void> {
+    for (const alias of [
+      descriptor.owner.continuationAlias,
+      descriptor.owner.parentRuntimeSessionId
+    ]) {
+      if (this.#recoveries.get(alias) === descriptor) this.#recoveries.delete(alias)
+    }
+    await this.nativeOwners?.removeExact(descriptor.owner)
   }
 
   #recordByChat(sessionId: string, chatId: string): RetainedPiSession | undefined {
@@ -505,16 +629,28 @@ export class RetainedPiSessionRegistry {
   lookupTranscriptOwned(
     sessionId: string,
     chatId: string,
-    id: string
+    id: string,
+    runtimeId?: AgentRuntimeId
   ): PiSessionHandle["subagentTranscript"] | undefined {
-    const live = this.#aliases.get(id)
-    if (live?.sessionId === sessionId && live.chatId === chatId) {
-      return live.handle.subagentTranscript
-    }
+    const live = this.#ownedRecord(sessionId, chatId, id, runtimeId)
+    if (live !== undefined) return live.handle.subagentTranscript
     const archived = this.#transcriptArchives.get(id)
-    return archived?.sessionId === sessionId && archived.chatId === chatId
+    return archived?.sessionId === sessionId &&
+      archived.chatId === chatId &&
+      (archived.nativeRuntimeId === undefined || runtimeId === undefined || archived.nativeRuntimeId === runtimeId)
       ? archived.read
       : undefined
+  }
+
+  async resolveTranscriptOwned(
+    sessionId: string,
+    chatId: string,
+    id: string,
+    runtimeId: AgentRuntimeId
+  ): Promise<PiSessionHandle["subagentTranscript"] | undefined> {
+    const read = this.lookupTranscriptOwned(sessionId, chatId, id, runtimeId)
+    if (read !== undefined) return read
+    return (await this.resolveOwned(sessionId, chatId, id, runtimeId))?.subagentTranscript
   }
 
   async release(record: RetainedPiSession): Promise<void> {
@@ -574,6 +710,7 @@ export class RetainedPiSessionRegistry {
       const archive: ArchivedPiTranscript = {
         sessionId: record.sessionId,
         chatId: record.chatId,
+        ...(record.nativeRuntimeId === undefined ? {} : { nativeRuntimeId: record.nativeRuntimeId }),
         aliases: record.aliases,
         read: record.handle.subagentTranscript
       }
@@ -605,57 +742,59 @@ export const retainedPiFleetHandlers = (
   sessions: RetainedPiSessionRegistry
 ): RetainedPiFleetHandlers => {
   const operation = <Value>(
-    available: boolean,
     id: string,
-    action: () => Promise<Value>
-  ): Effect.Effect<Value, AgentRuntimeError> => available
-    ? Effect.tryPromise({
-        try: action,
-        catch: (cause) => new AgentRuntimeError({
+    action: () => Promise<Value | undefined>
+  ): Effect.Effect<Value, AgentRuntimeError> => Effect.tryPromise({
+    try: async () => {
+      const value = await action()
+      if (value === undefined) throw new AgentRuntimeError({
+        reason: "runtime",
+        message: `pi session is not active: ${id}`
+      })
+      return value
+    },
+    catch: (cause) => cause instanceof AgentRuntimeError
+      ? cause
+      : new AgentRuntimeError({
           reason: "runtime",
           message: "pi session operation failed",
           cause
         })
-      })
-    : Effect.fail(new AgentRuntimeError({
-        reason: "runtime",
-        message: `pi session is not active: ${id}`
-      }))
+  })
 
   return {
-    controlSubagent: (_owner, sessionId, chatId, request) => {
-      const session = sessions.lookupOwned(sessionId, chatId, request.parentRuntimeSessionId)
-      return operation(
-        session !== undefined,
+    controlSubagent: (owner, sessionId, chatId, request) => operation(
+      request.parentRuntimeSessionId,
+      async () => (await sessions.resolveOwned(
+        sessionId,
+        chatId,
         request.parentRuntimeSessionId,
-        () => session!.controlSubagent(request)
-      )
-    },
-    subagentFleetSnapshot: (_owner, sessionId, chatId, parentRuntimeSessionId) => {
-      const session = sessions.lookupOwned(sessionId, chatId, parentRuntimeSessionId)
-      return operation(
-        session !== undefined,
+        owner.runtimeId
+      ))?.controlSubagent(request)
+    ),
+    subagentFleetSnapshot: (owner, sessionId, chatId, parentRuntimeSessionId) => operation(
+      parentRuntimeSessionId,
+      async () => (await sessions.resolveOwned(
+        sessionId,
+        chatId,
         parentRuntimeSessionId,
-        () => session!.subagentFleetSnapshot()
-      )
-    },
+        owner.runtimeId
+      ))?.subagentFleetSnapshot()
+    ),
     subagentTranscript: (
-      _owner,
+      owner,
       sessionId,
       chatId,
       parentRuntimeSessionId,
       runId
-    ) => {
-      const read = sessions.lookupTranscriptOwned(
+    ) => operation(
+      parentRuntimeSessionId,
+      async () => (await sessions.resolveTranscriptOwned(
         sessionId,
         chatId,
-        parentRuntimeSessionId
-      )
-      return operation(
-        read !== undefined,
         parentRuntimeSessionId,
-        () => read!(runId)
-      )
-    }
+        owner.runtimeId
+      ))?.(runId)
+    )
   }
 }

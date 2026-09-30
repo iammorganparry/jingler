@@ -155,6 +155,10 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
     })
   }
   const candidate = value as Partial<NativeExternalJobRecord>
+  const terminal = candidate.state === "completed" ||
+    candidate.state === "failed" ||
+    candidate.state === "stopped" ||
+    candidate.state === "blocked"
   if (
     candidate.version !== 1 ||
     typeof candidate.providerJobId !== "string" ||
@@ -165,8 +169,11 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
     typeof candidate.modelId !== "string" ||
     typeof candidate.promptDigest !== "string" ||
     typeof candidate.sourceRunId !== "string" ||
-    typeof candidate.startedAt !== "number" ||
-    typeof candidate.updatedAt !== "number" ||
+    typeof candidate.startedAt !== "number" || !Number.isFinite(candidate.startedAt) ||
+    typeof candidate.updatedAt !== "number" || !Number.isFinite(candidate.updatedAt) ||
+    (candidate.endedAt !== undefined &&
+      (typeof candidate.endedAt !== "number" || !Number.isFinite(candidate.endedAt))) ||
+    (terminal && candidate.endedAt === undefined) ||
     !["queued", "running", "completed", "failed", "stopped", "blocked"].includes(candidate.state ?? "")
   ) {
     throw new ExternalJobProviderError("Malformed Jingler native external-job state", {

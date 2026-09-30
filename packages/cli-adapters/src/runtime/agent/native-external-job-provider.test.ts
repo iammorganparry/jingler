@@ -473,6 +473,7 @@ describe("native external-job provider", () => {
     const activeId = "55555555-5555-4555-8555-555555555555"
     const terminalId = "66666666-6666-4666-8666-666666666666"
     const unreadableId = "77777777-7777-4777-8777-777777777777"
+    const malformedTerminalId = "88888888-8888-4888-8888-888888888888"
     const record = (providerJobId: string, state: "running" | "completed", endedAt?: number) => ({
       version: 1,
       providerJobId,
@@ -496,6 +497,10 @@ describe("native external-job provider", () => {
     ))}\n`)
     await writeFile(join(root, `${terminalId}.transcript.jsonl`), "terminal\n")
     await writeFile(join(root, `${unreadableId}.json`), "{}\n")
+    await writeFile(join(root, `${malformedTerminalId}.json`), `${JSON.stringify({
+      ...record(malformedTerminalId, "completed"),
+      updatedAt: Number.POSITIVE_INFINITY
+    })}\n`)
     const staleNext = join(root, "orphan.next")
     await writeFile(staleNext, "partial")
     const old = new Date(now - 31 * 24 * 60 * 60_000)
@@ -506,9 +511,13 @@ describe("native external-job provider", () => {
       state: "failed",
       failureCode: "ambiguous-active-job"
     })
+    await expect(host.provider.reattach(malformedTerminalId)).rejects.toMatchObject({
+      code: "state-unreadable"
+    })
     await expect(readdir(root)).resolves.toEqual(expect.arrayContaining([
       `${activeId}.json`,
-      `${unreadableId}.json`
+      `${unreadableId}.json`,
+      `${malformedTerminalId}.json`
     ]))
     expect((await readdir(root))).not.toEqual(expect.arrayContaining([
       `${terminalId}.json`,

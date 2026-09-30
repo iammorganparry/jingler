@@ -8,7 +8,11 @@ import {
 } from "@jingler/core"
 import { Effect } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
+import {
+  AgentRuntimeError,
+  inactiveRuntimeActivity,
+  type AgentRuntimeContext
+} from "./agent-runtime.js"
 import type { PiSessionFactory, PiSessionHandle } from "./pi-agent-runtime.js"
 import {
   nativeSidecarCapabilityFingerprint,
@@ -122,7 +126,12 @@ describe("retained native PI sidecars", () => {
     const firstUsage = vi.fn((_fact: UsageFact) => Effect.void)
     const secondUsage = vi.fn((_fact: UsageFact) => Effect.void)
 
-    const first = await Effect.runPromise(sessions.acquireByChat(spec, context(firstUsage), factory))
+    const first = await Effect.runPromise(sessions.acquireByChat(
+      spec,
+      context(firstUsage),
+      factory,
+      "codex"
+    ))
     await sessions.release(first)
     const second = await Effect.runPromise(sessions.acquireByChat({
       ...spec,
@@ -132,7 +141,7 @@ describe("retained native PI sidecars", () => {
         endpointId,
         id: "native-parent-continuation-not-a-pi-id"
       }
-    }, context(secondUsage), factory))
+    }, context(secondUsage), factory, "codex"))
 
     expect(second.handle).toBe(retainedHandle)
     expect(factory.create).toHaveBeenCalledOnce()
@@ -152,6 +161,12 @@ describe("retained native PI sidecars", () => {
     ))).resolves.toMatchObject({ status: "invalid-state", acknowledged: false })
     await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
       owner, "session-1", "another-chat", "pi-native-parent"
+    ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
+    await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
+      { ...owner, runtimeId: "opencode" },
+      "session-1",
+      "chat-1",
+      "pi-native-parent"
     ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
 
     await sessions.release(second)
@@ -274,6 +289,8 @@ describe("retained native PI sidecars", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "codex",
+      targetId: "device:recovery",
+      cwd: "/workspace/recovery",
       continuationAlias: "/sessions/native-sidecar.jsonl",
       parentRuntimeSessionId: "different-parent",
       updatedAt: Date.now()
@@ -287,7 +304,10 @@ describe("retained native PI sidecars", () => {
   it("persists owner aliases on native sidecar creation and reuse", async () => {
     const retainedHandle = handle(() => true)
     const factory: PiSessionFactory = { create: () => Effect.succeed(retainedHandle) }
-    const owners = { put: vi.fn(async () => undefined) }
+    const owners = {
+      put: vi.fn(async () => undefined),
+      removeExact: vi.fn(async () => undefined)
+    }
     const sessions = new RetainedPiSessionRegistry(factory, 60_000, 60_000, owners)
 
     const first = await Effect.runPromise(sessions.acquireByChat(
@@ -309,6 +329,8 @@ describe("retained native PI sidecars", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "codex",
+      targetId: "desktop",
+      cwd: "/workspace",
       continuationAlias: "/sessions/native-sidecar.jsonl",
       parentRuntimeSessionId: "pi-native-parent"
     })
@@ -339,6 +361,8 @@ describe("retained native PI sidecars", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "claude",
+      targetId: "device:recovery",
+      cwd: "/workspace/recovery",
       continuationAlias: "/sessions/native-sidecar.jsonl",
       parentRuntimeSessionId: "pi-native-parent",
       updatedAt: Date.now()
@@ -352,7 +376,7 @@ describe("retained native PI sidecars", () => {
     expect(sessions.lookupOwned("session-1", "chat-1", "pi-native-parent")).toBe(recoveredHandle)
     expect(sessions.lookupOwned("session-1", "chat-1", "/sessions/reopened.jsonl")).toBe(recoveredHandle)
     await expect(Effect.runPromise(retainedPiFleetHandlers(sessions).subagentTranscript(
-      owner,
+      { ...owner, runtimeId: "claude" },
       "session-1",
       "chat-1",
       "pi-native-parent",
@@ -378,6 +402,8 @@ describe("retained native PI sidecars", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "claude",
+      targetId: "device:recovery",
+      cwd: "/workspace/recovery",
       continuationAlias: "/sessions/native-sidecar.jsonl",
       parentRuntimeSessionId: "pi-native-parent",
       updatedAt: Date.now()
@@ -395,6 +421,126 @@ describe("retained native PI sidecars", () => {
     expect(sessions.lookupByChat("session-1", "chat-1")).toBe(currentHandle)
     expect(recoveredHandle.dispose).not.toHaveBeenCalled()
     await sessions.release(current)
+  })
+
+  it("lazily reopens after idle disposal, dedupes concurrent opens, and preserves target identity", async () => {
+    const disposals: Array<ReturnType<typeof vi.fn>> = []
+    const createdSpecs: AgentRunSpec[] = []
+    const factory: PiSessionFactory = {
+      create: (createdSpec) => {
+        createdSpecs.push(createdSpec)
+        const dispose = vi.fn()
+        disposals.push(dispose)
+        return Effect.succeed(handle(() => false, dispose))
+      }
+    }
+    const owners = {
+      put: vi.fn(async () => undefined),
+      removeExact: vi.fn(async () => undefined)
+    }
+    const sessions = new RetainedPiSessionRegistry(factory, 5, 15, owners)
+    const persisted = {
+      version: 1 as const,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex" as const,
+      targetId: "device:remote",
+      cwd: "/workspace/non-default",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      updatedAt: Date.now()
+    }
+    sessions.registerRecovery(persisted, {
+      ...spec,
+      cwd: persisted.cwd,
+      targetCapabilities: { ...spec.targetCapabilities, targetId: persisted.targetId }
+    }, context(), factory)
+    const fleet = retainedPiFleetHandlers(sessions)
+
+    const [first, duplicate] = await Promise.all([
+      Effect.runPromise(fleet.subagentFleetSnapshot(
+        owner, "session-1", "chat-1", "pi-native-parent"
+      )),
+      Effect.runPromise(fleet.subagentFleetSnapshot(
+        owner, "session-1", "chat-1", "pi-native-parent"
+      ))
+    ])
+    expect(first.totalActive).toBe(0)
+    expect(duplicate.totalActive).toBe(0)
+    expect(createdSpecs).toHaveLength(1)
+    expect(createdSpecs[0]).toMatchObject({
+      cwd: "/workspace/non-default",
+      continuation: { id: "/sessions/native-sidecar.jsonl" },
+      targetCapabilities: { targetId: "device:remote" }
+    })
+    await vi.waitFor(() => expect(disposals[0]).toHaveBeenCalledOnce())
+
+    await expect(Effect.runPromise(fleet.subagentFleetSnapshot(
+      owner, "session-1", "chat-1", "pi-native-parent"
+    ))).resolves.toMatchObject({ totalActive: 0 })
+    expect(createdSpecs).toHaveLength(2)
+    await expect(Effect.runPromise(fleet.subagentTranscript(
+      owner, "session-1", "chat-1", "pi-native-parent", "child-1"
+    ))).resolves.toHaveLength(1)
+    await vi.waitFor(() => expect(disposals[1]).toHaveBeenCalledOnce())
+
+    await expect(Effect.runPromise(fleet.controlSubagent(
+      owner, "session-1", "chat-1", control("stop")
+    ))).resolves.toMatchObject({ status: "accepted" })
+    expect(createdSpecs).toHaveLength(3)
+    expect(owners.removeExact).not.toHaveBeenCalled()
+  })
+
+  it("removes definitive missing recovery but keeps transient failures retryable", async () => {
+    const persisted = {
+      version: 1 as const,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex" as const,
+      targetId: "desktop",
+      cwd: "/workspace",
+      continuationAlias: "/sessions/native-sidecar.jsonl",
+      parentRuntimeSessionId: "pi-native-parent",
+      updatedAt: Date.now()
+    }
+    const owners = {
+      put: vi.fn(async () => undefined),
+      removeExact: vi.fn(async () => undefined)
+    }
+    const missingFactory: PiSessionFactory = {
+      create: vi.fn(() => Effect.fail(new AgentRuntimeError({
+        reason: "runtime",
+        message: "missing continuation",
+        cause: { code: "ENOENT" }
+      })))
+    }
+    const missing = new RetainedPiSessionRegistry(missingFactory, 5, 15, owners)
+    missing.registerRecovery(persisted, spec, context(), missingFactory)
+    const missingFleet = retainedPiFleetHandlers(missing)
+    await expect(Effect.runPromise(missingFleet.subagentFleetSnapshot(
+      owner, "session-1", "chat-1", "pi-native-parent"
+    ))).rejects.toMatchObject({ message: "pi session operation failed" })
+    expect(owners.removeExact).toHaveBeenCalledWith(persisted)
+    await expect(Effect.runPromise(missingFleet.subagentFleetSnapshot(
+      owner, "session-1", "chat-1", "pi-native-parent"
+    ))).rejects.toMatchObject({ message: "pi session is not active: pi-native-parent" })
+    expect(missingFactory.create).toHaveBeenCalledOnce()
+
+    const transientFactory: PiSessionFactory = {
+      create: vi.fn(() => Effect.fail(new AgentRuntimeError({
+        reason: "runtime",
+        message: "provider unavailable"
+      })))
+    }
+    const transient = new RetainedPiSessionRegistry(transientFactory, 5, 15, owners)
+    transient.registerRecovery(persisted, spec, context(), transientFactory)
+    const transientFleet = retainedPiFleetHandlers(transient)
+    const attempt = () => Effect.runPromise(transientFleet.subagentFleetSnapshot(
+      owner, "session-1", "chat-1", "pi-native-parent"
+    ))
+    await expect(attempt()).rejects.toMatchObject({ message: "pi session operation failed" })
+    await expect(attempt()).rejects.toMatchObject({ message: "pi session operation failed" })
+    expect(transientFactory.create).toHaveBeenCalledTimes(2)
   })
 
   it("retains an idle native host for bounded follow-up and fingerprints fallback model changes", async () => {

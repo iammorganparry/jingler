@@ -24,6 +24,8 @@ describe("native sidecar owner store", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "codex" as const,
+      targetId: "device:test",
+      cwd: "/workspace/non-default",
       parentRuntimeSessionId: "pi-parent"
     }
     await Promise.all([
@@ -46,6 +48,8 @@ describe("native sidecar owner store", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "claude",
+      targetId: "desktop",
+      cwd: "/workspace",
       continuationAlias: "/pi/active.jsonl",
       parentRuntimeSessionId: "pi-active"
     })
@@ -53,11 +57,42 @@ describe("native sidecar owner store", () => {
       sessionId: "session-1",
       chatId: "chat-1",
       runtimeId: "claude",
+      targetId: "desktop",
+      cwd: "/workspace",
       continuationAlias: "/pi/current.jsonl",
       parentRuntimeSessionId: "pi-current"
     })
 
     await expect(store.list()).resolves.toHaveLength(2)
+  })
+
+  it("prunes expired owners and removes one exact sidecar without deleting siblings", async () => {
+    const directory = await root()
+    const file = join(directory, "owners.json")
+    const entry = (parentRuntimeSessionId: string, updatedAt: number) => ({
+      version: 1,
+      sessionId: "session-1",
+      chatId: "chat-1",
+      runtimeId: "codex",
+      targetId: "device:test",
+      cwd: "/workspace/non-default",
+      continuationAlias: `/pi/${parentRuntimeSessionId}.jsonl`,
+      parentRuntimeSessionId,
+      updatedAt
+    })
+    await writeFile(file, `${JSON.stringify([
+      entry("expired", 10),
+      entry("current", 100),
+      entry("sibling", 100)
+    ])}\n`)
+    const store = new NativeSidecarOwnerStore(file)
+
+    await expect(store.pruneExpired(50)).resolves.toEqual([
+      entry("current", 100),
+      entry("sibling", 100)
+    ])
+    await store.removeExact(entry("current", 100))
+    await expect(store.list()).resolves.toEqual([entry("sibling", 100)])
   })
 
   it("fails closed on unreadable ownership and keeps the file", async () => {
