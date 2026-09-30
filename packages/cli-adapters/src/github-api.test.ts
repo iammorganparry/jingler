@@ -116,7 +116,11 @@ const runApi = <A>(
   const dependencies = Layer.mergeAll(
     Layer.succeed(GitHubCli, cli as never),
     Layer.succeed(GitHubAuth, auth as never),
-    fakeCommandExecutor(() => undefined)
+    fakeCommandExecutor((command, args) =>
+      command === "git" && args.includes("get-url")
+        ? { stdout: "git@github.com:acme/widget.git" }
+        : undefined
+    )
   )
   return Effect.runPromise(effect.pipe(
     Effect.provide(GitHubApi.Default),
@@ -186,6 +190,35 @@ describe("GitHubApi backend selection", () => {
     expect(result).not.toHaveProperty("installationId")
     expect(credentialsForOwner).not.toHaveBeenCalled()
   })
+
+  it("does not replace an authenticated CLI worktree link result with App data", async () => {
+    const error = new GitHubApiError({ reason: "unavailable", message: "CLI failed" })
+    const credentialsForOwner = vi.fn()
+
+    await expect(runApi(GitHubApi.prForWorktree("/repo"), {
+      available: () => Effect.succeed(true),
+      prForWorktree: () => Effect.fail(error)
+    }, { credentialsForOwner })).rejects.toThrow()
+    expect(credentialsForOwner).not.toHaveBeenCalled()
+  })
+
+  it.each(["worktree", "slug"] as const)(
+    "does not replace an authenticated CLI %s PR view with App data",
+    async (kind) => {
+      const error = new GitHubApiError({ reason: "unavailable", message: "CLI failed" })
+      const credentialsForOwner = vi.fn()
+      const effect = kind === "worktree"
+        ? GitHubApi.prView("/repo", 42)
+        : GitHubApi.prViewBySlug("acme/widget", 42)
+
+      await expect(runApi(effect, {
+        available: () => Effect.succeed(true),
+        prView: () => Effect.fail(error),
+        prViewBySlug: () => Effect.fail(error)
+      }, { credentialsForOwner })).rejects.toThrow()
+      expect(credentialsForOwner).not.toHaveBeenCalled()
+    }
+  )
 })
 
 describe("GitHubApi remote and repository identity", () => {

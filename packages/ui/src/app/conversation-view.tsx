@@ -82,6 +82,19 @@ const railText = (message: Message): string => {
   return text
 }
 
+export const isRetryablePromptFailure = (
+  messages: ReadonlyArray<Message>,
+  index: number
+): boolean => {
+  if (index !== messages.length - 1) return false
+  const failed = messages[index]
+  const failure = failed?.parts.at(-1)
+  return failed?.role === "assistant" &&
+    failure?._tag === "Text" &&
+    failure.text.startsWith("pi prompt failed") &&
+    messages[index - 1]?.role === "user"
+}
+
 export const latestAssistantMessageIndex = (messages: ReadonlyArray<Message>): number =>
   messages.findLastIndex((message) => message.role === "assistant")
 
@@ -174,6 +187,8 @@ export interface ConversationViewProps {
     modelId: ProviderModelId
   }) => void
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void
+  /** Replay the latest failed Pi prompt without consuming the current composer draft. */
+  onRetryPrompt?: () => void
   /** Halt the running agent — the Stop button, and Escape outside the composer. */
   onStop?: () => void
   /** The agent is producing a turn — the composer queues messages instead of blocking. */
@@ -297,7 +312,7 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -723,6 +738,7 @@ function renderSessionAnalytics() {
           >
             {virtualizer.getVirtualItems().map((item) => {
               const m = messages[item.index]!
+              const retry = onRetryPrompt !== undefined && isRetryablePromptFailure(messages, item.index)
               return (
                 <div
                   key={item.key}
@@ -754,6 +770,17 @@ function renderSessionAnalytics() {
                           }
                         : undefined}
                     />
+                    {retry && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-3 gap-1.5"
+                        onClick={onRetryPrompt}
+                      >
+                        <RotateCcw size={12} />
+                        Retry prompt
+                      </Button>
+                    )}
                   </div>
                 </div>
               )

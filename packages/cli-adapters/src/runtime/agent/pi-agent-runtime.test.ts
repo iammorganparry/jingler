@@ -674,7 +674,7 @@ describe("PiAgentRuntime", () => {
     const events = [...(await Effect.runPromise(Stream.runCollect(runtime.run(spec, context))))]
     expect(events.at(-1)).toEqual({
       _tag: "Failed",
-      message: "pi prompt failed"
+      message: "pi prompt failed: offline"
     })
   })
 })

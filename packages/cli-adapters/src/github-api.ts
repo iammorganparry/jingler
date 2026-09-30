@@ -1153,6 +1153,11 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         () => run(cliEffect),
         app
       ))
+    const cliSource = <A>(
+      cliEffect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>,
+      app: () => Promise<A>
+    ): Effect.Effect<A, GitHubApiError> =>
+      wrap(async () => (await run(cli.available())) ? run(cliEffect) : app())
     const preferCliNullable = <A>(
       cliEffect: Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>,
       app: () => Promise<A | null>
@@ -1227,7 +1232,7 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       prForBranchBySlug: (slug: string, branch: string) =>
         preferCli(cli.prForBranchBySlug(slug, branch), () => client.prForBranchBySlug(slug, branch)),
       prForWorktree: (cwd: string) =>
-        preferCli(cli.prForWorktree(cwd), () => client.prForWorktree(cwd)),
+        cliSource(cli.prForWorktree(cwd), () => client.prForWorktree(cwd)),
       listPrs: (cwd: string, options: { readonly mine: boolean; readonly search: string }) =>
         preferCli(cli.listPrs(cwd, options), () => client.listPrs(cwd, options)),
       listPrsBySlug: (slug: string, options: { readonly mine: boolean; readonly search: string }) =>
@@ -1245,9 +1250,9 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
       prHeadSha: (cwd: string, number: number) =>
         preferCliNullable(cli.prHeadSha(cwd, number), () => client.prHeadSha(cwd, number)),
       prView: (cwd: string, number: number) =>
-        preferCliNullable(cli.prView(cwd, number), () => client.prView(cwd, number)),
+        cliSource(cli.prView(cwd, number), () => client.prView(cwd, number)),
       prViewBySlug: (slug: string, number: number) =>
-        preferCliNullable(cli.prViewBySlug(slug, number), () => client.prViewBySlug(slug, number)),
+        cliSource(cli.prViewBySlug(slug, number), () => client.prViewBySlug(slug, number)),
       prFiles: (cwd: string, number: number) =>
         preferCli(cli.prFiles(cwd, number), () => client.prFiles(cwd, number)),
       prDiff: (cwd: string, number: number) =>

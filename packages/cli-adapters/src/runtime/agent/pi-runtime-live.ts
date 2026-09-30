@@ -48,6 +48,7 @@ import { McpConfigService } from "../../mcp-config-service.js"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { registerManagedFileTools } from "../resources/managed-file-tools.js"
 import { createMutationObserver } from "../tools/mutation-observer.js"
+import { makeMcpToolClientFactory, mcpClientIdentityForModel } from "../tools/mcp-tools.js"
 import {
   enabledPluginAgentToolsets,
   persistPluginIssueReferences,
@@ -482,6 +483,9 @@ export const makePiAgentRuntimeLive = (
                 ? undefined
                 : { ...current, configured: undefined }
             },
+            mcpClientFactory: makeMcpToolClientFactory(
+              mcpClientIdentityForModel(spec.providerId, spec.modelId)
+            ),
             registryOptions: {
               ...(plugins
                 ? {

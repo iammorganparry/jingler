@@ -8,7 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js"
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js"
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv"
-import type { RuntimeDiagnosticMcpHealth } from "@jingler/core"
+import type { ProviderId, ProviderModelId, RuntimeDiagnosticMcpHealth } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
 import { ToolError, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
@@ -158,10 +158,29 @@ const closeClient = (client: Client): Effect.Effect<void> =>
     catch: () => null
   }).pipe(Effect.ignore)
 
-export const makeMcpToolClient: McpToolClientFactory = (server) =>
+export interface McpClientIdentity {
+  readonly name: string
+  readonly title?: string
+}
+
+export const mcpClientIdentityForModel = (
+  providerId: ProviderId | undefined,
+  modelId: ProviderModelId
+): McpClientIdentity => {
+  const model = modelId.toLowerCase()
+  if (providerId === "anthropic" || model.startsWith("anthropic/") || model.includes("claude")) {
+    return { name: "claude-code", title: "Claude Code" }
+  }
+  if (providerId === "openai-codex" || model.startsWith("openai-codex/") || model.includes("codex")) {
+    return { name: "codex-mcp-client", title: "Codex" }
+  }
+  return { name: "jingler-pi-runtime" }
+}
+
+export const makeMcpToolClientFactory = (identity: McpClientIdentity): McpToolClientFactory => (server) =>
   Effect.tryPromise({
       try: async () => {
-        const client = new Client({ name: "jingler-pi-runtime", version: "1.0.0" })
+        const client = new Client({ ...identity, version: "1.0.0" })
         const transport = transportFor(server)
         await client.connect(transport)
         return client
@@ -196,6 +215,8 @@ export const makeMcpToolClient: McpToolClientFactory = (server) =>
       close: closeClient(client)
     }))
   )
+
+export const makeMcpToolClient = makeMcpToolClientFactory({ name: "jingler-pi-runtime" })
 
 const authenticatedFetch = (
   headers: Readonly<Record<string, string>>,

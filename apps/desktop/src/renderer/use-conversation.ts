@@ -103,6 +103,7 @@ export interface Conversation {
     images?: ReadonlyArray<Attachment>,
     agentContext?: string
   ) => void
+  readonly retryPrompt: (() => void) | null
   readonly decideGate: (gateId: string, decision: GateDecision) => void
   readonly setMode: (mode: PermissionMode) => void
   readonly setReasoning: (reasoning?: ReasoningSetting) => void
@@ -250,9 +251,21 @@ export function useConversation(
     state.matches("running") || state.matches("stopping") || state.matches("refreshingDiff")
   const status: SessionStatus | null =
     paused || question || plannotator?.review != null ? "needs-input" : busy ? "thinking" : null
+  const retryPrompt =
+    state.context.pendingText.length > 0 ||
+    state.context.pendingImages.length > 0 ||
+    state.context.pendingAgentContext.length > 0
+      ? () => actor.send({
+          type: "SEND",
+          text: state.context.pendingText,
+          images: state.context.pendingImages,
+          agentContext: state.context.pendingAgentContext
+        })
+      : null
 
   return {
     ...commands,
+    retryPrompt,
     messages,
     hasMoreHistory,
     loadingHistory,

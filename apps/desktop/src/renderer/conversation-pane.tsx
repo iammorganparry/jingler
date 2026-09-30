@@ -1238,6 +1238,11 @@ function renderMainConversation({
     onSetModel={({ runtimeId, endpointId, connectionId, providerId, modelId }) =>
       convo.setModel(runtimeId, endpointId, connectionId, providerId, modelId)}
     onSend={sendPrompt}
+    onRetryPrompt={
+      session.archived || composerDisabledReason !== undefined
+        ? undefined
+        : (convo.retryPrompt ?? undefined)
+    }
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}

@@ -1,4 +1,5 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js"
+import { ProviderId, ProviderModelId } from "@jingler/core"
 import { execFileSync } from "node:child_process"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -12,6 +13,8 @@ import { RunJournal } from "../journal/run-journal.js"
 import {
   McpToolBridgeError,
   jinglerMcpSources,
+  makeMcpToolClientFactory,
+  mcpClientIdentityForModel,
   registerProgressiveMcpTools,
   registerMcpTools,
   type McpToolClient,
@@ -27,6 +30,21 @@ const temporary = async () => {
   return root
 }
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
+
+describe("Pi MCP client identity", () => {
+  it.each([
+    ["anthropic", "anthropic/claude-sonnet", { name: "claude-code", title: "Claude Code" }],
+    [undefined, "anthropic/opus", { name: "claude-code", title: "Claude Code" }],
+    ["openai-codex", "openai-codex/gpt-5.6-sol", { name: "codex-mcp-client", title: "Codex" }],
+    [undefined, "openai-codex/gpt-5.6-sol", { name: "codex-mcp-client", title: "Codex" }],
+    ["openrouter", "openrouter/other", { name: "jingler-pi-runtime" }]
+  ] as const)("maps %s / %s to its native MCP identity", (provider, model, expected) => {
+    expect(mcpClientIdentityForModel(
+      provider === undefined ? undefined : ProviderId.make(provider),
+      ProviderModelId.make(model)
+    )).toEqual(expected)
+  })
+})
 
 const server: RuntimeMcpServer = {
   name: "jingler-browser",
@@ -353,7 +371,11 @@ it("connects to target-local stdio servers and supplies only resolved launch val
     env: { JINGLER_MCP_FIXTURE: "available" }
   }
   const registry = new ToolRegistry()
-  await Effect.runPromise(registerMcpTools(registry, [{ server: stdio, risk: "network" }]))
+  await Effect.runPromise(registerMcpTools(
+    registry,
+    [{ server: stdio, risk: "network" }],
+    makeMcpToolClientFactory({ name: "claude-code", title: "Claude Code" })
+  ))
 
   const result = await Effect.runPromise(registry.execute({
     id: "mcp__local__read_fixture_env",
@@ -362,9 +384,37 @@ it("connects to target-local stdio servers and supplies only resolved launch val
     mode: "ask"
   }))
 
+  const identity = await Effect.runPromise(registry.execute({
+    id: "mcp__local__read_client_name",
+    arguments: {},
+    role: "conversation",
+    mode: "ask"
+  }))
+
   expect(result).toMatchObject({
     status: "success",
     value: { content: [{ type: "text", text: "target:available" }] }
+  })
+  expect(identity).toMatchObject({
+    status: "success",
+    value: { content: [{ type: "text", text: "claude-code:Claude Code" }] }
+  })
+
+  const codexRegistry = new ToolRegistry()
+  await Effect.runPromise(registerMcpTools(
+    codexRegistry,
+    [{ server: stdio, risk: "network" }],
+    makeMcpToolClientFactory({ name: "codex-mcp-client", title: "Codex" })
+  ))
+  const codexIdentity = await Effect.runPromise(codexRegistry.execute({
+    id: "mcp__local__read_client_name",
+    arguments: {},
+    role: "conversation",
+    mode: "ask"
+  }))
+  expect(codexIdentity).toMatchObject({
+    status: "success",
+    value: { content: [{ type: "text", text: "codex-mcp-client:Codex" }] }
   })
 })
 
