@@ -68,6 +68,12 @@ const configList = (pattern: RegExp, label: string): string[] => {
   return [...match![1]!.matchAll(QUOTED_ENTRY)].map((m) => m[1]!)
 }
 
+it("bundles raw TypeScript dependencies used by the Electron main process", () => {
+  const config = readFileSync(configPath, "utf-8")
+  expect(config).toContain('"@jingler/cli-adapters"')
+  expect(config).toContain('"pi-subagents"')
+})
+
 it("pre-bundles and dedupes every @pierre package the renderer graph imports", () => {
   const include = new Set(
     configList(OPTIMIZE_DEPS_INCLUDE, "renderer optimizeDeps.include")

@@ -16,6 +16,21 @@ let pending
 const note = (method, params) => send({ method, params: { threadId: thread, turnId: 'turn-1', ...params } })
 const done = (status = 'completed') => note('turn/completed', { turn: { id: 'turn-1', status, error: null } })
 const reply = (id, result) => send({ id, result })
+const detachedSubagent = async () => {
+  const client = new Client({ name: 'codex-detached-fixture', version: '1' })
+  const headers = Object.fromEntries(Object.entries(toolConfig.env_http_headers).map(([header, variable]) => [header, process.env[variable]]))
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(toolConfig.url), { requestInit: { headers } }))
+    const result = await client.callTool({
+      name: 'subagent',
+      arguments: { async: true, agent: 'worker', task: 'Detached native worker e2e; remain active until stopped.' }
+    })
+    const envelope = JSON.parse(result.content?.[0]?.text ?? 'null')
+    if (envelope?.status !== 'running' || typeof envelope?.runId !== 'string') throw new Error('detached launch failed')
+    note('item/agentMessage/delta', { itemId: 'detached-parent', delta: 'Native Codex parent settled after detached launch.' })
+    done()
+  } finally { await client.close() }
+}
 const probeRegistry = async (planning = false) => {
   if (toolConfig.default_tools_approval_mode !== 'approve' || toolConfig.tool_timeout_sec !== 86400) { done('failed'); return }
   const client = new Client({ name: 'codex-fixture', version: '1' })
@@ -31,10 +46,21 @@ const probeRegistry = async (planning = false) => {
     done()
   } finally { await client.close() }
 }
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one compact protocol fixture intentionally enumerates prompt scenarios.
 const handleTurnStart = async (id, p) => {
   const prompt = p.input[0].text
   reply(id, { turn: { id: 'turn-1' } })
   if (prompt === 'registry-probe' || prompt.startsWith('planning-probe')) { await probeRegistry(prompt.startsWith('planning-probe')); return }
+  if (prompt.includes('Second retained Codex parent turn')) {
+    note('item/agentMessage/delta', { itemId: 'second-parent', delta: 'Native Codex second parent turn completed.' })
+    done()
+    return
+  }
+  if (prompt.includes('Launch the retained native workflow')) { await detachedSubagent(); return }
+  if (prompt.includes('Detached native worker e2e; remain active until stopped.')) {
+    note('item/agentMessage/delta', { itemId: 'detached-worker-progress', delta: 'Detached Codex child progress: waiting for stop.' })
+    return
+  }
   if (prompt === 'policy') { note('item/agentMessage/delta', { itemId: 'policy', delta: JSON.stringify(policy) }); done(); return }
   if (prompt === 'wait') { note('item/agentMessage/delta', { itemId: 'ready', delta: 'ready' }); return }
   if (['approval', 'file-approval', 'question', 'permissions'].includes(prompt)) {
@@ -69,7 +95,17 @@ const handleThread = (method, id, p) => {
 }
 const handleTurn = (method, id, p) => {
   if (method === 'turn/start') { handleTurnStart(id, p).catch(() => done('failed')); return true }
-  if (method === 'turn/steer') { reply(id, { turnId: 'turn-1' }); note('item/agentMessage/delta', { itemId: 'a1', delta: p.input[0].text }); return true }
+  if (method === 'turn/steer') {
+    reply(id, { turnId: 'turn-1' })
+    const prompt = p.input[0].text
+    const retainedSecondTurn = prompt.includes('Second retained Codex parent turn')
+    note('item/agentMessage/delta', {
+      itemId: 'a1',
+      delta: retainedSecondTurn ? 'Native Codex second parent turn completed.' : prompt
+    })
+    if (retainedSecondTurn) done()
+    return true
+  }
   if (method === 'turn/interrupt') { reply(id, {}); done('interrupted'); return true }
   return false
 }

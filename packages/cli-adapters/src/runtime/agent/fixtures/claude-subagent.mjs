@@ -12,7 +12,8 @@ if (process.argv.includes("auth")) {
 
 let input = ""
 for await (const chunk of process.stdin) input += chunk
-const parent = input.includes("Delegate this native Claude task")
+const detached = input.includes("Launch the retained native workflow")
+const parent = input.includes("Delegate this native Claude task") || detached
 if (!parent) {
   console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "PI child completed without a configured PI provider." } } }))
   console.log(JSON.stringify({ type: "result", is_error: false, usage: {} }))
@@ -31,14 +32,24 @@ const response = await fetch(url, {
     method: "tools/call",
     params: {
       name: "subagent",
-      arguments: { agent: "researcher", task: "Return the child completion sentence." }
+      arguments: detached
+        ? {
+            async: true,
+            agent: "worker",
+            task: "Detached native worker e2e; remain active until stopped."
+          }
+        : { agent: "researcher", task: "Return the child completion sentence." }
     }
   })
 })
 const message = await response.json()
 const envelope = JSON.parse(message.result?.content?.[0]?.text ?? "null")
-if (!/PI child completed|Claude child completed/u.test(String(envelope?.result))) {
+if (detached) {
+  if (envelope?.status !== "running" || typeof envelope?.runId !== "string") {
+    throw new Error("Native Claude did not start the retained workflow")
+  }
+} else if (!/PI child completed|Claude child completed/u.test(String(envelope?.result))) {
   throw new Error("Native Claude did not receive the PI-backed child result")
 }
-console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Native Claude received the PI-backed child result." } } }))
+console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: detached ? "Native Claude parent settled after detached launch." : "Native Claude received the PI-backed child result." } } }))
 console.log(JSON.stringify({ type: "result", is_error: false, usage: {} }))
