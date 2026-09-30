@@ -56,6 +56,16 @@ const handlePrompt = (_request, response, directory, id, body) => {
   const messageID = `msg_${randomUUID()}`
   const finish = (reply = '') => finishPrompt(directory, id, body, messageID, prompt, reply)
   if (prompt === 'disconnect') { for (const client of clients) client.end(); return }
+  if (prompt.includes('resumed turn')) {
+    promptOutput(directory, id, body, messageID, 'OpenCode: resumed turn')
+    emit(directory, 'session.idle', { sessionID: id })
+    return
+  }
+  if (prompt.includes('native first turn')) {
+    promptOutput(directory, id, body, messageID, 'OpenCode: native first turn')
+    emit(directory, 'session.idle', { sessionID: id })
+    return
+  }
   if (prompt.includes('Second retained OpenCode parent turn')) {
     promptOutput(directory, id, body, messageID, 'Native OpenCode second parent turn completed.')
     emit(directory, 'session.idle', { sessionID: id })
@@ -83,8 +93,7 @@ const handlePrompt = (_request, response, directory, id, body) => {
 }
 const handleSession = (request, response, directory, body, match) => {
   const [, id, action] = match
-  const session = readSession(id)
-  if (!session) { json(response, {}, 404); return }
+  const session = readSession(id) ?? save({ id, directory, permission: body.permission })
   if (!action) { json(response, request.method === 'PATCH' ? save({ ...session, permission: body.permission }) : session); return }
   if (action === 'fork') { json(response, save({ ...session, id: `ses_${randomUUID()}` })); return }
   if (action === 'abort') { pending.delete(id); emit(directory, 'session.idle', { sessionID: id }); json(response, true); return }

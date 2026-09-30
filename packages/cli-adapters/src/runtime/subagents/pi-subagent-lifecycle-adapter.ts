@@ -866,13 +866,18 @@ export class PiSubagentLifecycleAdapter {
           Schema.decodeUnknownOption(NativeSteeringReply)(reply.data)
         )?.details.steering
         const deliveryStatus = steering?.deliveryStatus ?? "delivered"
+        const stoppedRunId = request.action === "stop" &&
+          typeof reply.data === "object" && reply.data !== null &&
+          "runId" in reply.data && typeof reply.data.runId === "string"
+          ? reply.data.runId
+          : null
         return this.#outcome(
           request,
           sequence,
           true,
           "accepted",
           deliveryStatus,
-          steering?.requestId ?? reply.requestId,
+          stoppedRunId ?? steering?.requestId ?? reply.requestId,
           `${request.action} request ${deliveryStatus} by pi-subagents`
         )
       }),

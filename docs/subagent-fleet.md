@@ -13,9 +13,20 @@ Jingler ships `pi-subagents` with its managed Pi runtime and presents each deleg
 
 ## Native harness delegation
 
-Native Claude, Codex, and OpenCode expose the same bounded single-child `subagent` call for foreground work. Claude uses Jingler's bundled PI extension and its non-secret local CLI route marker; it does not require a configured PI provider connection. Codex and OpenCode start fresh native child sessions through their existing authenticated CLIs. Settings store role-to-model overrides per provider, and an empty role inherits that provider's parent model.
+Native Claude, Codex, and OpenCode expose the same bounded `subagent` contract for foreground leaves and detached single, parallel, or chain work. Claude uses Jingler's bundled PI extension and its non-secret local CLI route marker; it does not require a configured PI provider connection. Codex and OpenCode run detached leaves through Jingler-owned `pi-subagents` external-job profiles backed by their existing authenticated CLIs. Settings keep role-to-model overrides per provider, and an unassigned role inherits that provider's parent model.
 
-This foreground path is deliberately not advertised as fleet parity. Workflows, detached children, restart recovery, transcripts, and post-turn controls still require a retained PI parent session and remain unavailable to native-only parents until the retained-host slice lands.
+A session/chat-owned PI host remains alive after the native parent turn while detached work is active. It owns Fleet snapshots, transcripts, controls, capability credentials, and cleanup. A later turn in the same chat reuses that host with the new turn context; other chats, sessions, runtimes, and targets cannot address it.
+
+Native controls report only what the underlying runtime can do:
+
+| Control | Claude | Codex | OpenCode |
+| --- | --- | --- | --- |
+| Snapshot and transcript | Yes | Yes | Yes |
+| Stop | Yes | Yes, including native stream cancellation | Yes, including native stream cancellation |
+| Follow-up after completion | Yes | Yes | Yes |
+| Live steer or reply | Only when the bundled PI child supports it | Explicitly rejected when the native job cannot apply it | Explicitly rejected when the native job cannot apply it |
+
+Detached native job identity, terminal output, transcript material, and nullable usage are persisted without credentials. Restart recovery reopens the existing PI continuation and never redispatches a prompt. A native job that was queued or running but cannot be proven live becomes an `ambiguous-active-job` failure; repeated status and reattach calls return that same terminal result without recording usage twice.
 
 ## Agent launch contract
 
@@ -56,6 +67,6 @@ The extension remains lifecycle authority. Parent turn completion removes only t
 
 Jingler projects versioned events into a typed run tree and periodically reconciles the extension's status RPC independently of the parent turn stream. The newest evidenced parent owns the projection; replay is partitioned to it, and per-node clocks/tombstones reject duplicate, stale, reordered, cyclic, foreign-session, and malformed mutations. Normalized compatibility agents and the independent adversarial reviewer are adapted into the same tab lifecycle.
 
-On restart, Jingler reports only state it can reconcile. A child without a provably live process is shown as `unknown`; controls fail factually rather than guessing or replaying a mutation.
+On restart, Jingler reports only state it can reconcile. Native sidecar ownership is restored from a secret-free, owner-bound index; terminal native job records and transcripts are retained for 30 days. Active bundled PI work is reopened through its existing continuation and canonical `pi-subagents` artifacts. A child without a provably live process is shown as `unknown` or failed as ambiguous according to its runner contract; controls fail factually rather than guessing, restarting, or replaying a mutation.
 
 Schedules, mission administration, sharing, watchdog administration, agent-profile CRUD, and doctor/guide surfaces remain outside the interactive subagent-tab scope.

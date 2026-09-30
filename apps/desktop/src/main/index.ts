@@ -428,6 +428,12 @@ if (!gotPrimaryLock) {
           import.meta.dirname,
           "../../../../packages/cli-adapters/runtime-assets/jingler-claude-cli-provider.mjs"
         )
+    process.env.JINGLER_SUBAGENT_PROCESS_WORKER ??= app.isPackaged
+      ? join(packagedSubagentRoot, "jingler-subagent-process-worker.mjs")
+      : resolve(
+          import.meta.dirname,
+          "../../../device-agent/dist/runtime-payload/runtime-assets/jingler-subagent-process-worker.mjs"
+        )
     process.env.JINGLER_DEVICE_AGENT_BUNDLE ??= resolveDeviceAgentBundlePath(
       app.isPackaged,
       process.resourcesPath,

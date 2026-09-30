@@ -41,7 +41,7 @@ export const isNativeExternalJobRuntime = (
 ): runtimeId is "codex" | "opencode" => runtimeId === "codex" || runtimeId === "opencode"
 
 export interface NativeExternalJobBinding {
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly spec: AgentRunSpec & { readonly runtimeId: "codex" | "opencode" }
   readonly context: AgentRuntimeContext
   readonly models: SubagentModelAssignments
@@ -52,7 +52,7 @@ interface NativeExternalJobRecord {
   readonly version: 1
   readonly providerJobId: string
   readonly bindingId: string
-  readonly parentPiSessionId: string
+  readonly parentRuntimeSessionId: string
   readonly runtimeId: "codex" | "opencode"
   readonly role: string
   readonly modelId: string
@@ -145,7 +145,7 @@ export const registerNativeExternalJobProfiles = (
 export interface NativeExternalJobProviderHost {
   readonly provider: ExternalJobProvider
   bind(input: NativeExternalJobBinding): NativeExternalJobProfileSet
-  stop(sourceRunId: string, parentPiSessionId?: string): Promise<number>
+  stop(sourceRunId: string, parentRuntimeSessionId?: string): Promise<number>
   recoverAndPrune(now?: number): Promise<{ readonly failed: number; readonly pruned: number }>
 }
 
@@ -190,6 +190,7 @@ const validUsage = (
     usage.provenance === `${runtimeId}.external-job`
 }
 
+/* oxlint-disable complexity -- persisted job validation stays fail-closed in one audit boundary. */
 const safeRecord = (value: unknown): NativeExternalJobRecord => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new ExternalJobProviderError("Malformed Jingler native external-job state", {
@@ -207,7 +208,7 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
     !PROVIDER_JOB_ID.test(candidate.providerJobId) ||
     !boundedText(candidate.bindingId, MAX_ID_CHARS) ||
     (candidate.runtimeId !== "codex" && candidate.runtimeId !== "opencode") ||
-    !boundedText(candidate.parentPiSessionId, MAX_ID_CHARS) ||
+    !boundedText(candidate.parentRuntimeSessionId, MAX_ID_CHARS) ||
     !boundedText(candidate.role, MAX_ID_CHARS) ||
     !boundedText(candidate.modelId, MAX_ID_CHARS) ||
     !boundedText(candidate.promptDigest, MAX_ID_CHARS) ||
@@ -230,6 +231,7 @@ const safeRecord = (value: unknown): NativeExternalJobRecord => {
   }
   return candidate as NativeExternalJobRecord
 }
+/* oxlint-enable complexity */
 
 const toHandle = (record: NativeExternalJobRecord): ExternalJobHandle => ({
   providerJobId: record.providerJobId,
@@ -245,7 +247,7 @@ export const makeNativeExternalJobProvider = (
   const bindings = new Map<string, NativeExternalJobBinding>()
   const active = new Map<string, {
     readonly sourceRunId: string
-    readonly parentPiSessionId: string
+    readonly parentRuntimeSessionId: string
     readonly controller: AbortController
     readonly settled: Promise<void>
   }>()
@@ -464,7 +466,7 @@ export const makeNativeExternalJobProvider = (
   ): Promise<ExternalJobHandle> => {
     const options = optionsFor(input)
     const binding = bindings.get(options.bindingId)
-    if (!binding || input.sessionId !== binding.parentPiSessionId) {
+    if (!binding || input.sessionId !== binding.parentRuntimeSessionId) {
       throw new ExternalJobProviderError("Native delegation binding is missing or belongs to another PI session", {
         code: "binding-unavailable"
       })
@@ -481,7 +483,7 @@ export const makeNativeExternalJobProvider = (
       version: 1,
       providerJobId,
       bindingId: options.bindingId,
-      parentPiSessionId: binding.parentPiSessionId,
+      parentRuntimeSessionId: binding.parentRuntimeSessionId,
       runtimeId: binding.spec.runtimeId,
       role: options.role,
       modelId: options.modelId,
@@ -498,7 +500,7 @@ export const makeNativeExternalJobProvider = (
       .finally(() => active.delete(providerJobId))
     active.set(providerJobId, {
       sourceRunId: input.runId,
-      parentPiSessionId: binding.parentPiSessionId,
+      parentRuntimeSessionId: binding.parentRuntimeSessionId,
       controller,
       settled
     })
@@ -595,10 +597,10 @@ export const makeNativeExternalJobProvider = (
   return {
     provider,
     recoverAndPrune,
-    stop: async (sourceRunId, parentPiSessionId) => {
+    stop: async (sourceRunId, parentRuntimeSessionId) => {
       const matches = [...active.values()].filter((entry) =>
         entry.sourceRunId === sourceRunId &&
-        (parentPiSessionId === undefined || entry.parentPiSessionId === parentPiSessionId)
+        (parentRuntimeSessionId === undefined || entry.parentRuntimeSessionId === parentRuntimeSessionId)
       )
       for (const entry of matches) entry.controller.abort(new Error("Stopped by operator"))
       await Promise.all(matches.map((entry) => entry.settled))

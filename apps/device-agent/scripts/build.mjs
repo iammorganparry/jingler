@@ -45,6 +45,18 @@ await build({
   target: "node24",
   outfile: resolve(payload, "runtime-assets/jingler-claude-cli-provider.mjs")
 })
+await build({
+  entryPoints: [resolve(root, "node_modules/pi-subagents/src/runs/shared/process-child-session-worker.ts")],
+  bundle: true,
+  platform: "node",
+  mainFields: ["module", "main"],
+  format: "esm",
+  target: "node24",
+  outfile: resolve(payload, "runtime-assets/jingler-subagent-process-worker.mjs"),
+  banner: {
+    js: "import { createRequire as __jinglerCreateRequire } from \"node:module\"; const require = __jinglerCreateRequire(import.meta.url);"
+  }
+})
 await cp(
   resolve(root, "packages/cli-adapters/runtime-assets/jingler-child-tools.mjs"),
   resolve(payload, "runtime-assets/jingler-child-tools.mjs")
@@ -133,6 +145,7 @@ if (identity) {
 await run("tar", [
   "-czf",
   resolve(dist, "jingler-device-runtime.tgz"),
+  "--exclude=./runtime-assets/jingler-subagent-process-worker.mjs",
   "-C",
   payload,
   "."

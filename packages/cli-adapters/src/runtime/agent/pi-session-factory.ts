@@ -189,7 +189,7 @@ export interface PiSessionFactoryOptions {
   readonly delegationOnly?: boolean
   readonly configureNativeAsyncSubagents?: (input: {
     readonly eventBus: EventBus
-    readonly parentPiSessionId: string
+    readonly parentRuntimeSessionId: string
     readonly context: AgentRuntimeContext
   }) => Effect.Effect<{
     readonly agentNames: Readonly<Record<string, string>>
@@ -836,7 +836,7 @@ function* bindSubagentCapabilities(
   const nativeAsyncSubagents = options.configureNativeAsyncSubagents
     ? yield* options.configureNativeAsyncSubagents({
         eventBus: prepared.eventBus,
-        parentPiSessionId: parentRuntimeSessionId,
+        parentRuntimeSessionId: parentRuntimeSessionId,
         context
       }).pipe(Effect.onError(() => rollbackSession))
     : undefined

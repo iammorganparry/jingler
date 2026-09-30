@@ -117,7 +117,7 @@ describe("native external-job provider", () => {
     async (runtimeId) => {
       const host = makeNativeExternalJobProvider(await stateRoot())
       const binding = host.bind({
-        parentPiSessionId: "pi-session",
+        parentRuntimeSessionId: "pi-session",
         spec: spec(runtimeId),
         context: context(),
         models: { worker: ProviderModelId.make(`${runtimeId}/cheap`) },
@@ -197,7 +197,7 @@ describe("native external-job provider", () => {
       const recordUsage = vi.fn(() => Effect.void)
       const modelId = ProviderModelId.make(`${runtimeId}/cheap`)
       const binding = host.bind({
-        parentPiSessionId: "pi-session",
+        parentRuntimeSessionId: "pi-session",
         spec: spec(runtimeId),
         context: context(recordUsage),
         models: { worker: modelId },
@@ -241,7 +241,7 @@ describe("native external-job provider", () => {
     const recordUsage = vi.fn(() => Effect.void)
     const modelId = ProviderModelId.make("codex/cheap")
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("codex"),
       context: context(recordUsage),
       models: { worker: modelId },
@@ -263,7 +263,7 @@ describe("native external-job provider", () => {
     const seen: AgentRunSpec[] = []
     const modelId = ProviderModelId.make("codex/cheap")
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("codex"),
       context: context(),
       models: { worker: modelId },
@@ -295,8 +295,8 @@ describe("native external-job provider", () => {
   it("isolates concurrent bindings by PI session and rejects cross-binding follow-up", async () => {
     const host = makeNativeExternalJobProvider(await stateRoot())
     const modelId = ProviderModelId.make("codex/cheap")
-    const bind = (parentPiSessionId: string) => host.bind({
-      parentPiSessionId,
+    const bind = (parentRuntimeSessionId: string) => host.bind({
+      parentRuntimeSessionId,
       spec: spec("codex"),
       context: context(),
       models: { worker: modelId },
@@ -331,7 +331,7 @@ describe("native external-job provider", () => {
           : Stream.make({ _tag: "Failed" as const, message: "runtime refused" })
       }
       const binding = host.bind({
-        parentPiSessionId: "pi-session",
+        parentRuntimeSessionId: "pi-session",
         spec: spec("codex"),
         context: context(recordUsage),
         models: { worker: modelId },
@@ -366,7 +366,7 @@ describe("native external-job provider", () => {
       )
     }
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("codex"),
       context: context(recordUsage),
       models: { worker: modelId },
@@ -388,7 +388,7 @@ describe("native external-job provider", () => {
     const modelId = ProviderModelId.make("opencode/cheap")
     const recordUsage = vi.fn(() => Effect.die(new Error("usage unavailable")))
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("opencode"),
       context: context(recordUsage),
       models: { worker: modelId },
@@ -422,7 +422,7 @@ describe("native external-job provider", () => {
       ).pipe(Stream.ensuring(Effect.sync(cancelled)))
     }
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("codex"),
       context: context(recordUsage),
       models: { worker: modelId },
@@ -448,7 +448,7 @@ describe("native external-job provider", () => {
     const host = makeNativeExternalJobProvider(root)
     const modelId = ProviderModelId.make("codex/cheap")
     const binding = host.bind({
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       spec: spec("codex"),
       context: context(),
       models: { worker: modelId },
@@ -483,7 +483,7 @@ describe("native external-job provider", () => {
       version: 1,
       providerJobId: "44444444-4444-4444-8444-444444444444",
       bindingId: "ended-binding",
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       runtimeId: "codex",
       role: "worker",
       modelId: "codex/cheap",
@@ -502,7 +502,7 @@ describe("native external-job provider", () => {
       version: 1,
       providerJobId: staleId,
       bindingId: "ended-binding",
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       runtimeId: "opencode",
       role: "worker",
       modelId: "opencode/cheap",
@@ -536,7 +536,7 @@ describe("native external-job provider", () => {
     const malformed: ReadonlyArray<Readonly<Record<string, unknown>>> = [
       { providerJobId: "" },
       { bindingId: "" },
-      { parentPiSessionId: "" },
+      { parentRuntimeSessionId: "" },
       { role: "" },
       { modelId: "" },
       { promptDigest: "" },
@@ -565,7 +565,7 @@ describe("native external-job provider", () => {
         version: 1,
         providerJobId: ids[index],
         bindingId: "ended-binding",
-        parentPiSessionId: "pi-session",
+        parentRuntimeSessionId: "pi-session",
         runtimeId: "codex",
         role: "worker",
         modelId: "codex/cheap",
@@ -598,7 +598,7 @@ describe("native external-job provider", () => {
       version: 1,
       providerJobId,
       bindingId: "ended-binding",
-      parentPiSessionId: "pi-session",
+      parentRuntimeSessionId: "pi-session",
       runtimeId: "codex",
       role: "worker",
       modelId: "codex/cheap",

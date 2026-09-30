@@ -584,7 +584,7 @@ export const makePiAgentRuntimeLive = (
             request.action === "stop" && outcome.status === "accepted"
               ? Effect.tryPromise({
                   try: () => nativeExternalJobs.stop(
-                    request.runId,
+                    outcome.nativeRequestId ?? request.runId,
                     request.parentRuntimeSessionId
                   ),
                   catch: (cause) => new AgentRuntimeError({
@@ -628,11 +628,11 @@ export const makePiAgentRuntimeLive = (
             )),
         ...(nativeLeaf
           ? {
-              configureNativeAsyncSubagents: ({ eventBus, parentPiSessionId, context: liveContext }) =>
+              configureNativeAsyncSubagents: ({ eventBus, parentRuntimeSessionId, context: liveContext }) =>
                 Effect.try({
                   try: () => {
                     const profiles = nativeExternalJobs.bind({
-                      parentPiSessionId,
+                      parentRuntimeSessionId,
                       spec: nativeLeaf,
                       context: liveContext,
                       models,

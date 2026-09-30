@@ -51,6 +51,16 @@ const handleTurnStart = async (id, p) => {
   const prompt = p.input[0].text
   reply(id, { turn: { id: 'turn-1' } })
   if (prompt === 'registry-probe' || prompt.startsWith('planning-probe')) { await probeRegistry(prompt.startsWith('planning-probe')); return }
+  if (prompt.includes('native resumed turn')) {
+    note('item/agentMessage/delta', { itemId: 'native-resumed', delta: 'Codex resumed: native resumed turn' })
+    done()
+    return
+  }
+  if (prompt.includes('native first turn')) {
+    note('item/agentMessage/delta', { itemId: 'native-first', delta: 'Codex: native first turn' })
+    done()
+    return
+  }
   if (prompt.includes('Second retained Codex parent turn')) {
     note('item/agentMessage/delta', { itemId: 'second-parent', delta: 'Native Codex second parent turn completed.' })
     done()
@@ -99,11 +109,16 @@ const handleTurn = (method, id, p) => {
     reply(id, { turnId: 'turn-1' })
     const prompt = p.input[0].text
     const retainedSecondTurn = prompt.includes('Second retained Codex parent turn')
+    const nativeResume = prompt.includes('native resumed turn')
     note('item/agentMessage/delta', {
       itemId: 'a1',
-      delta: retainedSecondTurn ? 'Native Codex second parent turn completed.' : prompt
+      delta: retainedSecondTurn
+        ? 'Native Codex second parent turn completed.'
+        : nativeResume
+          ? 'Codex resumed: native resumed turn'
+          : prompt
     })
-    if (retainedSecondTurn) done()
+    if (retainedSecondTurn || nativeResume) done()
     return true
   }
   if (method === 'turn/interrupt') { reply(id, {}); done('interrupted'); return true }

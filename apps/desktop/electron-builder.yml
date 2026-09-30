@@ -70,6 +70,8 @@ extraResources:
     to: subagent-runtime/jingler-child-tools.mjs
   - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-claude-cli-provider.mjs
     to: subagent-runtime/jingler-claude-cli-provider.mjs
+  - from: ../device-agent/dist/runtime-payload/runtime-assets/jingler-subagent-process-worker.mjs
+    to: subagent-runtime/jingler-subagent-process-worker.mjs
   - from: ../../plugins/github-issues
     to: plugins/github-issues
     filter:

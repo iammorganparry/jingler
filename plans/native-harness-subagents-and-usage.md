@@ -19,7 +19,7 @@
 - [x] Recover retained hosts and terminal transcripts from durable lifecycle artifacts after reload/restart. Proven-active PI children remain attached; native jobs that cannot be proven live fail closed and are never silently restarted or double-counted.
 - [x] Add concurrency, ownership, restart, credential cleanup, capability-ceiling, cancellation, and idempotent usage tests covering same-chat serialization, cross-chat isolation, cross-session denial, final-child disposal, and stale-job pruning.
 - [x] Add parameterized Electron E2E coverage for Claude, Codex, and OpenCode detached workflows: parent turn settles, Fleet remains visible, a second parent turn works, transcript opens, stop works, and one cold-restart case restores durable terminal state.
-- [~] Run package typechecks, focused runtime/security tests, the full test/lint gates, native-harness Electron E2E, and update `docs/subagent-fleet.md` plus the changeset with retained-host behavior and honest control capability notes.
+- [x] Run package typechecks, focused runtime/security tests, the full test/lint gates, native-harness Electron E2E, and update `docs/subagent-fleet.md` plus the changeset with retained-host behavior and honest control capability notes.
 
 ### Acceptance
 
