@@ -6,10 +6,11 @@
  * switching tabs inside a group never re-renders the sidebar — only opening or
  * closing something does.
  */
-import { memo } from "react"
+import { memo, useState } from "react"
 import { useSelector } from "@xstate/react"
 import type { ProviderId, Session } from "@jingler/core"
-import { X } from "lucide-react"
+import { Pencil, RotateCcw, X } from "lucide-react"
+import { ContextMenu } from "../components/context-menu.js"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
@@ -33,16 +34,34 @@ const ensureLayout = (session: Session) => {
 
 const viewMeta = (id: string) => BUILTIN_TAB_META[id as BuiltinTabKey] as (typeof BUILTIN_TAB_META)[BuiltinTabKey] | undefined
 
+/** Chat lifecycle actions owned by the host (they are RPCs there). */
+export interface SessionChatActions {
+  readonly onRenameChat?: (sessionId: string, chatId: string, title: string) => void
+  /** Closes the chat itself (it moves to Closed), not just its tabs. */
+  readonly onCloseChat?: (sessionId: string, chatId: string) => void
+  readonly onReopenChat?: (sessionId: string, chatId: string) => void
+}
+
 export const SessionTree = memo(function SessionTree({
   session,
   running,
-  onSelectSession
+  onSelectSession,
+  chatActions
 }: {
   session: Session
   /** Whether the session's active chat is working right now. */
   running: boolean
   onSelectSession: (id: string) => void
+  chatActions?: SessionChatActions
 }) {
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+  const [closedOpen, setClosedOpen] = useState(false)
+  const closed = session.closedChats ?? []
+  const commitRename = (chatId: string) => {
+    if (draft.trim()) chatActions?.onRenameChat?.(session.id, chatId, draft.trim())
+    setRenaming(null)
+  }
   const openKeys = useSelector(editorLayouts, openKeysOf(session.id))
   const open = openKeys
     ? openKeys.split("\n").flatMap((key) => {
@@ -120,11 +139,43 @@ export const SessionTree = memo(function SessionTree({
         const owned = views.filter((v) => v.chatId === chat.id)
         // ponytail: only the session's active chat reports activity here; per-chat activity lives in the desktop registry.
         const busy = running && chat.id === session.activeChatId
-        return (
-          <div key={chat.id}>
+        const title = chat.title ?? `Chat ${index + 1}`
+        if (renaming === chat.id) {
+          return (
+            <input
+              key={chat.id}
+              aria-label="Chat title"
+              value={draft}
+              autoFocus
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename(chat.id)
+                else if (e.key === "Escape") setRenaming(null)
+              }}
+              onBlur={() => commitRename(chat.id)}
+              className="my-0.5 w-full rounded border border-blue/50 bg-editor px-2 py-0.5 text-[12px] text-text-bright outline-none"
+            />
+          )
+        }
+        const menu = [
+          ...(chatActions?.onRenameChat
+            ? [{ label: "Rename chat", icon: Pencil, onSelect: () => { setDraft(title); setRenaming(chat.id) } }]
+            : []),
+          ...(chatActions?.onCloseChat
+            ? [{ label: "Close chat", icon: X, onSelect: () => chatActions.onCloseChat?.(session.id, chat.id) }]
+            : [])
+        ]
+        const row = (
+          <div
+            onDoubleClick={() => {
+              if (!chatActions?.onRenameChat) return
+              setDraft(title)
+              setRenaming(chat.id)
+            }}
+          >
             {item(
               surface,
-              chat.title ?? `Chat ${index + 1}`,
+              title,
               <span
                 role="img"
                 aria-label={busy ? "Running" : "Idle"}
@@ -134,6 +185,11 @@ export const SessionTree = memo(function SessionTree({
                 <ProviderIcon providerId={chat.providerId as ProviderId | undefined} size={11} />
               </span>
             )}
+          </div>
+        )
+        return (
+          <div key={chat.id}>
+            {menu.length > 0 ? <ContextMenu items={menu}>{row}</ContextMenu> : row}
             {owned.length > 0 && <div className="ml-3 border-l border-hairline pl-1">{owned.map(viewItem)}</div>}
           </div>
         )
@@ -142,6 +198,34 @@ export const SessionTree = memo(function SessionTree({
         <>
           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-dim">Files</p>
           {files.map((f) => item(f, f.id.split("/").at(-1) ?? f.id, <FileIcon path={f.id} size={12} />))}
+        </>
+      )}
+      {closed.length > 0 && chatActions?.onReopenChat && (
+        <>
+          <button
+            type="button"
+            aria-expanded={closedOpen}
+            onClick={() => setClosedOpen((v) => !v)}
+            className="px-2 pb-0.5 pt-1.5 text-left text-[10px] uppercase tracking-wider text-dim hover:text-text"
+          >
+            Closed ({closed.length})
+          </button>
+          {closedOpen &&
+            closed.map((chat, index) => (
+              <button
+                key={chat.id}
+                type="button"
+                aria-label={`Reopen ${chat.title ?? `Closed chat ${index + 1}`}`}
+                onClick={() => {
+                  chatActions.onReopenChat?.(session.id, chat.id)
+                  onSelectSession(session.id)
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-surface/40 hover:text-text"
+              >
+                <RotateCcw className="size-3 flex-none text-dim" />
+                <span className="truncate">{chat.title ?? `Closed chat ${index + 1}`}</span>
+              </button>
+            ))}
         </>
       )}
       {sessionViews.length > 0 && (

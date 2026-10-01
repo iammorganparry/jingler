@@ -33,7 +33,7 @@ import { ProviderIcon } from "../components/provider-icon.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { AISidebarSurface } from "../composites/beui/shell.js"
-import { SessionTree } from "./session-tree.js"
+import { SessionTree, type SessionChatActions } from "./session-tree.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
 import type { PendingEnvironmentSession } from "./environment-session-startup-machine.js"
@@ -91,6 +91,8 @@ export interface SessionSidebarProps {
   onRestore?: (id: string) => void
   /** Permanently delete a session from its row quick-actions (caller confirms). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Chat lifecycle actions for the sidebar's session tree. */
+  chatActions?: SessionChatActions
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
@@ -320,6 +322,7 @@ function SidebarBody({
   onArchive,
   onRestore,
   onDelete,
+  chatActions,
   liveActivity,
   prStates,
   repoOwners,
@@ -654,7 +657,7 @@ return (renderExpandedGroupHeading())
         onToggleExpanded={toggleExpanded}
       />
       {open && (
-        <SessionTree session={s} running={liveActivity?.[s.id] !== undefined} onSelectSession={onSelect} />
+        <SessionTree session={s} running={liveActivity?.[s.id] !== undefined} onSelectSession={onSelect} chatActions={chatActions} />
       )}
       </div>
     )

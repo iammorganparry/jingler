@@ -50,6 +50,7 @@ import {
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
+  closeSurfaceEverywhere,
   openTab,
   updateEditorLayout,
 } from "@jingler/ui";
@@ -78,6 +79,7 @@ import { useSessionActivities } from "./session-activity.js";
 import { setSessionDiff, useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
+  disposeChatActor,
   disposeConversationActor,
   getConversationActor,
 } from "./conversation-registry.js";
@@ -1538,6 +1540,36 @@ function AuthedApp({
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
+        chatActions={{
+          onRenameChat: (sessionId, chatId, title) => {
+            void rpc.sessionsRenameChat(sessionId, chatId, title).then(publishSessionUpdate);
+          },
+          onCloseChat: (sessionId, chatId) =>
+            queueSessionChatMutation(
+              sessionId,
+              () => rpc.sessionsCloseChat(sessionId, chatId),
+              (updated) => {
+                clearDraft(chatId);
+                disposeChatActor(sessionId, chatId);
+                publishSessionUpdate(updated);
+                updateEditorLayout(sessionId, (layout) =>
+                  openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
+                    kind: "chat",
+                    id: updated.activeChatId,
+                  }),
+                );
+              },
+            ),
+          onReopenChat: (sessionId, chatId) =>
+            queueSessionChatMutation(
+              sessionId,
+              () => rpc.sessionsReopenChat(sessionId, chatId),
+              (updated) => {
+                publishSessionUpdate(updated);
+                updateEditorLayout(sessionId, (layout) => openTab(layout, { kind: "chat", id: chatId }));
+              },
+            ),
+        }}
         onCreateChat={(sessionId) =>
           queueSessionChatMutation(
             sessionId,

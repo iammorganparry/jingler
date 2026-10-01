@@ -1,3 +1,4 @@
+import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   DiffStat,
@@ -76,6 +77,8 @@ export interface SessionConversationProps {
   onRestoreSession?: (id: string) => void
   /** Permanently delete a session from the sidebar quick-actions (confirms first). */
   onDeleteSession?: (id: string) => void
+  /** Chat lifecycle actions for the sidebar's session tree. */
+  chatActions?: SessionChatActions
   /**
    * The live conversation pane (the renderer's session-keyed
    * `ConversationView`). Falls back to a static seeded transcript when absent
@@ -387,6 +390,7 @@ export function SessionConversation(props: SessionConversationProps) {
         activeSessionId={props.activeSessionId}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
+        chatActions={props.chatActions}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}
