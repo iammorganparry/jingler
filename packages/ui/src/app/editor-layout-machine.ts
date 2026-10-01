@@ -20,6 +20,8 @@ export type EditorLayoutsEvent =
   /** Apply a reducer to a held layout. A no-op reducer (same object) changes nothing. */
   | { readonly type: "UPDATE"; readonly sessionId: string; readonly update: (layout: EditorLayout) => EditorLayout }
   | { readonly type: "FORGET"; readonly sessionId: string }
+  /** Drops every held layout (tests). Storage is untouched. */
+  | { readonly type: "RESET" }
 
 export const editorLayoutsMachine = setup({
   types: { context: {} as EditorLayoutsContext, events: {} as EditorLayoutsEvent },
@@ -52,6 +54,7 @@ export const editorLayoutsMachine = setup({
         }
       ]
     },
+    RESET: { actions: assign({ layouts: () => ({}) }) },
     FORGET: {
       actions: assign({
         layouts: ({ context, event }) => {
@@ -77,3 +80,5 @@ export const editorLayoutOf = (sessionId: string): EditorLayout | undefined =>
 /** Re-renders only when THIS session's layout object changes. */
 export const useEditorLayout = (sessionId: string): EditorLayout | undefined =>
   useSelector(editorLayouts, (snapshot) => snapshot.context.layouts[sessionId])
+
+export const resetEditorLayouts = (): void => editorLayouts.send({ type: "RESET" })

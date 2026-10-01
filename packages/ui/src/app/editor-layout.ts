@@ -234,8 +234,10 @@ export const dropTab = (
   { surface, from }: TabDrag,
   targetGroupId: string | null,
   edge: DropEdge,
-  copy = false
+  copy = false,
+  mainChatId = layout.mainChatId
 ): EditorLayout => {
+  layout = reopenMain(layout, surface, mainChatId)
   const target = groupsOf(layout.root).find((g) => g.id === targetGroupId)
   if (!(layout.root && target)) return openTab(layout, surface)
   const key = keyOf(surface)

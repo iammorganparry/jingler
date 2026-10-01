@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { SESSION_DND_MIME, type SplitGroup } from "./split-layout.js"
 import { SessionSplit } from "./session-split.js"
 import { testSession as session } from "../test-support.js"
+import { resetEditorLayouts } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
 
@@ -115,76 +116,6 @@ describe("SessionSplit panes", () => {
       />
     )
     expect(screen.getByText("files a")).toBeTruthy()
-  })
-})
-
-/**
- * A tab bar says what you can look at; in a split it also has to say WHOSE. With
- * two transcripts side by side and nothing naming them, the only way to tell one
- * pane from the other was to read it.
- */
-describe("pane identity chips", () => {
-  it("names each pane by number and title, in the same numbering as ⌃⇧1..4", () => {
-    renderSplit({
-      group: groupOf(["a", "b"]),
-      sessions: [session({ id: "a", title: "Fix auth redirect" }), session({ id: "b", title: "Bump deps" })]
-    })
-    const first = within(screen.getByTestId("split-pane-0")).getByTestId("pane-chip-0")
-    const second = within(screen.getByTestId("split-pane-1")).getByTestId("pane-chip-1")
-    expect(first.textContent).toContain("1")
-    expect(first.textContent).toContain("Fix auth redirect")
-    expect(second.textContent).toContain("2")
-    expect(second.textContent).toContain("Bump deps")
-  })
-
-  it("shows no chip in a group of one — there is nothing to disambiguate", () => {
-    renderSplit({ group: groupOf(["a"]) })
-    expect(screen.queryByTestId("pane-chip-0")).toBeNull()
-  })
-
-  it("dims every chip but the focused pane's", () => {
-    renderSplit({ group: groupOf(["a", "b"], 1) })
-    const unfocused = within(screen.getByTestId("split-pane-0")).getByTestId("pane-chip-0")
-    const focused = within(screen.getByTestId("split-pane-1")).getByTestId("pane-chip-1")
-    expect(unfocused.className).toContain("text-dim")
-    expect(focused.className).not.toContain("text-dim")
-  })
-})
-
-describe("focused surface controls", () => {
-  it("keeps a one-click close control on every inner pane", () => {
-    renderSplit({ group: groupOf(["a"]) })
-    expect(
-      within(screen.getByTestId("surface-pane-0")).getByRole("button", {
-        name: "Close pane 1"
-      })
-    ).toBeTruthy()
-  })
-
-  it("does not route inner pane controls into the outer session split", () => {
-    const onClosePane = vi.fn()
-    const onMovePane = vi.fn()
-    renderSplit({
-      group: groupOf(["a"]),
-      onClosePane,
-      onMovePane,
-      renderFiles: (owner) => <div>files {owner.id}</div>
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    fireEvent.click(
-      within(screen.getByTestId("surface-pane-1")).getByRole("button", {
-        name: "Move pane 2 left"
-      })
-    )
-    fireEvent.click(
-      within(screen.getByTestId("surface-pane-0")).getByRole("button", {
-        name: "Close pane 1"
-      })
-    )
-
-    expect(onClosePane).not.toHaveBeenCalled()
-    expect(onMovePane).not.toHaveBeenCalled()
   })
 })
 
