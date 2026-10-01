@@ -280,6 +280,32 @@ export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> => 
   )
 }
 
+/**
+ * Applies a keyboard command (other than close, which has side effects) to the
+ * focused group. Unknown commands return the layout unchanged.
+ */
+export const applyEditorCommand = (layout: EditorLayout, command: string): EditorLayout => {
+  const named = EDITOR_COMMANDS[command]
+  if (named) return named(layout)
+  const index = /^focus-(\d+)$/.exec(command)?.[1]
+  const target = index === undefined ? undefined : groupsOf(layout.root)[Number(index)]
+  return target ? focusEditorGroup(layout, target.id) : layout
+}
+
+const splitFocused = (edge: "right" | "bottom") => (layout: EditorLayout): EditorLayout => {
+  const group = focusedGroup(layout)
+  return group ? dropTab(layout, { surface: activeSurface(group) }, group.id, edge, true) : layout
+}
+
+const EDITOR_COMMANDS: Readonly<Record<string, (layout: EditorLayout) => EditorLayout>> = {
+  "split-right": splitFocused("right"),
+  "split-down": splitFocused("bottom"),
+  "move-left": (l) => moveActiveTab(l, -1),
+  "move-right": (l) => moveActiveTab(l, 1),
+  "focus-left": (l) => focusAdjacentGroup(l, -1),
+  "focus-right": (l) => focusAdjacentGroup(l, 1)
+}
+
 /** Moves the focused group's active tab into the neighbouring group (reading order). */
 export const moveActiveTab = (layout: EditorLayout, direction: -1 | 1): EditorLayout => {
   const groups = groupsOf(layout.root)

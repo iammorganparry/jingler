@@ -1,5 +1,5 @@
 import { defaultProps } from "../lib/default-props.js"
-import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
+import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
 import {
   type ReactNode,
   useCallback,
@@ -735,6 +735,12 @@ function getActiveTabContext(active: Session) {
   })
 
   function handleSessionShortcut(e: KeyboardEvent) {
+      const editorSplit = matchSplitEditorChord(e)
+      if (editorSplit) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail: editorSplit }))
+        return
+      }
       const shortcut = matchSplitShortcut(e)
       if (shortcut === null) return
 

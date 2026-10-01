@@ -47,6 +47,7 @@ import {
 } from "../app/session-surface-layout.js"
 import {
   activateTab,
+  applyEditorCommand,
   activeSurface,
   allTabs,
   closeSurfaceEverywhere,
@@ -772,25 +773,10 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (!paneFocused) return
     const onCommand = (event: Event) => {
       const command = (event as CustomEvent<SessionSurfaceCommand>).detail
+      if (command !== "close") return update((l) => applyEditorCommand(l, command))
       const current = editorLayoutOf(sessionId)
       const group = current && focusedGroup(current)
-      switch (command) {
-        case "close":
-          if (group) closeTabIn(group.id, activeSurface(group))
-          return
-        case "move-left": update((l) => moveActiveTab(l, -1)); return
-        case "move-right": update((l) => moveActiveTab(l, 1)); return
-        case "focus-left": update((l) => focusAdjacentGroup(l, -1)); return
-        case "focus-right": update((l) => focusAdjacentGroup(l, 1)); return
-        default:
-          if (command.startsWith("focus-")) {
-            const index = Number(command.slice(6))
-            update((l) => {
-              const target = groupsOf(l.root)[index]
-              return target ? focusEditorGroup(l, target.id) : l
-            })
-          }
-      }
+      if (group) closeTabIn(group.id, activeSurface(group))
     }
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)

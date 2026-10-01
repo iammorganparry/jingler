@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
   activateTab,
+  applyEditorCommand,
   activeSurface,
   allTabs,
   closeTabsWhere,
@@ -225,5 +226,18 @@ describe("editor layout helpers", () => {
     const moved = moveActiveTab(back, 1)
     expect(shape(moved)).toEqual([["a", "pr"], ["pr", "terminal"]])
     expect(moveActiveTab(moved, 1)).toBe(moved)
+  })
+})
+
+describe("applyEditorCommand", () => {
+  it("splits right and down, moves and focuses, and ignores unknown commands", () => {
+    const base = createEditorLayout([chat("a")])
+    expect(split(applyEditorCommand(base, "split-right")).axis).toBe("row")
+    expect(split(applyEditorCommand(base, "split-down")).axis).toBe("column")
+    const two = applyEditorCommand(base, "split-right")
+    expect(focusedGroup(applyEditorCommand(two, "focus-0"))!.id).toBe(groupsOf(two.root)[0]!.id)
+    expect(focusedGroup(applyEditorCommand(two, "focus-left"))!.id).toBe(groupsOf(two.root)[0]!.id)
+    expect(applyEditorCommand(two, "focus-9")).toBe(two)
+    expect(applyEditorCommand(two, "nope")).toBe(two)
   })
 })
