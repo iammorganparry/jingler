@@ -350,7 +350,7 @@ const assertChanges = async (
   const changes = window.getByRole("region", { name: "Code review changes" });
   await expect(changes).toContainText(path, { timeout: 90_000 });
   await expect(changes).toContainText(content);
-  await window.getByTestId("active-chat-tab").click();
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click();
 };
 
 const waitForCloudStartup = async (window: Page): Promise<void> => {

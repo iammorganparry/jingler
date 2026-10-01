@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test"
 import { expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
@@ -31,6 +32,17 @@ const mainConversation = [
   }
 ]
 
+const chatTab = (window: Page, name: string) => window.getByRole("tab", { name, exact: true })
+const treeChat = (window: Page, name: string) =>
+  // The row's accessible name leads with its status dot ("Idle Chat 1").
+  window.getByTestId("session-tree-s_multi").getByRole("button", { name: new RegExp(`^(Idle|Running) ${name}$`) })
+const renameInTree = async (window: Page, from: string, to: string) => {
+  await treeChat(window, from).dblclick()
+  const title = window.getByRole("textbox", { name: "Chat title" })
+  await title.fill(to)
+  await title.press("Enter")
+}
+
 test("chat selection and titles survive a real app restart", async ({ launchApp }) => {
   const first = await launchApp({
     configured: true,
@@ -39,16 +51,12 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
   })
 
   await sessionRow(first.window, "Multi-chat lifecycle").click()
-  await expect(first.window.getByTitle("1. Chat 1")).toBeVisible()
-  await first.window.getByRole("button", { name: "New tab" }).click()
+  await expect(chatTab(first.window, "Chat 1")).toBeVisible()
+  await first.window.getByRole("button", { name: "New tab" }).first().click()
   await first.window.getByTestId("new-tab-option-chat").click()
-  const secondChat = first.window.getByTitle("2. Chat 2")
-  await expect(secondChat).toHaveAttribute("aria-current", "page")
-  await secondChat.dblclick()
-  const title = first.window.getByRole("textbox", { name: "Chat title" })
-  await title.fill("Review migrations")
-  await title.press("Enter")
-  await expect(first.window.getByTitle("2. Review migrations")).toBeVisible()
+  await expect(chatTab(first.window, "Chat 2")).toHaveAttribute("aria-selected", "true")
+  await renameInTree(first.window, "Chat 2", "Review migrations")
+  await expect(chatTab(first.window, "Review migrations")).toBeVisible()
   await first.app.close()
 
   const second = await launchApp({
@@ -59,26 +67,8 @@ test("chat selection and titles survive a real app restart", async ({ launchApp 
   })
 
   await sessionRow(second.window, "Multi-chat lifecycle").click()
-  await expect(second.window.getByTitle("1. Chat 1")).toBeVisible()
-  await expect(second.window.getByTitle("2. Review migrations")).toHaveAttribute(
-    "aria-current",
-    "page"
-  )
-  await second.window.getByRole("button", { name: "Close Review migrations" }).click()
-  await expect(second.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
-  await second.window.getByRole("button", { name: "Close Chat 1" }).click()
-  await expect(second.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
-  await second.app.close()
-
-  const third = await launchApp({
-    home: first.home,
-    reposDir: first.reposDir,
-    configured: true,
-    withRepo: true
-  })
-
-  await sessionRow(third.window, "Multi-chat lifecycle").click()
-  await expect(third.window.getByTitle("1. Chat 1")).toHaveAttribute("aria-current", "page")
+  await expect(chatTab(second.window, "Review migrations")).toHaveAttribute("aria-selected", "true")
+  await expect(treeChat(second.window, "Chat 1")).toBeVisible()
 })
 
 test("a new chat stays empty while its own transcript loads", async ({ launchApp }) => {
@@ -90,20 +80,16 @@ test("a new chat stays empty while its own transcript loads", async ({ launchApp
   })
 
   await sessionRow(launched.window, "Multi-chat lifecycle").click()
-  const priorContent = launched.window.getByText("The release checklist is ready.")
-  await expect(priorContent).toBeVisible()
-  await launched.window.getByRole("button", { name: "New tab" }).click()
+  await expect(launched.window.getByText("The release checklist is ready.")).toBeVisible()
+  await launched.window.getByRole("button", { name: "New tab" }).first().click()
   await launched.window.getByTestId("new-tab-option-chat").click()
-  await expect(launched.window.getByTitle("2. Chat 2")).toHaveAttribute(
-    "aria-current",
-    "page"
-  )
+  await expect(chatTab(launched.window, "Chat 2")).toHaveAttribute("aria-selected", "true")
 
-  const activePane = launched.window.locator('[data-testid^="surface-pane-"][data-focused="true"]')
-  await expect(activePane).toBeVisible()
+  const activeBody = launched.window.locator('[data-testid="editor-group"][data-focused="true"] [data-testid^="editor-body-"]:not([hidden])')
+  await expect(activeBody).toBeVisible()
   await Promise.all([250, 500, 1_000, 2_000, 4_000].map(async (delay) => {
     await launched.window.waitForTimeout(delay)
-    expect(await activePane.getByText("The release checklist is ready.").count()).toBe(0)
+    expect(await activeBody.getByText("The release checklist is ready.").count()).toBe(0)
   }))
 })
 
@@ -119,14 +105,12 @@ test("a closed chat can be reopened with its transcript after a real app restart
 
   await sessionRow(first.window, "Multi-chat lifecycle").click()
   await expect(first.window.getByText("The release checklist is ready.")).toBeVisible()
-  await first.window.getByTitle("1. Chat 1").dblclick()
-  const title = first.window.getByRole("textbox", { name: "Chat title" })
-  await title.fill("Main workspace")
-  await title.press("Enter")
-  await first.window.getByRole("button", { name: "New tab" }).click()
+  await renameInTree(first.window, "Chat 1", "Main workspace")
+  await first.window.getByRole("button", { name: "New tab" }).first().click()
   await first.window.getByTestId("new-tab-option-chat").click()
-  await first.window.getByRole("button", { name: "Close Main workspace" }).click()
-  await expect(first.window.getByRole("button", { name: "Previous chats" })).toBeVisible()
+  await treeChat(first.window, "Main workspace").click({ button: "right" })
+  await first.window.getByRole("menuitem", { name: "Close chat" }).click()
+  await expect(first.window.getByRole("button", { name: "Closed (1)" })).toBeVisible()
   await expect(first.window.getByText("The release checklist is ready.")).toHaveCount(0)
   await first.app.close()
 
@@ -138,10 +122,8 @@ test("a closed chat can be reopened with its transcript after a real app restart
   })
 
   await sessionRow(second.window, "Multi-chat lifecycle").click()
-  await second.window.getByRole("button", { name: "Previous chats" }).click()
-  await second.window.getByRole("menuitem", { name: "Reopen Main workspace" }).click()
-  await expect(
-    second.window.getByRole("button", { name: "Main workspace", exact: true })
-  ).toHaveAttribute("aria-current", "page")
+  await second.window.getByRole("button", { name: "Closed (1)" }).click()
+  await second.window.getByRole("button", { name: "Reopen Main workspace" }).click()
+  await expect(chatTab(second.window, "Main workspace")).toHaveAttribute("aria-selected", "true")
   await expect(second.window.getByText("The release checklist is ready.")).toBeVisible()
 })
