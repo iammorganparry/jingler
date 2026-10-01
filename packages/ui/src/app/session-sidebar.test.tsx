@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
 import { testSession as session } from "../test-support.js"
+import { allTabs, openTab } from "./editor-layout.js"
+import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
 let canvasContext: { mockRestore: () => void }
@@ -378,5 +380,76 @@ describe("SessionSidebar manual updates", () => {
     expect(screen.getByText(CANNOT_SELF_UPDATE)).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Download the Jingler 0.3.4 installer" }))
     expect(onAction).toHaveBeenCalledOnce()
+  })
+})
+
+describe("SessionSidebar session tree", () => {
+  const two = [
+    session({
+      id: "s1",
+      chats: [
+        { id: "c1", title: "Main chat", createdAt: "now", updatedAt: "now", providerId: "anthropic" as never },
+        { id: "c2", title: "Side chat", createdAt: "now", updatedAt: "now" }
+      ],
+      activeChatId: "c1"
+    }),
+    session({ id: "s2" })
+  ]
+  const renderTree = (props: Partial<Parameters<typeof SessionSidebar>[0]> = {}) =>
+    render(<SessionSidebar activeSessionId="s1" onSelect={() => {}} sessions={two} {...props} />)
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetEditorLayouts()
+  })
+
+  it("always shows the active session's chats, with each chat's provider icon", () => {
+    renderTree()
+    const tree = screen.getByTestId("session-tree-s1")
+    expect(within(tree).getByText("Main chat")).toBeTruthy()
+    expect(within(tree).getByText("Side chat")).toBeTruthy()
+    expect(within(tree).getByTitle("Anthropic")).toBeTruthy()
+    expect(screen.queryByTestId("session-tree-s2")).toBeNull()
+  })
+
+  it("expands another session from its chevron without selecting it, and remembers it", () => {
+    const select = vi.fn()
+    const { unmount } = renderTree({ onSelect: select })
+    fireEvent.click(screen.getByTestId("session-expand-s2"))
+    expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
+    expect(select).not.toHaveBeenCalled()
+    unmount()
+    renderTree()
+    expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
+  })
+
+  it("opens a chat as a tab and selects its session; closes it everywhere from the sidebar", () => {
+    const select = vi.fn()
+    renderTree({ onSelect: select })
+    fireEvent.click(within(screen.getByTestId("session-tree-chat-c2")).getByText("Side chat"))
+    expect(select).toHaveBeenCalledWith("s1")
+    expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).toContain("c2")
+    fireEvent.click(screen.getByRole("button", { name: "Close Side chat everywhere" }))
+    expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).not.toContain("c2")
+    // Chats stay listed after closing; only files and views drop out.
+    expect(screen.getByTestId("session-tree-chat-c2")).toBeTruthy()
+  })
+
+  it("lists open files and session views, and drops them when closed", () => {
+    renderTree()
+    fireEvent.click(within(screen.getByTestId("session-tree-chat-c1")).getByText("Main chat"))
+    act(() =>
+      updateEditorLayout("s1", (l) => openTab(openTab(l, { kind: "file", id: "src/a.ts" }), { kind: "view", id: "terminal" }))
+    )
+    expect(screen.getByText("Files")).toBeTruthy()
+    expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
+    expect(screen.getByTestId("session-tree-view-terminal")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
+    expect(screen.queryByTestId("session-tree-file-src/a.ts")).toBeNull()
+  })
+
+  it("shows no tree in the collapsed rail", () => {
+    renderTree({ forceCollapsed: true })
+    expect(screen.queryByTestId("session-tree-s1")).toBeNull()
   })
 })
