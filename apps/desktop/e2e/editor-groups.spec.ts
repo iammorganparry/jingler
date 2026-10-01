@@ -110,6 +110,7 @@ test("chats, files and views are tabs that split both ways and stay per session"
   // The open terminal appears under "Session views"; closing it from the
   // sidebar closes every copy and drops the row.
   await expect(tree.getByTestId("session-tree-view-terminal")).toBeVisible()
+  await tree.getByTestId("session-tree-view-terminal").hover()
   await tree.getByRole("button", { name: "Close Terminal everywhere" }).click()
   await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
   await expect(tree.getByTestId("session-tree-view-terminal")).toHaveCount(0)
