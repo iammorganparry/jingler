@@ -702,7 +702,8 @@ function AuthedApp({
           (session.repoPath === undefined && candidate.name === session.repo),
       );
       return (
-        (github.connection.cliAvailable === true && repo?.githubSlug != null) ||
+        (github.connection.cliAvailable === true &&
+          (session.worktreePath != null || repo?.githubSlug != null)) ||
         accessForSession(session).status === "accessible"
       );
     },

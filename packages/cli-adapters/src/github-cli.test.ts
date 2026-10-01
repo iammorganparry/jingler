@@ -31,12 +31,20 @@ const commitPages = (args: ReadonlyArray<string>) => {
 }
 
 describe("GitHubCli", () => {
-  it("detects an authenticated CLI", async () => {
+  it("detects an authenticated CLI by running gh directly", async () => {
+    const commands: string[] = []
     await expect(run(GitHubCli.available(), (command, args) => {
-      if (command === "which") return { stdout: "/usr/local/bin/gh\n" }
+      commands.push(command)
       if (command === "gh" && args[0] === "auth") return { stdout: "github.com\n" }
       return
     })).resolves.toBe(true)
+    expect(commands).toEqual(["gh"])
+  })
+
+  it("reports an unavailable or signed-out CLI", async () => {
+    await expect(run(GitHubCli.available(), (command) =>
+      command === "gh" ? { exitCode: 1, stderr: "not logged in" } : undefined
+    )).resolves.toBe(false)
   })
 
   it("paginates the inbox and preserves viewer relationships", async () => {

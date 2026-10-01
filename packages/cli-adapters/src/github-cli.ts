@@ -23,7 +23,7 @@ import {
   mapPullRequestListItem,
   mapReviewThreads
 } from "./github-mappers.js"
-import { which } from "./command.js"
+import { withMacCliPath } from "./runtime/providers/native-cli-environment.js"
 
 const PR_FIELDS = [
   "state", "number", "title", "body", "headRefName", "baseRefName", "headRefOid",
@@ -111,9 +111,10 @@ const execute = (
       const base = Command.make("gh", ...args)
       const located = cwd === null ? base : base.pipe(Command.workingDirectory(cwd))
       const fed = stdin === undefined ? located : located.pipe(Command.feed(stdin))
-      const command = environment === undefined
-        ? fed
-        : fed.pipe(Command.env({ ...process.env, ...environment }))
+      const command = fed.pipe(Command.env({
+        ...withMacCliPath(process.env),
+        ...environment
+      }))
       const child = yield* command.pipe(Command.start)
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [decode(child.stdout), decode(child.stderr), child.exitCode],
@@ -392,15 +393,9 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
   accessors: true,
   effect: Effect.succeed({
     available: () =>
-      which("gh").pipe(
-        Effect.flatMap((bin) =>
-          bin === null
-            ? Effect.succeed(false)
-            : execute(null, ["auth", "status", "--active", "--hostname", "github.com"]).pipe(
-                Effect.as(true),
-                Effect.orElseSucceed(() => false)
-              )
-        )
+      execute(null, ["auth", "status", "--active", "--hostname", "github.com"]).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false)
       ),
     cloneRepository: (repository: string, destination: string) =>
       execute(null, ["repo", "clone", repository, destination], undefined, {
