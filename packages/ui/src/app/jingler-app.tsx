@@ -61,7 +61,6 @@ import {
   SessionConversation
 } from "../screens/session-conversation.js"
 import { useSplitLayout } from "./use-split-layout.js"
-import { MAX_PANES } from "./split-layout.js"
 import { matchSplitShortcut, type SplitShortcut } from "./split-shortcuts.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
@@ -510,25 +509,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
           split.activateGroup(groupId)
           split.focusPane(groupId, index)
         }}
-        onSplitWith={splitActiveWith}
-        onSplitGroupWith={split.splitInto}
-        onReplacePane={(index, sessionId) => {
-          // One reducer, not close-then-insert: group ids derive from the
-          // leftmost pane, so closing pane 0 re-ids the group and the second
-          // call would look up an id that no longer exists.
-          if (!group) return
-          if (group.panes.length === 1) return setSelected(sessionId)
-          split.replacePane(group.id, index, sessionId)
-        }}
         onClosePane={(index) => group && split.closePane(group.id, index)}
         onCloseGroupPane={split.closePane}
-        onMovePane={(index, direction) =>
-          group && split.movePane(group.id, index, direction)
-        }
-        onSeparateAll={split.separateAll}
-        onResizePane={(index, delta) =>
-          group && split.resizePane(group.id, index, delta)
-        }
         onRenameSession={onRenameSession}
         onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}
@@ -756,11 +738,8 @@ function getActiveTabContext(active: Session) {
         openNewSession()
         return
       }
-      // Only consume an add request when there is room and an eligible session.
-      if (shortcut.type === "add-pane") {
-        if (addNextSessionAsPane()) e.preventDefault()
-        return
-      }
+      // Sessions no longer split, so there is no pane to add.
+      if (shortcut.type === "add-pane") return
       if (!routeSplitShortcut(e, shortcut, group, split)) return
       const detail = surfaceCommandForShortcut(shortcut)!
       window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail }))
@@ -1048,39 +1027,6 @@ function getActiveTabContext(active: Session) {
   // should answer to.
   const showEmpty = Boolean(renderConversation) && group === null
 
-  /** Merge a session into the active group at `at` — a drop, or ⌃⇧=. */
-  const splitActiveWith = useCallback(
-    (sessionId: string, at: number) => {
-      if (group) split.splitInto(group.id, sessionId, at)
-    },
-    [group, split]
-  )
-
-  /**
-   * Add a pane holding the first session not already on screen.
-   *
-   * Arc splits with a new tab; the nearest thing here is a session you have but
-   * aren't looking at, which beats opening a pane onto nothing.
-   *
-   * ONE definition for the two ways to ask — ⌃⇧= and the ghost panel on the
-   * right edge. They had a copy each, so a change of policy (most-recently-
-   * active rather than first, say) would have had to be made twice to be made
-   * at all, and the two controls would have quietly started doing different
-   * things.
-   *
-   * Reports whether it added, because the keyboard path needs to know: a chord
-   * that could not act should fall through rather than be swallowed.
-   */
-  const addNextSessionAsPane = useCallback((): boolean => {
-    if (!group || group.panes.length >= MAX_PANES) return false
-    const next = sessions.find(
-      (s) => !(s.archived || split.visibleSessionIds.has(s.id))
-    )
-    if (!next) return false
-    splitActiveWith(next.id, group.panes.length)
-    return true
-  }, [group, sessions, split, splitActiveWith])
-
   // ⌘N opens New Session; the rest is Arc's split map. Which chord means what is
   // `matchSplitShortcut`'s job — a pure function, and its own unit test, because
   // the first version of this map compared `e.key` against unshifted characters
@@ -1096,7 +1042,6 @@ function getActiveTabContext(active: Session) {
     renderBrowser,
     group,
     split,
-    addNextSessionAsPane,
     active,
     renderFileQuickOpen,
     renderTerminalDock,

@@ -54,22 +54,10 @@ export interface SessionConversationProps {
   onFocusPane?: (index: number) => void
   /** Focus a pane of ANY group from the sidebar — activates that group too. */
   onFocusGroupPane?: (groupId: string, index: number) => void
-  /** Insert a session as a new pane at `at` — what an edge drop means. */
-  onSplitWith?: (sessionId: string, at: number) => void
-  /** Merge a session into a named group (a drop on its sidebar pill). */
-  onSplitGroupWith?: (groupId: string, sessionId: string, at: number) => void
-  /** Swap a pane's session — what a drop on a pane's middle means. */
-  onReplacePane?: (index: number, sessionId: string) => void
   /** Close a pane of the active group, leaving the session running. */
   onClosePane?: (index: number) => void
   /** Close a pane of any group (a sidebar segment's ×). */
   onCloseGroupPane?: (groupId: string, index: number) => void
-  /** Reorder a pane within the active group. */
-  onMovePane?: (index: number, direction: -1 | 1) => void
-  /** Arc's "Separate all tabs" — every pane of a group flies out to its own row. */
-  onSeparateAll?: (groupId: string) => void
-  /** Committed divider delta, as a fraction of the split's width. */
-  onResizePane?: (index: number, delta: number) => void
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Make a nested chat-owned surface the session's canonical active chat. */
@@ -309,11 +297,7 @@ export function SessionConversation(props: SessionConversationProps) {
             group={group}
             sessions={props.sessions}
             onFocusPane={props.onFocusPane}
-            onSplitWith={props.onSplitWith}
-            onReplacePane={props.onReplacePane}
-            onResize={props.onResizePane}
             onClosePane={props.onClosePane}
-            onMovePane={props.onMovePane}
             emptyState={
               <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
             }
@@ -400,8 +384,6 @@ export function SessionConversation(props: SessionConversationProps) {
         activeGroupId={props.activeGroupId}
         onFocusPane={props.onFocusGroupPane}
         onClosePane={props.onCloseGroupPane}
-        onSeparateAll={props.onSeparateAll}
-        onSplitWith={props.onSplitGroupWith}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
         onArchive={props.onArchiveSession}

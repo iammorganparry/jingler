@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
-import type { DragEvent, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
-import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
 import { activityLabel, displayStatusOf, issueReferenceOf } from "@jingler/core"
 import {
@@ -108,7 +107,6 @@ export function SessionRow({
     >
       <div
         data-testid={`session-row-${session.id}`}
-        {...dragProps}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
         aria-busy={pendingAction !== null}
         className={cn(
@@ -377,24 +375,6 @@ return ([
   const withMenu = (node: ReactNode) =>
     actions.length > 0 ? <ContextMenu items={actions}>{node}</ContextMenu> : node
 
-  /**
-   * Drag props shared by both row variants. The row is the drag SOURCE for the
-   * session grid; the slots downstream are the targets.
-   *
-   * `effectAllowed = "copyMove"` because a drop doesn't remove the session from
-   * the sidebar.
-   */
-  const dragProps = {
-    // Never while renaming: in Chromium a `draggable` ancestor swallows
-    // press-and-drag inside a descendant text input, so selecting part of the
-    // title would start dragging the row instead.
-    draggable: draft === null && pendingAction === null,
-    onDragStart: (e: DragEvent) => {
-      e.dataTransfer.setData(SESSION_DND_MIME, session.id)
-      e.dataTransfer.effectAllowed = "copyMove"
-    }
-  }
-
   const commit = () => {
     if (draft === null) return
     const next = draft.trim()
@@ -409,7 +389,6 @@ return ([
     return withMenu(
       <div
         data-testid={`session-row-${session.id}`}
-        {...dragProps}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
         aria-busy={pendingAction !== null}
         className={cn(

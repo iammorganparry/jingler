@@ -22,13 +22,14 @@ describe("useSplitLayout", () => {
     expect(result.current.activeSessionId).toBe("b")
   })
 
-  it("persists a split across a remount", () => {
+  it("collapses a stored split on remount, keeping the focused session on screen", () => {
     const { result, unmount } = renderHook(() => useSplitLayout(sessions, "a"))
     act(() => result.current.splitInto(result.current.group!.id, "c", 1))
     unmount()
 
     const { result: reloaded } = renderHook(() => useSplitLayout(sessions, "a"))
-    expect(paneIds(reloaded)).toEqual(["a", "c"])
+    expect(paneIds(reloaded)).toEqual(["c"])
+    expect(reloaded.current.workspace.groups.map((g) => g.panes.map((p) => p.sessionId))).toEqual([["a"], ["c"]])
   })
 
   it("treats a sidebar click on an off-screen session as 'show that one'", () => {

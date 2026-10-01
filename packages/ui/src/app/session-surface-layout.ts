@@ -278,7 +278,7 @@ export const resizeSessionSurface = (
   }
 }
 
-const isSurface = (value: unknown): value is SessionSurface => {
+export const isSurface = (value: unknown): value is SessionSurface => {
   if (typeof value !== "object" || value === null) return false
   const candidate = value as { kind?: unknown; id?: unknown; chatId?: unknown }
   return (

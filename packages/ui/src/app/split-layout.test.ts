@@ -368,7 +368,7 @@ describe("persistence", () => {
   beforeEach(() => localStorage.clear())
 
   it("round-trips a workspace", () => {
-    const ws = workspaceOf(["a", "b"], ["c"])
+    const ws = workspaceOf(["a"], ["c"])
     save(ws)
     expect(load()).toEqual(ws)
   })
@@ -392,7 +392,7 @@ describe("persistence", () => {
     const ws = load()
     const all = ws.groups.flatMap((g) => g.panes.map((p) => p.sessionId))
     expect(all).toEqual(["a", "b"])
-    expect(ws.groups).toHaveLength(1)
+    expect(ws.groups).toHaveLength(2)
   })
 
   /**
@@ -424,7 +424,6 @@ describe("persistence", () => {
       ])
 
       const ws = load()
-      expect(ws.groups[0]!.panes.map((p) => p.sessionId)).toEqual(["a", "b", "c"])
       // The one that didn't fit is still somewhere, rather than nowhere.
       expect(ws.groups.flatMap((group) => group.panes.map((p) => p.sessionId))).toEqual(["a", "b", "c", "d", "overflow"])
     })
@@ -432,55 +431,19 @@ describe("persistence", () => {
     it("preserves an active overflow session across load and save", () => {
       store([{ id: "g:a", panes: ["a", "b", "c", "d"].map((id) => pane(id, 0.25)), focused: 3 }])
       const ws = load()
-      expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["a", "b", "c"], ["d"]])
+      expect(ws.groups.map((group) => group.panes.map((p) => p.sessionId))).toEqual([["a"], ["b"], ["c"], ["d"]])
       expect(focusedSessionId(ws)).toBe("d")
       save(ws)
       expect(load()).toEqual(ws)
     })
 
-    it("still caps a lone over-cap group at MAX_PANES", () => {
-      store([
-        {
-          id: "g:a",
-          panes: Array.from({ length: MAX_PANES + 3 }, (_, i) => pane(`s${i}`, 1 / (MAX_PANES + 3))),
-          focused: 0
-        }
-      ])
-      expect(load().groups[0]!.panes).toHaveLength(MAX_PANES)
-    })
-
-    it("falls back to equal shares when a stored ratio is below MIN_RATIO", () => {
-      // `renormalise` only makes them sum to one — it says nothing about any
-      // single pane, and a pair sharing less than MIN_RATIO between them makes
-      // `resize`'s clamp bounds cross and go negative.
-      store([
-        {
-          id: "g:a",
-          panes: [pane("a", 0.001), pane("b", 0.001), pane("c", 0.998)],
-          focused: 0
-        }
-      ])
-
+    it("explodes every stored split into single-session groups at full width", () => {
+      // Sessions no longer split; chats, files and views do (see editor-layout).
+      store([{ id: "g:a", panes: [pane("a", 0.001), pane("b", 0.001), pane("c", 0.998)], focused: 1 }])
       const ws = load()
-      expect(ws.groups[0]!.panes.every((p) => Math.abs(p.ratio - 1 / 3) < 1e-9)).toBe(true)
+      expect(ws.groups.map((g) => g.panes.map((p) => [p.sessionId, p.ratio]))).toEqual([[["a", 1]], [["b", 1]], [["c", 1]]])
+      expect(focusedSessionId(ws)).toBe("b")
       expect(ratiosSumToOne(ws)).toBe(true)
-    })
-
-    it("KEEPS ratios that merely drifted, rather than resetting a real arrangement", () => {
-      // A pane parked exactly on MIN_RATIO comes back a hair under it after a
-      // float round-trip. Treating that as corrupt would throw away divider
-      // positions the operator actually set.
-      store([
-        {
-          id: "g:a",
-          panes: [pane("a", MIN_RATIO - 1e-9), pane("b", 1 - MIN_RATIO + 1e-9)],
-          focused: 0
-        }
-      ])
-
-      const ws = load()
-      expect(ws.groups[0]!.panes[0]!.ratio).toBeCloseTo(MIN_RATIO, 6)
-      expect(ws.groups[0]!.panes[0]!.ratio).not.toBeCloseTo(0.5, 3)
     })
 
     it("never yields a negative ratio, whatever the divider is dragged by", () => {
