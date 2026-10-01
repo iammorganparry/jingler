@@ -160,6 +160,7 @@ export interface FileBrowserViewProps {
   readonly connected?: boolean
   /** Path-owned mode used by nested file splits. */
   readonly path?: string
+  readonly onOpenPath?: (path: string) => void
   readonly onClosed?: () => void
 }
 
@@ -289,6 +290,7 @@ export function FileBrowserView({
   onSendReference,
   onSendComment,
   path,
+  onOpenPath,
   onClosed
 }: FileBrowserViewProps) {
   const browser = useFileBrowser(
@@ -385,11 +387,13 @@ export function FileBrowserView({
       agentFileActivity.preview,
       agentFileActivity.phase === "completed"
     )
+    onOpenPath?.(normalizedAgentTarget)
   }, [
     agentFileActivity,
     browser.followAgentTarget,
     browser.followEnabled,
-    normalizedAgentTarget
+    normalizedAgentTarget,
+    onOpenPath
   ])
 
   useEffect(() => {

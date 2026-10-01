@@ -64,7 +64,7 @@ import type { SessionChatActions } from "./session-tree.js"
 import { openTab } from "./editor-layout.js"
 import { updateEditorLayout } from "./editor-layout-machine.js"
 import { useSplitLayout } from "./use-split-layout.js"
-import { matchSplitShortcut, type SplitShortcut } from "./split-shortcuts.js"
+import { matchSplitShortcut } from "./split-shortcuts.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   type SessionSurfaceCommand
@@ -297,7 +297,7 @@ export interface JinglerAppProps {
   /** Render the per-session Terminal view. */
   renderTerminalDock?: (session: Session) => ReactNode
   /** Render the embedded browser inside its owning session pane. */
-  renderBrowser?: (session: Session) => ReactNode
+  renderBrowser?: (session: Session, active: boolean) => ReactNode
   /** Make a nested chat-owned surface the session's canonical active chat. */
   onFocusChat?: (sessionId: string, chatId: string) => void
   /** Toggle the Browser tab belonging to the named session. */
@@ -348,14 +348,13 @@ export interface JinglerAppProps {
     session: Session,
     ctx: {
       readonly onSelectConversation: () => void
+      readonly onOpenPath: (path: string) => void
       readonly path?: string
       readonly onClosed?: () => void
     }
   ) => ReactNode
   /** Render the focused session's file tree in the Explorer column. */
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
-  /** Select a repository path in a session's persistent Files state. */
-  onOpenFile?: (sessionId: string, path: string) => void
   /** List a path among a session's open files without selecting it. */
   onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
@@ -449,28 +448,6 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
  * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
-const hasSimpleOuterSplit = (group: ReturnType<typeof useSplitLayout>["group"]) => {
-  if ((group?.panes.length ?? 0) <= 1) return false
-  const focused = document.querySelector('[data-split-pane-index][data-focused="true"]')
-  return (focused?.querySelectorAll('[data-surface-pane-index]').length ?? 0) <= 1
-}
-
-const routeSplitShortcut = (
-  event: KeyboardEvent,
-  shortcut: SplitShortcut,
-  group: ReturnType<typeof useSplitLayout>["group"],
-  split: ReturnType<typeof useSplitLayout>
-): boolean => {
-  if (!group) return false
-  event.preventDefault()
-  if (!hasSimpleOuterSplit(group)) return true
-  if (shortcut.type === "focus-pane") split.focusPane(group.id, shortcut.index)
-  else if (shortcut.type === "focus-neighbour") split.focusNeighbour(shortcut.direction)
-  else if (shortcut.type === "move-pane") split.moveFocused(shortcut.direction)
-  else if (shortcut.type === "close-pane") split.closeFocused()
-  return false
-}
-
 export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
@@ -507,17 +484,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         pendingEnvironmentSession={pendingEnvironmentSession}
         onSelectPendingEnvironmentSession={openPendingEnvironmentSession}
         group={group}
-        splitGroups={split.workspace.groups}
-        activeGroupId={split.workspace.activeGroupId}
-        onFocusPane={(index) => group && split.focusPane(group.id, index)}
-        onFocusGroupPane={(groupId, index) => {
-          // A sidebar segment belongs to a group that may not be on screen, so
-          // showing it is part of focusing it.
-          split.activateGroup(groupId)
-          split.focusPane(groupId, index)
-        }}
-        onClosePane={(index) => group && split.closePane(group.id, index)}
-        onCloseGroupPane={split.closePane}
         onRenameSession={onRenameSession}
         onCreateChat={onCreateChat}
         onOpenFilePicker={renderFileQuickOpen ? setFileQuickOpenSessionId : undefined}
@@ -532,14 +498,11 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         renderExplanation={renderExplanation}
         renderFiles={renderFiles}
         renderBrowser={renderBrowser}
-        onOpenFile={onOpenFile}
         onTrackFile={onTrackFile}
         onOpenExplorerFile={(sessionId, path) => {
-          onOpenFile?.(sessionId, path)
-          setTabRequest((previous) => ({
-            tabId: BUILTIN_TAB.files,
-            nonce: (previous?.nonce ?? 0) + 1
-          }))
+          // A file picked in the Explorer opens as its own tab, like ⌘P.
+          onTrackFile?.(sessionId, path)
+          updateEditorLayout(sessionId, (layout) => openTab(layout, { kind: "file", id: path }))
         }}
         onRequestCloseFile={onRequestCloseFile}
         renderChatTabs={renderChatTabs}
@@ -726,7 +689,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
+  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -754,10 +717,10 @@ function getActiveTabContext(active: Session) {
         openNewSession()
         return
       }
-      // Sessions no longer split, so there is no pane to add.
-      if (shortcut.type === "add-pane") return
-      if (!routeSplitShortcut(e, shortcut, group, split)) return
-      const detail = surfaceCommandForShortcut(shortcut)!
+      // Sessions no longer split, so every remaining pane chord targets editor groups.
+      const detail = surfaceCommandForShortcut(shortcut)
+      if (!detail) return
+      e.preventDefault()
       window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail }))
   }
 

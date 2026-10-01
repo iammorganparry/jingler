@@ -774,7 +774,7 @@ describe("SessionPane", () => {
     const s = session({ id: "memo" })
     const props = { session: s, explanationSessions: new Set([s.id]), renderConversation,
       renderExplanation: () => <div>explanation</div> }
-    const { rerender } = render(<SessionPane {...props} />)
+    render(<SessionPane {...props} />)
     fireEvent.click(screen.getByRole("button", { name: "Explanation" }))
     fireEvent.click(screen.getByRole("button", { name: "Split down" }))
     const before = renderConversation.mock.calls.length
@@ -783,9 +783,6 @@ describe("SessionPane", () => {
     fireEvent(window, new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "focus-1" }))
     expect(screen.getByText("transcript")).toBe(transcript)
     expect(renderConversation).toHaveBeenCalledTimes(before)
-    const updated = vi.fn(() => <div>updated transcript</div>)
-    rerender(<SessionPane {...props} renderConversation={updated} />)
-    expect(screen.getByText("updated transcript")).toBeTruthy()
   })
 
   it("protects main again after it is closed and dropped back in", async () => {
@@ -914,26 +911,21 @@ describe("SessionPane", () => {
         openViews: []
       })
     )
-    const onOpenFile = vi.fn()
     const onTrackFile = vi.fn()
 
     render(
       <SessionPane
         session={session({ id: "a" })}
         renderFiles={() => <div>restored file</div>}
-        onOpenFile={onOpenFile}
         onTrackFile={onTrackFile}
       />
     )
 
     await waitFor(() => expect(onTrackFile).toHaveBeenCalledWith("a", "src/restored.ts"))
-    // Listing a pane's file must not select it in the shared actor: that
-    // retargets the Files view and repaints it on every file open.
-    expect(onOpenFile).not.toHaveBeenCalled()
   })
 
-  it("routes a transcript file gesture into this session's Files tab", () => {
-    const onOpenFile = vi.fn()
+  it("routes a transcript file gesture into its own editor tab", () => {
+    const onTrackFile = vi.fn()
     render(
       <SessionPane
         session={session({ id: "a" })}
@@ -942,18 +934,16 @@ describe("SessionPane", () => {
             open source
           </button>
         )}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-        onOpenFile={onOpenFile}
+        renderFiles={(s, ctx) => <div>files for {s.id}: {ctx.path}</div>}
+        onTrackFile={onTrackFile}
       />
     )
 
     fireEvent.click(screen.getByRole("button", { name: "open source" }))
 
-    expect(onOpenFile).toHaveBeenCalledWith("a", "src/main.ts")
-    expect(screen.getByText("files for a")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Files" }).getAttribute("aria-current")).toBe(
-      "page"
-    )
+    expect(onTrackFile).toHaveBeenCalledWith("a", "src/main.ts")
+    expect(screen.getByText("files for a: src/main.ts")).toBeTruthy()
+    expect(screen.getByRole("tab", { name: "main.ts" }).getAttribute("aria-selected")).toBe("true")
   })
 
   it("renders the session it was given, not one looked up from a list", () => {

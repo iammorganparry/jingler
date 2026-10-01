@@ -421,7 +421,8 @@ const TabBody = memo(function TabBody({
   surface,
   visible,
   focused,
-  api
+  api,
+  revision
 }: {
   surface: SessionSurface
   visible: boolean
@@ -436,10 +437,28 @@ const TabBody = memo(function TabBody({
       hidden={!visible}
       className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
     >
-      {/* Each body measures its own width, so a view split beside a chat lays out for its half. */}
-      <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused: focused && visible })}</WidthTierProvider>
+      <TabContent
+        surface={surface}
+        focused={surface.kind === "file" ? false : focused && visible}
+        api={api}
+        revision={revision}
+      />
     </div>
   )
+})
+
+const TabContent = memo(function TabContent({
+  surface,
+  focused,
+  api
+}: {
+  surface: SessionSurface
+  focused: boolean
+  api: Api
+  revision: unknown
+}) {
+  // Each body measures its own width, so a view split beside a chat lays out for its half.
+  return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused })}</WidthTierProvider>
 })
 
 function Launcher({ api }: { api: Api }) {

@@ -88,6 +88,12 @@ test("chats, files and views are tabs that split both ways and stay per session"
   await tree.getByText("Side chat").click()
   await expect(window.getByTestId("editor-tab-chat-c_side")).toBeVisible()
 
+  // Quick-open creates a normal file tab in the focused group.
+  await window.keyboard.press("Meta+Shift+p")
+  await window.getByPlaceholder("Open a file in Alpha session…").fill("a.ts")
+  await window.getByTestId("palette-item-file:a.ts").click()
+  await expect(window.getByTestId("editor-tab-file-a.ts")).toBeVisible()
+
   // Open a view from the + menu, then split it down.
   await window.getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()

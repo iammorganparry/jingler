@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import type { Session, SessionActivity } from "@jingler/core"
+import type { ProviderId, Session, SessionActivity } from "@jingler/core"
+import { useState } from "react"
+import { createEditorLayout } from "./editor-layout.js"
+import { initEditorLayout, resetEditorLayouts } from "./editor-layout-machine.js"
 import { SessionSidebar } from "./session-sidebar.js"
 
 const meta = {
@@ -169,4 +172,58 @@ export const ToolWorkAllReadsAsRunning: Story = {
       <SessionSidebar {...args} />
     </div>
   )
+}
+
+
+const TREE_SESSION = session({
+  id: "tree",
+  title: "Editor navigation",
+  repo: "jingler",
+  branch: "feat/editor-groups",
+  chats: [
+    { id: "tree-main", title: "Navigation model", providerId: "anthropic" as ProviderId, createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "2026-09-01T10:00:00.000Z" },
+    { id: "tree-files", title: "File tabs", providerId: "openai-codex" as ProviderId, createdAt: "2026-09-01T10:01:00.000Z", updatedAt: "2026-09-01T10:01:00.000Z" },
+    { id: "tree-perf", title: "Render performance", providerId: "google" as ProviderId, createdAt: "2026-09-01T10:02:00.000Z", updatedAt: "2026-09-01T10:02:00.000Z" }
+  ],
+  activeChatId: "tree-main"
+})
+
+function SessionTreePreview() {
+  useState(() => {
+    resetEditorLayouts()
+    initEditorLayout(
+      TREE_SESSION.id,
+      createEditorLayout(
+        [
+          { kind: "chat", id: "tree-main" },
+          { kind: "chat", id: "tree-files" },
+          { kind: "file", id: "packages/ui/src/app/editor-groups.tsx" },
+          { kind: "view", id: "terminal" },
+          { kind: "view", id: "plan", chatId: "tree-main" }
+        ],
+        "tree-main"
+      )
+    )
+  })
+  return (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar
+        sessions={[TREE_SESSION]}
+        activeSessionId={TREE_SESSION.id}
+        onSelect={() => {}}
+        liveActivity={{ tree: { kind: "editing", verb: "Editing", target: "editor-groups.tsx" } }}
+      />
+      <div className="flex flex-1 items-center justify-center text-xs text-dim">Session editor layout</div>
+    </div>
+  )
+}
+
+/** The expanded session hierarchy with provider icons, chat-owned views, open files, and session views. */
+export const ExpandedSessionTree: Story = {
+  args: {
+    sessions: [TREE_SESSION],
+    activeSessionId: TREE_SESSION.id,
+    onSelect: () => {}
+  },
+  render: () => <SessionTreePreview />
 }

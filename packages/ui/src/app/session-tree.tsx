@@ -46,13 +46,15 @@ export const SessionTree = memo(function SessionTree({
   session,
   running,
   onSelectSession,
-  chatActions
+  chatActions,
+  onRequestCloseFile
 }: {
   session: Session
   /** Whether the session's active chat is working right now. */
   running: boolean
   onSelectSession: (id: string) => void
   chatActions?: SessionChatActions
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
 }) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -76,8 +78,10 @@ export const SessionTree = memo(function SessionTree({
     updateEditorLayout(session.id, (layout) => openTab(layout, surface, session.chats[0]?.id))
     onSelectSession(session.id)
   }
-  const closeItem = (surface: SessionSurface) =>
+  const closeItem = (surface: SessionSurface) => {
+    if (surface.kind === "file" && onRequestCloseFile && !onRequestCloseFile(session.id, surface.id)) return
     updateEditorLayout(session.id, (layout) => closeSurfaceEverywhere(layout, surface))
+  }
 
   const item = (surface: SessionSurface, label: string, icon: React.ReactNode, trailing?: React.ReactNode) => {
     const isOpen = openSet.has(sessionSurfaceKey(surface))

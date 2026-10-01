@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
 import { testSession as session } from "../test-support.js"
-import { allTabs, openTab } from "./editor-layout.js"
+import { allTabs, dropTab, focusedGroup, openTab } from "./editor-layout.js"
 import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
@@ -435,8 +435,9 @@ describe("SessionSidebar session tree", () => {
     expect(screen.getByTestId("session-tree-chat-c2")).toBeTruthy()
   })
 
-  it("lists open files and session views, and drops them when closed", () => {
-    renderTree()
+  it("lists open files and session views, and closes files only after the editor allows it", () => {
+    const requestClose = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    renderTree({ onRequestCloseFile: requestClose })
     fireEvent.click(within(screen.getByTestId("session-tree-chat-c1")).getByText("Main chat"))
     act(() =>
       updateEditorLayout("s1", (l) => openTab(openTab(l, { kind: "file", id: "src/a.ts" }), { kind: "view", id: "terminal" }))
@@ -444,6 +445,22 @@ describe("SessionSidebar session tree", () => {
     expect(screen.getByText("Files")).toBeTruthy()
     expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
     expect(screen.getByTestId("session-tree-view-terminal")).toBeTruthy()
+    act(() =>
+      updateEditorLayout("s1", (layout) =>
+        dropTab(
+          layout,
+          { surface: { kind: "view", id: "terminal" } },
+          focusedGroup(layout)?.id ?? null,
+          "bottom",
+          true
+        )
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal everywhere" }))
+    expect(allTabs(editorLayoutOf("s1")!).map((tab) => tab.id)).not.toContain("terminal")
+    fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
+    expect(requestClose).toHaveBeenCalledWith("s1", "src/a.ts")
+    expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
     expect(screen.queryByTestId("session-tree-file-src/a.ts")).toBeNull()
   })

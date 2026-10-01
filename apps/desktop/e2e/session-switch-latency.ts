@@ -9,6 +9,7 @@ export const measureSessionSwitch = async (window: Page, sessionId: string, read
     let contentMs: number | null = null
     let painted = false
     const transcriptsReady = (pane: HTMLElement) => [...pane.querySelectorAll<HTMLElement>('[data-testid="conversation-scroll"]')]
+      .filter((viewport) => viewport.getClientRects().length > 0)
       .every((viewport) => {
         const bounds = viewport.getBoundingClientRect()
         return [...viewport.querySelectorAll<HTMLElement>("[data-index]")].some((row) => {

@@ -89,7 +89,6 @@ import { clearViewedPaths } from "./viewed-store.js";
 import {
   closeSessionFile,
   disposeFileBrowserActor,
-  openSessionFile,
   trackSessionFile,
   requestCloseFileSurface,
 } from "./use-file-browser.js";
@@ -1633,6 +1632,7 @@ function AuthedApp({
             session={session}
             connected={canUseGitHubForSession(session)}
             path={ctx.path}
+            onOpenPath={ctx.onOpenPath}
             onClosed={() => {
               if (ctx.path) closeSessionFile(session.id, ctx.path);
               ctx.onClosed?.();
@@ -1651,7 +1651,6 @@ function AuthedApp({
             }}
           />
         )}
-        onOpenFile={openSessionFile}
         onTrackFile={trackSessionFile}
         onRequestCloseFile={requestCloseFileSurface}
         renderFileQuickOpen={(session, ctx) => (
@@ -1755,8 +1754,8 @@ function AuthedApp({
           if (browser.visible) void rpc.browserPreviewClose(sessionId, chatId);
           browser.toggle();
         }}
-        renderBrowser={(session) => (
-          <PreviewDockView session={session} dock={browserDock} />
+        renderBrowser={(session, active) => (
+          <PreviewDockView session={session} dock={browserDock} active={active} />
         )}
         version={window.jingler.appVersion}
       />

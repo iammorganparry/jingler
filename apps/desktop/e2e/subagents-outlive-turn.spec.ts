@@ -17,7 +17,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 }]
 
 const openPreviousChats = async (window: Parameters<typeof appShell>[0]) => {
-  await window.getByRole("button", { name: "Previous chats" }).click()
+  await window.getByRole("button", { name: "Previous subagents" }).click()
 }
 
 test("completed compatibility-agent output remains in Previous chats", async ({
@@ -28,7 +28,7 @@ test("completed compatibility-agent output remains in Previous chats", async ({
 
   await window.getByPlaceholder("Message the agent…").fill("[[legacy-agent]] inspect compatibility")
   await window.getByPlaceholder("Message the agent…").press("Enter")
-  await expect(window.getByRole("button", { name: "Previous chats" })).toBeVisible({
+  await expect(window.getByRole("button", { name: "Previous subagents" })).toBeVisible({
     timeout: 15_000
   })
   await openPreviousChats(window)

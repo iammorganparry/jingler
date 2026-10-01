@@ -71,7 +71,7 @@ function Flow() {
         onAddProject={() => setCreatingProjectId("new")}
         search={<TitleSearch onOpen={() => {}} className="w-full" />}
         renderExplorer={(session, onOpenPath) => <Explorer onOpenPath={onOpenPath} />}
-        onOpenFile={(sessionId, path) => setOpenFile({ sessionId, path })}
+        onOpenExplorerFile={(sessionId, path) => setOpenFile({ sessionId, path })}
         newSessionViewActive={creatingProjectId !== null}
         newSessionView={
           <div className="grid flex-1 place-items-center bg-canvas">

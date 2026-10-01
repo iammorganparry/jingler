@@ -93,6 +93,8 @@ export interface SessionSidebarProps {
   onDelete?: (id: string) => void | Promise<void>
   /** Chat lifecycle actions for the sidebar's session tree. */
   chatActions?: SessionChatActions
+  /** Dirty-aware close request for a file tab. */
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
@@ -323,6 +325,7 @@ function SidebarBody({
   onRestore,
   onDelete,
   chatActions,
+  onRequestCloseFile,
   liveActivity,
   prStates,
   repoOwners,
@@ -657,7 +660,7 @@ return (renderExpandedGroupHeading())
         onToggleExpanded={toggleExpanded}
       />
       {open && (
-        <SessionTree session={s} running={liveActivity?.[s.id] !== undefined} onSelectSession={onSelect} chatActions={chatActions} />
+        <SessionTree session={s} running={liveActivity?.[s.id] !== undefined} onSelectSession={onSelect} chatActions={chatActions} onRequestCloseFile={onRequestCloseFile} />
       )}
       </div>
     )

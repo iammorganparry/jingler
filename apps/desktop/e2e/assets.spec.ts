@@ -82,10 +82,10 @@ const transcript = [
   }
 ]
 
-const filesTab = (window: Page) =>
-  window.getByRole("button", { name: "Files", exact: true })
+const filesTab = (window: Page) => window.getByTestId("view-tab-files")
 const conversationTab = (window: Page) =>
   window.getByRole("tab", { name: "Chat 1", exact: true }).first()
+const fileBody = (window: Page, path: string) => window.getByTestId(`editor-body-file-${path}`)
 // The sidebar Explorer's tree; the Files view keeps a hidden one mounted too.
 const tree = (window: Page) =>
   window
@@ -120,7 +120,7 @@ const selectTreePath = async (window: Page, path: string): Promise<void> => {
   throw new Error(`Could not reveal repository path ${path}`)
 }
 
-test("routes every transcript file gesture to Files and keeps Browser separate", async ({
+test("routes every transcript file gesture to an editor tab and keeps Browser separate", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -133,23 +133,23 @@ test("routes every transcript file gesture to Files and keeps Browser separate",
 
   await expect(appShell(window)).toBeVisible()
 
-  // Tool filename → Files.
+  // Tool filename → its own file tab.
   await window.getByTitle("Open spec.md").click()
-  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  await expect(window.getByTestId("editor-tab-file-docs/spec.md").getByRole("tab")).toHaveAttribute("aria-selected", "true")
   await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
     timeout: 15_000
   })
   await expect(window.getByTestId("asset-content-canvas").locator('[data-diffs-header]')).toHaveCount(0)
   await showTree(window)
 
-  // Inline code path → the same Files view.
+  // Inline code path → another file tab.
   await conversationTab(window).click()
   await window.getByTitle("Open out/results.csv").click()
   await expect(window.getByRole("textbox", { name: "out/results.csv" })).toBeVisible({
     timeout: 15_000
   })
 
-  // Relative markdown link → the same Files view.
+  // Relative markdown link → the existing file tab.
   await conversationTab(window).click()
   await window.getByRole("button", { name: "the spec" }).click()
   await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
@@ -194,7 +194,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   await expect(source).toBeVisible({ timeout: 15_000 })
   await selectTreePath(window, "src/edit.ts")
 
-  let editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  let editor = fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })
   await expect(editor).toContainText("export const editable = 42", { timeout: 15_000 })
   await editor.click()
   await editor.press("Meta+a")
@@ -202,8 +202,8 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
 
   // Switching the session tab unmounts the view, but not its session actor.
   await conversationTab(window).click()
-  await filesTab(window).click()
-  editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  await window.getByTestId("editor-tab-file-src/edit.ts").getByRole("tab").click()
+  editor = fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })
   await expect(editor).toContainText("export const editable = 43", { timeout: 15_000 })
 
   await editor.press("Meta+s")
@@ -214,7 +214,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   // A later agent write wins on disk. The stale user save becomes a visible,
   // non-destructive conflict and keeps the user's draft while refreshing the
   // revision needed for a deliberate follow-up save.
-  editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  editor = fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })
   await editor.click()
   await editor.press("Meta+a")
   await window.keyboard.insertText("export const editable = 44\n")
@@ -228,9 +228,10 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   )
 
   await window.getByRole("button", { name: "Refresh revision", exact: true }).click()
-  editor = window.getByRole("textbox", { name: "src/edit.ts" })
+  editor = fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })
   await expect(editor).toContainText("export const editable = 44", { timeout: 15_000 })
   await expect(window.getByText(/Your draft is still here/)).toHaveCount(0)
+  await editor.focus()
   await editor.press("Meta+s")
   await expect.poll(() => readFileSync(join(repoPath, "src", "edit.ts"), "utf8")).toBe(
     "export const editable = 44\n"
@@ -253,7 +254,7 @@ test("quick-open fills the session with the repository tree and a changed-file d
   await window.getByPlaceholder("Open a file in Edit repository files…").fill("main")
   await window.getByTestId("palette-item-file:src/main.ts").click()
 
-  const browser = window.getByTestId("asset-browser")
+  const browser = window.getByTestId("asset-browser").filter({ visible: true }).first()
   await expect(browser).toBeVisible()
   await filesTab(window).click()
   await showTree(window)
@@ -289,25 +290,26 @@ test("keeps the repository tree visible while opening focusing and closing file 
   await filesTab(window).click()
   await showTree(window)
   await selectTreePath(window, "src/edit.ts")
-  await expect(window.getByTestId("file-tab-src/edit.ts")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByRole("textbox", { name: "src/edit.ts" })).toBeVisible()
 
   await showTree(window)
   await selectTreePath(window, "docs/spec.md")
-  await expect(window.getByTestId("file-tab-docs/spec.md")).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-file-docs/spec.md")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toHaveCount(1)
   await filesTab(window).click()
   await showTree(window)
 
-  await window.getByRole("button", { name: "src/edit.ts", exact: true }).click()
-  await expect(window.getByRole("textbox", { name: "src/edit.ts" }).first()).toBeVisible({
+  await window.getByTestId("editor-tab-file-src/edit.ts").getByRole("tab").click()
+  await expect(fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })).toBeVisible({
     timeout: 15_000
   })
-  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toHaveCount(1)
 
-  await window.getByRole("button", { name: "Close src/edit.ts", exact: true }).click()
-  await expect(window.getByTestId("file-tab-src/edit.ts")).toHaveCount(0)
-  await expect(window.getByRole("textbox", { name: "docs/spec.md" }).first()).toBeVisible({
+  await window.getByTestId("editor-tab-file-src/edit.ts").getByRole("button", { name: "Close edit.ts", exact: true }).click()
+  await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toHaveCount(0)
+  await window.getByTestId("editor-tab-file-docs/spec.md").getByRole("tab").click()
+  await expect(fileBody(window, "docs/spec.md").getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
     timeout: 15_000
   })
   await filesTab(window).click()
@@ -368,15 +370,16 @@ test("switches a changed file between diff and edit and saves the edited revisio
   await showTree(window)
   await selectTreePath(window, "src/main.ts")
 
-  const edit = window.getByRole("button", { name: "Edit src/main.ts", exact: true })
-  const diff = window.getByRole("button", { name: "Show diff for src/main.ts", exact: true })
+  const mainBody = fileBody(window, "src/main.ts")
+  const edit = mainBody.getByRole("button", { name: "Edit src/main.ts", exact: true })
+  const diff = mainBody.getByRole("button", { name: "Show diff for src/main.ts", exact: true })
   await expect(diff).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
-  await expect(window.getByTestId("asset-content-canvas")).toContainText(
+  await expect(mainBody.getByTestId("asset-content-canvas")).toContainText(
     "export const answer = 43"
   )
 
   await edit.click()
-  const editor = window.getByRole("textbox", { name: "src/main.ts" })
+  const editor = mainBody.getByRole("textbox", { name: "src/main.ts" })
   await expect(editor).toContainText("export const answer = 43", { timeout: 15_000 })
   await editor.click()
   await editor.press("Meta+a")
@@ -390,7 +393,7 @@ test("switches a changed file between diff and edit and saves the edited revisio
   // pre-save buffer the diff first opened on.
   await diff.click()
   await expect(diff).toHaveAttribute("aria-pressed", "true")
-  const canvas = window.getByTestId("asset-content-canvas")
+  const canvas = mainBody.getByTestId("asset-content-canvas")
   await expect(canvas).toContainText("export const answer = 44")
   await expect(canvas).not.toContainText("export const answer = 43")
 })
@@ -489,6 +492,7 @@ test("edits UTF-8 files with unknown extensions and refuses binary data", async 
 
   await showTree(window)
   await selectTreePath(window, "archive.bin")
-  await expect(window.getByText("Binary file", { exact: true })).toBeVisible({ timeout: 15_000 })
-  await expect(window.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  const binaryBody = fileBody(window, "archive.bin")
+  await expect(binaryBody.getByText("Binary file", { exact: true })).toBeVisible({ timeout: 15_000 })
+  await expect(binaryBody.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
 })

@@ -9,9 +9,10 @@ import { useNativeViewBounds } from "./use-native-view-bounds.js"
 export interface PreviewDockViewProps {
   readonly session: Session | null
   readonly dock: PreviewDockPrefs
+  readonly active?: boolean
 }
 
-export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
+export function PreviewDockView({ session, dock, active = true }: PreviewDockViewProps) {
   const sessionId = session?.id ?? null
   const chatId = session?.activeChatId ?? null
   const browser = dock.forAgent(sessionId, chatId)
@@ -28,14 +29,14 @@ export function PreviewDockView({ session, dock }: PreviewDockViewProps) {
       onReload={() => {
         if (session !== null) void rpc.browserPreviewReload(session.id, session.activeChatId)
       }}
-      renderBrowser={(active) => (
+      renderBrowser={(dockActive) => (
         <BrowserBody
           // Each session tab owns its own measurement surface and native view.
           key={sessionId === null || chatId === null ? "no-agent" : `${sessionId}:${chatId}`}
           browser={browser}
           sessionId={sessionId}
           chatId={chatId}
-          nativeWanted={active && sessionId !== null}
+          nativeWanted={active && dockActive && sessionId !== null}
         />
       )}
     />

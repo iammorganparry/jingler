@@ -27,7 +27,8 @@ export interface FileBrowserApi {
 export interface FileBrowserInput {
   readonly sessionId: string
   readonly worktreePath?: string
-  /** Path-owned split editors skip duplicate repository scans and diff loads. */
+  /** Path-owned editors reuse the session scan instead of scanning the repository again. */
+  readonly initialEntries?: ReadonlyArray<AssetFileEntry>
   readonly documentOnly?: boolean
 }
 
@@ -568,7 +569,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       sessionId: input.sessionId,
       ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
       documentOnly: input.documentOnly ?? false,
-      entries: [],
+      entries: input.initialEntries ?? [],
       treeError: null,
       treeRefreshQueued: false,
       patch: null,

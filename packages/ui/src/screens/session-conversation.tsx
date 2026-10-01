@@ -47,18 +47,6 @@ export interface SessionConversationProps {
    * single implicit pane holding `activeSessionId` is synthesised instead.
    */
   group?: SplitGroup | null
-  /** Every split, so the sidebar can draw a multi-pane group as one pill. */
-  splitGroups?: ReadonlyArray<SplitGroup>
-  /** Which group is on screen (highlights its sidebar pill). */
-  activeGroupId?: string | null
-  /** Move the focus ring to a pane (a click anywhere inside it). */
-  onFocusPane?: (index: number) => void
-  /** Focus a pane of ANY group from the sidebar — activates that group too. */
-  onFocusGroupPane?: (groupId: string, index: number) => void
-  /** Close a pane of the active group, leaving the session running. */
-  onClosePane?: (index: number) => void
-  /** Close a pane of any group (a sidebar segment's ×). */
-  onCloseGroupPane?: (groupId: string, index: number) => void
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
   /** Open the repository file picker for a session (the editor "+" menu). */
@@ -103,6 +91,7 @@ export interface SessionConversationProps {
     session: Session,
     ctx: {
       readonly onSelectConversation: () => void
+      readonly onOpenPath: (path: string) => void
       readonly path?: string
       readonly onClosed?: () => void
     }
@@ -110,8 +99,7 @@ export interface SessionConversationProps {
   /** Render the latest focused visual explanation. */
   renderExplanation?: (session: Session) => ReactNode
   /** Render the browser inside its owning session pane. */
-  renderBrowser?: (session: Session) => ReactNode
-  onOpenFile?: (sessionId: string, path: string) => void
+  renderBrowser?: (session: Session, active: boolean) => ReactNode
   onTrackFile?: (sessionId: string, path: string) => void
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
@@ -303,8 +291,6 @@ export function SessionConversation(props: SessionConversationProps) {
            return (<SessionSplit
             group={group}
             sessions={props.sessions}
-            onFocusPane={props.onFocusPane}
-            onClosePane={props.onClosePane}
             emptyState={
               <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
             }
@@ -312,7 +298,6 @@ export function SessionConversation(props: SessionConversationProps) {
             renderExplanation={props.renderExplanation}
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
-            onOpenFile={props.onOpenFile}
             onTrackFile={props.onTrackFile}
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
@@ -381,7 +366,7 @@ export function SessionConversation(props: SessionConversationProps) {
         explorer={
           activeSession && projectIdForSession(activeSession, projects) === selectedProjectId
             ? props.renderExplorer?.(activeSession, (path) =>
-                (props.onOpenExplorerFile ?? props.onOpenFile)?.(activeSession.id, path)
+                props.onOpenExplorerFile?.(activeSession.id, path)
               )
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
@@ -391,6 +376,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
         chatActions={props.chatActions}
+        onRequestCloseFile={props.onRequestCloseFile}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}

@@ -126,8 +126,8 @@ const scrollTree = (tree: Locator, direction: "top" | "down"): Promise<boolean> 
 
 const splitChatBesideFiles = async (window: Page): Promise<void> => {
   await window.evaluate(() => {
-    const source = document.querySelector('[data-testid^="chat-tab-"]')
-    const target = document.querySelector('[data-testid="surface-pane-0"]')
+    const source = document.querySelector('[data-testid^="editor-tab-chat-"]')
+    const target = document.querySelector('[data-testid="editor-group"]')
     if (!source || !target) throw new Error("missing chat/file split node")
     const box = target.getBoundingClientRect()
     const dataTransfer = new DataTransfer()
@@ -143,11 +143,13 @@ const splitChatBesideFiles = async (window: Page): Promise<void> => {
     target.dispatchEvent(new DragEvent("drop", init))
     source.dispatchEvent(new DragEvent("dragend", init))
   })
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(window.getByTestId("editor-group")).toHaveCount(2)
 }
 
+const fileBody = (window: Page, path: string) => window.getByTestId(`editor-body-file-${path}`)
+
 const selectFirstTwoLines = async (window: Page): Promise<void> => {
-  const lineNumbers = window.locator("diffs-container [data-column-number]")
+  const lineNumbers = window.locator("diffs-container [data-column-number]").filter({ visible: true })
   await expect(lineNumbers.first()).toBeVisible()
   await lineNumbers.first().click({ position: { x: 6, y: 6 } })
   await lineNumbers.nth(1).click({ modifiers: ["Shift"], position: { x: 6, y: 6 } })
@@ -170,22 +172,18 @@ test("splits the session repository beside chat and edits a file through Pierre"
   await filesTab(window).click()
   await showRepositoryTree(window)
   await splitChatBesideFiles(window)
-  await expect(window.getByTestId("surface-pane-0")).toBeVisible()
-  await expect(window.getByTestId("surface-pane-1")).toBeVisible()
+  await expect(window.getByTestId("editor-group").nth(0)).toBeVisible()
+  await expect(window.getByTestId("editor-group").nth(1)).toBeVisible()
 
   await selectTreePath(window, "src/config.ts")
-  const editor = window.getByRole("textbox", { name: "src/config.ts" })
+  const editor = fileBody(window, "src/config.ts").getByRole("textbox", { name: "src/config.ts" })
   await expect(editor).toContainText("export const mode = 'legacy'", { timeout: 15_000 })
   await expect(
     window
-      .getByTestId("file-tab-src/config.ts")
-      .getByRole("button", { name: "src/config.ts", exact: true })
-  ).toHaveAttribute(
-    "aria-current",
-    "page"
-  )
+      .getByTestId("editor-tab-file-src/config.ts").getByRole("tab")
+  ).toHaveAttribute("aria-selected", "true")
 
-  const themeBridge = await window
+  const themeBridge = await fileBody(window, "src/config.ts")
     .getByRole("region", { name: "src/config.ts editor" })
     .locator("diffs-container")
     .evaluate((element) => {
@@ -217,7 +215,7 @@ test("splits the session repository beside chat and edits a file through Pierre"
   )
 
   await selectTreePath(window, "src/other.ts")
-  await window.getByTestId("file-tab-src/config.ts").click()
+  await window.getByTestId("editor-tab-file-src/config.ts").getByRole("tab").click()
   // Modified files reopen diff-first; switching back to Edit must hydrate the
   // saved draft rather than the pre-save disk payload.
   const edit = window.getByRole("button", { name: "Edit src/config.ts" })
@@ -260,7 +258,7 @@ test("shows a previously existing large worktree without a repository search bar
   })).not.toBe("rgba(0, 0, 0, 0)")
   await expect.poll(async () => {
     const editorBox = await editor.boundingBox()
-    const canvasBox = await window.getByTestId("asset-content-canvas").boundingBox()
+    const canvasBox = await fileBody(window, "scripts/generate-brand-icons.py").getByTestId("asset-content-canvas").boundingBox()
     return Math.abs((editorBox?.height ?? 0) - (canvasBox?.height ?? 0))
   }).toBeLessThan(1)
 
@@ -304,7 +302,7 @@ test("shows a previously existing large worktree without a repository search bar
     return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
   }).toBeGreaterThanOrEqual(24)
 
-  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
   await filesTab(window).click()
   const restoredTree = await showRepositoryTree(window)
   await expect(restoredTree.locator('[role="treeitem"]').first()).toBeVisible({
@@ -350,7 +348,7 @@ test("adds selected code to the active chat from the editor context menu", async
   await filesTab(window).click()
   await selectTreePath(window, "src/config.ts")
   await selectFirstTwoLines(window)
-  await window
+  await fileBody(window, "src/config.ts")
     .getByRole("region", { name: "src/config.ts editor" })
     .click({ button: "right", position: { x: 260, y: 60 } })
   await window.getByRole("menuitem", { name: "Add selection to chat" }).click()
@@ -402,7 +400,7 @@ test("follows the selected chat agent through edited and newly created files", a
     .getByRole("button", { name: "Follow agent", exact: true })
   await composerFollow.click()
   await splitChatBesideFiles(window)
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(window.getByTestId("editor-group")).toHaveCount(2)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(composerFollow).toHaveClass(/is-active/)
   await expect(composerFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
@@ -416,7 +414,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await sessionRow(window, "Other file browser session").click()
   await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
   await sessionRow(window, "File browser IDE").click()
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(window.getByTestId("editor-group")).toHaveCount(2)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   // Prove the initial repository scan has settled before pi creates the file.
@@ -428,19 +426,18 @@ test("follows the selected chat agent through edited and newly created files", a
 
   await expect(
     window
-      .getByTestId("file-tab-src/config.ts")
-      .getByRole("button", { name: "src/config.ts", exact: true })
+      .getByTestId("editor-tab-file-src/config.ts").getByRole("tab")
   ).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByRole("region", { name: "src/created.ts changes" })).toBeVisible({
+  await expect(window.getByRole("region", { name: "src/created.ts changes" }).filter({ visible: true })).toBeVisible({
     timeout: 20_000
   })
   await expect(
     window
-      .getByTestId("file-tab-src/created.ts")
-      .getByRole("button", { name: "src/created.ts", exact: true })
+      .getByTestId("editor-tab-file-src/created.ts").getByRole("tab")
   ).toBeVisible()
 
   await selectTreePath(window, "src/other.ts")
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
 })
 
@@ -465,13 +462,13 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   await composer.press("Enter")
 
   await expect(
-    window.getByRole("region", { name: "src/delegated.ts changes" })
+    window.getByRole("region", { name: "src/delegated.ts changes" }).filter({ visible: true })
   ).toBeVisible({ timeout: 20_000 })
   await expect(
     window
-      .getByTestId("file-tab-src/delegated.ts")
-      .getByRole("button", { name: "src/delegated.ts", exact: true })
+      .getByTestId("editor-tab-file-src/delegated.ts").getByRole("tab")
   ).toBeVisible()
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -493,6 +490,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
   await composerFollow.click()
   await splitChatBesideFiles(window)
   await selectTreePath(window, "src/config.ts")
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
@@ -502,20 +500,18 @@ test("refreshes the repository tree and follows a moved file to its destination"
 
   await expect(
     window
-      .getByTestId("file-tab-src/settings/config.ts")
-      .getByRole("button", { name: "src/settings/config.ts", exact: true })
+      .getByTestId("editor-tab-file-src/settings/config.ts").getByRole("tab")
   ).toBeVisible({ timeout: 20_000 })
-  const movedDiff = window.getByRole("region", {
-    name: "src/settings/config.ts changes"
-  })
-  await expect(movedDiff).toBeVisible()
   await expect(
-    movedDiff.getByText("export const mode = 'modern'", { exact: true })
-  ).toBeVisible()
+    fileBody(window, "src/settings/config.ts").getByRole("textbox", {
+      name: "src/settings/config.ts"
+    })
+  ).toContainText("export const mode = 'modern'")
 
   const tree = await explorerTree(window)
   await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
   await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
