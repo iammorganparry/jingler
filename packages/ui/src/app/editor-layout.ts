@@ -72,8 +72,23 @@ export const focusedGroup = (layout: EditorLayout): TabGroup | null => {
 export const activeSurface = (group: TabGroup): SessionSurface =>
   group.tabs.find((t) => keyOf(t) === group.active) ?? group.tabs[0]!
 
+/**
+ * Structural sharing: a split is only re-created when one of its children
+ * changed. Untouched groups and splits keep their identity, so memoised group
+ * components skip re-rendering when another group changes.
+ */
+const mapChildren = (node: EditorSplit, fn: (child: EditorNode) => EditorNode): EditorSplit => {
+  let changed = false
+  const children = node.children.map((child) => {
+    const next = fn(child)
+    if (next !== child) changed = true
+    return next
+  })
+  return changed ? { ...node, children } : node
+}
+
 const mapGroups = (node: EditorNode, fn: (group: TabGroup) => TabGroup): EditorNode =>
-  node.type === "group" ? fn(node) : { ...node, children: node.children.map((c) => mapGroups(c, fn)) }
+  node.type === "group" ? fn(node) : mapChildren(node, (c) => mapGroups(c, fn))
 
 const normalise = (ratios: ReadonlyArray<number>): ReadonlyArray<number> => {
   const valid = ratios.every((r) => Number.isFinite(r) && r > 0)
@@ -88,11 +103,14 @@ const tidy = (node: EditorNode): EditorNode | null => {
   }
   const children: EditorNode[] = []
   const ratios: number[] = []
+  let changed = false
   node.children.forEach((child, index) => {
     const kept = tidy(child)
+    if (kept !== child) changed = true
     if (!kept) return
     const share = node.ratios[index] ?? 1 / node.children.length
     if (kept.type === "split" && kept.axis === node.axis) {
+      changed = true
       kept.children.forEach((c, j) => {
         children.push(c)
         ratios.push(share * (kept.ratios[j] ?? 0))
@@ -103,7 +121,7 @@ const tidy = (node: EditorNode): EditorNode | null => {
     }
   })
   if (children.length <= 1) return children[0] ?? null
-  return { ...node, children, ratios: normalise(ratios) }
+  return changed ? { ...node, children, ratios: normalise(ratios) } : node
 }
 
 /** Every mutation ends here: tidy the tree and keep focus on a group that exists. */
@@ -123,6 +141,7 @@ const groupOf = (tabs: ReadonlyArray<SessionSurface>, active = tabs.at(-1)!): Ta
 
 const addTab = (group: TabGroup, surface: SessionSurface): TabGroup => {
   const key = keyOf(surface)
+  if (group.active === key) return group
   return group.tabs.some((t) => keyOf(t) === key)
     ? { ...group, active: key }
     : { ...group, tabs: [...group.tabs, surface], active: key }
@@ -161,7 +180,7 @@ export const activateTab = (layout: EditorLayout, groupId: string, key: string):
   layout.root
     ? commit(
         layout,
-        mapGroups(layout.root, (g) => (g.id === groupId && g.tabs.some((t) => keyOf(t) === key) ? { ...g, active: key } : g)),
+        mapGroups(layout.root, (g) => (g.id === groupId && g.active !== key && g.tabs.some((t) => keyOf(t) === key) ? { ...g, active: key } : g)),
         groupId
       )
     : layout
@@ -198,9 +217,7 @@ export const openTab = (
 }
 
 const splitBeside = (node: EditorNode, targetId: string, edge: Exclude<DropEdge, "center">, added: TabGroup): EditorNode => {
-  if (node.type === "split") {
-    return { ...node, children: node.children.map((c) => splitBeside(c, targetId, edge, added)) }
-  }
+  if (node.type === "split") return mapChildren(node, (c) => splitBeside(c, targetId, edge, added))
   if (node.id !== targetId) return node
   const axis: SplitAxis = edge === "left" || edge === "right" ? "row" : "column"
   const before = edge === "left" || edge === "top"
@@ -254,7 +271,7 @@ export const resizeSplit = (layout: EditorLayout, splitId: string, index: number
   if (!(layout.root && Number.isFinite(delta))) return layout
   const resize = (node: EditorNode): EditorNode => {
     if (node.type === "group") return node
-    if (node.id !== splitId) return { ...node, children: node.children.map(resize) }
+    if (node.id !== splitId) return mapChildren(node, resize)
     const a = node.ratios[index]
     const b = node.ratios[index + 1]
     if (a === undefined || b === undefined || a + b < MIN_RATIO * 2) return node
@@ -267,13 +284,10 @@ export const resizeSplit = (layout: EditorLayout, splitId: string, index: number
 /** Drops tabs whose chat, file or view no longer exists (by `sessionSurfaceKey`). */
 export const pruneEditorLayout = (layout: EditorLayout, allowed: ReadonlySet<string>): EditorLayout => {
   if (!layout.root) return layout
-  const next = commit(
-    layout,
-    mapGroups(layout.root, (g) => ({ ...g, tabs: g.tabs.filter((t) => allowed.has(keyOf(t))) }))
+  const root = mapGroups(layout.root, (g) =>
+    g.tabs.every((t) => allowed.has(keyOf(t))) ? g : { ...g, tabs: g.tabs.filter((t) => allowed.has(keyOf(t))) }
   )
-  return groupsOf(next.root).flatMap((g) => g.tabs).length === groupsOf(layout.root).flatMap((g) => g.tabs).length
-    ? layout
-    : next
+  return root === layout.root ? layout : commit(layout, root)
 }
 
 const storedId = (value: unknown, prefix: string): string =>

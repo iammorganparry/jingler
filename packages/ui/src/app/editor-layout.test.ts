@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import {
+  activateTab,
   activeSurface,
   closeSurfaceEverywhere,
   closeTab,
@@ -169,5 +170,44 @@ describe("editor layout", () => {
     expect(shape(loadEditorLayout("bad", chat("x"), "main"))).toEqual([["main", "x"]])
     localStorage.setItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}junk`, JSON.stringify({ root: { type: "nope" } }))
     expect(shape(loadEditorLayout("junk", chat("x")))).toEqual([["x"]])
+  })
+})
+
+describe("editor layout structural sharing", () => {
+  const threeGroups = () => {
+    let layout = createEditorLayout([chat("a"), file("x.ts")])
+    layout = dropTab(layout, { surface: chat("b") }, firstGroupId(layout), "right")
+    return dropTab(layout, { surface: chat("c") }, groupsOf(layout.root)[1]!.id, "bottom")
+  }
+
+  it("keeps untouched groups and splits by identity when one group changes", () => {
+    const layout = threeGroups()
+    const [a, b, c] = groupsOf(layout.root)
+    const next = activateTab(layout, a!.id, sessionSurfaceKey(chat("a")))
+    const [a2, b2, c2] = groupsOf(next.root)
+    expect(a2).not.toBe(a)
+    expect(b2).toBe(b)
+    expect(c2).toBe(c)
+    expect(split(next).children[1]).toBe(split(layout).children[1])
+  })
+
+  it("returns the same tree when activating the already-active tab or resizing elsewhere", () => {
+    const layout = threeGroups()
+    const a = groupsOf(layout.root)[0]!
+    expect(activateTab(layout, a.id, a.active).root).toBe(layout.root)
+    const inner = split(layout).children[1] as EditorSplit
+    const resized = resizeSplit(layout, inner.id, 0, 0.1)
+    expect(groupsOf(resized.root)[0]).toBe(a)
+    expect(split(resized).children[1]).not.toBe(inner)
+  })
+
+  it("keeps identity through a prune that removes nothing, and through closing in another group", () => {
+    const layout = threeGroups()
+    const all = new Set(groupsOf(layout.root).flatMap((g) => g.tabs).map(sessionSurfaceKey))
+    expect(pruneEditorLayout(layout, all)).toBe(layout)
+    const [a, b, c] = groupsOf(layout.root)
+    const closed = closeTab(layout, a!.id, file("x.ts"))
+    expect(groupsOf(closed.root)[1]).toBe(b)
+    expect(groupsOf(closed.root)[2]).toBe(c)
   })
 })
