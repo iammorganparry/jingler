@@ -68,6 +68,46 @@ describe("SessionPane editor-group regressions", () => {
     expect(focusChat).toHaveBeenLastCalledWith(owner.id, "chat-b")
   })
 
+  it("notifies the host when the active chat tab is selected again", () => {
+    const focusChat = vi.fn()
+    const owner = session({ id: "reselect-chat" })
+    render(
+      <SessionPane
+        session={owner}
+        onFocusChat={focusChat}
+        renderConversation={() => <div>chat</div>}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+
+    expect(focusChat).toHaveBeenCalledExactlyOnceWith(owner.id, owner.activeChatId)
+  })
+
+  it("offers an untouched chat for disposal when its last tab closes", () => {
+    const discard = vi.fn()
+    const owner = session({
+      id: "empty-chat-close",
+      chats: [
+        { id: "chat-a", title: "A", createdAt: "now", updatedAt: "now" },
+        { id: "chat-b", title: null, createdAt: "now", updatedAt: "now" }
+      ],
+      activeChatId: "chat-b"
+    })
+    render(
+      <SessionPane
+        session={owner}
+        onCloseUntouchedChat={discard}
+        renderConversation={() => <div>chat</div>}
+      />
+    )
+
+    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-b")).getByRole("button", { name: "Close Chat 2" }))
+
+    expect(discard).toHaveBeenCalledOnce()
+    expect(discard).toHaveBeenCalledWith(owner.id, "chat-b")
+  })
+
   it("keeps a visible Browser copy active when another group gets focus and closes shared state only on the last copy", () => {
     const toggle = vi.fn()
     render(

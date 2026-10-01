@@ -63,6 +63,7 @@ import {
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
+import { selectSubagentTab } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import {
@@ -1749,6 +1750,7 @@ function AuthedApp({
           <TerminalDockView session={session} visible={visible} embedded />
         )}
         onFocusChat={(sessionId, chatId) => {
+          selectSubagentTab(sessionId, chatId, "main");
           const session = sessions.find((candidate) => candidate.id === sessionId);
           if (!session || session.activeChatId === chatId) return;
           queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId));

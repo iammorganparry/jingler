@@ -891,7 +891,8 @@ function SessionPaneBody(props: SessionPaneProps) {
           renderBody={renderBody}
           onActivate={(groupId, surface) => {
             update((current) => activateTab(current, groupId, sessionSurfaceKey(surface)))
-            syncChat(surface)
+            if (surface.kind === "chat") props.onFocusChat?.(sessionId, surface.id)
+            else syncChat(surface)
           }}
           onClose={closeTabIn}
           onDrop={(drag, groupId, edge, copy) => {

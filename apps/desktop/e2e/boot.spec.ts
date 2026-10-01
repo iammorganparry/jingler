@@ -32,6 +32,11 @@ test("a configured workspace boots into the app shell with its sessions", async 
   await expect(appShell(window)).toBeVisible()
   // …and the persisted session shows up (grouped under its repo).
   await expect(sessionRow(window, "Seeded session")).toBeVisible()
+  // Empty title-bar space drags the native window while its controls stay clickable.
+  const titleBar = window.getByTestId("title-bar")
+  await expect(titleBar).toHaveCSS("-webkit-app-region", "drag")
+  await expect(titleBar.locator("#session-tab-bar-portal"))
+    .toHaveCSS("-webkit-app-region", "none")
   // The setup screen is NOT shown.
   await expect(window.getByText("Set up your workspace")).toHaveCount(0)
 })
