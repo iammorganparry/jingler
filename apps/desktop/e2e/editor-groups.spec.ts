@@ -124,6 +124,17 @@ test("chats, files and views are tabs that split both ways and stay per session"
   await expect(groups(window)).toHaveCount(kept)
 })
 
+test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
+  await expect(appShell(window)).toBeVisible()
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
+
+  await window.keyboard.press("Meta+t")
+  await expect(window.getByTestId("new-tab-command-menu")).toBeVisible()
+  await window.getByTestId("palette-item-new-tab:terminal").click()
+  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+})
+
 test("⌘\\ splits the focused tab right and ⌘⇧\\ splits it down", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
   await expect(appShell(window)).toBeVisible()

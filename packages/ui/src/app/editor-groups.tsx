@@ -17,6 +17,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
   memo,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -30,6 +31,7 @@ import { FileIcon } from "../components/file-icon.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
 import {
   activeSurface,
+  resizedPair,
   type DropEdge,
   type EditorLayout,
   type EditorNode,
@@ -38,9 +40,11 @@ import {
   type TabGroup
 } from "./editor-layout.js"
 import { isSurface, sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
-import { MIN_RATIO } from "./split-layout.js"
 import type { TabLauncherItem } from "./chat-tab-bar.js"
 import type { TabBadge } from "./tab-contributions.js"
+import { matchNewTabChord } from "./app-shortcuts.js"
+import { CommandPalette } from "./command-palette.js"
+import type { PaletteItem } from "./command-palette-model.js"
 
 export interface EditorTabMeta {
   readonly label: string
@@ -58,7 +62,7 @@ export interface EditorGroupsProps {
   /** Changes whenever tab bodies must re-render (the host passes its session). */
   readonly revision: unknown
   readonly describe: (surface: SessionSurface) => EditorTabMeta
-  readonly renderBody: (surface: SessionSurface, ctx: { readonly focused: boolean }) => ReactNode
+  readonly renderBody: (surface: SessionSurface, ctx: { readonly focused: boolean; readonly visible: boolean }) => ReactNode
   readonly onActivate: (groupId: string, surface: SessionSurface) => void
   readonly onClose: (groupId: string, surface: SessionSurface) => void
   readonly onDrop: (drag: TabDrag, groupId: string | null, edge: DropEdge, copy: boolean) => void
@@ -122,13 +126,58 @@ export function EditorGroups(props: EditorGroupsProps) {
     }),
     []
   )
+  const [commandOpen, setCommandOpen] = useState(false)
+  const launchers = props.launcherItems ?? []
+  const commandItems = useMemo<ReadonlyArray<PaletteItem>>(
+    () => launchers.map((item, index) => ({
+      id: `new-tab:${item.id}`,
+      kind: "tab" as const,
+      group: "New tab",
+      label: item.label,
+      detail: item.detail,
+      icon: item.icon,
+      hint: index < 9 ? String(index + 1) : undefined,
+      run: item.onSelect
+    })),
+    [launchers]
+  )
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (matchNewTabChord(event)) {
+        event.preventDefault()
+        setCommandOpen(true)
+        return
+      }
+      if (!commandOpen || event.metaKey || event.ctrlKey || event.altKey) return
+      const item = launchers[Number(event.key) - 1]
+      if (!item || Number(event.key) < 1 || Number(event.key) > 9) return
+      event.preventDefault()
+      setCommandOpen(false)
+      item.onSelect()
+    }
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [commandOpen, launchers])
+  const palette = (
+    <CommandPalette
+      open={commandOpen}
+      onOpenChange={setCommandOpen}
+      items={commandItems}
+      placeholder="Choose a tab type…"
+      emptyMessage="No tab types available"
+      testId="new-tab-command-menu"
+    />
+  )
   const mime = editorTabMime(props.sessionId)
   const { root, focusedGroupId } = props.layout
-  if (!root) return <EmptyEditor mime={mime} api={api}>{props.emptyState}</EmptyEditor>
+  if (!root) return <><EmptyEditor mime={mime} api={api}>{props.emptyState}</EmptyEditor>{palette}</>
   return (
-    <div data-testid="editor-groups" className="flex min-h-0 min-w-0 flex-1 bg-hairline">
-      <EditorNodeView node={root} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} />
-    </div>
+    <>
+      <div data-testid="editor-groups" className="flex min-h-0 min-w-0 flex-1 bg-hairline">
+        <EditorNodeView node={root} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} />
+      </div>
+      {palette}
+    </>
   )
 }
 
@@ -149,6 +198,8 @@ function EditorNodeView({ node, ...rest }: NodeProps & { readonly node: EditorNo
 
 const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { readonly split: EditorSplit }) {
   const row = split.axis === "row"
+  const dragController = useRef<AbortController | null>(null)
+  useEffect(() => () => dragController.current?.abort(), [])
   const startDrag = (index: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     const container = e.currentTarget.parentElement
     const a = split.ratios[index]
@@ -164,21 +215,29 @@ const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { read
     const handle = e.currentTarget
     handle.setPointerCapture?.(e.pointerId)
     let delta = 0
+    dragController.current?.abort()
     const controller = new AbortController()
+    dragController.current = controller
     const move = (event: PointerEvent) => {
-      const next = Math.min(Math.max(a + ((row ? event.clientX : event.clientY) - start) / size, MIN_RATIO), a + b - MIN_RATIO)
-      delta = next - a
-      first.style.flexGrow = String(next)
-      second.style.flexGrow = String(a + b - next)
+      const pair = resizedPair(a, b, ((row ? event.clientX : event.clientY) - start) / size)
+      if (!pair) return
+      delta = pair[0] - a
+      first.style.flexGrow = String(pair[0])
+      second.style.flexGrow = String(pair[1])
     }
     const end = () => {
+      if (controller.signal.aborted) return
       controller.abort()
+      dragController.current = null
+      if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
       if (delta !== 0) rest.api.onResize(split.id, index, delta)
     }
     const options = { signal: controller.signal }
     window.addEventListener("pointermove", move, options)
     window.addEventListener("pointerup", end, options)
     window.addEventListener("pointercancel", end, options)
+    window.addEventListener("blur", end, options)
+    handle.addEventListener("lostpointercapture", end, options)
   }
   return (
     <div data-testid={`editor-split-${split.axis}`} className={cn("flex min-h-0 min-w-0 flex-1", !row && "flex-col")}>
@@ -230,6 +289,16 @@ function SplitChild({
 
 function useDropZone(mime: string, groupId: string | null, api: Api) {
   const [edge, setEdge] = useState<DropEdge | null>(null)
+  useEffect(() => {
+    if (edge === null) return
+    const clear = () => setEdge(null)
+    window.addEventListener("dragend", clear)
+    window.addEventListener("drop", clear)
+    return () => {
+      window.removeEventListener("dragend", clear)
+      window.removeEventListener("drop", clear)
+    }
+  }, [edge])
   const handlers = {
     onDragOver: (e: DragEvent<HTMLElement>) => {
       if (!e.dataTransfer.types.includes(mime)) return
@@ -250,7 +319,7 @@ function useDropZone(mime: string, groupId: string | null, api: Api) {
     }
   }
   const overlay = edge ? (
-    <div aria-hidden className={cn("pointer-events-none absolute z-20 bg-blue/15 ring-2 ring-inset ring-blue", OVERLAY[edge])} />
+    <div data-testid="editor-drop-overlay" aria-hidden className={cn("pointer-events-none absolute z-20 bg-blue/15 ring-2 ring-inset ring-blue", OVERLAY[edge])} />
   ) : null
   return { handlers, overlay }
 }
@@ -440,6 +509,7 @@ const TabBody = memo(function TabBody({
       <TabContent
         surface={surface}
         focused={surface.kind === "file" ? false : focused && visible}
+        visible={visible}
         api={api}
         revision={revision}
       />
@@ -450,15 +520,17 @@ const TabBody = memo(function TabBody({
 const TabContent = memo(function TabContent({
   surface,
   focused,
+  visible,
   api
 }: {
   surface: SessionSurface
   focused: boolean
+  visible: boolean
   api: Api
   revision: unknown
 }) {
   // Each body measures its own width, so a view split beside a chat lays out for its half.
-  return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused })}</WidthTierProvider>
+  return <WidthTierProvider className="flex-col">{api.renderBody(surface, { focused, visible })}</WidthTierProvider>
 })
 
 function Launcher({ api }: { api: Api }) {

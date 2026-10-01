@@ -18,7 +18,7 @@ import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
-import type { TabContribution, TabKey } from "../app/tab-contributions.js"
+import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (JinglerApp types its
@@ -134,6 +134,8 @@ export interface SessionConversationProps {
   patch?: string
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Live activity by session, then chat, for the sidebar tree. */
+  chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
   /** GitHub owner login per session, used for repository avatars in the sidebar. */
@@ -204,7 +206,7 @@ export interface SessionConversationProps {
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
   /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session) => ReactNode
+  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
   /** App version, shown in the sidebar footer. */
   version?: string
   /** Available packaged-app update shown in the sidebar. */
@@ -377,6 +379,13 @@ export function SessionConversation(props: SessionConversationProps) {
         onRename={props.onRenameSession}
         chatActions={props.chatActions}
         onRequestCloseFile={props.onRequestCloseFile}
+        onCloseView={(sessionId, surface) => {
+          if (surface.id !== BUILTIN_TAB.browser || !surface.chatId) return
+          if (props.isBrowserActive?.(sessionId, surface.chatId)) {
+            props.onToggleBrowser?.(sessionId, surface.chatId)
+          }
+        }}
+        chatActivities={props.chatActivities}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}

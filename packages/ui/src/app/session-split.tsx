@@ -87,7 +87,7 @@ export interface SessionSplitProps {
   paneContributions?: ReadonlyArray<PaneContribution>
   onRevealChanges?: (sessionId: string) => void
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
-  renderTerminalDock?: (session: Session) => ReactNode
+  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
   /**
    * A palette request to switch tabs, handed to the FOCUSED pane only.
    *

@@ -34,6 +34,7 @@ import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { AISidebarSurface } from "../composites/beui/shell.js"
 import { SessionTree, type SessionChatActions } from "./session-tree.js"
+import type { SessionSurface } from "./session-surface-layout.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
 import type { PendingEnvironmentSession } from "./environment-session-startup-machine.js"
@@ -95,6 +96,10 @@ export interface SessionSidebarProps {
   chatActions?: SessionChatActions
   /** Dirty-aware close request for a file tab. */
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
+  /** Dispose shared state when a sidebar action closes a view everywhere. */
+  onCloseView?: (sessionId: string, surface: Extract<SessionSurface, { kind: "view" }>) => void
+  /** Live activity by session, then chat. */
+  chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
@@ -326,6 +331,8 @@ function SidebarBody({
   onDelete,
   chatActions,
   onRequestCloseFile,
+  onCloseView,
+  chatActivities,
   liveActivity,
   prStates,
   repoOwners,
@@ -630,13 +637,12 @@ return (renderExpandedGroupHeading())
     (id: string) =>
       setExpandedIds((current) => {
         const next = new Set(current)
-        // The active session is always open, so its chevron only ever collapses it.
-        if (current.has(id) || id === activeSessionId) next.delete(id)
+        if (current.has(id)) next.delete(id)
         else next.add(id)
         writeExpanded(next)
         return next
       }),
-    [activeSessionId]
+    []
   )
 
   const renderEntry = (s: Session) => {
@@ -657,10 +663,18 @@ return (renderExpandedGroupHeading())
         onRestore={onRestore}
         onDelete={onDelete}
         expanded={open}
-        onToggleExpanded={toggleExpanded}
+        onToggleExpanded={s.id === activeSessionId ? undefined : toggleExpanded}
       />
       {open && (
-        <SessionTree session={s} running={liveActivity?.[s.id] !== undefined} onSelectSession={onSelect} chatActions={chatActions} onRequestCloseFile={onRequestCloseFile} />
+        <SessionTree
+          session={s}
+          running={liveActivity?.[s.id] !== undefined}
+          activityByChat={chatActivities?.[s.id]}
+          onSelectSession={onSelect}
+          chatActions={chatActions}
+          onRequestCloseFile={onRequestCloseFile}
+          onCloseView={onCloseView}
+        />
       )}
       </div>
     )

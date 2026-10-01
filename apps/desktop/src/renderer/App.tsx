@@ -82,6 +82,7 @@ import {
   disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  useAllChatActivities,
 } from "./conversation-registry.js";
 import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
@@ -311,6 +312,7 @@ function AuthedApp({
     [],
   );
   const liveDiff = useSessionDiffs();
+  const chatActivities = useAllChatActivities();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
   const browserDock = usePreviewDock();
@@ -1356,6 +1358,7 @@ function AuthedApp({
         onGithubRefresh={github.refresh}
         onGithubDisconnect={github.disconnect}
         liveActivity={liveActivity}
+        chatActivities={chatActivities}
         prStates={prStates}
         liveDiff={liveDiff}
         usage={usage}
@@ -1540,6 +1543,8 @@ function AuthedApp({
         onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
         chatActions={{
+          onSelectChat: (sessionId, chatId) =>
+            queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId)),
           onRenameChat: (sessionId, chatId, title) => {
             void rpc.sessionsRenameChat(sessionId, chatId, title).then(publishSessionUpdate);
           },
@@ -1605,6 +1610,7 @@ function AuthedApp({
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
+            onPlanDraftUnavailable={ctx.onPlanDraftUnavailable}
             onRestore={restoreSession}
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
@@ -1738,8 +1744,8 @@ function AuthedApp({
             />
           );
         }}
-        renderTerminalDock={(session) => (
-          <TerminalDockView session={session} embedded />
+        renderTerminalDock={(session, visible) => (
+          <TerminalDockView session={session} visible={visible} embedded />
         )}
         onFocusChat={(sessionId, chatId) => {
           const session = sessions.find((candidate) => candidate.id === sessionId);

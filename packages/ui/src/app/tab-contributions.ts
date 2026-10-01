@@ -118,6 +118,8 @@ export interface TabRenderContext {
   readonly splitOpen: boolean
   /** Whether this nested surface owns keyboard/composer focus. */
   readonly paneFocused?: boolean
+  /** Whether this tab is selected and painted in its editor group. */
+  readonly paneVisible?: boolean
   /** Open Settings — the "connect GitHub" escape hatch on empty states. */
   readonly onConnectGithub: () => void
   /** Switch this pane to another tab, e.g. deep-linking into Plan Review. */

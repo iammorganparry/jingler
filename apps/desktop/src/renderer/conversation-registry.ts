@@ -646,17 +646,22 @@ const evictIdleActors = (keep: string): void => {
   }
 }
 
+const subscribeActivities = (listener: () => void) => {
+  activityListeners.add(listener)
+  return () => activityListeners.delete(listener)
+}
+
 export const useChatActivities = (
   sessionId: string
 ): Readonly<Record<string, SessionActivity>> =>
   useSyncExternalStore(
-    (listener) => {
-      activityListeners.add(listener)
-      return () => activityListeners.delete(listener)
-    },
+    subscribeActivities,
     () => chatActivities[sessionId] ?? EMPTY_CHAT_ACTIVITIES,
     () => chatActivities[sessionId] ?? EMPTY_CHAT_ACTIVITIES
   )
+
+export const useAllChatActivities = (): Readonly<Record<string, Readonly<Record<string, SessionActivity>>>> =>
+  useSyncExternalStore(subscribeActivities, () => chatActivities, () => chatActivities)
 
 /**
  * Get (creating + starting on first use) the persistent actor for a session.

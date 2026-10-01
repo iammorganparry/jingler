@@ -8,7 +8,7 @@
  */
 import { memo, useState } from "react"
 import { useSelector } from "@xstate/react"
-import type { ProviderId, Session } from "@jingler/core"
+import type { ProviderId, Session, SessionActivity } from "@jingler/core"
 import { Pencil, RotateCcw, X } from "lucide-react"
 import { ContextMenu } from "../components/context-menu.js"
 import { cn } from "../lib/cn.js"
@@ -37,6 +37,8 @@ const viewMeta = (id: string) => BUILTIN_TAB_META[id as BuiltinTabKey] as (typeo
 /** Chat lifecycle actions owned by the host (they are RPCs there). */
 export interface SessionChatActions {
   readonly onRenameChat?: (sessionId: string, chatId: string, title: string) => void
+  /** Makes this chat canonical for session-owned actions. */
+  readonly onSelectChat?: (sessionId: string, chatId: string) => void
   /** Closes the chat itself (it moves to Closed), not just its tabs. */
   readonly onCloseChat?: (sessionId: string, chatId: string) => void
   readonly onReopenChat?: (sessionId: string, chatId: string) => void
@@ -45,16 +47,20 @@ export interface SessionChatActions {
 export const SessionTree = memo(function SessionTree({
   session,
   running,
+  activityByChat,
   onSelectSession,
   chatActions,
-  onRequestCloseFile
+  onRequestCloseFile,
+  onCloseView
 }: {
   session: Session
-  /** Whether the session's active chat is working right now. */
+  /** Session-level fallback for hosts without per-chat activity. */
   running: boolean
+  activityByChat?: Readonly<Record<string, SessionActivity>>
   onSelectSession: (id: string) => void
   chatActions?: SessionChatActions
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
+  onCloseView?: (sessionId: string, surface: Extract<SessionSurface, { kind: "view" }>) => void
 }) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
@@ -76,10 +82,17 @@ export const SessionTree = memo(function SessionTree({
   const openItem = (surface: SessionSurface) => {
     ensureLayout(session)
     updateEditorLayout(session.id, (layout) => openTab(layout, surface, session.chats[0]?.id))
+    if (surface.kind === "chat") chatActions?.onSelectChat?.(session.id, surface.id)
     onSelectSession(session.id)
   }
   const closeItem = (surface: SessionSurface) => {
-    if (surface.kind === "file" && onRequestCloseFile && !onRequestCloseFile(session.id, surface.id)) return
+    if (surface.kind === "file" && onRequestCloseFile && !onRequestCloseFile(session.id, surface.id)) {
+      ensureLayout(session)
+      updateEditorLayout(session.id, (layout) => openTab(layout, surface, session.chats[0]?.id))
+      onSelectSession(session.id)
+      return
+    }
+    if (surface.kind === "view") onCloseView?.(session.id, surface)
     updateEditorLayout(session.id, (layout) => closeSurfaceEverywhere(layout, surface))
   }
 
@@ -135,14 +148,15 @@ export const SessionTree = memo(function SessionTree({
   const views = open.filter((s): s is Extract<SessionSurface, { kind: "view" }> => s.kind === "view")
   const files = open.filter((s) => s.kind === "file")
   const sessionViews = views.filter((v) => !v.chatId)
+  const isChatBusy = (chatId: string) =>
+    activityByChat ? activityByChat[chatId] !== undefined : running && chatId === session.activeChatId
 
   return (
     <div data-testid={`session-tree-${session.id}`} className="ml-[18px] border-l border-line pb-1 pl-1">
       {session.chats.map((chat, index) => {
         const surface: SessionSurface = { kind: "chat", id: chat.id }
         const owned = views.filter((v) => v.chatId === chat.id)
-        // ponytail: only the session's active chat reports activity here; per-chat activity lives in the desktop registry.
-        const busy = running && chat.id === session.activeChatId
+        const busy = isChatBusy(chat.id)
         const title = chat.title ?? `Chat ${index + 1}`
         if (renaming === chat.id) {
           return (

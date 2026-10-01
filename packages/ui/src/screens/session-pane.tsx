@@ -91,6 +91,8 @@ export interface ConversationPaneCtx {
   onOpenProviderSettings: () => void
   /** Present the first renderable streamed draft using this pane's width. */
   onPlanDraftAvailable?: () => void
+  /** Drop a pending presentation when its streamed draft becomes invalid. */
+  onPlanDraftUnavailable?: () => void
   /** The stage Plan Review should open at, until the one-shot target is consumed. */
   planStepId?: string | null
   /** Plan Review's selection moved — retires a spent `planStepId`. */
@@ -170,9 +172,9 @@ export interface SessionPaneProps {
     }
   ) => ReactNode
   /** Render this session's embedded browser inside its pane. */
-  renderBrowser?: (session: Session, active: boolean) => ReactNode
+  renderBrowser?: (session: Session, visible: boolean) => ReactNode
   /** Render the session terminal as a normal closable/splittable view. */
-  renderTerminal?: (session: Session) => ReactNode
+  renderTerminal?: (session: Session, visible: boolean) => ReactNode
   /**
    * List a path among the session's open files WITHOUT selecting it. A file
    * pane owns its own document; selecting its path in the shared actor would
@@ -315,12 +317,13 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
 const noop = () => {}
 
 const SurfaceContent = memo(function SurfaceContent({
-  session, chatId, contribution, paneFocused, onSelectTab, onConnectGithub
+  session, chatId, contribution, paneFocused, paneVisible, onSelectTab, onConnectGithub
 }: {
   session: Session
   chatId: string
   contribution: TabContribution | undefined
   paneFocused: boolean
+  paneVisible: boolean
   onSelectTab: (id: TabKey) => void
   onConnectGithub: () => void
 }) {
@@ -329,6 +332,7 @@ const SurfaceContent = memo(function SurfaceContent({
     activeTabId: contribution.id,
     splitOpen: false,
     paneFocused,
+    paneVisible,
     onConnectGithub,
     onSelectTab: (id) => { if (paneFocused || contribution.id === BUILTIN_TAB.conversation) onSelectTab(id) }
   })
@@ -420,6 +424,7 @@ function renderEditorBody(
   active: Session,
   surface: SessionSurface,
   focused: boolean,
+  visible: boolean,
   conversationContribution: TabContribution | undefined,
   contributions: ReadonlyArray<TabContribution>,
   selectTab: (id: TabKey) => void,
@@ -451,6 +456,7 @@ function renderEditorBody(
         chatId={chatId}
         contribution={contribution}
         paneFocused={focused}
+        paneVisible={visible}
         onSelectTab={selectTab}
         onConnectGithub={onConnectGithub}
       />
@@ -460,7 +466,8 @@ function renderEditorBody(
 
 function allowedViewKeysOf(
   tabs: ReadonlyArray<TabContribution>,
-  session: Session
+  session: Session,
+  planChatIds: ReadonlySet<string>
 ): ReadonlyArray<string> {
   return tabs.flatMap((contribution) => {
     if (
@@ -472,9 +479,9 @@ function allowedViewKeysOf(
       return session.chats.map((chat) => sessionSurfaceKey({ kind: "view", id: contribution.id, chatId: chat.id }))
     }
     if (contribution.id === BUILTIN_TAB.plan) {
-      return session.chats.map((chat) =>
-        sessionSurfaceKey({ kind: "view", id: contribution.id, chatId: chat.id })
-      )
+      return session.chats
+        .filter((chat) => planChatIds.has(chat.id))
+        .map((chat) => sessionSurfaceKey({ kind: "view", id: contribution.id, chatId: chat.id }))
     }
     return [sessionSurfaceKey({ kind: "view", id: contribution.id })]
   })
@@ -524,15 +531,18 @@ function SessionPaneBody(props: SessionPaneProps) {
   )
   const focused = focusedGroup(layout)
   const focusedSurface = focused ? activeSurface(focused) : fallbackChatSurface
-  const openSurface = useCallback(
-    (surface: SessionSurface) => update((current) => openTab(current, surface, mainChatId)),
-    [mainChatId, update]
-  )
   /** A chat-owned surface the operator acts on makes its chat the session's active one. */
-  const syncChat = (surface: SessionSurface) => {
+  const syncChat = useCallback((surface: SessionSurface) => {
     const chatId = surfaceOwner(surface)
     if (chatId && chatId !== active.activeChatId) props.onFocusChat?.(sessionId, chatId)
-  }
+  }, [active.activeChatId, props.onFocusChat, sessionId])
+  const openSurface = useCallback(
+    (surface: SessionSurface) => {
+      update((current) => openTab(current, surface, mainChatId))
+      syncChat(surface)
+    },
+    [mainChatId, syncChat, update]
+  )
 
   const filePaths = allTabs(layout)
     .flatMap((surface) => (surface.kind === "file" ? [surface.id] : []))
@@ -554,12 +564,14 @@ function SessionPaneBody(props: SessionPaneProps) {
   // A pending deep link into Plan Review. One-shot: Plan Review reports its own
   // selection back and we drop it. Tagged with its session because step ids
   // (s_01, s_02…) collide across sessions.
-  const [target, setTarget] = useState<{ sessionId: string; stepId: string } | null>(null)
+  const [target, setTarget] = useState<{ sessionId: string; chatId: string; stepId: string } | null>(null)
   const pendingPlanOpen = useRef<string | null>(null)
   const activeHasPlan =
     (props.planSessions?.has(active.activeChatId) ?? false) ||
     pendingPlanOpen.current === active.activeChatId
-  const hasPlan = active.chats.some((chat) => props.planSessions?.has(chat.id) ?? false) || activeHasPlan
+  const hasPlan =
+    active.chats.some((chat) => props.planSessions?.has(chat.id) ?? false) ||
+    pendingPlanOpen.current !== null
   const previousOwner = useRef({ sessionId, chatId: active.activeChatId })
   useEffect(() => {
     const previous = previousOwner.current
@@ -570,31 +582,43 @@ function SessionPaneBody(props: SessionPaneProps) {
       }
     }
     previousOwner.current = { sessionId, chatId: active.activeChatId }
-  }, [active.activeChatId, sessionId])
+  }, [active.activeChatId, focusedSurface, openSurface, sessionId])
   const hasExplanation = props.explanationSessions?.has(sessionId) ?? false
-  const openPlanReview = useCallback(
-    (stepId?: string) => {
-      setTarget(stepId ? { sessionId, stepId } : null)
-      openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: active.activeChatId })
+  const openPlanReviewFor = useCallback(
+    (chatId: string, stepId?: string) => {
+      setTarget(stepId ? { sessionId, chatId, stepId } : null)
+      openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId })
     },
-    [active.activeChatId, openSurface, sessionId]
+    [openSurface, sessionId]
   )
-  const presentPlanDraft = useCallback(() => {
-    pendingPlanOpen.current = active.activeChatId
+  const openPlanReview = useCallback(
+    (stepId?: string) => openPlanReviewFor(active.activeChatId, stepId),
+    [active.activeChatId, openPlanReviewFor]
+  )
+  const presentPlanDraftFor = useCallback((chatId: string) => {
+    pendingPlanOpen.current = chatId
     setTarget(null)
-    openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: active.activeChatId })
-  }, [active.activeChatId, openSurface])
-  useEffect(() => {
-    if (pendingPlanOpen.current !== active.activeChatId || !props.planSessions?.has(active.activeChatId)) return
+    openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId })
+  }, [openSurface])
+  const dismissPlanDraftFor = useCallback((chatId: string) => {
+    if (pendingPlanOpen.current !== chatId || props.planSessions?.has(chatId)) return
     pendingPlanOpen.current = null
-    openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: active.activeChatId })
-  }, [active.activeChatId, openSurface, props.planSessions])
+    setTarget(null)
+    update((current) => closeSurfaceEverywhere(current, { kind: "view", id: BUILTIN_TAB.plan, chatId }))
+  }, [props.planSessions, update])
+  useEffect(() => {
+    const pending = pendingPlanOpen.current
+    if (pending === null || !props.planSessions?.has(pending)) return
+    pendingPlanOpen.current = null
+    openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: pending })
+  }, [openSurface, props.planSessions])
 
   // An outside request to switch tabs (the command palette). The nonce is the
   // trigger, and reporting it handled stops a remount replaying it.
   const tabRequestNonce = props.selectTabRequest?.nonce
   const tabRequestId = props.selectTabRequest?.tabId
   const onTabRequestHandled = props.onTabRequestHandled
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the one-shot trigger; see the prop contract.
   useEffect(() => {
     if (tabRequestId === undefined) return
     if (tabRequestId === BUILTIN_TAB.plan) openPlanReview()
@@ -657,8 +681,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [active, browserActive, onRevealChanges, openPlanReview, openSurface, props.onToggleBrowser, props.tabContributions]
   )
-  const planStepTarget = target?.sessionId === active.id ? target.stepId : null
-
   const tabCtx: TabContext = {
     session: active,
     hasPlan,
@@ -671,7 +693,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...builtinTabContributions({
       conversation: (session, ctx) => {
         const paneCtx: ConversationPaneCtx = {
-          onOpenPlanReview: openPlanReview,
+          onOpenPlanReview: (stepId) => openPlanReviewFor(session.activeChatId, stepId),
           onOpenFile: (path) => {
             props.onTrackFile?.(session.id, path)
             openSurface({ kind: "file", id: path })
@@ -679,8 +701,12 @@ function SessionPaneBody(props: SessionPaneProps) {
           onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
-          onPlanDraftAvailable: presentPlanDraft,
-          planStepId: planStepTarget,
+          onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),
+          onPlanDraftUnavailable: () => dismissPlanDraftFor(session.activeChatId),
+          planStepId:
+            target?.sessionId === session.id && target.chatId === session.activeChatId
+              ? target.stepId
+              : null,
           onPlanStepSelected: () => setTarget(null),
           paneFocused: ctx.paneFocused ?? true
         }
@@ -704,18 +730,22 @@ function SessionPaneBody(props: SessionPaneProps) {
           onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation),
           onOpenPath: (path) => openSurface({ kind: "file", id: path })
         }),
-      browser: (session, ctx) => props.renderBrowser?.(session, ctx.paneFocused ?? true),
-      terminal: (session) => props.renderTerminal?.(session),
+      browser: (session, ctx) => props.renderBrowser?.(session, ctx.paneVisible ?? true),
+      terminal: (session, ctx) => props.renderTerminal?.(session, ctx.paneVisible ?? true),
       stub: (id) => <BuiltinStubScreen tab={id} />
     }),
     ...(props.tabContributions ?? [])
-  ], [props, openPlanReview, presentPlanDraft, planStepTarget, connectGithub])
+  ], [props, dismissPlanDraftFor, openPlanReviewFor, presentPlanDraftFor, target, connectGithub])
 
   const tabs = visibleTabs(tabCtx, contributions)
-  const allowedViewKeys = allowedViewKeysOf(tabs, active)
+  const planChatIds = new Set(
+    active.chats
+      .map((chat) => chat.id)
+      .filter((chatId) => props.planSessions?.has(chatId) || pendingPlanOpen.current === chatId)
+  )
+  const allowedViewKeys = allowedViewKeysOf(tabs, active, planChatIds)
   const allowedSurfaceKeys = new Set<string>([
     ...active.chats.map((chat) => sessionSurfaceKey({ kind: "chat", id: chat.id })),
-    ...active.chats.map((chat) => sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.plan, chatId: chat.id })),
     ...(active.worktreePath ? [sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.files })] : []),
     ...allTabs(layout).filter((surface) => surface.kind === "file").map(sessionSurfaceKey),
     ...allowedViewKeys
@@ -745,18 +775,29 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const closeTabIn = useCallback(
     (groupId: string, surface: SessionSurface) => {
-      if (surface.kind === "file" && props.onRequestCloseFile && !props.onRequestCloseFile(active.id, surface.id)) {
+      const current = editorLayoutOf(sessionId) ?? layout
+      const key = sessionSurfaceKey(surface)
+      const copies = groupsOf(current.root).filter((group) => group.tabs.some((tab) => sessionSurfaceKey(tab) === key)).length
+      if (
+        surface.kind === "file" &&
+        copies <= 1 &&
+        props.onRequestCloseFile &&
+        !props.onRequestCloseFile(active.id, surface.id)
+      ) {
         // The editor's discard prompt owns the decision; keep its tab in view.
-        update((current) => activateTab(current, groupId, sessionSurfaceKey(surface)))
+        update((held) => activateTab(held, groupId, key))
         return
       }
-      if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser) {
+      if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser && copies <= 1) {
         const chatId = surface.chatId ?? active.activeChatId
         if (props.isBrowserActive?.(active.id, chatId)) props.onToggleBrowser?.(active.id, chatId)
       }
-      update((current) => closeTab(current, groupId, surface))
+      const next = closeTab(current, groupId, surface)
+      update(() => next)
+      const nextGroup = focusedGroup(next)
+      if (nextGroup) syncChat(activeSurface(nextGroup))
     },
-    [active.activeChatId, active.id, props.isBrowserActive, props.onRequestCloseFile, props.onToggleBrowser, update]
+    [active.activeChatId, active.id, layout, props.isBrowserActive, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
   )
 
   const launcherTabs = tabs.some((contribution) => contribution.id === BUILTIN_TAB.plan)
@@ -792,12 +833,13 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx)
 
-  const renderBody = (surface: SessionSurface, ctx: { readonly focused: boolean }) =>
+  const renderBody = (surface: SessionSurface, ctx: { readonly focused: boolean; readonly visible: boolean }) =>
     renderEditorBody(
       props,
       active,
       surface,
       ctx.focused,
+      ctx.visible,
       conversationContribution,
       contributions,
       selectTab,
@@ -806,19 +848,28 @@ function SessionPaneBody(props: SessionPaneProps) {
       connectGithub
     )
 
+  const renderRevision = useMemo(() => ({}), [active, contributions])
   const paneFocused = props.pane === undefined || props.pane.focused
   useEffect(() => {
     if (!paneFocused) return
     const onCommand = (event: Event) => {
       const command = (event as CustomEvent<SessionSurfaceCommand>).detail
-      if (command !== "close") return update((l) => applyEditorCommand(l, command))
+      if (command !== "close") {
+        const current = editorLayoutOf(sessionId)
+        if (!current) return
+        const next = applyEditorCommand(current, command)
+        update(() => next)
+        const nextGroup = focusedGroup(next)
+        if (nextGroup) syncChat(activeSurface(nextGroup))
+        return
+      }
       const current = editorLayoutOf(sessionId)
       const group = current && focusedGroup(current)
       if (group) closeTabIn(group.id, activeSurface(group))
     }
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
-  }, [closeTabIn, paneFocused, sessionId, update])
+  }, [closeTabIn, paneFocused, sessionId, syncChat, update])
 
   const surfaceInGroup = (groupId: string): SessionSurface | undefined => {
     const group = groupsOf((editorLayoutOf(sessionId) ?? layout).root).find((g) => g.id === groupId)
@@ -834,8 +885,8 @@ function SessionPaneBody(props: SessionPaneProps) {
         <EditorGroups
           sessionId={sessionId}
           layout={layout}
-          // Layout-only updates keep the session object, so mounted bodies skip rendering.
-          revision={active}
+          // Layout-only updates keep this token, while render dependencies replace it.
+          revision={renderRevision}
           describe={describeSurface}
           renderBody={renderBody}
           onActivate={(groupId, surface) => {

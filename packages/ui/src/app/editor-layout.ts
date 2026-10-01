@@ -315,18 +315,28 @@ export const moveActiveTab = (layout: EditorLayout, direction: -1 | 1): EditorLa
 }
 
 /** Drags the divider between `children[index]` and `children[index + 1]` of a split. */
+/** Clamp a divider move to the largest minimum the adjacent pair can afford. */
+export const resizedPair = (a: number, b: number, delta: number): readonly [number, number] | null => {
+  const total = a + b
+  if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(delta) && total > 0)) return null
+  const minimum = Math.min(MIN_RATIO, total / 2)
+  const next = Math.min(Math.max(a + delta, minimum), total - minimum)
+  return [next, total - next]
+}
+
 export const resizeSplit = (layout: EditorLayout, splitId: string, index: number, delta: number): EditorLayout => {
-  if (!(layout.root && Number.isFinite(delta))) return layout
+  if (!layout.root) return layout
   const resize = (node: EditorNode): EditorNode => {
     if (node.type === "group") return node
     if (node.id !== splitId) return mapChildren(node, resize)
     const a = node.ratios[index]
     const b = node.ratios[index + 1]
-    if (a === undefined || b === undefined || a + b < MIN_RATIO * 2) return node
-    const next = Math.min(Math.max(a + delta, MIN_RATIO), a + b - MIN_RATIO)
-    return { ...node, ratios: node.ratios.map((r, i) => (i === index ? next : i === index + 1 ? a + b - next : r)) }
+    const pair = a === undefined || b === undefined ? null : resizedPair(a, b, delta)
+    if (!pair || (pair[0] === a && pair[1] === b)) return node
+    return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
   }
-  return { ...layout, root: resize(layout.root) }
+  const root = resize(layout.root)
+  return root === layout.root ? layout : { ...layout, root }
 }
 
 /** Drops tabs whose chat, file or view no longer exists (by `sessionSurfaceKey`). */

@@ -19,6 +19,7 @@ import {
   loadEditorLayout,
   openTab,
   pruneEditorLayout,
+  resizedPair,
   resizeSplit,
   saveEditorLayout
 } from "./editor-layout.js"
@@ -217,6 +218,13 @@ describe("editor layout structural sharing", () => {
 })
 
 describe("editor layout helpers", () => {
+  it("keeps starved divider pairs non-negative", () => {
+    const pair = resizedPair(0.02, 0.03, 1)!
+    expect(pair[0]).toBeCloseTo(0.025)
+    expect(pair[1]).toBeCloseTo(0.025)
+    expect(pair[0] + pair[1]).toBeCloseTo(0.05)
+  })
+
   it("closes tabs by predicate, lists distinct tabs, and moves the active tab to a neighbour", () => {
     let layout = createEditorLayout([chat("a"), view("pr"), view("terminal")])
     layout = dropTab(layout, { surface: view("pr") }, firstGroupId(layout), "right")

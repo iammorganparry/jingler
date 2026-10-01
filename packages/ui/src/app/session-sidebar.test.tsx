@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
 import { testSession as session } from "../test-support.js"
-import { allTabs, dropTab, focusedGroup, openTab } from "./editor-layout.js"
+import { activeSurface, allTabs, dropTab, focusedGroup, openTab } from "./editor-layout.js"
 import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
@@ -423,11 +423,13 @@ describe("SessionSidebar session tree", () => {
     expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
   })
 
-  it("opens a chat as a tab and selects its session; closes it everywhere from the sidebar", () => {
+  it("opens a chat as a tab and selects its session and canonical chat; closes it everywhere from the sidebar", () => {
     const select = vi.fn()
-    renderTree({ onSelect: select })
+    const selectChat = vi.fn()
+    renderTree({ onSelect: select, chatActions: { onSelectChat: selectChat } })
     fireEvent.click(within(screen.getByTestId("session-tree-chat-c2")).getByText("Side chat"))
     expect(select).toHaveBeenCalledWith("s1")
+    expect(selectChat).toHaveBeenCalledWith("s1", "c2")
     expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).toContain("c2")
     fireEvent.click(screen.getByRole("button", { name: "Close Side chat everywhere" }))
     expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).not.toContain("c2")
@@ -435,9 +437,11 @@ describe("SessionSidebar session tree", () => {
     expect(screen.getByTestId("session-tree-chat-c2")).toBeTruthy()
   })
 
-  it("lists open files and session views, and closes files only after the editor allows it", () => {
+  it("lists open files and session views, and reveals a file when its close is blocked", () => {
     const requestClose = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
-    renderTree({ onRequestCloseFile: requestClose })
+    const closeView = vi.fn()
+    const select = vi.fn()
+    renderTree({ onRequestCloseFile: requestClose, onCloseView: closeView, onSelect: select })
     fireEvent.click(within(screen.getByTestId("session-tree-chat-c1")).getByText("Main chat"))
     act(() =>
       updateEditorLayout("s1", (l) => openTab(openTab(l, { kind: "file", id: "src/a.ts" }), { kind: "view", id: "terminal" }))
@@ -457,12 +461,32 @@ describe("SessionSidebar session tree", () => {
       )
     )
     fireEvent.click(screen.getByRole("button", { name: "Close Terminal everywhere" }))
+    expect(closeView).toHaveBeenCalledWith("s1", { kind: "view", id: "terminal" })
     expect(allTabs(editorLayoutOf("s1")!).map((tab) => tab.id)).not.toContain("terminal")
     fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
     expect(requestClose).toHaveBeenCalledWith("s1", "src/a.ts")
+    expect(select).toHaveBeenCalledWith("s1")
+    expect(activeSurface(focusedGroup(editorLayoutOf("s1")!)!).id).toBe("src/a.ts")
     expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
     expect(screen.queryByTestId("session-tree-file-src/a.ts")).toBeNull()
+  })
+
+  it("keeps the active tree open without offering a broken collapse control", () => {
+    renderTree()
+    expect(screen.queryByTestId("session-expand-s1")).toBeNull()
+    expect(screen.getByTestId("session-tree-s1")).toBeTruthy()
+    expect(screen.getByTestId("session-expand-s2")).toBeTruthy()
+  })
+
+  it("attributes activity to the chat that is actually running", () => {
+    renderTree({
+      chatActivities: {
+        s1: { c2: { kind: "running", verb: "Running", target: "tests" } }
+      }
+    })
+    expect(within(screen.getByTestId("session-tree-chat-c1")).getByRole("img", { name: "Idle" })).toBeTruthy()
+    expect(within(screen.getByTestId("session-tree-chat-c2")).getByRole("img", { name: "Running" })).toBeTruthy()
   })
 
   it("shows no tree in the collapsed rail", () => {

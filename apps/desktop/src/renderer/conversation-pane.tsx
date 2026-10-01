@@ -238,6 +238,7 @@ export function ConversationPane({
   view = "conversation",
   onOpenPlanReview,
   onPlanDraftAvailable,
+  onPlanDraftUnavailable,
   onRestore,
   onDelete,
   onInitialPromptConsumed,
@@ -273,6 +274,8 @@ export function ConversationPane({
   onOpenPlanReview?: (stepId?: string) => void
   /** Auto-present a newly active Plannotator review at the host's responsive width. */
   onPlanDraftAvailable?: () => void
+  /** Clear a pending presentation when the review disappears before promotion. */
+  onPlanDraftUnavailable?: () => void
   /** Restore this session from archived (the banner + locked composer). */
   onRestore?: (sessionId: string) => void
   /** Permanently delete this session (the banner). */
@@ -329,7 +332,12 @@ export function ConversationPane({
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
     const reviewId = plannotatorReviewId(convo.plannotator)
-    if (reviewId === null || reviewId === presentedPlannotatorReview.current) return
+    if (reviewId === null) {
+      if (presentedPlannotatorReview.current !== null) onPlanDraftUnavailable?.()
+      presentedPlannotatorReview.current = null
+      return
+    }
+    if (reviewId === presentedPlannotatorReview.current) return
     presentedPlannotatorReview.current = reviewId
     if (
       onPlanDraftAvailable !== undefined &&
@@ -337,7 +345,7 @@ export function ConversationPane({
     ) {
       onPlanDraftAvailable()
     }
-  }, [activeChat.id, plannotatorReviewId(convo.plannotator), onPlanDraftAvailable])
+  }, [activeChat.id, plannotatorReviewId(convo.plannotator), onPlanDraftAvailable, onPlanDraftUnavailable])
   // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
   // memoised transcript turns don't re-render while a turn streams. Adopt updates
   // this session in place; fork publishes a NEW worktree session into the sidebar
