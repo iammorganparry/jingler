@@ -60,6 +60,8 @@ import {
   type SessionChatTabsRenderContext,
   SessionConversation
 } from "../screens/session-conversation.js"
+import { openTab } from "./editor-layout.js"
+import { updateEditorLayout } from "./editor-layout-machine.js"
 import { useSplitLayout } from "./use-split-layout.js"
 import { matchSplitShortcut, type SplitShortcut } from "./split-shortcuts.js"
 import {
@@ -411,6 +413,8 @@ export interface JinglerAppProps {
     images: ReadonlyArray<Attachment>,
     onProgress?: (phase: SessionCreationPhase) => void
   ) => Promise<Session>
+  /** Start a new chat in a session (the editor "+" menu). */
+  onCreateChat?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
@@ -512,6 +516,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         onClosePane={(index) => group && split.closePane(group.id, index)}
         onCloseGroupPane={split.closePane}
         onRenameSession={onRenameSession}
+        onCreateChat={onCreateChat}
+        onOpenFilePicker={renderFileQuickOpen ? setFileQuickOpenSessionId : undefined}
         onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}
         isBrowserActive={isBrowserActive}
@@ -716,7 +722,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
+  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -1345,12 +1351,10 @@ function getActiveTabContext(active: Session) {
             onOpenChange: (open) => {
               if (!open) setFileQuickOpenSessionId(null)
             },
-            onOpenPath: () => {
+            onOpenPath: (path) => {
               setFileQuickOpenSessionId(null)
-              setTabRequest((previous) => ({
-                tabId: BUILTIN_TAB.files,
-                nonce: (previous?.nonce ?? 0) + 1
-              }))
+              // A picked file opens as its own tab in the focused group.
+              updateEditorLayout(fileQuickOpenSession.id, (layout) => openTab(layout, { kind: "file", id: path }))
             }
           })
         : null}

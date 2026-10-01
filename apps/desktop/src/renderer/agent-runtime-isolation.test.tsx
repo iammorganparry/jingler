@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { Session } from "@jingler/core"
 import { SessionPane } from "../../../../packages/ui/src/screens/session-pane.js"
+import { allTabs } from "../../../../packages/ui/src/app/editor-layout.js"
+import { editorLayoutOf, resetEditorLayouts } from "../../../../packages/ui/src/app/editor-layout-machine.js"
 import { createActor } from "xstate"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
@@ -13,6 +15,7 @@ import {
 const store = new Map<string, string>()
 beforeEach(() => {
   store.clear()
+  resetEditorLayouts()
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
@@ -74,8 +77,8 @@ describe("agent runtime ownership matrix", () => {
     view.rerender(pane({ ...baseSession, activeChatId: "b" }))
     await waitFor(() =>
       expect(
-        screen.getAllByTestId(/^surface-pane-/).some((node) =>
-          node.dataset.surface?.includes('["view","browser","b"]')
+        allTabs(editorLayoutOf(baseSession.id)!).some(
+          (surface) => surface.kind === "view" && surface.id === "browser" && surface.chatId === "b"
         )
       ).toBe(true)
     )

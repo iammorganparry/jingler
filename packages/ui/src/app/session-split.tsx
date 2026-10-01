@@ -69,6 +69,10 @@ export interface SessionSplitProps {
       readonly onSelectConversation: () => void
     }
   ) => ReactNode
+  /** Start a new chat in a session (the editor "+" menu). */
+  onCreateChat?: (sessionId: string) => void
+  /** Open the repository file picker for a session (the editor "+" menu). */
+  onOpenFilePicker?: (sessionId: string) => void
   /** Rename a session from its pane title. */
   onRenameSession?: (id: string, title: string) => void
   onFocusChat?: (sessionId: string, chatId: string) => void
@@ -165,6 +169,8 @@ export function SessionSplit(props: SessionSplitProps) {
         renderChatTabs={props.renderChatTabs}
         renderSubagentTabs={props.renderSubagentTabs}
         onRenameSession={props.onRenameSession}
+        onCreateChat={props.onCreateChat}
+        onOpenFilePicker={props.onOpenFilePicker}
         onFocusChat={props.onFocusChat}
         onToggleBrowser={props.onToggleBrowser}
         isBrowserActive={props.isBrowserActive}

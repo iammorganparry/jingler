@@ -50,6 +50,8 @@ import {
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
+  openTab,
+  updateEditorLayout,
 } from "@jingler/ui";
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
@@ -1536,6 +1538,18 @@ function AuthedApp({
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
+        onCreateChat={(sessionId) =>
+          queueSessionChatMutation(
+            sessionId,
+            () => rpc.sessionsCreateChat(sessionId),
+            (updated) => {
+              publishSessionUpdate(updated);
+              updateEditorLayout(sessionId, (layout) =>
+                openTab(layout, { kind: "chat", id: updated.activeChatId }),
+              );
+            },
+          )
+        }
         onArchiveSession={archiveSession}
         onRestoreSession={restoreSession}
         onDeleteSession={(id) =>

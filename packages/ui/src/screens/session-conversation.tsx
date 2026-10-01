@@ -58,6 +58,10 @@ export interface SessionConversationProps {
   onClosePane?: (index: number) => void
   /** Close a pane of any group (a sidebar segment's ×). */
   onCloseGroupPane?: (groupId: string, index: number) => void
+  /** Start a new chat in a session (the editor "+" menu). */
+  onCreateChat?: (sessionId: string) => void
+  /** Open the repository file picker for a session (the editor "+" menu). */
+  onOpenFilePicker?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Make a nested chat-owned surface the session's canonical active chat. */
@@ -312,6 +316,8 @@ export function SessionConversation(props: SessionConversationProps) {
             renderChatTabs={props.renderChatTabs}
             renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
+            onCreateChat={props.onCreateChat}
+            onOpenFilePicker={props.onOpenFilePicker}
             onFocusChat={props.onFocusChat}
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}
