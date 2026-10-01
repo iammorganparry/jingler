@@ -101,6 +101,9 @@ const getFileBrowserActor = (
     input: {
       sessionId,
       ...(worktreePath === undefined ? {} : { worktreePath }),
+      ...(instanceId === undefined
+        ? {}
+        : { initialEntries: actors.get(sessionId)?.getSnapshot().context.entries ?? [] }),
       documentOnly: instanceId !== undefined
     }
   })

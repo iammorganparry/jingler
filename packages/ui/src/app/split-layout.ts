@@ -651,7 +651,11 @@ export const load = (): Workspace => {
     const activeGroupId = (isPane(activePane)
       ? groups.find((group) => group.panes.some((pane) => pane.sessionId === activePane.sessionId))
       : groups.find((group) => group.id === parsed.activeGroupId))?.id ?? groups[0]!.id
-    return { groups, activeGroupId }
+    // Sessions no longer split: a stored multi-pane group explodes into one
+    // group per session, keeping the focused pane's session on screen.
+    return groups
+      .filter((group) => group.panes.length > 1)
+      .reduce((ws, group) => separateAll(ws, group.id), { groups, activeGroupId } as Workspace)
   } catch {
     return EMPTY_WORKSPACE
   }

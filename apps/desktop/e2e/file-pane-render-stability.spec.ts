@@ -6,7 +6,7 @@ import { appShell, expect, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
- * Opening a file adds a pane beside the files already open. Those panes must
+ * Opening a file adds a tab beside the files already open. Those mounted bodies must
  * not repaint: Pierre force-renders its whole shadow DOM whenever an option it
  * is handed changes identity, and a re-created callback is enough to blank and
  * redraw a file the operator was not touching — a visible flash per click.
@@ -81,14 +81,6 @@ const paneChurn = (pane: Locator, key: string) =>
     }
   }, key)
 
-const openTab = async (window: Page, path: string): Promise<void> => {
-  await window.getByTestId(`file-tab-${path}`).getByRole("button", { name: path, exact: true }).click()
-  await expect(filePane(window, path).getByRole("textbox", { name: path })).toContainText(
-    "export const",
-    { timeout: 15_000 }
-  )
-}
-
 test("opening another file leaves the files already open untouched", async ({ launchApp }) => {
   const { app, window } = await launchApp({
     configured: true,
@@ -98,7 +90,6 @@ test("opening another file leaves the files already open untouched", async ({ la
     sessions: ({ repoPath }) => [session(repoPath)]
   })
 
-  // Wide enough for chat plus two file panes side by side.
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(1800, 1000)
   })
@@ -106,24 +97,12 @@ test("opening another file leaves the files already open untouched", async ({ la
   await openFile(window, "src/alpha.ts")
   await openFile(window, "src/beta.ts")
 
-  // Free the chat's slot so the two files can sit side by side (MAX_PANES = 3).
-  await window.getByRole("button", { name: "Close pane 1" }).click()
-  await openTab(window, "src/alpha.ts")
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
-  const filesView = window.locator(`[data-surface='${JSON.stringify(["view", "files", null])}']`)
   const alpha = filePane(window, "src/alpha.ts")
   // Let highlighting and the first layout settle before measuring.
   await window.waitForTimeout(1_000)
-  await watchPane(filesView, "files")
   await watchPane(alpha, "alpha")
 
-  await openTab(window, "src/beta.ts")
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "3")
+  await openFile(window, "src/gamma.ts")
   await window.waitForTimeout(1_000)
-  const churn = {
-    files: await paneChurn(filesView, "files"),
-    alpha: await paneChurn(alpha, "alpha")
-  }
-  expect(churn.alpha).toEqual({ mutations: 0, sameCode: true })
-  expect(churn.files).toEqual({ mutations: 0, sameCode: true })
+  expect(await paneChurn(alpha, "alpha")).toEqual({ mutations: 0, sameCode: true })
 })

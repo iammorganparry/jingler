@@ -76,6 +76,7 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
         BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(true)
     }
 
+    await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
     const composer = window.getByPlaceholder(/message/i)
     await composer.fill(`Navigate the operator's Preview. [[browser-url=${targetUrl}]]`)
     await composer.press("Enter")
@@ -93,10 +94,6 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     await expect(window.getByText("Browser workflow completed through pi.")).toBeVisible({
       timeout: 20_000
     })
-    await expect(window.getByLabel("Preview URL")).toHaveValue(
-      `http://127.0.0.1:${address.port}/browser-pi-final`
-    )
-
     const nativeBrowserVisible = () => app.evaluate(({ BrowserWindow }, url) =>
       (BrowserWindow.getAllWindows()[0]?.contentView.children ?? []).some((view) => {
         const candidate = view as typeof view & { webContents?: { getURL(): string } }
@@ -106,7 +103,11 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
     await expect.poll(() => app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()[0]?.isFocused() ?? false)).toBe(false)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.emit("focus"))
+    await window.getByTestId("editor-tab-view-browser").getByRole("tab").click()
     await expect.poll(nativeBrowserVisible).toBe(true)
+    await expect(window.getByLabel("Preview URL")).toHaveValue(
+      `http://127.0.0.1:${address.port}/browser-pi-final`
+    )
 
     expect(requests.filter((path) => path === "/browser-pi")).toHaveLength(1)
     expect(requests.filter((path) => path === "/browser-pi-final")).toHaveLength(1)

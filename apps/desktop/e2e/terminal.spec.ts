@@ -42,7 +42,7 @@ test("opens Terminal as a view tab and its `+` button adds another shell", async
   await expect(appShell(window)).toBeVisible()
   await expect(window.locator(".xterm")).toHaveCount(0)
   await window.getByTestId("view-tab-terminal").click()
-  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
+  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 
   // A second terminal from the dock's "New terminal" (+) affordance.

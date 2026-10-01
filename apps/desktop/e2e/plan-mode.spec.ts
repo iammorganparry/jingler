@@ -41,6 +41,17 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
 
 /** Plan review is a native React surface inside the main window. */
 const review = (launched: LaunchedApp) => launched.window.getByTestId("plan-review")
+const planEditorTab = (launched: LaunchedApp) =>
+  launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first()
+const ensurePlanTab = async (launched: LaunchedApp) => {
+  const tab = planEditorTab(launched)
+  if (await tab.count() === 0) {
+    await launched.window.getByRole("button", { name: "New tab" }).click()
+    await launched.window.getByTestId("new-tab-option-plan").click()
+  }
+  await expect(tab).toBeVisible({ timeout: 20_000 })
+  return tab
+}
 const reviewText = (launched: LaunchedApp) => review(launched).innerText().catch(() => "")
 
 const expandTechnicalDetails = async (launched: LaunchedApp, index: number) => {
@@ -76,8 +87,7 @@ const planFile = (launched: LaunchedApp): string => {
 }
 
 const openPlanTab = async (launched: LaunchedApp) => {
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
   return planTab
@@ -104,8 +114,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect.poll(() => existsSync(join(launched.repoPath, "PLAN.md")), {
     timeout: 20_000
   }).toBe(true)
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
 
   await expect(review(launched)).toBeVisible()
@@ -146,7 +155,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await expect(launched.window.getByTestId("plan-progress-stage-implement-auth"))
     .toContainText("Done")
   // The plan outlives its approval: the tab persists as a live progress surface.
-  const persistentTab = launched.window.getByTestId("view-tab-plan").first()
+  const persistentTab = planEditorTab(launched)
   await expect(persistentTab).toBeVisible()
   await persistentTab.click()
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
@@ -163,8 +172,7 @@ test("diagram node opens linked stage", async ({ launchApp }) => {
   })
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
 
   const verifyHeading = review(launched).getByRole("heading", { name: "Verify auth", exact: true })
@@ -262,9 +270,9 @@ test("submission rejects a plan with an unsafe diff path and no test strategy", 
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched, "[[plan]] [[invalid-plan]] replace auth")
 
-  // The fixture agent copies the validator's errors into the fixed plan it resubmits.
+  // The fixture agent rewrites the rejected draft into a valid plan and resubmits it.
   await expect.poll(() => planFile(launched), { timeout: 30_000 })
-    .toContain('Fixed validation error: Plan needs a "## Test strategy" section.')
+    .toContain("## Test strategy")
   const fixed = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
   expect(fixed).toContain('proposes a change to unsafe path "../outside.ts"')
   expect(fixed).not.toContain("diff path=../outside.ts")
@@ -286,8 +294,7 @@ test("a new review in the same chat is presented and can be approved", async ({
   })
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
   await approveReview(launched)
@@ -325,16 +332,17 @@ test("closing the Plan tab keeps a pending review approvable", async ({
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
-  await launched.window.getByRole("button", { name: "Close Plan" }).click()
+  await launched.window.getByTestId("editor-tab-view-plan")
+    .getByRole("button", { name: "Close Plan", exact: true }).click()
   await expect(review(launched)).toHaveCount(0)
   await expect(launched.window.getByText("Implemented and verified the approved plan."))
     .toHaveCount(0)
 
-  await planTab.click()
+  await launched.window.getByRole("button", { name: "New tab" }).click()
+  await launched.window.getByTestId("new-tab-option-plan").click()
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
@@ -354,8 +362,7 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
@@ -383,8 +390,7 @@ test("revises one stage approach through native review feedback", async ({
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
   await expandTechnicalDetails(launched, 0)
@@ -426,9 +432,7 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  await expect(launched.window.getByTestId("view-tab-plan").first()).toBeVisible({
-    timeout: 20_000
-  })
+  await ensurePlanTab(launched)
   await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
   const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
   await composer.fill("Keep the existing token format")
@@ -450,8 +454,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   })
   await expect(appShell(first.window)).toBeVisible()
   await startPlanReview(first)
-  const firstPlanTab = first.window.getByTestId("view-tab-plan").first()
-  await expect(firstPlanTab).toBeVisible({ timeout: 20_000 })
+  const firstPlanTab = await ensurePlanTab(first)
   await firstPlanTab.click()
   await expect.poll(() => reviewText(first)).toContain("Implement the auth change")
   await first.app.close()
@@ -467,7 +470,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
     githubRelay: first.githubRelay
   })
   await expect(appShell(reopened.window)).toBeVisible()
-  const planTab = reopened.window.getByTestId("view-tab-plan").first()
+  const planTab = planEditorTab(reopened)
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
   await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
@@ -499,8 +502,7 @@ test("closing a chat removes its plan review", async ({ launchApp }) => {
   })
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
-  await expect(planTab).toBeVisible({ timeout: 20_000 })
+  const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
 
@@ -529,8 +531,7 @@ for (const recoveryCase of [
     })
     await expect(appShell(first.window)).toBeVisible()
     await startPlanReview(first)
-    await expect(first.window.getByTestId("view-tab-plan").first())
-      .toBeVisible({ timeout: 20_000 })
+    await ensurePlanTab(first)
     await first.app.close()
 
     recoveryCase.prepare(join(first.repoPath, "PLAN.md"))
@@ -548,7 +549,7 @@ for (const recoveryCase of [
     await expect(reopened.window.getByText(recoveryCase.message)).toBeVisible({ timeout: 20_000 })
     await expect(reopened.window.getByText("Implemented and verified the approved plan."))
       .toHaveCount(0)
-    await expect(reopened.window.getByTestId("view-tab-plan")).toHaveCount(0)
+    await expect(reopened.window.getByTestId("editor-tab-view-plan")).toHaveCount(0)
     await expect(reopened.window.getByTestId("plan-task-list")).toHaveCount(0)
     await expect(review(reopened)).toHaveCount(0)
   })

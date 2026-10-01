@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
 import { testSession } from "../test-support.js"
 import { SessionConversation } from "./session-conversation.js"
+import { resetEditorLayouts } from "../app/editor-layout-machine.js"
 
 const projects: Project[] = ["alpha", "beta", "empty"].map((id) => ({
   id, name: id, path: `/repos/${id}`, availability: "available",

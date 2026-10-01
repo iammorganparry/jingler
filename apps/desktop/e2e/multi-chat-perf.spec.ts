@@ -31,7 +31,7 @@ const transcripts = Object.fromEntries(chats.map((chat) => [chat.id,
 const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sessions) => {
     const multiple = sessions.length > 1
     const frames: number[] = []
-    const actions = multiple ? ["switch-session", "open-chat", "move-pane", "close-pane"] : ["open-chat", "move-pane", "close-pane"]
+    const actions = multiple ? ["switch-session", "open-chat", "split-tab", "close-chat"] : ["open-chat", "split-tab", "close-chat"]
     const actionFrames = actions.map(() => [] as number[])
     let actionIndex = 0
     const longTasks: number[] = []
@@ -49,9 +49,11 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
       handle = requestAnimationFrame(sample)
     }
     handle = requestAnimationFrame(sample)
-    let maxPanes = 0
+    let maxGroups = 0
     const operations = multiple ? 36 : 24
     let openedChatId = ""
+    const surfaceFor = (chatId: string) => [...document.querySelectorAll<HTMLElement>("[data-surface]")]
+      .find((pane) => pane.dataset.surface === JSON.stringify(["chat", chatId, null]))
     const paneFor = (chatId: string) => [...document.querySelectorAll<HTMLElement>("[data-surface]")]
       .find((pane) => pane.getClientRects().length > 0 && pane.dataset.surface === JSON.stringify(["chat", chatId, null]))
     const control = (i: number) => {
@@ -69,16 +71,22 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
         return [...document.querySelectorAll<HTMLButtonElement>("button")]
           .find((button) => button.getClientRects().length > 0 && button.textContent === chat.title)
       }
-      const pane = paneFor(openedChatId)
-      return pane?.querySelector<HTMLButtonElement>(actions[actionIndex] === "move-pane"
-        ? 'button[aria-label^="Move pane"][aria-label$=" left"]'
-        : 'button[aria-label^="Close pane"]')
+      if (actions[actionIndex] === "split-tab") {
+        return document.querySelector<HTMLButtonElement>(
+          '[data-testid="editor-group"][data-focused="true"] button[aria-label="Split right"]'
+        )
+      }
+      return document.querySelector<HTMLButtonElement>(
+        `[data-testid="session-tree-chat-${openedChatId}"] button[aria-label$=" everywhere"]`
+      )
     }
     const assertAction = (mainId: string, i: number) => {
-      if (!paneFor(mainId)) throw new Error(`Main disappeared at operation ${i}`)
+      if (!surfaceFor(mainId)) throw new Error(`Main disappeared at operation ${i}`)
       if (actions[actionIndex] === "switch-session") return
       const visible = paneFor(openedChatId) !== undefined
-      if (visible !== (actions[actionIndex] !== "close-pane")) {
+      const groups = document.querySelectorAll('[data-testid="editor-group"]').length
+      const expected = actions[actionIndex] === "close-chat" ? !visible : visible
+      if (!expected || (actions[actionIndex] === "split-tab" && groups !== 2)) {
         throw new Error(`Benchmark action did not change the expected surface at operation ${i}`)
       }
     }
@@ -90,7 +98,7 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
       button.click()
       await new Promise((resolve) => setTimeout(resolve, 400))
       assertAction(session.chats[0]!.id, i)
-      maxPanes = Math.max(maxPanes, [...document.querySelectorAll("[data-surface-pane-index]")].filter((pane) => pane.getClientRects().length > 0).length)
+      maxGroups = Math.max(maxGroups, document.querySelectorAll('[data-testid="editor-group"]').length)
     }
     cancelAnimationFrame(handle)
     observer.disconnect()
@@ -105,12 +113,12 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
       }
     }
     return {
-      operations, ...stats(frames), longTasks, maxPanes,
+      operations, ...stats(frames), longTasks, maxGroups,
       actions: Object.fromEntries(actions.map((action, i) => [action, stats(actionFrames[i]!)]))
     }
   }, sessions.map(({ id, chats }) => ({ id, chats })))
 
-test("benchmark rich transcripts while opening, moving and closing chat panes", async ({ launchApp }, testInfo) => {
+test("benchmark rich transcripts while opening, splitting and closing chat tabs", async ({ launchApp }, testInfo) => {
   test.setTimeout(180_000)
   const { window } = await launchApp({
     configured: true, withRepo: true,
@@ -119,17 +127,14 @@ test("benchmark rich transcripts while opening, moving and closing chat panes", 
   await window.evaluate(() => localStorage.setItem("jingler:mcp-import-prompt:v1", "done"))
   await window.reload()
   await sessionRow(window, seed.title).click()
-  for (const title of ["Stress 1", "Stress 2"]) {
-    await window.getByRole("button", { name: title, exact: true }).click()
-  }
-  await expect(window.locator('[data-testid="conversation-scroll"]:visible')).toHaveCount(3)
+  await expect(window.locator('[data-testid="conversation-scroll"]:visible')).toHaveCount(1)
   await expect(window.locator('[data-index]:visible').first()).toBeVisible()
   await window.waitForTimeout(1500)
 
   const result = await measure(window)
   console.log(`MULTI_CHAT_BENCH ${JSON.stringify(result)}`)
   await testInfo.attach("multi-chat-frame-times.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" })
-  expect(result.maxPanes).toBeLessThanOrEqual(3)
+  expect(result.maxGroups).toBeLessThanOrEqual(2)
   const scrolls = window.locator('[data-testid="conversation-scroll"]:visible')
   const history = scrolls.first()
   await history.evaluate((element) => { element.scrollTop = 0 })
@@ -194,10 +199,10 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
   console.log(`CACHED_SESSION_SWITCH_LATENCY ${JSON.stringify(cachedSwitches)}`)
   for (const session of sessions) {
     await sessionRow(window, session.title).click()
-    for (const title of ["Stress 1", "Stress 2"]) {
-      await window.getByRole("button", { name: title, exact: true }).click()
+    for (const chat of session.chats.slice(1, 3)) {
+      await window.getByTestId(`session-tree-chat-${chat.id}`).getByRole("button").first().click()
     }
-    await expect(window.locator('[data-testid="conversation-scroll"]:visible')).toHaveCount(3)
+    await expect(window.locator('[data-testid="conversation-scroll"]:visible')).toHaveCount(1)
   }
   const cdp = await window.context().newCDPSession(window)
   await cdp.send("Profiler.enable")
@@ -220,12 +225,13 @@ test("benchmark three running sessions with six rich chat tabs each", async ({ l
   await cdp.detach()
   console.log(`MULTI_SESSION_BENCH ${JSON.stringify(result)}`)
   await testInfo.attach("multi-session-frame-times.json", { body: JSON.stringify(result, null, 2), contentType: "application/json" })
-  expect(result.maxPanes).toBeLessThanOrEqual(3)
+  expect(result.maxGroups).toBeLessThanOrEqual(2)
   for (const session of sessions) {
     await sessionRow(window, session.title).click()
+    await window.getByTestId(`session-tree-chat-${session.chats[0]!.id}`).getByRole("button").first().click()
     await expect(window.locator(`[data-session="${session.id}"]:visible`).getByPlaceholder("Queue a message while the agent works…")).toBeVisible()
     await expect(window.locator(`[data-session="${session.id}"]:visible`).getByText("Holding the active turn for queue actions.")).toBeVisible()
-    await window.getByRole("button", { name: "Stress 1", exact: true }).click()
+    await window.getByTestId(`session-tree-chat-${session.chats[1]!.id}`).getByRole("button").first().click()
     const key = JSON.stringify(["chat", session.chats[1]!.id, null])
     const resumed = window.locator(`[data-session="${session.id}"]:visible [data-surface='${key}']`)
     const composer = resumed.getByPlaceholder("Message the agent…")

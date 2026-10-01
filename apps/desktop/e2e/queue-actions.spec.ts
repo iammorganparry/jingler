@@ -70,7 +70,7 @@ test("a queued message can be rewritten before it is ever sent", async ({ launch
 test("a queued message can be handed off to a fresh chat", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
-  await expect(window.getByTitle("1. Chat 1")).toBeVisible()
+  await expect(window.getByRole("tab", { name: "Chat 1", exact: true })).toBeVisible()
   await parkABusyRun(window)
 
   const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
@@ -82,30 +82,37 @@ test("a queued message can be handed off to a fresh chat", async ({ launchApp })
 
   // A second chat opens beside the main chat; the message runs THERE, so it
   // is no longer queued against the busy chat.
-  const handedOff = window.getByTitle("2. Chat 2")
+  const handedOff = window.getByRole("tab", { name: "Chat 2", exact: true })
   await expect(handedOff).toBeVisible({ timeout: 15_000 })
-  await expect(handedOff).toHaveAttribute("aria-current", "page")
+  await expect(handedOff).toHaveAttribute("aria-selected", "true")
   await expect(window.getByText("write the release notes for v2")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
-  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible()
+  // The handoff opens beside main as its own tab; main keeps holding its turn.
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await expect(window.getByText("Holding the active turn for queue actions.").filter({ visible: true })).toBeVisible()
 })
 
-test("repeated queued handoffs never hide main or exceed three panes", async ({ launchApp }) => {
+test("repeated queued handoffs never hide main", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
   await expect(appShell(window)).toBeVisible()
   await parkABusyRun(window)
-  const main = window.locator('[data-surface]').filter({ hasText: "Holding the active turn for queue actions." }).first()
+  const main = window.locator("[data-surface]").filter({ hasText: "Holding the active turn for queue actions." }).first()
   const mainKey = await main.getAttribute("data-surface")
-  const mainPane = window.locator(`[data-surface=${JSON.stringify(mainKey)}]`)
+  const mainBody = window.locator(`[data-surface=${JSON.stringify(mainKey)}]`)
+  // The main chat auto-titles from its prompt, so address its tab by id.
+  const [, mainChatId] = JSON.parse(mainKey!) as [string, string, null]
+  const mainTab = window.getByTestId(`editor-tab-chat-${mainChatId}`).getByRole("tab")
   for (let i = 0; i < 4; i++) {
-    const composer = mainPane.getByPlaceholder("Queue a message while the agent works…")
+    // Each handoff opens its chat as a new tab; bring main back to queue the next.
+    await mainTab.click()
+    const composer = mainBody.getByPlaceholder("Queue a message while the agent works…")
     await composer.fill(`[[queue-hold]] handed off ${i}`)
     await composer.press("Enter")
-    await mainPane.getByTitle(/^Hand off/).first().click()
-    await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", String(Math.min(i + 2, 3)))
-    await expect(mainPane).toBeVisible()
-    await expect(mainPane.getByText("Queued", { exact: true })).toHaveCount(0)
+    await mainBody.getByTitle(/^Hand off/).first().click()
+    await expect(window.getByRole("tab", { name: `Chat ${i + 2}`, exact: true })).toBeVisible({ timeout: 15_000 })
+    await expect(mainTab).toBeVisible()
+    await expect(mainBody.getByText("Queued", { exact: true })).toHaveCount(0)
   }
-  await mainPane.getByRole("button", { name: /^Close pane/ }).click()
-  await expect(mainPane).toHaveCount(0)
+  await window.getByTestId(`editor-tab-chat-${mainChatId}`).getByRole("button", { name: /^Close / }).click()
+  await expect(mainTab).toHaveCount(0)
 })

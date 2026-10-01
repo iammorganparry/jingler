@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
-import type { SplitGroup } from "./split-layout.js"
 import { testSession as session } from "../test-support.js"
+import { activeSurface, allTabs, dropTab, focusedGroup, openTab } from "./editor-layout.js"
+import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
 let canvasContext: { mockRestore: () => void }
@@ -247,213 +248,6 @@ describe("SessionSidebar global destinations", () => {
   })
 })
 
-/**
- * A split is ONE sidebar row, and it must survive every way the list can shrink
- * beneath it. An early version keyed the row on `panes[0]`, so any list that
- * didn't happen to contain the first pane rendered no pill at all — the split
- * stayed on screen with nothing in the sidebar pointing at it. These pin the
- * conditions that used to break it; where the row SITS is the next block down.
- */
-describe("SessionSidebar split pill presence", () => {
-  const SPLIT: SplitGroup = {
-    id: "g:first",
-    panes: [
-      { sessionId: "first", ratio: 0.5 },
-      { sessionId: "second", ratio: 0.5 }
-    ],
-    focused: 0
-  }
-
-  const renderSidebar = (
-    sessions: ReadonlyArray<ReturnType<typeof session>>,
-    filters = DEFAULT_FILTERS
-  ) =>
-    render(
-      <SessionSidebar
-        activeSessionId="first"
-        onSelect={() => {}}
-        sessions={sessions}
-        splitGroups={[SPLIT]}
-        activeGroupId="g:first"
-        defaultFilters={filters}
-      />
-    )
-
-  const both = [
-    session({ id: "first", title: "Refactor auth flow" }),
-    session({ id: "second", title: "Bump the toolchain" })
-  ]
-
-  it("draws the pill once, at the first pane, when everything is showing", () => {
-    renderSidebar(both)
-    expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
-    expect(screen.getByTestId("split-segment-first")).toBeDefined()
-    expect(screen.getByTestId("split-segment-second")).toBeDefined()
-    // And neither member is ALSO drawn as a plain row.
-    expect(rowOrder()).toStrictEqual([])
-  })
-
-  it("still draws the pill when the narrowing keeps only a LATER pane", () => {
-    // The regression: narrowing to pane 2 left pane 1 with no entry to hang the
-    // pill on, while pane 2's entry bowed out for not being first. The sidebar
-    // found a session and then rendered nothing whatsoever.
-    //
-    // Driven by the REPO facet rather than by typing. This used to type
-    // "toolchain" into the sidebar's "Filter sessions…" field; that field is
-    // gone — search is global now and lives in the title bar — but the property
-    // being pinned is about the pill surviving a shrunken list, not about how
-    // the list shrank. The repo filter is the narrowing this panel still owns.
-    renderSidebar(
-      [
-        session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
-        session({ id: "second", title: "Bump the toolchain", repo: "gtm-grid" })
-      ],
-      { ...DEFAULT_FILTERS, repo: "gtm-grid" }
-    )
-
-    expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
-    expect(screen.getByTestId("split-segment-second")).toBeDefined()
-  })
-
-  it("still draws the pill when the FIRST pane's session is missing from the list", () => {
-    // Defence in depth, using archiving as the way to make a member absent.
-    //
-    // The app no longer reaches this state — archiving evicts a session from its
-    // split (`use-split-layout`'s prune) precisely so it can't be in two sidebar
-    // places at once. But this component takes `splitGroups` as data and cannot
-    // police where it came from: a stale persisted workspace arriving one render
-    // before the prune runs looks exactly like this. Ownership must not depend
-    // on `panes[0]` being present, and that is what this pins.
-    // Default filters — Status: Active — so the archived first pane is genuinely
-    // ABSENT from the list, which is the condition being pinned.
-    renderSidebar([
-      session({ id: "first", title: "Refactor auth flow", archived: true, archivedAt: "2026-07-18T08:00:00.000Z" }),
-      session({ id: "second", title: "Bump the toolchain" })
-    ])
-
-    expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
-    expect(screen.getByTestId("split-segment-second")).toBeDefined()
-    // No plain rows: `second` is drawn as a segment of the pill, and `first` is
-    // filtered out entirely. Previously `first` ALSO appeared as its own row in
-    // the Archived group, so one session occupied two places in the sidebar.
-    expect(rowOrder()).toStrictEqual([])
-  })
-
-  it("draws no pill when the narrowing excludes every pane", () => {
-    // Same conversion as the test above, with one wrinkle: the excluding repo
-    // has to EXIST. `reconcileRepo` deliberately clears a repo filter that no
-    // live session belongs to — a persisted filter naming a vanished repo would
-    // otherwise empty the sidebar with no visible cause — so filtering on a
-    // made-up name shows everything and pins nothing. Hence the third session:
-    // it makes "elsewhere" a real place for the filter to point at.
-    renderSidebar(
-      [
-        session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
-        session({ id: "second", title: "Bump the toolchain", repo: "jingler" }),
-        session({ id: "third", title: "Unrelated work", repo: "elsewhere" })
-      ],
-      { ...DEFAULT_FILTERS, repo: "elsewhere" }
-    )
-
-    expect(screen.queryByTestId("split-row-g:first")).toBeNull()
-  })
-
-  it("draws ONE pill for a split that spans two repo groups", () => {
-    // A split is a top-level thing now, resolved against the whole active list
-    // — drawing it per group would put the same pill in both repos.
-    renderSidebar([
-      session({ id: "first", title: "Refactor auth flow", repo: "jingler" }),
-      session({ id: "second", title: "Bump the toolchain", repo: "gtm-grid" })
-    ])
-
-    expect(screen.getAllByTestId("split-row-g:first")).toHaveLength(1)
-  })
-})
-
-/**
- * Where a split SITS.
- *
- * It used to hang inside whichever repo group its first surviving pane landed
- * in, which was defensible while a split meant two sessions from one repo. Once
- * you can split across repos it is a claim the data doesn't support: the pill
- * named one repo as its home while the other repo's session showed nothing of
- * its own. Splits belong above the repo groups, under the filters.
- */
-describe("SessionSidebar split placement", () => {
-  const SPLIT: SplitGroup = {
-    id: "g:first",
-    panes: [
-      { sessionId: "first", ratio: 0.5 },
-      { sessionId: "second", ratio: 0.5 }
-    ],
-    focused: 0
-  }
-
-  /** Heading labels and split pills, in the order they appear in the DOM. */
-  const outline = () =>
-    Array.from(document.querySelectorAll("[data-testid^='split-row-'], [data-testid='session-sidebar'] span"))
-      .filter((el) => el.getAttribute("data-testid")?.startsWith("split-row-") || el.tagName === "SPAN")
-      .map((el) => el.getAttribute("data-testid") ?? el.textContent)
-
-  const crossRepo = [
-    session({ id: "first", title: "Refactor auth flow", repo: "trigify-app" }),
-    session({ id: "second", title: "Bump the toolchain", repo: "gtm-grid" }),
-    session({ id: "loose", title: "Loose end", repo: "trigify-app" })
-  ]
-
-  const renderSidebar = (sessions: ReadonlyArray<ReturnType<typeof session>>) =>
-    render(
-      <SessionSidebar
-        activeSessionId="first"
-        onSelect={() => {}}
-        sessions={sessions}
-        splitGroups={[SPLIT]}
-        activeGroupId="g:first"
-        defaultFilters={DEFAULT_FILTERS}
-      />
-    )
-
-  it("puts the split above every repo heading", () => {
-    renderSidebar(crossRepo)
-    const order = outline()
-    // `gtm-grid` is deliberately not asserted on: its only session is in the
-    // split, so its heading is gone — see the group-holdout test below.
-    expect(order.indexOf("split-row-g:first")).toBeGreaterThanOrEqual(0)
-    expect(order.indexOf("trigify-app")).toBeGreaterThanOrEqual(0)
-    expect(order.indexOf("split-row-g:first")).toBeLessThan(order.indexOf("trigify-app"))
-  })
-
-  it("labels the section and counts the splits in it", () => {
-    renderSidebar(crossRepo)
-    // Singular for one — "Splits 1" reads like a category with a stray number.
-    expect(screen.getByText("Split")).toBeDefined()
-  })
-
-  // The count badge under a repo heading has to match the rows beneath it.
-  // Leaving split members in the group inflated it: "trigify-app 2" over one row.
-  it("holds split members out of their repo groups entirely", () => {
-    renderSidebar(crossRepo)
-    expect(rowOrder()).toStrictEqual(["loose"])
-    // gtm-grid's only session is in the split, so the heading goes with it
-    // rather than sitting over an empty list.
-    expect(screen.queryByText("gtm-grid")).toBeNull()
-    expect(screen.getByText("trigify-app")).toBeDefined()
-  })
-
-  it("shows no splits section when nothing is split", () => {
-    render(
-      <SessionSidebar
-        activeSessionId="loose"
-        onSelect={() => {}}
-        sessions={[session({ id: "loose", title: "Loose end", repo: "trigify-app" })]}
-        defaultFilters={DEFAULT_FILTERS}
-      />
-    )
-    expect(screen.queryByText("Split")).toBeNull()
-    expect(screen.queryByText("Splits")).toBeNull()
-  })
-})
-
 describe("SessionSidebar updates", () => {
   it("starts the download from the upgrade card and collapses to an icon when dismissed", () => {
     localStorage.removeItem("sb.sidebar.pinned")
@@ -586,5 +380,117 @@ describe("SessionSidebar manual updates", () => {
     expect(screen.getByText(CANNOT_SELF_UPDATE)).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Download the Jingler 0.3.4 installer" }))
     expect(onAction).toHaveBeenCalledOnce()
+  })
+})
+
+describe("SessionSidebar session tree", () => {
+  const two = [
+    session({
+      id: "s1",
+      chats: [
+        { id: "c1", title: "Main chat", createdAt: "now", updatedAt: "now", providerId: "anthropic" as never },
+        { id: "c2", title: "Side chat", createdAt: "now", updatedAt: "now" }
+      ],
+      activeChatId: "c1"
+    }),
+    session({ id: "s2" })
+  ]
+  const renderTree = (props: Partial<Parameters<typeof SessionSidebar>[0]> = {}) =>
+    render(<SessionSidebar activeSessionId="s1" onSelect={() => {}} sessions={two} {...props} />)
+
+  beforeEach(() => {
+    localStorage.clear()
+    resetEditorLayouts()
+  })
+
+  it("always shows the active session's chats, with each chat's provider icon", () => {
+    renderTree()
+    const tree = screen.getByTestId("session-tree-s1")
+    expect(within(tree).getByText("Main chat")).toBeTruthy()
+    expect(within(tree).getByText("Side chat")).toBeTruthy()
+    expect(within(tree).getByTitle("Anthropic")).toBeTruthy()
+    expect(screen.queryByTestId("session-tree-s2")).toBeNull()
+  })
+
+  it("expands another session from its chevron without selecting it, and remembers it", () => {
+    const select = vi.fn()
+    const { unmount } = renderTree({ onSelect: select })
+    fireEvent.click(screen.getByTestId("session-expand-s2"))
+    expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
+    expect(select).not.toHaveBeenCalled()
+    unmount()
+    renderTree()
+    expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
+  })
+
+  it("opens a chat as a tab and selects its session and canonical chat; closes it everywhere from the sidebar", () => {
+    const select = vi.fn()
+    const selectChat = vi.fn()
+    renderTree({ onSelect: select, chatActions: { onSelectChat: selectChat } })
+    fireEvent.click(within(screen.getByTestId("session-tree-chat-c2")).getByText("Side chat"))
+    expect(select).toHaveBeenCalledWith("s1")
+    expect(selectChat).toHaveBeenCalledWith("s1", "c2")
+    expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).toContain("c2")
+    fireEvent.click(screen.getByRole("button", { name: "Close Side chat everywhere" }))
+    expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).not.toContain("c2")
+    // Chats stay listed after closing; only files and views drop out.
+    expect(screen.getByTestId("session-tree-chat-c2")).toBeTruthy()
+  })
+
+  it("lists open files and session views, and reveals a file when its close is blocked", () => {
+    const requestClose = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
+    const closeView = vi.fn()
+    const select = vi.fn()
+    renderTree({ onRequestCloseFile: requestClose, onCloseView: closeView, onSelect: select })
+    fireEvent.click(within(screen.getByTestId("session-tree-chat-c1")).getByText("Main chat"))
+    act(() =>
+      updateEditorLayout("s1", (l) => openTab(openTab(l, { kind: "file", id: "src/a.ts" }), { kind: "view", id: "terminal" }))
+    )
+    expect(screen.getByText("Files")).toBeTruthy()
+    expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
+    expect(screen.getByTestId("session-tree-view-terminal")).toBeTruthy()
+    act(() =>
+      updateEditorLayout("s1", (layout) =>
+        dropTab(
+          layout,
+          { surface: { kind: "view", id: "terminal" } },
+          focusedGroup(layout)?.id ?? null,
+          "bottom",
+          true
+        )
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal everywhere" }))
+    expect(closeView).toHaveBeenCalledWith("s1", { kind: "view", id: "terminal" })
+    expect(allTabs(editorLayoutOf("s1")!).map((tab) => tab.id)).not.toContain("terminal")
+    fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
+    expect(requestClose).toHaveBeenCalledWith("s1", "src/a.ts")
+    expect(select).toHaveBeenCalledWith("s1")
+    expect(activeSurface(focusedGroup(editorLayoutOf("s1")!)!).id).toBe("src/a.ts")
+    expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Close a.ts everywhere" }))
+    expect(screen.queryByTestId("session-tree-file-src/a.ts")).toBeNull()
+  })
+
+  it("keeps the active tree open without offering a broken collapse control", () => {
+    renderTree()
+    expect(screen.queryByTestId("session-expand-s1")).toBeNull()
+    expect(screen.getByTestId("session-tree-s1")).toBeTruthy()
+    expect(screen.getByTestId("session-expand-s2")).toBeTruthy()
+  })
+
+  it("attributes activity to the chat that is actually running", () => {
+    renderTree({
+      chatActivities: {
+        s1: { c2: { kind: "running", verb: "Running", target: "tests" } }
+      }
+    })
+    expect(within(screen.getByTestId("session-tree-chat-c1")).getByRole("img", { name: "Idle" })).toBeTruthy()
+    expect(within(screen.getByTestId("session-tree-chat-c2")).getByRole("img", { name: "Running" })).toBeTruthy()
+  })
+
+  it("shows no tree in the collapsed rail", () => {
+    renderTree({ forceCollapsed: true })
+    expect(screen.queryByTestId("session-tree-s1")).toBeNull()
   })
 })

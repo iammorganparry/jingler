@@ -1,5 +1,5 @@
 import { defaultProps } from "../lib/default-props.js"
-import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
+import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
 import {
   type ReactNode,
   useCallback,
@@ -60,9 +60,11 @@ import {
   type SessionChatTabsRenderContext,
   SessionConversation
 } from "../screens/session-conversation.js"
+import type { SessionChatActions } from "./session-tree.js"
+import { openTab } from "./editor-layout.js"
+import { updateEditorLayout } from "./editor-layout-machine.js"
 import { useSplitLayout } from "./use-split-layout.js"
-import { MAX_PANES } from "./split-layout.js"
-import { matchSplitShortcut, type SplitShortcut } from "./split-shortcuts.js"
+import { matchSplitShortcut } from "./split-shortcuts.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   type SessionSurfaceCommand
@@ -189,6 +191,8 @@ export interface JinglerAppProps {
   onGithubDisconnect?: () => void
   /** What each session's agent is doing right now ("Running npm test"), keyed by id. */
   liveActivity?: Record<string, SessionActivity>
+  /** Live activity by session, then chat, for the sidebar tree. */
+  chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
@@ -293,9 +297,9 @@ export interface JinglerAppProps {
   ) => ReactNode
   /** Render the Issue tab — the rich linked-issue view. */
   /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session) => ReactNode
+  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
   /** Render the embedded browser inside its owning session pane. */
-  renderBrowser?: (session: Session) => ReactNode
+  renderBrowser?: (session: Session, visible: boolean) => ReactNode
   /** Make a nested chat-owned surface the session's canonical active chat. */
   onFocusChat?: (sessionId: string, chatId: string) => void
   /** Toggle the Browser tab belonging to the named session. */
@@ -346,14 +350,13 @@ export interface JinglerAppProps {
     session: Session,
     ctx: {
       readonly onSelectConversation: () => void
+      readonly onOpenPath: (path: string) => void
       readonly path?: string
       readonly onClosed?: () => void
     }
   ) => ReactNode
   /** Render the focused session's file tree in the Explorer column. */
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
-  /** Select a repository path in a session's persistent Files state. */
-  onOpenFile?: (sessionId: string, path: string) => void
   /** List a path among a session's open files without selecting it. */
   onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
@@ -412,6 +415,8 @@ export interface JinglerAppProps {
     images: ReadonlyArray<Attachment>,
     onProgress?: (phase: SessionCreationPhase) => void
   ) => Promise<Session>
+  /** Start a new chat in a session (the editor "+" menu). */
+  onCreateChat?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
@@ -420,6 +425,8 @@ export interface JinglerAppProps {
   onRestoreSession?: (id: string) => void
   /** Permanently delete a session from the sidebar quick-actions (confirms first). */
   onDeleteSession?: (id: string) => void
+  /** Chat lifecycle actions for the sidebar's session tree. */
+  chatActions?: SessionChatActions
   /**
    * Commands contributed by loaded plugins, for the palette.
    *
@@ -443,28 +450,6 @@ const noBranches = async (): Promise<ReadonlyArray<string>> => []
  * renderer feeds it repositories, provider connections, live GitHub App state, and the session list
  * over Effect RPC, plus the callbacks that create real worktrees.
  */
-const hasSimpleOuterSplit = (group: ReturnType<typeof useSplitLayout>["group"]) => {
-  if ((group?.panes.length ?? 0) <= 1) return false
-  const focused = document.querySelector('[data-split-pane-index][data-focused="true"]')
-  return (focused?.querySelectorAll('[data-surface-pane-index]').length ?? 0) <= 1
-}
-
-const routeSplitShortcut = (
-  event: KeyboardEvent,
-  shortcut: SplitShortcut,
-  group: ReturnType<typeof useSplitLayout>["group"],
-  split: ReturnType<typeof useSplitLayout>
-): boolean => {
-  if (!group) return false
-  event.preventDefault()
-  if (!hasSimpleOuterSplit(group)) return true
-  if (shortcut.type === "focus-pane") split.focusPane(group.id, shortcut.index)
-  else if (shortcut.type === "focus-neighbour") split.focusNeighbour(shortcut.direction)
-  else if (shortcut.type === "move-pane") split.moveFocused(shortcut.direction)
-  else if (shortcut.type === "close-pane") split.closeFocused()
-  return false
-}
-
 export function JinglerApp(props:  JinglerAppProps) {
   function workspaceNavigationProps() {
     return {
@@ -501,53 +486,25 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         pendingEnvironmentSession={pendingEnvironmentSession}
         onSelectPendingEnvironmentSession={openPendingEnvironmentSession}
         group={group}
-        splitGroups={split.workspace.groups}
-        activeGroupId={split.workspace.activeGroupId}
-        onFocusPane={(index) => group && split.focusPane(group.id, index)}
-        onFocusGroupPane={(groupId, index) => {
-          // A sidebar segment belongs to a group that may not be on screen, so
-          // showing it is part of focusing it.
-          split.activateGroup(groupId)
-          split.focusPane(groupId, index)
-        }}
-        onSplitWith={splitActiveWith}
-        onSplitGroupWith={split.splitInto}
-        onReplacePane={(index, sessionId) => {
-          // One reducer, not close-then-insert: group ids derive from the
-          // leftmost pane, so closing pane 0 re-ids the group and the second
-          // call would look up an id that no longer exists.
-          if (!group) return
-          if (group.panes.length === 1) return setSelected(sessionId)
-          split.replacePane(group.id, index, sessionId)
-        }}
-        onClosePane={(index) => group && split.closePane(group.id, index)}
-        onCloseGroupPane={split.closePane}
-        onMovePane={(index, direction) =>
-          group && split.movePane(group.id, index, direction)
-        }
-        onSeparateAll={split.separateAll}
-        onResizePane={(index, delta) =>
-          group && split.resizePane(group.id, index, delta)
-        }
         onRenameSession={onRenameSession}
+        onCreateChat={onCreateChat}
+        onOpenFilePicker={renderFileQuickOpen ? setFileQuickOpenSessionId : undefined}
         onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}
         isBrowserActive={isBrowserActive}
         onArchiveSession={onArchiveSession}
         onRestoreSession={onRestoreSession}
         onDeleteSession={onDeleteSession}
+        chatActions={chatActions}
         renderConversation={renderConversation}
         renderExplanation={renderExplanation}
         renderFiles={renderFiles}
         renderBrowser={renderBrowser}
-        onOpenFile={onOpenFile}
         onTrackFile={onTrackFile}
         onOpenExplorerFile={(sessionId, path) => {
-          onOpenFile?.(sessionId, path)
-          setTabRequest((previous) => ({
-            tabId: BUILTIN_TAB.files,
-            nonce: (previous?.nonce ?? 0) + 1
-          }))
+          // A file picked in the Explorer opens as its own tab, like ⌘P.
+          onTrackFile?.(sessionId, path)
+          updateEditorLayout(sessionId, (layout) => openTab(layout, { kind: "file", id: path }))
         }}
         onRequestCloseFile={onRequestCloseFile}
         renderChatTabs={renderChatTabs}
@@ -557,6 +514,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         showEmpty={showEmpty}
         patch={patch}
         liveActivity={liveActivity}
+        chatActivities={chatActivities}
         prStates={prStates}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
@@ -734,7 +692,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onOpenFile, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
+  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -747,6 +705,12 @@ function getActiveTabContext(active: Session) {
   })
 
   function handleSessionShortcut(e: KeyboardEvent) {
+      const editorSplit = matchSplitEditorChord(e)
+      if (editorSplit) {
+        e.preventDefault()
+        window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail: editorSplit }))
+        return
+      }
       const shortcut = matchSplitShortcut(e)
       if (shortcut === null) return
 
@@ -756,13 +720,10 @@ function getActiveTabContext(active: Session) {
         openNewSession()
         return
       }
-      // Only consume an add request when there is room and an eligible session.
-      if (shortcut.type === "add-pane") {
-        if (addNextSessionAsPane()) e.preventDefault()
-        return
-      }
-      if (!routeSplitShortcut(e, shortcut, group, split)) return
-      const detail = surfaceCommandForShortcut(shortcut)!
+      // Sessions no longer split, so every remaining pane chord targets editor groups.
+      const detail = surfaceCommandForShortcut(shortcut)
+      if (!detail) return
+      e.preventDefault()
       window.dispatchEvent(new CustomEvent<SessionSurfaceCommand>(SESSION_SURFACE_COMMAND_EVENT, { detail }))
   }
 
@@ -1048,39 +1009,6 @@ function getActiveTabContext(active: Session) {
   // should answer to.
   const showEmpty = Boolean(renderConversation) && group === null
 
-  /** Merge a session into the active group at `at` — a drop, or ⌃⇧=. */
-  const splitActiveWith = useCallback(
-    (sessionId: string, at: number) => {
-      if (group) split.splitInto(group.id, sessionId, at)
-    },
-    [group, split]
-  )
-
-  /**
-   * Add a pane holding the first session not already on screen.
-   *
-   * Arc splits with a new tab; the nearest thing here is a session you have but
-   * aren't looking at, which beats opening a pane onto nothing.
-   *
-   * ONE definition for the two ways to ask — ⌃⇧= and the ghost panel on the
-   * right edge. They had a copy each, so a change of policy (most-recently-
-   * active rather than first, say) would have had to be made twice to be made
-   * at all, and the two controls would have quietly started doing different
-   * things.
-   *
-   * Reports whether it added, because the keyboard path needs to know: a chord
-   * that could not act should fall through rather than be swallowed.
-   */
-  const addNextSessionAsPane = useCallback((): boolean => {
-    if (!group || group.panes.length >= MAX_PANES) return false
-    const next = sessions.find(
-      (s) => !(s.archived || split.visibleSessionIds.has(s.id))
-    )
-    if (!next) return false
-    splitActiveWith(next.id, group.panes.length)
-    return true
-  }, [group, sessions, split, splitActiveWith])
-
   // ⌘N opens New Session; the rest is Arc's split map. Which chord means what is
   // `matchSplitShortcut`'s job — a pure function, and its own unit test, because
   // the first version of this map compared `e.key` against unshifted characters
@@ -1096,7 +1024,6 @@ function getActiveTabContext(active: Session) {
     renderBrowser,
     group,
     split,
-    addNextSessionAsPane,
     active,
     renderFileQuickOpen,
     renderTerminalDock,
@@ -1400,12 +1327,10 @@ function getActiveTabContext(active: Session) {
             onOpenChange: (open) => {
               if (!open) setFileQuickOpenSessionId(null)
             },
-            onOpenPath: () => {
+            onOpenPath: (path) => {
               setFileQuickOpenSessionId(null)
-              setTabRequest((previous) => ({
-                tabId: BUILTIN_TAB.files,
-                nonce: (previous?.nonce ?? 0) + 1
-              }))
+              // A picked file opens as its own tab in the focused group.
+              updateEditorLayout(fileQuickOpenSession.id, (layout) => openTab(layout, { kind: "file", id: path }))
             }
           })
         : null}

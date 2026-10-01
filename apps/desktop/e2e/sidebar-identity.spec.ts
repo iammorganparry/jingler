@@ -114,10 +114,8 @@ test("sidebar prioritises attention and exposes session identity at a glance", a
   expect(appBackground).toBe(titleBarBackground)
 
   await running.click()
-  await expect(window.getByTestId("conversation-tab")).toHaveAttribute(
-    "title",
-    /widget \/ Liquid glass sidebar/
-  )
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }))
+    .toContainText("Liquid glass sidebar")
 
   const sidebarSurface = await window.getByTestId("session-sidebar").evaluate((element) => {
     const style = getComputedStyle(element)

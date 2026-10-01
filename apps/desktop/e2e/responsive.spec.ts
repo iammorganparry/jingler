@@ -74,21 +74,21 @@ test("the tab bar does not spill at half-screen width", async ({ launchApp }) =>
   await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 940, 700)
 
-  const bar = window.getByTestId("session-tab-bar").first()
+  const bar = window.getByTestId("editor-tab-strip").first()
   await expect(bar).toBeVisible()
   // The tab STRIP scrolls; the bar itself must not.
   const over = await bar.evaluate((el) => el.scrollWidth - el.clientWidth)
   expect(over).toBeLessThanOrEqual(1)
 })
 
-test("close-pane survives all the way down to the window's minimum", async ({ launchApp }) => {
+test("the tab strip survives all the way down to the window's minimum", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, withRepo: true, sessions: SESSIONS })
   await sessionRow(window, "Alpha session").click()
   await setWindowSize(window, 900, 600)
 
   // Everything else in the cluster may fold into the overflow menu. This may not:
   // it is the control you reach for BECAUSE the pane is too narrow to read.
-  await expect(window.getByTestId("session-tab-bar").first()).toBeVisible()
+  await expect(window.getByTestId("editor-tab-strip").first()).toBeVisible()
 })
 
 test("the sidebar collapses to a rail and every session stays reachable", async ({ launchApp }) => {

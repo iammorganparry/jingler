@@ -279,7 +279,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   // Plannotator owns the plan as a markdown file in the worktree; the native
   // Plan tab reviews and approves it — there is no separate plan store.
   await expect.poll(() => existsSync(join(worktreePath, "PLAN.md")), { timeout: 20_000 }).toBe(true)
-  await launched.window.getByTestId("view-tab-plan").first().click()
+  await launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first().click()
   await launched.window.getByTestId("plan-review")
     .getByRole("button", { name: "Approve", exact: true }).click()
   await launched.window.getByRole("button", {

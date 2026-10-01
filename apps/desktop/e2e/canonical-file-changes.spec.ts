@@ -120,7 +120,7 @@ test("renders canonical create, modify, delete, and rename evidence across chat 
   await window.getByRole("button", { name: "View less" }).click()
   await expect(transcriptChanges).toHaveCount(10)
 
-  await window.getByRole("button", { name: "Changes" }).first().click()
+  await window.getByRole("button", { name: "Changes", exact: true }).last().click()
   const rail = window.getByTestId("changed-files-explorer")
   await expect(rail).toBeVisible({ timeout: 30_000 })
   const tree = rail.locator('[aria-label="Changed files tree"]')

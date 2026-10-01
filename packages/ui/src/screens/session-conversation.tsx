@@ -1,3 +1,4 @@
+import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import type {
   DiffStat,
@@ -17,7 +18,7 @@ import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
 import type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
-import type { TabContribution, TabKey } from "../app/tab-contributions.js"
+import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (JinglerApp types its
@@ -46,30 +47,10 @@ export interface SessionConversationProps {
    * single implicit pane holding `activeSessionId` is synthesised instead.
    */
   group?: SplitGroup | null
-  /** Every split, so the sidebar can draw a multi-pane group as one pill. */
-  splitGroups?: ReadonlyArray<SplitGroup>
-  /** Which group is on screen (highlights its sidebar pill). */
-  activeGroupId?: string | null
-  /** Move the focus ring to a pane (a click anywhere inside it). */
-  onFocusPane?: (index: number) => void
-  /** Focus a pane of ANY group from the sidebar — activates that group too. */
-  onFocusGroupPane?: (groupId: string, index: number) => void
-  /** Insert a session as a new pane at `at` — what an edge drop means. */
-  onSplitWith?: (sessionId: string, at: number) => void
-  /** Merge a session into a named group (a drop on its sidebar pill). */
-  onSplitGroupWith?: (groupId: string, sessionId: string, at: number) => void
-  /** Swap a pane's session — what a drop on a pane's middle means. */
-  onReplacePane?: (index: number, sessionId: string) => void
-  /** Close a pane of the active group, leaving the session running. */
-  onClosePane?: (index: number) => void
-  /** Close a pane of any group (a sidebar segment's ×). */
-  onCloseGroupPane?: (groupId: string, index: number) => void
-  /** Reorder a pane within the active group. */
-  onMovePane?: (index: number, direction: -1 | 1) => void
-  /** Arc's "Separate all tabs" — every pane of a group flies out to its own row. */
-  onSeparateAll?: (groupId: string) => void
-  /** Committed divider delta, as a fraction of the split's width. */
-  onResizePane?: (index: number, delta: number) => void
+  /** Start a new chat in a session (the editor "+" menu). */
+  onCreateChat?: (sessionId: string) => void
+  /** Open the repository file picker for a session (the editor "+" menu). */
+  onOpenFilePicker?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title). */
   onRenameSession?: (id: string, title: string) => void
   /** Make a nested chat-owned surface the session's canonical active chat. */
@@ -84,6 +65,8 @@ export interface SessionConversationProps {
   onRestoreSession?: (id: string) => void
   /** Permanently delete a session from the sidebar quick-actions (confirms first). */
   onDeleteSession?: (id: string) => void
+  /** Chat lifecycle actions for the sidebar's session tree. */
+  chatActions?: SessionChatActions
   /**
    * The live conversation pane (the renderer's session-keyed
    * `ConversationView`). Falls back to a static seeded transcript when absent
@@ -108,6 +91,7 @@ export interface SessionConversationProps {
     session: Session,
     ctx: {
       readonly onSelectConversation: () => void
+      readonly onOpenPath: (path: string) => void
       readonly path?: string
       readonly onClosed?: () => void
     }
@@ -115,8 +99,7 @@ export interface SessionConversationProps {
   /** Render the latest focused visual explanation. */
   renderExplanation?: (session: Session) => ReactNode
   /** Render the browser inside its owning session pane. */
-  renderBrowser?: (session: Session) => ReactNode
-  onOpenFile?: (sessionId: string, path: string) => void
+  renderBrowser?: (session: Session, active: boolean) => ReactNode
   onTrackFile?: (sessionId: string, path: string) => void
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
@@ -151,6 +134,8 @@ export interface SessionConversationProps {
   patch?: string
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Live activity by session, then chat, for the sidebar tree. */
+  chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
   /** GitHub owner login per session, used for repository avatars in the sidebar. */
@@ -221,7 +206,7 @@ export interface SessionConversationProps {
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
   /** Render the per-session Terminal view. */
-  renderTerminalDock?: (session: Session) => ReactNode
+  renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
   /** App version, shown in the sidebar footer. */
   version?: string
   /** Available packaged-app update shown in the sidebar. */
@@ -308,12 +293,6 @@ export function SessionConversation(props: SessionConversationProps) {
            return (<SessionSplit
             group={group}
             sessions={props.sessions}
-            onFocusPane={props.onFocusPane}
-            onSplitWith={props.onSplitWith}
-            onReplacePane={props.onReplacePane}
-            onResize={props.onResizePane}
-            onClosePane={props.onClosePane}
-            onMovePane={props.onMovePane}
             emptyState={
               <span className="text-[12px] text-dim">Nothing on screen — pick a session</span>
             }
@@ -321,13 +300,14 @@ export function SessionConversation(props: SessionConversationProps) {
             renderExplanation={props.renderExplanation}
             renderFiles={props.renderFiles}
             renderBrowser={props.renderBrowser}
-            onOpenFile={props.onOpenFile}
             onTrackFile={props.onTrackFile}
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
             renderChatTabs={props.renderChatTabs}
             renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
+            onCreateChat={props.onCreateChat}
+            onOpenFilePicker={props.onOpenFilePicker}
             onFocusChat={props.onFocusChat}
             onToggleBrowser={props.onToggleBrowser}
             isBrowserActive={props.isBrowserActive}
@@ -388,22 +368,24 @@ export function SessionConversation(props: SessionConversationProps) {
         explorer={
           activeSession && projectIdForSession(activeSession, projects) === selectedProjectId
             ? props.renderExplorer?.(activeSession, (path) =>
-                (props.onOpenExplorerFile ?? props.onOpenFile)?.(activeSession.id, path)
+                props.onOpenExplorerFile?.(activeSession.id, path)
               )
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
         sessions={projectSessions}
-        splitSessions={props.sessions}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
-        splitGroups={props.splitGroups}
-        activeGroupId={props.activeGroupId}
-        onFocusPane={props.onFocusGroupPane}
-        onClosePane={props.onCloseGroupPane}
-        onSeparateAll={props.onSeparateAll}
-        onSplitWith={props.onSplitGroupWith}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
+        chatActions={props.chatActions}
+        onRequestCloseFile={props.onRequestCloseFile}
+        onCloseView={(sessionId, surface) => {
+          if (surface.id !== BUILTIN_TAB.browser || !surface.chatId) return
+          if (props.isBrowserActive?.(sessionId, surface.chatId)) {
+            props.onToggleBrowser?.(sessionId, surface.chatId)
+          }
+        }}
+        chatActivities={props.chatActivities}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}

@@ -76,13 +76,18 @@ test("groups chats by attention and opens session views in a responsive two-thir
   await window.getByRole("button", { name: "Files", exact: true }).click()
   await window.getByRole("tab", { name: "Explorer", exact: true }).click()
 
-  const surfaces = window.getByTestId("surface-view")
-  await expect(surfaces).toHaveAttribute("data-panes", "2")
+  // Files opens as a tab in the focused group, beside the chat tab.
+  const groups = window.getByTestId("editor-group")
+  await expect(groups).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
   const tree = window.getByRole("region", { name: "Repository files" })
   await expect(tree).toBeVisible()
   await expect(window.getByRole("region", { name: "Repository browser" })).toHaveCount(0)
 
   await window.setViewportSize({ width: 900, height: 700 })
   await window.waitForTimeout(120)
-  await expect(surfaces).toHaveAttribute("data-panes", "2")
+  // Below the rail threshold the sidebar (and its Explorer) folds away; the
+  // editor keeps its single group with Files still open.
+  await expect(groups).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
 })

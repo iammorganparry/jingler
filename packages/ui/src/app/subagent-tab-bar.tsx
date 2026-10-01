@@ -1,18 +1,25 @@
-import { Bot } from "lucide-react"
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
+import { Bot, History } from "lucide-react"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
-import type { SubagentTabItem } from "./chat-tab-bar.js"
+import type { PreviousSubagentTabItem, SubagentTabItem } from "./chat-tab-bar.js"
 
 export function SubagentTabBar({
   subagents,
   activeSubagentId,
-  onSelectSubagent
+  onSelectSubagent,
+  previous = [],
+  onOpenPrevious
 }: {
   readonly subagents: ReadonlyArray<SubagentTabItem>
   readonly activeSubagentId?: string
   readonly onSelectSubagent: (id: string) => void
+  /** Finished subagents of this chat, reopenable from the history menu. */
+  readonly previous?: ReadonlyArray<PreviousSubagentTabItem>
+  readonly onOpenPrevious?: (id: string) => void
 }) {
-  if (subagents.length === 0) return null
+  const history = onOpenPrevious ? previous : []
+  if (subagents.length === 0 && history.length === 0) return null
   return (
     <div
       data-testid="subagent-tab-bar"
@@ -41,6 +48,40 @@ export function SubagentTabBar({
           </button>
         )
       })}
+      {history.length > 0 && (
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              aria-label="Previous subagents"
+              title="Previous subagents"
+              className="ml-auto flex flex-none items-center rounded-md px-1.5 py-1 text-dim outline-none hover:bg-panel hover:text-text"
+            >
+              <History className="size-3.5" />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={6}
+              collisionPadding={8}
+              className="z-50 flex min-w-[200px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+            >
+              {history.map((item) => (
+                <DropdownMenu.Item
+                  key={item.id}
+                  aria-label={`Open ${item.title}`}
+                  onSelect={() => onOpenPrevious?.(item.id)}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                >
+                  <Bot className="size-3.5 flex-none text-purple" />
+                  <span className="truncate">{item.title}</span>
+                </DropdownMenu.Item>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      )}
     </div>
   )
 }

@@ -65,39 +65,42 @@ test("a structured plan renders stages natively and ticks live progress", async 
     timeout: 20_000
   }).toBe(true)
 
-  // The Plan tab appears from plan existence alone — no review, no plan mode.
-  const planTab = launched.window.getByTestId("view-tab-plan").first()
+  // Plan is available from plan existence alone — no review or plan mode required.
+  const planTab = launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first()
+  if (await planTab.count() === 0) {
+    await launched.window.getByRole("button", { name: "New tab" }).click()
+    await launched.window.getByTestId("new-tab-option-plan").click()
+  }
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
-  await expect(launched.window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(launched.window.locator('[data-testid^="editor-tab-view-plan"]').first()).toBeVisible()
 
   // The native document renders the parsed structure: frontmatter title and
   // both stages, not a flat checklist.
   await expect(
-    launched.window.getByText("Token store rollout").first()
+    launched.window.getByText("Token store rollout").filter({ visible: true }).first()
   ).toBeVisible({ timeout: 20_000 })
-  await expect(launched.window.getByText("Token store", { exact: true }).first()).toBeVisible()
-  await expect(launched.window.getByText("Rollout", { exact: true }).first()).toBeVisible()
+  await expect(launched.window.getByText("Token store", { exact: true }).filter({ visible: true }).first()).toBeVisible()
+  await expect(launched.window.getByText("Rollout", { exact: true }).filter({ visible: true }).first()).toBeVisible()
   await expect(
-    launched.window.getByText("Build the store behind the existing interface.").first()
+    launched.window.getByText("Build the store behind the existing interface.").filter({ visible: true }).first()
   ).toBeVisible()
 
   await expect(
-    launched.window.getByText("Implement TokenStore").first()
+    launched.window.getByText("Implement TokenStore").filter({ visible: true }).first()
   ).toBeVisible()
-  await launched.window
-    .getByTestId("surface-pane-1")
-    .getByRole("button", { name: "Move pane 2 left" })
-    .click()
-  await expect(launched.window.getByText("Token store rollout").first()).toBeVisible()
+  // Split the plan right and back: it keeps rendering in its new group.
+  await launched.window.getByRole("button", { name: "Split right" }).first().click()
+  await expect(launched.window.getByTestId("editor-group")).toHaveCount(2)
+  await expect(launched.window.getByText("Token store rollout").filter({ visible: true }).first()).toBeVisible()
 
   // [DONE:1] ticked the first task, so the first stage is running (not done):
   // the drawer badge counts completed STAGES over total stages.
-  await launched.window
-    .getByRole("button", { name: "keep a structured plan while you work", exact: true })
-    .click()
+  // Plan sits over the chat in the first group; bring the transcript forward.
+  // The chat is auto-titled from its first prompt, so find its tab by kind.
+  await launched.window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await expect(
-    launched.window.getByRole("tab", { name: /Plan/ }).first()
+    launched.window.getByTestId("composer").filter({ visible: true }).first().getByRole("tab", { name: /Plan/ })
   ).toContainText("0/2", { timeout: 20_000 })
   await expect(launched.window.getByLabel("Step 1: Completed")).toBeVisible()
   await expect(launched.window.getByText("[DONE:1]", { exact: false })).toHaveCount(0)

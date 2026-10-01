@@ -53,7 +53,7 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   await expect(appShell(window)).toBeVisible()
   // The newest session is the one on screen at rest, so jumping to the other is
   // an observable change rather than a coincidence.
-  await expect(window.getByTestId("conversation-tab")).toContainText("Alpha session")
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Alpha session")
 
   await window.keyboard.press("Meta+k")
   await expect(window.getByTestId("command-palette")).toBeVisible()
@@ -67,7 +67,7 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   await window.keyboard.press("Enter")
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
-  await expect(window.getByTestId("conversation-tab")).toContainText("Beta session")
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Beta session")
 })
 
 test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) => {
@@ -86,7 +86,7 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
   await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("")
 })
 
-test("⌘⇧P searches only the focused split pane and opens its file in Files", async ({
+test("⌘⇧P searches only the active session and opens its file as a tab", async ({
   launchApp
 }) => {
   const gadgetPath = (reposDir: string) => join(reposDir, "gadget")
@@ -118,12 +118,7 @@ test("⌘⇧P searches only the focused split pane and opens its file in Files",
   })
 
   await expect(appShell(window)).toBeVisible()
-  // Add Beta as the second pane. This chord focuses the pane it creates.
-  await window.keyboard.press("Control+Shift+Equal")
-  await expect(window.getByTestId("split-view")).toHaveAttribute("data-panes", "2")
-  const alphaPane = window.getByTestId("split-pane-0")
-  const betaPane = window.getByTestId("split-pane-1")
-  await expect(betaPane).toHaveAttribute("data-focused", "true")
+  await sessionRow(window, "Beta session").first().click()
 
   await window.keyboard.press("Meta+Shift+p")
   const picker = window.getByTestId("file-quick-open")
@@ -136,17 +131,16 @@ test("⌘⇧P searches only the focused split pane and opens its file in Files",
   await expect(window.getByTestId("palette-item-file:alpha-only.custom")).toHaveCount(0)
   await window.keyboard.press("Enter")
 
+  // The pick opens as its own file tab in the session's focused group.
   await expect(picker).toBeHidden()
-  await expect(betaPane.getByRole("textbox", { name: "beta-only.custom" })).toContainText(
-    "beta worktree",
-    { timeout: 15_000 }
-  )
-  await expect(alphaPane.getByRole("textbox", { name: "beta-only.custom" })).toHaveCount(0)
+  await expect(window.getByTestId("editor-tab-file-beta-only.custom")).toBeVisible()
+  await expect(window.getByRole("textbox", { name: "beta-only.custom" })).toContainText("beta worktree", {
+    timeout: 15_000
+  })
 
-  // Focus Alpha without altering the split, then prove Beta's unique path is
-  // not merely ranked lower — it is absent from this picker altogether.
-  await alphaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
-  await expect(alphaPane).toHaveAttribute("data-focused", "true")
+  // Alpha's picker cannot see Beta's worktree, and Alpha has its own layout.
+  await sessionRow(window, "Alpha session").first().click()
+  await expect(window.getByTestId("editor-tab-file-beta-only.custom")).toHaveCount(0)
   await window.keyboard.press("Meta+Shift+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("beta-only")
   await expect(window.getByText("No matching files in this session", { exact: true })).toBeVisible({
@@ -247,7 +241,7 @@ test("opens the terminal surface from the command palette", async ({ launchApp }
 
   await expect(window.getByTestId("command-palette")).toBeHidden()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: "Close Terminal" }).click()
+  await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
   await expect(window.locator(".xterm").first()).toBeHidden()
 })
 
@@ -293,7 +287,7 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
     ]
   })
 
-  await expect(window.getByTestId("conversation-tab")).toContainText("Alpha session")
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Alpha session")
 
   // A worktree session surfaces the Terminal tab — see `builtinTabContributions`.
   await window.keyboard.press("Meta+k")
@@ -303,15 +297,15 @@ test("a 'Go to <Tab>' does not follow you to the next session", async ({ launchA
   const terminal = window.getByTestId("palette-item-tab:terminal")
   await expect(terminal).toBeVisible()
   await terminal.click()
-  await expect(window.getByTestId("open-view-tab-terminal")).toBeVisible()
+  await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
 
   // Jump to the other session. It must arrive on Conversation.
   await window.keyboard.press("Meta+k")
   await window.getByPlaceholder(PLACEHOLDER).fill("Beta")
   await window.keyboard.press("Enter")
 
-  await expect(window.getByTestId("conversation-tab")).toContainText("Beta session")
-  await expect(window.getByTestId("open-view-tab-terminal")).toHaveCount(0)
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Beta session")
+  await expect(window.getByTestId("editor-tab-view-terminal")).toHaveCount(0)
 })
 
 test("archives the active session from the palette", async ({ launchApp }) => {

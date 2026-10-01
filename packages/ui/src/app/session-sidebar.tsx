@@ -6,7 +6,6 @@ import {
   ChevronRight,
   CircleAlert,
   Cloud,
-  Columns2,
   Download,
   GitBranch,
   GitPullRequest,
@@ -34,10 +33,10 @@ import { ProviderIcon } from "../components/provider-icon.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { AISidebarSurface } from "../composites/beui/shell.js"
-import { SplitRow } from "../composites/split-row.js"
+import { SessionTree, type SessionChatActions } from "./session-tree.js"
+import type { SessionSurface } from "./session-surface-layout.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
-import type { SplitGroup } from "./split-layout.js"
 import type { PendingEnvironmentSession } from "./environment-session-startup-machine.js"
 import {
   filterSessions,
@@ -82,26 +81,8 @@ export interface SessionSidebarProps {
   explorer?: React.ReactNode
   sessions: ReadonlyArray<Session>
   /** Full session set used to render mixed-project split pills. */
-  splitSessions?: ReadonlyArray<Session>
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
-  /**
-   * The splits, so a multi-pane group renders as ONE row (Arc's pill) rather than
-   * as N unrelated rows. Groups of one aren't listed here — a one-pane group and
-   * a plain session are the same object, and the caller renders it as a
-   * `SessionRow` either way.
-   */
-  splitGroups?: ReadonlyArray<SplitGroup>
-  /** Which group is on screen (highlights its pill). */
-  activeGroupId?: string | null
-  /** Focus one pane of a split from its sidebar segment. */
-  onFocusPane?: (groupId: string, index: number) => void
-  /** Close one pane from its segment's × (the session keeps running). */
-  onClosePane?: (groupId: string, index: number) => void
-  /** Arc's "Separate all tabs" — every pane flies out to its own row. */
-  onSeparateAll?: (groupId: string) => void
-  /** A session was dropped on a pill, or picked from its "Split with ▸" submenu. */
-  onSplitWith?: (groupId: string, sessionId: string, at: number) => void
   onSelect: (id: string) => void
   /** Manually rename a session (double-click its title) — pins the auto-name. */
   onRename?: (id: string, title: string) => void
@@ -111,6 +92,14 @@ export interface SessionSidebarProps {
   onRestore?: (id: string) => void
   /** Permanently delete a session from its row quick-actions (caller confirms). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Chat lifecycle actions for the sidebar's session tree. */
+  chatActions?: SessionChatActions
+  /** Dirty-aware close request for a file tab. */
+  onRequestCloseFile?: (sessionId: string, path: string) => boolean
+  /** Dispose shared state when a sidebar action closes a view everywhere. */
+  onCloseView?: (sessionId: string, surface: Extract<SessionSurface, { kind: "view" }>) => void
+  /** Live activity by session, then chat. */
+  chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
@@ -333,20 +322,17 @@ function SidebarBody({
   onWorkspaceViewChange,
   explorer,
   sessions,
-  splitSessions = sessions,
   environments = [],
   activeSessionId,
-  splitGroups,
-  activeGroupId,
-  onFocusPane,
-  onClosePane,
-  onSeparateAll,
-  onSplitWith,
   onSelect,
   onRename,
   onArchive,
   onRestore,
   onDelete,
+  chatActions,
+  onRequestCloseFile,
+  onCloseView,
+  chatActivities,
   liveActivity,
   prStates,
   repoOwners,
@@ -415,25 +401,6 @@ function SidebarBody({
           </div>
         ) : (
           <>
-          {/* Splits, above every group and directly under the filters.
-              A split can span repos, so nesting it under one repo's heading
-              named an owner it doesn't have. Its own section says the true
-              thing: these are on screen together, wherever they came from. */}
-          {visibleSplits.length > 0 && (
-            <div>
-              <div className="flex items-center gap-[7px] px-1.5 pb-1.5 pt-2.5">
-                <span className="w-2 text-center text-[9px] text-muted-foreground">▾</span>
-                <Columns2 size={12} className="text-blue" />
-                <span className="flex-1 truncate text-[11.5px] font-semibold text-text">
-                  {visibleSplits.length === 1 ? "Split" : "Splits"}
-                </span>
-                <Badge tone="count" size="xs">
-                  {visibleSplits.length}
-                </Badge>
-              </div>
-              <div className="mb-1 flex flex-col gap-[3px]">{visibleSplits.map(renderSplit)}</div>
-            </div>
-          )}
           {groups.map(renderSessionGroup)}
           </>
         )}
@@ -633,36 +600,15 @@ return (renderExpandedGroupHeading())
     [sessions, filters]
   )
 
-  /**
-   * Sessions that sit inside a SPLIT of two panes or more.
-   *
-   * Groups of one are deliberately absent: they render as ordinary rows, which
-   * is the whole point of the model — a lone pane and a lone session are
-   * indistinguishable.
-   */
-  const splitMemberIds = React.useMemo(() => {
-    const ids = new Set<string>()
-    for (const g of splitGroups ?? []) {
-      if (g.panes.length < 2) continue
-      for (const p of g.panes) ids.add(p.sessionId)
-    }
-    return ids
-  }, [splitGroups])
-
-  // Sessions that belong to a SPLIT (two panes or more) are held out of the
-  // grouped lists entirely — they are drawn once, above, in the splits section.
-  // Held out BEFORE grouping rather than skipped during render, so a group's
-  // count badge matches the rows under it and a repo whose every session is in
-  // a split disappears instead of rendering an empty heading.
   const groups = React.useMemo(
     () =>
       groupSessions(
-        filtered.filter((session) => !splitMemberIds.has(session.id)),
+        filtered,
         filters,
         statusOf,
         starredRepoNames
       ),
-    [filtered, splitMemberIds, filters, statusOf, starredRepoNames]
+    [filtered, filters, statusOf, starredRepoNames]
   )
 
   // Counts for the Status flyout, computed over the SEARCH-narrowed list rather
@@ -681,51 +627,28 @@ return (renderExpandedGroupHeading())
   const narrowed = isNarrowed(filters)
 
   /**
-   * The splits worth drawing, in workspace order.
-   *
-   * A split used to be drawn INSIDE whichever repo group its first surviving
-   * pane happened to sit in. That stopped making sense the moment a split could
-   * span two repos: the pill claimed one repo as its home, and the other repo's
-   * session had no entry of its own to show. Splits now sit above the groups
-   * entirely, so a split belongs to no repo — which is the truth.
-   *
-   * Kept only while at least one pane survives the current search/filters: a
-   * split none of whose sessions match should no more appear than a session that
-   * doesn't match. ONE surviving pane is enough — the pill names every member,
-   * so hiding it because pane 1 didn't match would lose pane 2's only entry.
-   */
-  const visibleSplits = React.useMemo(() => {
-    const rendered = new Set(filtered.map((s) => s.id))
-    return (splitGroups ?? []).filter(
-      (g) => g.panes.length >= 2 && g.panes.some((p) => rendered.has(p.sessionId))
-    )
-  }, [splitGroups, filtered])
-
-  const renderSplit = (split: SplitGroup) => (
-    <SplitRow
-      key={split.id}
-      group={split}
-      sessions={splitSessions}
-      liveActivity={liveActivity}
-      active={split.id === activeGroupId}
-      onFocusPane={onFocusPane}
-      onClosePane={onClosePane}
-      onSeparateAll={onSeparateAll}
-      onSplitWith={onSplitWith}
-      splitCandidates={splitSessions.filter(
-        (c) => !(c.archived || split.panes.some((p) => p.sessionId === c.id))
-      )}
-    />
-  )
-
-  /**
    * One row in a grouped list.
    *
    * Split members never reach here — they are held out of `groups` before
    * grouping, so a session cannot appear both in a pill and as a loose row.
    */
+  const [expandedIds, setExpandedIds] = React.useState<ReadonlySet<string>>(readExpanded)
+  const toggleExpanded = React.useCallback(
+    (id: string) =>
+      setExpandedIds((current) => {
+        const next = new Set(current)
+        if (current.has(id)) next.delete(id)
+        else next.add(id)
+        writeExpanded(next)
+        return next
+      }),
+    []
+  )
+
   const renderEntry = (s: Session) => {
+    const open = s.id === activeSessionId || expandedIds.has(s.id)
     return (
+      <div key={s.id}>
       <SessionRow
         key={s.id}
         session={s}
@@ -739,7 +662,21 @@ return (renderExpandedGroupHeading())
         onArchive={onArchive}
         onRestore={onRestore}
         onDelete={onDelete}
+        expanded={open}
+        onToggleExpanded={s.id === activeSessionId ? undefined : toggleExpanded}
       />
+      {open && (
+        <SessionTree
+          session={s}
+          running={liveActivity?.[s.id] !== undefined}
+          activityByChat={chatActivities?.[s.id]}
+          onSelectSession={onSelect}
+          chatActions={chatActions}
+          onRequestCloseFile={onRequestCloseFile}
+          onCloseView={onCloseView}
+        />
+      )}
+      </div>
     )
   }
 
@@ -922,6 +859,23 @@ const SIDEBAR_WIDTH = { storageKey: "sb.sidebar.width", initial: 266, min: 200, 
 
 /** Below this much room for the whole shell, the sidebar becomes a rail. */
 const RAIL_THRESHOLD = 1000
+
+const EXPANDED_STORAGE_KEY = "sb.sidebar.expanded"
+const readExpanded = (): ReadonlySet<string> => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EXPANDED_STORAGE_KEY) ?? "[]") as unknown
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [])
+  } catch {
+    return new Set()
+  }
+}
+const writeExpanded = (ids: ReadonlySet<string>): void => {
+  try {
+    localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Expansion is a convenience; losing it is harmless.
+  }
+}
 
 /** The collapsed rail's width — one avatar plus breathing room. */
 const RAIL_WIDTH = 52

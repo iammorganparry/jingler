@@ -50,6 +50,9 @@ import {
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
+  closeSurfaceEverywhere,
+  openTab,
+  updateEditorLayout,
 } from "@jingler/ui";
 import { appMachine } from "./app-machine.js";
 import { authMachine } from "./auth-machine.js";
@@ -76,8 +79,10 @@ import { useSessionActivities } from "./session-activity.js";
 import { setSessionDiff, useSessionDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
+  disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  useAllChatActivities,
 } from "./conversation-registry.js";
 import { addDraftCodeReference, clearDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
@@ -85,7 +90,6 @@ import { clearViewedPaths } from "./viewed-store.js";
 import {
   closeSessionFile,
   disposeFileBrowserActor,
-  openSessionFile,
   trackSessionFile,
   requestCloseFileSurface,
 } from "./use-file-browser.js";
@@ -308,6 +312,7 @@ function AuthedApp({
     [],
   );
   const liveDiff = useSessionDiffs();
+  const chatActivities = useAllChatActivities();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
   const browserDock = usePreviewDock();
@@ -1354,6 +1359,7 @@ function AuthedApp({
         onGithubRefresh={github.refresh}
         onGithubDisconnect={github.disconnect}
         liveActivity={liveActivity}
+        chatActivities={chatActivities}
         prStates={prStates}
         liveDiff={liveDiff}
         usage={usage}
@@ -1537,6 +1543,50 @@ function AuthedApp({
         onCreateSessionFromPr={createSessionFromPr}
         onCreateSessionFromIssue={createSessionFromIssue}
         onRenameSession={renameSession}
+        chatActions={{
+          onSelectChat: (sessionId, chatId) =>
+            queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId)),
+          onRenameChat: (sessionId, chatId, title) => {
+            void rpc.sessionsRenameChat(sessionId, chatId, title).then(publishSessionUpdate);
+          },
+          onCloseChat: (sessionId, chatId) =>
+            queueSessionChatMutation(
+              sessionId,
+              () => rpc.sessionsCloseChat(sessionId, chatId),
+              (updated) => {
+                clearDraft(chatId);
+                disposeChatActor(sessionId, chatId);
+                publishSessionUpdate(updated);
+                updateEditorLayout(sessionId, (layout) =>
+                  openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
+                    kind: "chat",
+                    id: updated.activeChatId,
+                  }),
+                );
+              },
+            ),
+          onReopenChat: (sessionId, chatId) =>
+            queueSessionChatMutation(
+              sessionId,
+              () => rpc.sessionsReopenChat(sessionId, chatId),
+              (updated) => {
+                publishSessionUpdate(updated);
+                updateEditorLayout(sessionId, (layout) => openTab(layout, { kind: "chat", id: chatId }));
+              },
+            ),
+        }}
+        onCreateChat={(sessionId) =>
+          queueSessionChatMutation(
+            sessionId,
+            () => rpc.sessionsCreateChat(sessionId),
+            (updated) => {
+              publishSessionUpdate(updated);
+              updateEditorLayout(sessionId, (layout) =>
+                openTab(layout, { kind: "chat", id: updated.activeChatId }),
+              );
+            },
+          )
+        }
         onArchiveSession={archiveSession}
         onRestoreSession={restoreSession}
         onDeleteSession={(id) =>
@@ -1561,6 +1611,7 @@ function AuthedApp({
             view={view}
             onOpenPlanReview={ctx.onOpenPlanReview}
             onPlanDraftAvailable={ctx.onPlanDraftAvailable}
+            onPlanDraftUnavailable={ctx.onPlanDraftUnavailable}
             onRestore={restoreSession}
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
@@ -1588,6 +1639,7 @@ function AuthedApp({
             session={session}
             connected={canUseGitHubForSession(session)}
             path={ctx.path}
+            onOpenPath={ctx.onOpenPath}
             onClosed={() => {
               if (ctx.path) closeSessionFile(session.id, ctx.path);
               ctx.onClosed?.();
@@ -1606,7 +1658,6 @@ function AuthedApp({
             }}
           />
         )}
-        onOpenFile={openSessionFile}
         onTrackFile={trackSessionFile}
         onRequestCloseFile={requestCloseFileSurface}
         renderFileQuickOpen={(session, ctx) => (
@@ -1694,8 +1745,8 @@ function AuthedApp({
             />
           );
         }}
-        renderTerminalDock={(session) => (
-          <TerminalDockView session={session} embedded />
+        renderTerminalDock={(session, visible) => (
+          <TerminalDockView session={session} visible={visible} embedded />
         )}
         onFocusChat={(sessionId, chatId) => {
           const session = sessions.find((candidate) => candidate.id === sessionId);
@@ -1710,8 +1761,8 @@ function AuthedApp({
           if (browser.visible) void rpc.browserPreviewClose(sessionId, chatId);
           browser.toggle();
         }}
-        renderBrowser={(session) => (
-          <PreviewDockView session={session} dock={browserDock} />
+        renderBrowser={(session, active) => (
+          <PreviewDockView session={session} dock={browserDock} active={active} />
         )}
         version={window.jingler.appVersion}
       />

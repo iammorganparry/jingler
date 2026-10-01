@@ -436,7 +436,7 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
   await expect(window.getByTestId("changed-files-explorer")).toHaveCount(0)
 })
 
-test("the session title renames without navigating and the active chat replaces the Conversation tab", async ({
+test("renaming a session keeps the open tab and the breadcrumb follows it", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -446,29 +446,22 @@ test("the session title renames without navigating and the active chat replaces 
   })
   await expect(appShell(window)).toBeVisible()
 
-  const title = window.getByTestId("conversation-tab")
-  const changes = window.getByRole("button", { name: "Files", exact: true }).first()
-  await changes.click()
-  await expect(changes).toHaveAttribute("aria-current", "page")
+  const files = window.getByRole("button", { name: "Files", exact: true }).first()
+  await files.click()
+  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
 
-  await title.click()
-  await expect(changes).toHaveAttribute("aria-current", "page")
-
-  await title.dblclick()
-  const input = window.getByRole("textbox", { name: "Session title" })
-  await input.fill("Renamed from title")
+  const row = window.locator("[data-testid^='session-row-']").first()
+  await row.getByTitle("Double-click to rename").dblclick()
+  const input = row.getByRole("textbox")
+  await input.fill("Renamed from sidebar")
   await input.press("Enter")
-  await expect(title).toContainText("Renamed from title")
-  await expect(changes).toHaveAttribute("aria-current", "page")
+  await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Renamed from sidebar")
+  await expect(window.getByRole("tab", { name: "Files", exact: true })).toHaveAttribute("aria-selected", "true")
 
-  const rowBox = await window.getByTestId("session-tab-bar").boundingBox()
-  const controlsBox = await window.getByTestId("session-tab-actions").boundingBox()
-  expect(rowBox).not.toBeNull()
-  expect(controlsBox).not.toBeNull()
-  expect(controlsBox!.x).toBeGreaterThan(rowBox!.x + rowBox!.width / 2)
-
+  // Tabs live in the editor group, not the window title bar.
+  await expect(window.getByTestId("title-bar").getByRole("tab")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Conversation" })).toHaveCount(0)
-  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
@@ -539,7 +532,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
 
   // Continuity with the Conversation view: the same 760px reading column. Asserted
   // as a real measured width so a stray class change can't silently widen it.
-  const column = window.locator(".max-w-\\[760px\\]").first()
+  const column = window.locator(".max-w-\\[760px\\]").filter({ visible: true }).first()
   await expect(column).toBeVisible()
   const box = await column.boundingBox()
   expect(box?.width).toBeLessThanOrEqual(760)
@@ -993,7 +986,7 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable from the chat row, mid-run.
-  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
 
@@ -1020,8 +1013,8 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   })
   await expect(appShell(window)).toBeVisible()
 
-  // The completed reviewer is back in Previous chats with its output readable.
-  await window.getByRole("button", { name: "Previous chats" }).click()
+  // The completed reviewer is back in its chat's subagent history, readable.
+  await window.getByRole("button", { name: "Previous subagents" }).click()
   const reviewerTab = window.getByRole("menuitem", { name: /Open Reviewer/ })
   await expect(reviewerTab).toBeVisible()
   await reviewerTab.click()

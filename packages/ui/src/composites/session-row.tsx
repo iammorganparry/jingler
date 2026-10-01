@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react"
-import type { DragEvent, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
-import { SESSION_DND_MIME } from "../app/split-layout.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
 import { activityLabel, displayStatusOf, issueReferenceOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
+  ChevronRight,
   Cloud,
   GitMerge,
   Monitor,
@@ -66,6 +66,8 @@ export function SessionRow({
   onArchive,
   onRestore,
   onDelete,
+  expanded,
+  onToggleExpanded,
   className
 }: {
   session: Session
@@ -98,6 +100,9 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Whether the row's chat tree is shown. Absent hides the chevron. */
+  expanded?: boolean
+  onToggleExpanded?: (id: string) => void
   className?: string
 }) {
          function renderActiveRow() {
@@ -108,7 +113,6 @@ export function SessionRow({
     >
       <div
         data-testid={`session-row-${session.id}`}
-        {...dragProps}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
         aria-busy={pendingAction !== null}
         className={cn(
@@ -142,6 +146,21 @@ export function SessionRow({
 
   function renderEditableSessionTitle() {
     return (<div className="flex items-center gap-2">
+          {onToggleExpanded && (
+            <button
+              type="button"
+              aria-expanded={expanded ?? false}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${session.title}`}
+              data-testid={`session-expand-${session.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleExpanded(session.id)
+              }}
+              className="-ml-1 flex-none rounded p-0.5 text-dim outline-none hover:bg-surface hover:text-text"
+            >
+              <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
+            </button>
+          )}
           {draft !== null ? (
             <input
               value={draft}
@@ -377,24 +396,6 @@ return ([
   const withMenu = (node: ReactNode) =>
     actions.length > 0 ? <ContextMenu items={actions}>{node}</ContextMenu> : node
 
-  /**
-   * Drag props shared by both row variants. The row is the drag SOURCE for the
-   * session grid; the slots downstream are the targets.
-   *
-   * `effectAllowed = "copyMove"` because a drop doesn't remove the session from
-   * the sidebar.
-   */
-  const dragProps = {
-    // Never while renaming: in Chromium a `draggable` ancestor swallows
-    // press-and-drag inside a descendant text input, so selecting part of the
-    // title would start dragging the row instead.
-    draggable: draft === null && pendingAction === null,
-    onDragStart: (e: DragEvent) => {
-      e.dataTransfer.setData(SESSION_DND_MIME, session.id)
-      e.dataTransfer.effectAllowed = "copyMove"
-    }
-  }
-
   const commit = () => {
     if (draft === null) return
     const next = draft.trim()
@@ -409,7 +410,6 @@ return ([
     return withMenu(
       <div
         data-testid={`session-row-${session.id}`}
-        {...dragProps}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
         aria-busy={pendingAction !== null}
         className={cn(
@@ -439,19 +439,6 @@ return ([
     // is incompatible with the HTML5 drag handler this row needs to be a drag
     // source. Wrapping keeps both: motion owns the box, the inner div owns the
     // drag.
-    //
-    // `layoutId` pairs this row with the same session's SEGMENT inside a
-    // `SplitRow` pill. When the session is dragged into a split (or separated
-    // back out) `motion` matches the two elements across the unmount and tweens
-    // between their boxes, so the row visibly travels into the pill instead of
-    // vanishing here and appearing there. The id must match `split-row.tsx`.
-    //
-    // An ARCHIVED row carries no id at all. Archiving evicts a session from its
-    // split (see the prune in `use-split-layout`), so an archived row has no
-    // segment left to morph with — and an id with no counterpart is pure risk:
-    // if a stale persisted workspace ever named an archived session, both
-    // elements would mount with the same id for a frame, which is undefined in
-    // motion and can snap either one to the other's box.
     renderActiveRow()
   )
 }
