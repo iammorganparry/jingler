@@ -85,7 +85,7 @@ const transcript = [
 const filesTab = (window: Page) =>
   window.getByRole("button", { name: "Files", exact: true })
 const conversationTab = (window: Page) =>
-  window.getByRole("button", { name: "Chat 1", exact: true })
+  window.getByRole("tab", { name: "Chat 1", exact: true }).first()
 // The sidebar Explorer's tree; the Files view keeps a hidden one mounted too.
 const tree = (window: Page) =>
   window

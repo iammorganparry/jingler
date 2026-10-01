@@ -421,7 +421,8 @@ const chatTitleOf = (session: Session, chatId: string): string => {
 function describeEditorSurface(
   surface: SessionSurface,
   session: Session,
-  contributions: ReadonlyArray<TabContribution>
+  contributions: ReadonlyArray<TabContribution>,
+  tabCtx: TabContext
 ): EditorTabMeta {
   const sessionLabel = session.title || UNTITLED_SESSION
   if (surface.kind === "chat") {
@@ -434,7 +435,13 @@ function describeEditorSurface(
   const contribution = contributions.find((candidate) => candidate.id === surface.id)
   const label = contribution?.label ?? surface.id
   const owner = surface.chatId ? chatTitleOf(session, surface.chatId) : undefined
-  return { label, icon: contribution?.icon, crumbs: owner ? [sessionLabel, owner, label] : [sessionLabel, label] }
+  const badge = contribution ? describeTab(contribution, tabCtx).badge : undefined
+  return {
+    label,
+    icon: contribution?.icon,
+    crumbs: owner ? [sessionLabel, owner, label] : [sessionLabel, label],
+    ...(badge ? { badge } : {})
+  }
 }
 
 function SessionPaneBody(props: SessionPaneProps) {
@@ -735,7 +742,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...viewLauncherItems
   ]
 
-  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions)
+  const describeSurface = (surface: SessionSurface) => describeEditorSurface(surface, active, contributions, tabCtx)
 
   const renderBody = (surface: SessionSurface, ctx: { readonly focused: boolean }) => {
     const chatId = surfaceOwner(surface) ?? active.activeChatId

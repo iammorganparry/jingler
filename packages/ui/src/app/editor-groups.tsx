@@ -40,6 +40,7 @@ import {
 import { isSurface, sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
 import { MIN_RATIO } from "./split-layout.js"
 import type { TabLauncherItem } from "./chat-tab-bar.js"
+import type { TabBadge } from "./tab-contributions.js"
 
 export interface EditorTabMeta {
   readonly label: string
@@ -47,6 +48,8 @@ export interface EditorTabMeta {
   readonly icon?: LucideIcon
   /** Breadcrumb trail shown under the tab strip, e.g. `["jingler", "main", "a.ts"]`. */
   readonly crumbs?: ReadonlyArray<string>
+  /** The contribution's own badge (plan progress, diff totals). */
+  readonly badge?: TabBadge
 }
 
 export interface EditorGroupsProps {
@@ -287,7 +290,7 @@ const EditorGroup = memo(function EditorGroup({
       {...handlers}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-editor"
     >
-      <div className="flex h-9 flex-none items-stretch border-b border-hairline bg-sunken">
+      <div data-testid="editor-tab-strip" className="flex h-9 flex-none items-stretch border-b border-hairline bg-sunken">
         <div role="tablist" className="sb-no-scrollbar -mb-px flex min-w-0 flex-1 items-stretch overflow-x-auto">
           {group.tabs.map((surface) => (
             <EditorTab
@@ -389,6 +392,14 @@ const EditorTab = memo(function EditorTab({
           <Icon className={cn("size-3 flex-none", surface.kind === "chat" ? "text-blue" : "text-green")} />
         ) : null}
         <span className="max-w-40 truncate">{meta.label}</span>
+        {meta.badge?.kind === "count" && (
+          <span className="flex-none rounded bg-surface px-1 font-mono text-[10px] text-muted-foreground">{meta.badge.text}</span>
+        )}
+        {meta.badge?.kind === "diff" && meta.badge.added + meta.badge.removed > 0 && (
+          <span className="flex-none font-mono text-[10px]">
+            <span className="text-green">+{meta.badge.added}</span> <span className="text-red">-{meta.badge.removed}</span>
+          </span>
+        )}
       </button>
       <button
         type="button"
@@ -421,6 +432,7 @@ const TabBody = memo(function TabBody({
   return (
     <div
       data-testid={`editor-body-${surface.kind}-${surface.id}`}
+      data-surface={sessionSurfaceKey(surface)}
       hidden={!visible}
       className="absolute inset-0 flex min-h-0 min-w-0 flex-col"
     >

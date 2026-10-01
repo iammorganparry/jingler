@@ -46,6 +46,11 @@ export function SessionSubagentTabs({
   const subagents = active?.active ?? []
   return (
     <SubagentTabBar
+      previous={(active?.completed ?? []).map((node) => ({ id: node.id, title: `${node.agent} · ${node.task}` }))}
+      onOpenPrevious={(nodeId) => {
+        onSelectConversation()
+        selectSubagentTab(session.id, session.activeChatId, nodeId)
+      }}
       subagents={subagents.map((node) => ({
         id: node.id,
         title: `${node.agent} · ${node.task}`,
