@@ -439,19 +439,6 @@ return ([
     // is incompatible with the HTML5 drag handler this row needs to be a drag
     // source. Wrapping keeps both: motion owns the box, the inner div owns the
     // drag.
-    //
-    // `layoutId` pairs this row with the same session's SEGMENT inside a
-    // `SplitRow` pill. When the session is dragged into a split (or separated
-    // back out) `motion` matches the two elements across the unmount and tweens
-    // between their boxes, so the row visibly travels into the pill instead of
-    // vanishing here and appearing there. The id must match `split-row.tsx`.
-    //
-    // An ARCHIVED row carries no id at all. Archiving evicts a session from its
-    // split (see the prune in `use-split-layout`), so an archived row has no
-    // segment left to morph with — and an id with no counterpart is pure risk:
-    // if a stale persisted workspace ever named an archived session, both
-    // elements would mount with the same id for a frame, which is undefined in
-    // motion and can snap either one to the other's box.
     renderActiveRow()
   )
 }
