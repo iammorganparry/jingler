@@ -2,4 +2,4 @@
 "@jingler/desktop": minor
 ---
 
-Chats, files and views are now tabs you can split in any direction.
+Chats stay visible in a dedicated pane while files, previews, terminals, and other views open beside them.

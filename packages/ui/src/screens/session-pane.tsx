@@ -104,22 +104,6 @@ export interface ConversationPaneCtx {
   paneFocused?: boolean
 }
 
-export interface SessionChatTabsRenderContext {
-  readonly activeTabId: TabKey
-  readonly onSelectConversation: () => void
-  readonly onSelectFiles: () => void
-  readonly activeSurface?: SessionSurface
-  readonly onSelectSurface?: (surface: SessionSurface) => void
-  readonly onCloseSurface?: (surface: SessionSurface) => void
-  readonly onRequestCloseFile?: (path: string) => boolean
-  readonly viewSlot?: ReactNode
-  readonly viewCount?: number
-  readonly viewsActive?: boolean
-  readonly onCloseAllViews?: () => void
-  readonly viewLauncherItems?: ReadonlyArray<TabLauncherItem>
-  readonly paneFocused?: boolean
-}
-
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
@@ -188,17 +172,6 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
-  /**
-   * Render the session's chat pills into the tab row's `chatSlot` (behind the
-   * divider). A render prop for the same reason `renderConversation` is: the
-   * chat state it drives — the create/select/rename/close RPCs and the live
-   * per-chat activity — lives in the desktop renderer, so building the bar here
-   * would drag the RPC client into the component library. Absent in stories.
-   */
-  renderChatTabs?: (
-    session: Session,
-    ctx: SessionChatTabsRenderContext
-  ) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -768,7 +741,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     .filter(
       (contribution) =>
         (contribution.id !== BUILTIN_TAB.plan || activeHasPlan) &&
-        (props.renderChatTabs === undefined || contribution.id !== BUILTIN_TAB.conversation)
+        contribution.id !== BUILTIN_TAB.conversation
     )
     .map((contribution) => describeTab(contribution, tabCtx))
   const viewRailMenus = { ...buildProviderMenus(active, tabs, props.onSelectIssue), ...props.viewRailMenus }

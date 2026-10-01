@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { DEFAULT_FILTERS } from "./session-filters.js"
 import { SessionSidebar } from "./session-sidebar.js"
 import { testSession as session } from "../test-support.js"
-import { activeSurface, allTabs, dropTab, focusedGroup, openTab } from "./editor-layout.js"
+import { activeSurface, allTabs, createEditorLayout, dropTab, focusedGroup, openTab, saveEditorLayout } from "./editor-layout.js"
 import { editorLayoutOf, resetEditorLayouts, updateEditorLayout } from "./editor-layout-machine.js"
 
 afterEach(cleanup)
@@ -423,15 +423,29 @@ describe("SessionSidebar session tree", () => {
     expect(screen.getByTestId("session-tree-s2")).toBeTruthy()
   })
 
+  it("restores files and views when an inactive session tree expands", async () => {
+    saveEditorLayout("s2", createEditorLayout([
+      { kind: "chat", id: "c_s2_1" },
+      { kind: "file", id: "src/restored.ts" },
+      { kind: "view", id: "terminal" }
+    ]))
+    renderTree()
+    fireEvent.click(screen.getByTestId("session-expand-s2"))
+    await waitFor(() => expect(screen.getByTestId("session-tree-file-src/restored.ts")).toBeTruthy())
+    expect(screen.getByTestId("session-tree-view-terminal")).toBeTruthy()
+  })
+
   it("opens a chat as a tab and selects its session and canonical chat; closes it everywhere from the sidebar", () => {
     const select = vi.fn()
     const selectChat = vi.fn()
-    renderTree({ onSelect: select, chatActions: { onSelectChat: selectChat } })
+    const closeUntouched = vi.fn()
+    renderTree({ onSelect: select, chatActions: { onSelectChat: selectChat, onCloseUntouchedChat: closeUntouched } })
     fireEvent.click(within(screen.getByTestId("session-tree-chat-c2")).getByText("Side chat"))
     expect(select).toHaveBeenCalledWith("s1")
     expect(selectChat).toHaveBeenCalledWith("s1", "c2")
     expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).toContain("c2")
     fireEvent.click(screen.getByRole("button", { name: "Close Side chat everywhere" }))
+    expect(closeUntouched).toHaveBeenCalledWith("s1", "c2")
     expect(allTabs(editorLayoutOf("s1")!).map((t) => t.id)).not.toContain("c2")
     // Chats stay listed after closing; only files and views drop out.
     expect(screen.getByTestId("session-tree-chat-c2")).toBeTruthy()

@@ -1163,6 +1163,15 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return yield* get(sessionId)
         })
 
+      const discardClosedChat = (sessionId: string, chatId: string) =>
+        Effect.gen(function* () {
+          yield* update(sessionId, (session) => ({
+            ...session,
+            closedChats: (session.closedChats ?? []).filter((chat) => chat.id !== chatId)
+          }))
+          return yield* get(sessionId)
+        })
+
       const reopenChat = (sessionId: string, chatId: string) =>
         Effect.gen(function* () {
           const now = new Date().toISOString()
@@ -1949,6 +1958,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         selectChat,
         renameChat,
         closeChat,
+        discardClosedChat,
         reopenChat,
         setMode,
         setAgentModel,

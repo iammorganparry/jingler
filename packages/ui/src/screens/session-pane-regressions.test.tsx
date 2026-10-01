@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { editorTabMime } from "../app/editor-groups.js"
 import { resetEditorLayouts } from "../app/editor-layout-machine.js"
-import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 import { testSession as session } from "../test-support.js"
 import { SessionPane } from "./session-pane.js"
 
@@ -108,11 +107,11 @@ describe("SessionPane editor-group regressions", () => {
     expect(discard).toHaveBeenCalledWith(owner.id, "chat-b")
   })
 
-  it("keeps a visible Browser copy active when another group gets focus and closes shared state only on the last copy", () => {
+  it("mounts one Browser body and closes its shared state with its only tab", () => {
     const toggle = vi.fn()
     render(
       <SessionPane
-        session={session({ id: "browser-copies" })}
+        session={session({ id: "browser-single" })}
         isBrowserActive={() => true}
         onToggleBrowser={toggle}
         renderConversation={() => <div>chat</div>}
@@ -120,34 +119,27 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Browser" }))
-    fireEvent.click(screen.getByRole("button", { name: "Split right" }))
-    const [first, second] = screen.getAllByTestId("editor-group")
-    fireEvent.click(within(first!).getByRole("tab", { name: "Chat 1" }))
-    expect(screen.getAllByTestId("browser-visible").map((node) => node.textContent)).toEqual(["false", "true"])
+    expect(screen.getAllByTestId("browser-visible").map((node) => node.textContent)).toEqual(["true"])
+    expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
 
-    fireEvent.click(within(second!).getByRole("button", { name: "Close Browser" }))
-    expect(toggle).not.toHaveBeenCalled()
-    fireEvent.click(within(screen.getByTestId("editor-group")).getByRole("button", { name: "Close Browser" }))
+    fireEvent.click(screen.getByRole("button", { name: "Close Browser" }))
     expect(toggle).toHaveBeenCalledOnce()
+    expect(screen.getAllByTestId("editor-group")).toHaveLength(1)
   })
 
-  it("closes a duplicated file document only when its final tab closes", () => {
+  it("closes a file document through its only content tab", () => {
     const requestClose = vi.fn(() => true)
     render(
       <SessionPane
-        session={session({ id: "file-copies" })}
+        session={session({ id: "file-single" })}
         onRequestCloseFile={requestClose}
         renderConversation={(_owner, _view, ctx) => <button type="button" onClick={() => ctx.onOpenFile("src/a.ts")}>file</button>}
         renderFiles={(_owner, ctx) => <div>file {ctx.path}</div>}
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "file" }))
-    fireEvent.click(screen.getByRole("button", { name: "Split right" }))
-    const [, second] = screen.getAllByTestId("editor-group")
-    fireEvent.click(within(second!).getByRole("button", { name: "Close a.ts" }))
-    expect(requestClose).not.toHaveBeenCalled()
-    fireEvent.click(within(screen.getByTestId("editor-group")).getByRole("button", { name: "Close a.ts" }))
-    expect(requestClose).toHaveBeenCalledExactlyOnceWith("file-copies", "src/a.ts")
+    fireEvent.click(screen.getByRole("button", { name: "Close a.ts" }))
+    expect(requestClose).toHaveBeenCalledExactlyOnceWith("file-single", "src/a.ts")
   })
 
   it("prunes an open Plan tab when its plan ceases to exist", async () => {
@@ -179,37 +171,21 @@ describe("SessionPane editor-group regressions", () => {
     expect(screen.queryByTestId("editor-tab-view-plan")).toBeNull()
   })
 
-  it("synchronizes the canonical chat when keyboard focus moves between groups", () => {
-    const focusChat = vi.fn()
+  it("keeps all chats in the same group", () => {
     const owner = session({
-      id: "keyboard-chat",
+      id: "chat-lane",
       chats: [
         { id: "chat-a", title: "A", createdAt: "now", updatedAt: "now" },
         { id: "chat-b", title: "B", createdAt: "now", updatedAt: "now" }
       ],
       activeChatId: "chat-a"
     })
-    render(
-      <SessionPane
-        session={owner}
-        onFocusChat={focusChat}
-        renderConversation={(chat) => <div>{chat.activeChatId}</div>}
-      />
-    )
-    fireEvent.drop(screen.getByTestId("editor-group"), {
-      dataTransfer: {
-        types: [editorTabMime(owner.id)],
-        getData: () => JSON.stringify({ surface: { kind: "chat", id: "chat-b" } })
-      }
-    })
-    fireEvent.click(screen.getByRole("button", { name: "Split right" }))
-    fireEvent(window, new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "focus-0" }))
-    focusChat.mockClear()
-    fireEvent(window, new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, { detail: "focus-right" }))
-    expect(focusChat).toHaveBeenCalledWith(owner.id, "chat-b")
+    const view = render(<SessionPane session={owner} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
+    view.rerender(<SessionPane session={{ ...owner, activeChatId: "chat-b" }} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
+    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(2)
   })
 
-  it("deactivates hidden terminals without deactivating a visible split copy", () => {
+  it("mounts one visible terminal in the content pane", () => {
     render(
       <SessionPane
         session={session({ id: "terminal-visible" })}
@@ -218,9 +194,7 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
-    fireEvent.click(screen.getByRole("button", { name: "Split right" }))
-    const [first] = screen.getAllByTestId("editor-group")
-    fireEvent.click(within(first!).getByRole("tab", { name: "Chat 1" }))
-    expect(screen.getAllByTestId("terminal-visible").map((node) => node.textContent)).toEqual(["false", "true"])
+    expect(screen.getAllByTestId("terminal-visible").map((node) => node.textContent)).toEqual(["true"])
+    expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
   })
 })

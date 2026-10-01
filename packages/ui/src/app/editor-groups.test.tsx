@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { Plus } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { activateTab, type EditorLayout } from "./editor-layout.js"
@@ -17,10 +17,10 @@ const layout: EditorLayout = {
     type: "split",
     id: "root",
     axis: "row",
-    ratios: [0.5, 0.5],
+    ratios: [1 / 3, 2 / 3],
     children: [
-      { type: "group", id: "left", tabs: [a, source], active: sessionSurfaceKey(a) },
-      { type: "group", id: "right", tabs: [b], active: sessionSurfaceKey(b) }
+      { type: "group", id: "left", tabs: [a, b], active: sessionSurfaceKey(a) },
+      { type: "group", id: "right", tabs: [source], active: sessionSurfaceKey(source) }
     ]
   }
 }
@@ -55,13 +55,13 @@ describe("EditorGroups rendering", () => {
     view.rerender(
       <EditorGroups
         {...props(renderBody)}
-        layout={activateTab(layout, "left", sessionSurfaceKey(source))}
+        layout={activateTab(layout, "left", sessionSurfaceKey(b))}
       />
     )
 
     expect(renders.get("a")).toBe(2)
-    expect(renders.get("src/a.ts")).toBe(2)
-    expect(renders.get("b")).toBe(1)
+    expect(renders.get("b")).toBe(2)
+    expect(renders.get("src/a.ts")).toBe(1)
   })
 
   it("invalidates mounted bodies when rendering dependencies change", () => {
@@ -80,12 +80,12 @@ describe("EditorGroups rendering", () => {
       <span data-testid={`state-${surface.id}`}>{`${ctx.focused}:${ctx.visible}`}</span>
     )
     const view = render(<EditorGroups {...props(renderBody)} layout={layout} />)
-    expect(screen.getByTestId("state-b").textContent).toBe("false:true")
+    expect(screen.getByTestId("state-b").textContent).toBe("false:false")
 
     view.rerender(<EditorGroups {...props(renderBody)} layout={{ ...layout, focusedGroupId: "right" }} />)
-    expect(screen.getByTestId("state-b").textContent).toBe("true:true")
+    expect(screen.getByTestId("state-src/a.ts").textContent).toBe("false:true")
     expect(screen.getByTestId("state-a").textContent).toBe("false:true")
-    expect(screen.getByTestId("state-src/a.ts").textContent).toBe("false:false")
+    expect(screen.getByTestId("state-b").textContent).toBe("false:false")
   })
 
   it("opens the keyboard tab chooser and runs its numbered shortcut", () => {
@@ -113,6 +113,55 @@ describe("EditorGroups rendering", () => {
     expect(screen.getByTestId("editor-drop-overlay")).toBeTruthy()
     fireEvent.dragEnd(window)
     expect(screen.queryByTestId("editor-drop-overlay")).toBeNull()
+  })
+
+  it("moves a split tab back into another group's tab strip even with Alt held", () => {
+    const onDrop = vi.fn()
+    render(<EditorGroups {...props(() => null)} layout={layout} onDrop={onDrop} />)
+    const mime = editorTabMime("session")
+    const drag = { surface: source, from: "left" }
+    const dataTransfer = {
+      types: [mime],
+      dropEffect: "copy",
+      getData: (type: string) => type === mime ? JSON.stringify(drag) : ""
+    }
+
+    fireEvent.dragOver(screen.getAllByTestId("editor-group")[1]!, { clientX: 0, clientY: 0, dataTransfer })
+    fireEvent.dragOver(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+    expect(screen.getAllByTestId("editor-drop-overlay")).toHaveLength(1)
+    fireEvent.drop(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+
+    expect(onDrop).toHaveBeenCalledOnce()
+    expect(onDrop).toHaveBeenCalledWith(drag, "right", "center", false)
+    expect(screen.queryByTestId("editor-drop-overlay")).toBeNull()
+  })
+
+  it("keeps a chat body mounted when the content pane opens and closes", () => {
+    const mounted = vi.fn()
+    const Body = ({ id }: { id: string }) => {
+      useEffect(() => { mounted(id) }, [id])
+      return <span>{id}</span>
+    }
+    const root = layout.root!
+    const chatOnly: EditorLayout = { focusedGroupId: "left", root: root.type === "split" ? root.children[0]! : root }
+    const view = render(<EditorGroups {...props((surface) => <Body id={surface.id} />)} layout={chatOnly} />)
+    expect(mounted).toHaveBeenCalledTimes(2)
+
+    view.rerender(<EditorGroups {...props((surface) => <Body id={surface.id} />)} layout={layout} />)
+    expect(mounted.mock.calls.filter(([id]) => id === "a")).toHaveLength(1)
+    expect(mounted.mock.calls.filter(([id]) => id === "b")).toHaveLength(1)
+
+    view.rerender(<EditorGroups {...props((surface) => <Body id={surface.id} />)} layout={chatOnly} />)
+    expect(mounted.mock.calls.filter(([id]) => id === "a")).toHaveLength(1)
+  })
+
+  it("tracks keyboard focus without focusing a group from its close button", () => {
+    const onFocusGroup = vi.fn()
+    render(<EditorGroups {...props(() => null)} layout={layout} onFocusGroup={onFocusGroup} />)
+    fireEvent.focus(screen.getByRole("button", { name: "Close src/a.ts" }))
+    expect(onFocusGroup).not.toHaveBeenCalled()
+    fireEvent.focus(screen.getByRole("tab", { name: "src/a.ts" }))
+    expect(onFocusGroup).toHaveBeenCalledWith("right")
   })
 
   it("previews divider movement without rendering bodies and commits once on release", () => {

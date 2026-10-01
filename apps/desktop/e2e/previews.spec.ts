@@ -81,7 +81,7 @@ const closeServer = (server: Server): Promise<void> =>
   })
 
 test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", async ({ launchApp }) => {
-  const { window } = await launchApp({
+  const { app, window } = await launchApp({
     configured: true,
     isolateSystemHome: true,
     withRepo: true,
@@ -118,12 +118,16 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await window.getByTestId("view-tab-browser").click()
   const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
   await expect(url).toBeVisible()
-  await expect(window.getByTestId("open-view-tab-browser")).toBeVisible()
-  await expect(window.getByTestId("surface-view")).toHaveAttribute("data-panes", "2")
+  await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
+  await expect(window.getByTestId("editor-group")).toHaveCount(2)
   await expect(window.locator(".katex").first()).toBeVisible()
   await url.fill("http://localhost:4321")
   await url.press("Enter")
-  await expect(url).toBeVisible()
+  await window.getByTestId("view-tab-browser").click()
+  await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(1)
+  await expect.poll(() => app.evaluate(({ webContents }) =>
+    webContents.getAllWebContents().filter((contents) => contents.getURL().startsWith("http://localhost:4321")).length
+  )).toBe(1)
 
 })
 
@@ -302,16 +306,16 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
 
     // Open Browser surfaces are session state too. Focusing Chat does not close
     // the adjacent Browser pane, and switching sessions restores each pane.
-    await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+    await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/beta-history`)
     await sessionRow(window, "Preview Alpha").click()
-    await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("editor-tab-view-browser").getByRole("tab", { name: "Browser", exact: true }).click()
     await expect(url).toHaveValue(`${origin}/alpha-history`)
     await sessionRow(window, "Preview Beta").click()
     await expect(url).toHaveValue(`${origin}/beta-history`)
 
     await sessionRow(window, "Preview Alpha").click()
-    await window.getByTestId("open-view-tab-browser").getByRole("button", { name: "Browser", exact: true }).click()
+    await window.getByTestId("editor-tab-view-browser").getByRole("tab", { name: "Browser", exact: true }).click()
     await window.getByRole("button", { name: "Close Browser", exact: true }).click()
     await expect.poll(() => app.evaluate(
       ({ webContents }, expectedOrigin) =>
@@ -353,16 +357,13 @@ test("two agents in one session keep independent browser state", async ({ launch
       sessions: agentBrowserSession
     })
     await expect(appShell(window)).toBeVisible()
-    const focusedUrl = () => window
-      .locator('[data-testid^="surface-pane-"][data-focused="true"]')
-      .getByLabel("Preview URL")
+    const focusedUrl = () => window.getByLabel("Preview URL").filter({ visible: true }).first()
     await window.getByTestId("view-tab-browser").click()
     await focusedUrl().fill(`${origin}/alpha`)
     await focusedUrl().press("Enter")
     await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
 
-    await window.getByTitle("2. Agent Beta").click()
-    await expect(focusedUrl()).toHaveCount(0)
+    await window.getByTestId("session-tree-chat-chat-beta").getByRole("button").click()
     await window.getByTestId("view-tab-browser").click()
     await focusedUrl().fill(`${origin}/beta`)
     await focusedUrl().press("Enter")
@@ -383,8 +384,8 @@ test("two agents in one session keep independent browser state", async ({ launch
     ]))
     expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
 
-    await window.getByTitle("1. Agent Alpha").click()
-    await window.getByRole("button", { name: "Browser · Agent Alpha", exact: true }).click()
+    await window.getByTestId("session-tree-chat-chat-alpha").locator("button").first().click()
+    await window.getByTestId("view-tab-browser").click()
     await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
   } finally {
     await closeServer(server)
@@ -467,7 +468,7 @@ test("deleting a session closes its native browser resources", async ({ launchAp
   }
 })
 
-test("retains each session browser while Files owns two split panes", async ({ launchApp }) => {
+test("retains each session browser while files occupy the content pane", async ({ launchApp }) => {
   const server = createServer((_request, response) => {
     response.writeHead(200, { "Content-Type": "text/html" })
     response.end("<!doctype html><title>coexist</title><h1>Preview stays alive</h1>")
@@ -495,88 +496,43 @@ test("retains each session browser while Files owns two split panes", async ({ l
       }
     })
     await expect(appShell(window)).toBeVisible()
-    const mainWindowId = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.id)
-    const visibleNativeUrls = () =>
-      app.evaluate(({ BrowserWindow }, { expectedOrigin, mainWindowId }) => {
-        const root = BrowserWindow.fromId(mainWindowId)?.contentView
-        return (root?.children ?? [])
-          .filter((view) => view.getVisible())
-          .map((view) => {
-            const candidate = view as typeof view & {
-              webContents?: { getURL(): string }
-            }
-            return candidate.webContents?.getURL() ?? ""
-          })
-          .filter((loadedUrl) =>
-            loadedUrl.startsWith(expectedOrigin) || loadedUrl.startsWith("file:")
-          )
-      }, { expectedOrigin: origin, mainWindowId })
-    await window.getByTestId("view-tab-browser").click()
-    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
-    await url.fill(origin)
-    await url.press("Enter")
-    await expect.poll(visibleNativeUrls).toEqual([])
-    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("focus"), mainWindowId)
 
-    await window.keyboard.press("Control+Shift+Equal")
-    const alphaPane = window.getByTestId("split-pane-0")
-    const betaPane = window.getByTestId("split-pane-1")
-    // The internet dock follows the focused session. Seed Beta's own browser
-    // before opening its PDF so the final visible browser is Beta's retained
-    // view, not Alpha's deliberately hidden one.
-    await expect(betaPane).toHaveAttribute("data-focused", "true")
-    await window.getByTestId("view-tab-browser").click()
-    const betaUrl = betaPane.getByLabel("Preview URL")
-    await betaUrl.fill(origin)
-    await betaUrl.press("Enter")
+    const openBrowser = async () => {
+      await window.getByTestId("view-tab-browser").click()
+      const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
+      await url.fill(origin)
+      await url.press("Enter")
+      await expect(url).toHaveValue(origin)
+    }
+    const openPdf = async (sessionTitle: string, filename: string) => {
+      await window.keyboard.press("Meta+Shift+p")
+      const picker = window.getByTestId("file-quick-open")
+      await expect(picker).toBeVisible()
+      await window.getByPlaceholder(`Open a file in ${sessionTitle}…`).fill(filename)
+      await window.getByTestId(`palette-item-file:${filename}`).click()
+      await expect(picker).toBeHidden()
+      await expect(window.getByTestId(`editor-tab-file-${filename}`)).toBeVisible()
+      await expect(window.getByTestId("editor-group")).toHaveCount(2)
+    }
 
-    await alphaPane.getByTestId("surface-pane-toolbar-1").dispatchEvent("mousedown")
-    await expect(alphaPane).toHaveAttribute("data-focused", "true")
-    await window.keyboard.press("Meta+Shift+p")
-    const picker = window.getByTestId("file-quick-open")
-    await expect(picker).toBeVisible()
-    await window.getByPlaceholder("Open a file in Preview Alpha…").fill("alpha.pdf")
-    await window.getByTestId("palette-item-file:alpha.pdf").click()
-    await expect(picker).toBeHidden()
-    await expect(
-      window.getByTestId("file-tab-alpha.pdf").getByRole("button", { name: "alpha.pdf", exact: true })
-    ).toHaveAttribute("aria-current", "page")
+    await openBrowser()
+    await openPdf("Preview Alpha", "alpha.pdf")
+    await sessionRow(window, "Preview Beta").click()
+    await openBrowser()
+    await openPdf("Preview Beta", "beta.pdf")
 
-    await betaPane.getByTestId("surface-pane-toolbar-1").dispatchEvent("mousedown")
-    await expect(betaPane).toHaveAttribute("data-focused", "true")
-    await window.keyboard.press("Meta+Shift+p")
-    await expect(picker).toBeVisible()
-    await window.getByPlaceholder("Open a file in Preview Beta…").fill("beta.pdf")
-    await window.getByTestId("palette-item-file:beta.pdf").click()
-    await expect(picker).toBeHidden()
-    await expect(
-      window.getByTestId("file-tab-beta.pdf").getByRole("button", { name: "beta.pdf", exact: true })
-    ).toHaveAttribute("aria-current", "page")
+    await sessionRow(window, "Preview Alpha").click()
+    await window.getByTestId("editor-tab-view-browser").getByRole("tab").click()
+    await expect(window.getByLabel("Preview URL").filter({ visible: true }).first()).toHaveValue(origin)
+    await sessionRow(window, "Preview Beta").click()
+    await window.getByTestId("editor-tab-view-browser").getByRole("tab").click()
+    await expect(window.getByLabel("Preview URL").filter({ visible: true }).first()).toHaveValue(origin)
 
-    await expect
-      .poll(() =>
-        visibleNativeUrls()
-      )
-      .toEqual(
-        expect.arrayContaining([
-          expect.stringContaining("alpha.pdf"),
-          expect.stringContaining("beta.pdf")
-        ])
-      )
-    await alphaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
-    await window.getByTestId("view-tab-browser").click()
-    await expect(alphaPane.getByLabel("Preview URL")).toHaveValue(origin)
-
-    await betaPane.getByTestId("surface-pane-toolbar-0").dispatchEvent("mousedown")
-    await window.getByTestId("view-tab-browser").click()
-    await expect(betaPane.getByLabel("Preview URL")).toHaveValue(origin)
-    await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
-
-    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("blur"), mainWindowId)
-    await expect.poll(visibleNativeUrls).toEqual([])
-
-    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("focus"), mainWindowId)
-    await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
+    const nativeBrowserUrls = () => app.evaluate(({ webContents }, expectedOrigin) =>
+      webContents.getAllWebContents().map((contents) => contents.getURL()).filter((url) => url.startsWith(expectedOrigin)), origin)
+    await expect.poll(async () => (await nativeBrowserUrls()).length).toBeGreaterThanOrEqual(2)
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.blur())
+    await expect.poll(async () => (await nativeBrowserUrls()).length).toBeGreaterThanOrEqual(2)
   } finally {
     await closeServer(server)
   }

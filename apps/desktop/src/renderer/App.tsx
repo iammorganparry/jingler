@@ -51,6 +51,7 @@ import {
   useSplashHold,
   useThemeCatalog,
   closeSurfaceEverywhere,
+  forgetEditorLayout,
   openTab,
   updateEditorLayout,
 } from "@jingler/ui";
@@ -62,7 +63,7 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
+import { SessionSubagentTabs } from "./session-chat-tabs.js";
 import { selectSubagentTab } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -682,6 +683,7 @@ function AuthedApp({
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId);
     clearViewedPaths(sessionId);
+    forgetEditorLayout(sessionId);
     send({ type: "SESSION_DELETED", sessionId });
   };
 
@@ -1550,22 +1552,8 @@ function AuthedApp({
           onRenameChat: (sessionId, chatId, title) => {
             void rpc.sessionsRenameChat(sessionId, chatId, title).then(publishSessionUpdate);
           },
-          onCloseChat: (sessionId, chatId) =>
-            queueSessionChatMutation(
-              sessionId,
-              () => rpc.sessionsCloseChat(sessionId, chatId),
-              (updated) => {
-                clearDraft(chatId);
-                disposeChatActor(sessionId, chatId);
-                publishSessionUpdate(updated);
-                updateEditorLayout(sessionId, (layout) =>
-                  openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
-                    kind: "chat",
-                    id: updated.activeChatId,
-                  }),
-                );
-              },
-            ),
+          onCloseChat: closeChat,
+          onCloseUntouchedChat: closeUntouchedChat,
           onReopenChat: (sessionId, chatId) =>
             queueSessionChatMutation(
               sessionId,
@@ -1667,24 +1655,6 @@ function AuthedApp({
             open={ctx.open}
             onOpenChange={ctx.onOpenChange}
             onOpenPath={ctx.onOpenPath}
-          />
-        )}
-        renderChatTabs={(session: Session, ctx) => (
-          <SessionChatTabs
-            session={session}
-            filesActive={ctx.activeTabId === "files"}
-            onSelectConversation={ctx.onSelectConversation}
-            onSelectFiles={ctx.onSelectFiles}
-            activeSurface={ctx.activeSurface}
-            onSelectSurface={ctx.onSelectSurface}
-            onCloseSurface={ctx.onCloseSurface}
-            onRequestCloseFile={ctx.onRequestCloseFile}
-            viewSlot={ctx.viewSlot}
-            viewCount={ctx.viewCount}
-            viewsActive={ctx.viewsActive}
-            onCloseAllViews={ctx.onCloseAllViews}
-            viewLauncherItems={ctx.viewLauncherItems}
-            paneFocused={ctx.paneFocused}
           />
         )}
         renderSubagentTabs={(session: Session, ctx) => (

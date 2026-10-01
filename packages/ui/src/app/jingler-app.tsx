@@ -57,7 +57,6 @@ import type { PluginsSettingsProps } from "../composites/plugins-settings.js"
 import type { PaneContribution } from "./pane-contributions.js"
 import {
   type ConversationPaneCtx,
-  type SessionChatTabsRenderContext,
   SessionConversation
 } from "../screens/session-conversation.js"
 import type { SessionChatActions } from "./session-tree.js"
@@ -369,14 +368,6 @@ export interface JinglerAppProps {
       readonly onOpenPath: (path: string) => void
     }
   ) => ReactNode
-  /**
-   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
-   * for the same reason `renderConversation` is: the chat state it drives — the
-   * create/select/rename/close RPCs and the live per-chat activity — lives in
-   * the desktop renderer, so building the bar here would drag the RPC client
-   * into the component library. Absent in stories.
-   */
-  renderChatTabs?: (session: Session, ctx: SessionChatTabsRenderContext) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -507,7 +498,6 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
           updateEditorLayout(sessionId, (layout) => openTab(layout, { kind: "file", id: path }))
         }}
         onRequestCloseFile={onRequestCloseFile}
-        renderChatTabs={renderChatTabs}
         renderSubagentTabs={renderSubagentTabs}
         planSessions={planSessions}
         explanationSessions={explanationSessions}
@@ -692,7 +682,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderChatTabs, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
+  const { sessions, user, update, releaseNotes, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -729,12 +719,10 @@ function getActiveTabContext(active: Session) {
 
   function handleFileQuickOpen(e: KeyboardEvent) {
       if (!matchFileQuickOpenChord(e)) return false
-      {
         if (!renderFileQuickOpen || active?.worktreePath == null) return true
         e.preventDefault()
         setFileQuickOpenSessionId(active.id)
         return true
-      }
   }
 
   const onKey = (e: KeyboardEvent) => {

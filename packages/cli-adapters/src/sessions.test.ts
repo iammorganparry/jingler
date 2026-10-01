@@ -549,6 +549,27 @@ describe("SessionStore", () => {
     expect(exit.value.replaced.chats[0]!.modelId).toBe(modelId)
   })
 
+  it("discards a chat without retaining it in closed history", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Discard empty chat" }), {
+          defaultMode: "auto"
+        })
+        const withSecond = yield* SessionStore.createChat(created.id)
+        const discardedId = withSecond.activeChatId
+        yield* SessionStore.closeChat(created.id, discardedId)
+        const discarded = yield* SessionStore.discardClosedChat(created.id, discardedId)
+        return { discardedId, discarded }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.discarded.chats.some((chat) => chat.id === exit.value.discardedId)).toBe(false)
+    expect(exit.value.discarded.closedChats ?? []).toHaveLength(0)
+  })
+
   it("persists closed chats and reopens them with their original identity and settings", async () => {
     const exit = await runExit(
       Effect.gen(function* () {
