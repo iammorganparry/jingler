@@ -383,13 +383,8 @@ export function SessionConversation(props: SessionConversationProps) {
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
         sessions={projectSessions}
-        splitSessions={props.sessions}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
-        splitGroups={props.splitGroups}
-        activeGroupId={props.activeGroupId}
-        onFocusPane={props.onFocusGroupPane}
-        onClosePane={props.onCloseGroupPane}
         onSelect={props.onSelectSession}
         onRename={props.onRenameSession}
         onArchive={props.onArchiveSession}

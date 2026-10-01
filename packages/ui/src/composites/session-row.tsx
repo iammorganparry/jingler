@@ -7,6 +7,7 @@ import { activityLabel, displayStatusOf, issueReferenceOf } from "@jingler/core"
 import {
   Archive,
   ArchiveRestore,
+  ChevronRight,
   Cloud,
   GitMerge,
   Monitor,
@@ -65,6 +66,8 @@ export function SessionRow({
   onArchive,
   onRestore,
   onDelete,
+  expanded,
+  onToggleExpanded,
   className
 }: {
   session: Session
@@ -97,6 +100,9 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Whether the row's chat tree is shown. Absent hides the chevron. */
+  expanded?: boolean
+  onToggleExpanded?: (id: string) => void
   className?: string
 }) {
          function renderActiveRow() {
@@ -140,6 +146,21 @@ export function SessionRow({
 
   function renderEditableSessionTitle() {
     return (<div className="flex items-center gap-2">
+          {onToggleExpanded && (
+            <button
+              type="button"
+              aria-expanded={expanded ?? false}
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${session.title}`}
+              data-testid={`session-expand-${session.id}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleExpanded(session.id)
+              }}
+              className="-ml-1 flex-none rounded p-0.5 text-dim outline-none hover:bg-surface hover:text-text"
+            >
+              <ChevronRight className={cn("size-3 transition-transform", expanded && "rotate-90")} />
+            </button>
+          )}
           {draft !== null ? (
             <input
               value={draft}
