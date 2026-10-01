@@ -165,6 +165,43 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
 })
 
+test("closing an untouched chat tab removes it from the sidebar", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions,
+    transcripts: {
+      s_beta: [{
+        id: "u_beta_1",
+        role: "user",
+        parts: [{ _tag: "Text", text: "Keep this chat." }],
+        streaming: false,
+        createdAt: "2026-10-01T00:00:00.000Z"
+      }]
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
+  await expect(window.getByText("Keep this chat.")).toBeVisible()
+
+  await window.getByRole("button", { name: "New tab" }).click()
+  await window.getByTestId("new-tab-option-chat").click()
+  await expect(window.getByRole("tab", { name: "Chat 2" })).toBeVisible()
+  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
+
+  await window.getByRole("tab", { name: "Chat 2" }).locator("..").getByRole("button", { name: "Close Chat 2" }).click()
+
+  await expect(window.getByRole("tab", { name: "Chat 2" })).toHaveCount(0)
+  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toHaveCount(0)
+  await expect(window.getByTestId("session-tree-s_beta").getByText(/^Closed/)).toHaveCount(0)
+
+  // Closing a chat with history only closes its tab; its sidebar entry remains.
+  await window.getByRole("tab", { name: "Chat 1" }).locator("..").getByRole("button", { name: "Close Chat 1" }).click()
+  await expect(window.getByRole("tab", { name: "Chat 1" })).toHaveCount(0)
+  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
+})
+
 test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
   await expect(appShell(window)).toBeVisible()

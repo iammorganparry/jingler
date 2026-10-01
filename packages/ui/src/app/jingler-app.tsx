@@ -408,6 +408,8 @@ export interface JinglerAppProps {
   ) => Promise<Session>
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
+  /** Permanently discard a chat that has no transcript or draft. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Manually rename a session (double-click its sidebar title) — pins the name. */
   onRenameSession?: (id: string, title: string) => void
   /** Archive an active session from the sidebar quick-actions (undoable). */
@@ -479,6 +481,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         group={group}
         onRenameSession={onRenameSession}
         onCreateChat={onCreateChat}
+        onCloseUntouchedChat={onCloseUntouchedChat}
         onOpenFilePicker={renderFileQuickOpen ? setFileQuickOpenSessionId : undefined}
         onFocusChat={onFocusChat}
         onToggleBrowser={onToggleBrowser}

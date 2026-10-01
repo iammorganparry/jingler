@@ -47,6 +47,8 @@ export interface SessionSplitProps {
   ) => ReactNode
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for a session (the editor "+" menu). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Rename a session from its pane title. */
@@ -120,6 +122,7 @@ export function SessionSplit(props: SessionSplitProps) {
       renderSubagentTabs={props.renderSubagentTabs}
       onRenameSession={props.onRenameSession}
       onCreateChat={props.onCreateChat}
+      onCloseUntouchedChat={props.onCloseUntouchedChat}
       onOpenFilePicker={props.onOpenFilePicker}
       onFocusChat={props.onFocusChat}
       onToggleBrowser={props.onToggleBrowser}

@@ -84,9 +84,10 @@ import {
   disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  isChatUntouched,
   useAllChatActivities,
 } from "./conversation-registry.js";
-import { addDraftCodeReference, clearDraft } from "./draft-store.js";
+import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
 import {
@@ -685,6 +686,35 @@ function AuthedApp({
     clearViewedPaths(sessionId);
     forgetEditorLayout(sessionId);
     send({ type: "SESSION_DELETED", sessionId });
+  };
+
+  const closeChat = (sessionId: string, chatId: string, discard = false) =>
+    queueSessionChatMutation(
+      sessionId,
+      () => rpc.sessionsCloseChat(sessionId, chatId, discard),
+      (updated) => {
+        clearDraft(chatId);
+        disposeChatActor(sessionId, chatId);
+        publishSessionUpdate(updated);
+        updateEditorLayout(sessionId, (layout) =>
+          openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
+            kind: "chat",
+            id: updated.activeChatId,
+          }),
+        );
+      },
+    );
+  const closeUntouchedChat = (sessionId: string, chatId: string) => {
+    const draft = getDraft(chatId);
+    if (
+      !isChatUntouched(sessionId, chatId) ||
+      draft.text !== "" ||
+      draft.attachments.length > 0 ||
+      draft.references.length > 0
+    ) {
+      return;
+    }
+    closeChat(sessionId, chatId, true);
   };
 
   const accessForSession = useCallback(
@@ -1564,6 +1594,7 @@ function AuthedApp({
               },
             ),
         }}
+        onCloseUntouchedChat={closeUntouchedChat}
         onCreateChat={(sessionId) =>
           queueSessionChatMutation(
             sessionId,

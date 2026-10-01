@@ -88,6 +88,15 @@ const propertiesWhen = <T extends object>(condition: boolean, properties: T) =>
 
 const chatIdFor = (sessionId: string, suffix: string): string => `c_${sessionId}_${suffix}`
 
+const closedChatsAfter = (
+  chat: Chat,
+  existing: ReadonlyArray<Chat>,
+  discard: boolean
+): ReadonlyArray<Chat> => {
+  const others = existing.filter((candidate) => candidate.id !== chat.id)
+  return discard ? others : [chat, ...others]
+}
+
 const runtimeMode = (value: unknown): PermissionMode | undefined => {
   switch (value) {
     case "ask":
@@ -1124,7 +1133,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           return yield* get(sessionId)
         })
 
-      const closeChat = (sessionId: string, chatId: string) =>
+      const closeChat = (sessionId: string, chatId: string, discard = false) =>
         Effect.gen(function* () {
           const now = new Date().toISOString()
           yield* update(sessionId, (session) => {
@@ -1152,10 +1161,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             return {
               ...session,
               chats,
-              closedChats: [
-                closed!,
-                ...(session.closedChats ?? []).filter((chat) => chat.id !== chatId)
-              ],
+              closedChats: closedChatsAfter(closed!, session.closedChats ?? [], discard),
               activeChatId,
               updatedAt: now
             }

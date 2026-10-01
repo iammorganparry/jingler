@@ -239,6 +239,8 @@ export interface SessionPaneProps {
   onMovePaneRight?: () => void
   /** Start a new chat in this session (the "+" menu's Chat entry). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for this session (the "+" menu's File entry). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Persist selection of a provider-scoped issue from the right view rail. */
@@ -288,6 +290,15 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
 }
 
 const noop = () => {}
+
+const discardUntouchedChat = (
+  surface: SessionSurface,
+  copies: number,
+  sessionId: string,
+  discard: SessionPaneProps["onCloseUntouchedChat"]
+): void => {
+  if (surface.kind === "chat" && copies <= 1) discard?.(sessionId, surface.id)
+}
 
 const SurfaceContent = memo(function SurfaceContent({
   session, chatId, contribution, paneFocused, paneVisible, onSelectTab, onConnectGithub
@@ -761,6 +772,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         update((held) => activateTab(held, groupId, key))
         return
       }
+      discardUntouchedChat(surface, copies, active.id, props.onCloseUntouchedChat)
       if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser && copies <= 1) {
         const chatId = surface.chatId ?? active.activeChatId
         if (props.isBrowserActive?.(active.id, chatId)) props.onToggleBrowser?.(active.id, chatId)
@@ -770,7 +782,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       const nextGroup = focusedGroup(next)
       if (nextGroup) syncChat(activeSurface(nextGroup))
     },
-    [active.activeChatId, active.id, layout, props.isBrowserActive, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
+    [active.activeChatId, active.id, layout, props.isBrowserActive, props.onCloseUntouchedChat, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
   )
 
   const launcherTabs = tabs.some((contribution) => contribution.id === BUILTIN_TAB.plan)

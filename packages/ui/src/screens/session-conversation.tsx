@@ -49,6 +49,8 @@ export interface SessionConversationProps {
   group?: SplitGroup | null
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for a session (the editor "+" menu). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title). */
@@ -299,6 +301,7 @@ export function SessionConversation(props: SessionConversationProps) {
             renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
             onCreateChat={props.onCreateChat}
+            onCloseUntouchedChat={props.onCloseUntouchedChat}
             onOpenFilePicker={props.onOpenFilePicker}
             onFocusChat={props.onFocusChat}
             onToggleBrowser={props.onToggleBrowser}
