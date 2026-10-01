@@ -376,6 +376,8 @@ export interface LaunchOptions {
   readonly githubRelay?: FakeGitHubRelay;
   /** Test-only process flags for forcing a precise persistence/crash boundary. */
   readonly e2eEnv?: Readonly<Record<string, string>>;
+  /** Test-only process flags passed to the bundled remote device agent. */
+  readonly deviceE2eEnv?: Readonly<Record<string, string>>;
   /**
    * Start the hermetic buildbox relay + real bundled device-agent process.
    * No user SSH files, credentials, ports, or home directories are consulted.
@@ -837,6 +839,7 @@ async function prepareRemoteFixture(options: LaunchOptions, cleanups: (() => voi
         providerId: E2E_PI_PROVIDER_ID,
         modelId: E2E_PI_MODEL_ID,
       },
+      ...(options.deviceE2eEnv === undefined ? {} : { agentEnv: options.deviceE2eEnv }),
       spawnAgentOnClaim: options.realRemoteEnvironment === undefined,
     };
     if (options.realRemoteEnvironment) {

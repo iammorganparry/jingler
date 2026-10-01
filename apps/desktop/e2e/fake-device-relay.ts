@@ -40,6 +40,7 @@ export interface FakeDeviceRelayOptions {
     readonly providerId: string
     readonly modelId: string
   }
+  readonly agentEnv?: Readonly<Record<string, string>>
   /** Real-host QA activates the uploaded daemon over SSH instead of spawning one locally. */
   readonly spawnAgentOnClaim?: boolean
   readonly listenHost?: string
@@ -51,6 +52,7 @@ export interface FakeDeviceRelay {
   readonly token: string
   readonly deviceHome: string
   readonly setEndpointCatalog: (catalog: AgentEndpointCatalog) => void
+  readonly ready: () => boolean
   readonly endpointRequests: () => readonly string[]
   readonly sshClaims: () => number
   readonly desktopBearerForwarded: () => boolean
@@ -154,7 +156,8 @@ export const startFakeDeviceRelay = async (
                 JINGLER_E2E_PI_MODEL_ID: options.piFixture.modelId
               }),
           JINGLER_DISCOVERY_BIN_DIR: options.deviceBinDir,
-          PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`
+          PATH: `${options.deviceBinDir}:${dirname(process.execPath)}:/usr/bin:/bin:/usr/sbin:/sbin`,
+          ...options.agentEnv
         },
         stdio: ["ignore", "pipe", "pipe"]
       }
@@ -473,6 +476,17 @@ if (route) return route.handle();
     token: TOKEN,
     deviceHome: options.deviceHome,
     setEndpointCatalog: (catalog) => { catalogOverride = catalog },
+    ready: () => {
+      const capabilities = deviceCapabilities(discovery) as {
+        runtime?: { targetId?: unknown }
+        providerConnections?: ReadonlyArray<{ id?: unknown; status?: unknown }>
+      } | undefined
+      return state === "online" &&
+        capabilities?.runtime?.targetId === DEVICE_ID &&
+        capabilities.providerConnections?.some((connection) =>
+          connection.id === options.piFixture?.connectionId && connection.status === "authenticated"
+        ) === true
+    },
     endpointRequests: () => [...endpointRequests],
     sshClaims: () => claimCount,
     desktopBearerForwarded: () => bearerForwarded,

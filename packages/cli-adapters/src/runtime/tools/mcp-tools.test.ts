@@ -114,6 +114,15 @@ describe("MCP source policy", () => {
       ["configured", "execute"]
     ])
   })
+
+  it("keeps configured servers when the live view only rotates browser leases", () => {
+    const configured: RuntimeMcpServer = { ...server, name: "paper" }
+    const [source] = jinglerMcpSources(
+      { browser: null, configured: [configured] },
+      () => ({ browser: null })
+    )
+    expect(source?.resolveServer?.()).toBe(configured)
+  })
 })
 
 it("never falls back to stale MCP credentials when a live resolver returns null", async () => {

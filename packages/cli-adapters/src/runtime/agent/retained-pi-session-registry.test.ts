@@ -4,6 +4,7 @@ import {
   ProviderConnectionId,
   ProviderModelId,
   type AgentRunSpec,
+  type StreamEvent,
   type UsageFact
 } from "@jingler/core"
 import { Effect } from "effect"
@@ -302,7 +303,7 @@ describe("retained native PI sidecars", () => {
     await sessions.release(rebuilt)
   })
 
-  it("detaches turn-scoped callbacks and browser MCP until the next live acquire", async () => {
+  it("detaches turn-scoped callbacks but keeps background task events alive", async () => {
     let capturedContext!: AgentRuntimeContext
     const retainedHandle = handle(() => true)
     const factory: PiSessionFactory = {
@@ -313,6 +314,7 @@ describe("retained native PI sidecars", () => {
     }
     const sessions = new RetainedPiSessionRegistry(factory, 60_000)
     const endedPublish = vi.fn(() => Effect.void)
+    const registerBackgroundStop = vi.fn(() => Effect.void)
     const durablePermission = vi.fn(() => Effect.succeed("allow" as const))
     const firstContext: AgentRuntimeContext = {
       ...context(),
@@ -321,6 +323,7 @@ describe("retained native PI sidecars", () => {
         configured: []
       },
       publishEvent: endedPublish,
+      registerBackgroundStop,
       canUseTool: durablePermission
     }
     const first = await Effect.runPromise(sessions.acquireByChat(spec, firstContext, factory))
@@ -329,6 +332,18 @@ describe("retained native PI sidecars", () => {
     expect(capturedContext.mcp?.browser).toBeNull()
     await Effect.runPromise(capturedContext.publishEvent({ _tag: "Assistant", text: "late" }))
     expect(endedPublish).not.toHaveBeenCalled()
+    const settled: StreamEvent = {
+      _tag: "BackgroundTaskSettled",
+      id: "task-1",
+      status: "completed",
+      summary: "Done",
+      outputFile: null
+    }
+    await Effect.runPromise(capturedContext.publishEvent(settled))
+    expect(endedPublish).toHaveBeenCalledWith(settled)
+    const stop = async () => {}
+    await Effect.runPromise(capturedContext.registerBackgroundStop(stop))
+    expect(registerBackgroundStop).toHaveBeenCalledWith(stop)
     await expect(Effect.runPromise(capturedContext.canUseTool({
       toolId: "read",
       risk: "network"

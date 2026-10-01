@@ -39,7 +39,7 @@ const finishProviderSetup = async (
   ).toHaveCount(0);
   await expect(launched.window.getByText("Add another account")).toBeVisible();
   await expect(
-    launched.window.getByRole("button", { name: "Use Claude CLI" }),
+    launched.window.getByRole("button", { name: "Connect Claude through PI" }),
   ).toBeHidden();
   await expect(
     launched.window.getByRole("button", { name: "Open browser" }),
@@ -72,7 +72,7 @@ test("connects the local Claude CLI subscription without collecting credentials"
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
+  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
   await expect(launched.window.getByPlaceholder("Claude setup-token")).toHaveCount(0);
   await finishProviderSetup(launched, "Claude CLI subscription");
 
@@ -139,7 +139,7 @@ test("recovers a configured workspace that has no selectable provider", async ({
   await expect(
     launched.window.getByRole("heading", { name: "Connect a model provider" }),
   ).toBeVisible();
-  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
+  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
   await finishProviderSetup(launched, "Claude CLI subscription");
 });
 
@@ -302,7 +302,7 @@ test("provider onboarding remains reachable at the minimum window height", async
   });
   await chooseFixtureRepo(launched);
 
-  await launched.window.getByRole("button", { name: "Use Claude CLI" }).click();
+  await launched.window.getByRole("button", { name: "Connect Claude through PI" }).click();
   const heading = launched.window.getByRole("heading", {
     name: "Connect a model provider",
   });
@@ -430,7 +430,7 @@ test("detects native Claude during onboarding without a PI connection", async ({
     e2eEnv: { JINGLER_CLAUDE_BINARY: resolve(import.meta.dirname, "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs") }
   })
   await chooseFixtureRepo(launched)
-  await expect(launched.window.getByText("Claude Code", { exact: true }).first()).toBeVisible()
+  await expect(launched.window.getByText("Claude Code · ready", { exact: true })).toBeVisible()
   await launched.window.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(launched.window.getByRole("heading", { name: "Import agent resources" })).toBeVisible()
   await launched.window.getByRole("button", { name: "Skip for now" }).click()

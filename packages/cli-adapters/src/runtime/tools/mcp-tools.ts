@@ -139,8 +139,12 @@ export const jinglerMcpSources = (
     risk: "execute" as const,
     ...(live
       ? {
-          resolveServer: () =>
-            live()?.configured?.find((candidate) => candidate.name === server.name) ?? null
+          resolveServer: () => {
+            const configured = live()?.configured
+            return configured === undefined
+              ? server
+              : (configured.find((candidate) => candidate.name === server.name) ?? null)
+          }
         }
       : {})
   }))

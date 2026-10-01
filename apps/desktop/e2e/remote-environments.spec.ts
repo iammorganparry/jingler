@@ -1,9 +1,15 @@
 import { nativeCliEndpointId, ProviderId, ProviderModelId, type AgentEndpointCatalog } from "@jingler/core"
 import { execFileSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 import type { Page } from "@playwright/test"
-import { appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession } from "./fixtures.js"
+import { addProject, appShell, expect, sessionRow, test, type LaunchedApp, type SeedSession } from "./fixtures.js"
+
+const addFixtureOrigin = ({ reposDir, repoPath }: { reposDir: string; repoPath: string }) => {
+  const origin = join(reposDir, "widget-origin.git")
+  execFileSync("git", ["clone", "--bare", repoPath, origin])
+  execFileSync("git", ["remote", "add", "origin", origin], { cwd: repoPath })
+}
 
 const localSession = (
   repoPath: string,
@@ -45,6 +51,7 @@ const enrollBuildbox = async (app: LaunchedApp): Promise<void> => {
   await expect(app.window.getByRole("status")).toContainText("buildbox", { timeout: 30_000 })
   await app.window.keyboard.press("Escape")
   await app.window.getByRole("button", { name: "Refresh" }).click()
+  await expect.poll(() => app.deviceRelay?.ready() ?? false, { timeout: 15_000 }).toBe(true)
   await app.window.getByRole("button", { name: "Close settings" }).click()
 }
 
@@ -53,9 +60,10 @@ const selectComposerEnvironment = async (window: Page, name = "buildbox") => {
   await window.getByRole("option", { name: new RegExp(name) }).click()
 }
 
-const createRemoteWorkspace = async (window: Page): Promise<string> => {
+const createRemoteWorkspace = async (window: Page, projectPath: string): Promise<string> => {
   await window.getByTestId("new-session").click()
   await expect(window.getByRole("heading", { name: "New session" })).toBeVisible()
+  await addProject(window, projectPath)
   await window.getByRole("button", { name: "Execution environment" }).click()
   await window.getByRole("option", { name: "buildbox" }).click()
   await expect(window.getByRole("button", { name: "Create workspace" })).toBeEnabled({ timeout: 20_000 })
@@ -115,14 +123,10 @@ test("clones a missing project and creates a workspace on an account-owned envir
     withRepo: true,
     remoteEnvironment: true,
     remoteRepo: false,
-    seed: ({ reposDir, repoPath }) => {
-      const origin = join(reposDir, "widget-origin.git")
-      execFileSync("git", ["clone", "--bare", repoPath, origin])
-      execFileSync("git", ["remote", "add", "origin", origin], { cwd: repoPath })
-    }
+    seed: addFixtureOrigin
   })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteWorkspace(app.window)
+  const sessionId = await createRemoteWorkspace(app.window, app.repoPath)
   const remoteRepo = join(app.deviceHome!, "repos", "widget")
   expect(existsSync(join(remoteRepo, ".git"))).toBe(true)
   const remoteProjects = JSON.parse(readFileSync(join(app.deviceHome!, "jingler", "projects.json"), "utf8"))
@@ -141,6 +145,7 @@ test("returns a new session to Local while remote project preparation is pending
   })
   await enrollBuildbox(app)
   await app.window.getByTestId("new-session").click()
+  await addProject(app.window, app.repoPath)
   await selectComposerEnvironment(app.window)
 
   const environment = app.window.getByRole("button", { name: "Execution environment" })
@@ -185,13 +190,20 @@ test("continues an existing session on another environment without mutating the 
     configured: true,
     withRepo: true,
     remoteEnvironment: true,
+    seed: addFixtureOrigin,
     sessions: ({ repoPath }) => [localSession(repoPath, { diff: { added: 1, removed: 0 }, tokens: 10 })]
   })
   await enrollBuildbox(app)
   await selectComposerEnvironment(app.window)
   await expect(app.window.getByRole("alert")).toContainText("Continue it as a new session")
   await app.window.getByRole("button", { name: "Continue there" }).click()
+  await expect.poll(() => JSON.parse(
+    readFileSync(join(app.home, "jingler", "sessions.json"), "utf8")
+  ).map((session: { title: string }) => session.title), { timeout: 20_000 })
+    .toContain("Local session continuation")
+  await app.window.getByRole("button", { name: "Unassigned", exact: true }).click()
   await expect(sessionRow(app.window, "Local session continuation")).toBeVisible({ timeout: 20_000 })
+  await app.window.getByRole("button", { name: "widget", exact: true }).click()
   await expect(app.window.getByTestId("session-environment-session_local_abcdefgh")).toHaveCount(0)
   await expect(app.window.getByTestId("session-row-session_local_abcdefgh")).toBeVisible()
 })
@@ -202,14 +214,10 @@ test("resumes a remote turn after relay interruption without duplicate execution
     withRepo: true,
     remoteEnvironment: true,
     remoteRepo: false,
-    seed: ({ reposDir, repoPath }) => {
-      const origin = join(reposDir, "widget-origin.git")
-      execFileSync("git", ["clone", "--bare", repoPath, origin])
-      execFileSync("git", ["remote", "add", "origin", origin], { cwd: repoPath })
-    }
+    seed: addFixtureOrigin
   })
   await enrollBuildbox(app)
-  const sessionId = await createRemoteWorkspace(app.window)
+  const sessionId = await createRemoteWorkspace(app.window, app.repoPath)
   const composer = app.window.getByPlaceholder("Message the agent…")
   await composer.fill("Complete once after reconnect")
   await composer.press("Enter")
@@ -270,8 +278,14 @@ for (const status of ["missing", "unsupported"] as const) {
 test(`refreshes a ${status} remote-only endpoint and selects it on its target`, async ({ launchApp }) => {
   const app = await launchApp({
     configured: true, withRepo: true, remoteEnvironment: true,
-    sessions: ({ repoPath }) => [localSession(repoPath)],
-    e2eEnv: { JINGLER_CLAUDE_BINARY: "/nonexistent/local-claude" }
+    seed: addFixtureOrigin,
+    e2eEnv: { JINGLER_CLAUDE_BINARY: "/nonexistent/local-claude" },
+    deviceE2eEnv: {
+      JINGLER_CLAUDE_BINARY: resolve(
+        import.meta.dirname,
+        "../../../packages/cli-adapters/src/runtime/agent/fixtures/claude-tools.mjs"
+      )
+    }
   })
   const endpointId = nativeCliEndpointId("device_buildbox_abcdefgh", "claude")
   const catalog: AgentEndpointCatalog = { refreshedAt: "2026-09-25T00:00:00Z", stale: false, endpoints: [{
@@ -280,12 +294,20 @@ test(`refreshes a ${status} remote-only endpoint and selects it on its target`, 
     models: [{ providerId: ProviderId.make("anthropic"), id: ProviderModelId.make("anthropic/opus"), label: "Remote-only Opus",
       capabilities: { contextWindow: 200000, reasoning: [], vision: false }, verification: "unverified", status: "unavailable", selectable: false, certificationKey: null }]
   }] }
-  app.deviceRelay!.setEndpointCatalog(catalog)
   await enrollBuildbox(app)
-  await selectComposerEnvironment(app.window)
-  await app.window.getByRole("button", { name: /^Model:/ }).click()
-  await expect(app.window.getByRole("option", { name: /^Remote-only Opus/ })).toHaveCount(0)
-  await app.window.keyboard.press("Escape")
+  const sessionId = await createRemoteWorkspace(app.window, app.repoPath)
+  await expect(app.window.getByPlaceholder("Message the agent…")).toBeVisible({ timeout: 20_000 })
+
+  app.deviceRelay!.setEndpointCatalog(catalog)
+  await app.window.getByRole("button", { name: "Account menu" }).click()
+  await app.window.getByRole("menuitem", { name: "Settings" }).click()
+  await app.window.getByRole("button", { name: /Providers/ }).click()
+  await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
+  await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
+  await app.window.getByRole("button", { name: "Close settings" }).click()
+  const model = app.window.getByRole("button", { name: /^Model:/ })
+  await expect(model).toBeDisabled()
+
   app.deviceRelay!.setEndpointCatalog({ ...catalog, endpoints: catalog.endpoints.map(entry => ({
     endpoint: { ...entry.endpoint, status: "ready" }, models: entry.models.map(model => ({ ...model, status: "ready", selectable: true }))
   })) })
@@ -295,10 +317,10 @@ test(`refreshes a ${status} remote-only endpoint and selects it on its target`, 
   await app.window.getByRole("button", { name: "Refresh", exact: true }).click()
   await expect(app.window.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled({ timeout: 15_000 })
   await app.window.getByRole("button", { name: "Close settings" }).click()
-  await app.window.getByRole("button", { name: /^Model:/ }).click()
+  await model.click()
   await expect(app.window.getByText("Remote-only Claude", { exact: true })).toBeVisible()
   await app.window.getByRole("option", { name: /^Remote-only Opus/ }).click()
   await expect.poll(() => JSON.parse(readFileSync(join(app.home, "jingler", "sessions.json"), "utf8"))
-    .find((session: { id: string }) => session.id === "session_local_abcdefgh").endpointId).toBe(endpointId)
+    .find((session: { id: string }) => session.id === sessionId).endpointId).toBe(endpointId)
 })
 }

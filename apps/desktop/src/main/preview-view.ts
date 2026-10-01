@@ -200,6 +200,26 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const controlledNavigations = new Set<string>()
   const pendingNavigations = new Map<string, { requestedUrl: string; redirects: Set<string> }>()
   const mainWindow = (): BrowserWindow | null => BrowserWindow.getAllWindows()[0] ?? null
+  let visibilityWindow: BrowserWindow | null = null
+  let windowFocused = true
+  const onWindowBlur = () => {
+    windowFocused = false
+    for (const view of [...browserViews.values(), ...assetViews.values()]) view.setVisible(false)
+  }
+  const onWindowFocus = () => {
+    windowFocused = true
+    for (const id of visibleBrowserSessions) browserViews.get(id)?.setVisible(true)
+    for (const id of visibleAssetSessions) assetViews.get(id)?.setVisible(true)
+  }
+  const attachWindowVisibility = (win: BrowserWindow) => {
+    if (visibilityWindow === win) return
+    visibilityWindow?.off("blur", onWindowBlur)
+    visibilityWindow?.off("focus", onWindowFocus)
+    visibilityWindow = win
+    windowFocused = win.isFocused()
+    win.on("blur", onWindowBlur)
+    win.on("focus", onWindowFocus)
+  }
 
   const setOwnerVisible = (
     views: Map<string, WebContentsView>,
@@ -209,7 +229,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   ) => {
     if (wanted) visibleSessions.add(sessionId)
     else visibleSessions.delete(sessionId)
-    views.get(sessionId)?.setVisible(wanted)
+    views.get(sessionId)?.setVisible(wanted && windowFocused)
   }
 
   /** Load a URL, swallowing failures (dev server down, PDF deleted) so the RPC
@@ -221,6 +241,7 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
   const createView = (owner: PreviewOwner, sessionId: string | null, chatId: string | null = null): WebContentsView | null => {
     const win = mainWindow()
     if (!win) return null
+    attachWindowVisibility(win)
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
@@ -410,7 +431,11 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     visibleAssetSessions.delete(sessionId)
   }
 
-  yield* Effect.addFinalizer(() => Effect.sync(closeAllNow))
+  yield* Effect.addFinalizer(() => Effect.sync(() => {
+    visibilityWindow?.off("blur", onWindowBlur)
+    visibilityWindow?.off("focus", onWindowFocus)
+    closeAllNow()
+  }))
 
   return {
     openBrowser: (sessionId, chatId, url, bounds) =>

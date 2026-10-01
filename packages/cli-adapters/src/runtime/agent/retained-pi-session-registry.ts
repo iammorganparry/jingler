@@ -1,4 +1,9 @@
-import type { AgentRunSpec, AgentRuntimeId, SubagentModelAssignments } from "@jingler/core"
+import type {
+  AgentRunSpec,
+  AgentRuntimeId,
+  StreamEvent,
+  SubagentModelAssignments
+} from "@jingler/core"
 import { Effect } from "effect"
 import { mcpCapabilityFingerprint } from "../tools/mcp-tools.js"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
@@ -81,13 +86,28 @@ export interface RetainedPiSession {
  * lease belong to one turn. Each acquire repoints this stable facade so a
  * retained session never calls the ended turn's mailbox or stale MCP endpoint.
  */
+const publishDetachedEvent = (
+  context: AgentRuntimeContext,
+  event: StreamEvent
+): Effect.Effect<void> => {
+  switch (event._tag) {
+    case "BackgroundTaskStarted":
+    case "BackgroundTaskProgress":
+    case "BackgroundTaskSettled":
+    case "BackgroundTasksChanged":
+      return context.publishEvent(event)
+    default:
+      return Effect.void
+  }
+}
+
 const detachedPiSessionContext = (context: AgentRuntimeContext): AgentRuntimeContext => ({
   mcp: context.mcp === undefined
     ? undefined
     : { browser: null, configured: context.mcp.configured },
-  publishEvent: () => Effect.void,
+  publishEvent: (event) => publishDetachedEvent(context, event),
   recordUsage: context.recordUsage,
-  registerBackgroundStop: () => Effect.void,
+  registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: context.canUseTool,
   askQuestion: () => Effect.succeed([]),
   publishExplanation: () => Effect.void

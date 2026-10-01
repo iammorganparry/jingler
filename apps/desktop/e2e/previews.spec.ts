@@ -495,10 +495,28 @@ test("retains each session browser while Files owns two split panes", async ({ l
       }
     })
     await expect(appShell(window)).toBeVisible()
+    const mainWindowId = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.id)
+    const visibleNativeUrls = () =>
+      app.evaluate(({ BrowserWindow }, { expectedOrigin, mainWindowId }) => {
+        const root = BrowserWindow.fromId(mainWindowId)?.contentView
+        return (root?.children ?? [])
+          .filter((view) => view.getVisible())
+          .map((view) => {
+            const candidate = view as typeof view & {
+              webContents?: { getURL(): string }
+            }
+            return candidate.webContents?.getURL() ?? ""
+          })
+          .filter((loadedUrl) =>
+            loadedUrl.startsWith(expectedOrigin) || loadedUrl.startsWith("file:")
+          )
+      }, { expectedOrigin: origin, mainWindowId })
     await window.getByTestId("view-tab-browser").click()
     const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(origin)
     await url.press("Enter")
+    await expect.poll(visibleNativeUrls).toEqual([])
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("focus"), mainWindowId)
 
     await window.keyboard.press("Control+Shift+Equal")
     const alphaPane = window.getByTestId("split-pane-0")
@@ -535,22 +553,6 @@ test("retains each session browser while Files owns two split panes", async ({ l
       window.getByTestId("file-tab-beta.pdf").getByRole("button", { name: "beta.pdf", exact: true })
     ).toHaveAttribute("aria-current", "page")
 
-    const visibleNativeUrls = () =>
-      app.evaluate(({ BrowserWindow }, expectedOrigin) => {
-        const root = BrowserWindow.getAllWindows()[0]?.contentView
-        return (root?.children ?? [])
-          .filter((view) => view.getVisible())
-          .map((view) => {
-            const candidate = view as typeof view & {
-              webContents?: { getURL(): string }
-            }
-            return candidate.webContents?.getURL() ?? ""
-          })
-          .filter((loadedUrl) =>
-            loadedUrl.startsWith(expectedOrigin) || loadedUrl.startsWith("file:")
-          )
-      }, origin)
-
     await expect
       .poll(() =>
         visibleNativeUrls()
@@ -570,7 +572,10 @@ test("retains each session browser while Files owns two split panes", async ({ l
     await expect(betaPane.getByLabel("Preview URL")).toHaveValue(origin)
     await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
 
-    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.blur())
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("blur"), mainWindowId)
+    await expect.poll(visibleNativeUrls).toEqual([])
+
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.emit("focus"), mainWindowId)
     await expect.poll(async () => (await visibleNativeUrls()).some((url) => url.startsWith(origin))).toBe(true)
   } finally {
     await closeServer(server)

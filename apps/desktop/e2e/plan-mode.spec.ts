@@ -43,6 +43,10 @@ const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession
 const review = (launched: LaunchedApp) => launched.window.getByTestId("plan-review")
 const reviewText = (launched: LaunchedApp) => review(launched).innerText().catch(() => "")
 
+const expandTechnicalDetails = async (launched: LaunchedApp, index: number) => {
+  await review(launched).getByText("Technical details", { exact: true }).nth(index).click()
+}
+
 const approveReview = async (launched: LaunchedApp) => {
   await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
 }
@@ -106,10 +110,11 @@ test("projects explicit deliverable stages without treating overview headings as
 
   await expect(review(launched)).toBeVisible()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
+  await expandTechnicalDetails(launched, 0)
   // Proposed diffs, typed tests, and the test strategy render natively.
   await expect(review(launched).getByRole("region", { name: "Proposed change to src/auth.ts" }))
     .toBeVisible()
-  await expect(review(launched).getByRole("table", { name: "Implement auth acceptance" }))
+  await expect(review(launched).getByRole("region", { name: "Implement auth acceptance criteria" }))
     .toContainText("src/auth.test.ts::implements auth")
   await expect(review(launched).getByRole("heading", { name: "Test strategy" })).toBeVisible()
 
@@ -177,24 +182,24 @@ test("selection comments reach the agent and the revision diff shows what change
 
   const intent = review(launched)
     .getByRole("region", { name: "Implement auth", exact: true })
-    .getByText("Implement the auth change.", { exact: true })
+    .getByText("Auth tokens use the new format through the existing entry point.", { exact: true })
   await intent.click({ clickCount: 3 })
   await review(launched).getByRole("button", { name: "Add comment" }).click()
   await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Save comment" }).click()
-  await expect(review(launched).getByRole("list", { name: "Review comments" }))
+  await expect(review(launched).getByRole("complementary", { name: "Plan comments" }))
     .toContainText("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Request changes" }).click()
 
   // The fixture agent echoes every quoted anchor it received into the rewrite.
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"), { timeout: 30_000 })
-    .toContain("Reviewer quoted: Implement the auth change.")
+    .toContain("Reviewer quoted: Auth tokens use the new format through the existing entry point.")
 
   const toggle = review(launched).getByRole("button", { name: /Changes since revision/ })
   await expect(toggle).toBeVisible({ timeout: 30_000 })
   await toggle.click()
   const changes = review(launched).getByRole("region", { name: "Changes since the previous revision" })
-  await expect(changes.getByText("Reviewer quoted: Implement the auth change.")).toBeVisible()
+  await expect(changes.getByText("Reviewer quoted: Auth tokens use the new format through the existing entry point.")).toBeVisible()
   await expect(changes.getByText("- Replace the token format", { exact: false }).first()).toBeVisible()
   await review(launched).getByRole("button", { name: "Hide changes" }).click()
   await expect(changes).toHaveCount(0)
@@ -209,6 +214,7 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched)
   await openPlanTab(launched)
+  await expandTechnicalDetails(launched, 1)
 
   const readmeChange = review(launched).getByRole("region", { name: "Proposed change to README.md" })
   await expect(readmeChange).toBeVisible()
@@ -218,23 +224,33 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
 
   await openPlanTab(launched)
-  const canvas = review(launched).getByTestId("mermaid-canvas")
+  const stage = review(launched).getByRole("region", { name: "Implement auth", exact: true })
+  const canvas = stage.getByTestId("mermaid-canvas")
   await expect(canvas).toBeVisible()
-  await review(launched).getByRole("button", { name: "Zoom in" }).click()
+  await stage.getByRole("button", { name: "Zoom in" }).click()
   await expect(canvas).toHaveAttribute("style", /scale\(1\.25\)/)
-  // Drag from the middle of the visible (overflow-hidden) viewport, not the
-  // scaled canvas's corner, which is clipped once zoomed.
-  const box = (await canvas.locator("xpath=..").boundingBox())!
-  const [x, y] = [box.x + box.width / 2, box.y + Math.min(20, box.height / 2)]
+  const viewport = canvas.locator("xpath=..")
+  const point = await viewport.evaluate((element) => {
+    const box = element.getBoundingClientRect()
+    for (let y = box.bottom - 8; y > box.top; y -= 8) {
+      for (let x = box.left + 8; x < box.right; x += 8) {
+        const target = document.elementFromPoint(x, y)
+        if (target !== null && element.contains(target) && target.closest("[role=link]") === null) return { x, y }
+      }
+    }
+    return null
+  })
+  expect(point).not.toBeNull()
+  const { x, y } = point!
   await launched.window.mouse.move(x, y)
   await launched.window.mouse.down()
-  await launched.window.mouse.move(x + 60, y + 20, { steps: 5 })
+  await launched.window.mouse.move(x - 60, y - 20, { steps: 5 })
   await launched.window.mouse.up()
   await expect(canvas).not.toHaveAttribute("style", /translate\(0px, 0px\)/)
-  await review(launched).getByRole("button", { name: "Reset view" }).click()
+  await stage.getByRole("button", { name: "Reset view" }).click()
   await expect(canvas).toHaveAttribute("style", /translate\(0px, 0px\) scale\(1\)/)
 
-  await review(launched).getByRole("button", { name: "Fullscreen" }).click()
+  await stage.getByRole("button", { name: "Fullscreen" }).click()
   const dialog = launched.window.getByRole("dialog")
   await expect(dialog).toBeVisible()
   await dialog.getByRole("link", { name: "Open file README.md" }).click()
@@ -371,6 +387,7 @@ test("revises one stage approach through native review feedback", async ({
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
   await expect(review(launched)).toBeVisible()
+  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation replaces the token format")
   const originalPlan = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
@@ -388,6 +405,7 @@ test("revises one stage approach through native review feedback", async ({
     originalPlan.match(/<!-- id: [\w-]+ -->/g)
   )
   expect(revisedPlan.split("## Verify auth")[1]).toBe(originalPlan.split("## Verify auth")[1])
+  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)

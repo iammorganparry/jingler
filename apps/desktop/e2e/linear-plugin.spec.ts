@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { addProject, appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
 import { startFakeLinearServer } from "./fake-linear.js"
 const API_KEY = "lin_api_e2e_linear_plugin"
 const LINKED_LINEAR_ISSUE = /Linked issue ENG-/
@@ -21,6 +21,7 @@ test("shows every new-session source and starts from a Linear issue", async ({
     })
     await configureLinear(launched.window)
     await launched.window.getByTestId("new-session").click()
+    await addProject(launched.window, launched.repoPath)
 
     await launched.window.getByRole("button", { name: "Session source" }).click()
     await Promise.all(
@@ -172,11 +173,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
 
     await configureLinear(launched.window)
 
-    await launched.window.getByTestId("new-session").click()
-    await expect(launched.window.getByRole("heading", { name: "New session" })).toBeVisible()
-    await launched.window.getByRole("button", { name: "Checkout" }).click()
-    await launched.window.getByRole("option", { name: "Local" }).click()
-    await launched.window.getByRole("button", { name: "Create workspace", exact: true }).click()
+    await createWorkspace(launched.window, "", "direct", launched.repoPath)
     const linkRow = launched.window.locator('[data-testid^="session-row-"]').first()
     await expect(linkRow).toBeVisible()
     await openLinearIssueTab(launched.window)

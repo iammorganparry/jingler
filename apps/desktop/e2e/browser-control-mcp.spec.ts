@@ -65,6 +65,9 @@ test("pi drives the native Preview browser through the managed browser MCP", asy
 
     await expect(appShell(window)).toBeVisible()
     await window.getByRole("button", { name: "Browser", exact: true }).click()
+    if (process.env.JINGLER_E2E_HEADED !== "1") {
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.emit("focus"))
+    }
     const anyNativeViewVisible = () => app.evaluate(({ BrowserWindow }) =>
       (BrowserWindow.getAllWindows()[0]?.contentView.children ?? []).some((view) => view.getVisible()))
     await expect.poll(anyNativeViewVisible).toBe(true)
