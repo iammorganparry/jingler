@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest"
 import {
   activateTab,
   activeSurface,
+  allTabs,
+  closeTabsWhere,
+  moveActiveTab,
   closeSurfaceEverywhere,
   closeTab,
   createEditorLayout,
@@ -209,5 +212,18 @@ describe("editor layout structural sharing", () => {
     const closed = closeTab(layout, a!.id, file("x.ts"))
     expect(groupsOf(closed.root)[1]).toBe(b)
     expect(groupsOf(closed.root)[2]).toBe(c)
+  })
+})
+
+describe("editor layout helpers", () => {
+  it("closes tabs by predicate, lists distinct tabs, and moves the active tab to a neighbour", () => {
+    let layout = createEditorLayout([chat("a"), view("pr"), view("terminal")])
+    layout = dropTab(layout, { surface: view("pr") }, firstGroupId(layout), "right")
+    expect(allTabs(layout).map((t) => t.id)).toEqual(["a", "pr", "terminal"])
+    expect(shape(closeTabsWhere(layout, (s) => s.kind === "view"))).toEqual([["a"]])
+    const back = focusAdjacentGroup(layout, -1)
+    const moved = moveActiveTab(back, 1)
+    expect(shape(moved)).toEqual([["a", "pr"], ["pr", "terminal"]])
+    expect(moveActiveTab(moved, 1)).toBe(moved)
   })
 })

@@ -266,6 +266,26 @@ export const closeSurfaceEverywhere = (layout: EditorLayout, surface: SessionSur
     ? releaseMain(commit(layout, mapGroups(layout.root, (g) => withoutTab(g, keyOf(surface)))), surface)
     : layout
 
+/** Closes every tab matching `match` in every group. */
+export const closeTabsWhere = (layout: EditorLayout, match: (surface: SessionSurface) => boolean): EditorLayout =>
+  allTabs(layout).filter(match).reduce(closeSurfaceEverywhere, layout)
+
+/** Every distinct open surface, in reading order. */
+export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> => {
+  const seen = new Set<string>()
+  return groupsOf(layout.root).flatMap((g) =>
+    g.tabs.filter((t) => !seen.has(keyOf(t)) && Boolean(seen.add(keyOf(t))))
+  )
+}
+
+/** Moves the focused group's active tab into the neighbouring group (reading order). */
+export const moveActiveTab = (layout: EditorLayout, direction: -1 | 1): EditorLayout => {
+  const groups = groupsOf(layout.root)
+  const from = focusedGroup(layout)
+  const to = groups[groups.findIndex((g) => g.id === from?.id) + direction]
+  return from && to ? dropTab(layout, { surface: activeSurface(from), from: from.id }, to.id, "center") : layout
+}
+
 /** Drags the divider between `children[index]` and `children[index + 1]` of a split. */
 export const resizeSplit = (layout: EditorLayout, splitId: string, index: number, delta: number): EditorLayout => {
   if (!(layout.root && Number.isFinite(delta))) return layout
