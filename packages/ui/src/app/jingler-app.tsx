@@ -196,6 +196,8 @@ export interface JinglerAppProps {
   prStates?: Record<string, SessionPrStatus>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Loaded per-file worktree diff counts, keyed by session and path. */
+  fileDiffs?: Readonly<Record<string, Readonly<Record<string, DiffStat>>>>
   /** Sessions whose debugger is stopped at a source location. */
   debugStopSequences?: Readonly<Record<string, number>>
   /** Provider usage snapshot for the Usage & limits modal. */
@@ -511,6 +513,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         prStates={prStates}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
+        fileDiffs={props.fileDiffs}
         debugStopSequences={debugStopSequences}
         {...workspaceNavigationProps()}
         user={user}

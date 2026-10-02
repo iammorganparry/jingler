@@ -46,6 +46,27 @@ const dragTo = async (
   )
 }
 
+const rejectedFileDrag = async (page: Page, sourceSelector: string, targetGroup: number) =>
+  page.evaluate(async ({ sourceSelector, targetGroup }) => {
+    const source = document.querySelector(sourceSelector)
+    const target = document.querySelectorAll('[data-testid="editor-group"]')[targetGroup]
+    if (!(source && target)) throw new Error(`missing rejected drag node: ${sourceSelector}`)
+    const dataTransfer = new DataTransfer()
+    const init = { dataTransfer, bubbles: true, cancelable: true }
+    source.dispatchEvent(new DragEvent("dragstart", init))
+    target.dispatchEvent(new DragEvent("dragover", init))
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    const overlay = target.querySelector('[data-testid="editor-drop-overlay"]')
+    const result = {
+      rejected: overlay?.getAttribute("data-rejected"),
+      className: overlay?.getAttribute("class"),
+      dropEffect: dataTransfer.dropEffect
+    }
+    target.dispatchEvent(new DragEvent("drop", init))
+    source.dispatchEvent(new DragEvent("dragend", init))
+    return result
+  }, { sourceSelector, targetGroup })
+
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => {
   const base = {
     repo: "widget",
@@ -105,6 +126,12 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await expect(window.locator('[data-split-child="0"]')).toHaveCSS("flex-grow", "0.333333")
   await expect(window.locator('[data-split-child="1"]')).toHaveCSS("flex-grow", "0.666667")
 
+  const rejected = await rejectedFileDrag(window, '[data-testid="session-tree-file-a.ts"] button', 0)
+  expect(rejected).toEqual(expect.objectContaining({ rejected: "true", dropEffect: "none" }))
+  expect(rejected.className).toContain("ring-red")
+  await expect(groups(window).nth(0).getByTestId("editor-tab-file-a.ts")).toHaveCount(0)
+  await expect(groups(window).nth(1).getByTestId("editor-tab-file-a.ts")).toBeVisible()
+
   await groups(window).nth(1).getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-terminal").click()
   await expect(groups(window)).toHaveCount(2)
@@ -126,43 +153,6 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
   await expect(groups(window)).toHaveCount(2)
   await expect(window.getByTestId("editor-tab-chat-c_side")).toBeVisible()
-})
-
-test("closing an untouched chat tab removes it from the sidebar", async ({ launchApp }) => {
-  const { window } = await launchApp({
-    configured: true,
-    isolateSystemHome: true,
-    withRepo: true,
-    sessions,
-    transcripts: {
-      s_beta: [{
-        id: "u_beta_1",
-        role: "user",
-        parts: [{ _tag: "Text", text: "Keep this chat." }],
-        streaming: false,
-        createdAt: "2026-10-01T00:00:00.000Z"
-      }]
-    }
-  })
-  await expect(appShell(window)).toBeVisible()
-  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
-  await expect(window.getByText("Keep this chat.")).toBeVisible()
-
-  await window.getByRole("button", { name: "New tab" }).click()
-  await window.getByTestId("new-tab-option-chat").click()
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toBeVisible()
-  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
-
-  await window.getByRole("tab", { name: "Chat 2" }).locator("..").getByRole("button", { name: "Close Chat 2" }).click()
-
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toHaveCount(0)
-  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toHaveCount(0)
-  await expect(window.getByTestId("session-tree-s_beta").getByText(/^Closed/)).toHaveCount(0)
-
-  // Closing a chat with history only closes its tab; its sidebar entry remains.
-  await window.getByRole("tab", { name: "Chat 1" }).locator("..").getByRole("button", { name: "Close Chat 1" }).click()
-  await expect(window.getByRole("tab", { name: "Chat 1" })).toHaveCount(0)
-  await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
 })
 
 test("closing an untouched chat tab removes it from the sidebar", async ({ launchApp }) => {

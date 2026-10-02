@@ -8,15 +8,16 @@
  */
 import { memo, useEffect, useState } from "react"
 import { useSelector } from "@xstate/react"
-import type { ProviderId, Session, SessionActivity } from "@jingler/core"
+import type { DiffStat as DiffStatValue, ProviderId, Session, SessionActivity } from "@jingler/core"
 import { Pencil, RotateCcw, X } from "lucide-react"
 import { ContextMenu } from "../components/context-menu.js"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
+import { DiffStat } from "../components/diff-stat.js"
 import { ProviderIcon, providerLabel } from "../components/provider-icon.js"
 import { allTabs, closeSurfaceEverywhere, loadEditorLayout, openTab } from "./editor-layout.js"
 import { editorLayoutOf, editorLayouts, initEditorLayout, updateEditorLayout } from "./editor-layout-machine.js"
-import { editorTabMime } from "./editor-groups.js"
+import { editorFileMime, editorTabMime } from "./editor-groups.js"
 import { BUILTIN_TAB_META, type BuiltinTabKey } from "./tab-contributions.js"
 import { parseSessionSurfaceKey, sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
 
@@ -51,6 +52,7 @@ export const SessionTree = memo(function SessionTree({
   activityByChat,
   onSelectSession,
   chatActions,
+  fileDiffs,
   onRequestCloseFile,
   onCloseView
 }: {
@@ -60,6 +62,7 @@ export const SessionTree = memo(function SessionTree({
   activityByChat?: Readonly<Record<string, SessionActivity>>
   onSelectSession: (id: string) => void
   chatActions?: SessionChatActions
+  fileDiffs?: Readonly<Record<string, DiffStatValue>>
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   onCloseView?: (sessionId: string, surface: Extract<SessionSurface, { kind: "view" }>) => void
 }) {
@@ -116,6 +119,7 @@ export const SessionTree = memo(function SessionTree({
           onDragStart={(e) => {
             ensureLayout(session)
             e.dataTransfer.setData(editorTabMime(session.id), JSON.stringify({ surface }))
+            if (surface.kind === "file") e.dataTransfer.setData(editorFileMime, "")
             e.dataTransfer.effectAllowed = "copyMove"
           }}
           onClick={() => openItem(surface)}
@@ -218,7 +222,15 @@ export const SessionTree = memo(function SessionTree({
       {files.length > 0 && (
         <>
           <p className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wider text-dim">Files</p>
-          {files.map((f) => item(f, f.id.split("/").at(-1) ?? f.id, <FileIcon path={f.id} size={12} />))}
+          {files.map((f) => {
+            const diff = fileDiffs?.[f.id]
+            return item(
+              f,
+              f.id.split("/").at(-1) ?? f.id,
+              <FileIcon path={f.id} size={12} />,
+              diff && <DiffStat added={diff.added} removed={diff.removed} className="text-[10px]" />
+            )
+          })}
         </>
       )}
       {closed.length > 0 && chatActions?.onReopenChat && (

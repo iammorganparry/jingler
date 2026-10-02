@@ -435,6 +435,13 @@ test("follows the selected chat agent through edited and newly created files", a
     window
       .getByTestId("editor-tab-file-src/created.ts").getByRole("tab")
   ).toBeVisible()
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
+  await expect(window.getByTestId("session-tree-file-src/created.ts")).toContainText("+1")
+
+  await window.getByRole("button", { name: "Edit src/created.ts" }).filter({ visible: true }).click()
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
+  await composerFollow.click()
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   await selectTreePath(window, "src/other.ts")
   await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()

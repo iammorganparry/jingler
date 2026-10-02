@@ -78,6 +78,8 @@ type Api = Omit<EditorGroupsProps, "sessionId" | "layout" | "revision" | "emptyS
 export const editorTabMime = (sessionId: string): string =>
   `application/x-jingler-editor-tab-${sessionId.toLowerCase()}`
 
+export const editorFileMime = "application/x-jingler-editor-file"
+
 const readDrag = (e: DragEvent, mime: string): TabDrag | null => {
   try {
     const raw = JSON.parse(e.dataTransfer.getData(mime)) as { surface?: unknown; from?: unknown }
@@ -274,12 +276,22 @@ function SplitChild({
   )
 }
 
-function useDropZone(mime: string, groupId: string | null, api: Api, fixedEdge?: DropEdge) {
+function useDropZone(
+  mime: string,
+  groupId: string | null,
+  api: Api,
+  fixedEdge?: DropEdge,
+  rejectFiles = false
+) {
   const [edge, setEdge] = useState<DropEdge | null>(null)
+  const [rejected, setRejected] = useState(false)
   const edgeFor = (_e: DragEvent<HTMLElement>): DropEdge => fixedEdge ?? "center"
   useEffect(() => {
     if (edge === null) return
-    const clear = () => setEdge(null)
+    const clear = () => {
+      setEdge(null)
+      setRejected(false)
+    }
     window.addEventListener("dragend", clear)
     window.addEventListener("drop", clear)
     return () => {
@@ -287,32 +299,57 @@ function useDropZone(mime: string, groupId: string | null, api: Api, fixedEdge?:
       window.removeEventListener("drop", clear)
     }
   }, [edge])
+  const rejectsFile = (e: DragEvent<HTMLElement>) =>
+    rejectFiles && e.dataTransfer.types.includes(editorFileMime)
   const handlers = {
     onDragOver: (e: DragEvent<HTMLElement>) => {
       if (!e.dataTransfer.types.includes(mime)) return
       if (fixedEdge) e.stopPropagation()
       e.preventDefault()
-      e.dataTransfer.dropEffect = fixedEdge ? "move" : e.altKey ? "copy" : "move"
+      const reject = rejectsFile(e)
+      e.dataTransfer.dropEffect = reject ? "none" : fixedEdge ? "move" : e.altKey ? "copy" : "move"
+      setRejected(reject)
       const next = edgeFor(e)
       if (next !== edge) setEdge(next)
     },
     onDragLeave: (e: DragEvent<HTMLElement>) => {
       if (fixedEdge) e.stopPropagation()
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setEdge(null)
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+        setEdge(null)
+        setRejected(false)
+      }
     },
     onDrop: (e: DragEvent<HTMLElement>) => {
       const drag = readDrag(e, mime)
       setEdge(null)
+      setRejected(false)
       if (!drag) return
       if (fixedEdge) e.stopPropagation()
       e.preventDefault()
+      if (rejectFiles && drag.surface.kind === "file") return
       api.onDrop(drag, groupId, edgeFor(e), fixedEdge ? false : e.altKey)
     }
   }
   const overlay = edge ? (
-    <div data-testid="editor-drop-overlay" aria-hidden className={cn("pointer-events-none absolute z-20 bg-blue/15 ring-2 ring-inset ring-blue", OVERLAY[edge])} />
+    <div
+      data-testid="editor-drop-overlay"
+      data-rejected={rejected || undefined}
+      aria-hidden
+      className={cn(
+        "pointer-events-none absolute z-20 ring-2 ring-inset",
+        rejected ? "bg-red/15 ring-red" : "bg-blue/15 ring-blue",
+        OVERLAY[edge]
+      )}
+    />
   ) : null
-  return { handlers, overlay, clear: () => setEdge(null) }
+  return {
+    handlers,
+    overlay,
+    clear: () => {
+      setEdge(null)
+      setRejected(false)
+    }
+  }
 }
 
 function EmptyEditor({ mime, api, children }: { mime: string; api: Api; children: ReactNode }) {
@@ -338,7 +375,8 @@ const EditorGroup = memo(function EditorGroup({
   api: Api
   revision: unknown
 }) {
-  const groupDrop = useDropZone(mime, group.id, api, "center")
+  const active = activeSurface(group)
+  const groupDrop = useDropZone(mime, group.id, api, "center", active.kind === "chat")
   const tabStripDrop = useDropZone(mime, group.id, api, "center")
   const tabStripHandlers = {
     ...tabStripDrop.handlers,
@@ -351,7 +389,6 @@ const EditorGroup = memo(function EditorGroup({
       tabStripDrop.handlers.onDrop(e)
     }
   }
-  const active = activeSurface(group)
   const crumbs = api.describe(active).crumbs ?? []
   return (
     <section
@@ -434,6 +471,7 @@ const EditorTab = memo(function EditorTab({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(mime, JSON.stringify({ surface, from: groupId } satisfies TabDrag))
+        if (surface.kind === "file") e.dataTransfer.setData(editorFileMime, "")
         e.dataTransfer.effectAllowed = "copyMove"
       }}
       onAuxClick={(e) => e.button === 1 && api.onClose(groupId, surface)}
