@@ -748,7 +748,7 @@ function* runDigestTurn(
   const spec: AgentTurnSpec = {
     sessionId: settings.session.id,
     chatId: settings.chat.id,
-    runtimeId: settings.chat.runtimeId ?? "pi",
+    runtimeId: settings.chat.runtimeId ?? settings.session.runtimeId ?? "pi",
     endpointId: settings.chat.endpointId ?? settings.session.endpointId ?? piEndpointId(
       settings.session.environmentId ?? "desktop",
       connectionId!

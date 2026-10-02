@@ -24,6 +24,7 @@ import {
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
 import { withClaudeCliPath } from "./claude-cli-environment.js"
+import { ClaudeTurnUsage } from "./claude-cli-usage.js"
 import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
@@ -43,22 +44,12 @@ const ClaudeStreamDelta = Schema.Struct({
     )
   })
 })
-const ClaudeRequestUsage = Schema.Struct({
-  input_tokens: Schema.optional(Schema.Number),
-  output_tokens: Schema.optional(Schema.Number),
-  cache_read_input_tokens: Schema.optional(Schema.Number),
-  cache_creation_input_tokens: Schema.optional(Schema.Number)
-})
 const ClaudeResult = Schema.Struct({
   type: Schema.Literal("result"),
   subtype: Schema.String,
   is_error: Schema.Boolean,
   result: Schema.optional(Schema.String),
-  usage: Schema.optional(Schema.Struct({
-    ...ClaudeRequestUsage.fields,
-    /** The turn's final model request; the top-level fields sum every request. */
-    iterations: Schema.optional(Schema.Array(ClaudeRequestUsage))
-  }))
+  usage: Schema.optional(ClaudeTurnUsage)
 })
 
 const decodeAuthStatus = Schema.decodeUnknownOption(ClaudeAuthStatus)

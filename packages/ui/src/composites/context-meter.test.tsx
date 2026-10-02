@@ -33,9 +33,10 @@ describe("ContextMeter", () => {
    * An empty bar reads as "plenty of room left", which is the opposite of the
    * truth for a harness we cannot measure at all. Rendering nothing is honest.
    */
-  it("renders nothing when the harness cannot report context", () => {
+  it("shows a reported total without inventing a target when the window is unknown", () => {
     const { container } = render(<ContextMeter tokens={100_000} triggerAt={null} />)
-    expect(container.firstChild).toBeNull()
+    expect(container.textContent).toContain("100k")
+    expect(container.querySelector("span[style]")).toBeNull()
   })
 
   it("renders nothing before the first reading", () => {
@@ -190,6 +191,16 @@ describe("ContextMeter", () => {
     expect(title).toContain("150,000")
     expect(title).toContain("170,000")
     expect(title).toContain("compacts")
+  })
+
+  it.each([170_000, null])("shows context figures without Pi category data (target %s)", async (target) => {
+    render(<ContextMeter tokens={105_700} triggerAt={target} onCompactNow={() => {}} />)
+    fireEvent.focus(screen.getByRole("button", { name: "Compact now" }))
+    await waitFor(() => expect(screen.getAllByTestId("context-breakdown").length).toBeGreaterThan(0))
+    expect(screen.getAllByText("105,700").length).toBeGreaterThan(0)
+    expect(screen.getAllByText(target === null ? "Unknown" : "170,000").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("This harness reports a total, but no category breakdown.").length).toBeGreaterThan(0)
+    expect(screen.queryByText("System prompt")).toBeNull()
   })
 
   it("shows an estimated category breakdown on hover", async () => {

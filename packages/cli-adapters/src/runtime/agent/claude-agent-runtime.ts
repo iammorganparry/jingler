@@ -5,7 +5,7 @@ import {
   type AgentRunSpec,
   type StreamEvent
 } from "@jingler/core"
-import { Effect, Exit, Scope, Stream } from "effect"
+import { Effect, Exit, Schema, Scope, Stream } from "effect"
 import { isRecord } from "effect/Predicate"
 import {
   AgentRuntimeError,
@@ -18,6 +18,7 @@ import { trackChild } from "../../child-registry.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
+import { ClaudeRequestUsage, ClaudeTurnUsage, claudeUsageTokens } from "../providers/claude-cli-usage.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 
 export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
@@ -120,24 +121,13 @@ const inputLine = (spec: AgentRunSpec, sessionId: string): string => JSON.string
 const invalidContinuation =
   /no conversation found|session[^\n]*not found|invalid[^\n]*session/iu
 
-const numberOf = (value: unknown): number =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+const decodeRequestUsage = Schema.decodeUnknownSync(ClaudeRequestUsage)
+const decodeTurnUsage = Schema.decodeUnknownSync(ClaudeTurnUsage)
 
-/**
- * The usage of the turn's LAST model request — the one that says how full the
- * context window is now.
- *
- * `result.usage` is the sum over every request in the turn, so a turn of 30
- * tool calls re-reading a 100k cached prompt reported ~3M "context" and tripped
- * compaction on a session a fraction that size. The CLI reports the final
- * request under `usage.iterations`; an older CLI without it falls back to the
- * sum, which is the most it can tell us.
- */
-export const lastRequestUsage = (usage: Record<string, unknown>): Record<string, unknown> => {
-  const iterations = usage.iterations
-  const last = Array.isArray(iterations) ? iterations.at(-1) : undefined
-  return isRecord(last) ? last : usage
-}
+const usageEvent = (usage: ClaudeRequestUsage): StreamEvent => ({
+  _tag: "Usage",
+  tokens: claudeUsageTokens(usage)
+})
 
 const contentEvents = (value: unknown): ReadonlyArray<StreamEvent> => {
   if (!isRecord(value) || value.type !== "assistant" || !isRecord(value.message)) return []
@@ -187,8 +177,12 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   // Usage panel and never the conversation.
   if (recordClaudeCliRateLimits(value)) return []
   if (value.type === "stream_event") return streamEvents(value)
-  const content = contentEvents(value)
-  if (content.length > 0) return content
+  if (value.type === "assistant") {
+    const usage = value.parent_tool_use_id == null && isRecord(value.message) && isRecord(value.message.usage)
+      ? [usageEvent(decodeRequestUsage(value.message.usage))]
+      : []
+    return [...contentEvents(value), ...usage]
+  }
   if (value.type !== "result") return []
   if (typeof value.is_error !== "boolean") {
     throw new Error("Claude CLI emitted a malformed result")
@@ -200,21 +194,22 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
     }]
   }
   if (!isRecord(value.usage)) throw new Error("Claude CLI result is missing usage")
-  const input = numberOf(value.usage.input_tokens)
-  const output = numberOf(value.usage.output_tokens)
-  const cacheRead = numberOf(value.usage.cache_read_input_tokens)
-  const cacheWrite = numberOf(value.usage.cache_creation_input_tokens)
-  const last = lastRequestUsage(value.usage)
-  // The last request's prompt plus its reply is what the next turn starts from.
-  const context =
-    numberOf(last.input_tokens) +
-    numberOf(last.cache_read_input_tokens) +
-    numberOf(last.cache_creation_input_tokens) +
-    numberOf(last.output_tokens)
+  const usage = decodeTurnUsage(value.usage)
+  /**
+   * The usage of the turn's LAST model request — the one that says how full the
+   * context window is now.
+   *
+   * `result.usage` is the sum over every request in the turn, so a turn of 30
+   * tool calls re-reading a 100k cached prompt reported ~3M "context" and tripped
+   * compaction on a session a fraction that size. The CLI reports the final
+   * request under `usage.iterations`. Without it, use assistant-message usage,
+   * never the cumulative result: repeated cached reads are spend, not occupancy.
+   */
+  const last = usage.iterations?.at(-1)
   return [
-    { _tag: "Usage", tokens: context },
+    ...(last === undefined ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
-    { _tag: "Done", tokens: input + output + cacheRead + cacheWrite, costUsd: 0 }
+    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: 0 }
   ]
 }
 

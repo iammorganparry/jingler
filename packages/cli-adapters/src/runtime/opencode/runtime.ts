@@ -178,7 +178,8 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       directory = await realpath(spec.cwd)
       abort.signal.throwIfAborted()
       const models = await readOpenCodeModels(server, directory, abort.signal)
-      if (!models.some((model) => model.providerId === spec.providerId && model.id === spec.modelId && model.selectable)) throw new Error("OpenCode model is unavailable")
+      const model = models.find((model) => model.providerId === spec.providerId && model.id === spec.modelId && model.selectable)
+      if (model === undefined) throw new Error("OpenCode model is unavailable")
       const attachment = prepared.relay.attachment
       const connected = await server.client.mcp.add({ directory, name: attachment.name, config: {
         type: "remote", url: attachment.url, headers: { ...attachment.headers }, oauth: false, timeout: INTERACTIVE_TOOL_TIMEOUT_MS
@@ -195,7 +196,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       await inbox.connectedBeforePrompt()
       abort.signal.throwIfAborted()
       // OpenCode's loop compares sortable IDs. Let the server mint the user ID and correlate its event.
-      const events = new OpenCodeEvents(id, undefined, relayTools)
+      const events = new OpenCodeEvents(id, undefined, relayTools, model.capabilities.contextWindow)
       const permissions = new Set<string>()
       const questions = new Set<string>()
       await server.client.session.promptAsync({ sessionID: id, directory, model: { providerID: spec.providerId!, modelID: spec.modelId }, agent: "build", system: prepared.systemPrompt, parts: [{ type: "text", text: fresh ? seedPrompt(spec) : spec.prompt }, ...(spec.images ?? []).map((image) => ({ type: "file" as const, mime: image.mediaType, url: `data:${image.mediaType};base64,${image.data}` }))] }, { throwOnError: true, signal: abort.signal })

@@ -24,7 +24,7 @@ export class OpenCodeEvents {
   get hasResponse() { return this.messages.size > 0 }
   tokens = 0
   cost = 0
-  constructor(readonly sessionID: string, private parentID?: string, private readonly relayTools: ReadonlySet<string> = new Set()) {}
+  constructor(readonly sessionID: string, private parentID?: string, private readonly relayTools: ReadonlySet<string> = new Set(), private readonly window: number | null = null) {}
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: exhaustive vendor event normalization keeps per-turn correlation explicit.
   map(event: Event): StreamEvent[] {
     if (eventSessionId(event) !== this.sessionID) return []
@@ -67,7 +67,9 @@ export class OpenCodeEvents {
     this.usage.set(message.id, { tokens, cost: message.cost })
     this.tokens = [...this.usage.values()].reduce((sum, value) => sum + value.tokens, 0)
     this.cost = [...this.usage.values()].reduce((sum, value) => sum + value.cost, 0)
-    return [{ _tag: "Usage", tokens }]
+    // The SDK sends an initial zero-valued message before its usage is known.
+    if (tokens === 0) return []
+    return [{ _tag: "Usage", tokens, ...(this.window === null ? {} : { window: this.window }) }]
   }
   private textPart(part: Extract<Part, { type: "text" | "reasoning" }>, state: { text: string; done: boolean }): StreamEvent[] {
     if (part.text.length > 1_048_576) throw new Error("OpenCode text bound exceeded")
