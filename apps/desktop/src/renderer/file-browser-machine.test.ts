@@ -99,7 +99,7 @@ describe("fileBrowserMachine", () => {
     expect(api.read).toHaveBeenCalledTimes(1)
   })
 
-  it("skips duplicate repository scans for path-owned split editors", async () => {
+  it("skips repository scans but loads the requested diff for path-owned editors", async () => {
     const { actor, api } = start({}, { sessionId: "session-a", documentOnly: true })
     await waitFor(actor, (snapshot) =>
       snapshot.matches({ tree: "ready" }) && snapshot.matches({ changes: "ready" })
@@ -108,8 +108,15 @@ describe("fileBrowserMachine", () => {
     expect(api.diff).not.toHaveBeenCalled()
 
     actor.send({ type: "OPEN", path: "src/app.ts" })
-    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ document: { ready: "clean" } }) &&
+        snapshot.matches({ changes: "ready" }) &&
+        snapshot.context.diffPath === "src/app.ts"
+    )
     expect(api.read).toHaveBeenCalledWith("session-a", "src/app.ts")
+    expect(api.diff).toHaveBeenCalledWith("session-a", "src/app.ts")
   })
 
   it("loads file diffs on demand and reuses cached paths", async () => {
@@ -523,9 +530,10 @@ describe("fileBrowserMachine", () => {
     })
   })
 
-  it("reloads the selected file and diff when the followed mutation completes", async () => {
+  it("shows the live diff and reloads it when the followed mutation completes", async () => {
     const diff = vi
       .fn()
+      .mockResolvedValueOnce({ kind: "patch", patch: "live patch" })
       .mockResolvedValueOnce({ kind: "patch", patch: "completed patch" })
     const read = vi
       .fn()
@@ -542,8 +550,13 @@ describe("fileBrowserMachine", () => {
       preview: "-before\n+after",
       completed: false
     })
-    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
-    expect(actor.getSnapshot().context.viewMode).toBe("edit")
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ document: { ready: "clean" } }) &&
+        snapshot.context.patch === "live patch"
+    )
+    expect(actor.getSnapshot().context.viewMode).toBe("diff")
 
     actor.send({
       type: "AGENT_TARGET",
@@ -561,7 +574,7 @@ describe("fileBrowserMachine", () => {
     )
 
     expect(read).toHaveBeenCalledTimes(2)
-    expect(diff).toHaveBeenCalledTimes(1)
+    expect(diff).toHaveBeenCalledTimes(2)
     expect(actor.getSnapshot().context).toMatchObject({
       viewMode: "diff",
       agentTargetEventId: "edit-current",
@@ -569,6 +582,23 @@ describe("fileBrowserMachine", () => {
       agentTargetCompleted: true
     })
     expect(actor.getSnapshot().matches({ follow: "enabled" })).toBe(true)
+  })
+
+  it("stops following when the user changes the file view or contents", async () => {
+    const { actor } = start()
+    actor.send({ type: "OPEN", path: "src/app.ts" })
+    await waitFor(actor, (snapshot) => snapshot.matches({ document: { ready: "clean" } }))
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "SHOW_DIFF" })
+    expect(actor.getSnapshot().matches({ follow: "disabled" })).toBe(true)
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "START_EDIT" })
+    expect(actor.getSnapshot().matches({ follow: "disabled" })).toBe(true)
+
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "EDIT", text: "manual change" })
+    expect(actor.getSnapshot().matches({ follow: "disabled" })).toBe(true)
   })
 
   it("refreshes the tree and follows the destination when an agent moves a file", async () => {

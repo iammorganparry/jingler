@@ -455,13 +455,21 @@ describe("SessionSidebar session tree", () => {
     const requestClose = vi.fn().mockReturnValueOnce(false).mockReturnValue(true)
     const closeView = vi.fn()
     const select = vi.fn()
-    renderTree({ onRequestCloseFile: requestClose, onCloseView: closeView, onSelect: select })
+    renderTree({
+      onRequestCloseFile: requestClose,
+      onCloseView: closeView,
+      onSelect: select,
+      fileDiffs: { s1: { "src/a.ts": { added: 7, removed: 2 } } }
+    })
     fireEvent.click(within(screen.getByTestId("session-tree-chat-c1")).getByText("Main chat"))
     act(() =>
       updateEditorLayout("s1", (l) => openTab(openTab(l, { kind: "file", id: "src/a.ts" }), { kind: "view", id: "terminal" }))
     )
     expect(screen.getByText("Files")).toBeTruthy()
-    expect(screen.getByTestId("session-tree-file-src/a.ts")).toBeTruthy()
+    const fileRow = screen.getByTestId("session-tree-file-src/a.ts")
+    expect(fileRow).toBeTruthy()
+    expect(fileRow.textContent).toContain("+7")
+    expect(fileRow.textContent).toContain("−2")
     expect(screen.getByTestId("session-tree-view-terminal")).toBeTruthy()
     act(() =>
       updateEditorLayout("s1", (layout) =>

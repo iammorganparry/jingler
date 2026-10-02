@@ -3,7 +3,7 @@ import { useEffect, type ReactNode } from "react"
 import { Plus } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { activateTab, type EditorLayout } from "./editor-layout.js"
-import { EditorGroups, editorTabMime } from "./editor-groups.js"
+import { EditorGroups, editorFileMime, editorTabMime } from "./editor-groups.js"
 import { sessionSurfaceKey, type SessionSurface } from "./session-surface-layout.js"
 
 const chat = (id: string): SessionSurface => ({ kind: "chat", id })
@@ -112,6 +112,27 @@ describe("EditorGroups rendering", () => {
     })
     expect(screen.getByTestId("editor-drop-overlay")).toBeTruthy()
     fireEvent.dragEnd(window)
+    expect(screen.queryByTestId("editor-drop-overlay")).toBeNull()
+  })
+
+  it("shows a red rejection overlay and blocks files dropped onto a chat pane", () => {
+    const onDrop = vi.fn()
+    render(<EditorGroups {...props(() => null)} layout={layout} onDrop={onDrop} />)
+    const mime = editorTabMime("session")
+    const drag = { surface: source, from: "right" }
+    const dataTransfer = {
+      types: [mime, editorFileMime],
+      dropEffect: "move",
+      getData: (type: string) => type === mime ? JSON.stringify(drag) : ""
+    }
+    const chatPane = screen.getAllByTestId("editor-group")[0]!
+
+    fireEvent.dragOver(chatPane, { dataTransfer })
+    expect(screen.getByTestId("editor-drop-overlay").getAttribute("data-rejected")).toBe("true")
+    expect(dataTransfer.dropEffect).toBe("none")
+    fireEvent.drop(chatPane, { dataTransfer })
+
+    expect(onDrop).not.toHaveBeenCalled()
     expect(screen.queryByTestId("editor-drop-overlay")).toBeNull()
   })
 

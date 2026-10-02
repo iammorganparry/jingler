@@ -78,7 +78,7 @@ import { TerminalDockView } from "./terminal-dock-view.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
-import { setSessionDiff, useSessionDiffs } from "./diff-presence.js";
+import { setSessionDiff, useSessionDiffs, useSessionFileDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
   disposeChatActor,
@@ -315,6 +315,7 @@ function AuthedApp({
     [],
   );
   const liveDiff = useSessionDiffs();
+  const fileDiffs = useSessionFileDiffs();
   const chatActivities = useAllChatActivities();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
@@ -1395,6 +1396,7 @@ function AuthedApp({
         chatActivities={chatActivities}
         prStates={prStates}
         liveDiff={liveDiff}
+        fileDiffs={fileDiffs}
         usage={usage}
         usageReport={usageReportQuery.data ?? null}
         onLoadUsage={loadUsage}

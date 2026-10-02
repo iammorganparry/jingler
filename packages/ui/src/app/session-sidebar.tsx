@@ -1,6 +1,6 @@
 import { Spin } from "../components/spin.js"
 import * as React from "react"
-import type { Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import type { DiffStat, Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
@@ -100,6 +100,8 @@ export interface SessionSidebarProps {
   onCloseView?: (sessionId: string, surface: Extract<SessionSurface, { kind: "view" }>) => void
   /** Live activity by session, then chat. */
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
+  /** Loaded per-file worktree diff counts, keyed by session and path. */
+  fileDiffs?: Readonly<Record<string, Readonly<Record<string, DiffStat>>>>
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
@@ -333,6 +335,7 @@ function SidebarBody({
   onRequestCloseFile,
   onCloseView,
   chatActivities,
+  fileDiffs,
   liveActivity,
   prStates,
   repoOwners,
@@ -670,6 +673,7 @@ return (renderExpandedGroupHeading())
           session={s}
           running={liveActivity?.[s.id] !== undefined}
           activityByChat={chatActivities?.[s.id]}
+          fileDiffs={fileDiffs?.[s.id]}
           onSelectSession={onSelect}
           chatActions={chatActions}
           onRequestCloseFile={onRequestCloseFile}

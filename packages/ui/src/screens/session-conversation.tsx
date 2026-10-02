@@ -137,6 +137,8 @@ export interface SessionConversationProps {
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Loaded per-file worktree diff counts, keyed by session and path. */
+  fileDiffs?: Readonly<Record<string, Readonly<Record<string, DiffStat>>>>
   debugStopSequences?: Readonly<Record<string, number>>
   /** Open the New Session view. */
   onNewSession?: () => void
@@ -381,6 +383,7 @@ export function SessionConversation(props: SessionConversationProps) {
           }
         }}
         chatActivities={props.chatActivities}
+        fileDiffs={props.fileDiffs}
         onArchive={props.onArchiveSession}
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}

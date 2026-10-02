@@ -471,7 +471,20 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   const { window } = await launchApp({
     configured: true,
     withRepo: true,
-    sessions: seededPrSessions
+    sessions: seededPrSessions,
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 482,
+        title: "Refactor auth flow",
+        headRefName: "chore/refactor",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        additions: 1,
+        deletions: 0
+      }]
+    }
   })
   await expect(appShell(window)).toBeVisible()
 
@@ -482,10 +495,19 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   // Code Review is no longer a tab: its review lives in the Explorer's filter.
   await expect(window.getByRole("button", { name: "Code Review" })).toHaveCount(0)
   await window.setViewportSize({ width: 900, height: 700 })
-  await revealChanges(window)
+  const explorer = await revealChanges(window)
   await expect(window.getByText("Next milestone")).toHaveCount(0)
 
   const prFilter = window.getByRole("tab", { name: "Pull request", exact: true })
+  await expect(prFilter).toHaveAttribute("aria-selected", "true", { timeout: 20_000 })
+  await explorer.locator('[data-item-path="src/auth.ts"]').click()
+  const reviewDiff = window.getByTestId("review-file-diff")
+  await expect(reviewDiff).toBeVisible({ timeout: 20_000 })
+  await reviewDiff.locator("diffs-container [data-column-number]").first().click({ position: { x: 6, y: 6 } })
+  await expect(
+    window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
+  ).toBeVisible()
+
   const filterBar = prFilter.locator("..").locator("..")
   const [filterBox, prFilterBox] = await Promise.all([filterBar.boundingBox(), prFilter.boundingBox()])
   expect(filterBox).not.toBeNull()
