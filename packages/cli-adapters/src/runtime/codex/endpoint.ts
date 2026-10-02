@@ -22,6 +22,8 @@ const isEffort = (value: string): value is ReasoningEffort =>
   ["minimal", "low", "medium", "high", "xhigh", "max"].includes(value)
 
 export { CODEX_PROTOCOL_VERSION } from "./client.js"
+export type CodexModelCatalogEntry = Model
+export type CodexModelCatalogOptions = CodexClientOptions
 export const codexFeatures = {
   steer: "text",
   planReview: false,

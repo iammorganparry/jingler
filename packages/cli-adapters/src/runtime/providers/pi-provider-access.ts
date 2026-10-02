@@ -26,9 +26,11 @@ import {
   verifyLocalClaudeSubscription,
   type ClaudeCliProviderOptions
 } from "./claude-cli-provider.js"
-import { readCodexModelCatalog } from "../codex/endpoint.js"
-import type { CodexClientOptions } from "../codex/client.js"
-import type { Model as CodexCatalogModel } from "../codex/generated/v2/Model.js"
+import {
+  readCodexModelCatalog,
+  type CodexModelCatalogEntry,
+  type CodexModelCatalogOptions
+} from "../codex/endpoint.js"
 
 const credentialFor = (authKind: AuthKind, access: string): Credential =>
   authKind === "openai-codex-oauth"
@@ -90,7 +92,7 @@ const ASTRA_MODEL = {
 const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const
 
 const cliThinkingLevelMap = (
-  model: CodexCatalogModel
+  model: CodexModelCatalogEntry
 ): NonNullable<Model<Api>["thinkingLevelMap"]> => {
   const supported = new Set(model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
     reasoningEffort === "none" ? "off" : reasoningEffort
@@ -113,7 +115,7 @@ const modelTemplate = (
 
 const withCliCodexModels = (
   models: ReadonlyArray<Model<Api>>,
-  catalog: ReadonlyArray<CodexCatalogModel>
+  catalog: ReadonlyArray<CodexModelCatalogEntry>
 ): ReadonlyArray<Model<Api>> => {
   const existing = new Set(models.map(({ id }) => id))
   return [
@@ -139,7 +141,7 @@ const withCliCodexModels = (
 
 export const registerJinglerModels = async (
   runtime: ModelRuntime,
-  options: CodexClientOptions = {}
+  options: CodexModelCatalogOptions = {}
 ): Promise<void> => {
   const codex = runtime.getProvider("openai-codex")
   if (codex === undefined) return
