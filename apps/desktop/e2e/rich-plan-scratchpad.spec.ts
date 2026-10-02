@@ -89,8 +89,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await expect(
     launched.window.getByText("Implement TokenStore").filter({ visible: true }).first()
   ).toBeVisible()
-  // Split the plan right and back: it keeps rendering in its new group.
-  await launched.window.getByRole("button", { name: "Split right" }).first().click()
+  // Plan stays in the content pane while the chat remains visible on the left.
   await expect(launched.window.getByTestId("editor-group")).toHaveCount(2)
   await expect(launched.window.getByText("Token store rollout").filter({ visible: true }).first()).toBeVisible()
 
@@ -102,7 +101,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   await expect(
     launched.window.getByTestId("composer").filter({ visible: true }).first().getByRole("tab", { name: /Plan/ })
   ).toContainText("0/2", { timeout: 20_000 })
-  await expect(launched.window.getByLabel("Step 1: Completed")).toBeVisible()
+  await expect(launched.window.getByRole("button", { name: "Token store In progress" })).toBeVisible()
   await expect(launched.window.getByText("[DONE:1]", { exact: false })).toHaveCount(0)
 
   // Session state never changed: accept-edits, no review pending.
@@ -121,6 +120,6 @@ test("a structured plan renders stages natively and ticks live progress", async 
     githubRelay: launched.githubRelay
   })
   await expect(appShell(reopened.window)).toBeVisible()
-  await expect(reopened.window.getByLabel("Step 1: Completed")).toBeVisible({ timeout: 20_000 })
+  await expect(reopened.window.getByText("Adopted the structured plan. TokenStore implemented.", { exact: false })).toBeVisible({ timeout: 20_000 })
   await expect(reopened.window.getByText("[DONE:1]", { exact: false })).toHaveCount(0)
 })

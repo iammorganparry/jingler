@@ -17,14 +17,14 @@ import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
 import { EmptyConversation } from "./empty-conversation.js"
-import type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
+import type { ConversationPaneCtx } from "./session-pane.js"
 import { BUILTIN_TAB, type TabContribution, type TabKey } from "../app/tab-contributions.js"
 import type { PaneContribution } from "../app/pane-contributions.js"
 
 // The pane ctx is part of this screen's public surface (JinglerApp types its
 // `renderConversation` callback with it), so keep it importable from here even
 // though it's now defined alongside the pane that consumes it.
-export type { ConversationPaneCtx, SessionChatTabsRenderContext } from "./session-pane.js"
+export type { ConversationPaneCtx } from "./session-pane.js"
 
 export interface SessionConversationProps {
   /** Global command search shown at the top of the sidebar. */
@@ -49,6 +49,8 @@ export interface SessionConversationProps {
   group?: SplitGroup | null
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for a session (the editor "+" menu). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Manually rename a session (double-click its sidebar title). */
@@ -104,13 +106,6 @@ export interface SessionConversationProps {
   /** Open a file selected from the workspace Explorer and reveal its Files surface. */
   onOpenExplorerFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
-  /**
-   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
-   * for the same reason `renderConversation` is: the chat state it drives (RPCs
-   * + live per-chat activity) lives in the desktop renderer, so building the bar
-   * here would drag the RPC client into the component library. Absent in stories.
-   */
-  renderChatTabs?: (session: Session, ctx: SessionChatTabsRenderContext) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -303,10 +298,10 @@ export function SessionConversation(props: SessionConversationProps) {
             onTrackFile={props.onTrackFile}
             onRequestCloseFile={props.onRequestCloseFile}
             conversationPane={props.conversationPane}
-            renderChatTabs={props.renderChatTabs}
             renderSubagentTabs={props.renderSubagentTabs}
             onRenameSession={props.onRenameSession}
             onCreateChat={props.onCreateChat}
+            onCloseUntouchedChat={props.onCloseUntouchedChat}
             onOpenFilePicker={props.onOpenFilePicker}
             onFocusChat={props.onFocusChat}
             onToggleBrowser={props.onToggleBrowser}

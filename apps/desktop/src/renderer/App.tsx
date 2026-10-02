@@ -51,6 +51,7 @@ import {
   useSplashHold,
   useThemeCatalog,
   closeSurfaceEverywhere,
+  forgetEditorLayout,
   openTab,
   updateEditorLayout,
 } from "@jingler/ui";
@@ -62,7 +63,8 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionChatTabs, SessionSubagentTabs } from "./session-chat-tabs.js";
+import { SessionSubagentTabs } from "./session-chat-tabs.js";
+import { selectSubagentTab } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import {
@@ -82,9 +84,10 @@ import {
   disposeChatActor,
   disposeConversationActor,
   getConversationActor,
+  isChatUntouched,
   useAllChatActivities,
 } from "./conversation-registry.js";
-import { addDraftCodeReference, clearDraft } from "./draft-store.js";
+import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
 import {
@@ -681,7 +684,37 @@ function AuthedApp({
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId);
     clearViewedPaths(sessionId);
+    forgetEditorLayout(sessionId);
     send({ type: "SESSION_DELETED", sessionId });
+  };
+
+  const closeChat = (sessionId: string, chatId: string, discard = false) =>
+    queueSessionChatMutation(
+      sessionId,
+      () => rpc.sessionsCloseChat(sessionId, chatId, discard),
+      (updated) => {
+        clearDraft(chatId);
+        disposeChatActor(sessionId, chatId);
+        publishSessionUpdate(updated);
+        updateEditorLayout(sessionId, (layout) =>
+          openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
+            kind: "chat",
+            id: updated.activeChatId,
+          }),
+        );
+      },
+    );
+  const closeUntouchedChat = (sessionId: string, chatId: string) => {
+    const draft = getDraft(chatId);
+    if (
+      !isChatUntouched(sessionId, chatId) ||
+      draft.text !== "" ||
+      draft.attachments.length > 0 ||
+      draft.references.length > 0
+    ) {
+      return;
+    }
+    closeChat(sessionId, chatId, true);
   };
 
   const accessForSession = useCallback(
@@ -1549,22 +1582,8 @@ function AuthedApp({
           onRenameChat: (sessionId, chatId, title) => {
             void rpc.sessionsRenameChat(sessionId, chatId, title).then(publishSessionUpdate);
           },
-          onCloseChat: (sessionId, chatId) =>
-            queueSessionChatMutation(
-              sessionId,
-              () => rpc.sessionsCloseChat(sessionId, chatId),
-              (updated) => {
-                clearDraft(chatId);
-                disposeChatActor(sessionId, chatId);
-                publishSessionUpdate(updated);
-                updateEditorLayout(sessionId, (layout) =>
-                  openTab(closeSurfaceEverywhere(layout, { kind: "chat", id: chatId }), {
-                    kind: "chat",
-                    id: updated.activeChatId,
-                  }),
-                );
-              },
-            ),
+          onCloseChat: closeChat,
+          onCloseUntouchedChat: closeUntouchedChat,
           onReopenChat: (sessionId, chatId) =>
             queueSessionChatMutation(
               sessionId,
@@ -1575,6 +1594,7 @@ function AuthedApp({
               },
             ),
         }}
+        onCloseUntouchedChat={closeUntouchedChat}
         onCreateChat={(sessionId) =>
           queueSessionChatMutation(
             sessionId,
@@ -1668,24 +1688,6 @@ function AuthedApp({
             onOpenPath={ctx.onOpenPath}
           />
         )}
-        renderChatTabs={(session: Session, ctx) => (
-          <SessionChatTabs
-            session={session}
-            filesActive={ctx.activeTabId === "files"}
-            onSelectConversation={ctx.onSelectConversation}
-            onSelectFiles={ctx.onSelectFiles}
-            activeSurface={ctx.activeSurface}
-            onSelectSurface={ctx.onSelectSurface}
-            onCloseSurface={ctx.onCloseSurface}
-            onRequestCloseFile={ctx.onRequestCloseFile}
-            viewSlot={ctx.viewSlot}
-            viewCount={ctx.viewCount}
-            viewsActive={ctx.viewsActive}
-            onCloseAllViews={ctx.onCloseAllViews}
-            viewLauncherItems={ctx.viewLauncherItems}
-            paneFocused={ctx.paneFocused}
-          />
-        )}
         renderSubagentTabs={(session: Session, ctx) => (
           <SessionSubagentTabs
             session={session}
@@ -1749,6 +1751,7 @@ function AuthedApp({
           <TerminalDockView session={session} visible={visible} embedded />
         )}
         onFocusChat={(sessionId, chatId) => {
+          selectSubagentTab(sessionId, chatId, "main");
           const session = sessions.find((candidate) => candidate.id === sessionId);
           if (!session || session.activeChatId === chatId) return;
           queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId));

@@ -4614,12 +4614,23 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
-  "Sessions.closeChat": ({ sessionId, chatId }) =>
+  "Sessions.closeChat": ({ sessionId, chatId, discard }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
       if (!session.chats.some((chat) => chat.id === chatId)) return session;
       const runner = yield* AgentRunner;
-      yield* runner.stop(sessionId, chatId);
+      // Remove the chat from the active session first so a racing prompt cannot
+      // start after stop. Then wait for the existing writer to finish before
+      // deciding whether the transcript is still empty.
+      let updated = yield* SessionStore.closeChat(sessionId, chatId);
+      yield* runner.stop(sessionId, chatId, true);
+      const discardEmpty = discard
+        ? (yield* TranscriptStore.listPage(chatId, { limit: 1 })).messages.length === 0
+        : false;
+      if (discardEmpty) {
+        yield* TranscriptStore.remove(chatId);
+        updated = yield* SessionStore.discardClosedChat(sessionId, chatId);
+      }
       // Drop the closed chat's per-chat state so it can't leak or strand rows:
       // its background-task rows + stop handle (nothing else sweeps a chat that
       // never runs again), and the runner's per-chat maps (the lock in particular
@@ -4629,7 +4640,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* Effect.flatMap(PreviewViewService, (preview) =>
         preview.closeBrowser(sessionId, chatId),
       );
-      const updated = yield* SessionStore.closeChat(sessionId, chatId);
       yield* ContextManager.forget(chatId);
       if (session.worktreePath) {
         yield* ExplanationStore.rehome(

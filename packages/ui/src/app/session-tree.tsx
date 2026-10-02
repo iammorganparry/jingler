@@ -6,7 +6,7 @@
  * switching tabs inside a group never re-renders the sidebar — only opening or
  * closing something does.
  */
-import { memo, useState } from "react"
+import { memo, useEffect, useState } from "react"
 import { useSelector } from "@xstate/react"
 import type { ProviderId, Session, SessionActivity } from "@jingler/core"
 import { Pencil, RotateCcw, X } from "lucide-react"
@@ -41,6 +41,7 @@ export interface SessionChatActions {
   readonly onSelectChat?: (sessionId: string, chatId: string) => void
   /** Closes the chat itself (it moves to Closed), not just its tabs. */
   readonly onCloseChat?: (sessionId: string, chatId: string) => void
+  readonly onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   readonly onReopenChat?: (sessionId: string, chatId: string) => void
 }
 
@@ -64,6 +65,7 @@ export const SessionTree = memo(function SessionTree({
 }) {
   const [renaming, setRenaming] = useState<string | null>(null)
   const [draft, setDraft] = useState("")
+  useEffect(() => ensureLayout(session), [session])
   const [closedOpen, setClosedOpen] = useState(false)
   const closed = session.closedChats ?? []
   const commitRename = (chatId: string) => {
@@ -93,6 +95,7 @@ export const SessionTree = memo(function SessionTree({
       return
     }
     if (surface.kind === "view") onCloseView?.(session.id, surface)
+    if (surface.kind === "chat") chatActions?.onCloseUntouchedChat?.(session.id, surface.id)
     updateEditorLayout(session.id, (layout) => closeSurfaceEverywhere(layout, surface))
   }
 

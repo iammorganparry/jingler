@@ -104,22 +104,6 @@ export interface ConversationPaneCtx {
   paneFocused?: boolean
 }
 
-export interface SessionChatTabsRenderContext {
-  readonly activeTabId: TabKey
-  readonly onSelectConversation: () => void
-  readonly onSelectFiles: () => void
-  readonly activeSurface?: SessionSurface
-  readonly onSelectSurface?: (surface: SessionSurface) => void
-  readonly onCloseSurface?: (surface: SessionSurface) => void
-  readonly onRequestCloseFile?: (path: string) => boolean
-  readonly viewSlot?: ReactNode
-  readonly viewCount?: number
-  readonly viewsActive?: boolean
-  readonly onCloseAllViews?: () => void
-  readonly viewLauncherItems?: ReadonlyArray<TabLauncherItem>
-  readonly paneFocused?: boolean
-}
-
 export interface SessionPaneProps {
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
@@ -188,17 +172,6 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
-  /**
-   * Render the session's chat pills into the tab row's `chatSlot` (behind the
-   * divider). A render prop for the same reason `renderConversation` is: the
-   * chat state it drives — the create/select/rename/close RPCs and the live
-   * per-chat activity — lives in the desktop renderer, so building the bar here
-   * would drag the RPC client into the component library. Absent in stories.
-   */
-  renderChatTabs?: (
-    session: Session,
-    ctx: SessionChatTabsRenderContext
-  ) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -266,6 +239,8 @@ export interface SessionPaneProps {
   onMovePaneRight?: () => void
   /** Start a new chat in this session (the "+" menu's Chat entry). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for this session (the "+" menu's File entry). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Persist selection of a provider-scoped issue from the right view rail. */
@@ -315,6 +290,15 @@ function resolveVisibleTab(tabs: ReadonlyArray<TabContribution>, tab: TabKey): T
 }
 
 const noop = () => {}
+
+const discardUntouchedChat = (
+  surface: SessionSurface,
+  copies: number,
+  sessionId: string,
+  discard: SessionPaneProps["onCloseUntouchedChat"]
+): void => {
+  if (surface.kind === "chat" && copies <= 1) discard?.(sessionId, surface.id)
+}
 
 const SurfaceContent = memo(function SurfaceContent({
   session, chatId, contribution, paneFocused, paneVisible, onSelectTab, onConnectGithub
@@ -768,7 +752,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     .filter(
       (contribution) =>
         (contribution.id !== BUILTIN_TAB.plan || activeHasPlan) &&
-        (props.renderChatTabs === undefined || contribution.id !== BUILTIN_TAB.conversation)
+        contribution.id !== BUILTIN_TAB.conversation
     )
     .map((contribution) => describeTab(contribution, tabCtx))
   const viewRailMenus = { ...buildProviderMenus(active, tabs, props.onSelectIssue), ...props.viewRailMenus }
@@ -788,6 +772,7 @@ function SessionPaneBody(props: SessionPaneProps) {
         update((held) => activateTab(held, groupId, key))
         return
       }
+      discardUntouchedChat(surface, copies, active.id, props.onCloseUntouchedChat)
       if (surface.kind === "view" && surface.id === BUILTIN_TAB.browser && copies <= 1) {
         const chatId = surface.chatId ?? active.activeChatId
         if (props.isBrowserActive?.(active.id, chatId)) props.onToggleBrowser?.(active.id, chatId)
@@ -797,7 +782,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       const nextGroup = focusedGroup(next)
       if (nextGroup) syncChat(activeSurface(nextGroup))
     },
-    [active.activeChatId, active.id, layout, props.isBrowserActive, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
+    [active.activeChatId, active.id, layout, props.isBrowserActive, props.onCloseUntouchedChat, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
   )
 
   const launcherTabs = tabs.some((contribution) => contribution.id === BUILTIN_TAB.plan)
@@ -891,7 +876,8 @@ function SessionPaneBody(props: SessionPaneProps) {
           renderBody={renderBody}
           onActivate={(groupId, surface) => {
             update((current) => activateTab(current, groupId, sessionSurfaceKey(surface)))
-            syncChat(surface)
+            if (surface.kind === "chat") props.onFocusChat?.(sessionId, surface.id)
+            else syncChat(surface)
           }}
           onClose={closeTabIn}
           onDrop={(drag, groupId, edge, copy) => {

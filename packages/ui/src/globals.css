@@ -569,6 +569,22 @@
   }
 }
 
+/* Electron drag regions swallow pointer events, so only inert title-bar space
+ * inherits `drag`; controls opt back out and keep their normal interaction. */
+.window-drag-region :is(
+  button,
+  a,
+  input,
+  textarea,
+  select,
+  [role="button"],
+  [role="tab"],
+  [draggable="true"],
+  [tabindex]
+) {
+  -webkit-app-region: no-drag;
+}
+
 /*
  * Scrollable, but with no visible track.
  *

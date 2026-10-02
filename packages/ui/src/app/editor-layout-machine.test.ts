@@ -1,5 +1,5 @@
 import { createActor } from "xstate"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { closeTab, createEditorLayout, EDITOR_LAYOUT_STORAGE_PREFIX, groupsOf, openTab } from "./editor-layout.js"
 import { editorLayoutsMachine } from "./editor-layout-machine.js"
 
@@ -20,7 +20,9 @@ describe("editorLayoutsMachine", () => {
     expect(actor.getSnapshot().context).toBe(before.context)
     expect(localStorage.getItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}s`)).toBeNull()
 
-    actor.send({ type: "UPDATE", sessionId: "s", update: (l) => openTab(l, chat("b")) })
+    const update = vi.fn((layout: typeof seeded) => openTab(layout, chat("b")))
+    actor.send({ type: "UPDATE", sessionId: "s", update })
+    expect(update).toHaveBeenCalledOnce()
     const layout = actor.getSnapshot().context.layouts.s!
     expect(groupsOf(layout.root)[0]!.tabs.map((t) => t.id)).toEqual(["a", "b"])
     expect(JSON.parse(localStorage.getItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}s`)!)).toEqual(layout)
@@ -37,8 +39,10 @@ describe("editorLayoutsMachine", () => {
       update: (l) => closeTab(l, groupsOf(l.root)[0]!.id, chat("b"))
     })
     expect(actor.getSnapshot().context.layouts.t).toBe(other)
+    localStorage.setItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}s`, "stored")
     actor.send({ type: "FORGET", sessionId: "s" })
     expect(actor.getSnapshot().context.layouts.s).toBeUndefined()
+    expect(localStorage.getItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}s`)).toBeNull()
   })
 
   it("ignores updates for a session that was never seeded", () => {

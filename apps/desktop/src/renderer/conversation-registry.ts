@@ -680,6 +680,17 @@ export const useAllChatActivities = (): Readonly<Record<string, Readonly<Record<
  */
 export const __debugActorCount = (): number => registry.size
 
+/** True only after history has loaded and the chat has never produced or queued a turn. */
+export const isChatUntouched = (sessionId: string, chatId: string): boolean => {
+  const snapshot = snapshots.get(registryKey(sessionId, chatId))
+  return Boolean(
+    snapshot?.matches("awaitingInput") &&
+    snapshot.context.messages.length === 0 &&
+    snapshot.context.queued.length === 0 &&
+    snapshot.context.pendingText === ""
+  )
+}
+
 export const getConversationActor = (
   session: Session,
   chatId: string = session.activeChatId

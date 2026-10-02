@@ -605,8 +605,8 @@ export const rpc = {
     title: string
   ): Promise<Session> =>
     run((c) => c.Sessions.renameChat({ sessionId, chatId, title })),
-  sessionsCloseChat: (sessionId: string, chatId: string): Promise<Session> =>
-    run((c) => c.Sessions.closeChat({ sessionId, chatId })),
+  sessionsCloseChat: (sessionId: string, chatId: string, discard = false): Promise<Session> =>
+    run((c) => c.Sessions.closeChat({ sessionId, chatId, discard })),
   sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
   /**

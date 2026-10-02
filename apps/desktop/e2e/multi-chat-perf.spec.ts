@@ -31,7 +31,7 @@ const transcripts = Object.fromEntries(chats.map((chat) => [chat.id,
 const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sessions) => {
     const multiple = sessions.length > 1
     const frames: number[] = []
-    const actions = multiple ? ["switch-session", "open-chat", "split-tab", "close-chat"] : ["open-chat", "split-tab", "close-chat"]
+    const actions = multiple ? ["switch-session", "open-chat", "close-chat"] : ["open-chat", "close-chat"]
     const actionFrames = actions.map(() => [] as number[])
     let actionIndex = 0
     const longTasks: number[] = []
@@ -71,11 +71,6 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
         return [...document.querySelectorAll<HTMLButtonElement>("button")]
           .find((button) => button.getClientRects().length > 0 && button.textContent === chat.title)
       }
-      if (actions[actionIndex] === "split-tab") {
-        return document.querySelector<HTMLButtonElement>(
-          '[data-testid="editor-group"][data-focused="true"] button[aria-label="Split right"]'
-        )
-      }
       return document.querySelector<HTMLButtonElement>(
         `[data-testid="session-tree-chat-${openedChatId}"] button[aria-label$=" everywhere"]`
       )
@@ -86,7 +81,7 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
       const visible = paneFor(openedChatId) !== undefined
       const groups = document.querySelectorAll('[data-testid="editor-group"]').length
       const expected = actions[actionIndex] === "close-chat" ? !visible : visible
-      if (!expected || (actions[actionIndex] === "split-tab" && groups !== 2)) {
+      if (!expected || groups !== 1) {
         throw new Error(`Benchmark action did not change the expected surface at operation ${i}`)
       }
     }
@@ -118,7 +113,7 @@ const measure = (window: Page, sessions = [seed]) => window.evaluate(async (sess
     }
   }, sessions.map(({ id, chats }) => ({ id, chats })))
 
-test("benchmark rich transcripts while opening, splitting and closing chat tabs", async ({ launchApp }, testInfo) => {
+test("benchmark rich transcripts while opening and closing chat tabs", async ({ launchApp }, testInfo) => {
   test.setTimeout(180_000)
   const { window } = await launchApp({
     configured: true, withRepo: true,

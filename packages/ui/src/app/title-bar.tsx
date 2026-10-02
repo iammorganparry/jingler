@@ -16,12 +16,11 @@ export function TitleBar({
       data-testid="title-bar"
       title={title}
       style={drag}
-      className="flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
+      className="window-drag-region flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
       <div aria-hidden className="w-11 flex-none" />
       <div
         id="session-tab-bar-portal"
-        style={noDrag}
         className="flex h-full min-w-0 flex-1 items-center overflow-hidden"
       />
       {actions ? (

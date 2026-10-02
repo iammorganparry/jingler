@@ -830,11 +830,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     }
   }),
 
-  /** Close one chat; closing the last creates a fresh Chat 1 replacement. */
+  /** Close one chat; untouched chats may be discarded instead of archived. */
   Rpc.make("Sessions.closeChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      discard: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Restore a previously closed chat and make it active. */

@@ -5,8 +5,7 @@ import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
 import {
   SessionPane,
-  type ConversationPaneCtx,
-  type SessionChatTabsRenderContext
+  type ConversationPaneCtx
 } from "../screens/session-pane.js"
 import type { TabContribution, TabKey } from "./tab-contributions.js"
 import { dockedPanes, type PaneContribution } from "./pane-contributions.js"
@@ -38,16 +37,6 @@ export interface SessionSplitProps {
   onTrackFile?: (sessionId: string, path: string) => void
   onRequestCloseFile?: (sessionId: string, path: string) => boolean
   conversationPane?: ReactNode
-  /**
-   * Render a session's chat pills into the tab row's `chatSlot`. A render prop
-   * for the same reason `renderConversation` is: the chat state it drives (RPCs
-   * + live per-chat activity) lives in the desktop renderer, so building the bar
-   * here would drag the RPC client into the component library.
-   */
-  renderChatTabs?: (
-    session: Session,
-    ctx: SessionChatTabsRenderContext
-  ) => ReactNode
   /** Render children of the selected top-level agent in a second tab row. */
   renderSubagentTabs?: (
     session: Session,
@@ -58,6 +47,8 @@ export interface SessionSplitProps {
   ) => ReactNode
   /** Start a new chat in a session (the editor "+" menu). */
   onCreateChat?: (sessionId: string) => void
+  /** Discard an untouched chat when its last editor tab closes. */
+  onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for a session (the editor "+" menu). */
   onOpenFilePicker?: (sessionId: string) => void
   /** Rename a session from its pane title. */
@@ -128,10 +119,10 @@ export function SessionSplit(props: SessionSplitProps) {
       onTrackFile={props.onTrackFile}
       onRequestCloseFile={props.onRequestCloseFile}
       conversationPane={props.conversationPane}
-      renderChatTabs={props.renderChatTabs}
       renderSubagentTabs={props.renderSubagentTabs}
       onRenameSession={props.onRenameSession}
       onCreateChat={props.onCreateChat}
+      onCloseUntouchedChat={props.onCloseUntouchedChat}
       onOpenFilePicker={props.onOpenFilePicker}
       onFocusChat={props.onFocusChat}
       onToggleBrowser={props.onToggleBrowser}
