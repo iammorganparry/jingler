@@ -174,10 +174,12 @@ describe("editor layout persistence", () => {
       focused: 0,
       openViews: [view("terminal")]
     }))
-    expect(shape(loadEditorLayout("s", file("a.ts"), "main"))).toEqual([
+    const loaded = loadEditorLayout("s", file("a.ts"), "main")
+    expect(shape(loaded)).toEqual([
       ["chat:main"],
       ["file:a.ts", "view:terminal"]
     ])
+    expect(activeSurface(focusedGroup(loaded)!).id).toBe("a.ts")
   })
 
   it("does not restore an explicitly closed main chat", () => {

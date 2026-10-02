@@ -478,9 +478,14 @@ export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, ma
     if (!layout) return initial
     if (layout.mainChatId === null || !main) return layout
     const withMain = { ...layout, mainChatId }
-    const present = groupsOf(layout.root).some((g) => g.tabs.some((t) => keyOf(t) === keyOf(main)))
+    const present = groupsOf(layout.root).some((group) =>
+      group.tabs.some((tab) => keyOf(tab) === keyOf(main))
+    )
     if (present) return withMain
-    return openTab(withMain, main, mainChatId)
+    const restored = openTab(withMain, main, mainChatId)
+    return layout.focusedGroupId
+      ? focusEditorGroup(restored, layout.focusedGroupId)
+      : restored
   } catch {
     return initial
   }
