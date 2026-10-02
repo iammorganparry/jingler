@@ -1,5 +1,21 @@
 # @jingler/desktop
 
+## 0.5.0
+
+### Minor Changes
+
+- 549e056: Chats stay visible in a dedicated pane while files, previews, terminals, and other views open beside them.
+
+### Patch Changes
+
+- 1fcca1b: Name and branch new sessions from their initial prompt before they open, make Cmd/Ctrl+W close the focused editor tab, and restore horizontal and vertical splits when dragging file or view tabs to pane edges.
+- f031057: Keep Follow active when an agent moves a file, and show selected-diff feedback controls in the followed file tab without redirecting other open files.
+- 43e1388: Keep Follow in diff mode, stop it on manual file interaction, restore PR inline review diffs, show per-file line counts, and reject file drops onto chat panes clearly.
+- eeddfa1: Allow authenticated GitHub CLI users to discover, link, and view pull requests without installing the GitHub App, including Finder-launched macOS builds.
+- 717ea20: Restore returning from subagent tabs to the main chat and make the top bar draggable.
+- 3e918a9: Show context totals and compaction targets on hover across harnesses, keep Claude's cumulative token spend out of context accounting, and use OpenCode's reported model window for compaction.
+  - @jingler/plannotator-ext@0.5.0
+
 ## 0.4.1
 
 ### Patch Changes
