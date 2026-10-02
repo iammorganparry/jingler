@@ -1898,9 +1898,9 @@ export const CreateSessionInput = Schema.Struct({
   githubSlug: Schema.optional(Schema.String),
   /**
    * Optional session title. When omitted/blank the session is auto-named by the
-   * agent from a detached fresh-base worktree; when provided it seeds and pins
-   * the display title. Both paths remain detached until task understanding
-   * produces a validated semantic branch.
+   * agent; when provided it seeds and pins the display title. A fresh worktree
+   * with an initial prompt gets its validated semantic branch before creation
+   * returns; a promptless session stays detached until task understanding runs.
    */
   title: Schema.optional(Schema.String),
   /** Optional first task, opened as the new workspace's initial composer draft. */

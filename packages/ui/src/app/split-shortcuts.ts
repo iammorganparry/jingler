@@ -51,6 +51,9 @@ const PANE_CODES: ReadonlyArray<string> = Array.from(
  * Every chord takes `meta || ctrl`, so the same physical gesture works on macOS
  * and elsewhere.
  */
+const matchesPlainClose = (e: Chord): boolean =>
+  !e.shiftKey && !e.altKey && (e.code === "KeyW" || e.key.toLowerCase() === "w")
+
 export const matchSplitShortcut = (e: Chord): SplitShortcut | null => {
   if (!(e.metaKey || e.ctrlKey)) return null
 
@@ -58,6 +61,10 @@ export const matchSplitShortcut = (e: Chord): SplitShortcut | null => {
   // that must not fire with Shift or Alt held.
   if (!e.shiftKey && !e.altKey && (e.code === "KeyN" || e.key.toLowerCase() === "n")) {
     return { type: "new-session" }
+  }
+  // Editors close the focused tab, not the whole app window.
+  if (matchesPlainClose(e)) {
+    return { type: "close-pane" }
   }
   if (!e.shiftKey) return null
 
@@ -88,8 +95,7 @@ const matchNeighbourOrClose = (e: Chord): SplitShortcut | null => {
     return { type: "focus-neighbour", direction: 1 }
   }
 
-  // ⌃⇧W — close the focused pane. Not a bare ⌘W: that reads as "close the
-  // window", and mistaking one for the other is a far more destructive miss.
+  // ⌃⇧W remains an alias for closing the focused editor tab.
   if (e.code === "KeyW" || e.key.toLowerCase() === "w") return { type: "close-pane" }
 
   return null

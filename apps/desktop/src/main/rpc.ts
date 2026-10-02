@@ -54,6 +54,7 @@ import {
   ProjectService,
   planReviewPost,
   retitleSession,
+  retitleSessionFromPrompt,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -722,8 +723,19 @@ export const createSessionRouted = (
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
       const session = yield* createSession(runtimeInput);
+      const initialPrompt = runtimeInput.initialPrompt?.trim();
+      if (!initialPrompt) {
+        yield* reportSessionCreation(progress, "ready");
+        return session;
+      }
+      const runtime = yield* AgentRuntime;
+      const named = yield* retitleSessionFromPrompt(
+        session.id,
+        initialPrompt,
+        makeAgentRuntimeTitleGenerator(runtime),
+      );
       yield* reportSessionCreation(progress, "ready");
-      return session;
+      return named;
     }
 
     yield* reportSessionCreation(progress, "checking-access");

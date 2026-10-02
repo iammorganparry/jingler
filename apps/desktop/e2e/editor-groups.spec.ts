@@ -203,6 +203,27 @@ test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) =>
   await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
 })
 
+test("⌘W closes the focused editor tab without closing the app window", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions,
+    seed: ({ repoPath }) => writeFileSync(join(repoPath, "close-me.ts"), "export const open = true\n")
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
+  await window.keyboard.press("Meta+Shift+p")
+  await window.getByPlaceholder("Open a file in Alpha session…").fill("close-me.ts")
+  await window.getByTestId("palette-item-file:close-me.ts").click()
+  await expect(window.getByTestId("editor-tab-file-close-me.ts")).toBeVisible()
+
+  await window.keyboard.press("Meta+w")
+
+  await expect(window.getByTestId("editor-tab-file-close-me.ts")).toHaveCount(0)
+  await expect(appShell(window)).toBeVisible()
+})
+
 test("legacy split shortcuts cannot create duplicate panes", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, isolateSystemHome: true, withRepo: true, sessions })
   await expect(appShell(window)).toBeVisible()

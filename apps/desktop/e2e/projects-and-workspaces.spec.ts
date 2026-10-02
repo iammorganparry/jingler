@@ -195,6 +195,24 @@ test("creates a direct workspace from a registered project", async ({ launchApp 
   expect(persisted.projectId).toBeTruthy()
 })
 
+test("names and branches a new workspace from its initial prompt before opening it", async ({ launchApp }) => {
+  const launched = await launchApp({ configured: true })
+  const projectPath = makeProject(launched.home, "named-project")
+  await expect(appShell(launched.window)).toBeVisible()
+  await addProject(launched.window, projectPath)
+  await createWorkspace(launched.window, {
+    checkout: "Worktree",
+    task: "Fix keyboard tab closing"
+  })
+
+  const persisted = JSON.parse(readFileSync(join(launched.home, "jingler", "sessions.json"), "utf8"))[0]
+  expect(persisted).toMatchObject({
+    title: "Fix keyboard tab closing",
+    branch: "chore/fix-keyboard-tab-closing",
+    semanticBranchPending: false
+  })
+})
+
 test("creates an isolated worktree workspace from a selected base branch", async ({ launchApp }) => {
   const launched = await launchApp({ configured: true })
   const projectPath = makeProject(launched.home, "isolated-project")

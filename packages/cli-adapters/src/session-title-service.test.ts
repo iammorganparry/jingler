@@ -15,6 +15,7 @@ import {
   makeAgentRuntimeTitleGenerator,
   parseSessionMetadata,
   retitleSession,
+  retitleSessionFromPrompt,
   type TitleGenerator
 } from "./session-title-service.js"
 import { SessionStore } from "./sessions.js"
@@ -141,6 +142,39 @@ describe("retitleSession", () => {
         encoding: "utf-8"
       }).trim()
     ).toBe("feat/add-response-caching")
+  })
+
+  it("names and branches a fresh session from its initial prompt", async () => {
+    let received: ReadonlyArray<unknown> = []
+    const generator: TitleGenerator = {
+      generate: (messages) => {
+        received = messages
+        return Effect.succeed({
+          title: "Close focused editor tab",
+          branch: { type: "fix", slug: "close-focused-editor-tab" }
+        })
+      }
+    }
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input({ initialPrompt: "Make Cmd+W close the focused editor tab" }))
+        return yield* retitleSessionFromPrompt(
+          session.id,
+          "Make Cmd+W close the focused editor tab",
+          generator
+        )
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(received).toMatchObject([{
+      role: "user",
+      parts: [{ _tag: "Text", text: "Make Cmd+W close the focused editor tab" }]
+    }])
+    expect(exit.value.title).toBe("Close focused editor tab")
+    expect(exit.value.branch).toBe("fix/close-focused-editor-tab")
   })
 
   it("derives semantic metadata from the active chat transcript", async () => {
