@@ -14,6 +14,7 @@ import {
   type CodexClientOptions
 } from "./client.js"
 import type { GetAccountResponse } from "./generated/v2/GetAccountResponse.js"
+import type { Model } from "./generated/v2/Model.js"
 import type { ModelListResponse } from "./generated/v2/ModelListResponse.js"
 import type { LoginAccountResponse } from "./generated/v2/LoginAccountResponse.js"
 
@@ -21,6 +22,8 @@ const isEffort = (value: string): value is ReasoningEffort =>
   ["minimal", "low", "medium", "high", "xhigh", "max"].includes(value)
 
 export { CODEX_PROTOCOL_VERSION } from "./client.js"
+export type CodexModelCatalogEntry = Model
+export type CodexModelCatalogOptions = CodexClientOptions
 export const codexFeatures = {
   steer: "text",
   planReview: false,
@@ -56,8 +59,8 @@ const catalogModel = (
   }
 }
 
-const listModels = async (client: CodexClient, status: AgentEndpointStatus) => {
-  const models: AgentEndpointCatalogEntry["models"][number][] = []
+const listModelRecords = async (client: CodexClient): Promise<ReadonlyArray<Model>> => {
+  const models: Model[] = []
   let cursor: string | null = null
   const seen = new Set<string>()
   const modelIds = new Set<string>()
@@ -70,7 +73,7 @@ const listModels = async (client: CodexClient, status: AgentEndpointStatus) => {
     for (const model of response.data) {
       if (model.hidden || modelIds.has(model.model)) continue
       modelIds.add(model.model)
-      models.push(catalogModel(model, status))
+      models.push(model)
       if (models.length === 256) return models
     }
     cursor = response.nextCursor
@@ -80,6 +83,21 @@ const listModels = async (client: CodexClient, status: AgentEndpointStatus) => {
   }
   return models
 }
+
+export const readCodexModelCatalog = async (
+  options: CodexClientOptions = {}
+): Promise<ReadonlyArray<Model>> => {
+  const client = new CodexClient(options)
+  try {
+    await client.initialize()
+    return await listModelRecords(client)
+  } finally {
+    await client.close()
+  }
+}
+
+const listModels = async (client: CodexClient, status: AgentEndpointStatus) =>
+  (await listModelRecords(client)).map((model) => catalogModel(model, status))
 
 const probeFailureStatus = (error: unknown): AgentEndpointStatus => {
   if (error instanceof UnsupportedCodexPlatformError) return "unsupported"

@@ -58,8 +58,11 @@ refresh requests are rejected. No PI fleet, plan-review or background-task
 capability is advertised. Native tool diffs are normalized; the PI-only final
 filesystem reconciliation hook is not reused by this adapter.
 
-model/list supplies models, reasoning and input modalities. It does not report a
-context window or authoritative web-search capability, so those are not invented.
+model/list supplies models, reasoning and input modalities for both the native
+endpoint and PI's Codex subscription route. PI fills fields app-server does not
+report (context, output limit, pricing and compatibility) from the closest
+same-family model already shipped by pi-ai. It does not invent an authoritative
+web-search capability.
 Live usage uses last.totalTokens for resident context and modelContextWindow for
 the gauge. Done counts the run's token delta rather than historical thread totals.
 App-server does not report dollar cost; the existing numeric event contract uses
