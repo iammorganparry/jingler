@@ -124,19 +124,6 @@ const invalidContinuation =
 const decodeRequestUsage = Schema.decodeUnknownSync(ClaudeRequestUsage)
 const decodeTurnUsage = Schema.decodeUnknownSync(ClaudeTurnUsage)
 
-/**
- * The usage of the turn's LAST model request — the one that says how full the
- * context window is now.
- *
- * `result.usage` is the sum over every request in the turn, so a turn of 30
- * tool calls re-reading a 100k cached prompt reported ~3M "context" and tripped
- * compaction on a session a fraction that size. The CLI reports the final
- * request under `usage.iterations`. Without it, use assistant-message usage,
- * never the cumulative result: repeated cached reads are spend, not occupancy.
- */
-export const lastRequestUsage = (usage: ClaudeTurnUsage): ClaudeRequestUsage | null =>
-  usage.iterations?.at(-1) ?? null
-
 const usageEvent = (usage: ClaudeRequestUsage): StreamEvent => ({
   _tag: "Usage",
   tokens: claudeUsageTokens(usage)
@@ -208,9 +195,19 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   }
   if (!isRecord(value.usage)) throw new Error("Claude CLI result is missing usage")
   const usage = decodeTurnUsage(value.usage)
-  const last = lastRequestUsage(usage)
+  /**
+   * The usage of the turn's LAST model request — the one that says how full the
+   * context window is now.
+   *
+   * `result.usage` is the sum over every request in the turn, so a turn of 30
+   * tool calls re-reading a 100k cached prompt reported ~3M "context" and tripped
+   * compaction on a session a fraction that size. The CLI reports the final
+   * request under `usage.iterations`. Without it, use assistant-message usage,
+   * never the cumulative result: repeated cached reads are spend, not occupancy.
+   */
+  const last = usage.iterations?.at(-1)
   return [
-    ...(last === null ? [] : [usageEvent(last)]),
+    ...(last === undefined ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
     { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: 0 }
   ]
