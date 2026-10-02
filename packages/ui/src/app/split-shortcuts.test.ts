@@ -83,12 +83,14 @@ describe("shifted chords match the physical key, not the character", () => {
 })
 
 describe("the rest of the map", () => {
-  it("closes the focused pane on W — and only with Shift held", () => {
-    // Shift makes `key` uppercase, which the old `.toLowerCase()` handled; the
-    // point here is that a BARE ⌘W is not this shortcut. Mistaking "close the
-    // window" for "close the pane" is the destructive miss.
+  it("closes the focused editor tab on bare or shifted W", () => {
     expect(match(ctrlShift("KeyW", "W"))).toEqual({ type: "close-pane" })
-    expect(match(chord({ code: "KeyW", key: "w", metaKey: true }))).toBeNull()
+    expect(match(chord({ code: "KeyW", key: "w", metaKey: true }))).toEqual({
+      type: "close-pane"
+    })
+    expect(match(chord({ code: "KeyW", key: "w", ctrlKey: true }))).toEqual({
+      type: "close-pane"
+    })
   })
 
   it("moves the focused pane on the arrows, with Alt", () => {

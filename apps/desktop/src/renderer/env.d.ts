@@ -54,6 +54,10 @@ interface JinglerBridge {
   readonly onPreviewUrlChanged: (
     cb: (payload: { readonly sessionId: string; readonly chatId: string; readonly url: string }) => void
   ) => () => void
+  /** Forward Cmd/Ctrl+W from the focused native Browser view. */
+  readonly onPreviewCloseTab: (
+    cb: (payload: { readonly sessionId: string; readonly chatId: string }) => void
+  ) => () => void
   /** Main is waiting to close the window until dirty plan drafts are saved. */
   readonly onPlanFlushRequested: (cb: () => void) => () => void
   /** Complete the close handshake after every live plan actor settles. */

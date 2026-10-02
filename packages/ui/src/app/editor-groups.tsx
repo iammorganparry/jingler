@@ -26,6 +26,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react"
+import { createPortal } from "react-dom"
 import { ChevronRight, Plus, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
@@ -36,6 +37,8 @@ import {
   resizedPair,
   type DropEdge,
   type EditorLayout,
+  type EditorNode,
+  type EditorSplit,
   type TabDrag,
   type TabGroup
 } from "./editor-layout.js"
@@ -89,6 +92,17 @@ const readDrag = (e: DragEvent, mime: string): TabDrag | null => {
   } catch {
     return null
   }
+}
+
+/** The nearest edge within the outer fifth, else the middle. */
+const edgeAt = (e: DragEvent<HTMLElement>): DropEdge => {
+  const rect = e.currentTarget.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return "center"
+  const x = (e.clientX - rect.left) / rect.width
+  const y = (e.clientY - rect.top) / rect.height
+  const edges: ReadonlyArray<[DropEdge, number]> = [["left", x], ["right", 1 - x], ["top", y], ["bottom", 1 - y]]
+  const [edge, distance] = edges.reduce((best, next) => (next[1] < best[1] ? next : best))
+  return distance < 0.2 ? edge : "center"
 }
 
 const OVERLAY: Record<DropEdge, string> = {
@@ -161,40 +175,84 @@ export function EditorGroups(props: EditorGroupsProps) {
   )
   const mime = editorTabMime(props.sessionId)
   const { root, focusedGroupId } = props.layout
+  const groupHosts = useRef(new Map<string, HTMLDivElement>()).current
+  const groups = groupsOf(root)
+  const groupIds = new Set(groups.map((group) => group.id))
+  for (const id of groupHosts.keys()) if (!groupIds.has(id)) groupHosts.delete(id)
+  for (const group of groups) {
+    if (groupHosts.has(group.id)) continue
+    const host = document.createElement("div")
+    host.className = "flex min-h-0 min-w-0 flex-1"
+    groupHosts.set(group.id, host)
+  }
   if (!root) return <><EmptyEditor mime={mime} api={api}>{props.emptyState}</EmptyEditor>{palette}</>
+  const rootSplit: EditorSplit = root.type === "split"
+    ? root
+    : { type: "split", id: "root", axis: "row", children: [root], ratios: [1] }
   return (
     <>
-      <EditorRow layout={props.layout} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} />
+      <div data-testid="editor-groups" className="flex min-h-0 min-w-0 flex-1 bg-hairline">
+        <SplitNode split={rootSplit} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} groupHosts={groupHosts} />
+        {groups.map((group) => createPortal(
+          <EditorGroup
+            group={group}
+            focused={group.id === focusedGroupId}
+            mime={mime}
+            api={api}
+            revision={props.revision}
+          />,
+          groupHosts.get(group.id)!,
+          group.id
+        ))}
+      </div>
       {palette}
     </>
   )
 }
 
-interface RowProps {
-  readonly layout: EditorLayout
+interface NodeProps {
   readonly focusedGroupId: string | null
   readonly mime: string
   readonly api: Api
   readonly revision: unknown
+  readonly groupHosts: ReadonlyMap<string, HTMLDivElement>
 }
 
-const EditorRow = memo(function EditorRow({ layout, focusedGroupId, mime, api, revision }: RowProps) {
-  const groups = groupsOf(layout.root)
-  const split = layout.root?.type === "split" ? layout.root : null
-  const ratios = split?.ratios ?? [1]
+function EditorNodeView({ node, ...rest }: NodeProps & { readonly node: EditorNode }) {
+  return node.type === "group" ? (
+    <GroupSlot host={rest.groupHosts.get(node.id)!} />
+  ) : (
+    <SplitNode split={node} {...rest} />
+  )
+}
+
+function GroupSlot({ host }: { readonly host: HTMLDivElement }) {
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1"
+      ref={(node) => {
+        if (node && host.parentElement !== node) node.appendChild(host)
+      }}
+    />
+  )
+}
+
+const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { readonly split: EditorSplit }) {
+  const row = split.axis === "row"
   const dragController = useRef<AbortController | null>(null)
   useEffect(() => () => dragController.current?.abort(), [])
-  const startDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const startDrag = (index: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     const container = e.currentTarget.parentElement
-    const a = ratios[0]
-    const b = ratios[1]
-    const first = container?.querySelector<HTMLElement>(':scope > [data-split-child="0"]')
-    const second = container?.querySelector<HTMLElement>(':scope > [data-split-child="1"]')
-    if (!(container && first && second && split && a !== undefined && b !== undefined)) return
+    const a = split.ratios[index]
+    const b = split.ratios[index + 1]
+    const first = container?.querySelector<HTMLElement>(`:scope > [data-split-child="${index}"]`)
+    const second = container?.querySelector<HTMLElement>(`:scope > [data-split-child="${index + 1}"]`)
+    if (!(container && first && second && a !== undefined && b !== undefined)) return
     e.preventDefault()
     const rect = container.getBoundingClientRect()
-    if (rect.width === 0) return
-    const start = e.clientX
+    const size = row ? rect.width : rect.height
+    if (size === 0) return
+    const start = row ? e.clientX : e.clientY
     const handle = e.currentTarget
     handle.setPointerCapture?.(e.pointerId)
     let delta = 0
@@ -202,7 +260,7 @@ const EditorRow = memo(function EditorRow({ layout, focusedGroupId, mime, api, r
     const controller = new AbortController()
     dragController.current = controller
     const move = (event: PointerEvent) => {
-      const pair = resizedPair(a, b, (event.clientX - start) / rect.width)
+      const pair = resizedPair(a, b, ((row ? event.clientX : event.clientY) - start) / size)
       if (!pair) return
       delta = pair[0] - a
       first.style.flexGrow = String(pair[0])
@@ -213,7 +271,7 @@ const EditorRow = memo(function EditorRow({ layout, focusedGroupId, mime, api, r
       controller.abort()
       dragController.current = null
       if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      if (delta !== 0) api.onResize(split.id, 0, delta)
+      if (delta !== 0) rest.api.onResize(split.id, index, delta)
     }
     const options = { signal: controller.signal }
     window.addEventListener("pointermove", move, options)
@@ -223,17 +281,10 @@ const EditorRow = memo(function EditorRow({ layout, focusedGroupId, mime, api, r
     handle.addEventListener("lostpointercapture", end, options)
   }
   return (
-    <div data-testid="editor-groups" className="flex min-h-0 min-w-0 flex-1 bg-hairline">
-      {groups.map((group, index) => (
-        <SplitChild
-          key={group.id}
-          index={index}
-          ratio={ratios[index] ?? 1}
-          last={index === groups.length - 1}
-          row
-          onDividerDown={startDrag}
-        >
-          <EditorGroup group={group} focused={group.id === focusedGroupId} mime={mime} api={api} revision={revision} />
+    <div data-testid={`editor-split-${split.axis}`} className={cn("flex min-h-0 min-w-0 flex-1", !row && "flex-col")}>
+      {split.children.map((child, index) => (
+        <SplitChild key={child.id} index={index} ratio={split.ratios[index] ?? 0} last={index === split.children.length - 1} row={row} onDividerDown={startDrag(index)}>
+          <EditorNodeView node={child} {...rest} />
         </SplitChild>
       ))}
     </div>
@@ -282,11 +333,12 @@ function useDropZone(
   groupId: string | null,
   api: Api,
   fixedEdge?: DropEdge,
-  rejectFiles = false
+  rejectCenterFiles = false
 ) {
   const [edge, setEdge] = useState<DropEdge | null>(null)
   const [rejected, setRejected] = useState(false)
-  const edgeFor = (_e: DragEvent<HTMLElement>): DropEdge => fixedEdge ?? "center"
+  const edgeFor = (event: DragEvent<HTMLElement>): DropEdge =>
+    fixedEdge ?? (groupId === null ? "center" : edgeAt(event))
   const clear = useCallback(() => {
     setEdge(null)
     setRejected(false)
@@ -300,36 +352,38 @@ function useDropZone(
       window.removeEventListener("drop", clear)
     }
   }, [clear, edge])
-  const rejectsFile = (e: DragEvent<HTMLElement>) =>
-    rejectFiles && e.dataTransfer.types.includes(editorFileMime)
+  const rejectsFile = (event: DragEvent<HTMLElement>, next: DropEdge) =>
+    rejectCenterFiles && next === "center" && event.dataTransfer.types.includes(editorFileMime)
   const handlers = {
-    onDragOver: (e: DragEvent<HTMLElement>) => {
-      if (!e.dataTransfer.types.includes(mime)) return
-      if (fixedEdge) e.stopPropagation()
-      e.preventDefault()
-      const reject = rejectsFile(e)
-      e.dataTransfer.dropEffect = reject ? "none" : fixedEdge ? "move" : e.altKey ? "copy" : "move"
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (!event.dataTransfer.types.includes(mime)) return
+      if (fixedEdge) event.stopPropagation()
+      event.preventDefault()
+      const next = edgeFor(event)
+      const reject = rejectsFile(event, next)
+      event.dataTransfer.dropEffect = reject ? "none" : fixedEdge ? "move" : event.altKey ? "copy" : "move"
       setRejected(reject)
-      const next = edgeFor(e)
       if (next !== edge) setEdge(next)
     },
-    onDragLeave: (e: DragEvent<HTMLElement>) => {
-      if (fixedEdge) e.stopPropagation()
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) clear()
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      if (fixedEdge) event.stopPropagation()
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) clear()
     },
-    onDrop: (e: DragEvent<HTMLElement>) => {
-      const drag = readDrag(e, mime)
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      const drag = readDrag(event, mime)
+      const next = edgeFor(event)
       clear()
       if (!drag) return
-      if (fixedEdge) e.stopPropagation()
-      e.preventDefault()
-      if (rejectFiles && drag.surface.kind === "file") return
-      api.onDrop(drag, groupId, edgeFor(e), fixedEdge ? false : e.altKey)
+      if (fixedEdge) event.stopPropagation()
+      event.preventDefault()
+      if (rejectCenterFiles && next === "center" && drag.surface.kind === "file") return
+      api.onDrop(drag, groupId, next, fixedEdge ? false : event.altKey)
     }
   }
   const overlay = edge ? (
     <div
       data-testid="editor-drop-overlay"
+      data-edge={edge}
       data-rejected={rejected || undefined}
       aria-hidden
       className={cn(
@@ -366,17 +420,17 @@ const EditorGroup = memo(function EditorGroup({
   revision: unknown
 }) {
   const active = activeSurface(group)
-  const groupDrop = useDropZone(mime, group.id, api, "center", active.kind === "chat")
+  const groupDrop = useDropZone(mime, group.id, api, undefined, active.kind === "chat")
   const tabStripDrop = useDropZone(mime, group.id, api, "center")
   const tabStripHandlers = {
     ...tabStripDrop.handlers,
-    onDragOver: (e: DragEvent<HTMLElement>) => {
+    onDragOver: (event: DragEvent<HTMLElement>) => {
       groupDrop.clear()
-      tabStripDrop.handlers.onDragOver(e)
+      tabStripDrop.handlers.onDragOver(event)
     },
-    onDrop: (e: DragEvent<HTMLElement>) => {
+    onDrop: (event: DragEvent<HTMLElement>) => {
       groupDrop.clear()
-      tabStripDrop.handlers.onDrop(e)
+      tabStripDrop.handlers.onDrop(event)
     }
   }
   const crumbs = api.describe(active).crumbs ?? []

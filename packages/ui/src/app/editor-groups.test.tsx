@@ -8,6 +8,7 @@ import { sessionSurfaceKey, type SessionSurface } from "./session-surface-layout
 
 const chat = (id: string): SessionSurface => ({ kind: "chat", id })
 const file = (id: string): SessionSurface => ({ kind: "file", id })
+const view = (id: string): SessionSurface => ({ kind: "view", id })
 const a = chat("a")
 const source = file("src/a.ts")
 const b = chat("b")
@@ -62,6 +63,44 @@ describe("EditorGroups rendering", () => {
     expect(renders.get("a")).toBe(2)
     expect(renders.get("b")).toBe(2)
     expect(renders.get("src/a.ts")).toBe(1)
+  })
+
+  it("preserves mounted body state when a group is nested under a new split", () => {
+    const renderBody = (surface: SessionSurface) =>
+      surface.id === "a" ? <input aria-label="steering draft" defaultValue="" /> : null
+    const rendered = render(<EditorGroups {...props(renderBody)} layout={layout} />)
+    const draft = screen.getByLabelText("steering draft") as HTMLInputElement
+    fireEvent.change(draft, { target: { value: "unsent steering text" } })
+    const root = layout.root!
+    if (root.type !== "split") throw new Error("expected split")
+    const [left, right] = root.children
+    const nested: EditorLayout = {
+      ...layout,
+      root: {
+        ...root,
+        children: [{
+          type: "split",
+          id: "nested",
+          axis: "column",
+          ratios: [0.5, 0.5],
+          children: [left!, {
+            type: "group",
+            id: "below",
+            tabs: [view("terminal")],
+            active: sessionSurfaceKey(view("terminal"))
+          }]
+        }, right!]
+      }
+    }
+
+    rendered.rerender(<EditorGroups {...props(renderBody)} layout={nested} />)
+
+    expect(screen.getByLabelText("steering draft")).toBe(draft)
+    expect(draft.value).toBe("unsent steering text")
+
+    rendered.rerender(<EditorGroups {...props(renderBody)} layout={layout} />)
+    expect(screen.getByLabelText("steering draft")).toBe(draft)
+    expect(draft.value).toBe("unsent steering text")
   })
 
   it("invalidates mounted bodies when rendering dependencies change", () => {
@@ -134,6 +173,50 @@ describe("EditorGroups rendering", () => {
 
     expect(onDrop).not.toHaveBeenCalled()
     expect(screen.queryByTestId("editor-drop-overlay")).toBeNull()
+  })
+
+  it.each([
+    { surface: source, edge: "right", x: 95, y: 50, types: [editorTabMime("session"), editorFileMime] },
+    { surface: view("terminal"), edge: "top", x: 50, y: 5, types: [editorTabMime("session")] }
+  ] as const)("accepts a $surface.kind tab on the $edge split edge", ({ surface, edge, x, y, types }) => {
+    const onDrop = vi.fn()
+    render(<EditorGroups {...props(() => null)} layout={layout} onDrop={onDrop} />)
+    const mime = editorTabMime("session")
+    const drag = { surface, from: "right" }
+    const dataTransfer = {
+      types: [...types],
+      dropEffect: "move",
+      getData: (type: string) => type === mime ? JSON.stringify(drag) : ""
+    }
+    const target = screen.getAllByTestId("editor-group")[0]!
+    target.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 100,
+      width: 100,
+      height: 100,
+      toJSON: () => ({})
+    })
+
+    const dragEvent = (type: "dragover" | "drop") => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        clientX: { value: x },
+        clientY: { value: y },
+        altKey: { value: false },
+        dataTransfer: { value: dataTransfer }
+      })
+      fireEvent(target, event)
+    }
+    dragEvent("dragover")
+    expect(screen.getByTestId("editor-drop-overlay").getAttribute("data-edge")).toBe(edge)
+    expect(screen.getByTestId("editor-drop-overlay").getAttribute("data-rejected")).toBeNull()
+    dragEvent("drop")
+
+    expect(onDrop).toHaveBeenCalledWith(drag, "left", edge, false)
   })
 
   it("moves a split tab back into another group's tab strip even with Alt held", () => {

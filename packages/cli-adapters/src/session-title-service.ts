@@ -8,6 +8,7 @@ import {
   semanticBranchName,
   semanticBranchProposalFromName,
   type SessionMetadataProposal,
+  userMessage,
   workspaceModeOf
 } from "@jingler/core"
 import { Effect } from "effect"
@@ -101,23 +102,49 @@ export const retitleSession = (sessionId: string, gen: TitleGenerator) =>
     const session = yield* SessionStore.get(sessionId)
     // Only auto-named sessions are retitled. `autoTitle` absent ⇒ the session was
     // named by the user (legacy/explicit) and is left pinned.
-    return yield* retitleEligibleSession(session, gen, sessionId)
+    if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
+    // Transcripts are owned by chats, not sessions. Legacy session-keyed
+    // transcripts are adopted into activeChatId when the session is loaded, so
+    // reading by sessionId here silently misses every modern turn.
+    const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
+      Effect.orElseSucceed(() => [])
+    )
+    return yield* proposeSessionMetadata(session, gen, sessionId, messages)
   }).pipe(
     Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
   )
 
-function* retitleEligibleSession(session: Session, gen: TitleGenerator, sessionId: string) {
-  if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
-  // Transcripts are owned by chats, not sessions. Legacy session-keyed
-  // transcripts are adopted into activeChatId when the session is loaded, so
-  // reading by sessionId here silently misses every modern turn.
-  return yield* proposeSessionMetadata(session, gen, sessionId)
-}
+/** Name and branch a fresh session from its first prompt before it reaches the renderer. */
+export const retitleSessionFromPrompt = (
+  sessionId: string,
+  prompt: string,
+  gen: TitleGenerator
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId)
+    if (session.autoTitle !== true && session.semanticBranchPending !== true) return session
+    const messages = [userMessage(`${session.activeChatId}:initial`, prompt, session.updatedAt)]
+    return yield* proposeSessionMetadata(session, gen, sessionId, messages)
+  }).pipe(
+    Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
+  )
 
-function* proposeSessionMetadata(session: Session, gen: TitleGenerator, sessionId: string) {
-  const messages = yield* TranscriptStore.list(session.activeChatId).pipe(
-      Effect.orElseSucceed(() => [])
-    )
+/** Naming is post-create enrichment: never turn a persisted session into a failed create response. */
+export const retitleCreatedSessionFromPrompt = (
+  session: Session,
+  prompt: string,
+  gen: TitleGenerator
+) =>
+  retitleSessionFromPrompt(session.id, prompt, gen).pipe(
+    Effect.catchAll(() => Effect.succeed(session))
+  )
+
+function* proposeSessionMetadata(
+  session: Session,
+  gen: TitleGenerator,
+  sessionId: string,
+  messages: ReadonlyArray<Message>
+) {
     const proposal = yield* gen.generate(messages, session)
     // An empty transcript (a run-start trigger can beat the first write) yields
     // only the "Untitled session" heuristic — never let that displace the

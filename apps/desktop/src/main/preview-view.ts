@@ -81,6 +81,10 @@ export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
  * keep the address bar truthful without stealing focus from another dock tab.
  */
 export const PREVIEW_URL_CHANNEL = "jingler/preview/url"
+export const PREVIEW_CLOSE_TAB_CHANNEL = "jingler/preview/close-tab"
+
+export const isCloseTabInput = (input: Pick<Electron.Input, "type" | "key" | "control" | "meta" | "alt">): boolean =>
+  input.type === "keyDown" && (input.meta || input.control) && !input.alt && input.key.toLowerCase() === "w"
 
 type PendingNavigation = { readonly requestedUrl: string; readonly redirects: ReadonlySet<string> }
 
@@ -260,6 +264,11 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
     // explicit owner-visibility path be the only way it can paint.
     view.setVisible(false)
     if (owner === "browser" && sessionId !== null) {
+      view.webContents.on("before-input-event", (event, input) => {
+        if (!isCloseTabInput(input)) return
+        event.preventDefault()
+        if (chatId !== null) mainWindow()?.webContents.send(PREVIEW_CLOSE_TAB_CHANNEL, { sessionId, chatId })
+      })
       const partition = browserPartitionForAgent(sessionId, chatId ?? "")
       view.webContents.setWindowOpenHandler(({ url }) =>
         isBrowserPopupUrl(url)

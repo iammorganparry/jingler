@@ -485,6 +485,43 @@ function initialEditorLayoutFor(
     : restored
 }
 
+const handleTargetedClose = (
+  command: Extract<SessionSurfaceCommand, object>,
+  sessionId: string,
+  close: (groupId: string, surface: SessionSurface) => void
+): void => {
+  if (command.sessionId !== sessionId) return
+  const current = editorLayoutOf(sessionId)
+  const group = current && groupsOf(current.root).find((candidate) =>
+    candidate.tabs.some((surface) => sessionSurfaceKey(surface) === sessionSurfaceKey(command.surface))
+  )
+  if (group) close(group.id, command.surface)
+}
+
+const handleSurfaceCommand = (
+  command: SessionSurfaceCommand,
+  sessionId: string,
+  update: (fn: (current: EditorLayout) => EditorLayout) => void,
+  syncChat: (surface: SessionSurface) => void,
+  close: (groupId: string, surface: SessionSurface) => void
+): void => {
+  if (typeof command === "object") {
+    handleTargetedClose(command, sessionId, close)
+    return
+  }
+  const current = editorLayoutOf(sessionId)
+  if (!current) return
+  if (command === "close") {
+    const group = focusedGroup(current)
+    if (group) close(group.id, activeSurface(group))
+    return
+  }
+  const next = applyEditorCommand(current, command)
+  update(() => next)
+  const nextGroup = focusedGroup(next)
+  if (nextGroup) syncChat(activeSurface(nextGroup))
+}
+
 // One component coordinates independent tab, browser, plan, and persistence effects.
 // oxlint-disable eslint/complexity
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: splitting the coordinator would duplicate those effects.
@@ -837,21 +874,13 @@ function SessionPaneBody(props: SessionPaneProps) {
   const paneFocused = props.pane === undefined || props.pane.focused
   useEffect(() => {
     if (!paneFocused) return
-    const onCommand = (event: Event) => {
-      const command = (event as CustomEvent<SessionSurfaceCommand>).detail
-      if (command !== "close") {
-        const current = editorLayoutOf(sessionId)
-        if (!current) return
-        const next = applyEditorCommand(current, command)
-        update(() => next)
-        const nextGroup = focusedGroup(next)
-        if (nextGroup) syncChat(activeSurface(nextGroup))
-        return
-      }
-      const current = editorLayoutOf(sessionId)
-      const group = current && focusedGroup(current)
-      if (group) closeTabIn(group.id, activeSurface(group))
-    }
+    const onCommand = (event: Event) => handleSurfaceCommand(
+      (event as CustomEvent<SessionSurfaceCommand>).detail,
+      sessionId,
+      update,
+      syncChat,
+      closeTabIn
+    )
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
   }, [closeTabIn, paneFocused, sessionId, syncChat, update])

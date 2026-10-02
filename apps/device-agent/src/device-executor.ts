@@ -35,6 +35,10 @@ import { PluginHost } from "@jingler/cli-adapters/plugin-host"
 import { PluginRegistry } from "@jingler/cli-adapters/plugins"
 import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
+import {
+  makeAgentRuntimeTitleGenerator,
+  retitleCreatedSessionFromPrompt
+} from "@jingler/cli-adapters/session-title-service"
 import { ProviderConnections } from "@jingler/cli-adapters/runtime/providers/provider-connections"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
 import {
@@ -621,7 +625,17 @@ export const makeLiveDeviceSessionCommandExecutor = (
       : Effect.succeed(explicit)
 
   return makeDeviceSessionCommandExecutor({
-    create: (input) => run(SessionStore.create(input)),
+    create: (input) => run(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input)
+      const initialPrompt = input.initialPrompt?.trim()
+      if (!initialPrompt) return session
+      const agentRuntime = yield* AgentRuntime
+      return yield* retitleCreatedSessionFromPrompt(
+        session,
+        initialPrompt,
+        makeAgentRuntimeTitleGenerator(agentRuntime)
+      )
+    })),
     createFromPr: (input) => run(SessionStore.createFromPr(input)),
     createFromIssue: (input) => run(SessionStore.createFromIssue(input)),
     continuation: (source, requestedSessionId) => run(Effect.gen(function* () {

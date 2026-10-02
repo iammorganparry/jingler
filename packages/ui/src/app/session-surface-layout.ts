@@ -22,6 +22,7 @@ export interface SessionSurfaceLayout {
 export const SESSION_SURFACE_DND_MIME = "application/x-jingler-session-surface"
 export const SESSION_SURFACE_COMMAND_EVENT = "jingler:session-surface-command"
 export type SessionSurfaceCommand =
+  | { readonly type: "close-surface"; readonly sessionId: string; readonly surface: SessionSurface }
   | "close"
   | "split-right"
   | "split-down"

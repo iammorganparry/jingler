@@ -16,6 +16,7 @@ const APP_VERSION_CHANNEL = "jingler/app-version"
 // here so the preload doesn't import the main bundle).
 const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
 const PREVIEW_URL_CHANNEL = "jingler/preview/url"
+const PREVIEW_CLOSE_TAB_CHANNEL = "jingler/preview/close-tab"
 const PLAN_FLUSH_REQUEST_CHANNEL = "jingler/plan-flush-request"
 const PLAN_FLUSH_COMPLETE_CHANNEL = "jingler/plan-flush-complete"
 const UPDATE_STATE_CHANNEL = "jingler/update-state"
@@ -129,6 +130,11 @@ contextBridge.exposeInMainWorld("jingler", {
     const listener = (_event: Electron.IpcRendererEvent, payload: PreviewEventPayload) => cb(payload)
     ipcRenderer.on(PREVIEW_URL_CHANNEL, listener)
     return () => ipcRenderer.removeListener(PREVIEW_URL_CHANNEL, listener)
+  },
+  onPreviewCloseTab: (cb: (payload: { readonly sessionId: string; readonly chatId: string }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: { readonly sessionId: string; readonly chatId: string }) => cb(payload)
+    ipcRenderer.on(PREVIEW_CLOSE_TAB_CHANNEL, listener)
+    return () => ipcRenderer.removeListener(PREVIEW_CLOSE_TAB_CHANNEL, listener)
   },
   onPlanFlushRequested: (cb: () => void) => {
     const listener = () => cb()
