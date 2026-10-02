@@ -1,5 +1,4 @@
 import {
-  type AuthKind,
   type ConnectClaudeTokenInput,
   type ModelCertification,
   ProviderConnection,
@@ -114,28 +113,6 @@ const removeConnection = (
     catch: serviceError("Failed to remove provider connection")
   })
 
-interface ConnectionIdentity {
-  readonly id: string
-  readonly providerId: string
-  readonly authKind: AuthKind
-  readonly targetId: string
-}
-
-const ensureUniqueConnection = (
-  connections: ReadonlyArray<ProviderConnection>,
-  identity: ConnectionIdentity
-): Effect.Effect<void, ProviderConnectionsError> =>
-  connections.some((connection) =>
-    connection.id !== identity.id &&
-    connection.authKind === identity.authKind &&
-    connection.targetId === identity.targetId &&
-    (identity.authKind !== "api-key" || connection.providerId === identity.providerId)
-  )
-    ? Effect.fail(new ProviderConnectionsError({
-        message: "This provider connection already exists on this target"
-      }))
-    : Effect.void
-
 export const makeProviderConnections = (
   options: ProviderConnectionsOptions
 ): Effect.Effect<ProviderConnectionsShape, ProviderConnectionsError> =>
@@ -151,11 +128,25 @@ export const makeProviderConnections = (
     const persist = persistConnection(document)
     const setupLock = yield* Effect.makeSemaphore(1)
     const persistSetup = <E extends { readonly message: string }>(
-      identity: ConnectionIdentity,
+      identity: {
+        readonly id: string
+        readonly providerId: string
+        readonly authKind: ProviderConnection["authKind"]
+        readonly targetId: string
+      },
       setup: Effect.Effect<ProviderConnection, E>
     ) => setupLock.withPermits(1)(
       options.broker.list.pipe(
-        Effect.flatMap((connections) => ensureUniqueConnection(connections, identity)),
+        Effect.flatMap((connections) => connections.some((connection) =>
+          connection.id !== identity.id &&
+          connection.authKind === identity.authKind &&
+          connection.targetId === identity.targetId &&
+          (identity.authKind !== "api-key" || connection.providerId === identity.providerId)
+        )
+          ? Effect.fail(new ProviderConnectionsError({
+              message: "This provider connection already exists on this target"
+            }))
+          : Effect.void),
         Effect.zipRight(
           Effect.acquireUseRelease(
             brokerCall(setup),
