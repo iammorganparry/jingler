@@ -129,6 +129,16 @@ export const retitleSessionFromPrompt = (
     Effect.catchTag("SessionNotFoundError", () => Effect.fail(new GitError({ message: "Session not found" })))
   )
 
+/** Naming is post-create enrichment: never turn a persisted session into a failed create response. */
+export const retitleCreatedSessionFromPrompt = (
+  session: Session,
+  prompt: string,
+  gen: TitleGenerator
+) =>
+  retitleSessionFromPrompt(session.id, prompt, gen).pipe(
+    Effect.catchAll(() => Effect.succeed(session))
+  )
+
 function* proposeSessionMetadata(
   session: Session,
   gen: TitleGenerator,

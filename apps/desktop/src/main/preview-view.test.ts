@@ -4,6 +4,7 @@ import {
   browserPartitionForAgent,
   fileUrlFor,
   isBrowserPopupUrl,
+  isCloseTabInput,
   isHttpUrl,
   toRect
 } from "./preview-view.js"
@@ -15,6 +16,17 @@ import {
  * WebContentsView lifecycle itself needs a live Electron main process, so it's
  * exercised by the Playwright e2e (previews.spec.ts), not here.
  */
+describe("native Browser shortcuts", () => {
+  it("forwards Cmd/Ctrl+W keydown but not unrelated or Alt-modified input", () => {
+    const input = { type: "keyDown" as const, key: "w", control: false, meta: true, alt: false }
+    expect(isCloseTabInput(input)).toBe(true)
+    expect(isCloseTabInput({ ...input, meta: false, control: true })).toBe(true)
+    expect(isCloseTabInput({ ...input, alt: true })).toBe(false)
+    expect(isCloseTabInput({ ...input, type: "keyUp" })).toBe(false)
+    expect(isCloseTabInput({ ...input, key: "q" })).toBe(false)
+  })
+})
+
 describe("isHttpUrl", () => {
   it("accepts http and https", () => {
     expect(isHttpUrl("http://localhost:3000")).toBe(true)

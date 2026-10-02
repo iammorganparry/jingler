@@ -131,6 +131,59 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
 
 })
 
+test("Cmd/Ctrl+W closes the Browser tab while its native page has focus", async ({ launchApp }) => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" })
+    response.end("<button autofocus>Focused browser content</button>")
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = server.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(server)
+    throw new Error("Preview shortcut server has no TCP address")
+  }
+  const url = `http://127.0.0.1:${address.port}`
+
+  try {
+    const { app, window } = await launchApp({
+      configured: true,
+      isolateSystemHome: true,
+      withRepo: true,
+      sessions: seededSessions
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("view-tab-browser").click()
+    const addressBar = window.getByLabel("Preview URL").filter({ visible: true }).first()
+    await addressBar.fill(url)
+    await addressBar.press("Enter")
+    await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
+    await expect.poll(() => app.evaluate(({ webContents }, expectedUrl) =>
+      webContents.getAllWebContents().some((contents) => contents.getURL().startsWith(expectedUrl)), url
+    )).toBe(true)
+    const chatTab = window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab")
+    await chatTab.click()
+
+    await app.evaluate(({ webContents }, expectedUrl) => {
+      const browser = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith(expectedUrl))
+      browser?.focus()
+      browser?.sendInputEvent({
+        type: "keyDown",
+        keyCode: "W",
+        modifiers: [process.platform === "darwin" ? "meta" : "control"]
+      })
+    }, url)
+
+    await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(0)
+    await expect(chatTab).toBeVisible()
+    await expect(window.getByTestId("editor-group")).toHaveCount(1)
+  } finally {
+    await closeServer(server)
+  }
+})
+
 test("browser sign-in popups keep their opener without app privileges", async ({ launchApp }) => {
   let unsafeRedirectRequested = false
   const server = createServer((request, response) => {

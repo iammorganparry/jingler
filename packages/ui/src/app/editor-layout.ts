@@ -61,6 +61,16 @@ const keyOf = sessionSurfaceKey
 const CHAT_RATIO = 1 / 3
 const CONTENT_RATIO = 2 / 3
 const laneOf = (surface: SessionSurface): "chat" | "content" => surface.kind === "chat" ? "chat" : "content"
+const isBrowser = (surface: SessionSurface) => surface.kind === "view" && surface.id === "browser"
+const uniqueTabs = (tabs: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurface> => {
+  const seen = new Set<string>()
+  return tabs.filter((tab) => {
+    const key = keyOf(tab)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 const isMain = (layout: EditorLayout, surface: SessionSurface) =>
   surface.kind === "chat" && surface.id === layout.mainChatId
 
@@ -174,7 +184,7 @@ export const createEditorLayout = (
   tabs: ReadonlyArray<SessionSurface>,
   mainChatId?: string | null
 ): EditorLayout => {
-  const unique = tabs.filter((tab, index) => tabs.findIndex((other) => keyOf(other) === keyOf(tab)) === index)
+  const unique = uniqueTabs(tabs)
   const chats = unique.filter((tab) => laneOf(tab) === "chat")
   const content = unique.filter((tab) => laneOf(tab) === "content")
   const chatGroup = chats.length > 0 ? groupOf(chats) : null
@@ -274,6 +284,23 @@ const splitBeside = (
   return { type: "split", id: newId("split"), axis, children: before ? [added, node] : [node, added], ratios }
 }
 
+const dropActivationTarget = (
+  groups: ReadonlyArray<TabGroup>,
+  surface: SessionSurface,
+  move: boolean,
+  from: string | undefined,
+  target: TabGroup,
+  edge: DropEdge
+): TabGroup | undefined => {
+  const holder = groups.find((group) => group.tabs.some((tab) => keyOf(tab) === keyOf(surface)))
+  // Browser bodies all control one native WebContentsView per session/chat, so
+  // they cannot be copied into competing groups.
+  if (isBrowser(surface) && holder && !move) return holder
+  return move && from === target.id && (edge === "center" || target.tabs.length === 1)
+    ? target
+    : undefined
+}
+
 /**
  * A drop on a group: the middle adds the tab there, an edge splits beside it.
  * A tab dragged out of a group MOVES unless `copy` (⌥ held); a sidebar drag
@@ -296,9 +323,8 @@ export const dropTab = (
     : target
   const key = keyOf(surface)
   const move = from !== undefined && !copy
-  if (move && from === dropTarget.id && (edge === "center" || dropTarget.tabs.length === 1)) {
-    return activateTab(layout, dropTarget.id, key)
-  }
+  const activationTarget = dropActivationTarget(groups, surface, move, from, dropTarget, edge)
+  if (activationTarget) return activateTab(layout, activationTarget.id, key)
   const added = edge === "center" ? null : groupOf([surface])
   let root = added
     ? splitBeside(layout.root, dropTarget.id, edge as Exclude<DropEdge, "center">, added)
@@ -327,12 +353,8 @@ export const closeTabsWhere = (layout: EditorLayout, match: (surface: SessionSur
   allTabs(layout).filter(match).reduce(closeSurfaceEverywhere, layout)
 
 /** Every distinct open surface, in reading order. */
-export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> => {
-  const seen = new Set<string>()
-  return groupsOf(layout.root).flatMap((g) =>
-    g.tabs.filter((t) => !seen.has(keyOf(t)) && Boolean(seen.add(keyOf(t))))
-  )
-}
+export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> =>
+  uniqueTabs(groupsOf(layout.root).flatMap((group) => group.tabs))
 
 /**
  * Applies a keyboard command (other than close, which has side effects) to the
@@ -390,7 +412,7 @@ const parseGroup = (node: Record<string, unknown>): TabGroup => {
   return {
     type: "group",
     id: storedId(node.id, "group"),
-    tabs: tabs.filter((t, i) => tabs.findIndex((o) => keyOf(o) === keyOf(t)) === i),
+    tabs: uniqueTabs(tabs),
     active: typeof node.active === "string" ? node.active : ""
   }
 }

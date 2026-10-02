@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { chmodSync, rmSync } from "node:fs"
 import { execFileSync } from "node:child_process"
 import type { CreateSessionInput } from "@jingler/core"
 import {
@@ -15,6 +16,7 @@ import {
   makeAgentRuntimeTitleGenerator,
   parseSessionMetadata,
   retitleSession,
+  retitleCreatedSessionFromPrompt,
   retitleSessionFromPrompt,
   type TitleGenerator
 } from "./session-title-service.js"
@@ -175,6 +177,48 @@ describe("retitleSession", () => {
     }])
     expect(exit.value.title).toBe("Close focused editor tab")
     expect(exit.value.branch).toBe("fix/close-focused-editor-tab")
+  })
+
+  it("returns a persisted fresh session when post-create Git naming fails", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const session = yield* SessionStore.create(input({ initialPrompt: "Name this session" }))
+        rmSync(session.worktreePath!, { recursive: true, force: true })
+        const returned = yield* retitleCreatedSessionFromPrompt(session, "Name this session", fixed("Named session"))
+        return { session, returned, persisted: yield* SessionStore.get(session.id) }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.returned).toEqual(exit.value.session)
+    expect(exit.value.persisted.id).toBe(exit.value.session.id)
+  })
+
+  it("returns the fresh session when branch metadata persistence fails", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ initialPrompt: "Name this session" }))
+        yield* SessionStore.setSemanticBranchProposal(created.id, { type: "feat", slug: "named-session" })
+        const session = yield* SessionStore.get(created.id)
+        yield* Effect.sync(() => chmodSync(temp.root, 0o500))
+        const returned = yield* retitleCreatedSessionFromPrompt(session, "Name this session", fixed("Named session"))
+        yield* Effect.sync(() => chmodSync(temp.root, 0o700))
+        return { session, returned, persisted: yield* SessionStore.get(created.id) }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    chmodSync(temp.root, 0o700)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.returned).toEqual(exit.value.session)
+    expect(exit.value.persisted.semanticBranchPending).toBe(true)
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: exit.value.persisted.worktreePath,
+      encoding: "utf-8"
+    }).trim()).toBe("feat/named-session")
   })
 
   it("derives semantic metadata from the active chat transcript", async () => {

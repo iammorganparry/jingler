@@ -37,7 +37,7 @@ import { ProjectService } from "@jingler/cli-adapters/projects"
 import { SessionStore } from "@jingler/cli-adapters/sessions"
 import {
   makeAgentRuntimeTitleGenerator,
-  retitleSessionFromPrompt
+  retitleCreatedSessionFromPrompt
 } from "@jingler/cli-adapters/session-title-service"
 import { ProviderConnections } from "@jingler/cli-adapters/runtime/providers/provider-connections"
 import { TranscriptStore } from "@jingler/cli-adapters/transcripts"
@@ -630,8 +630,8 @@ export const makeLiveDeviceSessionCommandExecutor = (
       const initialPrompt = input.initialPrompt?.trim()
       if (!initialPrompt) return session
       const agentRuntime = yield* AgentRuntime
-      return yield* retitleSessionFromPrompt(
-        session.id,
+      return yield* retitleCreatedSessionFromPrompt(
+        session,
         initialPrompt,
         makeAgentRuntimeTitleGenerator(agentRuntime)
       )

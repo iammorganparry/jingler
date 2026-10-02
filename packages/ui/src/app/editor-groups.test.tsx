@@ -65,6 +65,44 @@ describe("EditorGroups rendering", () => {
     expect(renders.get("src/a.ts")).toBe(1)
   })
 
+  it("preserves mounted body state when a group is nested under a new split", () => {
+    const renderBody = (surface: SessionSurface) =>
+      surface.id === "a" ? <input aria-label="steering draft" defaultValue="" /> : null
+    const rendered = render(<EditorGroups {...props(renderBody)} layout={layout} />)
+    const draft = screen.getByLabelText("steering draft") as HTMLInputElement
+    fireEvent.change(draft, { target: { value: "unsent steering text" } })
+    const root = layout.root!
+    if (root.type !== "split") throw new Error("expected split")
+    const [left, right] = root.children
+    const nested: EditorLayout = {
+      ...layout,
+      root: {
+        ...root,
+        children: [{
+          type: "split",
+          id: "nested",
+          axis: "column",
+          ratios: [0.5, 0.5],
+          children: [left!, {
+            type: "group",
+            id: "below",
+            tabs: [view("terminal")],
+            active: sessionSurfaceKey(view("terminal"))
+          }]
+        }, right!]
+      }
+    }
+
+    rendered.rerender(<EditorGroups {...props(renderBody)} layout={nested} />)
+
+    expect(screen.getByLabelText("steering draft")).toBe(draft)
+    expect(draft.value).toBe("unsent steering text")
+
+    rendered.rerender(<EditorGroups {...props(renderBody)} layout={layout} />)
+    expect(screen.getByLabelText("steering draft")).toBe(draft)
+    expect(draft.value).toBe("unsent steering text")
+  })
+
   it("invalidates mounted bodies when rendering dependencies change", () => {
     let value = "first"
     const renderBody = () => <span>{value}</span>

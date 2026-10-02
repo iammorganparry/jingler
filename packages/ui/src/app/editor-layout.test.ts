@@ -25,7 +25,7 @@ import { MIN_RATIO } from "./split-layout.js"
 
 const chat = (id: string): SessionSurface => ({ kind: "chat", id })
 const file = (id: string): SessionSurface => ({ kind: "file", id })
-const view = (id: string): SessionSurface => ({ kind: "view", id })
+const view = (id: string, chatId?: string): SessionSurface => ({ kind: "view", id, ...(chatId ? { chatId } : {}) })
 const shape = (layout: EditorLayout) => groupsOf(layout.root).map((group) => group.tabs.map((tab) => `${tab.kind}:${tab.id}`))
 const split = (layout: EditorLayout) => layout.root as EditorSplit
 
@@ -113,6 +113,21 @@ describe("editor layout lanes", () => {
     const moved = dropTab(layout, { surface: chat("side"), from: chats!.id }, content!.id, "center")
     expect(shape(moved)).toEqual([["chat:main", "chat:side"], ["file:a.ts"]])
     expect(focusedGroup(moved)!.id).toBe(chats!.id)
+  })
+
+  it("keeps each native Browser surface in one group", () => {
+    const browser = view("browser", "chat-a")
+    const layout = createEditorLayout([chat("main"), browser])
+    const content = groupsOf(layout.root)[1]!
+
+    const altDropped = dropTab(layout, { surface: browser, from: content.id }, content.id, "bottom", true)
+    expect(shape(altDropped)).toEqual([["chat:main"], ["view:browser"]])
+
+    const sidebarDropped = dropTab(layout, { surface: browser }, content.id, "right")
+    expect(shape(sidebarDropped)).toEqual([["chat:main"], ["view:browser"]])
+
+    const closed = closeTab(altDropped, content.id, browser)
+    expect(allTabs(closed)).not.toContainEqual(browser)
   })
 
   it("moves file and view tabs into horizontal or vertical edge splits", () => {

@@ -26,12 +26,14 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode
 } from "react"
+import { createPortal } from "react-dom"
 import { ChevronRight, Plus, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
 import {
   activeSurface,
+  groupsOf,
   resizedPair,
   type DropEdge,
   type EditorLayout,
@@ -173,6 +175,16 @@ export function EditorGroups(props: EditorGroupsProps) {
   )
   const mime = editorTabMime(props.sessionId)
   const { root, focusedGroupId } = props.layout
+  const groupHosts = useRef(new Map<string, HTMLDivElement>()).current
+  const groups = groupsOf(root)
+  const groupIds = new Set(groups.map((group) => group.id))
+  for (const id of groupHosts.keys()) if (!groupIds.has(id)) groupHosts.delete(id)
+  for (const group of groups) {
+    if (groupHosts.has(group.id)) continue
+    const host = document.createElement("div")
+    host.className = "flex min-h-0 min-w-0 flex-1"
+    groupHosts.set(group.id, host)
+  }
   if (!root) return <><EmptyEditor mime={mime} api={api}>{props.emptyState}</EmptyEditor>{palette}</>
   const rootSplit: EditorSplit = root.type === "split"
     ? root
@@ -180,7 +192,18 @@ export function EditorGroups(props: EditorGroupsProps) {
   return (
     <>
       <div data-testid="editor-groups" className="flex min-h-0 min-w-0 flex-1 bg-hairline">
-        <SplitNode split={rootSplit} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} />
+        <SplitNode split={rootSplit} focusedGroupId={focusedGroupId} mime={mime} api={api} revision={props.revision} groupHosts={groupHosts} />
+        {groups.map((group) => createPortal(
+          <EditorGroup
+            group={group}
+            focused={group.id === focusedGroupId}
+            mime={mime}
+            api={api}
+            revision={props.revision}
+          />,
+          groupHosts.get(group.id)!,
+          group.id
+        ))}
       </div>
       {palette}
     </>
@@ -192,13 +215,25 @@ interface NodeProps {
   readonly mime: string
   readonly api: Api
   readonly revision: unknown
+  readonly groupHosts: ReadonlyMap<string, HTMLDivElement>
 }
 
 function EditorNodeView({ node, ...rest }: NodeProps & { readonly node: EditorNode }) {
   return node.type === "group" ? (
-    <EditorGroup group={node} focused={node.id === rest.focusedGroupId} mime={rest.mime} api={rest.api} revision={rest.revision} />
+    <GroupSlot host={rest.groupHosts.get(node.id)!} />
   ) : (
     <SplitNode split={node} {...rest} />
+  )
+}
+
+function GroupSlot({ host }: { readonly host: HTMLDivElement }) {
+  return (
+    <div
+      className="flex min-h-0 min-w-0 flex-1"
+      ref={(node) => {
+        if (node && host.parentElement !== node) node.appendChild(host)
+      }}
+    />
   )
 }
 

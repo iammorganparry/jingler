@@ -53,6 +53,7 @@ import {
   closeSurfaceEverywhere,
   forgetEditorLayout,
   openTab,
+  SESSION_SURFACE_COMMAND_EVENT,
   updateEditorLayout,
 } from "@jingler/ui";
 import { appMachine } from "./app-machine.js";
@@ -1999,6 +2000,12 @@ export function App() {
     });
     return unsubscribe;
   }, [authSend]);
+
+  useEffect(() => window.jingler.onPreviewCloseTab(({ sessionId, chatId }) => {
+    window.dispatchEvent(new CustomEvent(SESSION_SURFACE_COMMAND_EVENT, {
+      detail: { type: "close-surface", sessionId, surface: { kind: "view", id: "browser", chatId } }
+    }));
+  }), []);
 
   return (
     <ThemeProvider

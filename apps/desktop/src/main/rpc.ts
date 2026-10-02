@@ -54,7 +54,7 @@ import {
   ProjectService,
   planReviewPost,
   retitleSession,
-  retitleSessionFromPrompt,
+  retitleCreatedSessionFromPrompt,
   ReviewService,
   ReviewStore,
   SessionStore,
@@ -729,8 +729,8 @@ export const createSessionRouted = (
         return session;
       }
       const runtime = yield* AgentRuntime;
-      const named = yield* retitleSessionFromPrompt(
-        session.id,
+      const named = yield* retitleCreatedSessionFromPrompt(
+        session,
         initialPrompt,
         makeAgentRuntimeTitleGenerator(runtime),
       );
