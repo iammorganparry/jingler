@@ -174,9 +174,11 @@ export const ProviderConnectionsLive = Layer.effect(
       connections: broker.list,
       certifications,
       discover: (connection, signal) =>
-        e2eFixture !== null
-          ? Effect.succeed(e2eDiscoveredModels(e2eFixture, connection.providerId))
-          : discoverPiModels(credentials, connection, signal),
+        e2eFixture?.scenarioId === "pi-codex-cli-models"
+          ? discoverPiModels(credentials, connection, signal)
+          : e2eFixture !== null
+            ? Effect.succeed(e2eDiscoveredModels(e2eFixture, connection.providerId))
+            : discoverPiModels(credentials, connection, signal),
       targetAvailable: (connection) => connection.targetId === "desktop"
     })
     const service = yield* makeProviderConnections({

@@ -1,20 +1,29 @@
 import { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import type { Api, Model } from "@earendil-works/pi-ai"
-import { describe, expect, it } from "vitest"
+import { ProviderConnection, ProviderConnectionId } from "@jingler/core"
+import { fileURLToPath } from "node:url"
+import { Effect, Schema } from "effect"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { InMemoryProviderCredentialStore } from "../auth/credential-store.js"
 import {
   classifyObservedBillingRoute,
+  discoverPiModels,
   isModelUnsupportedError,
   modelReasoningCapabilities,
   registerClaudeCliProvider,
   registerJinglerModels,
 } from "./pi-provider-access.js"
 
+const codexBinary = fileURLToPath(new URL("../codex/fixtures/app-server.mjs", import.meta.url))
+
+afterEach(() => vi.unstubAllEnvs())
+
 describe("Jingler model additions", () => {
   it("adds GPT-6 Astra to the configured Codex route", async () => {
     const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
     runtime.registerProvider("openai-codex", { baseUrl: "https://codex-proxy.example.com" })
 
-    registerJinglerModels(runtime)
+    await registerJinglerModels(runtime, { binary: codexBinary })
 
     expect(runtime.getModel("openai-codex", "gpt-6-astra")).toMatchObject({
       baseUrl: "https://codex-proxy.example.com",
@@ -26,9 +35,67 @@ describe("Jingler model additions", () => {
     })
   })
 
+  it("registers models advertised by the installed Codex CLI for PI execution", async () => {
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
+    await registerJinglerModels(runtime, {
+      binary: codexBinary,
+      environment: { ...process.env, CODEX_HOME: "latest-models" }
+    })
+
+    expect(runtime.getModel("openai-codex", "gpt-6.1-sol")).toMatchObject({
+      name: "GPT-6.1 Sol",
+      api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api",
+      contextWindow: 272_000,
+      maxTokens: 128_000,
+      reasoning: true,
+      input: ["text", "image"]
+    })
+  })
+
+  it("discovers CLI-advertised models through a PI Codex connection", async () => {
+    vi.stubEnv("JINGLER_CODEX_BINARY", codexBinary)
+    vi.stubEnv("CODEX_HOME", "latest-models")
+    const connectionId = ProviderConnectionId.make("codex-cli-models")
+    const credentials = new InMemoryProviderCredentialStore()
+    await Effect.runPromise(credentials.write({
+      connectionId,
+      authKind: "openai-codex-oauth",
+      access: "fixture-access",
+      refresh: "fixture-refresh",
+      expiresAt: Date.now() + 60_000
+    }))
+    const connection = Schema.decodeUnknownSync(ProviderConnection)({
+      id: connectionId,
+      providerId: "openai-codex",
+      authKind: "openai-codex-oauth",
+      account: null,
+      targetId: "desktop",
+      status: "authenticated",
+      subscription: {
+        entitlement: "active",
+        planLabel: null,
+        expiresAt: null,
+        quotaLabel: null,
+        rateLimitLabel: null,
+        confirmedBillingRoute: "subscription"
+      },
+      createdAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: "2026-10-02T00:00:00.000Z"
+    })
+
+    const models = await Effect.runPromise(
+      discoverPiModels(credentials, connection, new AbortController().signal)
+    )
+    expect(models).toContainEqual(expect.objectContaining({
+      id: "openai-codex/gpt-6.1-sol",
+      label: "GPT-6.1 Sol"
+    }))
+  })
+
   it("installs the Claude CLI stream only for an explicit subscription route", async () => {
     const apiRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })
-    registerJinglerModels(apiRuntime)
+    await registerJinglerModels(apiRuntime, { binary: codexBinary })
     expect(apiRuntime.getRegisteredProviderConfig("anthropic")?.streamSimple).toBeUndefined()
 
     const subscriptionRuntime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false })

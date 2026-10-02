@@ -94,6 +94,7 @@ const handleAccount = (method, id) => {
 const handleModel = (method, id, p) => {
   if (method !== 'model/list') return false
   if (process.env.CODEX_HOME === 'many-models') reply(id, { data: Array.from({ length: 400 }, (_, i) => ({ model: "model-" + String(Math.floor(i / 2) + (p.cursor ? 100 : 0)), displayName: 'Model', supportedReasoningEfforts: [], inputModalities: ['text'] })), nextCursor: p.cursor ? null : 'page-2' })
+  else if (process.env.CODEX_HOME === 'latest-models') reply(id, { data: [{ model: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', hidden: false, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }, { reasoningEffort: 'max' }], defaultReasoningEffort: 'high', inputModalities: ['text', 'image'] }], nextCursor: null })
   else reply(id, { data: [{ model: p.cursor ? 'second' : 'first', displayName: p.cursor ? 'Second' : 'First', supportedReasoningEfforts: [{ reasoningEffort: 'high' }], defaultReasoningEffort: 'high', inputModalities: ['text', 'image'] }], nextCursor: p.cursor ? null : 'page-2' })
   return true
 }

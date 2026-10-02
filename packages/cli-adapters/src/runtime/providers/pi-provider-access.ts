@@ -26,6 +26,9 @@ import {
   verifyLocalClaudeSubscription,
   type ClaudeCliProviderOptions
 } from "./claude-cli-provider.js"
+import { readCodexModelCatalog } from "../codex/endpoint.js"
+import type { CodexClientOptions } from "../codex/client.js"
+import type { Model as CodexCatalogModel } from "../codex/generated/v2/Model.js"
 
 const credentialFor = (authKind: AuthKind, access: string): Credential =>
   authKind === "openai-codex-oauth"
@@ -84,12 +87,73 @@ const ASTRA_MODEL = {
   compat: { supportsOpenAIGrammarTools: true, supportsToolSearch: true }
 }
 
-export const registerJinglerModels = (runtime: ModelRuntime): void => {
+const PI_THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const
+
+const cliThinkingLevelMap = (
+  model: CodexCatalogModel
+): NonNullable<Model<Api>["thinkingLevelMap"]> => {
+  const supported = new Set(model.supportedReasoningEfforts.map(({ reasoningEffort }) =>
+    reasoningEffort === "none" ? "off" : reasoningEffort
+  ))
+  return Object.fromEntries(PI_THINKING_LEVELS.map((level) => [
+    level,
+    supported.has(level) ? (level === "off" ? "none" : level) : null
+  ]))
+}
+
+const modelTemplate = (
+  models: ReadonlyArray<Model<Api>>,
+  id: string
+): Model<Api> | undefined => {
+  const family = id.split("-").at(-1)
+  return models.find((model) => family !== undefined && model.id.endsWith(`-${family}`))
+    ?? models.find((model) => model.id === "gpt-5.6-sol")
+    ?? models.at(-1)
+}
+
+const withCliCodexModels = (
+  models: ReadonlyArray<Model<Api>>,
+  catalog: ReadonlyArray<CodexCatalogModel>
+): ReadonlyArray<Model<Api>> => {
+  const existing = new Set(models.map(({ id }) => id))
+  return [
+    ...models,
+    ...catalog.flatMap((entry): ReadonlyArray<Model<Api>> => {
+      if (entry.hidden || existing.has(entry.model)) return []
+      const template = modelTemplate(models, entry.model)
+      if (template === undefined) return []
+      existing.add(entry.model)
+      return [{
+        ...template,
+        id: entry.model,
+        name: entry.displayName || entry.model,
+        reasoning: entry.supportedReasoningEfforts.length > 0,
+        thinkingLevelMap: cliThinkingLevelMap(entry),
+        input: entry.inputModalities.filter(
+          (input): input is "text" | "image" => input === "text" || input === "image"
+        )
+      }]
+    })
+  ]
+}
+
+export const registerJinglerModels = async (
+  runtime: ModelRuntime,
+  options: CodexClientOptions = {}
+): Promise<void> => {
   const codex = runtime.getProvider("openai-codex")
-  if (codex === undefined || codex.getModels().some(({ id }) => id === ASTRA_MODEL.id)) return
+  if (codex === undefined) return
+  if (!codex.getModels().some(({ id }) => id === ASTRA_MODEL.id)) {
+    runtime.registerProvider("openai-codex", {
+      ...runtime.getRegisteredProviderConfig("openai-codex"),
+      models: [...codex.getModels(), ASTRA_MODEL]
+    })
+  }
+  const models = runtime.getProvider("openai-codex")!.getModels()
+  const catalog = await readCodexModelCatalog({ timeoutMs: 5_000, ...options }).catch(() => [])
   runtime.registerProvider("openai-codex", {
     ...runtime.getRegisteredProviderConfig("openai-codex"),
-    models: [...codex.getModels(), ASTRA_MODEL]
+    models: [...withCliCodexModels(models, catalog)]
   })
 }
 
@@ -209,7 +273,7 @@ export const probePiEntitlement = async (input: {
     refreshOnCreate: true,
     signal: input.signal
   })
-  registerJinglerModels(runtime)
+  if (input.providerId === "openai-codex") await registerJinglerModels(runtime)
   const models = await entitlementModels(runtime, input.providerId, input.signal)
   let lastError: Error | null = null
   for (const model of models) {
@@ -301,7 +365,7 @@ export const discoverPiModels = (
         refreshOnCreate: true,
         signal
       })
-      registerJinglerModels(runtime)
+      if (connection.providerId === "openai-codex") await registerJinglerModels(runtime)
       if (connection.authKind === "claude-setup-token") {
         registerClaudeCliProvider(runtime, {})
       }

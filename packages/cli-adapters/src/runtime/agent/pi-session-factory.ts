@@ -377,7 +377,7 @@ const createEmbeddedSession = (
         refreshOnCreate: false
       })
       await options.configureModelRuntime?.(modelRuntime)
-      registerJinglerModels(modelRuntime)
+      if (connection.providerId === "openai-codex") await registerJinglerModels(modelRuntime)
       if (usesClaudeCli(connection)) {
         registerClaudeCliProvider(modelRuntime, { cwd: spec.cwd })
       }

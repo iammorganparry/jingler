@@ -7,6 +7,11 @@ const SUBSCRIPTION_BILLING = /billing: subscription/;
 const DETERMINISTIC_MODEL = /^Deterministic pi model 1/u;
 const PROVIDERS_NAV = /Providers/u;
 const STALE_MODEL_TITLE = / · stale$/u;
+const GPT_6_1_SOL = /^GPT-6\.1 Sol/u;
+const CODEX_BINARY = resolve(
+  import.meta.dirname,
+  "../../../packages/cli-adapters/src/runtime/codex/fixtures/app-server.mjs",
+);
 const chooseFixtureRepo = async (launched: LaunchedApp): Promise<void> => {
   await launched.app.evaluate(({ dialog }, selected) => {
     dialog.showOpenDialog = async () => ({
@@ -234,6 +239,29 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
   ).toBeVisible();
   await expect(
     launched.window.getByRole("button", { name: DETERMINISTIC_MODEL }),
+  ).toBeVisible();
+});
+
+test("shows installed Codex CLI models on the PI subscription connection", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    config: { providerSetupCompleted: true },
+    piFixture: {
+      scenarioId: "pi-codex-cli-models",
+      authRoute: "openai-codex-oauth",
+    },
+    e2eEnv: {
+      JINGLER_CODEX_BINARY: CODEX_BINARY,
+      CODEX_HOME: "latest-models",
+    },
+  });
+
+  await launched.window.getByRole("button", { name: "Account menu" }).click();
+  await launched.window.getByRole("menuitem", { name: "Settings" }).click();
+  await launched.window.getByRole("button", { name: PROVIDERS_NAV }).click();
+  await expect(
+    launched.window.getByRole("button", { name: GPT_6_1_SOL }),
   ).toBeVisible();
 });
 
