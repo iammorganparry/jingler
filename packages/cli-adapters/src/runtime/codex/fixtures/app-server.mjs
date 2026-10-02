@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
-if (process.argv.includes('--version')) { console.log('codex-cli ' + ((process.env.CODEX_HOME === '0.152.0' ? '0.152.0' : '0.153.2'))); process.exit(0) }
+if (process.argv.includes('--version')) { console.log('codex-cli ' + (/^\d+\.\d+\.\d+$/.test(process.env.CODEX_HOME ?? '') ? process.env.CODEX_HOME : '0.153.2')); process.exit(0) }
 const send = value => process.stdout.write(JSON.stringify(value) + '\n')
 let initialized = false
 let thread = process.env.CODEX_HOME === 'unique-threads' ? `thread-${process.pid}` : 'thread-1'

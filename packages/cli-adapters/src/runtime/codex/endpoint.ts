@@ -95,17 +95,13 @@ export const probeCodexEndpoint = async (
   let client: CodexClient | undefined
   try {
     version = await readCodexVersion(options)
-    // Exact protocol pin until another installed release has been certified.
-    if (version !== CODEX_PROTOCOL_VERSION) status = "unsupported"
-    else {
-      client = new CodexClient(options)
-      await client.initialize()
-      const account = await client.request<GetAccountResponse>("account/read", {
-        refreshToken: false
-      })
-      status = account.account === null && account.requiresOpenaiAuth ? "signed-out" : "ready"
-      if (status === "ready") models.push(...(await listModels(client, status)))
-    }
+    client = new CodexClient(options)
+    await client.initialize()
+    const account = await client.request<GetAccountResponse>("account/read", {
+      refreshToken: false
+    })
+    status = account.account === null && account.requiresOpenaiAuth ? "signed-out" : "ready"
+    if (status === "ready") models.push(...(await listModels(client, status)))
   } catch (error) {
     status = probeFailureStatus(error)
   } finally {

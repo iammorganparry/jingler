@@ -11,8 +11,10 @@ Regenerate the unmodified TypeScript dependency closure with:
 node scripts/generate-codex-protocol.mjs
 ```
 
-The adapter accepts exactly 0.153.2 until a different release is checked against
-its generated protocol. Generation uses the stable schema command; initialize
+The checked-in protocol types come from 0.153.2, but discovery talks to the
+installed CLI so compatible updates expose their current model catalog without a
+Jingler release. Protocol incompatibilities fail the probe instead of hiding every
+newer version up front. Generation uses the stable schema command; initialize
 opts into experimental messages for structured user input. Wire envelopes, frame
 sizes, queue sizes, pending requests, model pagination and output previews are
 bounded. Generated types constrain the payloads; they are not runtime validators

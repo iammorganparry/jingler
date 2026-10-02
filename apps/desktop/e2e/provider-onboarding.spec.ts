@@ -237,7 +237,7 @@ test("adds a provider from settings after provider onboarding was skipped", asyn
   ).toBeVisible();
 });
 
-test("adds a second provider connection from settings", async ({ launchApp }) => {
+test("rejects a duplicate provider connection from settings", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -255,8 +255,15 @@ test("adds a second provider connection from settings", async ({ launchApp }) =>
   await launched.window.getByRole("button", { name: "Open browser" }).click();
 
   await expect(
-    launched.window.getByText("ChatGPT Codex subscription", { exact: true }).last(),
+    launched.window.getByText("This provider connection already exists on this target", {
+      exact: true,
+    }),
   ).toBeVisible();
+  await expect(
+    launched.window.getByRole("button", {
+      name: "Remove ChatGPT Codex subscription connection",
+    }),
+  ).toHaveCount(1);
 });
 
 test("shows a stale canonical default model as unavailable in provider settings", async ({
