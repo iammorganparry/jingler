@@ -130,14 +130,20 @@ const numberOf = (value: unknown): number =>
  * `result.usage` is the sum over every request in the turn, so a turn of 30
  * tool calls re-reading a 100k cached prompt reported ~3M "context" and tripped
  * compaction on a session a fraction that size. The CLI reports the final
- * request under `usage.iterations`; an older CLI without it falls back to the
- * sum, which is the most it can tell us.
+ * request under `usage.iterations`. Without it, use assistant-message usage,
+ * never the cumulative result: repeated cached reads are spend, not occupancy.
  */
-export const lastRequestUsage = (usage: Record<string, unknown>): Record<string, unknown> => {
+export const lastRequestUsage = (usage: Record<string, unknown>): Record<string, unknown> | null => {
   const iterations = usage.iterations
   const last = Array.isArray(iterations) ? iterations.at(-1) : undefined
-  return isRecord(last) ? last : usage
+  return isRecord(last) ? last : null
 }
+
+const usageEvent = (usage: Record<string, unknown>): StreamEvent => ({
+  _tag: "Usage",
+  tokens: numberOf(usage.input_tokens) + numberOf(usage.cache_read_input_tokens) +
+    numberOf(usage.cache_creation_input_tokens) + numberOf(usage.output_tokens)
+})
 
 const contentEvents = (value: unknown): ReadonlyArray<StreamEvent> => {
   if (!isRecord(value) || value.type !== "assistant" || !isRecord(value.message)) return []
@@ -187,8 +193,12 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   // Usage panel and never the conversation.
   if (recordClaudeCliRateLimits(value)) return []
   if (value.type === "stream_event") return streamEvents(value)
-  const content = contentEvents(value)
-  if (content.length > 0) return content
+  if (value.type === "assistant") {
+    const usage = value.parent_tool_use_id == null && isRecord(value.message) && isRecord(value.message.usage)
+      ? [usageEvent(value.message.usage)]
+      : []
+    return [...contentEvents(value), ...usage]
+  }
   if (value.type !== "result") return []
   if (typeof value.is_error !== "boolean") {
     throw new Error("Claude CLI emitted a malformed result")
@@ -205,14 +215,8 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   const cacheRead = numberOf(value.usage.cache_read_input_tokens)
   const cacheWrite = numberOf(value.usage.cache_creation_input_tokens)
   const last = lastRequestUsage(value.usage)
-  // The last request's prompt plus its reply is what the next turn starts from.
-  const context =
-    numberOf(last.input_tokens) +
-    numberOf(last.cache_read_input_tokens) +
-    numberOf(last.cache_creation_input_tokens) +
-    numberOf(last.output_tokens)
   return [
-    { _tag: "Usage", tokens: context },
+    ...(last === null ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
     { _tag: "Done", tokens: input + output + cacheRead + cacheWrite, costUsd: 0 }
   ]

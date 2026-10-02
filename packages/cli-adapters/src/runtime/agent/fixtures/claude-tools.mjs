@@ -24,5 +24,6 @@ if (process.argv.includes("--version")) {
   const second = await call(2, "workspace_read_file", { path: "README.md" })
   if (!first.text.includes("e2e repo") || second.text !== first.text) throw new Error("Expected real workspace results")
   console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Claude completed two workspace tool rounds." } } }))
-  console.log(JSON.stringify({ type: "result", is_error: false, usage: {} }))
+  console.log(JSON.stringify({ type: "assistant", parent_tool_use_id: null, message: { id: "last-request", content: [], usage: { input_tokens: 5700, cache_read_input_tokens: 100000, output_tokens: 200 } } }))
+  console.log(JSON.stringify({ type: "result", is_error: false, usage: { input_tokens: 300000, output_tokens: 600 } }))
 }

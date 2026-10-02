@@ -11,7 +11,7 @@ export interface ContextMeterProps {
   tokens: number
   /** Estimated category allocation, scaled to the provider-reported total. */
   breakdown?: ContextBreakdown | null
-  /** Where compaction fires: `min(budget, window × safety)`. Null = unmeasurable. */
+  /** Where compaction fires: `min(budget, window × safety)`. Null = unknown window. */
   triggerAt: number | null
   /**
    * What the context manager will ACTUALLY do with this session.
@@ -63,8 +63,7 @@ export interface ContextMeterProps {
  * target, and showing 700k of "available" space would invite exactly the usage
  * this exists to prevent.
  *
- * Renders nothing when the harness cannot report context (`triggerAt === null`),
- * rather than showing an empty bar that reads as "plenty of room left".
+ * An unknown window still shows the reported total, but no capacity bar.
  */
 export function ContextMeter({
   tokens,
@@ -106,10 +105,10 @@ export function ContextMeter({
            return ("bg-fg/25")
          }
 
-  if (triggerAt === null || triggerAt <= 0) return null
   if (tokens <= 0) return null
 
-  const ratio = Math.min(1, tokens / triggerAt)
+  const target = triggerAt !== null && triggerAt > 0 ? triggerAt : null
+  const ratio = target === null ? 0 : Math.min(1, tokens / target)
   const pct = Math.round(ratio * 100)
 
   // Three states, and none of them is an alarm. Crossing the trigger is the
@@ -133,9 +132,7 @@ export function ContextMeter({
    */
   const label = getLabel()
 
-  const title = `${tokens.toLocaleString()} of ~${triggerAt.toLocaleString()} tokens before Jingler compacts this session${
-    getTitle()
-  }`
+  const title = contextTitle(tokens, target, getTitle())
 
   // A plain span when there is nothing to click, so the meter never presents a
   // button that does nothing (a digest is already queued, or the harness gave
@@ -154,8 +151,9 @@ export function ContextMeter({
         className
       )}
       title={title}
+      tabIndex={0}
     >
-      <span className="relative h-1 w-10 overflow-hidden rounded-full bg-fg/10">
+      {target !== null && <span className="relative h-1 w-10 overflow-hidden rounded-full bg-fg/10">
         <span
           className={cn(
             "absolute inset-y-0 left-0 rounded-full transition-[width]",
@@ -166,15 +164,32 @@ export function ContextMeter({
           )}
           style={{ width: `${Math.max(pct, 2)}%` }}
         />
-      </span>
+      </span>}
       <span>
         {fmtTokens(tokens)} <span className="text-dim">{label}</span>
       </span>
     </Tag>
   )
-  if (breakdown === null) return meter
+  return (
+    <HoverCard
+      side="top"
+      className="w-64 p-3"
+      content={(
+        <ContextDetails tokens={tokens} breakdown={breakdown} target={target} title={title} />
+      )}
+    >
+      {meter}
+    </HoverCard>
+  )
+}
 
-  const categories: ReadonlyArray<readonly [string, number]> = [
+function ContextDetails({ tokens, breakdown, target, title }: {
+  tokens: number
+  breakdown: ContextBreakdown | null
+  target: number | null
+  title: string
+}) {
+  const categories: ReadonlyArray<readonly [string, number]> = breakdown === null ? [] : [
     ["System prompt", breakdown.systemPrompt],
     ["Tool schemas & calls", breakdown.tools],
     ["Skills", breakdown.skills],
@@ -182,14 +197,12 @@ export function ContextMeter({
     ["Messages", breakdown.messages]
   ]
   return (
-    <HoverCard
-      side="top"
-      className="w-64 p-3"
-      content={(
         <div data-testid="context-breakdown" className="space-y-2 font-sans text-[11px]">
           <div>
-            <div className="font-medium text-text-bright">Context estimate</div>
-            <div className="mt-0.5 text-dim">Scaled to Pi's provider-reported total</div>
+            <div className="font-medium text-text-bright">Context usage</div>
+            <div className="mt-0.5 text-dim">{breakdown === null
+              ? "This harness reports a total, but no category breakdown."
+              : "Category estimates scaled to the provider-reported total"}</div>
           </div>
           <div className="space-y-1 border-t border-hairline pt-2">
             {categories.map(([name, value]) => (
@@ -201,12 +214,18 @@ export function ContextMeter({
           </div>
           <div className="flex items-center justify-between border-t border-hairline pt-2">
             <span className="text-muted-foreground">Total</span>
-            <span className="font-mono tabular-nums text-text-bright">{fmtTokens(tokens)}</span>
+            <span className="font-mono tabular-nums text-text-bright">{tokens.toLocaleString()}</span>
           </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-muted-foreground">Compaction target</span>
+            <span className="font-mono tabular-nums text-text-bright">{target?.toLocaleString() ?? "Unknown"}</span>
+          </div>
+          <div className="text-dim">{target === null ? "The model's context window is unavailable." : title}</div>
         </div>
-      )}
-    >
-      {meter}
-    </HoverCard>
   )
 }
+
+const contextTitle = (tokens: number, target: number | null, status: string): string =>
+  target === null
+    ? `${tokens.toLocaleString()} context tokens · compaction target unavailable`
+    : `${tokens.toLocaleString()} of ~${target.toLocaleString()} tokens before Jingler compacts this session${status}`

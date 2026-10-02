@@ -38,6 +38,17 @@ describe('OpenCode event normalization', () => {
     expect(events.tokens).toBe(20)
     expect(events.cost).toBe(0.02)
   })
+  it('reports the latest request and its model window, ignoring pending zero usage', () => {
+    const events = new OpenCodeEvents('session', 'prompt', new Set(), 128000)
+    expect(events.map(event('message.updated', { info: message() }))).toEqual([
+      { _tag: 'Usage', tokens: 20, window: 128000 }
+    ])
+    expect(events.map(event('message.updated', { info: message({ id: 'pending', tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }) }))).toEqual([])
+    expect(events.map(event('message.updated', { info: message({ id: 'pending' }) }))).toEqual([
+      { _tag: 'Usage', tokens: 20, window: 128000 }
+    ])
+    expect(events.tokens).toBe(40)
+  })
   it('normalizes completed tools and bounds output while preserving diff counts', () => {
     const events = new OpenCodeEvents('session', 'prompt')
     events.map(event('message.updated', { info: message() }))

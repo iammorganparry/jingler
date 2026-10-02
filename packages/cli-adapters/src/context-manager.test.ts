@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Session, StreamEvent } from "@jingler/core"
-import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
+import { AgentEndpointId, ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { AgentTurnDriver } from "./agent-turn-driver.js"
@@ -288,6 +288,38 @@ const observeAndSettle = (tokens: number, rec?: Recorder, runs = 1) =>
   })
 
 describe("ContextManager.observe", () => {
+  it.each(["pi", "claude", "codex", "opencode"] as const)("compacts %s at the target through its own runtime", async (runtimeId) => {
+    const rec = recorder()
+    const endpointId = AgentEndpointId.make(`desktop:${runtimeId}:${runtimeId === "pi" ? "anthropic-max" : "default"}`)
+    const result = await run(
+      Effect.gen(function* () {
+        yield* seed({
+          runtimeId, endpointId, modelId: providerModel("sonnet"),
+          chats: [{
+            id: SESSION, title: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+            runtimeId, endpointId,
+            connectionId: ProviderConnectionId.make("anthropic-max"),
+            providerId: ProviderId.make("anthropic"), modelId: providerModel("sonnet")
+          }]
+        })
+        yield* turnEnd(499_999, 1_000_000)
+        const below = yield* ContextManager.snapshot(SESSION)
+        yield* ContextManager.observe(SESSION, 500_000, 1_000_000)
+        const streaming = yield* ContextManager.snapshot(SESSION)
+        yield* ContextManager.settle(SESSION)
+        yield* awaitDigest()
+        const applied = yield* ContextManager.applyIfReady(SESSION)
+        return { below, streaming, applied }
+      }),
+      recordingAdapter(GOOD_REPLY, rec)
+    )
+    expect(result.below.phase).toBe("idle")
+    expect(result.streaming.preparing).toBe(false)
+    expect(result.applied?.tokensBefore).toBe(500_000)
+    expect(rec.specs).toHaveLength(1)
+    expect(rec.specs[0]).toMatchObject({ runtimeId, endpointId, role: "context-digest", continuation: null })
+  })
+
   it("stays quiet well inside the budget", async () => {
     const rec = recorder()
     const phase = await run(

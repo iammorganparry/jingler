@@ -50,6 +50,7 @@ describe("native OpenCode 1.18.14", () => {
     const first = await collect()
     expect(first).toContainEqual({ _tag: "Assistant", text: "OpenCode: hello" })
     expect(first.at(-1)).toEqual({ _tag: "Done", tokens: 15, costUsd: 0.01 })
+    expect(first).toContainEqual({ _tag: "Usage", tokens: 15, window: 128000 })
     const started = first.find(e => e._tag === 'Started')!
     if (started._tag !== 'Started') throw new Error('missing start')
     const continuation = { runtimeId: 'opencode' as const, endpointId, id: started.sessionId }

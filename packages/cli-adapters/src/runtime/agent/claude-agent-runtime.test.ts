@@ -199,7 +199,7 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:7,o
     )
     const events = [...chunk]
     expect(events.map(({ _tag }) => _tag)).toEqual([
-      "Started", "Assistant", "Usage", "Done"
+      "Started", "Assistant", "Done"
     ])
     expect(events[0]).toMatchObject({ _tag: "Started", model: "anthropic/opus" })
   })
@@ -214,9 +214,28 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{}}))
     const events = [...await Effect.runPromise(
       makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
     )]
-    expect(events.map(({ _tag }) => _tag)).toEqual(["Started", "Usage", "Done"])
+    expect(events.map(({ _tag }) => _tag)).toEqual(["Started", "Done"])
     expect(latestClaudeCliRateLimits()?.windows.five_hour).toEqual({ utilization: 0.2, resetsAt: 1790516400 })
     resetClaudeCliRateLimits()
+  })
+
+  it("uses parent assistant usage without letting cumulative spend or child usage overwrite it", async () => {
+    const binary = await executable(`
+process.stdin.resume()
+for (const [id, input, output, parent] of [["a", 90000, 100, null], ["b", 95000, 200, null], ["b", 95000, 200, null], ["child", 800000, 300, "tool-1"]]) {
+  console.log(JSON.stringify({type:"assistant",parent_tool_use_id:parent,message:{id,content:[],usage:{input_tokens:input,output_tokens:output,cache_read_input_tokens:10000,cache_creation_input_tokens:500}}}))
+}
+console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:900000,output_tokens:9000}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events.filter(({ _tag }) => _tag === "Usage")).toEqual([
+      { _tag: "Usage", tokens: 100600 },
+      { _tag: "Usage", tokens: 105700 },
+      { _tag: "Usage", tokens: 105700 }
+    ])
+    expect(events.at(-1)).toMatchObject({ _tag: "Done", tokens: 909000 })
   })
 
   it("reports context from the turn's last request, not the sum over every request", async () => {
