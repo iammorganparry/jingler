@@ -25,7 +25,7 @@ import type { PierreAnnotationMetadata } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
-import { openSessionFileSurface, useFileBrowser } from "./use-file-browser.js"
+import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
 import { ChangesExplorerPanel, useChangesReview } from "./changes-review.js"
@@ -183,7 +183,7 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
   const openChangedPath = (path: string) => {
     browser.open(path)
     browser.showDiff()
-    openSessionFileSurface(session.id, session.worktreePath, path, "diff")
+    openSessionFileDiff(session.id, session.worktreePath, path)
     onOpenPath(path)
   }
 
@@ -388,7 +388,7 @@ export function FileBrowserView({
       agentFileActivity.preview,
       agentFileActivity.phase === "completed"
     )
-    openSessionFileSurface(session.id, session.worktreePath, normalizedAgentTarget, "diff")
+    openSessionFileDiff(session.id, session.worktreePath, normalizedAgentTarget)
     onOpenPath?.(normalizedAgentTarget)
   }, [
     agentFileActivity,

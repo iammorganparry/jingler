@@ -130,19 +130,16 @@ export const openSessionFile = (sessionId: string, path: string): void => {
   getFileBrowserActor(sessionId).send({ type: "OPEN", path })
 }
 
-/** Seed a path-owned editor before its tab mounts so the requested mode is not lost. */
-export const openSessionFileSurface = (
+/** Seed a path-owned editor in diff mode before its tab mounts. */
+export const openSessionFileDiff = (
   sessionId: string,
   worktreePath: string | undefined,
-  path: string,
-  viewMode: "diff" | "edit"
+  path: string
 ): void => {
   const actor = getFileBrowserActor(sessionId, worktreePath, `file:${path}`)
   actor.send({ type: "OPEN", path })
-  if (viewMode === "diff") {
-    actor.send({ type: "SHOW_DIFF" })
-    actor.send({ type: "REFRESH_DIFF" })
-  }
+  actor.send({ type: "SHOW_DIFF" })
+  actor.send({ type: "REFRESH_DIFF" })
 }
 
 /** List a path among the session's open files without selecting it. */
