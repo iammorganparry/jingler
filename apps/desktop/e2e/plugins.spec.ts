@@ -372,7 +372,7 @@ export default definePlugin(
   await expect(window.getByText(/plugin exploded/)).toBeVisible()
 
   // The app is intact: the active chat still returns to the conversation.
-  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await expect(window.getByTestId("conversation-scroll")).toBeVisible()
 })
 

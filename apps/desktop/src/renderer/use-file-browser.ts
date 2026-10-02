@@ -6,6 +6,7 @@ import {
   createFileBrowserMachine,
   type FileBrowserApi,
   type FileBrowserFailure,
+  type FileBrowserEvent,
   type FileBrowserMachine,
   type FileBrowserPendingDiscard
 } from "./file-browser-machine.js"
@@ -134,12 +135,17 @@ export const openSessionFile = (sessionId: string, path: string): void => {
 export const openSessionFileDiff = (
   sessionId: string,
   worktreePath: string | undefined,
-  path: string
+  path: string,
+  target?: Omit<Extract<FileBrowserEvent, { type: "AGENT_TARGET" }>, "type" | "path">
 ): void => {
   const actor = getFileBrowserActor(sessionId, worktreePath, `file:${path}`)
   actor.send({ type: "OPEN", path })
   actor.send({ type: "SHOW_DIFF" })
   actor.send({ type: "REFRESH_DIFF" })
+  if (target !== undefined) {
+    actor.send({ type: "ENABLE_FOLLOW" })
+    actor.send({ type: "AGENT_TARGET", path, ...target })
+  }
 }
 
 /** List a path among the session's open files without selecting it. */

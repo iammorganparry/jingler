@@ -89,7 +89,7 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   await window.getByRole("switch", { name: "Disable Review" }).click()
   await expect(window.getByRole("switch", { name: "Enable Review" })).toBeVisible()
 
-  await window.getByRole("button", { name: "Runtime" }).click()
+  await window.getByRole("button", { name: "Runtime", exact: true }).click()
   const inspector = window.getByRole("region", { name: "Runtime inspector" })
   await expect(inspector.getByText("api-key")).toBeVisible()
   await expect(inspector.getByText("done", { exact: true })).toBeVisible()

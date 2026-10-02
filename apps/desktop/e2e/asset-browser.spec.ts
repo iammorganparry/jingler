@@ -140,6 +140,8 @@ test("keeps a large repository and source file windowed while navigating the per
   expect(mountedTreeItems).toBeLessThan(REPOSITORY_FILES)
 
   await expect(tree.locator("[data-file-tree-search-input]")).toHaveCount(0)
+  const treeScroller = await verticalScrollOwner(tree)
+  await treeScroller.evaluate((element) => element.scrollTo({ top: element.scrollHeight }))
   const lastGenerated = tree.locator(
     '[role="treeitem"][data-item-path="generated/file-1199.ts"]'
   )
