@@ -1,3 +1,15 @@
+/**
+ * A session's editor layout: a split tree whose leaves are TAB GROUPS.
+ *
+ * Every chat, file and view is a tab (`SessionSurface`). A split nests in both
+ * directions (`row` = side by side, `column` = stacked). Each session owns one
+ * layout; sessions themselves never split.
+ *
+ * Pure and React-free so every rule here is cheap to test. `tidy` is the one
+ * place that keeps the tree canonical: empty groups disappear, a split left with
+ * one child is replaced by that child, and a split inside a same-axis parent is
+ * flattened into it (its share of the parent's slot is kept).
+ */
 import {
   isSurface,
   SESSION_SURFACE_STORAGE_PREFIX,
@@ -13,6 +25,7 @@ export interface TabGroup {
   readonly type: "group"
   readonly id: string
   readonly tabs: ReadonlyArray<SessionSurface>
+  /** `sessionSurfaceKey` of the tab on screen. Always one of `tabs`. */
   readonly active: string
 }
 
@@ -21,149 +34,177 @@ export interface EditorSplit {
   readonly id: string
   readonly axis: SplitAxis
   readonly children: ReadonlyArray<EditorNode>
+  /** One share per child, summing to 1. */
   readonly ratios: ReadonlyArray<number>
 }
 
 export type EditorNode = TabGroup | EditorSplit
 
 export interface EditorLayout {
+  /** `null` when every tab is closed. */
   readonly root: EditorNode | null
   readonly focusedGroupId: string | null
+  /** Null records an explicit close, so restoring the layout must not reopen main. */
   readonly mainChatId?: string | null
 }
 
+/** What a tab drag carries. `from` is absent when dragging from the sidebar. */
 export interface TabDrag {
   readonly surface: SessionSurface
   readonly from?: string
 }
 
 export const EDITOR_LAYOUT_STORAGE_PREFIX = "sb.editor-layout.v1:"
+
+const newId = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
+const keyOf = sessionSurfaceKey
 const CHAT_RATIO = 1 / 3
 const CONTENT_RATIO = 2 / 3
-const keyOf = sessionSurfaceKey
-const newId = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
 const laneOf = (surface: SessionSurface): "chat" | "content" => surface.kind === "chat" ? "chat" : "content"
+const isMain = (layout: EditorLayout, surface: SessionSurface) =>
+  surface.kind === "chat" && surface.id === layout.mainChatId
+
 export const groupsOf = (node: EditorNode | null): ReadonlyArray<TabGroup> =>
   node === null ? [] : node.type === "group" ? [node] : node.children.flatMap(groupsOf)
 
 export const focusedGroup = (layout: EditorLayout): TabGroup | null => {
   const groups = groupsOf(layout.root)
-  return groups.find((group) => group.id === layout.focusedGroupId) ?? groups[0] ?? null
+  return groups.find((g) => g.id === layout.focusedGroupId) ?? groups[0] ?? null
 }
 
 export const activeSurface = (group: TabGroup): SessionSurface =>
-  group.tabs.find((tab) => keyOf(tab) === group.active) ?? group.tabs[0]!
+  group.tabs.find((t) => keyOf(t) === group.active) ?? group.tabs[0]!
 
-const unique = (tabs: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurface> =>
-  tabs.filter((tab, index) => tabs.findIndex((other) => keyOf(other) === keyOf(tab)) === index)
+/**
+ * Structural sharing: a split is only re-created when one of its children
+ * changed. Untouched groups and splits keep their identity, so memoised group
+ * components skip re-rendering when another group changes.
+ */
+const mapChildren = (node: EditorSplit, fn: (child: EditorNode) => EditorNode): EditorSplit => {
+  let changed = false
+  const children = node.children.map((child) => {
+    const next = fn(child)
+    if (next !== child) changed = true
+    return next
+  })
+  return changed ? { ...node, children } : node
+}
 
-const sameTabs = (left: ReadonlyArray<SessionSurface>, right: ReadonlyArray<SessionSurface>): boolean =>
-  left.length === right.length && left.every((tab, index) => keyOf(tab) === keyOf(right[index]!))
+const mapGroups = (node: EditorNode, fn: (group: TabGroup) => TabGroup): EditorNode =>
+  node.type === "group" ? fn(node) : mapChildren(node, (c) => mapGroups(c, fn))
 
-const existingLaneGroup = (layout: EditorLayout, lane: "chat" | "content"): TabGroup | undefined =>
-  groupsOf(layout.root).find((group) => group.tabs.some((tab) => laneOf(tab) === lane))
+const normalise = (ratios: ReadonlyArray<number>): ReadonlyArray<number> => {
+  const valid = ratios.every((r) => Number.isFinite(r) && r > 0)
+  const total = ratios.reduce((sum, r) => sum + r, 0)
+  return valid && total > 0 ? ratios.map((r) => r / total) : ratios.map(() => 1 / ratios.length)
+}
 
-const laneActive = (
-  layout: EditorLayout,
-  lane: "chat" | "content",
-  tabs: ReadonlyArray<SessionSurface>,
-  preferred?: string
-): string => {
-  if (preferred && tabs.some((tab) => keyOf(tab) === preferred)) return preferred
-  const focused = focusedGroup(layout)
-  const candidates = [focused, ...groupsOf(layout.root)].filter((group): group is TabGroup => Boolean(group))
-  for (const group of candidates) {
-    const active = group.tabs.find((tab) => keyOf(tab) === group.active && laneOf(tab) === lane)
-    if (active && tabs.some((tab) => keyOf(tab) === keyOf(active))) return keyOf(active)
+const tidy = (node: EditorNode): EditorNode | null => {
+  if (node.type === "group") {
+    if (node.tabs.length === 0) return null
+    return node.tabs.some((t) => keyOf(t) === node.active) ? node : { ...node, active: keyOf(node.tabs[0]!) }
   }
-  return keyOf(tabs.at(-1)!)
+  const children: EditorNode[] = []
+  const ratios: number[] = []
+  let changed = false
+  node.children.forEach((child, index) => {
+    const kept = tidy(child)
+    if (kept !== child) changed = true
+    if (!kept) return
+    const share = node.ratios[index] ?? 1 / node.children.length
+    if (kept.type === "split" && kept.axis === node.axis) {
+      changed = true
+      kept.children.forEach((c, j) => {
+        children.push(c)
+        ratios.push(share * (kept.ratios[j] ?? 0))
+      })
+    } else {
+      children.push(kept)
+      ratios.push(share)
+    }
+  })
+  if (children.length <= 1) return children[0] ?? null
+  return changed ? { ...node, children, ratios: normalise(ratios) } : node
 }
 
-const laneGroup = (
-  layout: EditorLayout,
-  lane: "chat" | "content",
+/** Every mutation ends here: tidy the tree and keep focus on a group that exists. */
+const commit = (layout: EditorLayout, root: EditorNode | null, focus = layout.focusedGroupId): EditorLayout => {
+  const tidied = root && tidy(root)
+  const groups = groupsOf(tidied)
+  const focusedGroupId = groups.find((g) => g.id === focus)?.id ?? groups[0]?.id ?? null
+  return { ...layout, root: tidied, focusedGroupId }
+}
+
+const groupOf = (tabs: ReadonlyArray<SessionSurface>, active = tabs.at(-1)!): TabGroup => ({
+  type: "group",
+  id: newId("group"),
+  tabs,
+  active: keyOf(active)
+})
+
+const addTab = (group: TabGroup, surface: SessionSurface): TabGroup => {
+  const key = keyOf(surface)
+  if (group.active === key) return group
+  return group.tabs.some((t) => keyOf(t) === key)
+    ? { ...group, active: key }
+    : { ...group, tabs: [...group.tabs, surface], active: key }
+}
+
+const withoutTab = (group: TabGroup, key: string): TabGroup => {
+  const index = group.tabs.findIndex((t) => keyOf(t) === key)
+  if (index === -1) return group
+  const tabs = group.tabs.filter((_, i) => i !== index)
+  // Closing the active tab shows its right-hand neighbour, like VS Code.
+  const active = group.active === key ? keyOf(tabs[Math.min(index, tabs.length - 1)] ?? group.tabs[0]!) : group.active
+  return { ...group, tabs, active }
+}
+
+/** Closing the protected main chat everywhere records it as explicitly closed. */
+const releaseMain = (layout: EditorLayout, surface: SessionSurface): EditorLayout =>
+  isMain(layout, surface) && !groupsOf(layout.root).some((g) => g.tabs.some((t) => keyOf(t) === keyOf(surface)))
+    ? { ...layout, mainChatId: null }
+    : layout
+
+const reopenMain = (layout: EditorLayout, surface: SessionSurface, mainChatId: string | null | undefined) =>
+  surface.kind === "chat" && surface.id === mainChatId && layout.mainChatId !== mainChatId
+    ? { ...layout, mainChatId }
+    : layout
+
+export const createEditorLayout = (
   tabs: ReadonlyArray<SessionSurface>,
-  preferredActive?: string,
-  reservedId?: string
-): TabGroup | null => {
-  if (tabs.length === 0) return null
-  const existing = existingLaneGroup(layout, lane)
-  const id = existing && existing.id !== reservedId ? existing.id : newId(`group-${lane}`)
-  const active = laneActive(layout, lane, tabs, preferredActive)
-  if (existing && existing.id === id && existing.active === active && sameTabs(existing.tabs, tabs)) return existing
-  return { type: "group", id, tabs, active }
-}
-
-const normalisedRatios = (layout: EditorLayout): readonly [number, number] => {
-  if (layout.root?.type !== "split" || layout.root.axis !== "row" || layout.root.ratios.length !== 2) {
-    return [CHAT_RATIO, CONTENT_RATIO]
-  }
-  const [chat, content] = layout.root.ratios
-  if (!(chat && content && Number.isFinite(chat) && Number.isFinite(content))) return [CHAT_RATIO, CONTENT_RATIO]
-  const total = chat + content
-  return total > 0 ? [chat / total, content / total] : [CHAT_RATIO, CONTENT_RATIO]
-}
-
-const canonicalRoot = (
-  layout: EditorLayout,
-  chat: TabGroup | null,
-  content: TabGroup | null,
-  requestedRatios?: readonly [number, number]
-): EditorNode | null => {
-  if (!chat) return content
-  if (!content) return chat
-  const ratios = requestedRatios ?? normalisedRatios(layout)
-  const existing = layout.root?.type === "split" && layout.root.axis === "row" && layout.root.children.length === 2
-    ? layout.root
-    : undefined
-  const unchanged = existing?.children[0] === chat && existing.children[1] === content &&
-    existing.ratios[0] === ratios[0] && existing.ratios[1] === ratios[1]
-  return unchanged
-    ? existing
-    : { type: "split", id: existing?.id ?? newId("split"), axis: "row", children: [chat, content], ratios }
-}
-
-const focusedLaneOf = (layout: EditorLayout): "chat" | "content" | undefined => {
-  const group = focusedGroup(layout)
-  return group ? laneOf(activeSurface(group)) : undefined
-}
-
-const canonical = (
-  layout: EditorLayout,
-  tabs: ReadonlyArray<SessionSurface>,
-  options: {
-    readonly focus?: "chat" | "content"
-    readonly chatActive?: string
-    readonly contentActive?: string
-    readonly ratios?: readonly [number, number]
-  } = {}
+  mainChatId?: string | null
 ): EditorLayout => {
-  const distinct = unique(tabs)
-  const chat = laneGroup(layout, "chat", distinct.filter((tab) => tab.kind === "chat"), options.chatActive)
-  const content = laneGroup(layout, "content", distinct.filter((tab) => tab.kind !== "chat"), options.contentActive, chat?.id)
-  const focusLane = options.focus ?? focusedLaneOf(layout)
-  const focused = focusLane === "content" ? content ?? chat : chat ?? content
-  const root = canonicalRoot(layout, chat, content, options.ratios)
-  if (root === layout.root && focused?.id === layout.focusedGroupId) return layout
-  return { ...layout, root, focusedGroupId: focused?.id ?? null }
+  const unique = tabs.filter((tab, index) => tabs.findIndex((other) => keyOf(other) === keyOf(tab)) === index)
+  const chats = unique.filter((tab) => laneOf(tab) === "chat")
+  const content = unique.filter((tab) => laneOf(tab) === "content")
+  const chatGroup = chats.length > 0 ? groupOf(chats) : null
+  const contentGroup = content.length > 0 ? groupOf(content) : null
+  const root: EditorNode | null = chatGroup && contentGroup
+    ? {
+        type: "split",
+        id: newId("split"),
+        axis: "row",
+        children: [chatGroup, contentGroup],
+        ratios: [CHAT_RATIO, CONTENT_RATIO]
+      }
+    : chatGroup ?? contentGroup
+  return {
+    root,
+    focusedGroupId: contentGroup?.id ?? chatGroup?.id ?? null,
+    ...(mainChatId !== undefined ? { mainChatId } : {})
+  }
 }
-
-export const createEditorLayout = (tabs: ReadonlyArray<SessionSurface>, mainChatId?: string | null): EditorLayout =>
-  canonical(
-    { root: null, focusedGroupId: null, ...(mainChatId !== undefined ? { mainChatId } : {}) },
-    tabs,
-    { focus: tabs.at(-1) ? laneOf(tabs.at(-1)!) : undefined }
-  )
 
 export const activateTab = (layout: EditorLayout, groupId: string, key: string): EditorLayout => {
+  if (!layout.root) return layout
   const group = groupsOf(layout.root).find((candidate) => candidate.id === groupId)
-  const surface = group?.tabs.find((tab) => keyOf(tab) === key)
-  if (!group || !surface) return layout
-  if (group.active === key && layout.focusedGroupId === groupId) return layout
-  return canonical(layout, allTabs(layout), {
-    focus: laneOf(surface),
-    ...(surface.kind === "chat" ? { chatActive: key } : { contentActive: key })
-  })
+  if (!group?.tabs.some((tab) => keyOf(tab) === key)) return layout
+  if (group.active === key) return focusEditorGroup(layout, groupId)
+  return commit(
+    layout,
+    mapGroups(layout.root, (candidate) => candidate.id === groupId ? { ...candidate, active: key } : candidate),
+    groupId
+  )
 }
 
 export const focusEditorGroup = (layout: EditorLayout, groupId: string): EditorLayout =>
@@ -171,71 +212,132 @@ export const focusEditorGroup = (layout: EditorLayout, groupId: string): EditorL
     ? layout
     : { ...layout, focusedGroupId: groupId }
 
+/** Moves focus through groups in reading order; stops at the ends. */
 export const focusAdjacentGroup = (layout: EditorLayout, direction: -1 | 1): EditorLayout => {
   const groups = groupsOf(layout.root)
-  const index = groups.findIndex((group) => group.id === focusedGroup(layout)?.id)
+  const index = groups.findIndex((g) => g.id === focusedGroup(layout)?.id)
   const next = groups[index + direction]
   return next ? { ...layout, focusedGroupId: next.id } : layout
 }
 
-export const openTab = (layout: EditorLayout, surface: SessionSurface, mainChatId = layout.mainChatId): EditorLayout => {
+/**
+ * Shows a surface: reveals it where it is already open, otherwise adds it to
+ * the focused matching lane (or the first matching lane).
+ */
+export const openTab = (
+  layout: EditorLayout,
+  surface: SessionSurface,
+  mainChatId = layout.mainChatId
+): EditorLayout => {
+  layout = reopenMain(layout, surface, mainChatId)
   const key = keyOf(surface)
-  const holder = groupsOf(layout.root).find((group) => group.tabs.some((tab) => keyOf(tab) === key))
-  const reopened = surface.kind === "chat" && surface.id === mainChatId && layout.mainChatId !== mainChatId
-    ? { ...layout, mainChatId }
-    : layout
-  if (holder) return activateTab(reopened, holder.id, key)
-  return canonical(reopened, [...allTabs(reopened), surface], {
-    focus: laneOf(surface),
-    ...(surface.kind === "chat" ? { chatActive: key } : { contentActive: key })
-  })
+  const groups = groupsOf(layout.root)
+  const focused = focusedGroup(layout)
+  const holder = focused?.tabs.some((tab) => keyOf(tab) === key)
+    ? focused
+    : groups.find((group) => group.tabs.some((tab) => keyOf(tab) === key))
+  if (holder) return activateTab(layout, holder.id, key)
+  if (!layout.root) return commit(layout, groupOf([surface]))
+  const lane = laneOf(surface)
+  const target = focused?.tabs.some((tab) => laneOf(tab) === lane)
+    ? focused
+    : groups.find((group) => group.tabs.some((tab) => laneOf(tab) === lane))
+  if (target) {
+    return commit(
+      layout,
+      mapGroups(layout.root, (group) => group.id === target.id ? addTab(group, surface) : group),
+      target.id
+    )
+  }
+  const anchor = focused ?? groups[0]
+  if (!anchor) return commit(layout, groupOf([surface]))
+  const added = groupOf([surface])
+  const edge = lane === "chat" ? "left" : "right"
+  return commit(
+    layout,
+    splitBeside(layout.root, anchor.id, edge, added, [CHAT_RATIO, CONTENT_RATIO]),
+    added.id
+  )
 }
 
+const splitBeside = (
+  node: EditorNode,
+  targetId: string,
+  edge: Exclude<DropEdge, "center">,
+  added: TabGroup,
+  ratios: readonly [number, number] = [0.5, 0.5]
+): EditorNode => {
+  if (node.type === "split") return mapChildren(node, (child) => splitBeside(child, targetId, edge, added, ratios))
+  if (node.id !== targetId) return node
+  const axis: SplitAxis = edge === "left" || edge === "right" ? "row" : "column"
+  const before = edge === "left" || edge === "top"
+  return { type: "split", id: newId("split"), axis, children: before ? [added, node] : [node, added], ratios }
+}
+
+/**
+ * A drop on a group: the middle adds the tab there, an edge splits beside it.
+ * A tab dragged out of a group MOVES unless `copy` (⌥ held); a sidebar drag
+ * has no source and always adds.
+ */
 export const dropTab = (
   layout: EditorLayout,
-  { surface }: TabDrag,
-  _targetGroupId: string | null,
-  _edge: DropEdge,
-  _copy = false,
+  { surface, from }: TabDrag,
+  targetGroupId: string | null,
+  edge: DropEdge,
+  copy = false,
   mainChatId = layout.mainChatId
-): EditorLayout => openTab(layout, surface, mainChatId)
-
-const nextActiveAfterClose = (group: TabGroup, surface: SessionSurface): string | undefined => {
-  const closedKey = keyOf(surface)
-  if (group.active !== closedKey) return group.active
-  const index = group.tabs.findIndex((tab) => keyOf(tab) === closedKey)
-  const remaining = group.tabs.filter((tab) => keyOf(tab) !== closedKey)
-  return remaining[Math.min(index, remaining.length - 1)] ? keyOf(remaining[Math.min(index, remaining.length - 1)]!) : undefined
+): EditorLayout => {
+  layout = reopenMain(layout, surface, mainChatId)
+  const groups = groupsOf(layout.root)
+  const target = groups.find((group) => group.id === targetGroupId)
+  if (!(layout.root && target)) return openTab(layout, surface)
+  const dropTarget = edge === "center" && !target.tabs.some((tab) => laneOf(tab) === laneOf(surface))
+    ? groups.find((group) => group.tabs.some((tab) => laneOf(tab) === laneOf(surface))) ?? target
+    : target
+  const key = keyOf(surface)
+  const move = from !== undefined && !copy
+  if (move && from === dropTarget.id && (edge === "center" || dropTarget.tabs.length === 1)) {
+    return activateTab(layout, dropTarget.id, key)
+  }
+  const added = edge === "center" ? null : groupOf([surface])
+  let root = added
+    ? splitBeside(layout.root, dropTarget.id, edge as Exclude<DropEdge, "center">, added)
+    : mapGroups(layout.root, (group) => group.id === dropTarget.id ? addTab(group, surface) : group)
+  if (move) root = mapGroups(root, (group) => group.id === from ? withoutTab(group, key) : group)
+  return commit(layout, root, added?.id ?? dropTarget.id)
 }
 
-const releaseMain = (layout: EditorLayout, surface: SessionSurface): EditorLayout =>
-  surface.kind === "chat" && surface.id === layout.mainChatId && !allTabs(layout).some((tab) => keyOf(tab) === keyOf(surface))
-    ? { ...layout, mainChatId: null }
+/** Closes one tab in one group. */
+export const closeTab = (layout: EditorLayout, groupId: string, surface: SessionSurface): EditorLayout =>
+  layout.root
+    ? releaseMain(
+        commit(layout, mapGroups(layout.root, (g) => (g.id === groupId ? withoutTab(g, keyOf(surface)) : g))),
+        surface
+      )
     : layout
 
-export const closeTab = (layout: EditorLayout, groupId: string, surface: SessionSurface): EditorLayout => {
-  const group = groupsOf(layout.root).find((candidate) => candidate.id === groupId)
-  if (!group?.tabs.some((tab) => keyOf(tab) === keyOf(surface))) return layout
-  const nextActive = nextActiveAfterClose(group, surface)
-  const next = canonical(layout, allTabs(layout).filter((tab) => keyOf(tab) !== keyOf(surface)), {
-    ...(surface.kind === "chat" ? { chatActive: nextActive } : { contentActive: nextActive })
-  })
-  return releaseMain(next, surface)
-}
+/** Closes a surface in every group — the sidebar's close button. */
+export const closeSurfaceEverywhere = (layout: EditorLayout, surface: SessionSurface): EditorLayout =>
+  layout.root
+    ? releaseMain(commit(layout, mapGroups(layout.root, (g) => withoutTab(g, keyOf(surface)))), surface)
+    : layout
 
-export const closeSurfaceEverywhere = (layout: EditorLayout, surface: SessionSurface): EditorLayout => {
-  const holder = groupsOf(layout.root).find((group) => group.tabs.some((tab) => keyOf(tab) === keyOf(surface)))
-  return holder ? closeTab(layout, holder.id, surface) : layout
-}
-
+/** Closes every tab matching `match` in every group. */
 export const closeTabsWhere = (layout: EditorLayout, match: (surface: SessionSurface) => boolean): EditorLayout =>
   allTabs(layout).filter(match).reduce(closeSurfaceEverywhere, layout)
 
-export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> =>
-  unique(groupsOf(layout.root).flatMap((group) => group.tabs))
+/** Every distinct open surface, in reading order. */
+export const allTabs = (layout: EditorLayout): ReadonlyArray<SessionSurface> => {
+  const seen = new Set<string>()
+  return groupsOf(layout.root).flatMap((g) =>
+    g.tabs.filter((t) => !seen.has(keyOf(t)) && Boolean(seen.add(keyOf(t))))
+  )
+}
 
-export const moveActiveTab = (layout: EditorLayout, _direction: -1 | 1): EditorLayout => layout
-
+/**
+ * Applies a keyboard command (other than close, which has side effects) to the
+ * focused group. Unknown commands return the layout unchanged.
+ */
 export const applyEditorCommand = (layout: EditorLayout, command: string): EditorLayout => {
   if (command === "focus-left") return focusAdjacentGroup(layout, -1)
   if (command === "focus-right") return focusAdjacentGroup(layout, 1)
@@ -244,6 +346,10 @@ export const applyEditorCommand = (layout: EditorLayout, command: string): Edito
   return target ? focusEditorGroup(layout, target.id) : layout
 }
 
+export const moveActiveTab = (layout: EditorLayout, _direction: -1 | 1): EditorLayout => layout
+
+/** Drags the divider between `children[index]` and `children[index + 1]` of a split. */
+/** Clamp a divider move to the largest minimum the adjacent pair can afford. */
 export const resizedPair = (a: number, b: number, delta: number): readonly [number, number] | null => {
   const total = a + b
   if (!(Number.isFinite(a) && Number.isFinite(b) && Number.isFinite(delta) && total > 0)) return null
@@ -253,31 +359,55 @@ export const resizedPair = (a: number, b: number, delta: number): readonly [numb
 }
 
 export const resizeSplit = (layout: EditorLayout, splitId: string, index: number, delta: number): EditorLayout => {
-  if (layout.root?.type !== "split" || layout.root.id !== splitId || index !== 0) return layout
-  const pair = resizedPair(layout.root.ratios[0]!, layout.root.ratios[1]!, delta)
-  if (!pair || (pair[0] === layout.root.ratios[0] && pair[1] === layout.root.ratios[1])) return layout
-  return { ...layout, root: { ...layout.root, ratios: pair } }
+  if (!layout.root) return layout
+  const resize = (node: EditorNode): EditorNode => {
+    if (node.type === "group") return node
+    if (node.id !== splitId) return mapChildren(node, resize)
+    const a = node.ratios[index]
+    const b = node.ratios[index + 1]
+    const pair = a === undefined || b === undefined ? null : resizedPair(a, b, delta)
+    if (!pair || (pair[0] === a && pair[1] === b)) return node
+    return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
+  }
+  const root = resize(layout.root)
+  return root === layout.root ? layout : { ...layout, root }
 }
 
+/** Drops tabs whose chat, file or view no longer exists (by `sessionSurfaceKey`). */
 export const pruneEditorLayout = (layout: EditorLayout, allowed: ReadonlySet<string>): EditorLayout => {
-  const tabs = allTabs(layout).filter((tab) => allowed.has(keyOf(tab)))
-  return tabs.length === allTabs(layout).length ? layout : canonical(layout, tabs)
+  if (!layout.root) return layout
+  const root = mapGroups(layout.root, (g) =>
+    g.tabs.every((t) => allowed.has(keyOf(t))) ? g : { ...g, tabs: g.tabs.filter((t) => allowed.has(keyOf(t))) }
+  )
+  return root === layout.root ? layout : commit(layout, root)
 }
 
-const normalise = (ratios: ReadonlyArray<number>): ReadonlyArray<number> => {
-  const total = ratios.reduce((sum, ratio) => sum + ratio, 0)
-  return total > 0 && ratios.every((ratio) => Number.isFinite(ratio) && ratio > 0)
-    ? ratios.map((ratio) => ratio / total)
-    : ratios.map(() => 1 / ratios.length)
-}
+const storedId = (value: unknown, prefix: string): string =>
+  typeof value === "string" && value ? value : newId(prefix)
 
 const parseGroup = (node: Record<string, unknown>): TabGroup => {
   const tabs = (Array.isArray(node.tabs) ? node.tabs : []).filter(isSurface)
   return {
     type: "group",
-    id: typeof node.id === "string" && node.id ? node.id : newId("group"),
-    tabs: unique(tabs),
+    id: storedId(node.id, "group"),
+    tabs: tabs.filter((t, i) => tabs.findIndex((o) => keyOf(o) === keyOf(t)) === i),
     active: typeof node.active === "string" ? node.active : ""
+  }
+}
+
+const parseSplit = (node: Record<string, unknown>, axis: SplitAxis, children: ReadonlyArray<unknown>): EditorSplit => {
+  const ratios = Array.isArray(node.ratios) ? node.ratios : []
+  const pairs = children.flatMap((c, i) => {
+    const child = parseNode(c)
+    const ratio = ratios[i]
+    return child ? [{ child, ratio: typeof ratio === "number" ? ratio : Number.NaN }] : []
+  })
+  return {
+    type: "split",
+    id: storedId(node.id, "split"),
+    axis,
+    children: pairs.map((p) => p.child),
+    ratios: normalise(pairs.map((p) => p.ratio))
   }
 }
 
@@ -285,50 +415,45 @@ function parseNode(value: unknown): EditorNode | null {
   if (typeof value !== "object" || value === null) return null
   const node = value as Record<string, unknown>
   if (node.type === "group") return parseGroup(node)
-  if (node.type !== "split" || (node.axis !== "row" && node.axis !== "column") || !Array.isArray(node.children)) return null
-  const children = node.children.flatMap((child) => {
-    const parsed = parseNode(child)
-    return parsed ? [parsed] : []
-  })
-  const ratios = Array.isArray(node.ratios) ? node.ratios : []
-  return {
-    type: "split",
-    id: typeof node.id === "string" && node.id ? node.id : newId("split"),
-    axis: node.axis,
-    children,
-    ratios: normalise(children.map((_, index) => typeof ratios[index] === "number" ? ratios[index] : Number.NaN))
+  if (node.type === "split" && (node.axis === "row" || node.axis === "column") && Array.isArray(node.children)) {
+    return parseSplit(node, node.axis, node.children)
   }
+  return null
 }
 
-const parsedLayout = (raw: unknown): EditorLayout | null => {
+/** The flat v1 surface list becomes the default chat/content lanes. */
+const migrateSurfaceLayout = (raw: unknown): EditorLayout | null => {
+  if (typeof raw !== "object" || raw === null) return null
+  const old = raw as { panes?: unknown; focused?: unknown; openViews?: unknown; mainChatId?: unknown }
+  if (!Array.isArray(old.panes)) return null
+  const surfaces = old.panes.flatMap((pane: { surface?: unknown }) =>
+    isSurface(pane?.surface) ? [pane.surface] : []
+  )
+  const views = (Array.isArray(old.openViews) ? old.openViews : []).filter(isSurface)
+  const mainChatId = old.mainChatId === null
+    ? null
+    : typeof old.mainChatId === "string"
+      ? old.mainChatId
+      : undefined
+  const layout = createEditorLayout([...surfaces, ...views], mainChatId)
+  const focused = surfaces[typeof old.focused === "number" ? old.focused : 0]
+  const holder = focused && groupsOf(layout.root).find((group) =>
+    group.tabs.some((tab) => keyOf(tab) === keyOf(focused))
+  )
+  return holder && focused ? activateTab(layout, holder.id, keyOf(focused)) : layout
+}
+
+const parseLayout = (raw: unknown): EditorLayout | null => {
   if (typeof raw !== "object" || raw === null) return null
   const stored = raw as { root?: unknown; focusedGroupId?: unknown; mainChatId?: unknown }
   const root = stored.root === null ? null : parseNode(stored.root)
   if (root === null && stored.root !== null) return null
-  const layout: EditorLayout = {
+  const mainChatId = stored.mainChatId === null ? null : typeof stored.mainChatId === "string" ? stored.mainChatId : undefined
+  return commit(
+    { root: null, focusedGroupId: null, ...(mainChatId !== undefined ? { mainChatId } : {}) },
     root,
-    focusedGroupId: typeof stored.focusedGroupId === "string" ? stored.focusedGroupId : null,
-    ...(stored.mainChatId === null || typeof stored.mainChatId === "string" ? { mainChatId: stored.mainChatId } : {})
-  }
-  return canonical(layout, allTabs(layout))
-}
-
-const migratedLayout = (raw: unknown): EditorLayout | null => {
-  if (typeof raw !== "object" || raw === null) return null
-  const stored = raw as { panes?: unknown; focused?: unknown; openViews?: unknown; mainChatId?: unknown }
-  if (!Array.isArray(stored.panes)) return null
-  const panes = stored.panes.flatMap((pane: { surface?: unknown; ratio?: unknown }) => isSurface(pane?.surface) ? [pane] : [])
-  const tabs = unique([
-    ...panes.map((pane) => pane.surface as SessionSurface),
-    ...(Array.isArray(stored.openViews) ? stored.openViews.filter(isSurface) : [])
-  ])
-  const focused = panes[typeof stored.focused === "number" ? stored.focused : 0]?.surface as SessionSurface | undefined
-  const base: EditorLayout = {
-    root: null,
-    focusedGroupId: null,
-    ...(stored.mainChatId === null || typeof stored.mainChatId === "string" ? { mainChatId: stored.mainChatId } : {})
-  }
-  return canonical(base, tabs, { focus: focused ? laneOf(focused) : undefined })
+    typeof stored.focusedGroupId === "string" ? stored.focusedGroupId : null
+  )
 }
 
 const readJson = (key: string): unknown => {
@@ -336,20 +461,26 @@ const readJson = (key: string): unknown => {
   return raw === null ? undefined : JSON.parse(raw)
 }
 
+/**
+ * Restores a session's layout, migrating the v1 surface list on first read.
+ * A live main chat that is missing (and was not explicitly closed) is restored
+ * to the chat lane.
+ */
 export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, mainChatId?: string): EditorLayout => {
   const main: SessionSurface | null = mainChatId ? { kind: "chat", id: mainChatId } : null
-  const initial = createEditorLayout(main ? unique([main, fallback]) : [fallback], mainChatId)
+  const initial = createEditorLayout(main ? [main, fallback] : [fallback], mainChatId)
   try {
     const stored = readJson(`${EDITOR_LAYOUT_STORAGE_PREFIX}${sessionId}`)
-    const restored = stored !== undefined
-      ? parsedLayout(stored)
-      : migratedLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
-    if (!restored) return initial
-    if (restored.mainChatId === null || !main) return restored
-    const withMain = { ...restored, mainChatId }
-    return allTabs(withMain).some((tab) => keyOf(tab) === keyOf(main))
-      ? withMain
-      : canonical(withMain, [main, ...allTabs(withMain)])
+    const layout =
+      stored !== undefined
+        ? parseLayout(stored)
+        : migrateSurfaceLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
+    if (!layout) return initial
+    if (layout.mainChatId === null || !main) return layout
+    const withMain = { ...layout, mainChatId }
+    const present = groupsOf(layout.root).some((g) => g.tabs.some((t) => keyOf(t) === keyOf(main)))
+    if (present) return withMain
+    return openTab(withMain, main, mainChatId)
   } catch {
     return initial
   }

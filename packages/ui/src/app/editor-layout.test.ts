@@ -7,6 +7,7 @@ import {
   closeSurfaceEverywhere,
   closeTab,
   createEditorLayout,
+  dropTab,
   EDITOR_LAYOUT_STORAGE_PREFIX,
   type EditorLayout,
   type EditorSplit,
@@ -106,6 +107,39 @@ describe("editor layout lanes", () => {
     expect(applyEditorCommand(focusedLeft, "move-right")).toBe(focusedLeft)
   })
 
+  it("routes center drops back to the matching chat or content lane", () => {
+    const layout = createEditorLayout([chat("main"), chat("side"), file("a.ts")])
+    const [chats, content] = groupsOf(layout.root)
+    const moved = dropTab(layout, { surface: chat("side"), from: chats!.id }, content!.id, "center")
+    expect(shape(moved)).toEqual([["chat:main", "chat:side"], ["file:a.ts"]])
+    expect(focusedGroup(moved)!.id).toBe(chats!.id)
+  })
+
+  it("moves file and view tabs into horizontal or vertical edge splits", () => {
+    const horizontal = createEditorLayout([chat("main"), file("a.ts"), view("terminal")])
+    const horizontalContent = groupsOf(horizontal.root)[1]!
+    const movedRight = dropTab(
+      horizontal,
+      { surface: view("terminal"), from: horizontalContent.id },
+      horizontalContent.id,
+      "right"
+    )
+    expect(shape(movedRight)).toEqual([["chat:main"], ["file:a.ts"], ["view:terminal"]])
+    expect(split(movedRight).axis).toBe("row")
+
+    const vertical = createEditorLayout([chat("main"), file("a.ts"), view("terminal")])
+    const verticalContent = groupsOf(vertical.root)[1]!
+    const movedDown = dropTab(
+      vertical,
+      { surface: view("terminal"), from: verticalContent.id },
+      verticalContent.id,
+      "bottom"
+    )
+    expect(shape(movedDown)).toEqual([["chat:main"], ["file:a.ts"], ["view:terminal"]])
+    expect(split(movedDown).children[1]!.type).toBe("split")
+    expect((split(movedDown).children[1] as EditorSplit).axis).toBe("column")
+  })
+
   it("prunes unavailable tabs without disturbing the other lane", () => {
     const layout = createEditorLayout([chat("main"), file("gone.ts"), view("terminal")])
     const allowed = new Set([chat("main"), view("terminal")].map(sessionSurfaceKey))
@@ -114,7 +148,7 @@ describe("editor layout lanes", () => {
 })
 
 describe("editor layout persistence", () => {
-  it("normalizes old arbitrary groups into chat-left and content-right", () => {
+  it("restores saved arbitrary editor groups", () => {
     localStorage.setItem(`${EDITOR_LAYOUT_STORAGE_PREFIX}s`, JSON.stringify({
       focusedGroupId: "mixed",
       root: {
@@ -129,9 +163,9 @@ describe("editor layout persistence", () => {
       }
     }))
     const layout = loadEditorLayout("s", chat("main"), "main")
-    expect(shape(layout)).toEqual([["chat:main", "chat:side"], ["file:a.ts", "view:terminal"]])
-    expect(split(layout).axis).toBe("row")
-    expect(split(layout).ratios).toEqual([1 / 3, 2 / 3])
+    expect(shape(layout)).toEqual([["file:a.ts", "chat:main"], ["chat:side", "view:terminal"]])
+    expect(split(layout).axis).toBe("column")
+    expect(split(layout).ratios).toEqual([0.5, 0.5])
   })
 
   it("migrates v1 panes and restores a missing live main chat", () => {
