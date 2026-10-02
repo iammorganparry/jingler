@@ -365,9 +365,9 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       // the selection clears the pending target, while its path is known.
       loadPendingAgentDiff: enqueueActions(({ context, enqueue }) => {
         const target = context.pendingAgentTarget
-        // Only a completed edit opens on the diff; an in-flight one opens in
-        // the editor and needs no patch yet.
-        if (target?.completed === true && target.path !== context.selectedPath) {
+        // Follow always shows the live worktree diff; completion only controls
+        // whether the tree and patch need a final refresh.
+        if (target !== null && (!target.completed || target.path !== context.selectedPath)) {
           enqueue.raise({ type: "LOAD_DIFF", path: target.path })
         }
       }),
@@ -382,11 +382,13 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           failure: null,
           pendingDiscard: null,
           pendingAgentTarget: null,
-          viewMode:
-            context.pendingAgentTarget?.completed === true ? ("diff" as const) : ("edit" as const)
+          viewMode: "diff" as const
         }
       }),
-      clearPendingAgentTarget: assign({ pendingAgentTarget: null }),
+      showPendingAgentDiff: assign({
+        pendingAgentTarget: null,
+        viewMode: "diff"
+      }),
       markAgentRefreshRequested: assign(({ context }) => ({
         pendingAgentTarget:
           context.pendingAgentTarget === null
@@ -486,12 +488,16 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         }
       }),
       cancelDiscard: assign({ pendingDiscard: null }),
-      editDraft: assign(({ event }) =>
-        event.type === "EDIT" ? { draft: event.text, failure: null } : {}
-      ),
-      editConflictedDraft: assign(({ event }) =>
-        event.type === "EDIT" ? { draft: event.text } : {}
-      )
+      editDraft: enqueueActions(({ event, enqueue }) => {
+        if (event.type !== "EDIT") return
+        enqueue.assign({ draft: event.text, failure: null })
+        enqueue.raise({ type: "DISABLE_FOLLOW" })
+      }),
+      editConflictedDraft: enqueueActions(({ event, enqueue }) => {
+        if (event.type !== "EDIT") return
+        enqueue.assign({ draft: event.text })
+        enqueue.raise({ type: "DISABLE_FOLLOW" })
+      })
     },
     guards: {
       documentOnly: ({ context }) => context.documentOnly,
@@ -790,7 +796,6 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
           ready: {
             on: {
               LOAD_DIFF: [
-                { guard: "documentOnly" },
                 { guard: "hasCachedDiff", actions: "activateCachedDiff" },
                 { target: "loading", actions: "prepareDiff" }
               ],
@@ -878,8 +883,12 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             }
           ],
           CANCEL_DISCARD: { actions: "cancelDiscard" },
-          START_EDIT: { actions: assign({ viewMode: "edit" }) },
-          SHOW_DIFF: { actions: assign({ viewMode: "diff" }) }
+          START_EDIT: {
+            actions: [assign({ viewMode: "edit" }), raise({ type: "DISABLE_FOLLOW" })]
+          },
+          SHOW_DIFF: {
+            actions: [assign({ viewMode: "diff" }), raise({ type: "DISABLE_FOLLOW" })]
+          }
         },
         states: {
           idle: {
@@ -892,7 +901,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                 },
                 {
                   guard: "pendingAgentTargetIsSelected",
-                  actions: "clearPendingAgentTarget"
+                  actions: ["loadPendingAgentDiff", "showPendingAgentDiff"]
                 },
                 {
                   guard: "pendingAgentTargetCanOpen",
@@ -985,7 +994,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
-                      actions: "clearPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "showPendingAgentDiff"]
                     },
                     {
                       guard: "pendingAgentTargetCanOpen",
@@ -1017,7 +1026,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
-                      actions: "clearPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "showPendingAgentDiff"]
                     },
                     {
                       guard: "pendingAgentTargetCanOpen",
@@ -1062,7 +1071,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
                     },
                     {
                       guard: "pendingAgentTargetIsSelected",
-                      actions: "clearPendingAgentTarget"
+                      actions: ["loadPendingAgentDiff", "showPendingAgentDiff"]
                     },
                     {
                       guard: "pendingAgentTargetCanOpen",

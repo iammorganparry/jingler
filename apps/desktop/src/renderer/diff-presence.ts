@@ -14,8 +14,35 @@ export interface LiveDiffStat extends DiffStat {
   readonly files: number
 }
 
+export type SessionFileDiffs = Readonly<Record<string, Readonly<Record<string, DiffStat>>>>
+
 let diffs: Record<string, LiveDiffStat> = {}
+let fileDiffs: SessionFileDiffs = {}
 const listeners = new Set<() => void>()
+
+export const fileDiffStat = (patch: string): DiffStat => {
+  let added = 0
+  let removed = 0
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added++
+    else if (line.startsWith("-") && !line.startsWith("---")) removed++
+  }
+  return { added, removed }
+}
+
+export const setSessionFileDiff = (sessionId: string, path: string, stat: DiffStat): void => {
+  const session = fileDiffs[sessionId] ?? {}
+  const previous = session[path]
+  if (previous?.added === stat.added && previous.removed === stat.removed) return
+  const nextSession = { ...session }
+  if (stat.added === 0 && stat.removed === 0) delete nextSession[path]
+  else nextSession[path] = stat
+  const next = { ...fileDiffs }
+  if (Object.keys(nextSession).length === 0) delete next[sessionId]
+  else next[sessionId] = nextSession
+  fileDiffs = next
+  for (const listener of listeners) listener()
+}
 
 /** Set (or clear, when empty) a session's live diff totals; notifies subscribers. */
 export const setSessionDiff = (id: string, stat: LiveDiffStat): void => {
@@ -38,8 +65,14 @@ export const setSessionDiff = (id: string, stat: LiveDiffStat): void => {
 }
 
 /** Clear a session's diff (on dispose). */
-export const clearSessionDiff = (id: string): void =>
+export const clearSessionDiff = (id: string): void => {
   setSessionDiff(id, { added: 0, removed: 0, files: 0 })
+  if (fileDiffs[id] === undefined) return
+  const next = { ...fileDiffs }
+  delete next[id]
+  fileDiffs = next
+  for (const listener of listeners) listener()
+}
 
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener)
@@ -52,4 +85,11 @@ export const useSessionDiffs = (): Record<string, LiveDiffStat> =>
     subscribe,
     () => diffs,
     () => diffs
+  )
+
+export const useSessionFileDiffs = (): SessionFileDiffs =>
+  useSyncExternalStore(
+    subscribe,
+    () => fileDiffs,
+    () => fileDiffs
   )

@@ -12,6 +12,7 @@ import {
 import { rpc } from "./rpc-client.js"
 import { listRepositoryFiles } from "./repository-file-list.js"
 import { lruKeysToEvict } from "./registry-eviction.js"
+import { fileDiffStat, setSessionFileDiff } from "./diff-presence.js"
 
 export type FileBrowserActor = ActorRefFrom<FileBrowserMachine>
 
@@ -127,6 +128,21 @@ const releaseFileBrowserActor = (sessionId: string): void => {
 /** Open a path even while the Files tab is unmounted (transcript/quick-open route). */
 export const openSessionFile = (sessionId: string, path: string): void => {
   getFileBrowserActor(sessionId).send({ type: "OPEN", path })
+}
+
+/** Seed a path-owned editor before its tab mounts so the requested mode is not lost. */
+export const openSessionFileSurface = (
+  sessionId: string,
+  worktreePath: string | undefined,
+  path: string,
+  viewMode: "diff" | "edit"
+): void => {
+  const actor = getFileBrowserActor(sessionId, worktreePath, `file:${path}`)
+  actor.send({ type: "OPEN", path })
+  if (viewMode === "diff") {
+    actor.send({ type: "SHOW_DIFF" })
+    actor.send({ type: "REFRESH_DIFF" })
+  }
 }
 
 /** List a path among the session's open files without selecting it. */
@@ -253,20 +269,47 @@ export function useFileBrowser(
     if (worktreePath === undefined) return
     actor.send({ type: "SYNC_WORKTREE", worktreePath })
   }, [actor, worktreePath])
+  useEffect(() => {
+    const path = snapshot.context.diffPath
+    if (path === null) return
+    const tooLarge = snapshot.context.patchTooLarge
+    if (tooLarge !== null) {
+      setSessionFileDiff(sessionId, path, tooLarge)
+      return
+    }
+    if (snapshot.context.patch !== null) {
+      setSessionFileDiff(sessionId, path, fileDiffStat(snapshot.context.patch))
+    }
+  }, [sessionId, snapshot.context.diffPath, snapshot.context.patch, snapshot.context.patchTooLarge])
+  const disableFollow = useCallback(() => {
+    actor.send({ type: "DISABLE_FOLLOW" })
+    if (instanceId !== undefined) getFileBrowserActor(sessionId).send({ type: "DISABLE_FOLLOW" })
+  }, [actor, instanceId, sessionId])
   const activate = useCallback(() => actor.send({ type: "VIEW_ACTIVATED" }), [actor])
-  const open = useCallback((path: string) => actor.send({ type: "OPEN", path }), [actor])
+  const open = useCallback((path: string) => {
+    disableFollow()
+    actor.send({ type: "OPEN", path })
+  }, [actor, disableFollow])
   const close = useCallback((path: string) => actor.send({ type: "CLOSE", path }), [actor])
-  const edit = useCallback((text: string) => actor.send({ type: "EDIT", text }), [actor])
+  const edit = useCallback((text: string) => {
+    disableFollow()
+    actor.send({ type: "EDIT", text })
+  }, [actor, disableFollow])
   const save = useCallback(() => actor.send({ type: "SAVE" }), [actor])
   const refreshConflict = useCallback(() => actor.send({ type: "REFRESH_CONFLICT" }), [actor])
   const reload = useCallback(() => actor.send({ type: "RELOAD" }), [actor])
   const refreshTree = useCallback(() => actor.send({ type: "REFRESH_TREE" }), [actor])
   const confirmDiscard = useCallback(() => actor.send({ type: "CONFIRM_DISCARD" }), [actor])
   const cancelDiscard = useCallback(() => actor.send({ type: "CANCEL_DISCARD" }), [actor])
-  const startEdit = useCallback(() => actor.send({ type: "START_EDIT" }), [actor])
-  const showDiff = useCallback(() => actor.send({ type: "SHOW_DIFF" }), [actor])
+  const startEdit = useCallback(() => {
+    disableFollow()
+    actor.send({ type: "START_EDIT" })
+  }, [actor, disableFollow])
+  const showDiff = useCallback(() => {
+    disableFollow()
+    actor.send({ type: "SHOW_DIFF" })
+  }, [actor, disableFollow])
   const enableFollow = useCallback(() => actor.send({ type: "ENABLE_FOLLOW" }), [actor])
-  const disableFollow = useCallback(() => actor.send({ type: "DISABLE_FOLLOW" }), [actor])
   const followAgentTarget = useCallback(
     (path: string, eventId: string, preview: string | null, completed: boolean) =>
       actor.send({ type: "AGENT_TARGET", path, eventId, preview, completed }),
