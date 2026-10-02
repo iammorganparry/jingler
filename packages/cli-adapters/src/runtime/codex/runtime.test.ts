@@ -92,13 +92,13 @@ describe("native Codex protocol", () => {
       "missing"
     )
   })
-  it("rejects unsupported installed versions", async () => {
+  it("inherits models from newer compatible CLI versions", async () => {
     const entry = await probeCodexEndpoint({
       binary,
-      environment: { ...process.env, CODEX_HOME: "0.152.0" }
+      environment: { ...process.env, CODEX_HOME: "0.154.0" }
     })
-    expect(entry.endpoint.status).toBe("unsupported")
-    expect(entry.models).toEqual([])
+    expect(entry.endpoint).toMatchObject({ status: "ready", version: "0.154.0" })
+    expect(entry.models.map((model) => model.id)).toEqual(["first", "second"])
   })
   it("starts and cancels native login without PI OAuth", async () => {
     const login = await startCodexEndpointLogin({ binary })

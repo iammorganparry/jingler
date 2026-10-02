@@ -206,8 +206,7 @@ export class CodexClient {
     this.send({ id, error: { code: -32601, message } })
   }
   async initialize(): Promise<void> {
-    if ((await readCodexVersion(this.options)) !== CODEX_PROTOCOL_VERSION)
-      throw new Error("Unsupported Codex app-server version")
+    await readCodexVersion(this.options)
     await this.request("initialize", {
       clientInfo: { name: "jingler", title: "Jingler", version: "0.2.1" },
       capabilities: { experimentalApi: true, requestAttestation: false }

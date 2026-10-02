@@ -128,14 +128,34 @@ export const makeProviderConnections = (
     const persist = persistConnection(document)
     const setupLock = yield* Effect.makeSemaphore(1)
     const persistSetup = <E extends { readonly message: string }>(
+      identity: {
+        readonly id: string
+        readonly providerId: string
+        readonly authKind: ProviderConnection["authKind"]
+        readonly targetId: string
+      },
       setup: Effect.Effect<ProviderConnection, E>
     ) => setupLock.withPermits(1)(
-      Effect.acquireUseRelease(
-        brokerCall(setup),
-        persist,
-        (connection, exit) => Exit.isSuccess(exit)
-          ? Effect.void
-          : brokerCall(options.broker.delete(connection.id)).pipe(Effect.orDie)
+      options.broker.list.pipe(
+        Effect.flatMap((connections) => connections.some((connection) =>
+          connection.id !== identity.id &&
+          connection.authKind === identity.authKind &&
+          connection.targetId === identity.targetId &&
+          (identity.authKind !== "api-key" || connection.providerId === identity.providerId)
+        )
+          ? Effect.fail(new ProviderConnectionsError({
+              message: "This provider connection already exists on this target"
+            }))
+          : Effect.void),
+        Effect.zipRight(
+          Effect.acquireUseRelease(
+            brokerCall(setup),
+            persist,
+            (connection, exit) => Exit.isSuccess(exit)
+              ? Effect.void
+              : brokerCall(options.broker.delete(connection.id)).pipe(Effect.orDie)
+          )
+        )
       )
     )
     const refreshCatalog = <A, E>(effect: Effect.Effect<A, E>) =>
@@ -157,9 +177,15 @@ export const makeProviderConnections = (
       status: options.broker.list,
       resolveCredential: (id) => brokerCall(options.broker.resolve(id)),
       connectClaudeToken: (input) =>
-        persistSetup(options.broker.connectClaudeToken(input)).pipe(
-          refreshCatalog
-        ),
+        persistSetup(
+          {
+            id: input.id,
+            providerId: "anthropic",
+            authKind: "claude-setup-token",
+            targetId: input.targetId
+          },
+          options.broker.connectClaudeToken(input)
+        ).pipe(refreshCatalog),
       startCodexLogin: (input) =>
         Effect.gen(function* () {
           const connectionId = yield* Schema.decodeUnknown(ProviderConnectionId)(input.id).pipe(
@@ -167,6 +193,12 @@ export const makeProviderConnections = (
           )
           const interaction = options.codexInteraction(input.method)
           return yield* persistSetup(
+            {
+              id: input.id,
+              providerId: "openai-codex",
+              authKind: "openai-codex-oauth",
+              targetId: input.targetId
+            },
             options.broker.startCodexLogin({
               id: input.id,
               targetId: input.targetId,
@@ -201,6 +233,12 @@ export const makeProviderConnections = (
       cancelLogin: (id) => options.broker.cancelLogin(id),
       setApiKey: (input) =>
         persistSetup(
+          {
+            id: input.id,
+            providerId: input.providerId,
+            authKind: "api-key",
+            targetId: input.targetId
+          },
           options.broker.setApiKey({
             id: input.id,
             provider: input.providerId,

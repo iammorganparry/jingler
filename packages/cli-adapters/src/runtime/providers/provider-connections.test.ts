@@ -240,6 +240,21 @@ describe("ProviderConnections", () => {
       targetId: "desktop"
     }))
 
+    await expect(Effect.runPromise(service.connectClaudeToken({
+      id: "claude-duplicate",
+      token: "sk-ant-oat-another-fixture-value",
+      targetId: "desktop"
+    }))).rejects.toMatchObject({
+      message: "This provider connection already exists on this target"
+    })
+    await expect(Effect.runPromise(service.startCodexLogin({
+      id: "codex-duplicate",
+      targetId: "desktop",
+      method: "browser"
+    }))).rejects.toMatchObject({
+      message: "This provider connection already exists on this target"
+    })
+
     expect(claude.authKind).toBe("claude-setup-token")
     expect(codex.authKind).toBe("openai-codex-oauth")
     expect(loginEvent).toMatchObject({
