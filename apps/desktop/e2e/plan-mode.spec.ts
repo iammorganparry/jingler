@@ -46,7 +46,7 @@ const planEditorTab = (launched: LaunchedApp) =>
 const ensurePlanTab = async (launched: LaunchedApp) => {
   const tab = planEditorTab(launched)
   if (await tab.count() === 0) {
-    await launched.window.getByRole("button", { name: "New tab" }).click()
+    await launched.window.getByRole("button", { name: "New tab" }).first().click()
     await launched.window.getByTestId("new-tab-option-plan").click()
   }
   await expect(tab).toBeVisible({ timeout: 20_000 })
@@ -130,7 +130,7 @@ test("projects explicit deliverable stages without treating overview headings as
   await approveReview(launched)
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toHaveCount(0)
 
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   const transcriptCard = launched.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toBeVisible()
   await expect(transcriptCard.locator('[data-testid^="plan-approval-stage-"]')).toHaveCount(2)
@@ -213,7 +213,7 @@ test("selection comments reach the agent and the revision diff shows what change
   await expect(changes).toHaveCount(0)
 
   await approveReview(launched)
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -240,8 +240,9 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   const viewport = canvas.locator("xpath=..")
   const point = await viewport.evaluate((element) => {
     const box = element.getBoundingClientRect()
-    for (let y = box.bottom - 8; y > box.top; y -= 8) {
-      for (let x = box.left + 8; x < box.right; x += 8) {
+    // Keep the first drag movement inside the viewport so it can capture the pointer.
+    for (let y = box.bottom - 8; y > box.top + 20; y -= 8) {
+      for (let x = box.left + 68; x < box.right; x += 8) {
         const target = document.elementFromPoint(x, y)
         if (target !== null && element.contains(target) && target.closest("[role=link]") === null) return { x, y }
       }
@@ -298,7 +299,7 @@ test("a new review in the same chat is presented and can be approved", async ({
   await planTab.click()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
   await approveReview(launched)
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 
@@ -314,7 +315,7 @@ test("a new review in the same chat is presented and can be approved", async ({
   await expect(review(launched).getByRole("button", { name: "Approve", exact: true }))
     .toBeVisible({ timeout: 20_000 })
   await approveReview(launched)
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect.poll(() =>
     launched.window.getByText("Implemented and verified the approved plan.").count(),
   { timeout: 30_000 }).toBeGreaterThan(1)
@@ -341,11 +342,11 @@ test("closing the Plan tab keeps a pending review approvable", async ({
   await expect(launched.window.getByText("Implemented and verified the approved plan."))
     .toHaveCount(0)
 
-  await launched.window.getByRole("button", { name: "New tab" }).click()
+  await launched.window.getByRole("button", { name: "New tab" }).first().click()
   await launched.window.getByTestId("new-tab-option-plan").click()
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -367,7 +368,7 @@ test("missing PLAN.md during execution fails closed without rejecting progress",
   await expect(review(launched)).toBeVisible()
   await approveReview(launched)
 
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByRole("tab", { name: "Plan 1/2" })).toBeVisible({
     timeout: 20_000
   })
@@ -416,7 +417,7 @@ test("revises one stage approach through native review feedback", async ({
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)
 
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
   await expect(launched.window.getByText("2/2")).toBeVisible({ timeout: 20_000 })
@@ -432,8 +433,9 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
   await expect(appShell(launched.window)).toBeVisible()
   await startPlanReview(launched)
 
-  await ensurePlanTab(launched)
-  await launched.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await openPlanTab(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeVisible()
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
   await composer.fill("Keep the existing token format")
   await composer.press("Enter")
@@ -476,7 +478,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => reviewText(reopened)).toContain("Implement the auth change")
 
-  await reopened.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await reopened.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("0/2")).toBeVisible({ timeout: 20_000 })
   const transcriptCard = reopened.window.getByTestId("plannotator-transcript-card")
   await expect(transcriptCard).toContainText("Implement the auth change")
@@ -488,7 +490,7 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   // The resumed review must still be decidable over the native channel.
   await planTab.click()
   await approveReview(reopened)
-  await reopened.window.getByRole("button", { name: "[[plan]] replace auth", exact: true }).click()
+  await reopened.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
   await expect(reopened.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
@@ -506,7 +508,8 @@ test("closing a chat removes its plan review", async ({ launchApp }) => {
   await planTab.click()
   await expect(review(launched)).toBeVisible()
 
-  await launched.window.getByRole("button", { name: "Close [[plan]] replace auth" }).click()
+  await launched.window.getByTestId("session-tree-chat-s_plannotator_chat").click({ button: "right" })
+  await launched.window.getByRole("menuitem", { name: "Close chat", exact: true }).click()
   await expect(review(launched)).toHaveCount(0, { timeout: 20_000 })
 })
 

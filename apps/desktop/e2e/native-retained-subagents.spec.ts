@@ -98,7 +98,7 @@ const activeChild = (window: Page) =>
   window.getByRole("button", { name: activeWorker }).first()
 
 const openPreviousChild = async (window: Page) => {
-  await window.getByRole("button", { name: "Previous chats" }).click()
+  await window.getByRole("button", { name: "Previous subagents" }).click()
   const previous = window.getByRole("menuitem", { name: previousWorker }).first()
   await expect(previous).toBeVisible({ timeout: 30_000 })
   await previous.click()

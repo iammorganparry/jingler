@@ -56,7 +56,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
   // parked. Before this change the run below was refused; now it streams.
   await window.getByRole("button", { name: "New tab" }).click()
   await window.getByTestId("new-tab-option-chat").click()
-  await expect(window.getByTitle("2. Chat 2")).toHaveAttribute("aria-current", "page")
+  await expect(window.getByRole("tab", { name: "Chat 2", exact: true })).toHaveAttribute("aria-selected", "true")
 
   const composer2 = window.getByPlaceholder("Message the agent…")
   await composer2.click()
@@ -78,7 +78,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
   // (Sending a prompt renames the chat to its first line, so the tab now reads
   // "…refund endpoint", not "Chat 1".)
   await window
-    .getByRole("button", { name: "Add rate limiting to the refund endpoint.", exact: true })
+    .getByRole("tab", { name: "Add rate limiting to the refund endpoint.", exact: true })
     .click()
   await expect(window.getByText("Approval needed · run a command")).toBeVisible()
   await expect(window.getByRole("button", { name: /Allow once/ })).toBeVisible()
@@ -89,7 +89,7 @@ test("two chats in one session run their agents concurrently", async ({ launchAp
 
   // Chat 2 is still parked at its own gate, untouched by chat 1 finishing.
   await window
-    .getByRole("button", { name: "Add rate limiting to the settings endpoint.", exact: true })
+    .getByRole("tab", { name: "Add rate limiting to the settings endpoint.", exact: true })
     .click()
   await expect(window.getByText("Approval needed · run a command")).toBeVisible()
 })

@@ -68,7 +68,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   // Plan is available from plan existence alone — no review or plan mode required.
   const planTab = launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first()
   if (await planTab.count() === 0) {
-    await launched.window.getByRole("button", { name: "New tab" }).click()
+    await launched.window.getByRole("button", { name: "New tab" }).first().click()
     await launched.window.getByTestId("new-tab-option-plan").click()
   }
   await expect(planTab).toBeVisible({ timeout: 20_000 })

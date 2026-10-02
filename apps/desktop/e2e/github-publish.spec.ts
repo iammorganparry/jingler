@@ -71,7 +71,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
     resumeFrom: "verifying-branch"
   })
 
-  await window.getByRole("button", { name: "Chat 1", exact: true }).click()
+  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("Implement deterministic publishing")
   await composer.press("Enter")

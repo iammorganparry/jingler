@@ -381,20 +381,25 @@ export function FileBrowserView({
   )
 
   useEffect(() => {
-    if (!browser.followEnabled || agentFileActivity === null || normalizedAgentTarget === null) return
+    if (path !== undefined || !browser.followEnabled || agentFileActivity === null || normalizedAgentTarget === null) return
     browser.followAgentTarget(
       normalizedAgentTarget,
       agentFileActivity.eventId,
       agentFileActivity.preview,
       agentFileActivity.phase === "completed"
     )
-    openSessionFileDiff(session.id, session.worktreePath, normalizedAgentTarget)
+    openSessionFileDiff(session.id, session.worktreePath, normalizedAgentTarget, {
+      eventId: agentFileActivity.eventId,
+      preview: agentFileActivity.preview,
+      completed: agentFileActivity.phase === "completed"
+    })
     onOpenPath?.(normalizedAgentTarget)
   }, [
     agentFileActivity,
     browser.followAgentTarget,
     browser.followEnabled,
     normalizedAgentTarget,
+    path,
     onOpenPath,
     session.id,
     session.worktreePath
@@ -1024,7 +1029,6 @@ function TextFileEditor({
         selection={selection}
         onSelectionChange={onSelectionChange}
         onChange={({ contents }) => browser.edit(contents)}
-        onComplete={({ contents }) => browser.edit(contents)}
         scrollRequest={debugLine === null ? undefined : {
           path: payload.path,
           revision: debugRevision,

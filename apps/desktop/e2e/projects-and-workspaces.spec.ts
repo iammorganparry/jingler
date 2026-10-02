@@ -300,7 +300,7 @@ test("adds a project creates a workspace selects capabilities and completes a Pl
   await launched.window.getByTestId("editor-tab-view-plan").getByRole("tab").first().click()
   await launched.window.getByTestId("plan-review")
     .getByRole("button", { name: "Approve", exact: true }).click()
-  await launched.window.getByRole("button", {
+  await launched.window.getByRole("tab", {
     name: "[[plan]] refactor auth to a TokenStore", exact: true
   }).click()
   await expect(

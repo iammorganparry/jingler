@@ -510,12 +510,19 @@ test("refreshes the repository tree and follows a moved file to its destination"
       .getByTestId("editor-tab-file-src/settings/config.ts").getByRole("tab")
   ).toBeVisible({ timeout: 20_000 })
   await expect(
-    fileBody(window, "src/settings/config.ts").getByRole("textbox", {
-      name: "src/settings/config.ts"
+    fileBody(window, "src/settings/config.ts").getByRole("region", {
+      name: "src/settings/config.ts changes"
     })
   ).toContainText("export const mode = 'modern'")
+  await expect(
+    fileBody(window, "src/settings/config.ts").getByRole("button", {
+      name: "Show diff for src/settings/config.ts"
+    })
+  ).toHaveAttribute("aria-pressed", "true")
 
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   const tree = await explorerTree(window)
+  await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
   await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
   await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
@@ -543,7 +550,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
   await composer.press("Enter")
 
-  const followed = window.locator('[data-follow-agent-change="follow-diff-1"]')
+  const followed = window.locator('[data-follow-agent-change="follow-diff-1"]').filter({ visible: true })
   await expect(followed).toBeVisible({ timeout: 20_000 })
   await expect(window.getByRole("region", { name: "src/config.ts changes" })).toBeVisible()
   await expect(followed.getByText("export const mode = 'modern'", { exact: true })).toBeVisible()
