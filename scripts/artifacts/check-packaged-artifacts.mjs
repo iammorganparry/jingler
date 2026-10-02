@@ -43,6 +43,9 @@ const deviceSource = execFileSync(
 )
 const auditPackagedWorker = () => {
   if (!existsSync(packagedWorker)) return []
+  const issues = readFileSync(packagedWorker, "utf8").includes("src/bundled-oauth.ts")
+    ? []
+    : ["desktop subagent process worker does not register bundled OAuth flows"]
   const isolatedRoot = mkdtempSync(join(tmpdir(), "jingler-worker-smoke-"))
   const isolatedWorker = join(isolatedRoot, "worker.mjs")
   copyFileSync(packagedWorker, isolatedWorker)
@@ -53,14 +56,15 @@ const auditPackagedWorker = () => {
       timeout: 10_000
     }).trim()
     const message = JSON.parse(output)
-    return message.type === "fatal" && message.error === "Child session is not initialized"
-      ? []
-      : ["desktop subagent process worker returned an unexpected smoke response"]
+    if (message.type !== "fatal" || message.error !== "Child session is not initialized") {
+      issues.push("desktop subagent process worker returned an unexpected smoke response")
+    }
   } catch (cause) {
-    return [`desktop subagent process worker failed its smoke run: ${cause.message}`]
+    issues.push(`desktop subagent process worker failed its smoke run: ${cause.message}`)
   } finally {
     rmSync(isolatedRoot, { recursive: true, force: true })
   }
+  return issues
 }
 
 const requiredDeviceEntries = [

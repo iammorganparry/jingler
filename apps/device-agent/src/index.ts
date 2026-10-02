@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises"
 import { createConnection } from "node:net"
 import { join } from "node:path"
-import { registerBunOAuthFlows } from "@earendil-works/pi-ai/bun-oauth"
 import { RemoteSessionCommand as RemoteSessionCommandSchema } from "@jingler/core"
 import { Schema } from "effect"
+import "./bundled-oauth.js"
 import { installDeviceService, removeDeviceService } from "./device-service.js"
 import { makeLiveDeviceSessionCommandExecutor } from "./device-executor.js"
 import { runManagedCommand } from "./managed-command.js"
@@ -17,11 +17,6 @@ import {
   rotateLocalDeviceKey,
   serveDevice
 } from "./runtime.js"
-
-// pi-ai deliberately keeps OAuth implementations behind bundler-opaque
-// imports. The device agent is a standalone bundle, so register the package's
-// static loaders before ModelRuntime can resolve a subscription credential.
-registerBunOAuthFlows()
 
 // Pin the brokered child-tool extension before any remote session creates an
 // embedded parent; process-isolated children inherit this exact packaged path.

@@ -53,6 +53,7 @@ await build({
   format: "esm",
   target: "node24",
   outfile: resolve(payload, "runtime-assets/jingler-subagent-process-worker.mjs"),
+  inject: [resolve(import.meta.dirname, "../src/bundled-oauth.ts")],
   banner: {
     js: "import { createRequire as __jinglerCreateRequire } from \"node:module\"; const require = __jinglerCreateRequire(import.meta.url);"
   }
