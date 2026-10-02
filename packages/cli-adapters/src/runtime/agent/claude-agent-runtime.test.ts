@@ -238,6 +238,30 @@ console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:900
     expect(events.at(-1)).toMatchObject({ _tag: "Done", tokens: 909000 })
   })
 
+  it.each(["assistant", "result", "iteration"] as const)("validates %s usage at the JSON boundary", async (source) => {
+    const invalid = { input_tokens: "1000", output_tokens: 2 }
+    const record = source === "assistant"
+      ? { type: "assistant", message: { content: [], usage: invalid } }
+      : { type: "result", is_error: false, usage: source === "iteration" ? { iterations: [invalid] } : invalid }
+    const binary = await executable(`process.stdin.resume(); console.log(${JSON.stringify(JSON.stringify(record))})`)
+    await expect(Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )).rejects.toThrow("input_tokens")
+  })
+
+  it("accepts omitted and nullable cache counters without fabricating tokens", async () => {
+    const binary = await executable(`
+process.stdin.resume()
+console.log(JSON.stringify({type:"assistant",message:{content:[],usage:{input_tokens:7,output_tokens:2,cache_read_input_tokens:null}}}))
+console.log(JSON.stringify({type:"result",is_error:false,usage:{input_tokens:7,output_tokens:2,cache_creation_input_tokens:null}}))
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary }).run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events).toContainEqual({ _tag: "Usage", tokens: 9 })
+    expect(events.at(-1)).toEqual({ _tag: "Done", tokens: 9, costUsd: 0 })
+  })
+
   it("reports context from the turn's last request, not the sum over every request", async () => {
     // Shape recorded from a real 4-request turn: the top level sums them all,
     // \`iterations\` holds only the final one.

@@ -5,7 +5,7 @@ import {
   type AgentRunSpec,
   type StreamEvent
 } from "@jingler/core"
-import { Effect, Exit, Scope, Stream } from "effect"
+import { Effect, Exit, Schema, Scope, Stream } from "effect"
 import { isRecord } from "effect/Predicate"
 import {
   AgentRuntimeError,
@@ -18,6 +18,7 @@ import { trackChild } from "../../child-registry.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
+import { ClaudeRequestUsage, ClaudeTurnUsage, claudeUsageTokens } from "../providers/claude-cli-usage.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "./native-runtime-tools.js"
 
 export interface ClaudeAgentRuntimeOptions extends NativeRuntimeToolsOptions {
@@ -120,8 +121,8 @@ const inputLine = (spec: AgentRunSpec, sessionId: string): string => JSON.string
 const invalidContinuation =
   /no conversation found|session[^\n]*not found|invalid[^\n]*session/iu
 
-const numberOf = (value: unknown): number =>
-  typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0
+const decodeRequestUsage = Schema.decodeUnknownSync(ClaudeRequestUsage)
+const decodeTurnUsage = Schema.decodeUnknownSync(ClaudeTurnUsage)
 
 /**
  * The usage of the turn's LAST model request — the one that says how full the
@@ -133,16 +134,12 @@ const numberOf = (value: unknown): number =>
  * request under `usage.iterations`. Without it, use assistant-message usage,
  * never the cumulative result: repeated cached reads are spend, not occupancy.
  */
-export const lastRequestUsage = (usage: Record<string, unknown>): Record<string, unknown> | null => {
-  const iterations = usage.iterations
-  const last = Array.isArray(iterations) ? iterations.at(-1) : undefined
-  return isRecord(last) ? last : null
-}
+export const lastRequestUsage = (usage: ClaudeTurnUsage): ClaudeRequestUsage | null =>
+  usage.iterations?.at(-1) ?? null
 
-const usageEvent = (usage: Record<string, unknown>): StreamEvent => ({
+const usageEvent = (usage: ClaudeRequestUsage): StreamEvent => ({
   _tag: "Usage",
-  tokens: numberOf(usage.input_tokens) + numberOf(usage.cache_read_input_tokens) +
-    numberOf(usage.cache_creation_input_tokens) + numberOf(usage.output_tokens)
+  tokens: claudeUsageTokens(usage)
 })
 
 const contentEvents = (value: unknown): ReadonlyArray<StreamEvent> => {
@@ -195,7 +192,7 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   if (value.type === "stream_event") return streamEvents(value)
   if (value.type === "assistant") {
     const usage = value.parent_tool_use_id == null && isRecord(value.message) && isRecord(value.message.usage)
-      ? [usageEvent(value.message.usage)]
+      ? [usageEvent(decodeRequestUsage(value.message.usage))]
       : []
     return [...contentEvents(value), ...usage]
   }
@@ -210,15 +207,12 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
     }]
   }
   if (!isRecord(value.usage)) throw new Error("Claude CLI result is missing usage")
-  const input = numberOf(value.usage.input_tokens)
-  const output = numberOf(value.usage.output_tokens)
-  const cacheRead = numberOf(value.usage.cache_read_input_tokens)
-  const cacheWrite = numberOf(value.usage.cache_creation_input_tokens)
-  const last = lastRequestUsage(value.usage)
+  const usage = decodeTurnUsage(value.usage)
+  const last = lastRequestUsage(usage)
   return [
     ...(last === null ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
-    { _tag: "Done", tokens: input + output + cacheRead + cacheWrite, costUsd: 0 }
+    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: 0 }
   ]
 }
 
