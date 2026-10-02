@@ -17,6 +17,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
   memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -286,19 +287,19 @@ function useDropZone(
   const [edge, setEdge] = useState<DropEdge | null>(null)
   const [rejected, setRejected] = useState(false)
   const edgeFor = (_e: DragEvent<HTMLElement>): DropEdge => fixedEdge ?? "center"
+  const clear = useCallback(() => {
+    setEdge(null)
+    setRejected(false)
+  }, [])
   useEffect(() => {
     if (edge === null) return
-    const clear = () => {
-      setEdge(null)
-      setRejected(false)
-    }
     window.addEventListener("dragend", clear)
     window.addEventListener("drop", clear)
     return () => {
       window.removeEventListener("dragend", clear)
       window.removeEventListener("drop", clear)
     }
-  }, [edge])
+  }, [clear, edge])
   const rejectsFile = (e: DragEvent<HTMLElement>) =>
     rejectFiles && e.dataTransfer.types.includes(editorFileMime)
   const handlers = {
@@ -314,15 +315,11 @@ function useDropZone(
     },
     onDragLeave: (e: DragEvent<HTMLElement>) => {
       if (fixedEdge) e.stopPropagation()
-      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-        setEdge(null)
-        setRejected(false)
-      }
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) clear()
     },
     onDrop: (e: DragEvent<HTMLElement>) => {
       const drag = readDrag(e, mime)
-      setEdge(null)
-      setRejected(false)
+      clear()
       if (!drag) return
       if (fixedEdge) e.stopPropagation()
       e.preventDefault()
@@ -342,14 +339,7 @@ function useDropZone(
       )}
     />
   ) : null
-  return {
-    handlers,
-    overlay,
-    clear: () => {
-      setEdge(null)
-      setRejected(false)
-    }
-  }
+  return { handlers, overlay, clear }
 }
 
 function EmptyEditor({ mime, api, children }: { mime: string; api: Api; children: ReactNode }) {
