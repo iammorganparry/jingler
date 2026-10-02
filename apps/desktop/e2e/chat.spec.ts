@@ -962,7 +962,7 @@ test("a merged PR badges its linked session but never archives it", async ({ lau
  * on the floor. It must now report where it is on the button, and be watchable in
  * a live subagent tab like any other agent.
  */
-test("a running adversarial review reports its phase and appears as a tab", async ({
+test("an adversarial review runs beside an active conversation and appears as a tab", async ({
   launchApp
 }) => {
   const { window } = await launchApp({
@@ -986,6 +986,13 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
   })
   await expect(appShell(window)).toBeVisible()
 
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[queue-hold]] keep the planning chat active during review")
+  await composer.press("Enter")
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
+    timeout: 15_000
+  })
+
   // The preview dock covers the right rail, hiding the review button.
   // Collapse it only IF it's open: its visibility persists in localStorage across
   // runs, so an unconditional toggle opens it whenever the last run left it shut.
@@ -1007,8 +1014,7 @@ test("a running adversarial review reports its phase and appears as a tab", asyn
     window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   ).toBeVisible({ timeout: 20_000 })
 
-  // …and the reviewer is watchable from the chat row, mid-run.
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
+  // …and the reviewer is watchable in the still-visible conversation, mid-run.
   await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
 })
 
