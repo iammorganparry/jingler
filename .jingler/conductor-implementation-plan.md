@@ -6,7 +6,7 @@ Status: operator authorized implementation with “Lets implement”. Review com
 
 Implement comparison items 1–4 in order: approved project setup/run/cleanup; local workspace ports and preview; code restore points; saved desktop routines.
 
-The operator selected **this desktop** and **scheduled triggers**, with manual Run now. No webhook server, cloud routine runner, main-checkout testing or multiplayer. Workspace features start with isolated local worktrees; unsupported remote/direct actions must be disabled explicitly, never executed locally as a fallback.
+The operator selected **this desktop** and **scheduled triggers**, with manual Run now. They also selected **opt-in checkpoint-safe mode**: normal workspaces retain current parallel behavior by default; enabling safe mode requires quiescence and blocks unsupported overlapping/delegated execution only in that mode. Scheduled routines use safe mode. No webhook server, cloud routine runner, main-checkout testing or multiplayer. Workspace features start with isolated local worktrees; unsupported remote/direct actions must be disabled explicitly, never executed locally as a fallback.
 
 Proposed safe schedule defaults for review: no catch-up while Jingler is closed; skip overlapping runs; retain missed/skipped history. No background daemon. Closing Jingler stops its runs; a restart marks unfinished runs interrupted rather than restarting them invisibly.
 
@@ -124,7 +124,9 @@ Fake-clock tests cover long delays, invalid intervals, suspend/resume, missed/ov
 
 Phase 1 writer reports 32 focused tests, affected typechecks and built Electron `workspace-workflow.spec.ts` passed. These prove the happy workflow, not full safety acceptance. Parent reinspection still requires no-follow destination copying, truly exclusive lifecycle ownership/token validation, bounded process-group wait including an already-exited leader, and retaining activity until the group is stopped. Fixes and regression tests are pending; phase 1 is NOT complete.
 
-Read-only workers returned untested proposals for port allocation, Git checkpoint capture and scheduling logic. They are NOT applied or shipped; phases 2–4 remain unimplemented. Candidate artifact references and parent caveats are in `.jingler/workspace-automation-preflight.md`.
+Read-only workers returned untested proposals for port allocation, Git checkpoint capture and scheduling logic. They are NOT applied or shipped. Candidate artifact references and parent caveats are in `.jingler/workspace-automation-preflight.md`.
+
+Saved WIP foundation in local commit `9f66f87d` (not pushed/released) to enable clean managed worktrees. Four independent mutation lanes are now running: phase1 safety and phase2 ports via codex-exec-writer after native launch timeout, phase3 checkpoints and phase4 routines via native worker. Parent will integrate verified lane commits in dependency order, resolve shared-file conflicts, then run full gates. Mission `97e6ba17-f6d3-4d4b-803f-cbf002b9b607` keeps completion active. No phase is considered complete yet.
 
 ## Delivery and verification
 
