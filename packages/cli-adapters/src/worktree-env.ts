@@ -1,5 +1,4 @@
 import { delimiter, isAbsolute, relative, resolve, sep } from "node:path"
-
 /**
  * Strip the PARENT process's toolchain configuration out of a child's
  * environment.

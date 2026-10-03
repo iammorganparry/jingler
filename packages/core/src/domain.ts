@@ -432,8 +432,21 @@ export const ProjectRunCommand = Schema.Struct({
 });
 export type ProjectRunCommand = Schema.Schema.Type<typeof ProjectRunCommand>;
 
+export const WorkspacePortConfig = Schema.Struct({
+  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
+  extras: Schema.Array(Schema.Struct({ name: Schema.String, start: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) })),
+  previewUrl: Schema.optional(Schema.String),
+});
+export type WorkspacePortConfig = Schema.Schema.Type<typeof WorkspacePortConfig>;
+export const WorkspacePorts = Schema.Struct({
+  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
+  extras: Schema.Record({ key: Schema.String, value: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) }),
+});
+export type WorkspacePorts = Schema.Schema.Type<typeof WorkspacePorts>;
+
 /** Machine-local commands and ignored files explicitly approved by the operator. */
 export const ProjectWorkflow = Schema.Struct({
+  ports: Schema.optional(WorkspacePortConfig),
   setup: Schema.optional(Schema.String),
   cleanup: Schema.optional(Schema.String),
   runs: Schema.Array(ProjectRunCommand),
@@ -558,6 +571,9 @@ export const PublishCheckpoint = Schema.Struct({
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
 export const Session = Schema.Struct({
+  /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
+  workspacePorts: Schema.optional(WorkspacePorts),
   id: Schema.String,
   /** Durable project identity. Absent on sessions created before Projects existed. */
   projectId: Schema.optional(Schema.String),
@@ -703,6 +719,7 @@ export const Session = Schema.Struct({
   baseBranch: Schema.optional(Schema.String),
   /** Durable setup/cleanup gate for machine-local workspace automation. */
   workspaceLifecycle: Schema.optional(WorkspaceLifecycle),
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Legacy single-chat mode and allowlist aliases retained during rolling migration. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),

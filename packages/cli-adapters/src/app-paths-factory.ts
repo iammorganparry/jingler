@@ -20,6 +20,7 @@ export const makeAppPaths = (
   mcpConfigFile: join(root, "mcp.json"),
   sessionsFile: join(root, "sessions.json"),
   projectsFile: join(root, "projects.json"),
+  routinesFile: join(root, "routines.json"),
   worktreesDir: join(root, "worktrees"),
   transcriptsDir: join(root, "transcripts"),
   reviewsDir: join(root, "reviews"),

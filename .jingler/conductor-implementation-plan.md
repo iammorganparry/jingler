@@ -128,6 +128,8 @@ Read-only workers returned untested proposals for port allocation, Git checkpoin
 
 Saved WIP foundation in local commit `9f66f87d` (not pushed/released) to enable clean managed worktrees. Four independent mutation lanes are now running: phase1 safety and phase2 ports via codex-exec-writer after native launch timeout, phase3 checkpoints and phase4 routines via native worker. Parent will integrate verified lane commits in dependency order, resolve shared-file conflicts, then run full gates. Mission `97e6ba17-f6d3-4d4b-803f-cbf002b9b607` keeps completion active. No phase is considered complete yet.
 
+Verified integration contract from phase3: optional `Session.checkpointSafeMode?: boolean`, default false. Routines persist true before calling `AgentRunner.prompt`. The shared runner uses `acquireCheckpointedTurn(session, checkpointRoot): Promise<WorkspaceActivity>`; capture failures surface Failed, not silent bypass. `WorkspaceCheckpointService.Default` provides setMode/capture/list/preview/restore. Parent relayed this to phase4. Safety lane owns the closure-token API; parent resolves combined method signatures and re-runs admission races after merging.
+
 ## Delivery and verification
 
 | Phase | Rough engineer-hours including focused tests and e2e |

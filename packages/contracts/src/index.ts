@@ -1,5 +1,8 @@
 import { NativeEndpointLogin } from "@jingler/core"
 import {
+  RoutineInput,
+  RoutineDocument,
+  RoutineRun,
   AdversarialReview,
   ArchiveReason,
   AssetFileEntry,
@@ -69,6 +72,8 @@ import {
   ProjectDirectoryListing,
   ProjectRunCommand,
   WorkspaceRunState,
+  WorkspaceCheckpoint,
+  WorkspaceCheckpointPreview,
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
@@ -247,6 +252,12 @@ export const AssetHover = Schema.Union(
 export type AssetHover = Schema.Schema.Type<typeof AssetHover>
 
 export class JinglerCoreRpcs extends RpcGroup.make(
+  Rpc.make("Routines.list", { success: RoutineDocument, error: GitError }),
+  Rpc.make("Routines.save", { success: RoutineDocument, error: GitError, payload: { id: Schema.optional(Schema.String), input: RoutineInput } }),
+  Rpc.make("Routines.enable", { success: RoutineDocument, error: GitError, payload: { id: Schema.String, enabled: Schema.Boolean } }),
+  Rpc.make("Routines.delete", { success: RoutineDocument, error: GitError, payload: { id: Schema.String } }),
+  Rpc.make("Routines.runNow", { success: RoutineRun, error: GitError, payload: { id: Schema.String } }),
+  Rpc.make("Routines.cancel", { success: RoutineDocument, error: GitError, payload: { runId: Schema.String } }),
   Rpc.make("RuntimeDiagnostics.get", {
     success: Schema.NullOr(RuntimeDiagnosticSnapshot),
     payload: { runId: Schema.String }
@@ -560,6 +571,27 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       copyFiles: Schema.Array(Schema.String),
       approve: Schema.Boolean
     }
+  }),
+
+  Rpc.make("WorkspaceCheckpoints.setMode", {
+    success: Session, error: GitError,
+    payload: { sessionId: Schema.String, enabled: Schema.Boolean }
+  }),
+  Rpc.make("WorkspaceCheckpoints.list", {
+    success: Schema.Array(WorkspaceCheckpoint), error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.capture", {
+    success: WorkspaceCheckpoint, error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.preview", {
+    success: WorkspaceCheckpointPreview, error: GitError,
+    payload: { sessionId: Schema.String, checkpointId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.restore", {
+    success: WorkspaceCheckpoint, error: GitError,
+    payload: { sessionId: Schema.String, checkpointId: Schema.String, token: Schema.String }
   }),
 
   Rpc.make("WorkspaceWorkflow.retrySetup", {
