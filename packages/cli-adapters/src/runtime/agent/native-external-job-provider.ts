@@ -478,7 +478,7 @@ export const makeNativeExternalJobProvider = (
         code: "binding-mismatch"
       })
     }
-    let workspaceLease
+    let workspaceLease: ReturnType<typeof acquireWorkspaceActivity>
     try {
       workspaceLease = acquireWorkspaceActivity(binding.spec.sessionId, `native-child:${input.runId}`)
     } catch (cause) {
