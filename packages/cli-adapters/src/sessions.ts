@@ -19,6 +19,7 @@ import type {
   RuntimeContinuation,
   Session,
   SettledSessionStatus,
+  WorkspaceLifecycle,
   WorkspaceMode
 } from "@jingler/core"
 import {
@@ -723,7 +724,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: workspace.path,
             workspaceMode,
             repoPath: workspace.repoPath,
-            baseBranch: input.baseBranch
+            baseBranch: input.baseBranch,
+            ...propertiesWhen(
+              workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+            )
           })
 
           if (input.useWorktree === false) {
@@ -912,7 +917,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.pr.baseRefName
+            baseBranch: input.pr.baseRefName,
+            ...propertiesWhen(
+              input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+            )
           }
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -1041,7 +1050,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch
+            baseBranch: input.baseBranch,
+            ...propertiesWhen(
+              input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+            )
           }
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -1776,6 +1789,30 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
+        update(id, (session) => ({ ...session, workspaceLifecycle: lifecycle }))
+
+      const reconcileInterruptedWorkspaceLifecycles = (): Effect.Effect<void, GitError, PersistEnv> =>
+        atomically(Effect.gen(function* () {
+          const sessions = yield* readAll()
+          const now = new Date().toISOString()
+          let changed = false
+          const reconciled = sessions.map((session) => {
+            const status = session.workspaceLifecycle?.status
+            if (status !== "setup-running" && status !== "cleanup-running") return session
+            changed = true
+            return {
+              ...session,
+              workspaceLifecycle: {
+                status: status === "setup-running" ? "setup-failed" as const : "cleanup-failed" as const,
+                updatedAt: now,
+                error: `${status === "setup-running" ? "Setup" : "Cleanup"} was interrupted when Jingler stopped. Retry explicitly.`
+              }
+            }
+          })
+          if (changed) yield* writeAll(reconciled)
+        }))
+
       /** Persist an authoritative publication checkpoint for restart-safe retries. */
       const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
         update(id, (s) => ({ ...s, publish }))
@@ -1996,6 +2033,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         markGitHubFeedbackDispatched,
         recoverGitHubFeedbackOutbox,
         setPublishCheckpoint,
+        setWorkspaceLifecycle,
+        reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
         setProject,
         setIssue,

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import { afterEach, describe, expect, it } from "vitest"
-import { killAllChildren, liveChildCount, stopChild, trackChild } from "./child-registry.js"
+import { killAllChildren, liveChildCount, ownedChildCount, stopChild, stopOwnedChildren, trackChild } from "./child-registry.js"
 
 /**
  * The orphan guard. A harness subprocess that outlives the app is invisible,
@@ -96,6 +96,17 @@ describe("stopChild", () => {
   })
 })
 
+describe("owned children", () => {
+  it("awaits only the selected session's process tree", async () => {
+    const first = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }), false, { sessionId: "s-1", action: "run:dev" })
+    const second = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" }), false, { sessionId: "s-2", action: "run:dev" })
+    expect(ownedChildCount("s-1")).toBe(1)
+    await stopOwnedChildren("s-1")
+    expect(isRunning(first)).toBe(false)
+    expect(isRunning(second)).toBe(true)
+  })
+})
+
 describe("killAllChildren", () => {
   /** The quit path: everything still running dies, politely or otherwise. */
   it("kills every tracked child, including ones ignoring SIGTERM", async () => {
@@ -150,6 +161,19 @@ describe("killAllChildren", () => {
 })
 
 // Exercise a real detached POSIX group, including a grandchild holding stdout open.
+it.skipIf(process.platform === "win32")("awaits the whole owned process group before cleanup continues", async () => {
+  const child = trackChild(spawn(process.execPath, ["-e", `
+    const { spawn } = require("node:child_process")
+    const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] })
+    console.log(descendant.pid)
+    setInterval(() => {}, 1000)
+  `], { detached: true, stdio: ["ignore", "pipe", "pipe"] }), true, { sessionId: "tree", action: "cleanup" })
+  const descendantPid = await new Promise<number>((resolve) => child.stdout.once("data", (data) => resolve(Number(String(data).trim()))))
+  await stopOwnedChildren("tree")
+  expect(isRunning(child)).toBe(false)
+  expect(() => process.kill(descendantPid, 0)).toThrow()
+})
+
 it.skipIf(process.platform === "win32")("reaps descendants when an owned process-group leader exits", async () => {
   const before = liveChildCount()
   const child = trackChild(spawn(process.execPath, ["-e", `

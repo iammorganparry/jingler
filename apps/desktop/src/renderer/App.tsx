@@ -118,6 +118,7 @@ import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
+import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
 import { useAutoUpdate } from "./use-auto-update.js";
 import { useReleaseNotes } from "./use-release-notes.js";
 import {
@@ -1382,6 +1383,7 @@ function AuthedApp({
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
+        onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
         collapsedRepos={collapsedRepos}
@@ -1622,9 +1624,15 @@ function AuthedApp({
           <ExplanationPane sessionId={session.id} />
         )}
         renderConversation={(session: Session, view, ctx) => (
-          // The registry keeps each actor alive, but React state must remount per
-          // chat or useSelector can display the previous actor until the new
-          // transcript load emits its first transition.
+          <div className="flex min-h-0 flex-1 flex-col">
+            <WorkspaceWorkflowBar
+              session={session}
+              project={projectController.projects.find((project) => project.id === session.projectId)}
+              onSession={publishSessionUpdate}
+            />
+          {/* The registry keeps each actor alive, but React state must remount per
+              chat or useSelector can display the previous actor until the new
+              transcript load emits its first transition. */}
           <ConversationPane
             key={`${session.id}:${session.activeChatId}`}
             session={session}
@@ -1649,6 +1657,7 @@ function AuthedApp({
             onAuthorizeMcp={mcp.startAuthorization}
             paneFocused={ctx.paneFocused ?? true}
           />
+          </div>
         )}
         renderExplorer={(session, onOpenPath) => (
           <FileBrowserExplorer

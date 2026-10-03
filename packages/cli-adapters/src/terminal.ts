@@ -27,6 +27,7 @@ import type { TerminalChunk, TerminalInfo } from "@jingler/core"
 import { Effect, Exit, Mailbox, Stream } from "effect"
 import { neutralCwd } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
+import { acquireWorkspaceActivity, type WorkspaceActivity } from "./workspace-admission.js"
 
 /** Last-N-bytes of output kept for re-attach replay (per terminal). */
 const RING_CAP = 256 * 1024
@@ -100,6 +101,7 @@ interface MutableInfo {
 
 interface Handle {
   pty: IPty
+  activity: WorkspaceActivity
   info: MutableInfo
   ring: RingBuffer
   /** The single attached consumer, if any (null while detached). */
@@ -207,16 +209,23 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
           // so commands typed here would run inside an unrelated repo.
           const worktree = input.cwd?.trim() || undefined
           const cwd = worktree ?? neutralCwd()
-          const pty = spawn(shell, shellArgs(), {
-            name: "xterm-256color",
-            cols: Math.max(1, input.cols || 80),
-            rows: Math.max(1, input.rows || 24),
-            cwd,
-            // A session-less terminal passes `undefined`, so EVERY
-            // `node_modules/.bin` on PATH is treated as foreign — there is no
-            // worktree whose tooling it could legitimately be.
-            env: shellEnv(worktree)
-          })
+          const activity = acquireWorkspaceActivity(input.sessionId, "terminal")
+          let pty: IPty
+          try {
+            pty = spawn(shell, shellArgs(), {
+              name: "xterm-256color",
+              cols: Math.max(1, input.cols || 80),
+              rows: Math.max(1, input.rows || 24),
+              cwd,
+              // A session-less terminal passes `undefined`, so EVERY
+              // `node_modules/.bin` on PATH is treated as foreign — there is no
+              // worktree whose tooling it could legitimately be.
+              env: shellEnv(worktree)
+            })
+          } catch (cause) {
+            activity.release()
+            throw cause
+          }
           const id = randomUUID()
           const info: MutableInfo = {
             id,
@@ -228,6 +237,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
           }
           const handle: Handle = {
             pty,
+            activity,
             info,
             ring: new RingBuffer(RING_CAP),
             live: null,
@@ -261,6 +271,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
             pty.onExit(({ exitCode }) => {
               info.status = "exited"
               info.exitCode = exitCode
+              handle.activity.release()
               handle.live?.exit(exitCode)
               // The process is gone; nothing else will ever arrive. Free the
               // native handle and listeners NOW rather than at app quit —
@@ -285,6 +296,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
             releasePty()
             handle.live?.dispose()
             handle.live = null
+            handle.activity.release()
             handles.delete(id)
           }
 
@@ -403,6 +415,37 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
     const kill = (terminalId: string): Effect.Effect<void> =>
       Effect.sync(() => handles.get(terminalId)?.teardown())
 
+    const killSession = (sessionId: string): Effect.Effect<void, TerminalError> =>
+      Effect.tryPromise({
+        try: async () => {
+          const owned = [...handles.values()].filter((handle) => handle.info.sessionId === sessionId)
+          await Promise.all(owned.map(async (handle) => {
+            if (handle.info.status === "exited") {
+              handle.teardown()
+              return
+            }
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error(`Timed out stopping terminal ${handle.info.id}.`)), 5_000)
+              timer.unref?.()
+              const listener = handle.pty.onExit(() => {
+                clearTimeout(timer)
+                listener.dispose()
+                resolve()
+              })
+              try {
+                handle.pty.kill()
+              } catch {
+                clearTimeout(timer)
+                listener.dispose()
+                resolve()
+              }
+            })
+            handle.teardown()
+          }))
+        },
+        catch: (cause) => new TerminalError({ message: "Could not stop workspace terminals", cause })
+      })
+
     const list = (sessionId: string): Effect.Effect<ReadonlyArray<TerminalInfo>> =>
       Effect.sync(() =>
         [...handles.values()]
@@ -418,7 +461,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
       handles.clear()
     })
 
-    return { create, attach, write, resize, kill, list, killAll } as const
+    return { create, attach, write, resize, kill, killSession, list, killAll } as const
   })
 }) {}
 

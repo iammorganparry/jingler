@@ -425,6 +425,50 @@ export type ProjectAvailability = Schema.Schema.Type<
   typeof ProjectAvailability
 >;
 
+export const ProjectRunCommand = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  command: Schema.String,
+});
+export type ProjectRunCommand = Schema.Schema.Type<typeof ProjectRunCommand>;
+
+/** Machine-local commands and ignored files explicitly approved by the operator. */
+export const ProjectWorkflow = Schema.Struct({
+  setup: Schema.optional(Schema.String),
+  cleanup: Schema.optional(Schema.String),
+  runs: Schema.Array(ProjectRunCommand),
+  copyFiles: Schema.Array(Schema.String),
+  /** SHA-256 of the executable fields above. Missing means configured but not approved. */
+  approvedDigest: Schema.optional(Schema.String),
+});
+export type ProjectWorkflow = Schema.Schema.Type<typeof ProjectWorkflow>;
+
+export const WorkspaceLifecycle = Schema.Struct({
+  status: Schema.Literal(
+    "ready",
+    "setup-running",
+    "setup-failed",
+    "setup-skipped",
+    "cleanup-running",
+    "cleanup-failed",
+  ),
+  updatedAt: Schema.String,
+  error: Schema.optional(Schema.String),
+  /** Bounded, redacted-by-contract command output for operator diagnosis. */
+  output: Schema.optional(Schema.String),
+});
+export type WorkspaceLifecycle = Schema.Schema.Type<typeof WorkspaceLifecycle>;
+
+export const WorkspaceRunState = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  status: Schema.Literal("running", "exited", "failed"),
+  startedAt: Schema.String,
+  exitCode: Schema.optional(Schema.Number),
+  output: Schema.optional(Schema.String),
+});
+export type WorkspaceRunState = Schema.Schema.Type<typeof WorkspaceRunState>;
+
 /** A durable repository registration, independent of any workspace/session. */
 export const Project = Schema.Struct({
   id: Schema.String,
@@ -437,6 +481,8 @@ export const Project = Schema.Struct({
   availability: ProjectAvailability,
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  /** Approved machine-local workspace commands; absent on legacy projects. */
+  workflow: Schema.optional(ProjectWorkflow),
 });
 export type Project = Schema.Schema.Type<typeof Project>;
 
@@ -655,6 +701,8 @@ export const Session = Schema.Struct({
   repoPath: Schema.optional(Schema.String),
   /** The branch this session's worktree was forked from. */
   baseBranch: Schema.optional(Schema.String),
+  /** Durable setup/cleanup gate for machine-local workspace automation. */
+  workspaceLifecycle: Schema.optional(WorkspaceLifecycle),
   /** Legacy single-chat mode and allowlist aliases retained during rolling migration. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),

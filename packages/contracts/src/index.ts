@@ -67,6 +67,8 @@ import {
   PrSummary,
   Project,
   ProjectDirectoryListing,
+  ProjectRunCommand,
+  WorkspaceRunState,
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
@@ -546,6 +548,48 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { id: Schema.String, environmentId: Schema.optional(Schema.String) }
   }),
 
+  /** Save machine-local workflow commands. Approval is bound to this exact content. */
+  Rpc.make("Projects.setWorkflow", {
+    success: Project,
+    error: GitError,
+    payload: {
+      projectId: Schema.String,
+      setup: Schema.optional(Schema.String),
+      cleanup: Schema.optional(Schema.String),
+      runs: Schema.Array(ProjectRunCommand),
+      copyFiles: Schema.Array(Schema.String),
+      approve: Schema.Boolean
+    }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.retrySetup", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.skipSetup", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.startRun", {
+    success: WorkspaceRunState,
+    error: GitError,
+    payload: { sessionId: Schema.String, runId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.stopRun", {
+    error: GitError,
+    payload: { sessionId: Schema.String, runId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.listRuns", {
+    success: Schema.Array(WorkspaceRunState),
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Scan the configured repos directory for git repositories. */
   Rpc.make("Workspace.repos", {
     success: Schema.Array(Repo),
@@ -701,7 +745,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.archive", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, reason: ArchiveReason }
+    payload: {
+      sessionId: Schema.String,
+      reason: ArchiveReason,
+      skipCleanup: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Restore an archived session back to an editable state. */
@@ -802,7 +850,10 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** Permanently delete a session and remove its worktree. Irreversible. */
   Rpc.make("Sessions.delete", {
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      skipCleanup: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Create and activate a fresh chat inside a session. */

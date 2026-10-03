@@ -1,28 +1,17 @@
 import { execFile, type ChildProcess, type ExecFileOptionsWithStringEncoding } from "node:child_process"
 
-/**
- * Every harness subprocess Jingler spawns, so all of them can be killed when the
- * app quits.
- *
- * POSIX does not reap a child when its parent dies — an orphan is reparented to
- * init and lives forever. `TerminalService` already learned this for PTYs, which is
- * why `before-quit` kills them explicitly. The harness servers (`opencode serve`,
- * `codex app-server`) had exactly the same hazard and no such handling.
- *
- * Each spawn site did clean up after itself on its own happy path — which is the
- * case that doesn't matter. The leak is a quit MID-FLIGHT: the `finally` never
- * runs, and the server is orphaned. Under the e2e suite, which launches and tears
- * down Electron once per test while a real `opencode` sits on PATH, that is one
- * leaked `opencode serve` per test, each holding a port and its own memory, until
- * the machine is manually cleared.
- *
- * Registering here is what makes a spawn visible to the quit path. Nothing else in
- * the process knows these children exist.
- */
+export interface ChildOwner {
+  readonly sessionId: string
+  readonly action: string
+}
 
-const live = new Map<ChildProcess, boolean>()
+interface ChildRecord {
+  readonly processGroup: boolean
+  readonly owner?: ChildOwner
+}
 
-/** How long a child gets to honour SIGTERM before it is killed outright. */
+/** Every owned subprocess, including detached groups started by workspace actions. */
+const live = new Map<ChildProcess, ChildRecord>()
 const GRACE_MS = 2_000
 
 const isAlive = (proc: ChildProcess): boolean =>
@@ -30,22 +19,24 @@ const isAlive = (proc: ChildProcess): boolean =>
 
 const signal = (proc: ChildProcess, sig: NodeJS.Signals): void => {
   try {
-    if (live.get(proc) && proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig)
+    const record = live.get(proc)
+    if (record?.processGroup && proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig)
     else if (isAlive(proc)) proc.kill(sig)
   } catch {
-    /* already gone — the pid may have been reaped between the check and here */
+    /* already gone */
   }
 }
 
-/**
- * Register a freshly-spawned child so the quit path can reach it. Returns the same
- * child, so it can wrap a `spawn(...)` call directly. Deregisters itself on exit.
- */
-export const trackChild = <P extends ChildProcess>(proc: P, processGroup = false): P => {
-  live.set(proc, processGroup)
+export const trackChild = <P extends ChildProcess>(
+  proc: P,
+  processGroup = false,
+  owner?: ChildOwner
+): P => {
+  live.set(proc, { processGroup, ...(owner ? { owner } : {}) })
   const forget = () => live.delete(proc)
   if (processGroup) {
-    // A server can exit before a grandchild; reap the remaining owned group.
+    // The leader can exit before a descendant. Kill the remaining owned group
+    // while the process-group id is still known, then forget after stdio closes.
     proc.once("exit", () => signal(proc, "SIGKILL"))
     proc.once("close", forget)
   } else proc.once("exit", forget)
@@ -53,29 +44,66 @@ export const trackChild = <P extends ChildProcess>(proc: P, processGroup = false
   return proc
 }
 
-/**
- * Ask a child to stop, and make sure it actually does.
- *
- * SIGTERM is only a request. opencode is a compiled Bun binary and codex an
- * app-server; neither is obliged to honour it promptly, and an unheeded SIGTERM
- * leaves behind exactly the process we were trying to reap. The follow-up SIGKILL
- * is `unref`'d so it can never hold the event loop (or a test run) open.
- */
 export const stopChild = (proc: ChildProcess, graceMs: number = GRACE_MS): void => {
-  if (!isAlive(proc)) return
+  if (!isAlive(proc)) {
+    if (live.get(proc)?.processGroup) signal(proc, "SIGKILL")
+    return
+  }
   signal(proc, "SIGTERM")
   const timer = setTimeout(() => signal(proc, "SIGKILL"), graceMs)
   timer.unref?.()
   proc.once("exit", () => clearTimeout(timer))
 }
 
-/**
- * Kill every tracked child NOW, returning how many were still running.
- *
- * Called from `before-quit`, where there is no time to be polite: the process is
- * going away, and anything still running is about to be orphaned. SIGKILL rather
- * than SIGTERM for the same reason — we will not be here to follow up.
- */
+const waitForProcessGroupExit = async (proc: ChildProcess): Promise<void> => {
+  if (!live.get(proc)?.processGroup || process.platform === "win32" || !proc.pid) return
+  while (true) {
+    try {
+      process.kill(-proc.pid, 0)
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    } catch {
+      return
+    }
+  }
+}
+
+export const stopChildAndWait = async (
+  proc: ChildProcess,
+  graceMs: number = GRACE_MS,
+  timeoutMs: number = graceMs + 3_000
+): Promise<void> => {
+  if (!isAlive(proc)) {
+    stopChild(proc, graceMs)
+    return
+  }
+  await new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out stopping child process ${proc.pid ?? "unknown"}.`)), timeoutMs)
+    timeout.unref?.()
+    const done = () => {
+      void waitForProcessGroupExit(proc).then(() => {
+        clearTimeout(timeout)
+        resolve()
+      }, reject)
+    }
+    proc.once("exit", done)
+    proc.once("error", done)
+    stopChild(proc, graceMs)
+  })
+}
+
+/** Stop only children provably owned by this live app/session. Persisted PIDs are never used. */
+export const stopOwnedChildren = async (
+  sessionId: string,
+  action?: string,
+  graceMs: number = GRACE_MS
+): Promise<number> => {
+  const matches = [...live.entries()].filter(([, record]) =>
+    record.owner?.sessionId === sessionId && (action === undefined || record.owner.action === action)
+  )
+  await Promise.all(matches.map(([proc]) => stopChildAndWait(proc, graceMs)))
+  return matches.length
+}
+
 export const killAllChildren = (): number => {
   let killed = 0
   for (const proc of live.keys()) {
@@ -86,7 +114,6 @@ export const killAllChildren = (): number => {
   return killed
 }
 
-/** Run a bounded text command that remains visible to the app shutdown path. */
 export const execFileText = (
   file: string,
   args: readonly string[],
@@ -96,5 +123,7 @@ export const execFileText = (
     error ? reject(error) : resolve(stdout)))
 })
 
-/** How many spawned children are currently tracked. For tests and diagnostics. */
 export const liveChildCount = (): number => live.size
+
+export const ownedChildCount = (sessionId: string): number =>
+  [...live.values()].filter((record) => record.owner?.sessionId === sessionId).length

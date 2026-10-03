@@ -75,6 +75,7 @@ import { BrowserControlMcpService,
 } from "./browser-control-mcp-service.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
+import { acquireWorkspaceActivity } from "./workspace-admission.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { UsageFactStore } from "./usage-facts.js"
@@ -1258,6 +1259,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         Effect.gen(function* () {
           const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
+            // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: admission, dedupe, model rollback, and run reservation share one atomic chat boundary.
             Effect.gen(function* () {
               if (
                 externalInstruction !== undefined &&
@@ -1269,6 +1271,30 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   duplicate: true
                 }])
               }
+              const gatedSession = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+              const lifecycleStatus = gatedSession?.workspaceLifecycle?.status
+              if (gatedSession?.archived || (lifecycleStatus !== undefined && lifecycleStatus !== "ready" && lifecycleStatus !== "setup-skipped")) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: gatedSession?.archived
+                    ? "This workspace is archived. Restore it before sending a message."
+                    : lifecycleStatus === "setup-failed"
+                      ? "Workspace setup failed. Retry or explicitly skip setup before sending a message."
+                      : "Workspace setup or cleanup is still in progress."
+                }])
+              }
+              const workspaceLease = yield* Effect.try({
+                try: () => acquireWorkspaceActivity(sessionId, `agent:${chatId}`),
+                catch: (cause) => cause
+              }).pipe(Effect.either)
+              if (workspaceLease._tag === "Left") {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: workspaceLease.left instanceof Error ? workspaceLease.left.message : "Workspace is unavailable."
+                }])
+              }
+              yield* Effect.addFinalizer(() => Effect.sync(() => workspaceLease.right.release()))
+
               // Concurrent chats in one session are allowed, but a single chat is
               // single-flight: two runs on ONE chatId would race the `fibers`
               // slot (line ~1503) — run A's fiber orphaned and unstoppable since

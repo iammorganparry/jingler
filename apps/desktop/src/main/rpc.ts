@@ -77,6 +77,10 @@ import {
   adoptableChatIdentities,
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
+  WorkspaceWorkflowService,
+  closeWorkspaceAdmission,
+  reopenWorkspaceAdmission,
+  waitForWorkspaceIdle,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
   disposeLanguageIntelligence,
@@ -712,6 +716,15 @@ const sessionCreationStream = <E, R>(
     }),
   );
 
+const prepareLocalWorkspace = (session: Session) =>
+  Effect.gen(function* () {
+    const workflow = yield* WorkspaceWorkflowService;
+    yield* workflow.setup(session.id).pipe(Effect.either)
+    return yield* SessionStore.get(session.id).pipe(
+      Effect.mapError((cause) => new GitError({ message: "Created workspace could not be reloaded", cause })),
+    )
+  })
+
 export const createSessionRouted = (
   input: CreateSessionInput,
   progress?: SessionCreationProgress,
@@ -722,9 +735,10 @@ export const createSessionRouted = (
     )
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
-      const session = yield* createSession(runtimeInput);
+      const created = yield* createSession(runtimeInput);
+      const session = yield* prepareLocalWorkspace(created);
       const initialPrompt = runtimeInput.initialPrompt?.trim();
-      if (!initialPrompt) {
+      if (!initialPrompt || session.workspaceLifecycle?.status === "setup-failed") {
         yield* reportSessionCreation(progress, "ready");
         return session;
       }
@@ -970,8 +984,9 @@ export const createSessionFromPrRouted = (
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
       const session = yield* createSessionFromPr(runtimeInput);
+      const prepared = yield* prepareLocalWorkspace(session);
       yield* reportSessionCreation(progress, "ready");
-      return session;
+      return prepared;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
@@ -993,8 +1008,9 @@ export const createSessionFromIssueRouted = (
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
       const session = yield* createSessionFromIssue(runtimeInput);
+      const prepared = yield* prepareLocalWorkspace(session);
       yield* reportSessionCreation(progress, "ready");
-      return session;
+      return prepared;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
@@ -1589,9 +1605,26 @@ export const backgroundTaskOutput = (sessionId: string, taskId: string) =>
 export const archiveSession = (
   sessionId: string,
   reason: "merged" | "closed",
+  skipCleanup = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
+    closeWorkspaceAdmission(sessionId, "workspace archive is in progress");
+    const runner = yield* AgentRunner;
+    const terminals = yield* TerminalService;
+    const workflow = yield* WorkspaceWorkflowService;
+    for (const chat of [...session.chats, ...(session.closedChats ?? [])]) {
+      yield* runner.stop(sessionId, chat.id, true);
+    }
+    yield* terminals.killSession(sessionId).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+    );
+    yield* workflow.stopAll(sessionId);
+    yield* Effect.tryPromise({
+      try: () => waitForWorkspaceIdle(sessionId),
+      catch: (cause) => new GitError({ message: "Workspace activity did not stop before archive", cause }),
+    });
+    if (!skipCleanup) yield* workflow.cleanup(sessionId);
     yield* SessionStore.archive(sessionId, reason);
     const worktreePath = session.worktreePath;
     if (worktreePath) {
@@ -1620,6 +1653,7 @@ export const archiveSession = (
 export const archiveSessionRouted = (
   sessionId: string,
   reason: "merged" | "closed",
+  skipCleanup = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
@@ -1627,11 +1661,11 @@ export const archiveSessionRouted = (
     return yield* routeSessionOperation(
       session,
       "Sessions.archive",
-      { reason },
-      { execute: () => archiveSession(sessionId, reason) },
+      { reason, skipCleanup },
+      { execute: () => archiveSession(sessionId, reason, skipCleanup) },
       {
         execute: () =>
-          remote.request(session, "Sessions.archive", { reason }).pipe(
+          remote.request(session, "Sessions.archive", { reason, skipCleanup }).pipe(
             Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
             Effect.flatMap(SessionStore.upsertRemote),
             Effect.mapError(
@@ -1653,7 +1687,16 @@ export const archiveSessionRouted = (
 /** `Sessions.restore` handler — un-archive a session and return the updated record. */
 export const restoreSession = (sessionId: string) =>
   Effect.gen(function* () {
+    const closure = yield* Effect.try({
+      try: () => closeWorkspaceAdmission(sessionId, "workspace archive is in progress"),
+      catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause }),
+    });
     yield* SessionStore.restore(sessionId);
+    yield* SessionStore.setWorkspaceLifecycle(sessionId, {
+      status: "ready",
+      updatedAt: new Date().toISOString(),
+    });
+    reopenWorkspaceAdmission(sessionId, closure);
     const session = yield* SessionStore.get(sessionId);
     if (session.worktreePath) {
       const offload = yield* makeOffloadCommandRouter
@@ -4414,6 +4457,22 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const project = yield* ProjectService.get(projectId);
       return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
+  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, approve }) =>
+    ProjectService.setWorkflow(
+      projectId,
+      {
+        ...(setup === undefined ? {} : { setup }),
+        ...(cleanup === undefined ? {} : { cleanup }),
+        runs,
+        copyFiles,
+      },
+      approve,
+    ),
+  "WorkspaceWorkflow.retrySetup": ({ sessionId }) => WorkspaceWorkflowService.setup(sessionId),
+  "WorkspaceWorkflow.skipSetup": ({ sessionId }) => WorkspaceWorkflowService.skipSetup(sessionId),
+  "WorkspaceWorkflow.startRun": ({ sessionId, runId }) => WorkspaceWorkflowService.startRun(sessionId, runId),
+  "WorkspaceWorkflow.stopRun": ({ sessionId, runId }) => WorkspaceWorkflowService.stopRun(sessionId, runId),
+  "WorkspaceWorkflow.listRuns": ({ sessionId }) => WorkspaceWorkflowService.listRuns(sessionId),
   "Projects.remove": ({ id, environmentId }) =>
     environmentId === undefined
       ? ProjectService.remove(id)
@@ -4477,6 +4536,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // satisfy them — so a pre-PI conversation continues without the operator
   // re-choosing what they already had. No-op for healthy sessions.
   "Sessions.list": () => healMigratedRuntimeIdentities.pipe(
+    Effect.andThen(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.ignore)),
     Effect.andThen(SessionStore.list()),
   ),
   "Sessions.get": ({ id }) => SessionStore.get(id),
@@ -4519,8 +4579,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* SessionStore.clearInitialPrompt(sessionId);
       return yield* SessionStore.get(sessionId);
     }),
-  "Sessions.archive": ({ sessionId, reason }) =>
-    archiveSessionRouted(sessionId, reason),
+  "Sessions.archive": ({ sessionId, reason, skipCleanup }) =>
+    archiveSessionRouted(sessionId, reason, skipCleanup),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
   "Sessions.resolveRuntimeRecovery": ({ sessionId, runId, callId }) =>
     RuntimeRecoveryService.resolve(sessionId, runId, callId),
@@ -4543,7 +4603,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     continueOnEnvironment(sessionId, environmentId),
   "Sessions.adoptBranch": ({ sessionId }) => adoptBranch(sessionId),
   "Sessions.forkOntoBranch": ({ sessionId }) => forkOntoBranch(sessionId),
-  "Sessions.delete": ({ sessionId }) =>
+  "Sessions.delete": ({ sessionId, skipCleanup }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId).pipe(
         Effect.orElseSucceed(() => null),
@@ -4551,7 +4611,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       if (session?.environmentId) {
         const remote = yield* RemoteSessionService;
         yield* removeRemoteSessionMirror(
-          remote.request(session, "Sessions.delete", {}),
+          remote.request(session, "Sessions.delete", { skipCleanup }),
           remote
             .forget(sessionId)
             .pipe(
@@ -4569,7 +4629,10 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ),
         Effect.orElseSucceed(() => null),
       );
+      closeWorkspaceAdmission(sessionId, "workspace deletion is in progress");
       const runner = yield* AgentRunner;
+      const terminals = yield* TerminalService;
+      const workflow = yield* WorkspaceWorkflowService;
       const browserControl = yield* BrowserControlMcpService;
       const preview = yield* PreviewViewService;
       const chats = [
@@ -4581,6 +4644,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         // transcript/state until the harness finalizers have actually finished.
         yield* runner.stop(sessionId, chat.id, true);
       }
+      yield* terminals.killSession(sessionId).pipe(
+        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      );
+      yield* workflow.stopAll(sessionId);
+      yield* Effect.tryPromise({
+        try: () => waitForWorkspaceIdle(sessionId),
+        catch: (cause) => new GitError({ message: "Workspace activity did not stop before deletion", cause }),
+      });
+      if (!skipCleanup) yield* workflow.cleanup(sessionId);
       yield* browserControl.revoke(sessionId);
       yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
       yield* BackgroundTaskStore.clear(sessionId);
@@ -6009,6 +6081,7 @@ export type RpcServerRequirements =
   | TranscriptStore
   | UsageService
   | WorkspaceService
+  | WorkspaceWorkflowService
   | RuntimeDiagnostics
   | RuntimeRecoveryService
   | ProviderConnections;

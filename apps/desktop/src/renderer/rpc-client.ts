@@ -54,6 +54,8 @@ import type {
   Message,
   Project,
   ProjectDirectoryListing,
+  ProjectRunCommand,
+  WorkspaceRunState,
   PermissionMode,
   PlanDocument,
   PlanTemplateConfig,
@@ -473,6 +475,24 @@ export const rpc = {
     run((c) => c.Projects.ensureOnEnvironment({ projectId, environmentId })),
   projectsRemove: (id: string, environmentId?: string): Promise<void> =>
     run((c) => c.Projects.remove({ id, ...(environmentId === undefined ? {} : { environmentId }) })),
+  projectsSetWorkflow: (input: {
+    projectId: string
+    setup?: string
+    cleanup?: string
+    runs: ReadonlyArray<ProjectRunCommand>
+    copyFiles: ReadonlyArray<string>
+    approve: boolean
+  }): Promise<Project> => run((c) => c.Projects.setWorkflow({ ...input, runs: [...input.runs], copyFiles: [...input.copyFiles] })),
+  workspaceWorkflowRetrySetup: (sessionId: string): Promise<Session> =>
+    run((c) => c.WorkspaceWorkflow.retrySetup({ sessionId })),
+  workspaceWorkflowSkipSetup: (sessionId: string): Promise<Session> =>
+    run((c) => c.WorkspaceWorkflow.skipSetup({ sessionId })),
+  workspaceWorkflowStartRun: (sessionId: string, runId: string): Promise<WorkspaceRunState> =>
+    run((c) => c.WorkspaceWorkflow.startRun({ sessionId, runId })),
+  workspaceWorkflowStopRun: (sessionId: string, runId: string): Promise<void> =>
+    run((c) => c.WorkspaceWorkflow.stopRun({ sessionId, runId })),
+  workspaceWorkflowListRuns: (sessionId: string): Promise<ReadonlyArray<WorkspaceRunState>> =>
+    run((c) => c.WorkspaceWorkflow.listRuns({ sessionId })),
   workspaceBranches: (repoPath: string, environmentId?: string): Promise<ReadonlyArray<string>> =>
     run((c) => c.Workspace.branches({ repoPath, ...(environmentId ? { environmentId } : {}) })),
   githubConnectionStatus: (): Promise<GitHubAppConnectionStatus> =>
@@ -559,8 +579,9 @@ export const rpc = {
     run((c) => c.Sessions.clearInitialPrompt({ sessionId })),
   sessionsArchive: (
     sessionId: string,
-    reason: ArchiveReason
-  ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason })),
+    reason: ArchiveReason,
+    skipCleanup = false
+  ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason, skipCleanup })),
   sessionsRestore: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.restore({ sessionId })),
   sessionsResolveRuntimeRecovery: (
@@ -593,8 +614,8 @@ export const rpc = {
     persistent: boolean
   ): Promise<Session> =>
     run((c) => c.Sessions.setPersistent({ sessionId, persistent })),
-  sessionsDelete: (sessionId: string): Promise<void> =>
-    run((c) => c.Sessions.delete({ sessionId })),
+  sessionsDelete: (sessionId: string, skipCleanup = false): Promise<void> =>
+    run((c) => c.Sessions.delete({ sessionId, skipCleanup })),
   sessionsCreateChat: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.createChat({ sessionId })),
   sessionsSelectChat: (sessionId: string, chatId: string): Promise<Session> =>
