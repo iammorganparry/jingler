@@ -1,3 +1,4 @@
+import { workspaceEnvironment } from "./workspace-ports.js"
 import { join } from "node:path"
 import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
@@ -1505,6 +1506,7 @@ function prepareTurnSpec(
   const mcp = { browser: browserAttachment }
 
   const spec: AgentTurnSpec = {
+    workspaceEnvironment: workspaceEnvironment(session),
     sessionId,
     chatId,
     runtimeId: chat.runtimeId ?? "pi",

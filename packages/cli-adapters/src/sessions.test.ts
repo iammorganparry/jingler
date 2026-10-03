@@ -1,3 +1,5 @@
+import { acquireWorkspaceActivity } from "./workspace-admission.js"
+import { ProjectService } from "./projects.js"
 import { execFileSync } from "node:child_process"
 import {
   existsSync,
@@ -8,7 +10,7 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 import { Cause, Effect, Layer, Schema } from "effect"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -43,6 +45,13 @@ import {
   withTempRoot
 } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
+
+// Store tests exercise the real allocator and write lock with a deterministic
+// listener probe. Actual IPv4/IPv6 sockets are covered in workspace-ports.test.ts.
+vi.mock("./workspace-ports.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./workspace-ports.js")>()
+  return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[], config?: import("@jingler/core").WorkspacePortConfig) => actual.allocateWorkspacePorts(sessions, config, async () => true) }
+})
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
@@ -126,6 +135,64 @@ describe("SessionStore", () => {
     modelId,
     baseBranch: "main",
     ...over
+  })
+
+  it("atomically assigns distinct ports to concurrent creates and reserves archives across store restart", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const sessions = yield* Effect.all([SessionStore.create(input({ title: "port one" })), SessionStore.create(input({ title: "port two" }))], { concurrency: 2 })
+      yield* SessionStore.archive(sessions[0]!.id, "closed")
+      return sessions
+    }).pipe(Effect.provide(services)), temp.layer)
+    if (result._tag !== "Success") throw new Error(String(result.cause))
+    const [one, two] = result.value
+    expect(one!.workspacePorts?.primary).toBeDefined()
+    expect(one!.workspacePorts?.primary).not.toBe(two!.workspacePorts?.primary)
+    const restarted = await runExit(SessionStore.create(input({ title: "port three" })).pipe(Effect.provide(services)), temp.layer)
+    if (restarted._tag !== "Success") throw new Error(String(restarted.cause))
+    expect(restarted.value.workspacePorts?.primary).not.toBe(one!.workspacePorts?.primary)
+    expect(restarted.value.workspacePorts?.primary).not.toBe(two!.workspacePorts?.primary)
+  })
+
+  it("releases deleted assignments and explicitly reassigns only idle workspaces", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const one = yield* SessionStore.create(input({ title: "deleted port" }))
+      yield* SessionStore.remove(one.id)
+      const two = yield* SessionStore.create(input({ title: "reused port" }))
+      expect(two.workspacePorts?.primary).toBe(one.workspacePorts?.primary)
+      const next = yield* SessionStore.reassignWorkspacePorts(two.id)
+      expect(next.workspacePorts).toBeDefined()
+      const persisted = yield* SessionStore.get(two.id)
+      expect(persisted.workspacePorts).toEqual(next.workspacePorts)
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
+  })
+
+  it("allocates approved project service ports for reserved routine creation", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const project = yield* ProjectService.register({ path: repoPath })
+      yield* ProjectService.setWorkflow(project.id, { runs: [], copyFiles: [], ports: { primary: 45000, extras: [{ name: "API", start: 46000 }], previewUrl: "http://localhost:{API_port}" } }, true)
+      const session = yield* SessionStore.create(input({ projectId: project.id, requestedSessionId: "s_routine_reserved_ports" }))
+      expect(session.id).toBe("s_routine_reserved_ports")
+      expect(session.workspacePorts).toEqual({ primary: 45000, extras: { API: 46000 } })
+    }).pipe(Effect.provide(Layer.mergeAll(services, ProjectService.Default))), temp.layer)
+    expect(result._tag).toBe("Success")
+  })
+
+  it("refuses reassignment while an owned workspace command is active", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input({ title: "busy ports" }))
+      const denied = yield* Effect.acquireUseRelease(
+        Effect.sync(() => acquireWorkspaceActivity(session.id, "command")),
+        () => Effect.exit(SessionStore.reassignWorkspacePorts(session.id)),
+        (activity) => Effect.sync(() => activity.release())
+      )
+      expect(denied._tag).toBe("Failure")
+      const persisted = yield* SessionStore.get(session.id)
+      expect(persisted.workspacePorts).toEqual(session.workspacePorts)
+      const next = yield* SessionStore.reassignWorkspacePorts(session.id)
+      expect(next.workspacePorts).toBeDefined()
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
   })
 
   it("persists canonical provider identity on a new session and chat", async () => {

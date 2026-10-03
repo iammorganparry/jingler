@@ -85,6 +85,8 @@ export interface ConversationPaneCtx {
   onOpenFile: (path: string) => void
   /** Present the Files workspace without requiring a path to be selected. */
   onSelectFiles: () => void
+  /** Reveal and focus the session browser for an operator-requested preview. */
+  onSelectBrowser?: () => void
   /** Present canonical worktree changes for mutation recovery inspection. */
   onSelectChanges: () => void
   /** Open provider settings for authentication or certification recovery. */
@@ -720,6 +722,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             openSurface({ kind: "file", id: path })
           },
           onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
+          onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
           onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),

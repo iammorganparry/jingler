@@ -1,3 +1,4 @@
+import { trustedWorkspaceEnvironment } from "./workspace-ports.js"
 /**
  * TerminalService — the main-process manager for PTY-backed terminals.
  *
@@ -185,6 +186,7 @@ const safeResume = (pty: IPty): void => {
 
 export interface CreateTerminalInput {
   sessionId: string
+  workspaceEnvironment?: Readonly<Record<string, string>>
   /** Working directory; the session worktree. Defaults to the process cwd. */
   cwd?: string
   cols: number
@@ -220,7 +222,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
               // A session-less terminal passes `undefined`, so EVERY
               // `node_modules/.bin` on PATH is treated as foreign — there is no
               // worktree whose tooling it could legitimately be.
-              env: shellEnv(worktree)
+              env: { ...shellEnv(worktree), ...trustedWorkspaceEnvironment(input.workspaceEnvironment) }
             })
           } catch (cause) {
             activity.release()

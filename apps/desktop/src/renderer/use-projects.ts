@@ -44,7 +44,8 @@ export function useProjects(environmentId?: string) {
       setup?: string
       cleanup?: string
       runs: ReadonlyArray<ProjectRunCommand>
-      copyFiles: ReadonlyArray<string>
+      ports?: import("@jingler/core").WorkspacePortConfig
+    copyFiles: ReadonlyArray<string>
       approve: boolean
     }) => rpc.projectsSetWorkflow(input).then(publish),
     remove: (project: Project) =>

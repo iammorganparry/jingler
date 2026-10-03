@@ -1,3 +1,7 @@
+import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount } from "./workspace-admission.js"
+import { allocateWorkspacePorts } from "./workspace-ports.js"
+import { ProjectService } from "./projects.js"
+import { approvedWorkflow } from "./project-workflow.js"
 import { createHash } from "node:crypto"
 import type {
   AgentEndpointId,
@@ -505,6 +509,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
+      const assignPorts = (session: Session, current: readonly Session[]) => Effect.gen(function* () {
+        if (session.environmentId || session.workspaceMode === "direct" || !session.worktreePath || session.workspacePorts) return session
+        const projectService = yield* Effect.serviceOption(ProjectService)
+        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project port configuration", cause }))) : undefined
+        const config = approvedWorkflow(project?.workflow)?.ports
+        const workspacePorts = yield* Effect.tryPromise({ try: () => allocateWorkspacePorts(current, config), catch: (cause) => new GitError({ message: "Could not allocate workspace ports", cause }) })
+        return { ...session, workspacePorts }
+      })
       const repositoryLocks = new Map<string, Effect.Semaphore>()
       const repositoryLock = (identity: string): Effect.Semaphore => {
         const existing = repositoryLocks.get(identity)
@@ -820,7 +832,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           atomically,
           readAll,
           ensureSessionIdAvailable,
-          writeAll
+          writeAll,
+          assignPorts
         )
             })
 
@@ -890,7 +903,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(opts.defaultReasoning !== undefined, { reasoning: opts.defaultReasoning })
           })
-          const session: Session = {
+          let session: Session = {
             id,
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
@@ -931,6 +944,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
+              session = yield* assignPorts(session, current)
               yield* writeAll([session, ...current])
             })
           )
@@ -1009,7 +1023,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
-          const session: Session = {
+          let session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
@@ -1064,6 +1078,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
+              session = yield* assignPorts(session, current)
               yield* writeAll([session, ...current])
             })
           )
@@ -1082,6 +1097,24 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             yield* writeAll(all.map((s) => (s.id === id ? patch(s) : s)))
           })
         )
+
+      const reassignWorkspacePorts = (id: string) => Effect.acquireUseRelease(
+        Effect.try({ try: () => {
+          const token = closeWorkspaceAdmission(id, "reassigning workspace ports")
+          if (workspaceActivityCount(id) !== 0) { reopenWorkspaceAdmission(id, token); throw new Error("Stop all agents, commands and terminals before reassigning ports.") }
+          return token
+        }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is busy", cause }) }),
+        () => atomically(Effect.gen(function* () {
+          const current = yield* readAll()
+          const session = current.find((item) => item.id === id)
+          if (!session || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return yield* Effect.fail(new GitError({ message: "Ports require an isolated local workspace." }))
+          const unassigned = { ...session, workspacePorts: undefined }
+          const next = yield* assignPorts(unassigned, current.filter((item) => item.id !== id))
+          yield* writeAll(current.map((item) => item.id === id ? next : item))
+          return next
+        })),
+        (token) => Effect.sync(() => { reopenWorkspaceAdmission(id, token) })
+      )
 
       const updateChat = (
         sessionId: string,
@@ -1997,6 +2030,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         create,
         createFromPr,
         createFromIssue,
+        reassignWorkspacePorts,
         createChat,
         selectChat,
         renameChat,
@@ -2174,7 +2208,8 @@ function* createIsolatedSession(
     sessions: readonly Session[],
     sessionId: string
   ) => Effect.Effect<void, GitError>,
-  writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>
+  writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>,
+  assignPorts: (session: Session, current: readonly Session[]) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
   const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
   if (existing.some((s) => s.worktreePath === worktreePath)) {
@@ -2196,7 +2231,7 @@ function* createIsolatedSession(
   if (input.continueBranch === true) {
     yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
   }
-  const session = makeSession(
+  let session = makeSession(
     input.continueBranch === true ? { ...worktree, branch: input.baseBranch } : worktree,
     "worktree"
   )
@@ -2209,7 +2244,8 @@ function* createIsolatedSession(
     Effect.gen(function* () {
       const current = yield* readAll()
       yield* ensureSessionIdAvailable(current, session.id)
-      yield* writeAll([session, ...current])
+      session = yield* assignPorts(session, current)
+              yield* writeAll([session, ...current])
     })
   )
   // AFTER the write: the fibre patches this session by id, so the record

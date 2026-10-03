@@ -75,6 +75,7 @@ export class ToolError extends Error {
 }
 
 export interface ToolExecutionContext {
+  readonly workspaceEnvironment?: Readonly<Record<string, string>>
   readonly signal: AbortSignal
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void

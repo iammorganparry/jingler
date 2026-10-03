@@ -54,7 +54,9 @@
     "./runtime/codex/endpoint": "./src/runtime/codex/endpoint.ts",
     "./runtime/codex/login": "./src/runtime/codex/login.ts",
     "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
-    "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts"
+    "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts",
+    "./workspace-ports": "./src/workspace-ports.ts",
+    "./routine-store": "./src/routine-store.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

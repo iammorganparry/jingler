@@ -27,6 +27,7 @@ describe("ProjectWorkflowSettings", () => {
       setup: "pnpm install",
       runs: [{ id: "run-1", label: "Dev", command: "pnpm dev" }],
       copyFiles: [".env.local"],
+      ports: { primary: 3100, extras: [], previewUrl: "http://localhost:{port}" },
       approve: true
     }))
     fireEvent.change(screen.getByLabelText("Setup command"), { target: { value: "pnpm install --frozen-lockfile" } })

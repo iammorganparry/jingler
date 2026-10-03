@@ -219,13 +219,14 @@ export class ProjectService extends Effect.Service<ProjectService>()(
           if (workflow.copyFiles.some((file) => safeWorkflowRelativePath(file) === null)) {
             return yield* Effect.fail(new GitError({ message: "Copied files must use safe repository-relative paths outside .git." }))
           }
+          const normalized = yield* Effect.try({ try: () => normalizeWorkflow(workflow, approve), catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Invalid workspace port configuration", cause }) })
           return yield* lock.withPermits(1)(Effect.gen(function* () {
           const current = yield* readPersisted()
           const existing = current.find((project) => project.id === id)
           if (!existing) return yield* Effect.fail(new GitError({ message: `Project not found: ${id}` }))
           const updated: Project = {
             ...existing,
-            workflow: normalizeWorkflow(workflow, approve),
+            workflow: normalized,
             updatedAt: new Date().toISOString()
           }
           yield* writePersisted(current.map((project) => project.id === id ? updated : project))

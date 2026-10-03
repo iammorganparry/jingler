@@ -1,3 +1,4 @@
+import { validateWorkspacePortConfig } from "./workspace-ports.js"
 import { createHash } from "node:crypto"
 import { isAbsolute, normalize, sep } from "node:path"
 import type { ProjectWorkflow } from "@jingler/core"
@@ -5,6 +6,7 @@ import type { ProjectWorkflow } from "@jingler/core"
 export type WorkflowDraft = Omit<ProjectWorkflow, "approvedDigest">
 
 const canonical = (workflow: WorkflowDraft): WorkflowDraft => ({
+  ...(workflow.ports ? { ports: workflow.ports } : {}),
   ...(workflow.setup?.trim() ? { setup: workflow.setup.trim() } : {}),
   ...(workflow.cleanup?.trim() ? { cleanup: workflow.cleanup.trim() } : {}),
   runs: workflow.runs.map((run) => ({
@@ -32,6 +34,7 @@ export const safeWorkflowRelativePath = (value: string): string | null => {
 }
 
 export const normalizeWorkflow = (workflow: WorkflowDraft, approve: boolean): ProjectWorkflow => {
+  if (workflow.ports) validateWorkspacePortConfig(workflow.ports)
   const value = canonical(workflow)
   return approve ? { ...value, approvedDigest: workflowDigest(value) } : value
 }

@@ -1,3 +1,5 @@
+import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { worktreeEnv } from "../../worktree-env.js"
 import {
   Command,
   CommandExecutor,
@@ -188,6 +190,7 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
       Effect.gen(function* () {
         const process = yield* shell.pipe(
           Command.workingDirectory(cwd),
+          Command.env({ ...worktreeEnv(globalThis.process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) }),
           Command.start
         )
         const [stdout, stderr, exitCode] = yield* Effect.all(
@@ -232,6 +235,7 @@ const fileTool = <Input, Encoded>(
 
 export interface WorkspaceCommandRouting {
   readonly sessionId: string
+  readonly workspaceEnvironment?: Readonly<Record<string, string>>
   readonly offload: OffloadCommandRouterPort
 }
 
@@ -282,7 +286,7 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Eligible commands offload automatically; only the operator can force local execution by disabling Offload Compute.",
+    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Workspaces with assigned local ports execute here so app servers remain local. Other eligible commands may offload automatically when Offload Compute is enabled.",
     input: Schema.Struct({
       command: Schema.String.pipe(Schema.minLength(1))
     }),
@@ -297,7 +301,7 @@ export const registerWorkspaceMutationTools = (
     idempotency: "unsafe",
     execute: ({ command }, context) =>
       Effect.runPromise(
-        (routing
+        (routing && !routing.workspaceEnvironment?.JINGLER_PORT
           ? routing.offload.executeIfEligible(
               cwd,
               routing.sessionId,
@@ -306,11 +310,11 @@ export const registerWorkspaceMutationTools = (
             ).pipe(
               Effect.flatMap((remote) =>
                 remote === null
-                  ? workspace.execute(cwd, command, context)
+                  ? workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment })
                   : Effect.succeed(remote)
               )
             )
-          : workspace.execute(cwd, command, context)),
+          : workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment })),
         { signal: context.signal }
       )
   })

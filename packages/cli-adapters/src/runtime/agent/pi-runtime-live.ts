@@ -534,6 +534,7 @@ export const makePiAgentRuntimeLive = (
             Effect.tap((registry) => Effect.sync(() =>
               registerWorkspaceMutationTools(registry, spec.cwd, mutations, {
                 sessionId: spec.sessionId,
+                workspaceEnvironment: spec.workspaceEnvironment,
                 offload
               })
             )),

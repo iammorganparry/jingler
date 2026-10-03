@@ -1,3 +1,5 @@
+import { worktreeEnv } from "../../worktree-env.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
 import { nativeCliEnvironment, withMacCliPath } from "../providers/native-cli-environment.js"
 import { execFileText, stopChild, trackChild } from "../../child-registry.js"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
@@ -43,6 +45,7 @@ export const readCodexVersion = async (
 }
 
 export interface CodexClientOptions {
+  readonly workspaceEnvironment?: Readonly<Record<string, string>>
   readonly mcpEnvironmentKeys?: readonly string[]
   readonly binary?: string
   readonly environment?: NodeJS.ProcessEnv
@@ -85,10 +88,11 @@ export class CodexClient {
   private closing: Promise<void> | undefined
   constructor(private readonly options: CodexClientOptions = {}) {
     assertSupportedPlatform()
-    const environment = options.environment ?? process.env
+    const environment = worktreeEnv(options.environment ?? process.env, options.cwd)
     const env = codexEnvironment(environment)
     // Only explicit run-scoped attachments may extend the inherited allowlist.
     for (const name of options.mcpEnvironmentKeys ?? []) env[name] = environment[name]
+    Object.assign(env, trustedWorkspaceEnvironment(options.workspaceEnvironment))
     this.child = (options.spawnProcess ?? spawn)(
       options.binary ?? process.env.JINGLER_CODEX_BINARY ?? "codex",
       ["app-server"],

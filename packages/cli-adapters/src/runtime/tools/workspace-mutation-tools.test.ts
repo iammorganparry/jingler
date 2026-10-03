@@ -216,3 +216,12 @@ describe("workspace mutation tools", () => {
     expect(executeIfEligible).toHaveBeenCalledTimes(2)
   })
 })
+
+ it("runs simultaneous Pi and child commands with isolated trusted workspace environments", async () => {
+   const context = { signal: new AbortController().signal, idempotencyKey: null, progress: () => undefined }
+   const command = 'printf "%s:%s" "$JINGLER_PORT" "$JINGLER_WORKSPACE_PATH"'
+   const before = process.env.JINGLER_PORT
+   const results = await Promise.all([3100, 3101].map((value) => Effect.runPromise(port.execute(workspace, command, { ...context, workspaceEnvironment: { JINGLER_PORT: String(value), JINGLER_WORKSPACE_PATH: workspace } }))))
+   expect(results.map((result) => result.stdout)).toEqual([`3100:${workspace}`, `3101:${workspace}`])
+   expect(process.env.JINGLER_PORT).toBe(before)
+ })

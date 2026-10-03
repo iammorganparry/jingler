@@ -480,9 +480,13 @@ export const rpc = {
     setup?: string
     cleanup?: string
     runs: ReadonlyArray<ProjectRunCommand>
+    ports?: import("@jingler/core").WorkspacePortConfig
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }): Promise<Project> => run((c) => c.Projects.setWorkflow({ ...input, runs: [...input.runs], copyFiles: [...input.copyFiles] })),
+  workspacePortsCheck: (sessionId: string): Promise<ReadonlyArray<number>> => run((c) => c.WorkspacePorts.check({ sessionId })),
+  workspacePortsReassign: (sessionId: string): Promise<Session> => run((c) => c.WorkspacePorts.reassign({ sessionId })),
+  workspacePortsPreview: (sessionId: string): Promise<string> => run((c) => c.WorkspacePorts.preview({ sessionId })),
   workspaceWorkflowRetrySetup: (sessionId: string): Promise<Session> =>
     run((c) => c.WorkspaceWorkflow.retrySetup({ sessionId })),
   workspaceWorkflowSkipSetup: (sessionId: string): Promise<Session> =>

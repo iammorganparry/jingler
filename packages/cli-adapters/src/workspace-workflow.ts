@@ -15,7 +15,7 @@ import {
   closeWorkspaceAdmission,
   reopenWorkspaceAdmission
 } from "./workspace-admission.js"
-import { worktreeEnv } from "./worktree-env.js"
+import { workspaceProcessEnvironment } from "./workspace-ports.js"
 
 const OUTPUT_LIMIT = 64 * 1024
 const COMMAND_TIMEOUT_MS = 10 * 60_000
@@ -52,7 +52,7 @@ const runCommand = async (
   try {
     const child = trackChild(spawn(shell.file, shell.args, {
       cwd: session.worktreePath,
-      env: worktreeEnv(process.env, session.worktreePath),
+      env: workspaceProcessEnvironment(process.env, session),
       detached: true,
       stdio: ["ignore", "pipe", "pipe"]
     }), true, { sessionId: session.id, action })

@@ -174,6 +174,7 @@ export interface JinglerAppProps {
     setup?: string
     cleanup?: string
     runs: ReadonlyArray<ProjectRunCommand>
+    ports?: import("@jingler/core").WorkspacePortConfig
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }) => Promise<void> | void

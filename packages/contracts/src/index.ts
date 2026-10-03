@@ -1,5 +1,6 @@
 import { NativeEndpointLogin } from "@jingler/core"
 import {
+  WorkspacePortConfig,
   RoutineInput,
   RoutineDocument,
   RoutineRun,
@@ -568,6 +569,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       setup: Schema.optional(Schema.String),
       cleanup: Schema.optional(Schema.String),
       runs: Schema.Array(ProjectRunCommand),
+      ports: Schema.optional(WorkspacePortConfig),
       copyFiles: Schema.Array(Schema.String),
       approve: Schema.Boolean
     }
@@ -594,6 +596,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, checkpointId: Schema.String, token: Schema.String }
   }),
 
+  Rpc.make("WorkspacePorts.check", { success: Schema.Array(Schema.Number), error: GitError, payload: { sessionId: Schema.String } }),
+  Rpc.make("WorkspacePorts.reassign", { success: Session, error: GitError, payload: { sessionId: Schema.String } }),
+  Rpc.make("WorkspacePorts.preview", { success: Schema.String, error: GitError, payload: { sessionId: Schema.String } }),
   Rpc.make("WorkspaceWorkflow.retrySetup", {
     success: Session,
     error: GitError,

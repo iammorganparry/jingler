@@ -1,6 +1,13 @@
+import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
 import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { CodexInbox } from "./inbox.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"
+
+/** Individual overrides preserve operator inheritance, filters and other explicit values. */
+export const codexWorkspaceConfig = (config: ThreadStartParams["config"], environment?: Readonly<Record<string, string>>): NonNullable<ThreadStartParams["config"]> => ({
+  ...config,
+  ...Object.fromEntries(Object.entries(trustedWorkspaceEnvironment(environment)).map(([name, value]) => [`shell_environment_policy.set.${name}`, value]))
+})
 
 export type CodexRuntimeOptions = CodexClientOptions & NativeRuntimeToolsOptions
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
@@ -244,7 +251,7 @@ const openThread = async (
   const params: ThreadStartParams = {
     cwd: spec.cwd,
     model: spec.modelId,
-    config,
+    config: codexWorkspaceConfig(config, spec.workspaceEnvironment),
     developerInstructions: systemPrompt,
     approvalPolicy: spec.mode === "read-only" ? "never" : "on-request",
     approvalsReviewer: "user",
@@ -386,6 +393,7 @@ export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentR
               try: () => new CodexClient({
                 ...options,
                 cwd: spec.cwd,
+                workspaceEnvironment: spec.workspaceEnvironment,
                 // codexMcpConfig already filtered inherited values before adding attachments.
                 environment: attachment.env,
                 mcpEnvironmentKeys: Object.keys(attachment.env)

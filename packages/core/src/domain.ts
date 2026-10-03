@@ -719,7 +719,6 @@ export const Session = Schema.Struct({
   baseBranch: Schema.optional(Schema.String),
   /** Durable setup/cleanup gate for machine-local workspace automation. */
   workspaceLifecycle: Schema.optional(WorkspaceLifecycle),
-  checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Legacy single-chat mode and allowlist aliases retained during rolling migration. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),

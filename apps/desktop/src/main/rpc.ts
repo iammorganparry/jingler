@@ -1,3 +1,4 @@
+import { workspaceEnvironment, resolveWorkspacePreview, workspacePortAvailable } from "@jingler/cli-adapters/workspace-ports";
 import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
@@ -3195,13 +3196,12 @@ export const createTerminal = (input: {
   rows: number;
 }) =>
   Effect.gen(function* () {
-    const cwd =
-      input.cwd ??
-      (yield* resolveSession(input.sessionId))?.worktreePath ??
-      undefined;
+    const session = yield* resolveSession(input.sessionId);
+    const cwd = input.cwd ?? session?.worktreePath ?? undefined;
     const terminals = yield* TerminalService;
     return yield* terminals.create({
       sessionId: input.sessionId,
+      workspaceEnvironment: session ? workspaceEnvironment(session) : {},
       cwd,
       cols: input.cols,
       rows: input.rows,
@@ -4457,7 +4457,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const project = yield* ProjectService.get(projectId);
       return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
-  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, approve }) =>
+  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, ports, approve }) =>
     ProjectService.setWorkflow(
       projectId,
       {
@@ -4465,9 +4465,39 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ...(cleanup === undefined ? {} : { cleanup }),
         runs,
         copyFiles,
+        ...(ports ? { ports } : {}),
       },
       approve,
     ),
+  "WorkspacePorts.check": ({ sessionId }) => Effect.gen(function* () {
+    const session = yield* resolveSession(sessionId);
+    const ports = session?.workspacePorts;
+    if (!ports) return [];
+    const sessions = yield* SessionStore.list();
+    const reserved = new Set(sessions.filter((item) => item.id !== sessionId).flatMap((item) => item.workspacePorts ? [item.workspacePorts.primary, ...Object.values(item.workspacePorts.extras)] : []));
+    return yield* Effect.tryPromise({ try: async () => {
+      const assigned = [ports.primary, ...Object.values(ports.extras)];
+      const availability = await Promise.all(assigned.map(workspacePortAvailable));
+      return assigned.filter((port, index) => reserved.has(port) || !availability[index]);
+    }, catch: (cause) => new GitError({ message: "Could not check workspace ports", cause }) });
+  }),
+  "WorkspacePorts.reassign": ({ sessionId }) => SessionStore.reassignWorkspacePorts(sessionId),
+  "WorkspacePorts.preview": ({ sessionId }) => Effect.gen(function* () {
+    const session = yield* resolveSession(sessionId);
+    if (!session?.workspacePorts || !session.projectId || session.environmentId || session.workspaceMode === "direct") return yield* Effect.fail(new GitError({ message: "Preview requires an isolated local workspace with assigned ports." }));
+    const project = yield* ProjectService.get(session.projectId);
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const url = resolveWorkspacePreview(project.workflow?.ports?.previewUrl ?? "http://localhost:{port}", session.workspacePorts!);
+        try {
+          const response = await fetch(url, { signal: AbortSignal.timeout(3000), redirect: "error" });
+          await response.body?.cancel();
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        } catch (cause) { throw new Error(`Preview is not ready at ${url}. Start the server and retry. ${cause instanceof Error ? cause.message : ""}`); }
+        return url;
+      }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Preview unavailable", cause })
+    });
+  }),
   "WorkspaceWorkflow.retrySetup": ({ sessionId }) => WorkspaceWorkflowService.setup(sessionId),
   "WorkspaceWorkflow.skipSetup": ({ sessionId }) => WorkspaceWorkflowService.skipSetup(sessionId),
   "WorkspaceWorkflow.startRun": ({ sessionId, runId }) => WorkspaceWorkflowService.startRun(sessionId, runId),

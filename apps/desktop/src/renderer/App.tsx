@@ -1629,6 +1629,7 @@ function AuthedApp({
               session={session}
               project={projectController.projects.find((project) => project.id === session.projectId)}
               onSession={publishSessionUpdate}
+              onPreview={(url) => { const browser = browserDock.forAgent(session.id, session.activeChatId); browser.navigate(url); ctx.onSelectBrowser?.(); }}
             />
           {/* The registry keeps each actor alive, but React state must remount per
               chat or useSelector can display the previous actor until the new

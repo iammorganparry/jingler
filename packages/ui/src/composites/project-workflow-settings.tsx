@@ -11,6 +11,7 @@ export interface ProjectWorkflowSettingsProps {
     setup?: string
     cleanup?: string
     runs: ReadonlyArray<ProjectRunCommand>
+    ports?: import("@jingler/core").WorkspacePortConfig
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }) => Promise<void> | void
@@ -19,6 +20,8 @@ export interface ProjectWorkflowSettingsProps {
 const runsText = (project: Project | undefined): string =>
   (project?.workflow?.runs ?? []).map((run) => `${run.label}=${run.command}`).join("\n")
 
+const portsOf = (project: Project | undefined) => project?.workflow?.ports ?? { primary: 3100, extras: [], previewUrl: "http://localhost:{port}" }
+
 export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSettingsProps) {
   const [projectId, setProjectId] = React.useState(projects[0]?.id ?? "")
   const project = projects.find((candidate) => candidate.id === projectId) ?? projects[0]
@@ -26,6 +29,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
   const [cleanup, setCleanup] = React.useState(project?.workflow?.cleanup ?? "")
   const [runs, setRuns] = React.useState(runsText(project))
   const [copyFiles, setCopyFiles] = React.useState((project?.workflow?.copyFiles ?? []).join("\n"))
+  const [ports, setPorts] = React.useState(portsOf(project))
   const [approved, setApproved] = React.useState(project?.workflow?.approvedDigest !== undefined)
   const [busy, setBusy] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
@@ -37,6 +41,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
     setCleanup(next?.workflow?.cleanup ?? "")
     setRuns(runsText(next))
     setCopyFiles((next?.workflow?.copyFiles ?? []).join("\n"))
+    setPorts(portsOf(next))
     setApproved(next?.workflow?.approvedDigest !== undefined)
     setMessage(null)
   }
@@ -57,6 +62,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
         ...(setup.trim() ? { setup: setup.trim() } : {}),
         ...(cleanup.trim() ? { cleanup: cleanup.trim() } : {}),
         runs: parsedRuns,
+        ports: { ...ports, previewUrl: ports.previewUrl?.trim() || undefined },
         copyFiles: copyFiles.split("\n").map((line) => line.trim()).filter(Boolean),
         approve: approved
       })
@@ -72,6 +78,18 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
 
   return (
     <div className="space-y-5" data-testid="project-workflow-settings">
+      <div>
+        <label htmlFor="workspace-primary-port" className="text-sm text-text-bright">Starting app port
+          <Input id="workspace-primary-port" aria-label="Starting app port" type="number" min={1024} max={65535} value={ports.primary} onChange={(event) => { setPorts({ ...ports, primary: Number(event.currentTarget.value) }); setApproved(false) }} />
+        </label>
+        <label htmlFor="workspace-preview-template" className="text-sm text-text-bright">Preview URL template
+          <Input id="workspace-preview-template" aria-label="Preview URL template" value={ports.previewUrl ?? ""} placeholder="http://localhost:{port}" onChange={(event) => { setPorts({ ...ports, previewUrl: event.currentTarget.value }); setApproved(false) }} />
+        </label>
+        <p className="text-xs text-dim">Use {"{port}"} for the app port or {"{API_port}"} for a named service. Commands receive JINGLER_PORT and JINGLER_API_PORT.</p>
+        <label htmlFor="workspace-extra-ports" className="text-sm text-text-bright">Additional service ports (NAME=starting port)
+          <textarea id="workspace-extra-ports" aria-label="Additional service ports" className="w-full border border-line bg-sunken text-text-bright" value={ports.extras.map((extra) => `${extra.name}=${extra.start}`).join("\n")} onChange={(event) => { setPorts({ ...ports, extras: event.currentTarget.value.split("\n").filter(Boolean).map((line) => { const [name, start] = line.split("="); return { name: name ?? "", start: Number(start) } }) }); setApproved(false) }} />
+        </label>
+      </div>
       <div>
         <h2 className="text-lg font-semibold text-text-bright">Project workflows</h2>
         <p className="mt-1 text-sm text-dim">Machine-local commands run only after approving their exact content.</p>
