@@ -1602,6 +1602,31 @@ export const backgroundTaskOutput = (sessionId: string, taskId: string) =>
     return yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""));
   });
 
+const allSessionChats = (session: Session | null) =>
+  session ? [...session.chats, ...(session.closedChats ?? [])] : [];
+
+// A failed archive/delete retains admission ownership for an explicit retry.
+// Only this coordinator can transfer that token; concurrent callers cannot reuse it.
+const lifecycleClosures = new Map<string, symbol>();
+const lifecycleOperations = new Set<string>();
+const beginWorkspaceLifecycle = (sessionId: string, reason: string) =>
+  Effect.gen(function* () {
+    const owner = yield* Effect.try({
+      try: () => {
+        if (lifecycleOperations.has(sessionId)) throw new Error("Workspace lifecycle operation is already in progress.");
+        const previous = lifecycleClosures.get(sessionId);
+        if (previous && !reopenWorkspaceAdmission(sessionId, previous)) throw new Error("Workspace lifecycle ownership changed.");
+        const token = closeWorkspaceAdmission(sessionId, reason);
+        lifecycleClosures.set(sessionId, token);
+        lifecycleOperations.add(sessionId);
+        return token;
+      },
+      catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => lifecycleOperations.delete(sessionId)));
+    return owner;
+  });
+
 /** `Sessions.archive` handler — archive a session and return the updated record. */
 export const archiveSession = (
   sessionId: string,
@@ -1610,10 +1635,11 @@ export const archiveSession = (
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
-    closeWorkspaceAdmission(sessionId, "workspace archive is in progress");
+    const workflow = yield* WorkspaceWorkflowService;
+    yield* workflow.prepareLifecycle(sessionId);
+    const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace archive is in progress");
     const runner = yield* AgentRunner;
     const terminals = yield* TerminalService;
-    const workflow = yield* WorkspaceWorkflowService;
     for (const chat of [...session.chats, ...(session.closedChats ?? [])]) {
       yield* runner.stop(sessionId, chat.id, true);
     }
@@ -1625,7 +1651,7 @@ export const archiveSession = (
       try: () => waitForWorkspaceIdle(sessionId),
       catch: (cause) => new GitError({ message: "Workspace activity did not stop before archive", cause }),
     });
-    if (!skipCleanup) yield* workflow.cleanup(sessionId);
+    if (!skipCleanup) yield* workflow.cleanup(sessionId, closure);
     yield* SessionStore.archive(sessionId, reason);
     const worktreePath = session.worktreePath;
     if (worktreePath) {
@@ -1649,6 +1675,7 @@ export const archiveSession = (
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(new GitError({ message: "Session not found" })),
     ),
+    Effect.scoped,
   );
 
 export const archiveSessionRouted = (
@@ -1688,16 +1715,14 @@ export const archiveSessionRouted = (
 /** `Sessions.restore` handler — un-archive a session and return the updated record. */
 export const restoreSession = (sessionId: string) =>
   Effect.gen(function* () {
-    const closure = yield* Effect.try({
-      try: () => closeWorkspaceAdmission(sessionId, "workspace archive is in progress"),
-      catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause }),
-    });
+    const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace restoration is in progress");
     yield* SessionStore.restore(sessionId);
     yield* SessionStore.setWorkspaceLifecycle(sessionId, {
       status: "ready",
       updatedAt: new Date().toISOString(),
     });
     reopenWorkspaceAdmission(sessionId, closure);
+    lifecycleClosures.delete(sessionId);
     const session = yield* SessionStore.get(sessionId);
     if (session.worktreePath) {
       const offload = yield* makeOffloadCommandRouter
@@ -1720,6 +1745,7 @@ export const restoreSession = (sessionId: string) =>
     }
     return session;
   }).pipe(
+    Effect.scoped,
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(new GitError({ message: "Session not found" })),
     ),
@@ -4659,16 +4685,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ),
         Effect.orElseSucceed(() => null),
       );
-      closeWorkspaceAdmission(sessionId, "workspace deletion is in progress");
+      const workflow = yield* WorkspaceWorkflowService;
+      yield* workflow.prepareLifecycle(sessionId);
+      const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace deletion is in progress");
       const runner = yield* AgentRunner;
       const terminals = yield* TerminalService;
-      const workflow = yield* WorkspaceWorkflowService;
       const browserControl = yield* BrowserControlMcpService;
       const preview = yield* PreviewViewService;
-      const chats = [
-        ...(session?.chats ?? []),
-        ...(session?.closedChats ?? []),
-      ];
+      const chats = allSessionChats(session);
       for (const chat of chats) {
         // Deletion is stronger than an ordinary Stop click: do not remove the
         // transcript/state until the harness finalizers have actually finished.
@@ -4682,7 +4706,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         try: () => waitForWorkspaceIdle(sessionId),
         catch: (cause) => new GitError({ message: "Workspace activity did not stop before deletion", cause }),
       });
-      if (!skipCleanup) yield* workflow.cleanup(sessionId);
+      if (!skipCleanup) yield* workflow.cleanup(sessionId, closure);
       yield* browserControl.revoke(sessionId);
       yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
       yield* BackgroundTaskStore.clear(sessionId);
@@ -4709,7 +4733,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         yield* ExplanationStore.removeAll(session.worktreePath, session.id);
       }
       yield* ReviewStore.clear(sessionId);
-    }),
+      lifecycleClosures.delete(sessionId);
+    }).pipe(Effect.scoped),
   "Sessions.createChat": ({ sessionId }) =>
     SessionStore.createChat(sessionId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>

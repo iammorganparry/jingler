@@ -1,4 +1,4 @@
-import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount } from "./workspace-admission.js"
+import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { allocateWorkspacePorts } from "./workspace-ports.js"
 import { ProjectService } from "./projects.js"
 import { approvedWorkflow } from "./project-workflow.js"
@@ -50,6 +50,13 @@ import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.j
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
+
+const updateWorkspaceReadiness = (session: Session): void => {
+  const status = session.workspaceLifecycle?.status
+  const reason = session.archived ? "the workspace is archived" :
+    status && status !== "ready" && status !== "setup-skipped" ? `workspace ${status}` : undefined
+  setWorkspaceAdmissionReadiness(session.id, reason)
+}
 
 const SessionArray = Schema.Array(SessionSchema)
 const GitHubFeedbackOutbox = Schema.Array(GitHubFeedbackOutboxEntrySchema)
@@ -1823,7 +1830,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         )
 
       const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
-        update(id, (session) => ({ ...session, workspaceLifecycle: lifecycle }))
+        update(id, (session) => ({ ...session, workspaceLifecycle: lifecycle })).pipe(Effect.andThen(get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace lifecycle", cause })), Effect.tap((session) => Effect.sync(() => updateWorkspaceReadiness(session))), Effect.asVoid)))
 
       const reconcileInterruptedWorkspaceLifecycles = (): Effect.Effect<void, GitError, PersistEnv> =>
         atomically(Effect.gen(function* () {
@@ -2268,7 +2275,7 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
     const decoded = Schema.decodeUnknownEither(SessionSchema)(
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
-    if (Either.isRight(decoded)) sessions.push(decoded.right)
+    if (Either.isRight(decoded)) { updateWorkspaceReadiness(decoded.right); sessions.push(decoded.right) }
   }
   return sessions
 }

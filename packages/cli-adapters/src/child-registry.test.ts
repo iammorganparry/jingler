@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
 import { afterEach, describe, expect, it } from "vitest"
-import { killAllChildren, liveChildCount, ownedChildCount, stopChild, stopOwnedChildren, trackChild } from "./child-registry.js"
+import { killAllChildren, liveChildCount, ownedChildCount, stopChild, stopChildAndWait, stopOwnedChildren, trackChild } from "./child-registry.js"
 
 /**
  * The orphan guard. A harness subprocess that outlives the app is invisible,
@@ -38,9 +38,10 @@ const isRunning = (proc: ChildProcess): boolean => {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   // Never let a test leak the very thing this module exists to prevent.
   killAllChildren()
+  await expect.poll(() => liveChildCount()).toBe(0)
 })
 
 describe("trackChild", () => {
@@ -122,15 +123,16 @@ describe("killAllChildren", () => {
     expect(isRunning(b)).toBe(false)
   }, 10_000)
 
-  it("empties the registry", () => {
+  it("empties the registry after processes have actually stopped", async () => {
     polite()
     stubborn()
     killAllChildren()
-    expect(liveChildCount()).toBe(0)
+    await expect.poll(() => liveChildCount()).toBe(0)
   })
 
-  it("reports zero and does nothing when there is nothing to kill", () => {
+  it("reports zero and does nothing when there is nothing to kill", async () => {
     killAllChildren()
+    await expect.poll(() => liveChildCount()).toBe(0)
     expect(killAllChildren()).toBe(0)
   })
 
@@ -193,11 +195,24 @@ it.skipIf(process.platform === "win32")("reaps descendants when an owned process
     await expect.poll(() => {
       try { process.kill(descendantPid!, 0); return true } catch { return false }
     }).toBe(false)
-    expect(liveChildCount()).toBe(before)
+    await expect.poll(() => liveChildCount()).toBe(before)
   } finally {
     stopChild(child, 0)
     if (descendantPid) {
       try { process.kill(descendantPid, "SIGKILL") } catch { /* already reaped */ }
     }
+  }
+})
+
+it.skipIf(process.platform === "win32")("bounds shutdown polling, retains ownership on timeout, and supports retry", async () => {
+  const child = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }), true, { sessionId: "timeout", action: "run" })
+  try {
+    // A negative timeout forces the bounded failure path before the leader can exit.
+    await expect(stopChildAndWait(child, 10_000, -1)).rejects.toThrow(/Timed out/)
+    expect(ownedChildCount("timeout")).toBe(1)
+    await stopChildAndWait(child, 0)
+    expect(ownedChildCount("timeout")).toBe(0)
+  } finally {
+    await stopChildAndWait(child, 0)
   }
 })

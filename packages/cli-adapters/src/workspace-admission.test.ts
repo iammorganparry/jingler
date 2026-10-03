@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest"
 import {
   acquireWorkspaceActivity,
+  acquireWorkspaceLifecycleActivity,
   closeWorkspaceAdmission,
   reopenWorkspaceAdmission,
   resetWorkspaceAdmissions,
+  setWorkspaceAdmissionReadiness,
   waitForWorkspaceIdle,
   workspaceActivityCount
 } from "./workspace-admission.js"
@@ -31,4 +33,26 @@ describe("workspace admission", () => {
     const lease = acquireWorkspaceActivity("s-1", "agent")
     lease.release()
   })
+})
+
+it("never shares a closure even when the reason matches", () => {
+  const owner = closeWorkspaceAdmission("exclusive", "setup")
+  expect(() => closeWorkspaceAdmission("exclusive", "setup")).toThrow(/already unavailable/)
+  expect(reopenWorkspaceAdmission("exclusive", Symbol("setup"))).toBe(false)
+  const activity = acquireWorkspaceLifecycleActivity("exclusive", "setup", owner)
+  expect(() => acquireWorkspaceLifecycleActivity("exclusive", "cleanup", Symbol())).toThrow(/owner/)
+  activity.release()
+  expect(reopenWorkspaceAdmission("exclusive", owner)).toBe(true)
+  expect(() => acquireWorkspaceLifecycleActivity("exclusive", "setup", owner)).toThrow(/owner/)
+})
+
+it("blocks restarted failed/interrupted work independently of ephemeral closure tokens", () => {
+  setWorkspaceAdmissionReadiness("restart", "workspace cleanup-failed")
+  expect(() => acquireWorkspaceActivity("restart", "native-child")).toThrow(/cleanup-failed/)
+  const owner = closeWorkspaceAdmission("restart", "retry cleanup")
+  acquireWorkspaceLifecycleActivity("restart", "cleanup", owner).release()
+  reopenWorkspaceAdmission("restart", owner)
+  expect(() => acquireWorkspaceActivity("restart", "terminal")).toThrow(/cleanup-failed/)
+  setWorkspaceAdmissionReadiness("restart")
+  acquireWorkspaceActivity("restart", "agent").release()
 })

@@ -3,9 +3,11 @@ import { execFile, type ChildProcess, type ExecFileOptionsWithStringEncoding } f
 export interface ChildOwner {
   readonly sessionId: string
   readonly action: string
+  readonly onStopped?: () => void
 }
 
 interface ChildRecord {
+  spawned: boolean
   readonly processGroup: boolean
   readonly owner?: ChildOwner
 }
@@ -32,15 +34,17 @@ export const trackChild = <P extends ChildProcess>(
   processGroup = false,
   owner?: ChildOwner
 ): P => {
-  live.set(proc, { processGroup, ...(owner ? { owner } : {}) })
-  const forget = () => live.delete(proc)
+  live.set(proc, { processGroup, spawned: false, ...(owner ? { owner } : {}) })
+  proc.once("spawn", () => { const record = live.get(proc); if (record) record.spawned = true })
   if (processGroup) {
-    // The leader can exit before a descendant. Kill the remaining owned group
-    // while the process-group id is still known, then forget after stdio closes.
-    proc.once("exit", () => signal(proc, "SIGKILL"))
-    proc.once("close", forget)
-  } else proc.once("exit", forget)
-  proc.once("error", forget)
+    proc.once("exit", () => { void stopChildAndWait(proc, 0).catch(() => { /* Retain ownership on timeout. */ }) })
+    proc.once("error", () => {
+      if (!proc.pid) { live.get(proc)?.owner?.onStopped?.(); live.delete(proc) }
+    })
+  } else {
+    proc.once("exit", () => { live.get(proc)?.owner?.onStopped?.(); live.delete(proc) })
+    proc.once("error", () => { live.get(proc)?.owner?.onStopped?.(); live.delete(proc) })
+  }
   return proc
 }
 
@@ -55,15 +59,14 @@ export const stopChild = (proc: ChildProcess, graceMs: number = GRACE_MS): void 
   proc.once("exit", () => clearTimeout(timer))
 }
 
-const waitForProcessGroupExit = async (proc: ChildProcess): Promise<void> => {
-  if (!live.get(proc)?.processGroup || process.platform === "win32" || !proc.pid) return
-  while (true) {
-    try {
-      process.kill(-proc.pid, 0)
-      await new Promise((resolve) => setTimeout(resolve, 25))
-    } catch {
-      return
-    }
+const groupAlive = (proc: ChildProcess): boolean => {
+  if (!live.get(proc)?.processGroup) return isAlive(proc)
+  if (!live.get(proc)?.spawned) return true
+  if (process.platform === "win32") throw new Error("Owned process-group shutdown is unsupported on Windows.")
+  if (!proc.pid) return isAlive(proc)
+  try { process.kill(-proc.pid, 0); return true } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ESRCH") return false
+    throw cause
   }
 }
 
@@ -72,23 +75,16 @@ export const stopChildAndWait = async (
   graceMs: number = GRACE_MS,
   timeoutMs: number = graceMs + 3_000
 ): Promise<void> => {
-  if (!isAlive(proc)) {
-    stopChild(proc, graceMs)
-    return
+  const started = Date.now()
+  signal(proc, graceMs === 0 ? "SIGKILL" : "SIGTERM")
+  while (groupAlive(proc)) {
+    const elapsed = Date.now() - started
+    if (elapsed >= timeoutMs) throw new Error(`Timed out stopping child process ${proc.pid ?? "unknown"}.`)
+    if (elapsed >= graceMs) signal(proc, "SIGKILL")
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(25, timeoutMs - elapsed)))
   }
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Timed out stopping child process ${proc.pid ?? "unknown"}.`)), timeoutMs)
-    timeout.unref?.()
-    const done = () => {
-      void waitForProcessGroupExit(proc).then(() => {
-        clearTimeout(timeout)
-        resolve()
-      }, reject)
-    }
-    proc.once("exit", done)
-    proc.once("error", done)
-    stopChild(proc, graceMs)
-  })
+  live.get(proc)?.owner?.onStopped?.()
+  live.delete(proc)
 }
 
 /** Stop only children provably owned by this live app/session. Persisted PIDs are never used. */
@@ -110,7 +106,9 @@ export const killAllChildren = (): number => {
     if (isAlive(proc)) killed += 1
     signal(proc, "SIGKILL")
   }
-  live.clear()
+  for (const proc of live.keys()) {
+    if (live.get(proc)?.processGroup) void stopChildAndWait(proc, 0).catch(() => { /* Retain timed-out ownership. */ })
+  }
   return killed
 }
 

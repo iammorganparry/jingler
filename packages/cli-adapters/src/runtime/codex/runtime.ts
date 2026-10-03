@@ -394,6 +394,7 @@ export const makeCodexAgentRuntime = (options: CodexRuntimeOptions = {}): AgentR
                 ...options,
                 cwd: spec.cwd,
                 workspaceEnvironment: spec.workspaceEnvironment,
+                owner: { sessionId: spec.sessionId, action: "native-agent" },
                 // codexMcpConfig already filtered inherited values before adding attachments.
                 environment: attachment.env,
                 mcpEnvironmentKeys: Object.keys(attachment.env)

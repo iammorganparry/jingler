@@ -120,7 +120,7 @@ export const makeOpenCodeAgentRuntime = (options?: OpenCodeRuntimeOptions): Agen
       }, catch: (cause) => new AgentRuntimeError({ reason: "runtime", message: cause instanceof Error ? cause.message : "Invalid OpenCode run" }) })
       const prepared = yield* prepareNativeRuntimeTools(spec, context, options ?? {})
       // MCP.add is directory-scoped. A per-run server prevents same-directory chats sharing credentials.
-      const server = yield* Effect.acquireRelease(Effect.tryPromise({ try: () => OpenCodeServer.start({ ...options, cwd: spec.cwd, workspaceEnvironment: spec.workspaceEnvironment }), catch: failure }), (owned) => Effect.promise(() => owned.close()))
+      const server = yield* Effect.acquireRelease(Effect.tryPromise({ try: () => OpenCodeServer.start({ ...options, cwd: spec.cwd, workspaceEnvironment: spec.workspaceEnvironment, owner: { sessionId: spec.sessionId, action: "native-agent" } }), catch: failure }), (owned) => Effect.promise(() => owned.close()))
       const abort = new AbortController()
       let cleanup = async () => { abort.abort() }
       yield* Effect.addFinalizer(() => Effect.promise(() => cleanup()))

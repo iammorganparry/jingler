@@ -4,6 +4,13 @@ interface Closure {
 }
 
 const closed = new Map<string, Closure>()
+const readiness = new Map<string, string>()
+
+/** Persisted setup/archive state gates every entrypoint, including after restart. */
+export const setWorkspaceAdmissionReadiness = (sessionId: string, reason?: string): void => {
+  if (reason) readiness.set(sessionId, reason)
+  else readiness.delete(sessionId)
+}
 const active = new Map<string, Set<{ readonly action: string }>>()
 const waiters = new Map<string, Set<() => void>>()
 
@@ -13,10 +20,13 @@ export interface WorkspaceActivity {
   release(): void
 }
 
-export const workspaceAdmissionReason = (sessionId: string): string | undefined => closed.get(sessionId)?.reason
+export const workspaceAdmissionReason = (sessionId: string): string | undefined => closed.get(sessionId)?.reason ?? readiness.get(sessionId)
 
-const acquire = (sessionId: string, action: string, lifecycleOwner: boolean): WorkspaceActivity => {
-  const reason = lifecycleOwner ? undefined : closed.get(sessionId)?.reason
+const acquire = (sessionId: string, action: string, lifecycleOwner?: symbol): WorkspaceActivity => {
+  if (lifecycleOwner !== undefined && closed.get(sessionId)?.token !== lifecycleOwner) {
+    throw new Error("Workspace lifecycle owner does not match admission closure.")
+  }
+  const reason = lifecycleOwner !== undefined ? undefined : workspaceAdmissionReason(sessionId)
   if (reason) throw new Error(`Workspace is unavailable while ${reason}.`)
   const token = { action }
   const entries = active.get(sessionId) ?? new Set()
@@ -40,16 +50,15 @@ const acquire = (sessionId: string, action: string, lifecycleOwner: boolean): Wo
 }
 
 export const acquireWorkspaceActivity = (sessionId: string, action: string): WorkspaceActivity =>
-  acquire(sessionId, action, false)
+  acquire(sessionId, action)
 
 /** Internal setup/cleanup work runs under the closure it owns, without opening public admission. */
-export const acquireWorkspaceLifecycleActivity = (sessionId: string, action: string): WorkspaceActivity =>
-  acquire(sessionId, action, true)
+export const acquireWorkspaceLifecycleActivity = (sessionId: string, action: string, owner: symbol): WorkspaceActivity =>
+  acquire(sessionId, action, owner)
 
 export const closeWorkspaceAdmission = (sessionId: string, reason: string): symbol => {
   const existing = closed.get(sessionId)
   if (existing) {
-    if (existing.reason === reason) return existing.token
     throw new Error(`Workspace is already unavailable while ${existing.reason}.`)
   }
   const token = Symbol(reason)
@@ -87,6 +96,7 @@ export const workspaceActivityCount = (sessionId: string): number => active.get(
 
 export const resetWorkspaceAdmissions = (): void => {
   closed.clear()
+  readiness.clear()
   active.clear()
   waiters.clear()
 }

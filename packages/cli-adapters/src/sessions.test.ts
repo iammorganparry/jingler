@@ -1,4 +1,4 @@
-import { acquireWorkspaceActivity } from "./workspace-admission.js"
+import { acquireWorkspaceActivity, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { ProjectService } from "./projects.js"
 import { execFileSync } from "node:child_process"
 import {
@@ -191,6 +191,22 @@ describe("SessionStore", () => {
       expect(persisted.workspacePorts).toEqual(session.workspacePorts)
       const next = yield* SessionStore.reassignWorkspacePorts(session.id)
       expect(next.workspacePorts).toBeDefined()
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
+  })
+
+  it.each(["setup-running", "cleanup-running"] as const)("recovers interrupted %s without admitting work or redispatching commands", async (status) => {
+    const result = await runExit(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input({ title: `Interrupted ${status}`, projectId: "recovery-project" }))
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { status, updatedAt: new Date().toISOString() })
+      yield* SessionStore.reconcileInterruptedWorkspaceLifecycles()
+      const recovered = yield* SessionStore.get(session.id)
+      expect(recovered.workspaceLifecycle?.status).toBe(status === "setup-running" ? "setup-failed" : "cleanup-failed")
+      expect(recovered.workspaceLifecycle?.error).toContain("interrupted")
+      expect(() => acquireWorkspaceActivity(session.id, "native-child")).toThrow()
+      setWorkspaceAdmissionReadiness(session.id)
+      return recovered
+
     }).pipe(Effect.provide(services)), temp.layer)
     expect(result._tag).toBe("Success")
   })

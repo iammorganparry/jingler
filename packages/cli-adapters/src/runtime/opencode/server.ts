@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer } from "node:net"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { execFileText, stopChild, trackChild } from "../../child-registry.js"
+import { execFileText, stopChildAndWait, trackChild, type ChildOwner } from "../../child-registry.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 
 /** Minimum and maximum tested server are deliberately the same release. */
@@ -16,6 +16,7 @@ export class UnsupportedOpenCode extends Error {}
 export interface OpenCodeOptions {
   workspaceEnvironment?: Readonly<Record<string, string>>
   cwd?: string
+  owner?: ChildOwner
   binary?: string
   environment?: NodeJS.ProcessEnv
   spawnProcess?: typeof spawn
@@ -128,7 +129,7 @@ export class OpenCodeServer {
         cwd: options.cwd,
         env: { ...environment, ...trustedWorkspaceEnvironment(options.workspaceEnvironment), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
         stdio: ["ignore", "pipe", "pipe"], detached: true
-      }), true)
+      }), true, options.owner)
     } catch (cause) {
       await rm(configRoot, { recursive: true, force: true })
       throw cause
@@ -167,7 +168,7 @@ export class OpenCodeServer {
   close(): Promise<void> {
     this.closing ??= (async () => {
       this.stopped.abort()
-      stopChild(this.child, 250)
+      await stopChildAndWait(this.child, 250)
       await this.closed
       await rm(this.configRoot, { recursive: true, force: true })
     })()
