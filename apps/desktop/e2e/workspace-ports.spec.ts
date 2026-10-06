@@ -9,6 +9,7 @@ test("two isolated servers have distinct previews and stopping one preserves the
   execFileSync("git", ["add", "preview-server.cjs"], { cwd: repoPath })
   execFileSync("git", ["commit", "-m", "add preview fixture"], { cwd: repoPath })
   await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("new-session").click()
   await addProject(window, repoPath)
   await window.keyboard.press("Escape")
   await window.getByRole("button", { name: "Account menu" }).click()
