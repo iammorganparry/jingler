@@ -1,6 +1,6 @@
 # Workspace automation implementation plan
 
-Status: operator authorized implementation with “Lets implement”. Review completed with blocking design findings; the mandatory corrections below are part of implementation. Implement phases 1–4; do not release or publish. Earlier effort figures remain provisional until Git/process/environment feasibility tests pass.
+Status: phases 1–4 completed and locally verified. Final checklist: `automation-parent-plan.md`; exact gates, reviews, sources and explicit v1 limits: `automation-acceptance.md`. No push/release. The original approved scope and historical design/results below are retained; superseded draft alternatives are not current policy (capture failure has Retry, never bypass).
 
 ## Scope and decisions
 
