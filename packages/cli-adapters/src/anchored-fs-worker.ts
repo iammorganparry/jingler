@@ -104,9 +104,7 @@ const writeFile = (file: string, request: AnchoredRequest): void => {
         else fs.renameSync(temporary, file) // Break hardlinks instead of truncating their inode.
       } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }) }
 }
-export const operate = (request: AnchoredRequest): unknown => {
-  if (request.op === "mkdir") { enterDirectory(request.path, true, true); return null }
-  if (request.op === "git") {
+const runGit = (request: AnchoredRequest): string => {
     enterDirectory(request.path)
     const env = { ...process.env, ...request.env }
     for (const key of Object.keys(env)) if (key.startsWith("GIT_") && !(key in (request.env ?? {}))) delete env[key]
@@ -114,7 +112,10 @@ export const operate = (request: AnchoredRequest): unknown => {
       cwd: ".", env, input: request.bytes ? Buffer.from(request.bytes, "base64") : undefined,
       timeout: 30_000, maxBuffer: 34 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"]
     }).toString("base64")
-  }
+}
+export const operate = (request: AnchoredRequest): unknown => {
+  if (request.op === "mkdir") { enterDirectory(request.path, true, true); return null }
+  if (request.op === "git") return runGit(request)
   enterDirectory(dirname(request.path), request.createParents)
   const file = name(request.path)
   switch (request.op) {

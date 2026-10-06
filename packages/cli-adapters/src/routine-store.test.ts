@@ -43,6 +43,18 @@ describe("RoutineStore durable occurrences", () => {
     expect(doc.runs[0]!.sessionId).toBe(claim!.run.requestedSessionId)
     expect((await stat(join(root, "routines.json"))).mode & 0o777).toBe(0o600)
   })
+  it.each([true, false])("recovers late creation association after failed teardown only when exact ownership is verified: %s", async matches => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const claim = (await store.claim(id, "scheduled", 1000))!
+    await store.finish(claim.run.id, "failed", "Preparation remains unresolved", 1001)
+    const restarted = new RoutineStore(join(root, "routines.json"))
+    await restarted.reconcile(async reserved => matches && reserved === claim.run.requestedSessionId, 2000)
+    expect((await restarted.read()).runs[0]).toMatchObject({
+      status: "failed", message: "Preparation remains unresolved", finishedAt: 1001,
+      sessionId: matches ? claim.run.requestedSessionId : null
+    })
+    expect(await restarted.claim(id, "scheduled", 2001)).toBeNull()
+  })
   it("fails closed on corrupt storage and refuses to replace it", async () => {
     const file = join(root, "routines.json")
     await writeFile(file, "{corrupt")

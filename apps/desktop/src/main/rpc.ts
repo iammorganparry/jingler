@@ -3248,13 +3248,14 @@ export const createTerminal = (input: {
   rows: number;
 }) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId);
+    const session = yield* SessionStore.get(input.sessionId).pipe(Effect.catchTag("SessionNotFoundError", () => Effect.succeed(null)));
     const cwd = input.cwd ?? session?.worktreePath ?? undefined;
     const terminals = yield* TerminalService;
     if (session?.checkpointSafeMode) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in checkpoint-safe mode." }));
     if (session) yield* SessionStore.markCheckpointTerminalExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
     return yield* terminals.create({
       executionHistoryPersisted: session !== null && session !== undefined,
+      unscoped: session === null || session === undefined,
       sessionId: input.sessionId,
       workspaceEnvironment: session ? workspaceEnvironment(session) : {},
       cwd,

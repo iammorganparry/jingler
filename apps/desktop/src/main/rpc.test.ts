@@ -46,6 +46,7 @@ import type {
 } from "@jingler/core";
 import {
   GitError,
+  TerminalError,
   GitHubApiError,
   AgentEndpointId,
   DetectedResourceCandidate,
@@ -1245,6 +1246,35 @@ describe("RPC handlers", () => {
         ),
       );
 
+    it.each([
+      { name: "ordinary", safe: false, persistFails: false, lookupFails: false, error: "reached PTY boundary", order: ["persist", "spawn"], spawns: 1 },
+      { name: "safe", safe: true, persistFails: false, lookupFails: false, error: "safe mode", order: [], spawns: 0 },
+      { name: "persist-failure", safe: false, persistFails: true, lookupFails: false, error: "persist terminal history", order: ["persist"], spawns: 0 },
+      { name: "lookup-failure", safe: false, persistFails: false, lookupFails: true, error: "lookup unavailable", order: [], spawns: 0 }
+    ])("keeps the authoritative bound terminal guard: $name", async scenario => {
+      const order: string[] = []
+      const create = vi.fn((input: Parameters<TerminalService["create"]>[0]) => Effect.gen(function* () {
+        order.push("spawn")
+        expect(input.executionHistoryPersisted).toBe(true)
+        expect(input.unscoped).toBe(false)
+        return yield* Effect.fail(new TerminalError({ message: "reached PTY boundary" }))
+      }))
+      const services = Layer.mergeAll(
+        Layer.succeed(SessionStore, {
+          get: () => scenario.lookupFails ? Effect.die(new Error("lookup unavailable")) : Effect.succeed({ id: "bound", worktreePath: dir, checkpointSafeMode: scenario.safe }),
+          markCheckpointTerminalExecutionUnprovable: () => Effect.suspend(() => {
+            order.push("persist")
+            return scenario.persistFails ? Effect.fail(new GitError({ message: "disk unavailable" })) : Effect.void
+          })
+        } as never),
+        Layer.succeed(TerminalService, { create } as never)
+      )
+      await expect(Effect.runPromise(createTerminal({ sessionId: "bound", cols: 80, rows: 24 }).pipe(Effect.provide(Layer.mergeAll(base, services)))))
+        .rejects.toThrow(scenario.error)
+      expect(order).toEqual(scenario.order)
+      expect(create).toHaveBeenCalledTimes(scenario.spawns)
+    })
+
     it("spawns in an explicit cwd when one is given", async () => {
       const info = await runCreate({
         sessionId: "s1",
@@ -2327,8 +2357,13 @@ describe("Auth.getSession routine sign-in fence", () => {
     const execute = vi.fn(async () => ({ status: "succeeded" as const, message: "Done" }))
     const store = new RoutineStore(join(root, "routines.json"))
     const scheduler = new RoutineScheduler(store, { execute, sessionExists: async () => false }, { now: () => now, setTimer: callback => { due = callback; return callback }, clearTimer: () => { due = undefined } })
-    let session: AuthSession | null = {} as AuthSession
-    const layer = Layer.mergeAll(Layer.succeed(AuthService, { getSession: () => Effect.sync(() => session) } as AuthService), Layer.succeed(RoutinesService, { start: Effect.promise(() => scheduler.start()), stop: Effect.promise(() => scheduler.stop()) } as RoutinesService))
+    let session: AuthSession | null = { user: { id: "operator", email: "operator@example.test", name: "Operator", image: null }, expiresAt: "2026-10-07T00:00:00.000Z" }
+    const layer = Layer.mergeAll(Layer.succeed(AuthService, { getSession: () => Effect.sync(() => session) } as AuthService), Layer.succeed(RoutinesService, RoutinesService.make({
+      scheduler, start: Effect.promise(() => scheduler.start()), stop: Effect.promise(() => scheduler.stop()),
+      resume: Effect.die("unused resume"), list: Effect.die("unused list"),
+      save: () => Effect.die("unused save"), enable: () => Effect.die("unused enable"),
+      delete: () => Effect.die("unused delete"), runNow: () => Effect.die("unused runNow"), cancel: () => Effect.die("unused cancel")
+    })))
     try {
       await store.save(undefined, Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "once", at: 1000 }, maxDurationMs: 10000 }), null, now)
       await Effect.runPromise(authenticatedSession().pipe(Effect.provide(layer))); expect(scheduler.running).toBe(true)

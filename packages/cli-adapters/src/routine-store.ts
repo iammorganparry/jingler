@@ -3,6 +3,7 @@ import { RoutineDocument, RoutineInput, routineRunActive, type Routine, type Rou
 import { Schema } from "effect"
 import { AtomicJsonFile } from "./runtime/persistence/atomic-json-file.js"
 
+const needsAssociation = (run: RoutineRun) => routineRunActive(run) || (run.status === "failed" && run.sessionId === null)
 const empty = (): RoutineDocument => ({ version: 1, routines: [], runs: [] })
 const trimHistory = (runs: ReadonlyArray<RoutineRun>) => runs.filter(routineRunActive).concat(runs.filter(run => !routineRunActive(run)).slice(-500))
 const nextAfter = (routine: Routine, now: number) => routine.schedule.kind === "once" ? null
@@ -86,7 +87,7 @@ export class RoutineStore {
     // Never redispatch: reconcile only the exact ID reserved before creation.
     const current = await this.read()
     const linked = new Set<string>()
-    for (const run of current.runs.filter(routineRunActive)) if (await sessionExists(run.requestedSessionId)) linked.add(run.id)
-    await this.document.update(value => ({ ...value, runs: value.runs.map(run => routineRunActive(run) ? { ...run, sessionId: linked.has(run.id) ? run.requestedSessionId : null, status: "interrupted", message: "Desktop restarted; unfinished run was not replayed", finishedAt: now } : run) }))
+    for (const run of current.runs.filter(needsAssociation)) if (await sessionExists(run.requestedSessionId)) linked.add(run.id)
+    await this.document.update(value => ({ ...value, runs: value.runs.map(run => routineRunActive(run) ? { ...run, sessionId: linked.has(run.id) ? run.requestedSessionId : null, status: "interrupted", message: "Desktop restarted; unfinished run was not replayed", finishedAt: now } : linked.has(run.id) && run.status === "failed" && run.sessionId === null ? { ...run, sessionId: run.requestedSessionId } : run) }))
   }
 }

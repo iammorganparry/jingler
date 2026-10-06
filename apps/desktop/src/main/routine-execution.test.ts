@@ -86,6 +86,28 @@ describe("routine execution adapter", () => {
       expect((await store.read()).runs[0]!.status).toBe("failed")
     } finally { vi.useRealTimers(); release() }
   })
+  it("retains a real Effect mode mutation through bounded cancellation and late rejection", async () => {
+    const { claim, create, store } = await fixture()
+    const controller = new AbortController(); const prompt = vi.fn()
+    let rejectMode!: (error: Error) => void; let entered!: () => void
+    const waiting = new Promise<void>((_, reject) => { rejectMode = reject })
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const execute = routineExecution({ validate: async () => {}, create: (_, run) => create(run),
+      setMode: (_, signal) => runOwnedRoutineEffect(Runtime.defaultRuntime, Effect.promise(() => { entered(); return waiting }), signal), prompt })
+    const outcome = execute(claim.routine, claim.run, controller.signal, async () => true, () => store.link(claim.run, 0)).catch(error => error)
+    await started
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      controller.abort(); vi.setSystemTime(0)
+      await vi.advanceTimersByTimeAsync(10_000)
+      const error = await outcome
+      expect(error).toBeInstanceOf(RoutinePreparationPendingError)
+      expect((await store.read()).runs[0]!.sessionId).toBe(claim.run.requestedSessionId)
+      rejectMode(new Error("late mode failure"))
+      await expect(error.pending).rejects.toThrow()
+      expect(prompt).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers(); rejectMode(new Error("cleanup")) }
+  })
   it("Runtime AbortSignal interrupts validation before creation", async () => {
     const { claim } = await fixture(); const controller = new AbortController(); const create = vi.fn(); const prompt = vi.fn()
     let entered!: () => void; let innerSignal!: AbortSignal

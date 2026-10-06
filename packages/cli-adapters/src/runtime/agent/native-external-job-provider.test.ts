@@ -1,3 +1,4 @@
+import * as fsPromises from "node:fs/promises"
 import { mkdtemp, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
@@ -21,6 +22,11 @@ import {
   makeNativeExternalJobProvider,
   registerNativeExternalJobProfiles
 } from "./native-external-job-provider.js"
+
+vi.mock("node:fs/promises", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>()
+  return { ...actual, readFile: vi.fn(actual.readFile) }
+})
 
 const roots: string[] = []
 
@@ -351,6 +357,43 @@ describe("native external-job provider", () => {
       }))
     }
   )
+
+  it("rereads durable terminal state when an active read settles after ownership release", async () => {
+    const root = await stateRoot()
+    const host = makeNativeExternalJobProvider(root)
+    const modelId = ProviderModelId.make("codex/cheap")
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const binding = host.bind({
+      parentRuntimeSessionId: "pi-session", spec: spec("codex"), context: context(),
+      models: { worker: modelId },
+      makeRuntime: () => ({ ...runtime([]), run: () => Stream.fromEffect(Effect.promise(() => gate)).pipe(Stream.flatMap(() => Stream.die(new Error("runtime exploded")))) })
+    })
+    const started = await host.provider.start(startInput(binding.bindingId, modelId))
+    const file = join(root, `${started.providerJobId}.json`)
+    const originalRead = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).readFile
+    let entered!: () => void
+    const readEntered = new Promise<void>(resolve => { entered = resolve })
+    let completeRead!: () => void
+    const readGate = new Promise<void>(resolve => { completeRead = resolve })
+    let intercept = true
+    const spy = vi.spyOn(fsPromises, "readFile").mockImplementation(async (...args) => {
+      const result = await originalRead(...args)
+      if (args[0] === file && intercept) { intercept = false; entered(); await readGate }
+      return result
+    })
+    try {
+      const stale = host.provider.result(started.providerJobId)
+      await readEntered
+      release()
+      await vi.waitFor(async () => expect(JSON.parse(await originalRead(file, "utf8"))).toMatchObject({ state: "failed", failureCode: "runtime-failed" }))
+      // A provider result that observes the terminal record proves its execute completed.
+      await terminalResult(host.provider, started.providerJobId)
+      completeRead()
+      expect(await stale).toMatchObject({ state: "failed", failureCode: "runtime-failed" })
+      expect(JSON.parse(await originalRead(file, "utf8"))).toMatchObject({ failureCode: "runtime-failed" })
+    } finally { spy.mockRestore(); release(); completeRead() }
+  })
 
   it("settles durably when transcript persistence fails", async () => {
     const root = await stateRoot()

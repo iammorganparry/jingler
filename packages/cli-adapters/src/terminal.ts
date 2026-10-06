@@ -188,11 +188,18 @@ export interface CreateTerminalInput {
   sessionId: string
   /** Persisted by SessionStore before spawning. Missing proof fails closed for session terminals. */
   executionHistoryPersisted?: boolean
+  /** Host resolved no durable session. This terminal owns no session workspace. */
+  unscoped?: boolean
   workspaceEnvironment?: Readonly<Record<string, string>>
   /** Working directory; the session worktree. Defaults to the process cwd. */
   cwd?: string
   cols: number
   rows: number
+}
+
+const validateTerminalHistory = (input: CreateTerminalInput): void => {
+  if (workspaceCheckpointMode(input.sessionId)) throw new Error("Interactive terminals are unsupported in checkpoint-safe mode.")
+  if (input.sessionId && !input.unscoped && !input.executionHistoryPersisted) throw new Error("Terminal history must be persisted before spawning.")
 }
 
 /**
@@ -207,15 +214,14 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
     const create = (input: CreateTerminalInput): Effect.Effect<TerminalInfo, TerminalError> =>
       Effect.try({
         try: () => {
-          if (workspaceCheckpointMode(input.sessionId)) throw new Error("Interactive terminals are unsupported in checkpoint-safe mode.")
-          if (input.sessionId && !input.executionHistoryPersisted) throw new Error("Terminal history must be persisted before spawning.")
+          validateTerminalHistory(input)
           const shell = defaultShell()
           // A terminal with no session anchors to the user's home, NOT the app's
           // cwd — which in dev is whichever worktree Jingler was launched from,
           // so commands typed here would run inside an unrelated repo.
           const worktree = input.cwd?.trim() || undefined
           const cwd = worktree ?? neutralCwd()
-          const activity = acquireWorkspaceActivity(input.sessionId, "terminal")
+          const activity = acquireWorkspaceActivity(input.unscoped ? "" : input.sessionId, "terminal")
           let pty: IPty
           try {
             pty = spawn(shell, shellArgs(), {

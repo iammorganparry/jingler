@@ -102,6 +102,39 @@ describe("desktop routine clock and dispatch fence", () => {
     await scheduler.stop(); expect(elapsed.setTimer).toHaveBeenCalledTimes(1); expect(clearDeadline).toHaveBeenCalled()
     expect((await store.read()).runs[0]!.status).toBe("cancelled")
   })
+  it("rechecks scheduled wall time after a backwards jump instead of launching a future occurrence", async () => {
+    await store.save(undefined, input, null, 0)
+    await scheduler.start()
+    const due = timer!
+    now = -100_000
+    due(); await scheduler.refresh()
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).runs).toEqual([])
+    now = 1000
+    timer!(); await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+    await scheduler.stop()
+    expect((await store.read()).runs[0]!.occurrenceAt).toBe(1000)
+  })
+  it("a cancelled run's elapsed callback cannot abort the next run", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const deadlines: (() => void)[] = []
+    const signals: AbortSignal[] = []
+    scheduler = new RoutineScheduler(store, {
+      sessionExists: async () => false,
+      execute: async (_, __, signal) => {
+        signals.push(signal)
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }))
+        return { status: "succeeded", message: "Done" }
+      }
+    }, clock, { setTimer: callback => { deadlines.push(callback); return callback }, clearTimer: () => {} })
+    now = 100
+    await scheduler.start()
+    const first = await scheduler.runNow(id); await vi.waitFor(() => expect(signals).toHaveLength(1))
+    now = 1; await scheduler.cancel(first.id)
+    const second = await scheduler.runNow(id); await vi.waitFor(() => expect(signals).toHaveLength(2))
+    deadlines[0]!(); expect(signals[1]!.aborted).toBe(false)
+    await scheduler.cancel(second.id)
+    expect((await store.read()).runs.map(run => run.status)).toEqual(["cancelled", "cancelled"])
+  })
   it.each(["validate", "create", "setMode"].flatMap(stage => ["stop", "cancel"].map(action => ({ stage, action }))))("$action during unresolved $stage is bounded but retains activity and blocks admission", async ({ stage, action }) => {
     const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
     const entered = deferred<void>(); const release = deferred<void>(); const prompt = vi.fn()

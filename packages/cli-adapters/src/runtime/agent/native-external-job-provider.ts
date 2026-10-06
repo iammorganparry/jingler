@@ -292,8 +292,11 @@ export const makeNativeExternalJobProvider = (
   const failAmbiguous = async (record: NativeExternalJobRecord): Promise<NativeExternalJobRecord> => {
     if (record.state !== "queued" && record.state !== "running") return record
     if (active.has(record.providerJobId)) return record
+    // The first read can precede terminal persistence and active ownership release.
+    const latest = await read(record.providerJobId)
+    if (latest.state !== "queued" && latest.state !== "running") return latest
     const failed: NativeExternalJobRecord = {
-      ...record,
+      ...latest,
       state: "failed",
       updatedAt: Date.now(),
       endedAt: Date.now(),

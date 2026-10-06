@@ -1,3 +1,4 @@
+import { stopRoutinesBeforeQuit } from "./routine-shutdown.js"
 import { RoutinesService } from "./routines.js"
 /**
  * Electron main entry — standard electron-vite lifecycle. On ready it forces the
@@ -524,13 +525,12 @@ if (!gotPrimaryLock) {
       event.preventDefault()
       if (!routinesShutdownPending) {
         routinesShutdownPending = true
-        const finish = () => { routinesShutdownAttempted = true; app.quit() }
-        // Elapsed Node timer: even unresolved preparation/persistence cannot trap quit.
-        // The durable claim is never replayed on restart; no remaining workspace is deleted.
-        const deadline = setTimeout(() => { console.error("Routine shutdown remains unresolved at quit deadline"); finish() }, 15_000)
-        void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))).catch(error => {
-          console.error("Routine shutdown failed", error)
-        }).finally(() => { clearTimeout(deadline); if (!routinesShutdownAttempted) finish() })
+        stopRoutinesBeforeQuit(
+          () => runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))),
+          () => { routinesShutdownAttempted = true; app.quit() },
+          () => console.error("Routine shutdown remains unresolved at quit deadline"),
+          error => console.error("Routine shutdown failed", error)
+        )
       }
       return
     }

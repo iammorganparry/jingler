@@ -41,7 +41,8 @@ export const routineExecution = (ports: RoutineExecutionPorts): RoutineExecution
   let association: Promise<void> | undefined
   const associate = (session: Session) => {
     if (session.id !== run.requestedSessionId || session.routineOccurrence?.routineId !== run.routineId || session.routineOccurrence.runId !== run.id) throw new Error("Created session does not match its reserved occurrence")
-    return association ??= link()
+    association ??= link()
+    return association
   }
   await check()
   // Associate on actual creation, including completion after the bounded cancel wait.

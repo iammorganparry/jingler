@@ -99,6 +99,10 @@ export class WorkspaceCheckpointStore {
       }
     return files
   }
+  async #validateFilters(paths: string[], shadow: string): Promise<void> {
+      const attributes = (await anchoredFs.git(this.#cwd, ["check-attr", "-z", "--stdin", "filter"], { GIT_INDEX_FILE: shadow }, Buffer.from(paths.join("\0") + "\0"))).toString("utf8").split("\0")
+      for (let i = 2; i < attributes.length; i += 3) if (!["unspecified", "unset"].includes(attributes[i]!)) throw new Error(`Checkpoint path has an unsupported Git filter: ${attributes[i - 2]}`)
+  }
   async #current(): Promise<Current> {
     const cwd = this.#cwd
     if (await text(cwd, ["rev-parse", "--show-toplevel"]) !== await realpath(cwd)) throw new Error("Checkpoints require the worktree root.")
@@ -124,8 +128,7 @@ export class WorkspaceCheckpointStore {
       const paths = [...new Set([...listed.map((entry) => entry.path), ...untracked])].sort()
       if (paths.length > MAX_FILES) throw new Error("Checkpoint file count limit exceeded.")
       for (const path of paths) safePath(path)
-      const attributes = (await anchoredFs.git(cwd, ["check-attr", "-z", "--stdin", "filter"], { GIT_INDEX_FILE: shadow }, Buffer.from(paths.join("\0") + "\0"))).toString("utf8").split("\0")
-      for (let i = 2; i < attributes.length; i += 3) if (!["unspecified", "unset"].includes(attributes[i]!)) throw new Error(`Checkpoint path has an unsupported Git filter: ${attributes[i - 2]}`)
+      await this.#validateFilters(paths, shadow)
       const blobs = new Map<string, Buffer>()
       let size = 0
       const addBlob = (bytes: Buffer): string => {
