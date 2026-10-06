@@ -701,6 +701,10 @@
 .sb-md ol {
   list-style: decimal;
 }
+.sb-md a,
+.sb-md-path {
+  user-select: text;
+}
 .sb-md a {
   color: var(--sb-blue);
   text-decoration: none;
@@ -725,11 +729,10 @@
   color: var(--sb-cyan);
 }
 /*
-  A path in agent output that opens in the Preview dock. Rendered as a <button>
-  so it is keyboard-reachable and announced as an action rather than a link —
-  it navigates nothing, it opens a panel.
+  A path in agent output that opens in the Files view. It remains a selectable
+  link; the click handler routes navigation into an editor tab.
 
-  The button is deliberately shape-less: it inherits the surrounding line's
+  The link is deliberately shape-less: it inherits the surrounding line's
   metrics so a path inside a sentence does not change that sentence's height or
   baseline. The only visual difference from an inert path is the underline on
   hover, which is the same affordance `.sb-md a` uses.

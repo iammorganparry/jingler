@@ -662,7 +662,7 @@ function MessageTurnImpl({
       ? message.parts.length - 1
       : -1
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex select-text flex-col gap-3">
       {isAssistant ? (
         // Provider-branded eyebrow: logo + name in the provider's brand colour.
         <Eyebrow
