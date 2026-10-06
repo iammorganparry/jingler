@@ -480,9 +480,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       text: string,
       images: ReadonlyArray<Attachment>,
       reasoning: ReasoningSetting | null | undefined,
-      planExecutionId?: string,
-      externalInstruction?: ExternalInstructionIdentity,
-      displayText?: string
+      planExecutionId: string | undefined,
+      externalInstruction: ExternalInstructionIdentity | undefined,
+      displayText: string | undefined,
+      workspaceTurn: { release(): void; transfer(): void }
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -1129,6 +1130,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 )
               }).pipe(Effect.provide(env), Effect.ignore)
             ),
+            Effect.ensuring(Effect.sync(() => workspaceTurn.release())),
             Effect.ensuring(out.end)
           )
           /**
@@ -1142,7 +1144,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * addressed a handle into nothing. Background work has to outlive the
            * turn that started it or the feature does not exist.
            */
-          const fiber = yield* Effect.forkDaemon(run)
+          // Transfer the lease atomically with the daemon fork. The request
+          // consumer can linger after Done or detach while background work lives;
+          // neither changes whether the actual harness still owns the workspace.
+          const fiber = yield* Effect.uninterruptibleMask(restore =>
+            Effect.forkDaemon(restore(run)).pipe(
+              Effect.tap(() => Effect.sync(() => workspaceTurn.transfer()))
+            )
+          )
           yield* Ref.update(fibers, (m) =>
             new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
           )
@@ -1298,7 +1307,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   message: workspaceLease.left instanceof Error ? workspaceLease.left.message : "Workspace is unavailable."
                 }])
               }
-              yield* Effect.addFinalizer(() => Effect.sync(() => workspaceLease.right.release()))
+              let runOwnsLease = false
+              yield* Effect.addFinalizer(() => Effect.sync(() => {
+                if (!runOwnsLease) workspaceLease.right.release()
+              }))
               if (gatedSession?.checkpointSafeMode !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
 
               // Concurrent chats in one session are allowed, but a single chat is
@@ -1330,7 +1342,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 reasoning,
                 planExecutionId,
                 externalInstruction,
-                displayText
+                displayText,
+                {
+                  release: () => workspaceLease.right.release(),
+                  transfer: () => { runOwnsLease = true }
+                }
               ).pipe(
                 Effect.onError(() => expectedModel === null
                   ? Effect.void

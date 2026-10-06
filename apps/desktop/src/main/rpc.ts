@@ -1647,6 +1647,83 @@ const beginWorkspaceLifecycle = (sessionId: string, reason: string) =>
     return owner;
   });
 
+export const deleteSession = (sessionId: string, skipCleanup = false) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (session?.environmentId) {
+        const remote = yield* RemoteSessionService;
+        yield* removeRemoteSessionMirror(
+          remote.request(session, "Sessions.delete", { skipCleanup }),
+          remote
+            .forget(sessionId)
+            .pipe(
+              Effect.ignore,
+              Effect.zipRight(SessionStore.forgetRemote(sessionId)),
+            ),
+        );
+        return;
+      }
+      const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(
+        Effect.map(
+          (routes) =>
+            routes.find((candidate) => candidate.sessionId === sessionId) ??
+            null,
+        ),
+        Effect.orElseSucceed(() => null),
+      );
+      const workflow = yield* WorkspaceWorkflowService;
+      yield* workflow.prepareLifecycle(sessionId);
+      const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace deletion is in progress");
+      const runner = yield* AgentRunner;
+      const terminals = yield* TerminalService;
+      const browserControl = yield* BrowserControlMcpService;
+      const preview = yield* PreviewViewService;
+      const chats = allSessionChats(session);
+      for (const chat of chats) {
+        // Deletion is stronger than an ordinary Stop click: do not remove the
+        // transcript/state until the harness finalizers have actually finished.
+        yield* runner.stop(sessionId, chat.id, true);
+      }
+      yield* terminals.killSession(sessionId).pipe(
+        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      );
+      yield* workflow.stopAll(sessionId);
+      yield* Effect.tryPromise({
+        try: () => waitForWorkspaceIdle(sessionId),
+        catch: (cause) => new GitError({ message: "Workspace activity did not stop before deletion", cause }),
+      });
+      if (!skipCleanup && session && workspaceModeOf(session) === "worktree") yield* workflow.cleanup(sessionId, closure);
+      yield* browserControl.revoke(sessionId);
+      yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
+      yield* BackgroundTaskStore.clear(sessionId);
+      const offload = yield* makeOffloadCommandRouter
+      yield* offload.destroySession(sessionId).pipe(Effect.ignore)
+      if (session?.worktreePath) {
+        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
+      }
+      yield* SessionStore.remove(sessionId);
+      if (relayRoute) {
+        yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
+          Effect.ignore,
+        );
+      }
+      for (const chat of chats) {
+        yield* TranscriptStore.remove(chat.id);
+        yield* ContextManager.forget(chat.id);
+        // Same per-chat reclaim `Chats.delete` does — without it, a session
+        // deleted whole left every chat's mode/approval entries in the
+        // runner's maps for the app's lifetime.
+        yield* runner.forgetChat(chat.id);
+      }
+      if (session?.worktreePath) {
+        yield* ExplanationStore.removeAll(session.worktreePath, session.id);
+      }
+      yield* ReviewStore.clear(sessionId);
+      lifecycleClosures.delete(sessionId);
+    }).pipe(Effect.scoped);
+
 /** `Sessions.archive` handler — archive a session and return the updated record. */
 export const archiveSession = (
   sessionId: string,
@@ -1675,7 +1752,7 @@ export const archiveSession = (
       try: () => waitForWorkspaceIdle(sessionId),
       catch: (cause) => new GitError({ message: "Workspace activity did not stop before archive", cause }),
     });
-    if (!skipCleanup) yield* workflow.cleanup(sessionId, closure);
+    if (!skipCleanup && session && workspaceModeOf(session) === "worktree") yield* workflow.cleanup(sessionId, closure);
     yield* SessionStore.archive(sessionId, reason);
     const worktreePath = session.worktreePath;
     if (worktreePath) {
@@ -4694,82 +4771,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     continueOnEnvironment(sessionId, environmentId),
   "Sessions.adoptBranch": ({ sessionId }) => adoptBranch(sessionId),
   "Sessions.forkOntoBranch": ({ sessionId }) => forkOntoBranch(sessionId),
-  "Sessions.delete": ({ sessionId, skipCleanup }) =>
-    Effect.gen(function* () {
-      const session = yield* SessionStore.get(sessionId).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (session?.environmentId) {
-        const remote = yield* RemoteSessionService;
-        yield* removeRemoteSessionMirror(
-          remote.request(session, "Sessions.delete", { skipCleanup }),
-          remote
-            .forget(sessionId)
-            .pipe(
-              Effect.ignore,
-              Effect.zipRight(SessionStore.forgetRemote(sessionId)),
-            ),
-        );
-        return;
-      }
-      const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(
-        Effect.map(
-          (routes) =>
-            routes.find((candidate) => candidate.sessionId === sessionId) ??
-            null,
-        ),
-        Effect.orElseSucceed(() => null),
-      );
-      const workflow = yield* WorkspaceWorkflowService;
-      yield* workflow.prepareLifecycle(sessionId);
-      const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace deletion is in progress");
-      const runner = yield* AgentRunner;
-      const terminals = yield* TerminalService;
-      const browserControl = yield* BrowserControlMcpService;
-      const preview = yield* PreviewViewService;
-      const chats = allSessionChats(session);
-      for (const chat of chats) {
-        // Deletion is stronger than an ordinary Stop click: do not remove the
-        // transcript/state until the harness finalizers have actually finished.
-        yield* runner.stop(sessionId, chat.id, true);
-      }
-      yield* terminals.killSession(sessionId).pipe(
-        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
-      );
-      yield* workflow.stopAll(sessionId);
-      yield* Effect.tryPromise({
-        try: () => waitForWorkspaceIdle(sessionId),
-        catch: (cause) => new GitError({ message: "Workspace activity did not stop before deletion", cause }),
-      });
-      if (!skipCleanup) yield* workflow.cleanup(sessionId, closure);
-      yield* browserControl.revoke(sessionId);
-      yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
-      yield* BackgroundTaskStore.clear(sessionId);
-      const offload = yield* makeOffloadCommandRouter
-      yield* offload.destroySession(sessionId).pipe(Effect.ignore)
-      if (session?.worktreePath) {
-        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
-      }
-      yield* SessionStore.remove(sessionId);
-      if (relayRoute) {
-        yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
-          Effect.ignore,
-        );
-      }
-      for (const chat of chats) {
-        yield* TranscriptStore.remove(chat.id);
-        yield* ContextManager.forget(chat.id);
-        // Same per-chat reclaim `Chats.delete` does — without it, a session
-        // deleted whole left every chat's mode/approval entries in the
-        // runner's maps for the app's lifetime.
-        yield* runner.forgetChat(chat.id);
-      }
-      if (session?.worktreePath) {
-        yield* ExplanationStore.removeAll(session.worktreePath, session.id);
-      }
-      yield* ReviewStore.clear(sessionId);
-      lifecycleClosures.delete(sessionId);
-    }).pipe(Effect.scoped),
+  "Sessions.delete": ({ sessionId, skipCleanup }) => deleteSession(sessionId, skipCleanup),
   "Sessions.createChat": ({ sessionId }) =>
     SessionStore.createChat(sessionId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
