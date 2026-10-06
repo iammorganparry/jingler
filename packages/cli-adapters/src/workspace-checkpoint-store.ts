@@ -1,14 +1,11 @@
-import { execFile } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
-import { constants } from "node:fs"
-import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, unlink, writeFile } from "node:fs/promises"
+import { mkdtemp, realpath, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, isAbsolute, join, resolve, sep } from "node:path"
-import { promisify } from "node:util"
+import { isAbsolute, join, resolve } from "node:path"
+import { anchoredFs } from "./anchored-fs.js"
 import { Schema } from "effect"
 import { WorkspaceCheckpoint, type WorkspaceCheckpointPreview } from "@jingler/core"
 
-const exec = promisify(execFile)
 const HASH = /^[a-f0-9]{40}$/
 const ID = /^[a-f0-9-]{36}$/
 const MAX_FILES = 10_000
@@ -16,21 +13,17 @@ const MAX_BYTES = 32 * 1024 * 1024
 const STORAGE_BYTES = 128 * 1024 * 1024
 const KEEP = 20
 const digest = (bytes: Buffer | string): string => createHash("sha256").update(bytes).digest("hex")
-const Entry = Schema.Struct({ path: Schema.String, oid: Schema.String, mode: Schema.Literal("100644", "100755"), sha256: Schema.String })
+const Entry = Schema.Struct({ path: Schema.String, oid: Schema.String, mode: Schema.Literal("100644", "100755"), sha256: Schema.String, permissions: Schema.Number })
 const Snapshot = Schema.Struct({
   summary: WorkspaceCheckpoint, branch: Schema.String, repository: Schema.String,
-  index: Schema.Array(Entry), files: Schema.Array(Entry)
+  index: Schema.Array(Entry), files: Schema.Array(Entry), indexDigest: Schema.String, verifiedBranch: Schema.String
 })
 type Entry = typeof Entry.Type
 type Snapshot = typeof Snapshot.Type
-interface Current { head: string; branch: string; repository: string; indexPath: string; index: Entry[]; files: Entry[]; indexTree: string; worktreeTree: string; blobs: Map<string, Buffer>; tracked: Set<string> }
+interface Current { head: string; branch: string; repository: string; indexPath: string; index: Entry[]; files: Entry[]; indexTree: string; worktreeTree: string; blobs: Map<string, Buffer>; tracked: Set<string>; indexDigest: string }
 
 const git = async (cwd: string, args: string[], index?: string): Promise<Buffer> => {
-  // Inherited GIT_INDEX_FILE must never redirect the user's index or a linked worktree.
-  const env = { ...process.env }
-  delete env.GIT_INDEX_FILE
-  if (index !== undefined) env.GIT_INDEX_FILE = index
-  return (await exec("git", ["-C", cwd, ...args], { env, encoding: "buffer", maxBuffer: MAX_BYTES + 1024 * 1024 })).stdout
+  return anchoredFs.git(cwd, args, index === undefined ? {} : { GIT_INDEX_FILE: index })
 }
 const text = async (cwd: string, args: string[], index?: string): Promise<string> => (await git(cwd, args, index)).toString("utf8").trim()
 const safePath = (path: string): void => {
@@ -38,27 +31,7 @@ const safePath = (path: string): void => {
     throw new Error(`Unsafe checkpoint path: ${path}`)
   }
 }
-const containedPath = async (cwd: string, path: string): Promise<string> => {
-  safePath(path)
-  let current = cwd
-  for (const part of path.split("/")) {
-    current = join(current, part)
-    const info = await lstat(current).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null
-      throw error
-    })
-    if (info?.isSymbolicLink()) throw new Error(`Checkpoints do not support symlinks: ${path}`)
-  }
-  return current
-}
-const regularBytes = async (path: string): Promise<Buffer> => {
-  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-  try {
-    const stat = await file.stat()
-    if (!stat.isFile() || stat.size > MAX_BYTES) throw new Error("Checkpoint file is unsupported or exceeds 32 MiB.")
-    return await file.readFile()
-  } finally { await file.close() }
-}
+const regularBytes = async (path: string): Promise<Buffer> => (await anchoredFs.read(path, MAX_BYTES)).bytes
 const entries = (raw: Buffer): Array<{ path: string; oid: string; mode: string; stage: string }> =>
   raw.toString("utf8").split("\0").filter(Boolean).map((row) => {
     const tab = row.indexOf("\t")
@@ -69,7 +42,7 @@ const ignored = async (cwd: string, path: string): Promise<boolean> => {
   try { await git(cwd, ["check-ignore", "--no-index", "--quiet", "--", path]); return true }
   catch (cause) { if ((cause as { code?: number }).code === 1) return false; throw cause }
 }
-const fingerprint = (current: Current): string => digest(JSON.stringify({ head: current.head, branch: current.branch, index: current.index, files: current.files }))
+const fingerprint = (current: Current): string => digest(JSON.stringify({ head: current.head, branch: current.branch, indexDigest: current.indexDigest, index: current.index, files: current.files }))
 
 /** Private, bounded, owner-only copies survive linked-worktree deletion; Git refs protect source trees from GC. */
 export class WorkspaceCheckpointStore {
@@ -77,93 +50,95 @@ export class WorkspaceCheckpointStore {
   readonly #sessionId: string
   readonly #cwd: string
   readonly #beforeWrite?: () => Promise<void>
-  constructor(input: { root: string; sessionId: string; cwd: string; beforeWrite?: () => Promise<void> }) {
+  readonly #afterIndexCopy?: () => Promise<void>
+  readonly #verifiedBranch: string
+  constructor(input: { root: string; sessionId: string; cwd: string; beforeWrite?: () => Promise<void>; afterIndexCopy?: () => Promise<void>; verifiedBranch?: string }) {
     this.#root = join(input.root, digest(input.sessionId))
     this.#sessionId = input.sessionId
     this.#cwd = input.cwd
     this.#beforeWrite = input.beforeWrite
+    this.#afterIndexCopy = input.afterIndexCopy
+    this.#verifiedBranch = input.verifiedBranch ?? ""
   }
   async #directory(): Promise<void> {
-    await mkdir(dirname(this.#root), { recursive: true, mode: 0o700 })
-    await chmod(dirname(this.#root), 0o700)
-    await mkdir(this.#root, { mode: 0o700, recursive: true })
-    if ((await lstat(this.#root)).isSymbolicLink()) throw new Error("Checkpoint storage must not be a symlink.")
-    await chmod(this.#root, 0o700)
+    await anchoredFs.mkdir(this.#root)
   }
   async #current(): Promise<Current> {
-    const cwd = await realpath(this.#cwd)
-    if (await text(cwd, ["rev-parse", "--show-toplevel"]) !== cwd) throw new Error("Checkpoints require the worktree root.")
+    const cwd = this.#cwd
+    if (await text(cwd, ["rev-parse", "--show-toplevel"]) !== await realpath(cwd)) throw new Error("Checkpoints require the worktree root.")
     const indexPath = resolve(cwd, await text(cwd, ["rev-parse", "--git-path", "index"]))
     const repository = await realpath(resolve(cwd, await text(cwd, ["rev-parse", "--git-common-dir"])))
     const head = await text(cwd, ["rev-parse", "--verify", "HEAD"])
-    const branch = await text(cwd, ["symbolic-ref", "-q", "HEAD"]).catch(() => "(detached)")
-    const config = await text(cwd, ["config", "--get-regexp", "^(filter\\.|core\\.sparseCheckout|core\\.splitIndex|extensions\\.worktreeConfig)"]).catch((cause) => {
-      if ((cause as { code?: number }).code === 1) return ""
-      throw cause
-    })
-    if (config || (await text(cwd, ["ls-files", "-v"])).split("\n").some((line) => line.startsWith("S ") || /^[a-z] /.test(line))) {
-      throw new Error("Checkpoints do not support filters, sparse/split index, or assume-unchanged entries.")
+    const branch = await text(cwd, ["symbolic-ref", "-q", "HEAD"]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "(detached)"; throw cause })
+    for (const key of ["core.sparseCheckout", "core.splitIndex"]) {
+      const value = await text(cwd, ["config", "--bool", "--get", key]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "false"; throw cause })
+      if (value === "true") throw new Error("Checkpoints do not support sparse/split index.")
     }
-    const listed = entries(await git(cwd, ["ls-files", "--stage", "-z"]))
-    if (listed.length > MAX_FILES || listed.some((entry) => entry.stage !== "0" || !["100644", "100755"].includes(entry.mode))) {
-      throw new Error("Checkpoints do not support conflicts, symlinks, submodules, or more than 10000 files.")
-    }
-    const untracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])).toString("utf8").split("\0").filter(Boolean)
-    if (listed.length + untracked.length > MAX_FILES) throw new Error("Checkpoint file count limit exceeded.")
-    const blobs = new Map<string, Buffer>()
-    let size = 0
-    const addBlob = (bytes: Buffer): string => {
-      const hash = digest(bytes)
-      if (!blobs.has(hash)) { size += bytes.length; blobs.set(hash, bytes) }
-      if (size > MAX_BYTES) throw new Error("Checkpoint exceeds 32 MiB storage limit.")
-      return hash
-    }
-    const index: Entry[] = []
-    for (const entry of listed) {
-      safePath(entry.path)
-      if (await ignored(cwd, entry.path)) throw new Error(`Tracked checkpoint path is now ignored: ${entry.path}`)
-      const sha256 = addBlob(await git(cwd, ["cat-file", "blob", entry.oid]))
-      index.push({ path: entry.path, mode: entry.mode as Entry["mode"], oid: entry.oid, sha256 })
-    }
-    const files: Entry[] = []
-    for (const path of [...new Set([...listed.map((entry) => entry.path), ...untracked])].sort()) {
-      const absolute = await containedPath(cwd, path)
-      const stat = await lstat(absolute).catch((cause: NodeJS.ErrnoException) => { if (cause.code === "ENOENT") return null; throw cause })
-      if (stat === null) continue
-      if (!stat.isFile()) throw new Error(`Checkpoint path is not a regular file: ${path}`)
-      const bytes = await regularBytes(absolute)
-      files.push({ path, oid: "", mode: (stat.mode & 0o111) ? "100755" : "100644", sha256: addBlob(bytes) })
-    }
+    const original = await regularBytes(indexPath)
+    const indexDigest = digest(original)
     const temp = await mkdtemp(join(tmpdir(), "jingler-checkpoint-"))
     try {
       const shadow = join(temp, "index")
-      await writeFile(shadow, await regularBytes(indexPath), { mode: 0o600 })
+      await anchoredFs.write(shadow, original)
+      await this.#afterIndexCopy?.()
+      // Every staged entry and tree is derived from this ONE immutable index copy.
+      const debug = await text(cwd, ["ls-files", "--debug"], shadow)
+      if ([...debug.matchAll(/flags: ([0-9a-f]+)/g)].some((match) => (Number.parseInt(match[1]!, 16) & 0x20000000) !== 0)) throw new Error("Intent-to-add (git add -N) is unsupported; original staging is unchanged.")
+      if ((await text(cwd, ["ls-files", "-v"], shadow)).split("\n").some((line) => line.startsWith("S ") || /^[a-z] /.test(line))) throw new Error("Checkpoints do not support assume-unchanged/skip-worktree entries.")
+      const listed = entries(await git(cwd, ["ls-files", "--stage", "-z"], shadow))
+      if (listed.length > MAX_FILES || listed.some((entry) => entry.stage !== "0" || !["100644", "100755"].includes(entry.mode))) throw new Error("Checkpoints do not support conflicts, symlinks, submodules, or more than 10000 files.")
+      const untracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], shadow)).toString("utf8").split("\0").filter(Boolean)
+      const paths = [...new Set([...listed.map((entry) => entry.path), ...untracked])].sort()
+      if (paths.length > MAX_FILES) throw new Error("Checkpoint file count limit exceeded.")
+      for (const path of paths) safePath(path)
+      const attributes = (await anchoredFs.git(cwd, ["check-attr", "-z", "--stdin", "filter"], { GIT_INDEX_FILE: shadow }, Buffer.from(paths.join("\0") + "\0"))).toString("utf8").split("\0")
+      for (let i = 2; i < attributes.length; i += 3) if (!["unspecified", "unset"].includes(attributes[i]!)) throw new Error(`Checkpoint path has an unsupported Git filter: ${attributes[i - 2]}`)
+      const blobs = new Map<string, Buffer>()
+      let size = 0
+      const addBlob = (bytes: Buffer): string => {
+        const hash = digest(bytes)
+        if (!blobs.has(hash)) { size += bytes.length; blobs.set(hash, bytes) }
+        if (size > MAX_BYTES) throw new Error("Checkpoint exceeds 32 MiB storage limit.")
+        return hash
+      }
+      addBlob(original)
+      const index: Entry[] = []
+      for (const entry of listed) {
+        if (await ignored(cwd, entry.path)) throw new Error(`Tracked checkpoint path is now ignored: ${entry.path}`)
+        index.push({ path: entry.path, mode: entry.mode as Entry["mode"], oid: entry.oid, sha256: addBlob(await git(cwd, ["cat-file", "blob", entry.oid])), permissions: 0o600 })
+      }
       const indexTree = await text(cwd, ["write-tree"], shadow)
-      await git(cwd, ["add", "-A", "--", "."], shadow)
+      const files: Entry[] = []
+      for (const path of paths) {
+        const absolute = join(cwd, path)
+        const stat = await anchoredFs.stat(absolute).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
+        if (!stat) continue
+        if (!stat.file || stat.symlink) throw new Error(`Checkpoint path is not a regular file: ${path}`)
+        const file = await anchoredFs.read(absolute, MAX_BYTES)
+        const oid = (await anchoredFs.git(cwd, ["hash-object", "-w", "--stdin", "--no-filters"], {}, file.bytes)).toString("utf8").trim()
+        files.push({ path, oid, mode: (file.mode & 0o111) ? "100755" : "100644", permissions: file.mode & 0o777, sha256: addBlob(file.bytes) })
+      }
+      await git(cwd, ["read-tree", "--empty"], shadow)
+      if (files.length) await anchoredFs.git(cwd, ["update-index", "-z", "--index-info"], { GIT_INDEX_FILE: shadow }, Buffer.from(files.map((entry) => `${entry.mode} ${entry.oid}\t${entry.path}\0`).join("")))
       const worktreeTree = await text(cwd, ["write-tree"], shadow)
-      const worktreeEntries = entries(await git(cwd, ["ls-files", "--stage", "-z"], shadow))
+      if (digest(await regularBytes(indexPath)) !== indexDigest || await text(cwd, ["rev-parse", "HEAD"]) !== head || await text(cwd, ["symbolic-ref", "-q", "HEAD"]).catch(() => "(detached)") !== branch) throw new Error("Index or HEAD changed during checkpoint capture. Retry.")
+      // Re-read bytes, modes and enumeration, not just timestamps (which can repeat).
       for (const file of files) {
-        const captured = worktreeEntries.find((entry) => entry.path === file.path)
-        if (!captured || captured.mode !== file.mode || digest(await git(cwd, ["cat-file", "blob", captured.oid])) !== file.sha256) {
-          throw new Error("Workspace changed during checkpoint capture. Retry.")
-        }
-        Object.assign(file, { oid: captured.oid })
+        const again = await anchoredFs.read(join(cwd, file.path), MAX_BYTES)
+        if (digest(again.bytes) !== file.sha256 || again.mode !== file.permissions) throw new Error("Workspace changed during checkpoint capture. Retry.")
       }
-      if (worktreeEntries.length !== files.length) throw new Error("Workspace changed during checkpoint capture. Retry.")
-      const checkIndex = await text(cwd, ["ls-files", "--stage", "-z"])
-      if (checkIndex !== (await git(cwd, ["ls-files", "--stage", "-z"], join(temp, "original-index"))).toString("utf8").trim()) {
-        // Compare below using the original listing; no command uses the real index for writes.
-        if (JSON.stringify(entries(Buffer.from(checkIndex))) !== JSON.stringify(listed)) throw new Error("Index changed during checkpoint capture. Retry.")
-      }
-      return { head, branch, repository, indexPath, index, files, blobs, indexTree, worktreeTree, tracked: new Set(listed.map((entry) => entry.path)) }
+      const againUntracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])).toString("utf8").split("\0").filter(Boolean)
+      if (JSON.stringify(againUntracked) !== JSON.stringify(untracked)) throw new Error("Workspace changed during checkpoint capture. Retry.")
+      return { head, branch, repository, indexPath, index, files, blobs, indexTree, worktreeTree, tracked: new Set(listed.map((entry) => entry.path)), indexDigest }
     } finally { await rm(temp, { recursive: true, force: true }) }
   }
+
   #ref(snapshot: Snapshot, kind: string): string {
     return `refs/jingler/checkpoints/${digest(snapshot.repository)}/${digest(this.#sessionId)}/${snapshot.summary.id}/${kind}`
   }
   async #read(id: string): Promise<Snapshot> {
     if (!ID.test(id)) throw new Error("Invalid checkpoint identity.")
-    const snapshot = Schema.decodeUnknownSync(Snapshot)(JSON.parse(await readFile(join(this.#root, id, "snapshot.json"), "utf8")))
+    const snapshot = Schema.decodeUnknownSync(Snapshot)(JSON.parse((await regularBytes(join(this.#root, id, "snapshot.json"))).toString("utf8")))
     if (snapshot.summary.id !== id || snapshot.summary.sessionId !== this.#sessionId) throw new Error("Checkpoint ownership mismatch.")
     for (const entry of [...snapshot.index, ...snapshot.files]) {
       safePath(entry.path)
@@ -176,7 +151,7 @@ export class WorkspaceCheckpointStore {
   async list(): Promise<WorkspaceCheckpoint[]> {
     await this.#directory()
     const snapshots: WorkspaceCheckpoint[] = []
-    for (const id of await readdir(this.#root)) {
+    for (const id of await anchoredFs.list(this.#root)) {
       if (ID.test(id)) snapshots.push((await this.#read(id)).summary)
     }
     return snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -196,27 +171,28 @@ export class WorkspaceCheckpointStore {
     if (total > STORAGE_BYTES || count > KEEP) throw new Error("Checkpoint storage is full; pinned recovery backups are retained.")
     const id = randomUUID()
     const summary: WorkspaceCheckpoint = { id, sessionId: this.#sessionId, createdAt: new Date().toISOString(), label, head: current.head, indexTree: current.indexTree, worktreeTree: current.worktreeTree, pinned, byteLength }
-    const snapshot: Snapshot = { summary, branch: current.branch, repository: current.repository, index: current.index, files: current.files }
+    const snapshot: Snapshot = { summary, branch: current.branch, repository: current.repository, index: current.index, files: current.files, indexDigest: current.indexDigest, verifiedBranch: this.#verifiedBranch }
     const temporary = join(this.#root, `${id}.tmp`)
-    await mkdir(temporary, { mode: 0o700 })
+    await anchoredFs.mkdir(temporary)
     try {
-      for (const [hash, bytes] of current.blobs) await writeFile(join(temporary, hash), bytes, { mode: 0o600, flag: "wx" })
-      await writeFile(join(temporary, "snapshot.json"), JSON.stringify(snapshot), { mode: 0o600, flag: "wx" })
-      await git(this.#cwd, ["update-ref", this.#ref(snapshot, "index"), current.indexTree])
-      await git(this.#cwd, ["update-ref", this.#ref(snapshot, "worktree"), current.worktreeTree])
-      await rename(temporary, join(this.#root, id))
+      for (const [hash, bytes] of current.blobs) await anchoredFs.write(join(temporary, hash), bytes, 0o600, true)
+      await anchoredFs.write(join(temporary, "snapshot.json"), JSON.stringify(snapshot), 0o600, true)
+      await git(this.#cwd, ["update-ref", this.#ref(snapshot, "index"), current.indexTree, "0000000000000000000000000000000000000000"])
+      await git(this.#cwd, ["update-ref", this.#ref(snapshot, "worktree"), current.worktreeTree, "0000000000000000000000000000000000000000"])
+      await anchoredFs.rename(temporary, join(this.#root, id))
       for (const old of evict) {
         const prior = await this.#read(old.id)
         await git(this.#cwd, ["update-ref", "-d", this.#ref(prior, "index")])
         await git(this.#cwd, ["update-ref", "-d", this.#ref(prior, "worktree")])
-        await rm(join(this.#root, old.id), { recursive: true })
+        await anchoredFs.remove(join(this.#root, old.id))
       }
       return summary
-    } catch (cause) { await rm(temporary, { recursive: true, force: true }); throw cause }
+    } catch (cause) { await anchoredFs.remove(temporary); throw cause }
   }
   async capture(label = "Manual checkpoint"): Promise<WorkspaceCheckpoint> { return this.#save(await this.#current(), label) }
   async #preview(snapshot: Snapshot, current: Current): Promise<WorkspaceCheckpointPreview> {
-    if (snapshot.summary.head !== current.head || snapshot.branch !== current.branch || snapshot.repository !== current.repository) throw new Error("HEAD or branch changed since this checkpoint; restore is refused.")
+    const hostActivation = snapshot.branch === "(detached)" && this.#verifiedBranch !== "" && current.branch === `refs/heads/${this.#verifiedBranch}`
+    if (snapshot.summary.head !== current.head || (!hostActivation && snapshot.branch !== current.branch) || snapshot.repository !== current.repository) throw new Error("HEAD or branch changed since this checkpoint; restore is refused.")
     const target = new Map(snapshot.files.map((entry) => [entry.path, entry]))
     const now = new Map(current.files.map((entry) => [entry.path, entry]))
     const operations: WorkspaceCheckpointPreview["operations"][number][] = []
@@ -224,10 +200,12 @@ export class WorkspaceCheckpointStore {
       const to = target.get(path)
       const from = now.get(path)
       if (to && await ignored(this.#cwd, path)) throw new Error(`Checkpoint path is now ignored: ${path}`)
-      await containedPath(this.#cwd, path)
+      safePath(path)
+      const disk = await anchoredFs.stat(join(this.#cwd, path)).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
+      if (to && disk && !from) throw new Error(`Ignored or unsupported collision must be resolved first: ${path}`)
       if (to && from && !current.tracked.has(path) && snapshot.index.some((entry) => entry.path === path)) throw new Error(`Later untracked collision must be resolved first: ${path}`)
       if (!to && !current.tracked.has(path)) continue // Preserve every later untracked file.
-      if (to?.sha256 === from?.sha256 && to?.mode === from?.mode) continue
+      if (to?.sha256 === from?.sha256 && to?.permissions === from?.permissions) continue
       operations.push({ path, action: !to ? "delete" : !from ? "create" : "overwrite" })
     }
     const rawDiff = await git(this.#cwd, ["diff", "--no-ext-diff", "--no-textconv", current.worktreeTree, snapshot.summary.worktreeTree, "--"])
@@ -241,35 +219,32 @@ export class WorkspaceCheckpointStore {
     const preview = await this.#preview(snapshot, current)
     if (preview.token !== token) throw new Error("Restore preview is stale. Preview again before confirming.")
     const backup = await this.#save(current, "Safety backup before restore", true)
-    const temp = await mkdtemp(join(tmpdir(), "jingler-restore-"))
     const lock = `${current.indexPath}.lock`
-    let indexLock: Awaited<ReturnType<typeof open>> | undefined
+    let locked = false
     try {
-      indexLock = await open(lock, "wx", 0o600)
-      const shadow = join(temp, "index")
-      await git(this.#cwd, ["read-tree", snapshot.summary.indexTree], shadow)
+      await anchoredFs.write(lock, Buffer.alloc(0), 0o600, true)
+      locked = true
       await this.#beforeWrite?.()
       if ((await this.#preview(snapshot, await this.#current())).token !== token) throw new Error("Workspace changed before restore. Preview again.")
       for (const operation of preview.operations) {
-        const path = await containedPath(this.#cwd, operation.path)
-        if (operation.action === "delete") { await unlink(path); continue }
+        const path = join(this.#cwd, operation.path)
+        if (operation.action === "delete") {
+          const stat = await anchoredFs.stat(path)
+          if (!stat?.file) throw new Error("Restore deletion path changed.")
+          await anchoredFs.remove(path)
+          continue
+        }
         const entry = snapshot.files.find((file) => file.path === operation.path)!
         if (await ignored(this.#cwd, entry.path)) throw new Error(`Checkpoint path is now ignored: ${entry.path}`)
-        await mkdir(dirname(path), { recursive: true })
-        await containedPath(this.#cwd, operation.path)
-        const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, entry.mode === "100755" ? 0o755 : 0o644)
-        try { await file.writeFile(await regularBytes(join(this.#root, id, entry.sha256))); await file.chmod(entry.mode === "100755" ? 0o755 : 0o644) }
-        finally { await file.close() }
+        await anchoredFs.write(path, await regularBytes(join(this.#root, id, entry.sha256)), entry.permissions)
       }
-      await indexLock.writeFile(await regularBytes(shadow))
-      await indexLock.close(); indexLock = undefined
-      await rename(lock, current.indexPath)
+      await anchoredFs.write(lock, await regularBytes(join(this.#root, id, snapshot.indexDigest)), 0o600)
+      await anchoredFs.rename(lock, current.indexPath)
+      locked = false
       return backup
     } catch (cause) {
       throw new Error(`Restore failed. Safety backup ${backup.id} is pinned and available in Checkpoints. ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
-    } finally {
-      if (indexLock) { await indexLock.close(); await unlink(lock) }
-      await rm(temp, { recursive: true, force: true })
-    }
+    } finally { if (locked) await anchoredFs.remove(lock) }
+
   }
 }

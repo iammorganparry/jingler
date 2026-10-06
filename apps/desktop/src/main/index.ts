@@ -18,9 +18,10 @@ import {
   PluginHost,
   SecretStore,
   SessionStore,
-  RuntimeRecoveryService
+  RuntimeRecoveryService,
+  configureAnchoredFsProcess
 } from "@jingler/cli-adapters"
-import { app, BrowserWindow, ipcMain, shell } from "electron"
+import { app, BrowserWindow, ipcMain, shell, utilityProcess } from "electron"
 import { Effect } from "effect"
 import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
@@ -44,6 +45,11 @@ import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 import { registerAppVersionChannel } from "./app-version.js"
+
+configureAnchoredFsProcess(() => {
+  const child = utilityProcess.fork(join(import.meta.dirname, "anchored-fs-worker.js"), [], { cwd: "/", serviceName: "jingler-anchored-filesystem", stdio: "ignore" })
+  return { post: (message) => child.postMessage(message), onMessage: (handler) => { child.on("message", handler) }, onExit: (handler) => { child.on("exit", handler) }, kill: () => { child.kill() } }
+})
 
 app.setName("Jingler")
 registerAppVersionChannel()

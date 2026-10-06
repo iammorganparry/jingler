@@ -573,6 +573,8 @@ export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 export const Session = Schema.Struct({
   /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
+  /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
+  checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
   workspacePorts: Schema.optional(WorkspacePorts),
   id: Schema.String,
   /** Durable project identity. Absent on sessions created before Projects existed. */

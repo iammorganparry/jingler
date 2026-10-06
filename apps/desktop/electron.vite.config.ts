@@ -76,6 +76,7 @@ export default defineConfig(({ command }) => {
           // booted and every plugin with a `main` half silently failed to
           // activate. Change the name here and that fork breaks again.
 
+          "anchored-fs-worker": resolve(import.meta.dirname, "../../packages/cli-adapters/src/anchored-fs-worker.ts"),
           "plugin-host-entry": resolve(
             import.meta.dirname,
             "src/main/plugin-host-entry.ts"

@@ -79,6 +79,7 @@ import {
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
   WorkspaceWorkflowService,
+  WorkspaceCheckpointService,
   closeWorkspaceAdmission,
   reopenWorkspaceAdmission,
   waitForWorkspaceIdle,
@@ -3225,7 +3226,10 @@ export const createTerminal = (input: {
     const session = yield* resolveSession(input.sessionId);
     const cwd = input.cwd ?? session?.worktreePath ?? undefined;
     const terminals = yield* TerminalService;
+    if (session?.checkpointSafeMode) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in checkpoint-safe mode." }));
+    if (session) yield* SessionStore.markCheckpointExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
     return yield* terminals.create({
+      executionHistoryPersisted: session !== null && session !== undefined,
       sessionId: input.sessionId,
       workspaceEnvironment: session ? workspaceEnvironment(session) : {},
       cwd,
@@ -4524,6 +4528,11 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Preview unavailable", cause })
     });
   }),
+  "WorkspaceCheckpoints.setMode": ({ sessionId, enabled }) => WorkspaceCheckpointService.setMode(sessionId, enabled),
+  "WorkspaceCheckpoints.list": ({ sessionId }) => WorkspaceCheckpointService.list(sessionId),
+  "WorkspaceCheckpoints.capture": ({ sessionId }) => WorkspaceCheckpointService.capture(sessionId),
+  "WorkspaceCheckpoints.preview": ({ sessionId, checkpointId }) => WorkspaceCheckpointService.preview(sessionId, checkpointId),
+  "WorkspaceCheckpoints.restore": ({ sessionId, checkpointId, token }) => WorkspaceCheckpointService.restore(sessionId, checkpointId, token),
   "WorkspaceWorkflow.retrySetup": ({ sessionId }) => WorkspaceWorkflowService.setup(sessionId),
   "WorkspaceWorkflow.skipSetup": ({ sessionId }) => WorkspaceWorkflowService.skipSetup(sessionId),
   "WorkspaceWorkflow.startRun": ({ sessionId, runId }) => WorkspaceWorkflowService.startRun(sessionId, runId),
@@ -6137,6 +6146,7 @@ export type RpcServerRequirements =
   | UsageService
   | WorkspaceService
   | WorkspaceWorkflowService
+  | WorkspaceCheckpointService
   | RuntimeDiagnostics
   | RuntimeRecoveryService
   | ProviderConnections;

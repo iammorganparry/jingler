@@ -28,7 +28,7 @@ import type { TerminalChunk, TerminalInfo } from "@jingler/core"
 import { Effect, Exit, Mailbox, Stream } from "effect"
 import { neutralCwd } from "./cwd.js"
 import { worktreeEnv } from "./worktree-env.js"
-import { acquireWorkspaceActivity, type WorkspaceActivity } from "./workspace-admission.js"
+import { acquireWorkspaceActivity, workspaceCheckpointMode, type WorkspaceActivity } from "./workspace-admission.js"
 
 /** Last-N-bytes of output kept for re-attach replay (per terminal). */
 const RING_CAP = 256 * 1024
@@ -186,6 +186,8 @@ const safeResume = (pty: IPty): void => {
 
 export interface CreateTerminalInput {
   sessionId: string
+  /** Persisted by SessionStore before spawning. Missing proof fails closed for session terminals. */
+  executionHistoryPersisted?: boolean
   workspaceEnvironment?: Readonly<Record<string, string>>
   /** Working directory; the session worktree. Defaults to the process cwd. */
   cwd?: string
@@ -205,6 +207,8 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
     const create = (input: CreateTerminalInput): Effect.Effect<TerminalInfo, TerminalError> =>
       Effect.try({
         try: () => {
+          if (workspaceCheckpointMode(input.sessionId)) throw new Error("Interactive terminals are unsupported in checkpoint-safe mode.")
+          if (input.sessionId && !input.executionHistoryPersisted) throw new Error("Terminal history must be persisted before spawning.")
           const shell = defaultShell()
           // A terminal with no session anchors to the user's home, NOT the app's
           // cwd — which in dev is whichever worktree Jingler was launched from,
@@ -273,7 +277,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
             pty.onExit(({ exitCode }) => {
               info.status = "exited"
               info.exitCode = exitCode
-              handle.activity.release()
+              // Interactive descendants may escape the leader group: retain admission ownership.
               handle.live?.exit(exitCode)
               // The process is gone; nothing else will ever arrive. Free the
               // native handle and listeners NOW rather than at app quit —
@@ -298,7 +302,7 @@ export class TerminalService extends Effect.Service<TerminalService>()("@jingler
             releasePty()
             handle.live?.dispose()
             handle.live = null
-            handle.activity.release()
+            // Retain activity: terminal leader exit/close is not proof all jobs stopped.
             handles.delete(id)
           }
 

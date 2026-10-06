@@ -76,7 +76,7 @@ import { BrowserControlMcpService,
 } from "./browser-control-mcp-service.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
-import { acquireWorkspaceActivity } from "./workspace-admission.js"
+import { acquireCheckpointedTurn } from "./workspace-checkpoints.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { UsageFactStore } from "./usage-facts.js"
@@ -1284,8 +1284,12 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                       : "Workspace setup or cleanup is still in progress."
                 }])
               }
-              const workspaceLease = yield* Effect.try({
-                try: () => acquireWorkspaceActivity(sessionId, `agent:${chatId}`),
+              const checkpointPaths = yield* AppPaths
+              const workspaceLease = yield* Effect.tryPromise({
+                try: async () => {
+                  if (!gatedSession) throw new Error("Workspace session not found.")
+                  return acquireCheckpointedTurn(gatedSession, join(checkpointPaths.root, "checkpoints"))
+                },
                 catch: (cause) => cause
               }).pipe(Effect.either)
               if (workspaceLease._tag === "Left") {
@@ -1295,6 +1299,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }])
               }
               yield* Effect.addFinalizer(() => Effect.sync(() => workspaceLease.right.release()))
+              if (gatedSession?.checkpointSafeMode !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
 
               // Concurrent chats in one session are allowed, but a single chat is
               // single-flight: two runs on ONE chatId would race the `fibers`

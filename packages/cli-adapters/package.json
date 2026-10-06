@@ -56,7 +56,9 @@
     "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
     "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts",
     "./workspace-ports": "./src/workspace-ports.ts",
-    "./routine-store": "./src/routine-store.ts"
+    "./routine-store": "./src/routine-store.ts",
+    "./workspace-checkpoints": "./src/workspace-checkpoints.ts",
+    "./anchored-fs": "./src/anchored-fs.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -1,3 +1,4 @@
+import { setWorkspaceCheckpointMode } from "./workspace-admission.js"
 import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { allocateWorkspacePorts } from "./workspace-ports.js"
 import { ProjectService } from "./projects.js"
@@ -52,6 +53,7 @@ import { GitService } from "./git.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
 
 const updateWorkspaceReadiness = (session: Session): void => {
+  setWorkspaceCheckpointMode(session.id, session.checkpointSafeMode === true)
   const status = session.workspaceLifecycle?.status
   const reason = session.archived ? "the workspace is archived" :
     status && status !== "ready" && status !== "setup-skipped" ? `workspace ${status}` : undefined
@@ -720,6 +722,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             workspaceMode: WorkspaceMode
           ): Session => ({
             id,
+            checkpointExecutionHistory: "clean",
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -912,6 +915,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
           let session: Session = {
             id,
+            checkpointExecutionHistory: "clean",
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -1035,12 +1039,14 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
+            checkpointExecutionHistory: "clean",
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
             ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: worktree.branch,
             semanticBranchPending: true,
+            checkpointExecutionHistory: "clean",
             // Seed (and pin) the title from the issue.
             title: input.issue.title,
             autoTitle: false,
@@ -1829,6 +1835,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      const setCheckpointSafeMode = (id: string, enabled: boolean) =>
+        update(id, (session) => ({ ...session, checkpointSafeMode: enabled })).pipe(Effect.tap(() => Effect.sync(() => setWorkspaceCheckpointMode(id, enabled))))
+      const markCheckpointExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable" }))
+
       const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
         update(id, (session) => ({ ...session, workspaceLifecycle: lifecycle })).pipe(Effect.andThen(get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace lifecycle", cause })), Effect.tap((session) => Effect.sync(() => updateWorkspaceReadiness(session))), Effect.asVoid)))
 
@@ -2075,6 +2085,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         recoverGitHubFeedbackOutbox,
         setPublishCheckpoint,
         setWorkspaceLifecycle,
+        setCheckpointSafeMode,
+        markCheckpointExecutionUnprovable,
         reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
         setProject,

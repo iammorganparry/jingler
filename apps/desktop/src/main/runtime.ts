@@ -42,6 +42,7 @@ import {
   UsageService,
   WorkspaceService,
   WorkspaceWorkflowService,
+  WorkspaceCheckpointService,
   WebSearchCredentialService,
   WebSearchService,
   makeWebSearchService,
@@ -165,7 +166,7 @@ const AgentExecutionLayer = AgentTurnDriverLive.pipe(
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
   Layer.provideMerge(RuntimeRecoveryService.Default),
-  Layer.provideMerge(WorkspaceWorkflowService.Default),
+  Layer.provideMerge(Layer.merge(WorkspaceWorkflowService.Default, WorkspaceCheckpointService.Default)),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
   Layer.provide(RemoteSessionsLive),

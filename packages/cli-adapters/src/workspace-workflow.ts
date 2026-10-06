@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, unlinkSync, writeSync } from "node:fs"
 import { randomUUID } from "node:crypto"
-import { dirname, resolve, sep } from "node:path"
+import { resolve } from "node:path"
+import { anchoredFs } from "./anchored-fs.js"
 import type { FileSystem, Path, CommandExecutor } from "@effect/platform"
 import { GitError, type Session, type WorkspaceRunState } from "@jingler/core"
 import { Effect } from "effect"
@@ -91,85 +91,20 @@ const runCommand = async (
   }
 }
 
-const isIgnored = (root: string, relative: string): Promise<boolean> =>
-  new Promise((resolveIgnored, reject) => {
-    const child = spawn("git", ["-C", root, "check-ignore", "--quiet", "--", relative], { stdio: "ignore" })
-    child.once("error", reject)
-    child.once("exit", (code) => resolveIgnored(code === 0))
-  })
-
-const validateCopyParents = (base: string, path: string, create: boolean) => {
-    let current = base
-    for (const part of path.slice(base.length + 1).split(sep).filter(Boolean)) {
-      current = resolve(current, part)
-      try {
-        const info = lstatSync(current)
-        if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`Unsafe copied-file ancestor: ${path}`)
-      } catch (cause) {
-        if (!create || (cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause
-        mkdirSync(current, { mode: 0o700 })
-      }
-      if (realpathSync(current) !== current) throw new Error(`Copied-file ancestor changed: ${path}`)
-    }
-  }
-
-const validateCopyTarget = (targetPath: string) => {
-    try {
-      const info = lstatSync(targetPath)
-      if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new Error(`Unsafe copied-file destination: ${targetPath}`)
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause
-    }
-  }
-
-const removeCopyTemporary = (temporary: string) => {
-  try { unlinkSync(temporary) } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause
-  }
+const isIgnored = async (root: string, relative: string): Promise<boolean> => {
+  try { await anchoredFs.git(root, ["check-ignore", "--quiet", "--", relative]); return true }
+  catch (cause) { if (String(cause).includes("failed")) return false; throw cause }
 }
 
 export const copyApprovedFile = async (root: string, targetRoot: string, configured: string): Promise<void> => {
   const relative = safeWorkflowRelativePath(configured)
   if (!relative) throw new Error(`Unsafe copied-file path: ${configured}`)
   if (!(await isIgnored(root, relative))) throw new Error(`Copied file is not ignored by Git: ${relative}`)
-  // Keep validation and writes synchronous: no app task can mutate ancestors between them.
-  // O_NOFOLLOW protects the source inode; rename replaces the destination entry atomically.
-  const realRoot = realpathSync(root)
-  const realTargetRoot = realpathSync(targetRoot)
-  const sourcePath = resolve(realRoot, relative)
-  const targetPath = resolve(realTargetRoot, relative)
-  validateCopyParents(realRoot, dirname(sourcePath), false)
-  validateCopyParents(realTargetRoot, dirname(targetPath), true)
-  validateCopyTarget(targetPath)
-  const input = openSync(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
-  const temporary = resolve(dirname(targetPath), `.jingler-copy-${randomUUID()}`)
-  let output: number | undefined
-  try {
-    const info = fstatSync(input)
-    const limit = 16 * 1024 * 1024
-    if (!info.isFile() || info.nlink !== 1 || info.size > limit) throw new Error(`Copied file is unsafe or exceeds 16 MiB: ${relative}`)
-    output = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-    const buffer = Buffer.alloc(64 * 1024)
-    let total = 0
-    while (true) {
-      const count = readSync(input, buffer, 0, buffer.length, null)
-      if (count === 0) break
-      total += count
-      if (total > limit) throw new Error(`Copied file exceeds 16 MiB: ${relative}`)
-      let written = 0
-      while (written < count) written += writeSync(output, buffer, written, count - written)
-    }
-    fsyncSync(output)
-    closeSync(output)
-    output = undefined
-    validateCopyParents(realTargetRoot, dirname(targetPath), false)
-    validateCopyTarget(targetPath)
-    renameSync(temporary, targetPath)
-  } finally {
-    closeSync(input)
-    if (output !== undefined) closeSync(output)
-    removeCopyTemporary(temporary)
-  }
+  const source = await anchoredFs.read(resolve(root, relative), 16 * 1024 * 1024)
+  if (source.nlink !== 1) throw new Error("Unsafe copied-file source hardlink.")
+  const destination = await anchoredFs.stat(resolve(targetRoot, relative))
+  if (destination && (!destination.file || destination.nlink !== 1)) throw new Error("Unsafe copied-file destination.")
+  await anchoredFs.write(resolve(targetRoot, relative), source.bytes, 0o600)
 }
 
 export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowService>()(

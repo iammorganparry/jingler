@@ -3,6 +3,12 @@ interface Closure {
   readonly token: symbol
 }
 
+const safeModes = new Set<string>()
+const checkpointOwners = new Map<string, symbol>()
+export const setWorkspaceCheckpointMode = (sessionId: string, enabled: boolean): void => { if (enabled) safeModes.add(sessionId); else safeModes.delete(sessionId) }
+export const workspaceCheckpointMode = (sessionId: string): boolean => safeModes.has(sessionId)
+export const checkpointTurnOwner = (sessionId: string): symbol | undefined => checkpointOwners.get(sessionId)
+
 const closed = new Map<string, Closure>()
 const readiness = new Map<string, string>()
 
@@ -26,6 +32,7 @@ const acquire = (sessionId: string, action: string, lifecycleOwner?: symbol): Wo
   if (lifecycleOwner !== undefined && closed.get(sessionId)?.token !== lifecycleOwner) {
     throw new Error("Workspace lifecycle owner does not match admission closure.")
   }
+  if (lifecycleOwner === undefined && safeModes.has(sessionId)) throw new Error("Checkpoint-safe mode blocks overlapping/unsupported workspace execution. Interactive terminals and delegated children are unsupported.")
   const reason = lifecycleOwner !== undefined ? undefined : workspaceAdmissionReason(sessionId)
   if (reason) throw new Error(`Workspace is unavailable while ${reason}.`)
   const token = { action }
@@ -56,6 +63,22 @@ export const acquireWorkspaceActivity = (sessionId: string, action: string): Wor
 export const acquireWorkspaceLifecycleActivity = (sessionId: string, action: string, owner: symbol): WorkspaceActivity =>
   acquire(sessionId, action, owner)
 
+/** Convert the capture closure into a turn owner synchronously, with no admission gap. */
+export const acquireCheckpointTurnOwner = (sessionId: string, closure: symbol): WorkspaceActivity => {
+  const activity = acquire(sessionId, "checkpoint-owner-turn", closure)
+  const owner = Symbol("checkpoint-owner-turn")
+  checkpointOwners.set(sessionId, owner)
+  reopenWorkspaceAdmission(sessionId, closure)
+  return { ...activity, release: () => { if (checkpointOwners.get(sessionId) === owner) checkpointOwners.delete(sessionId); activity.release() } }
+}
+export const acquireWorkspaceToolActivity = (sessionId: string, owner?: symbol): WorkspaceActivity => {
+  if (!safeModes.has(sessionId)) return acquireWorkspaceActivity(sessionId, "tool")
+  if (!owner || checkpointOwners.get(sessionId) !== owner || workspaceAdmissionReason(sessionId)) throw new Error("Checkpoint owner tool admission refused.")
+  // No closure is held during owner tools; other public entrypoints remain denied.
+  const mode = safeModes.delete(sessionId)
+  try { return acquireWorkspaceActivity(sessionId, "owner-tool") }
+  finally { if (mode) safeModes.add(sessionId) }
+}
 export const closeWorkspaceAdmission = (sessionId: string, reason: string): symbol => {
   const existing = closed.get(sessionId)
   if (existing) {
@@ -95,6 +118,8 @@ export const waitForWorkspaceIdle = async (sessionId: string, timeoutMs = 15_000
 export const workspaceActivityCount = (sessionId: string): number => active.get(sessionId)?.size ?? 0
 
 export const resetWorkspaceAdmissions = (): void => {
+  safeModes.clear()
+  checkpointOwners.clear()
   closed.clear()
   readiness.clear()
   active.clear()
