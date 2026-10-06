@@ -32,7 +32,7 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
 
   const sessionsPath = join(home, "jingler", "sessions.json")
   await expect.poll(() => existsSync(sessionsPath) ? JSON.parse(readFileSync(sessionsPath, "utf8"))[0]?.worktreePath : null).not.toBeNull()
-  const session = JSON.parse(readFileSync(sessionsPath, "utf8"))[0] as { worktreePath: string }
+  const session = JSON.parse(readFileSync(sessionsPath, "utf8"))[0] as { id: string; worktreePath: string }
   expect(readFileSync(join(session.worktreePath, "setup-proof.txt"), "utf8")).toBe("ready")
   expect(readFileSync(join(session.worktreePath, ".env.local"), "utf8")).toContain("WORKFLOW_COPY=ready")
 
@@ -45,4 +45,5 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   await row.hover()
   await row.getByRole("button", { name: /^Archive / }).click()
   await expect.poll(() => existsSync(join(session.worktreePath, "cleanup-proof.txt"))).toBe(true)
+  await expect.poll(() => JSON.parse(readFileSync(sessionsPath, "utf8")).find((item: { id: string }) => item.id === session.id)?.archived).toBe(true)
 })

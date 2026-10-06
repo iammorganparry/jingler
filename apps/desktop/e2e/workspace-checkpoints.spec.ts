@@ -41,6 +41,11 @@ test("safe creation captures before the production Pi turn and restores files an
   await expect(window.getByText("Checkpoint edit complete.", { exact: true })).toBeVisible({ timeout: 20000 })
   expect(readFileSync(join(cwd, "checkpoint-proof.txt"), "utf8")).toBe("changed")
   expect(git(cwd, "show", ":checkpoint-proof.txt")).toBe("staged")
+  // Change the index too: restoring only worktree bytes must not pass this test.
+  writeFileSync(join(cwd, "checkpoint-proof.txt"), "staged after capture")
+  git(cwd, "add", "checkpoint-proof.txt")
+  writeFileSync(join(cwd, "checkpoint-proof.txt"), "changed")
+  expect(git(cwd, "show", ":checkpoint-proof.txt")).toBe("staged after capture")
   const root = join(home, "jingler/checkpoints")
   const snapshots = readdirSync(root).flatMap((owner) => readdirSync(join(root, owner)).filter((id) => !id.endsWith(".tmp")).map((id) => JSON.parse(readFileSync(join(root, owner, id, "snapshot.json"), "utf8"))))
   expect(snapshots.some((item) => item.summary.label.startsWith("Before agent turn"))).toBe(true)

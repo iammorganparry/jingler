@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { addProject, appShell, expect, test } from "./fixtures.js"
 
 test("saves a routine through Settings and runs the real checkpoint-gated Pi into a linked fresh worktree", async ({ launchApp }) => {
+  test.setTimeout(120000)
   const launched = await launchApp({ configured: true, withRepo: true, piFixture: { scenarioId: "workspace-routines", authRoute: "api-key" } })
   const { window, repoPath, home } = launched
   await expect(appShell(window)).toBeVisible()
@@ -54,6 +55,8 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   await routines.getByLabel(/I approve these exact settings/).check()
   await routines.getByRole("button", { name: "Save routine", exact: true }).click()
   await expect.poll(() => document().runs.filter((item: { trigger: string; status: string }) => item.trigger === "scheduled" && item.status === "succeeded").length, { timeout: 30000 }).toBe(1)
+  const disabledDueAt = document().routines[0].nextAt as number
+  expect(disabledDueAt).toBeGreaterThan(Date.now())
   await routines.getByRole("button", { name: "Disable Routine proof", exact: true }).click()
   await expect.poll(() => document().routines[0].enabled).toBe(false)
   await routines.getByRole("button", { name: "Run now Routine proof", exact: true }).click()
@@ -64,6 +67,13 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   await routines.getByRole("button", { name: "Open workspace Routine proof" }).first().click()
   await expect(window.getByTestId("workspace-checkpoints")).toBeVisible()
   const ids = document().runs.map((item: { id: string }) => item.id)
+  // Cross the actual persisted due time while disabled; checking only the flag
+  // would miss a stale armed timer that still dispatches an occurrence.
+  await expect.poll(() => {
+    expect(document().runs.map((item: { id: string }) => item.id)).toEqual(ids)
+    return Date.now()
+  }, { timeout: 75000, intervals: [250] }).toBeGreaterThan(disabledDueAt + 1000)
+  expect(document().routines[0].enabled).toBe(false)
   await launched.app.close()
   const reopened = await launchApp({ home, reposDir: launched.reposDir, userDataDir: launched.userDataDir, configured: true, piFixture: { scenarioId: "workspace-routines", authRoute: "api-key" } })
   await expect(appShell(reopened.window)).toBeVisible()
@@ -71,7 +81,13 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   await reopened.window.getByRole("menuitem", { name: "Settings" }).click()
   await reopened.window.getByRole("button", { name: "Routines", exact: true }).click()
   await expect(reopened.window.getByRole("button", { name: "Run now Routine proof", exact: true })).toBeVisible()
-  expect(document().runs.map((item: { id: string }) => item.id)).toEqual(ids)
+  await expect(reopened.window.getByRole("button", { name: "Enable Routine proof", exact: true })).toBeVisible()
+  const restartSettledAt = Date.now() + 2000
+  await expect.poll(() => {
+    expect(document().routines[0].enabled).toBe(false)
+    expect(document().runs.map((item: { id: string }) => item.id)).toEqual(ids)
+    return Date.now()
+  }, { intervals: [250] }).toBeGreaterThan(restartSettledAt)
 
 })
 
