@@ -1,3 +1,4 @@
+import { setWorkspaceCheckpointMode } from "./workspace-admission.js"
 import type { TerminalChunk, TerminalError } from "@jingler/core"
 import { Effect, Fiber, Stream } from "effect"
 import { describe, expect, it } from "vitest"
@@ -86,10 +87,28 @@ const collect = (t: TerminalService, id: string) => {
 }
 
 describe("TerminalService", () => {
+  it("rejects before PTY creation unless history was durably persisted", async () => {
+    await withService(t => Effect.gen(function* () {
+      const exit = yield* t.create({ sessionId: "unpersisted", cwd: process.cwd(), cols: 80, rows: 24 }).pipe(Effect.exit)
+      expect(exit._tag).toBe("Failure")
+      expect(yield* t.list("unpersisted")).toEqual([])
+    }))
+  })
+  it("blocks safe-mode PTYs even with persisted history, while ordinary mode remains available", async () => {
+    setWorkspaceCheckpointMode("safe-terminal", true)
+    try {
+      await withService(t => Effect.gen(function* () {
+        const exit = yield* t.create({ sessionId: "safe-terminal", executionHistoryPersisted: true, cols: 80, rows: 24 }).pipe(Effect.exit)
+        expect(exit._tag).toBe("Failure")
+        expect(yield* t.list("safe-terminal")).toEqual([])
+      }))
+    } finally { setWorkspaceCheckpointMode("safe-terminal", false) }
+  })
+
   it("spawns a running terminal and lists it only for its own session", () =>
     withService((t) =>
       Effect.gen(function* () {
-        const info = yield* t.create({ sessionId: "s1", cwd: process.cwd(), cols: 80, rows: 24 })
+        const info = yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cwd: process.cwd(), cols: 80, rows: 24 })
         expect(info.status).toBe("running")
         expect(info.exitCode).toBeNull()
         expect(info.cwd).toBe(process.cwd())
@@ -105,7 +124,7 @@ describe("TerminalService", () => {
   it("echoes written input back on the attach stream", () =>
     withService((t) =>
       Effect.gen(function* () {
-        const info = yield* t.create({ sessionId: "s1", cols: 80, rows: 24 })
+        const info = yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cols: 80, rows: 24 })
         const sink = collect(t, info.id)
         yield* Effect.sleep("150 millis") // let the shell + attach settle
         yield* t.write(info.id, "echo HELLO_JINGLER\r")
@@ -118,7 +137,7 @@ describe("TerminalService", () => {
   it("coalesces a flood into a bounded number of frames", () =>
     withService((t) =>
       Effect.gen(function* () {
-        const info = yield* t.create({ sessionId: "s1", cols: 200, rows: 50 })
+        const info = yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cols: 200, rows: 50 })
         const sink = collect(t, info.id)
         yield* Effect.sleep("150 millis")
         const startedAt = yield* Effect.sync(() => Date.now())
@@ -157,7 +176,7 @@ describe("TerminalService", () => {
   it("drops the handle from the map on kill", () =>
     withService((t) =>
       Effect.gen(function* () {
-        const info = yield* t.create({ sessionId: "s1", cols: 80, rows: 24 })
+        const info = yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cols: 80, rows: 24 })
         expect((yield* t.list("s1")).length).toBe(1)
         yield* t.kill(info.id)
         expect(yield* t.list("s1")).toHaveLength(0)
@@ -167,8 +186,8 @@ describe("TerminalService", () => {
   it("killAll reclaims every terminal across sessions", () =>
     withService((t) =>
       Effect.gen(function* () {
-        yield* t.create({ sessionId: "s1", cols: 80, rows: 24 })
-        yield* t.create({ sessionId: "s2", cols: 80, rows: 24 })
+        yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cols: 80, rows: 24 })
+        yield* t.create({ executionHistoryPersisted: true, sessionId: "s2", cols: 80, rows: 24 })
         yield* t.killAll
         expect(yield* t.list("s1")).toHaveLength(0)
         expect(yield* t.list("s2")).toHaveLength(0)
@@ -188,7 +207,7 @@ describe("TerminalService", () => {
   it("replays the last screen and a final exit frame for an exited terminal", () =>
     withService((t) =>
       Effect.gen(function* () {
-        const info = yield* t.create({ sessionId: "s1", cols: 80, rows: 24 })
+        const info = yield* t.create({ executionHistoryPersisted: true, sessionId: "s1", cols: 80, rows: 24 })
         yield* t.write(info.id, "echo BEFORE_EXIT\r")
         yield* Effect.sleep("200 millis")
         yield* t.write(info.id, "exit\r")

@@ -1,3 +1,4 @@
+import type { RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
 /**
  * Renderer-side RPC client. Mirror image of `src/main/rpc.ts`: a custom
  * `RpcClient.Protocol` that shuttles encoded frames over the preload bridge
@@ -586,11 +587,18 @@ export const rpc = {
     run((c) => c.Sessions.unlinkIssue({ sessionId })),
   sessionsClearInitialPrompt: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.clearInitialPrompt({ sessionId })),
+  routinesList: (): Promise<RoutineDocument> => run(c => c.Routines.list()),
+  routinesSave: (id: string | undefined, input: RoutineInput): Promise<RoutineDocument> => run(c => c.Routines.save({ id, input })),
+  routinesEnable: (id: string, enabled: boolean): Promise<RoutineDocument> => run(c => c.Routines.enable({ id, enabled })),
+  routinesDelete: (id: string): Promise<RoutineDocument> => run(c => c.Routines.delete({ id })),
+  routinesRunNow: (id: string): Promise<RoutineRun> => run(c => c.Routines.runNow({ id })),
+  routinesCancel: (runId: string): Promise<RoutineDocument> => run(c => c.Routines.cancel({ runId })),
   sessionsArchive: (
     sessionId: string,
     reason: ArchiveReason,
-    skipCleanup = false
-  ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason, skipCleanup })),
+    skipCleanup = false,
+    metadataOnlyAcknowledged = false
+  ): Promise<Session> => run((c) => c.Sessions.archive({ sessionId, reason, skipCleanup, metadataOnlyAcknowledged })),
   sessionsRestore: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.restore({ sessionId })),
   sessionsResolveRuntimeRecovery: (

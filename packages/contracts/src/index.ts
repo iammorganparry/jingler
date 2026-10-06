@@ -785,7 +785,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       reason: ArchiveReason,
-      skipCleanup: Schema.optional(Schema.Boolean)
+      skipCleanup: Schema.optional(Schema.Boolean),
+      metadataOnlyAcknowledged: Schema.optional(Schema.Boolean)
     }
   }),
 

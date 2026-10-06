@@ -1,3 +1,5 @@
+import { RoutinesSettings } from "./routines-settings.js"
+import { sessionArchiveMachine } from "./session-archive-machine.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMachine } from "@xstate/react";
 import {
@@ -652,19 +654,13 @@ function AuthedApp({
   >(null);
   // Manual archive from the sidebar quick-actions. The store only models a
   // merged/closed reason, so a hand-archived session records "closed".
+  const [archiveState, sendArchive] = useMachine(sessionArchiveMachine, { input: {
+    archive: (id, acknowledged) => rpc.sessionsArchive(id, "closed", false, acknowledged),
+    onSession: session => send({ type: "SESSION_UPDATED", session })
+  } });
   const archiveSession = async (sessionId: string) => {
-    setSessionMutationError(null);
-    try {
-      const session = await rpc.sessionsArchive(sessionId, "closed");
-      send({ type: "SESSION_UPDATED", session });
-    } catch (error) {
-      setSessionMutationError(
-        error instanceof Error
-          ? error.message
-          : "Could not archive the session.",
-      );
-      throw error;
-    }
+    const session = sessions.find(item => item.id === sessionId);
+    if (session) sendArchive({ type: "ARCHIVE", session });
   };
   const renameSession = (sessionId: string, title: string) => {
     void rpc
@@ -1383,6 +1379,7 @@ function AuthedApp({
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
+        routines={<RoutinesSettings projects={projectController.projects} catalog={providerCatalog.catalog} onSession={id => rpc.sessionsGet(id).then(session => { send({ type: "SESSION_UPDATED", session }); setSelectRequest({ sessionId: id, nonce: Date.now() }); })} />}
         onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
@@ -1804,6 +1801,7 @@ function AuthedApp({
         load={mcp.importCandidates}
         apply={mcp.applyImport}
       />
+      <ArchiveConfirmation state={archiveState} send={sendArchive} />
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
@@ -2255,4 +2253,15 @@ function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): bo
 
 function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): boolean {
   return connected && (config?.autoDetectPr ?? true);
+}
+
+function ArchiveConfirmation({ state, send }: { state: import("xstate").SnapshotFrom<typeof sessionArchiveMachine>; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+  return <ConfirmDialog
+    open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
+    onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
+    title="Archive without cleanup?"
+    description={state.context.error ?? "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked."}
+    confirmLabel="Archive without cleanup"
+    onConfirm={() => { send({ type: "CONFIRM" }); }}
+  />
 }

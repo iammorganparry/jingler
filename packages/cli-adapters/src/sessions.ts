@@ -485,7 +485,7 @@ const nextOpId = (): number => ++opSeq
  * Reads are best-effort: a missing or malformed file yields an empty list so
  * the app still boots.
  */
-const checkpointCreationFields = (input: CreateSessionInput) => input.checkpointSafeMode ? { checkpointSafeMode: true } : {}
+const checkpointCreationFields = (input: CreateSessionInput) => ({ ...(input.checkpointSafeMode ? { checkpointSafeMode: true } : {}), ...(input.routineOccurrence ? { routineOccurrence: input.routineOccurrence } : {}) })
 const checkpointCreationSupported = (input: CreateSessionInput): boolean => !input.checkpointSafeMode || (!input.environmentId && input.useWorktree !== false && (input.runtimeId ?? "pi") === "pi" && process.platform !== "win32")
 
 const validateCheckpointCreation = (input: CreateSessionInput) => checkpointCreationSupported(input) ? Effect.void : Effect.fail(new GitError({ message: "Checkpoint-safe mode requires a fresh isolated local managed Pi workspace." }))
@@ -1950,10 +1950,10 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         update(id, (s) => ({ ...s, initialPrompt: undefined }))
 
       /** Archive a session (its linked PR was merged/closed) — read-only, kept. */
-      const archive = (id: string, reason: "merged" | "closed") =>
+      const archive = (id: string, reason: "merged" | "closed", metadataOnlyAcknowledged = false) =>
         Effect.gen(function* () {
           const session = yield* get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for archive", cause })))
-          if (session.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; archive is refused. The workspace remains usable." }))
+          if (session.checkpointPtyHistory && !metadataOnlyAcknowledged) return yield* Effect.fail(new GitError({ message: "Terminal descendants cannot be proven stopped. Explicitly confirm archive without cleanup; files and running jobs will be preserved." }))
           const now = yield* Effect.sync(() => new Date().toISOString())
           yield* update(id, (s) => ({
             ...s,

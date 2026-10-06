@@ -8,6 +8,15 @@ const trimHistory = (runs: ReadonlyArray<RoutineRun>) => runs.filter(routineRunA
 const nextAfter = (routine: Routine, now: number) => routine.schedule.kind === "once" ? null
   : routine.schedule.at + (Math.floor((now - routine.schedule.at) / routine.schedule.everyMs) + 1) * routine.schedule.everyMs
 
+const validCursor = (routine: Routine): boolean => {
+  if (routine.nextAt === null) return true
+  if (routine.nextAt < routine.schedule.at) return false
+  return routine.schedule.kind === "once" ? routine.nextAt === routine.schedule.at : (routine.nextAt - routine.schedule.at) % routine.schedule.everyMs === 0
+}
+const due = (routine: Routine | undefined, trigger: RoutineRun["trigger"], now: number): routine is Routine => routine !== undefined && (trigger === "manual" || (routine.enabled && routine.nextAt !== null && routine.nextAt <= now))
+const claimMessage = (missed: boolean, overlap: boolean) => missed ? "Missed while desktop was unavailable; no catch-up" : overlap ? "Another routine is active; overlap skipped" : "Occurrence reserved"
+const missedCount = (missed: boolean, routine: Routine, now: number, at: number) => missed && routine.schedule.kind === "interval" ? Math.floor((now - at) / routine.schedule.everyMs) + 1 : 1
+
 /** One atomic document owns definitions, occurrence cursors and reserved session IDs. */
 export class RoutineStore {
   readonly document: AtomicJsonFile<RoutineDocument>
@@ -18,7 +27,7 @@ export class RoutineStore {
       for (const routine of value.routines) {
         if (ids.has(routine.id)) throw new Error("Duplicate routine identity")
         ids.add(routine.id)
-        if (routine.nextAt !== null && (routine.nextAt < routine.schedule.at || (routine.schedule.kind === "once" ? routine.nextAt !== routine.schedule.at : (routine.nextAt - routine.schedule.at) % routine.schedule.everyMs !== 0))) throw new Error("Invalid occurrence cursor")
+        if (!validCursor(routine)) throw new Error("Invalid occurrence cursor")
       }
       if (value.runs.filter(routineRunActive).length > 1 || new Set(value.runs.map(run => run.requestedSessionId)).size !== value.runs.length) throw new Error("Invalid routine run identities")
       return value
@@ -31,7 +40,7 @@ export class RoutineStore {
     await this.document.update(current => {
       const old = id === undefined ? undefined : current.routines.find(item => item.id === id)
       if (id !== undefined && old === undefined) throw new Error("Routine no longer exists")
-      const routine: Routine = { ...decoded, id: id ?? randomUUID(), revision: randomUUID(), workflowDigest, createdAt: old?.createdAt ?? now, updatedAt: now, nextAt: decoded.schedule.at }
+      const routine: Routine = { ...decoded, id: id ?? randomUUID(), revision: randomUUID(), workflowDigest, createdAt: old?.createdAt ?? now, updatedAt: now, nextAt: old && JSON.stringify(old.schedule) === JSON.stringify(decoded.schedule) ? old.nextAt : decoded.schedule.at }
       return { ...current, routines: [...current.routines.filter(item => item.id !== routine.id), routine] }
     })
     return this.read()
@@ -51,12 +60,12 @@ export class RoutineStore {
     let claimed: { routine: Routine; run: RoutineRun } | null = null
     await this.document.update(current => {
       const routine = current.routines.find(item => item.id === id)
-      if (!routine || (trigger === "scheduled" && (!routine.enabled || routine.nextAt === null || routine.nextAt > now))) return current
+      if (!due(routine, trigger, now)) return current
       const at = trigger === "manual" ? now : routine.nextAt!
       const missed = trigger === "scheduled" && (skipMissed || now - at > 5000)
       const overlap = current.runs.some(routineRunActive)
-      const skippedCount = missed && routine.schedule.kind === "interval" ? Math.floor((now - at) / routine.schedule.everyMs) + 1 : 1
-      const run: RoutineRun = { id: randomUUID(), routineId: id, routineName: routine.name, revision: routine.revision, trigger, occurrenceAt: at, requestedSessionId: `s_routine_${randomUUID().replaceAll("-", "")}`, sessionId: null, status: missed || overlap ? "skipped" : "claimed", message: missed ? "Missed while desktop was unavailable; no catch-up" : overlap ? "Another routine is active; overlap skipped" : "Occurrence reserved", createdAt: now, finishedAt: missed || overlap ? now : null, skippedCount }
+      const skippedCount = missedCount(missed, routine, now, at)
+      const run: RoutineRun = { id: randomUUID(), routineId: id, routineName: routine.name, revision: routine.revision, trigger, occurrenceAt: at, requestedSessionId: `s_routine_${randomUUID().replaceAll("-", "")}`, sessionId: null, status: missed || overlap ? "skipped" : "claimed", message: claimMessage(missed, overlap), createdAt: now, finishedAt: missed || overlap ? now : null, skippedCount }
       claimed = { routine, run }
       return { ...current, routines: current.routines.map(item => item.id === id && trigger === "scheduled" ? { ...item, nextAt: nextAfter(item, now) } : item), runs: trimHistory([...current.runs, run]) }
     })
@@ -78,6 +87,6 @@ export class RoutineStore {
     const current = await this.read()
     const linked = new Set<string>()
     for (const run of current.runs.filter(routineRunActive)) if (await sessionExists(run.requestedSessionId)) linked.add(run.id)
-    await this.document.update(value => ({ ...value, runs: value.runs.map(run => routineRunActive(run) ? { ...run, sessionId: linked.has(run.id) ? run.requestedSessionId : run.sessionId, status: "interrupted", message: "Desktop restarted; unfinished run was not replayed", finishedAt: now } : run) }))
+    await this.document.update(value => ({ ...value, runs: value.runs.map(run => routineRunActive(run) ? { ...run, sessionId: linked.has(run.id) ? run.requestedSessionId : null, status: "interrupted", message: "Desktop restarted; unfinished run was not replayed", finishedAt: now } : run) }))
   }
 }

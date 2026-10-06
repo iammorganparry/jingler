@@ -571,6 +571,7 @@ export const PublishCheckpoint = Schema.Struct({
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
 export const Session = Schema.Struct({
+  routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
@@ -1950,6 +1951,7 @@ export const adversarialReviewModelLabel = (
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
+  routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
   /** Explicit consent to edit/inspect-only managed Pi checkpoint execution. */
   checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Internal remote provision fence; omitted by renderer-originated requests. */

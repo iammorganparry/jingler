@@ -1,3 +1,4 @@
+import { RoutinesService } from "./routines.js"
 /**
  * Electron main entry — standard electron-vite lifecycle. On ready it forces the
  * Effect runtime to build (which forks the RPC server and registers the IPC
@@ -21,7 +22,7 @@ import {
   RuntimeRecoveryService,
   configureAnchoredFsProcess
 } from "@jingler/cli-adapters"
-import { app, BrowserWindow, ipcMain, shell, utilityProcess } from "electron"
+import { app, BrowserWindow, ipcMain, shell, utilityProcess, powerMonitor } from "electron"
 import { Effect } from "effect"
 import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
@@ -508,11 +509,19 @@ if (!gotPrimaryLock) {
     if (process.platform !== "darwin") app.quit()
   })
 
+  let routinesStopped = false
+  powerMonitor.on("suspend", () => { void runtime.runPromise(RoutinesService.pipe(Effect.map(service => service.scheduler.suspend()))) })
+  powerMonitor.on("resume", () => { void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.resume))).catch(() => {}) })
   app.on("before-quit", (event) => {
     if (!readyToQuit && mainWindow !== null) {
       event.preventDefault()
       quitPending = true
       mainWindow.close()
+      return
+    }
+    if (!routinesStopped) {
+      event.preventDefault()
+      void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))).then(() => { routinesStopped = true; app.quit() }).catch(error => { console.error("Routine shutdown failed", error) })
       return
     }
     // The extension host is a utilityProcess; Electron reaps it with the app,

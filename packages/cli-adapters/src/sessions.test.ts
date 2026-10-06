@@ -151,6 +151,12 @@ describe("SessionStore", () => {
     expect(restarted.checkpointPtyHistory).toBe(true)
     await expect(Effect.runPromise(SessionStore.archive(session.id, "closed").pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+    await Effect.runPromise(SessionStore.archive(session.id, "closed", true).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const archived = await Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(archived.archived).toBe(true)
+    expect(archived.worktreePath).toBe(session.worktreePath)
+    expect(existsSync(session.worktreePath!)).toBe(true)
+    await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
   })
 
   it("atomically assigns distinct ports to concurrent creates and reserves archives across store restart", async () => {

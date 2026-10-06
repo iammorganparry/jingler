@@ -1,3 +1,5 @@
+import { archiveMetadataOnly } from "./metadata-only-archive.js"
+import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
 import { TerminalError } from "@jingler/core";
 import { readyWorkspacePreview } from "@jingler/cli-adapters/project-workflow";
@@ -1648,9 +1650,13 @@ export const archiveSession = (
   sessionId: string,
   reason: "merged" | "closed",
   skipCleanup = false,
+  metadataOnlyAcknowledged = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
+    if (session.checkpointPtyHistory && metadataOnlyAcknowledged) {
+      return yield* archiveMetadataOnly(sessionId, reason, metadataOnlyAcknowledged);
+    }
     const workflow = yield* WorkspaceWorkflowService;
     yield* workflow.prepareLifecycle(sessionId);
     const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace archive is in progress");
@@ -1698,6 +1704,7 @@ export const archiveSessionRouted = (
   sessionId: string,
   reason: "merged" | "closed",
   skipCleanup = false,
+  metadataOnlyAcknowledged = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
@@ -1705,11 +1712,11 @@ export const archiveSessionRouted = (
     return yield* routeSessionOperation(
       session,
       "Sessions.archive",
-      { reason, skipCleanup },
-      { execute: () => archiveSession(sessionId, reason, skipCleanup) },
+      { reason, skipCleanup, metadataOnlyAcknowledged },
+      { execute: () => archiveSession(sessionId, reason, skipCleanup, metadataOnlyAcknowledged) },
       {
         execute: () =>
-          remote.request(session, "Sessions.archive", { reason, skipCleanup }).pipe(
+          remote.request(session, "Sessions.archive", { reason, skipCleanup, metadataOnlyAcknowledged }).pipe(
             Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
             Effect.flatMap(SessionStore.upsertRemote),
             Effect.mapError(
@@ -4654,8 +4661,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* SessionStore.clearInitialPrompt(sessionId);
       return yield* SessionStore.get(sessionId);
     }),
-  "Sessions.archive": ({ sessionId, reason, skipCleanup }) =>
-    archiveSessionRouted(sessionId, reason, skipCleanup),
+  "Routines.list": () => RoutinesService.pipe(Effect.flatMap(service => service.list)),
+  "Routines.save": ({ id, input }) => RoutinesService.pipe(Effect.flatMap(service => service.save(id, input))),
+  "Routines.enable": ({ id, enabled }) => RoutinesService.pipe(Effect.flatMap(service => service.enable(id, enabled))),
+  "Routines.delete": ({ id }) => RoutinesService.pipe(Effect.flatMap(service => service.delete(id))),
+  "Routines.runNow": ({ id }) => RoutinesService.pipe(Effect.flatMap(service => service.runNow(id))),
+  "Routines.cancel": ({ runId }) => RoutinesService.pipe(Effect.flatMap(service => service.cancel(runId))),
+  "Sessions.archive": ({ sessionId, reason, skipCleanup, metadataOnlyAcknowledged }) =>
+    archiveSessionRouted(sessionId, reason, skipCleanup, metadataOnlyAcknowledged),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
   "Sessions.resolveRuntimeRecovery": ({ sessionId, runId, callId }) =>
     RuntimeRecoveryService.resolve(sessionId, runId, callId),
@@ -5729,11 +5742,11 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
   // Auth — the sign-in wall. Delegates to AuthService, which bridges the OS
   // keychain (SecretStore) and the BetterAuth backend.
-  "Auth.getSession": () => AuthService.getSession(),
+  "Auth.getSession": () => AuthService.getSession().pipe(Effect.tap(session => session ? RoutinesService.pipe(Effect.flatMap(service => service.start), Effect.catchAll(cause => Effect.logError(cause.message))) : Effect.void)),
   "Auth.startSignIn": ({ provider }) => AuthService.startSignIn(provider),
   "Auth.sendMagicLink": ({ email, name }) =>
     AuthService.sendMagicLink(email, name),
-  "Auth.signOut": () => AuthService.signOut(),
+  "Auth.signOut": () => RoutinesService.pipe(Effect.flatMap(service => service.stop), Effect.catchAll(cause => Effect.logError(cause.message)), Effect.zipRight(AuthService.signOut())),
 
   // Themes — the picker, the editor, and live reload of `~/jingler/themes`.
   "Theme.list": () => ThemeService.list(),
@@ -6116,6 +6129,7 @@ const RpcServerLayer = RpcServer.layer(JinglerRpcs).pipe(
 // ManagedRuntime check. The assignment below also verifies this list stays a
 // superset of every handler requirement.
 export type RpcServerRequirements =
+  | RoutinesService
   | AgentRunner
   | AgentRuntime
   | AppPaths

@@ -1,0 +1,88 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { RoutineInput } from "@jingler/core"
+import { RoutineStore } from "@jingler/cli-adapters/routine-store"
+import { Schema } from "effect"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { RoutineScheduler, type RoutineClock } from "./routine-scheduler.js"
+const input = Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "interval", at: 1000, everyMs: 1000 }, maxDurationMs: 10000 })
+const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+describe("desktop routine clock and dispatch fence", () => {
+  let root: string; let store: RoutineStore; let now: number; let timer: (() => void) | undefined; let scheduler: RoutineScheduler
+  const execute = vi.fn(async () => ({ status: "succeeded" as const, message: "Done" }))
+  const clock: RoutineClock = { now: () => now, setTimer: callback => { timer = callback; return callback }, clearTimer: () => { timer = undefined } }
+  beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "routine-scheduler-")); store = new RoutineStore(join(root, "routines.json")); now = 0; execute.mockClear(); scheduler = new RoutineScheduler(store, { execute, sessionExists: async () => false }, clock) })
+  afterEach(async () => { await scheduler.stop(); await rm(root, { recursive: true, force: true }) })
+  it("skips startup/sleep missed occurrences and dispatches the next bounded-clock occurrence", async () => {
+    await store.save(undefined, input, null, 0); now = 3000; await scheduler.start()
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).routines[0]!.nextAt).toBe(4000)
+    scheduler.suspend(); now = 8000; await scheduler.wake()
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).routines[0]!.nextAt).toBe(9000)
+    now = 9000; timer!(); await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+  })
+  it("does not launch after stop during a deferred claim", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id; await scheduler.start()
+    const entered = deferred<void>(); const release = deferred<void>(); const original = store.claim.bind(store)
+    vi.spyOn(store, "claim").mockImplementation(async (...args) => { entered.resolve(); await release.promise; return original(...args) })
+    const request = scheduler.runNow(id); await entered.promise; const stopped = scheduler.stop(); release.resolve(); await request; await stopped
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).runs[0]!.status).toBe("interrupted")
+  })
+  it("does not launch or arm after suspension during deferred read", async () => {
+    await store.save(undefined, input, null, 0); await scheduler.start(); now = 1000
+    const entered = deferred<void>(); const release = deferred<void>(); const original = store.read.bind(store)
+    vi.spyOn(store, "read").mockImplementationOnce(async () => { entered.resolve(); await release.promise; return original() })
+    timer!(); await entered.promise; scheduler.suspend(); release.resolve(); await scheduler.refresh()
+    expect(execute).not.toHaveBeenCalled(); expect(timer).toBeUndefined()
+  })
+  it("cancellation waits for owned teardown before releasing the global slot", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const entered = deferred<void>(); const teardown = deferred<void>()
+    const execution = vi.fn(async (_routine: import("@jingler/core").Routine, _run: import("@jingler/core").RoutineRun, signal: AbortSignal) => {
+      entered.resolve()
+      await new Promise<void>(resolve => signal.addEventListener("abort", () => { void teardown.promise.then(resolve) }, { once: true }))
+      return { status: "succeeded" as const, message: "Done" }
+    })
+    scheduler = new RoutineScheduler(store, { execute: execution, sessionExists: async () => false }, clock)
+    await scheduler.start(); const run = await scheduler.runNow(id); await entered.promise
+    const cancel = scheduler.cancel(run.id)
+    expect((await store.read()).runs[0]!.status).toBe("claimed")
+    expect((await scheduler.runNow(id)).status).toBe("skipped")
+    teardown.resolve(); await cancel
+    expect((await store.read()).runs[0]!.status).toBe("cancelled")
+  })
+  it("claim write failure halts dispatch visibly without launching", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    await scheduler.start()
+    vi.spyOn(store.document, "update").mockRejectedValueOnce(new Error("claim write failed"))
+    await expect(scheduler.runNow(id)).rejects.toThrow("claim write failed")
+    expect(execute).not.toHaveBeenCalled(); expect(scheduler.error).toBe("claim write failed")
+    expect((await store.read()).runs).toEqual([])
+  })
+  it("restart never redispatches a claimed occurrence before or after linking", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const claim = (await store.claim(id, "manual", 0))!
+    await store.link(claim.run, 0)
+    await scheduler.start()
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).runs[0]!.status).toBe("interrupted")
+    expect((await store.read()).runs[0]!.sessionId).toBeNull()
+  })
+
+  it("definition invalidation fences a manual claim still awaiting persistence", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id; await scheduler.start()
+    const entered = deferred<void>(); const release = deferred<void>(); const original = store.claim.bind(store)
+    vi.spyOn(store, "claim").mockImplementation(async (...args) => { entered.resolve(); await release.promise; return original(...args) })
+    const request = scheduler.runNow(id); await entered.promise; scheduler.invalidatePending(); await store.enable(id, false, 1); release.resolve(); await request
+    expect(execute).not.toHaveBeenCalled(); expect((await store.read()).runs[0]!.status).toBe("interrupted")
+  })
+  it("cannot restart in-process after cancellation teardown failure", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    scheduler = new RoutineScheduler(store, { execute: async () => { throw new Error("Routine cancellation teardown timed out") }, sessionExists: async () => false }, clock)
+    await scheduler.start(); await scheduler.runNow(id)
+    await vi.waitFor(() => expect(scheduler.error).toContain("timed out"))
+    await expect(scheduler.start()).rejects.toThrow("Restart the desktop")
+    await scheduler.stop()
+    expect((await store.read()).runs[0]!.status).toBe("failed")
+  })
+
+})

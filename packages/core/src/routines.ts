@@ -1,3 +1,4 @@
+import { ReasoningSetting } from "./domain.js"
 import { Schema } from "effect"
 import { AgentEndpointId, AgentRuntimeId } from "./runtime/agent-endpoint.js"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "./runtime/provider-connection.js"
@@ -19,6 +20,7 @@ export const RoutineInput = Schema.Struct({
   modelId: ProviderModelId,
   // Review-safe only: no unattended approval escalation in desktop v1.
   mode: Schema.Literal("ask"),
+  reasoning: Schema.NullOr(ReasoningSetting),
   schedule: RoutineSchedule,
   enabled: Schema.Boolean,
   approved: Schema.Literal(true),
