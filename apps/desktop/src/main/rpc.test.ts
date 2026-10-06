@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   EMPTY_REVIEW_DIFF,
   AppPaths,
+  AuthService,
   AgentResourceService,
   AssetService,
   AgentTurnDriver,
@@ -63,8 +64,13 @@ import {
   Logger,
   Schema,
 } from "effect";
+import { RoutinesService } from "./routines.js"
+import { RoutineScheduler } from "./routine-scheduler.js"
+import { RoutineStore } from "@jingler/cli-adapters/routine-store"
+import { RoutineInput, type AuthSession } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  authenticatedSession,
   adoptBranch,
   forkOntoBranch,
   transcriptForFork,
@@ -2313,3 +2319,23 @@ function reviewReconcileCommand(log: string) {
     return { stdout: "2.1.0" };
   };
 }
+
+
+describe("Auth.getSession routine sign-in fence", () => {
+  it("valid session then null stops the actual scheduler before a due occurrence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "routine-auth-")); let now = 0; let due: (() => void) | undefined
+    const execute = vi.fn(async () => ({ status: "succeeded" as const, message: "Done" }))
+    const store = new RoutineStore(join(root, "routines.json"))
+    const scheduler = new RoutineScheduler(store, { execute, sessionExists: async () => false }, { now: () => now, setTimer: callback => { due = callback; return callback }, clearTimer: () => { due = undefined } })
+    let session: AuthSession | null = {} as AuthSession
+    const layer = Layer.mergeAll(Layer.succeed(AuthService, { getSession: () => Effect.sync(() => session) } as AuthService), Layer.succeed(RoutinesService, { start: Effect.promise(() => scheduler.start()), stop: Effect.promise(() => scheduler.stop()) } as RoutinesService))
+    try {
+      await store.save(undefined, Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "once", at: 1000 }, maxDurationMs: 10000 }), null, now)
+      await Effect.runPromise(authenticatedSession().pipe(Effect.provide(layer))); expect(scheduler.running).toBe(true)
+      const staleDue = due!; session = null
+      expect(await Effect.runPromise(authenticatedSession().pipe(Effect.provide(layer)))).toBeNull()
+      expect(scheduler.running).toBe(false); expect(due).toBeUndefined()
+      now = 1000; staleDue(); await scheduler.refresh(); expect(execute).not.toHaveBeenCalled()
+    } finally { await scheduler.stop(); rmSync(root, { recursive: true, force: true }) }
+  })
+})

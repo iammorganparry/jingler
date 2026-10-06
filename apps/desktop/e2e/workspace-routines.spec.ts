@@ -45,7 +45,7 @@ test("saves a routine through Settings and runs the real checkpoint-gated Pi int
   expect(transcript()).toContain("# e2e repo")
   await expect(routines.getByRole("button", { name: "Open workspace Routine proof" })).toBeVisible()
   await routines.getByRole("button", { name: "Edit Routine proof", exact: true }).click()
-  await routines.getByLabel("Schedule", { exact: true }).selectOption("interval")
+  await routines.getByRole("combobox", { name: "Schedule", exact: true }).selectOption("interval")
   const next = new Date(Date.now() + 5000)
   const local = new Date(next.getTime() - next.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
   await routines.getByLabel("First occurrence").fill(local)

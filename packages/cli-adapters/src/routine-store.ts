@@ -77,7 +77,7 @@ export class RoutineStore {
     return routine !== undefined && routine.revision === run.revision && (run.trigger === "manual" || routine.enabled) && current.runs.some(item => item.id === run.id && routineRunActive(item))
   }
   async link(run: RoutineRun, now: number) {
-    await this.document.update(current => ({ ...current, runs: current.runs.map(item => item.id === run.id && routineRunActive(item) ? { ...item, sessionId: run.requestedSessionId, status: "running", message: "Workspace created", createdAt: item.createdAt ?? now } : item) }))
+    await this.document.update(current => ({ ...current, runs: current.runs.map(item => item.id === run.id && item.requestedSessionId === run.requestedSessionId ? { ...item, sessionId: run.requestedSessionId, ...(routineRunActive(item) ? { status: "running" as const, message: "Workspace created", createdAt: item.createdAt ?? now } : {}) } : item) }))
   }
   async finish(id: string, status: RoutineRun["status"], message: string, now: number) {
     await this.document.update(current => ({ ...current, runs: trimHistory(current.runs.map(item => item.id === id && routineRunActive(item) ? { ...item, status, message, finishedAt: now } : item)) }))

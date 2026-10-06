@@ -234,6 +234,8 @@ import {
 } from "./github-relay.js";
 
 /** The single IPC channel both directions of the RPC transport ride on. */
+export const authenticatedSession = () => AuthService.getSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
+
 export const RPC_CHANNEL = "jingler/rpc";
 
 /**
@@ -5742,7 +5744,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
   // Auth — the sign-in wall. Delegates to AuthService, which bridges the OS
   // keychain (SecretStore) and the BetterAuth backend.
-  "Auth.getSession": () => AuthService.getSession().pipe(Effect.tap(session => session ? RoutinesService.pipe(Effect.flatMap(service => service.start), Effect.catchAll(cause => Effect.logError(cause.message))) : Effect.void)),
+  "Auth.getSession": authenticatedSession,
   "Auth.startSignIn": ({ provider }) => AuthService.startSignIn(provider),
   "Auth.sendMagicLink": ({ email, name }) =>
     AuthService.sendMagicLink(email, name),

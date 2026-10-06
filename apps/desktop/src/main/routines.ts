@@ -1,4 +1,4 @@
-import { routineExecution } from "./routine-execution.js"
+import { routineExecution, runOwnedRoutineEffect } from "./routine-execution.js"
 import { validateRoutineProject, validateRoutineModel } from "./routine-validation.js"
 import { join } from "node:path"
 import { AgentRunner, AppPaths, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
@@ -41,9 +41,9 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
         return session !== null && run !== undefined && session.routineOccurrence?.routineId === run.routineId && session.routineOccurrence.runId === run.id
       },
       execute: routineExecution({
-        validate: routine => runEffect(validate(routine, routine.workflowDigest)),
-        create: (routine, run) => runEffect(create(routine, run)),
-        setMode: id => runEffect(checkpoints.setMode(id, true)),
+        validate: (routine, signal) => runEffect(validate(routine, routine.workflowDigest), { signal }),
+        create: (routine, run, signal, committed) => runOwnedRoutineEffect(effectRuntime, create(routine, run), signal, committed),
+        setMode: (id, signal) => runOwnedRoutineEffect(effectRuntime, checkpoints.setMode(id, true), signal),
         prompt: async (session, routine, signal) => {
         const chatId = session.activeChatId
         let status: "succeeded" | "failed" | "needs-attention" = "failed"

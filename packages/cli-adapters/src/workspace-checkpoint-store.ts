@@ -65,7 +65,40 @@ export class WorkspaceCheckpointStore {
   async #directory(): Promise<void> {
     await anchoredFs.mkdir(this.#root)
   }
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one immutable-index consistency boundary validates repository, bytes, modes and enumeration before publishing either tree.
+  async #validateIndexConfiguration(): Promise<void> {
+    for (const key of ["core.sparseCheckout", "core.splitIndex"]) {
+      const value = await text(this.#cwd, ["config", "--bool", "--get", key]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "false"; throw cause })
+      if (value === "true") throw new Error("Checkpoints do not support sparse/split index.")
+    }
+  }
+  async #validateIndexFlags(shadow: string): Promise<void> {
+      const debug = await text(this.#cwd, ["ls-files", "--debug"], shadow)
+      if ([...debug.matchAll(/flags: ([0-9a-f]+)/g)].some((match) => (Number.parseInt(match[1]!, 16) & 0x20000000) !== 0)) throw new Error("Intent-to-add (git add -N) is unsupported; original staging is unchanged.")
+      if ((await text(this.#cwd, ["ls-files", "-v"], shadow)).split("\n").some((line) => line.startsWith("S ") || /^[a-z] /.test(line))) throw new Error("Checkpoints do not support assume-unchanged/skip-worktree entries.")
+  }
+  async #verifyFiles(files: Entry[], paths: string[], untracked: string[]): Promise<void> {
+      // Re-read bytes, modes and enumeration, not just timestamps (which can repeat).
+      for (const file of files) {
+        const again = await anchoredFs.read(join(this.#cwd, file.path), MAX_BYTES)
+        if (digest(again.bytes) !== file.sha256 || again.mode !== file.permissions) throw new Error("Workspace changed during checkpoint capture. Retry.")
+      }
+      for (const path of paths.filter((path) => !files.some((file) => file.path === path))) if (await anchoredFs.stat(join(this.#cwd, path))) throw new Error("Workspace changed during checkpoint capture. Retry.")
+      const againUntracked = (await git(this.#cwd, ["ls-files", "--others", "--exclude-standard", "-z"])).toString("utf8").split("\0").filter(Boolean)
+      if (JSON.stringify(againUntracked) !== JSON.stringify(untracked)) throw new Error("Workspace changed during checkpoint capture. Retry.")
+  }
+  async #captureFiles(paths: string[], addBlob: (bytes: Buffer) => string): Promise<Entry[]> {
+      const files: Entry[] = []
+      for (const path of paths) {
+        const absolute = join(this.#cwd, path)
+        const stat = await anchoredFs.stat(absolute).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
+        if (!stat) continue
+        if (!stat.file || stat.symlink) throw new Error(`Checkpoint path is not a regular file: ${path}`)
+        const file = await anchoredFs.read(absolute, MAX_BYTES)
+        const oid = (await anchoredFs.git(this.#cwd, ["hash-object", "-w", "--stdin", "--no-filters"], {}, file.bytes)).toString("utf8").trim()
+        files.push({ path, oid, mode: (file.mode & 0o111) ? "100755" : "100644", permissions: file.mode & 0o777, sha256: addBlob(file.bytes) })
+      }
+    return files
+  }
   async #current(): Promise<Current> {
     const cwd = this.#cwd
     if (await text(cwd, ["rev-parse", "--show-toplevel"]) !== await realpath(cwd)) throw new Error("Checkpoints require the worktree root.")
@@ -73,10 +106,7 @@ export class WorkspaceCheckpointStore {
     const repository = await realpath(resolve(cwd, await text(cwd, ["rev-parse", "--git-common-dir"])))
     const head = await text(cwd, ["rev-parse", "--verify", "HEAD"])
     const branch = await text(cwd, ["symbolic-ref", "-q", "HEAD"]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "(detached)"; throw cause })
-    for (const key of ["core.sparseCheckout", "core.splitIndex"]) {
-      const value = await text(cwd, ["config", "--bool", "--get", key]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "false"; throw cause })
-      if (value === "true") throw new Error("Checkpoints do not support sparse/split index.")
-    }
+    await this.#validateIndexConfiguration()
     const indexInfo = await anchoredFs.stat(indexPath)
     if (!indexInfo?.file || indexInfo.nlink !== 1 || (indexInfo.mode & 0o022) !== 0) throw new Error("Unsafe checkpoint index permissions or hardlinks.")
     const original = await regularBytes(indexPath)
@@ -87,9 +117,7 @@ export class WorkspaceCheckpointStore {
       await anchoredFs.write(shadow, original)
       await this.#afterIndexCopy?.()
       // Every staged entry and tree is derived from this ONE immutable index copy.
-      const debug = await text(cwd, ["ls-files", "--debug"], shadow)
-      if ([...debug.matchAll(/flags: ([0-9a-f]+)/g)].some((match) => (Number.parseInt(match[1]!, 16) & 0x20000000) !== 0)) throw new Error("Intent-to-add (git add -N) is unsupported; original staging is unchanged.")
-      if ((await text(cwd, ["ls-files", "-v"], shadow)).split("\n").some((line) => line.startsWith("S ") || /^[a-z] /.test(line))) throw new Error("Checkpoints do not support assume-unchanged/skip-worktree entries.")
+      await this.#validateIndexFlags(shadow)
       const listed = entries(await git(cwd, ["ls-files", "--stage", "-z"], shadow))
       if (listed.length > MAX_FILES || listed.some((entry) => entry.stage !== "0" || !["100644", "100755"].includes(entry.mode))) throw new Error("Checkpoints do not support conflicts, symlinks, submodules, or more than 10000 files.")
       const untracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"], shadow)).toString("utf8").split("\0").filter(Boolean)
@@ -113,28 +141,12 @@ export class WorkspaceCheckpointStore {
         index.push({ path: entry.path, mode: entry.mode as Entry["mode"], oid: entry.oid, sha256: addBlob(await git(cwd, ["cat-file", "blob", entry.oid])), permissions: 0o600 })
       }
       const indexTree = await text(cwd, ["write-tree"], shadow)
-      const files: Entry[] = []
-      for (const path of paths) {
-        const absolute = join(cwd, path)
-        const stat = await anchoredFs.stat(absolute).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
-        if (!stat) continue
-        if (!stat.file || stat.symlink) throw new Error(`Checkpoint path is not a regular file: ${path}`)
-        const file = await anchoredFs.read(absolute, MAX_BYTES)
-        const oid = (await anchoredFs.git(cwd, ["hash-object", "-w", "--stdin", "--no-filters"], {}, file.bytes)).toString("utf8").trim()
-        files.push({ path, oid, mode: (file.mode & 0o111) ? "100755" : "100644", permissions: file.mode & 0o777, sha256: addBlob(file.bytes) })
-      }
+      const files = await this.#captureFiles(paths, addBlob)
       await git(cwd, ["read-tree", "--empty"], shadow)
       if (files.length) await anchoredFs.git(cwd, ["update-index", "-z", "--index-info"], { GIT_INDEX_FILE: shadow }, Buffer.from(files.map((entry) => `${entry.mode} ${entry.oid}\t${entry.path}\0`).join("")))
       const worktreeTree = await text(cwd, ["write-tree"], shadow)
       if (digest(await regularBytes(indexPath)) !== indexDigest || await text(cwd, ["rev-parse", "HEAD"]) !== head || await text(cwd, ["symbolic-ref", "-q", "HEAD"]).catch(() => "(detached)") !== branch) throw new Error("Index or HEAD changed during checkpoint capture. Retry.")
-      // Re-read bytes, modes and enumeration, not just timestamps (which can repeat).
-      for (const file of files) {
-        const again = await anchoredFs.read(join(cwd, file.path), MAX_BYTES)
-        if (digest(again.bytes) !== file.sha256 || again.mode !== file.permissions) throw new Error("Workspace changed during checkpoint capture. Retry.")
-      }
-      for (const path of paths.filter((path) => !files.some((file) => file.path === path))) if (await anchoredFs.stat(join(cwd, path))) throw new Error("Workspace changed during checkpoint capture. Retry.")
-      const againUntracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])).toString("utf8").split("\0").filter(Boolean)
-      if (JSON.stringify(againUntracked) !== JSON.stringify(untracked)) throw new Error("Workspace changed during checkpoint capture. Retry.")
+      await this.#verifyFiles(files, paths, untracked)
       return { head, branch, repository, indexPath, index, files, blobs, indexTree, worktreeTree, tracked: new Set(listed.map((entry) => entry.path)), indexDigest }
     } finally { await rm(temp, { recursive: true, force: true }) }
   }
@@ -199,7 +211,16 @@ export class WorkspaceCheckpointStore {
   }
   async worktreeSnapshot(): Promise<{ cwd: string; tree: string }> { return { cwd: this.#cwd, tree: (await this.#current()).worktreeTree } }
   async capture(label = "Manual checkpoint"): Promise<WorkspaceCheckpoint> { return this.#save(await this.#current(), label) }
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: every path disposition and collision must be validated before issuing the confirmation token.
+  async #previewPath(path: string, to: Entry | undefined, from: Entry | undefined, current: Current, snapshot: Snapshot): Promise<WorkspaceCheckpointPreview["operations"][number] | null> {
+      if (to && await ignored(this.#cwd, path)) throw new Error(`Checkpoint path is now ignored: ${path}`)
+      safePath(path)
+      const disk = await anchoredFs.stat(join(this.#cwd, path)).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
+      if (to && disk && !from) throw new Error(`Ignored or unsupported collision must be resolved first: ${path}`)
+      if (to && from && !current.tracked.has(path) && snapshot.index.some((entry) => entry.path === path)) throw new Error(`Later untracked collision must be resolved first: ${path}`)
+      if (!to && !current.tracked.has(path)) return null // Preserve every later untracked file.
+      if (to?.sha256 === from?.sha256 && to?.permissions === from?.permissions) return null
+      return { path, action: !to ? "delete" : !from ? "create" : "overwrite" }
+  }
   async #preview(snapshot: Snapshot, current: Current): Promise<WorkspaceCheckpointPreview> {
     const hostActivation = snapshot.branch === "(detached)" && this.#verifiedBranch !== "" && current.branch === `refs/heads/${this.#verifiedBranch}`
     if (snapshot.summary.head !== current.head || (!hostActivation && snapshot.branch !== current.branch) || snapshot.repository !== current.repository) throw new Error("HEAD or branch changed since this checkpoint; restore is refused.")
@@ -207,16 +228,8 @@ export class WorkspaceCheckpointStore {
     const now = new Map(current.files.map((entry) => [entry.path, entry]))
     const operations: WorkspaceCheckpointPreview["operations"][number][] = []
     for (const path of [...new Set([...target.keys(), ...now.keys()])].sort()) {
-      const to = target.get(path)
-      const from = now.get(path)
-      if (to && await ignored(this.#cwd, path)) throw new Error(`Checkpoint path is now ignored: ${path}`)
-      safePath(path)
-      const disk = await anchoredFs.stat(join(this.#cwd, path)).catch((cause) => { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause })
-      if (to && disk && !from) throw new Error(`Ignored or unsupported collision must be resolved first: ${path}`)
-      if (to && from && !current.tracked.has(path) && snapshot.index.some((entry) => entry.path === path)) throw new Error(`Later untracked collision must be resolved first: ${path}`)
-      if (!to && !current.tracked.has(path)) continue // Preserve every later untracked file.
-      if (to?.sha256 === from?.sha256 && to?.permissions === from?.permissions) continue
-      operations.push({ path, action: !to ? "delete" : !from ? "create" : "overwrite" })
+      const operation = await this.#previewPath(path, target.get(path), now.get(path), current, snapshot)
+      if (operation) operations.push(operation)
     }
     const rawDiff = await git(this.#cwd, ["diff", "--no-ext-diff", "--no-textconv", current.worktreeTree, snapshot.summary.worktreeTree, "--"])
     if (rawDiff.length > 1024 * 1024) throw new Error("Checkpoint diff is too large to preview safely.")

@@ -5,6 +5,7 @@ import { RoutineInput } from "@jingler/core"
 import { RoutineStore } from "@jingler/cli-adapters/routine-store"
 import { Schema } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { routineExecution } from "./routine-execution.js"
 import { RoutineScheduler, type RoutineClock } from "./routine-scheduler.js"
 const input = Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "interval", at: 1000, everyMs: 1000 }, maxDurationMs: 10000 })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -83,6 +84,47 @@ describe("desktop routine clock and dispatch fence", () => {
     await expect(scheduler.start()).rejects.toThrow("Restart the desktop")
     await scheduler.stop()
     expect((await store.read()).runs[0]!.status).toBe("failed")
+  })
+
+  it("elapsed maximum duration ignores backwards wall-clock jumps and does not rearm", async () => {
+    now = 100_000_000
+    const id = (await store.save(undefined, { ...input, schedule: { kind: "once", at: 200_000_000 } }, null, now)).routines[0]!.id
+    let deadline: (() => void) | undefined; const clearDeadline = vi.fn()
+    const elapsed = { setTimer: vi.fn((callback: () => void, ms: number) => { deadline = callback; expect(ms).toBe(input.maxDurationMs); return callback }), clearTimer: clearDeadline }
+    const entered = deferred<void>(); let aborted = false
+    scheduler = new RoutineScheduler(store, { sessionExists: async () => false, execute: async (_, __, signal) => {
+      entered.resolve(); await new Promise<void>(resolve => signal.addEventListener("abort", () => { aborted = true; resolve() }, { once: true }))
+      return { status: "succeeded", message: "Done" }
+    } }, clock, elapsed)
+    await scheduler.start(); await scheduler.runNow(id); await entered.promise
+    now = 1; await scheduler.refresh(); expect(aborted).toBe(false)
+    deadline!(); await vi.waitFor(() => expect(aborted).toBe(true))
+    await scheduler.stop(); expect(elapsed.setTimer).toHaveBeenCalledTimes(1); expect(clearDeadline).toHaveBeenCalled()
+    expect((await store.read()).runs[0]!.status).toBe("cancelled")
+  })
+  it.each(["validate", "create", "setMode"].flatMap(stage => ["stop", "cancel"].map(action => ({ stage, action }))))("$action during unresolved $stage is bounded but retains activity and blocks admission", async ({ stage, action }) => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const entered = deferred<void>(); const release = deferred<void>(); const prompt = vi.fn()
+    const wait = async () => { entered.resolve(); await release.promise }
+    const execution = routineExecution({
+      validate: async () => { if (stage === "validate") await wait() },
+      create: async (_, run) => { if (stage === "create") await wait(); return { id: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, checkpointSafeMode: true, checkpointExecutionHistory: "clean", workspaceLifecycle: { status: "setup-skipped" } } as import("@jingler/core").Session },
+      setMode: async () => { if (stage === "setMode") await wait() }, prompt
+    })
+    scheduler = new RoutineScheduler(store, { execute: execution, sessionExists: async () => false }, clock)
+    await scheduler.start(); const run = await scheduler.runNow(id); await entered.promise
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      const stopped = action === "stop" ? scheduler.stop() : scheduler.cancel(run.id); await vi.advanceTimersByTimeAsync(10_000); await stopped
+      expect(scheduler.error).toContain("remains unresolved"); expect(scheduler.activityUnresolved).toBe(true)
+      expect((await store.read()).runs[0]!.status).toBe("failed")
+      await expect(scheduler.runNow(id)).rejects.toThrow("unresolved")
+      await expect(scheduler.start()).rejects.toThrow("Restart the desktop")
+      release.resolve(); vi.useRealTimers()
+      await vi.waitFor(() => expect(scheduler.activityUnresolved).toBe(false))
+      expect(prompt).not.toHaveBeenCalled()
+      if (stage !== "validate") expect((await store.read()).runs[0]!.sessionId).toBe(run.requestedSessionId)
+    } finally { vi.useRealTimers(); release.resolve() }
   })
 
 })

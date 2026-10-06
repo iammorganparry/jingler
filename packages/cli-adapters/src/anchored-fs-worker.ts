@@ -89,7 +89,21 @@ const removeDirectory = (entry: string): void => {
     fs.rmdirSync(entry)
   } finally { fs.closeSync(fd); fs.closeSync(parent) }
 }
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the worker dispatch keeps atomic replacement and cleanup in the same anchored cwd.
+const writeFile = (file: string, request: AnchoredRequest): void => {
+      const existing = stat(file)
+      if (existing && (!existing.file || existing.symlink)) throw new Error("Unsafe file destination.")
+      if (request.exclusive && existing) throw new Error("File destination already exists.")
+      const temporary = `.jingler-write-${randomUUID()}`
+      const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, request.mode ?? 0o600)
+      try {
+        fs.writeFileSync(fd, Buffer.from(request.bytes!, "base64"))
+        fs.fchmodSync(fd, request.mode ?? 0o600)
+        fs.fsyncSync(fd)
+        checkExpected(file, request.expected)
+        if (request.exclusive) { fs.linkSync(temporary, file); fs.unlinkSync(temporary) }
+        else fs.renameSync(temporary, file) // Break hardlinks instead of truncating their inode.
+      } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }) }
+}
 export const operate = (request: AnchoredRequest): unknown => {
   if (request.op === "mkdir") { enterDirectory(request.path, true, true); return null }
   if (request.op === "git") {
@@ -123,19 +137,7 @@ export const operate = (request: AnchoredRequest): unknown => {
       fs.renameSync(file, name(request.to!)); return null
     }
     case "write": {
-      const existing = stat(file)
-      if (existing && (!existing.file || existing.symlink)) throw new Error("Unsafe file destination.")
-      if (request.exclusive && existing) throw new Error("File destination already exists.")
-      const temporary = `.jingler-write-${randomUUID()}`
-      const fd = fs.openSync(temporary, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | O_NOFOLLOW, request.mode ?? 0o600)
-      try {
-        fs.writeFileSync(fd, Buffer.from(request.bytes!, "base64"))
-        fs.fchmodSync(fd, request.mode ?? 0o600)
-        fs.fsyncSync(fd)
-        checkExpected(file, request.expected)
-        if (request.exclusive) { fs.linkSync(temporary, file); fs.unlinkSync(temporary) }
-        else fs.renameSync(temporary, file) // Break hardlinks instead of truncating their inode.
-      } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }) }
+      writeFile(file, request)
       return null
     }
   }

@@ -1,6 +1,8 @@
 import { routineRunActive, type Routine, type RoutineRun } from "@jingler/core"
 import type { RoutineStore } from "@jingler/cli-adapters/routine-store"
 
+import { RoutinePreparationPendingError } from "./routine-execution.js"
+
 class RoutineRequestError extends Error {}
 const teardownFailure = /teardown|timed out/i
 export interface RoutineClock {
@@ -21,14 +23,15 @@ export interface RoutineExecution {
 /** Desktop-only, one next-due timer. The durable cursor, not this timer, owns time. */
 export class RoutineScheduler {
   #timer: unknown
-  #active: { run: RoutineRun; generation: number; controller: AbortController; deadline: number; done: Promise<void> } | undefined
+  #active: { run: RoutineRun; generation: number; controller: AbortController; deadlineTimer: unknown; pending?: Promise<unknown>; done: Promise<void> } | undefined
   #queue = Promise.resolve()
   #stopped = true
   #suspended = false
   #generation = 0
   error: string | null = null
-  constructor(readonly store: RoutineStore, readonly execution: RoutineExecution, readonly clock: RoutineClock = desktopRoutineClock) {}
+  constructor(readonly store: RoutineStore, readonly execution: RoutineExecution, readonly clock: RoutineClock = desktopRoutineClock, readonly elapsedClock: Pick<RoutineClock, "setTimer" | "clearTimer"> = desktopRoutineClock) {}
   get running() { return !this.#stopped }
+  get activityUnresolved() { return this.#active?.pending !== undefined }
   async start() {
     if (this.error) throw new Error(`Restart the desktop to recover the routine scheduler: ${this.error}`)
     if (!this.#stopped) return
@@ -104,7 +107,6 @@ export class RoutineScheduler {
   }
   async #tick(missed: boolean) {
     if (this.#stopped || this.#suspended) return
-    if (this.#active && this.clock.now() >= this.#active.deadline) this.#active.controller.abort(new Error("Maximum duration reached"))
     const generation = this.#generation
     const document = await this.store.read()
     if (this.#unavailable(generation)) return
@@ -117,8 +119,9 @@ export class RoutineScheduler {
   }
   #launch(routine: Routine, run: RoutineRun) {
     const controller = new AbortController()
-    const active = { run, generation: this.#generation, controller, deadline: this.clock.now() + routine.maxDurationMs, done: Promise.resolve() }
+    const active = { run, generation: this.#generation, controller, deadlineTimer: this.elapsedClock.setTimer(() => controller.abort(new Error("Maximum duration reached")), routine.maxDurationMs), pending: undefined as Promise<unknown> | undefined, done: Promise.resolve() }
     this.#active = active
+    controller.signal.addEventListener("abort", () => this.elapsedClock.clearTimer(active.deadlineTimer), { once: true })
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: completion and cancellation share one durable history boundary.
     active.done = (async () => {
       try {
@@ -129,6 +132,10 @@ export class RoutineScheduler {
         const result = await this.execution.execute(routine, run, controller.signal, () => this.#current(run, controller.signal), () => this.store.link(run, this.clock.now()))
         await this.store.finish(run.id, controller.signal.aborted ? "cancelled" : result.status, controller.signal.aborted ? String(controller.signal.reason?.message ?? "Cancelled") : result.message, this.clock.now())
       } catch (error) {
+        if (error instanceof RoutinePreparationPendingError) {
+          active.pending = error.pending
+          void error.pending.catch(() => {}).finally(() => { if (this.#active === active) this.#active = undefined })
+        }
         if (error instanceof Error && teardownFailure.test(error.message)) {
           this.error = error.message
           this.#stopped = true
@@ -136,7 +143,8 @@ export class RoutineScheduler {
         }
         await this.store.finish(run.id, controller.signal.aborted && !(error instanceof Error && teardownFailure.test(error.message)) ? "cancelled" : "failed", error instanceof Error ? error.message : "Routine execution failed", this.clock.now())
       } finally {
-        if (this.#active === active) this.#active = undefined
+        this.elapsedClock.clearTimer(active.deadlineTimer)
+        if (this.#active === active && !active.pending) this.#active = undefined
       }
     })().then(() => this.refresh()).catch(error => {
       this.error = `Routine history could not be saved: ${String(error)}`
@@ -150,7 +158,7 @@ export class RoutineScheduler {
     const generation = this.#generation
     const document = await this.store.read()
     if (this.#unavailable(generation)) return
-    const next = Math.min(...document.routines.filter(item => item.enabled && item.nextAt !== null).map(item => item.nextAt!), this.#active?.controller.signal.aborted ? Infinity : this.#active?.deadline ?? Infinity)
+    const next = Math.min(...document.routines.filter(item => item.enabled && item.nextAt !== null).map(item => item.nextAt!))
     if (!Number.isFinite(next)) return
     // Node timers overflow beyond 2^31-1 ms. Re-read durable time at each chunk.
     this.#timer = this.clock.setTimer(() => { void this.#serial(() => this.#tick(false)).catch(() => {}) }, Math.min(2147483647, Math.max(1, next - this.clock.now())))

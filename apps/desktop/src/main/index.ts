@@ -509,7 +509,8 @@ if (!gotPrimaryLock) {
     if (process.platform !== "darwin") app.quit()
   })
 
-  let routinesStopped = false
+  let routinesShutdownAttempted = false
+  let routinesShutdownPending = false
   powerMonitor.on("suspend", () => { void runtime.runPromise(RoutinesService.pipe(Effect.map(service => service.scheduler.suspend()))) })
   powerMonitor.on("resume", () => { void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.resume))).catch(() => {}) })
   app.on("before-quit", (event) => {
@@ -519,9 +520,18 @@ if (!gotPrimaryLock) {
       mainWindow.close()
       return
     }
-    if (!routinesStopped) {
+    if (!routinesShutdownAttempted) {
       event.preventDefault()
-      void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))).then(() => { routinesStopped = true; app.quit() }).catch(error => { console.error("Routine shutdown failed", error) })
+      if (!routinesShutdownPending) {
+        routinesShutdownPending = true
+        const finish = () => { routinesShutdownAttempted = true; app.quit() }
+        // Elapsed Node timer: even unresolved preparation/persistence cannot trap quit.
+        // The durable claim is never replayed on restart; no remaining workspace is deleted.
+        const deadline = setTimeout(() => { console.error("Routine shutdown remains unresolved at quit deadline"); finish() }, 15_000)
+        void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))).catch(error => {
+          console.error("Routine shutdown failed", error)
+        }).finally(() => { clearTimeout(deadline); if (!routinesShutdownAttempted) finish() })
+      }
       return
     }
     // The extension host is a utilityProcess; Electron reaps it with the app,
