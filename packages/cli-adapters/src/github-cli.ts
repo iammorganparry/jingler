@@ -5,11 +5,14 @@ import type {
   PullRequest,
   PullRequestListItem,
   ReviewSubmitKind,
-  SessionPrStatus
+  SessionPrStatus,
+  GitHubCliAccount,
+  GitHubTeam,
+  GitHubTeamQueue,
+  GitHubTeamPrResult
 } from "@jingler/core"
 import { GitHubApiError } from "@jingler/core"
-import { Command } from "@effect/platform"
-import type { CommandExecutor } from "@effect/platform"
+import { Command, CommandExecutor } from "@effect/platform"
 import type { PlatformError } from "@effect/platform/Error"
 import { Effect, Stream } from "effect"
 import {
@@ -23,6 +26,7 @@ import {
   mapPullRequestListItem,
   mapReviewThreads
 } from "./github-mappers.js"
+import { fetchWithGitHubToken } from "./git.js"
 import { withMacCliPath } from "./runtime/providers/native-cli-environment.js"
 
 const PR_FIELDS = [
@@ -299,7 +303,7 @@ const prView = (
     const repositoryArgs = repoArgs(repository)
     const raw = yield* json(cwd, ["pr", "view", String(number), ...repositoryArgs, "--json", PR_FIELDS])
     const [owner, repo] = repository
-      ? slugParts(repository)
+      ? slugParts(repository.replace(/^github\.com\//, ""))
       : yield* execute(cwd, ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).pipe(
           Effect.map(slugParts)
         )
@@ -389,9 +393,325 @@ const reviewPayload = (input: {
   }))
 })
 
+const repositoryBySlug = (cwd: string | null, repository: string) =>
+      Effect.gen(function* () {
+        const raw = yield* repositoryMetadata(cwd, repository)
+        const [owner, name] = slugParts(repository)
+        if (typeof raw.id !== "number" || typeof raw.node_id !== "string") {
+          return yield* Effect.fail(new GitHubApiError({
+            reason: "unavailable",
+            message: "GitHub CLI returned invalid repository metadata."
+          }))
+        }
+        return {
+          id: String(raw.id), nodeId: raw.node_id, owner, name, fullName: repository,
+          installationId: undefined
+        }
+      })
+
+const prCheckoutForRepo = (cwd: string | null, number: number, repository: string | null) =>
+      Effect.gen(function* () {
+        const raw = jsonRecord(yield* json(cwd, [
+          "pr", "view", String(number), ...repoArgs(repository), "--json", "headRefName,headRefOid,headRepository"
+        ]))
+        const headRepository = jsonRecord(raw.headRepository)
+        const fullName = headRepository.nameWithOwner
+        if (typeof fullName !== "string" || typeof raw.headRefName !== "string" || typeof raw.headRefOid !== "string") {
+          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request head." }))
+        }
+        const metadata = yield* repositoryMetadata(cwd, fullName)
+        if (typeof metadata.id !== "number" || typeof metadata.clone_url !== "string") {
+          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request repository." }))
+        }
+        return {
+          repositoryId: String(metadata.id), fullName, ref: raw.headRefName, sha: raw.headRefOid,
+          cloneUrl: metadata.clone_url, sshUrl: typeof metadata.ssh_url === "string" ? metadata.ssh_url : null
+        }
+      })
+
+const TEAM_NAME = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,99}$/
+// Enterprise Managed User logins include an underscore before the enterprise shortcode.
+const USER_LOGIN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/
+const REPOSITORY_NAME = /^[a-zA-Z0-9_.-]+$/
+const teamValidation = (message: string) => new GitHubApiError({ reason: "validation", message })
+
+const validateTeam = (organization: string, slug: string): void => {
+  if (!TEAM_NAME.test(organization) || !TEAM_NAME.test(slug)) {
+    throw teamValidation("Choose a valid GitHub organization team.")
+  }
+}
+
+const validateTeamPr = (repository: string, number: number): void => {
+  const [owner, name] = slugParts(repository)
+  if (!USER_LOGIN.test(owner) || !REPOSITORY_NAME.test(name) || !Number.isSafeInteger(number) || number < 1) {
+    throw teamValidation("Choose a valid GitHub pull request.")
+  }
+}
+
+// Never send raw CLI stderr (which can contain credentials) across RPC.
+const teamCliError = (error: GitHubApiError): GitHubApiError => {
+  if (error.reason === "validation") return error
+  const message = error.message
+  if (/rate limit|retry-after|secondary rate/i.test(message)) {
+    return new GitHubApiError({ reason: "unavailable", message: "GitHub CLI rate limit reached. Wait for the GitHub limit to reset before refreshing; no automatic retry is running." })
+  }
+  if (/SSO|SAML/i.test(message)) {
+    return new GitHubApiError({ reason: "repository-access", message: "Authorize your GitHub CLI credentials for this organization's SSO, then refresh." })
+  }
+  if (/403|404|scope|forbidden|not found/i.test(message)) {
+    return new GitHubApiError({ reason: "repository-access", message: "GitHub CLI cannot access this team or repository. Check organization membership, read:org/repository permissions and SSO authorization, then refresh." })
+  }
+  return new GitHubApiError({ reason: "unavailable", message: "GitHub CLI could not load team work. Run gh auth login --hostname github.com or check your connection, then refresh." })
+}
+
+/** Snapshot CLI credentials privately for one operation: switching accounts mid-read/write cannot change its identity. */
+const withTeamAccount = <A>(
+  expectedAccountId: string | null,
+  operation: (account: GitHubCliAccount, token: string) => Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor>
+): Effect.Effect<A, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    const token = yield* execute(null, ["auth", "token", "--hostname", "github.com"])
+    if (!token || /\s/.test(token)) return yield* Effect.fail(teamValidation("Authenticate GitHub CLI on github.com, then refresh."))
+    const executor = yield* CommandExecutor.CommandExecutor
+    const pinned = CommandExecutor.makeExecutor((command) => executor.start(command.pipe(Command.env({
+      GH_TOKEN: token,
+      GITHUB_TOKEN: token,
+      GH_HOST: "github.com",
+      GH_DEBUG: "",
+    }))))
+    return yield* Effect.gen(function* () {
+      const user = jsonRecord(yield* json(null, ["api", "user", "--hostname", "github.com"]))
+      if (typeof user.id !== "number" || !Number.isSafeInteger(user.id) || user.id < 1 ||
+          typeof user.login !== "string" || !USER_LOGIN.test(user.login)) {
+        return yield* Effect.fail(teamValidation("GitHub CLI returned an invalid account. Authenticate again, then refresh."))
+      }
+      const account = { id: String(user.id), login: user.login }
+      if (expectedAccountId !== null && account.id !== expectedAccountId) {
+        return yield* Effect.fail(teamValidation("The GitHub CLI account changed. Refresh teams before opening or changing a pull request."))
+      }
+      return yield* operation(account, token)
+    }).pipe(Effect.provideService(CommandExecutor.CommandExecutor, pinned))
+  }).pipe(
+    Effect.catchAllDefect((error) => Effect.fail(error instanceof GitHubApiError ? error : teamValidation("GitHub CLI returned invalid team data. Refresh to retry."))),
+    Effect.mapError(teamCliError)
+  )
+
+const teamApi = (endpoint: string, fields: ReadonlyArray<string> = []) =>
+  json(null, ["api", endpoint, "--hostname", "github.com", "--method", "GET", ...fields.flatMap((field) => ["-f", field])])
+
+const teamPages = (endpoint: string) =>
+  json(null, ["api", endpoint, "--hostname", "github.com", "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp"]).pipe(
+    Effect.flatMap((raw) => Array.isArray(raw) && raw.every(Array.isArray)
+      ? Effect.succeed(raw.flat().map(jsonRecord))
+      : Effect.fail(teamValidation("GitHub CLI returned invalid team pagination. Refresh to retry.")))
+  )
+
+const discoverTeams = () => teamPages("user/teams").pipe(Effect.flatMap((rows) => Effect.try({
+  try: () => rows.flatMap((row): GitHubTeam[] => {
+    // Enterprise-level teams are not organization queues.
+    if (row.type === "enterprise") return []
+    const organization = jsonRecord(row.organization).login
+    if (typeof row.id !== "number" || !Number.isSafeInteger(row.id) || typeof organization !== "string" ||
+        typeof row.slug !== "string" || typeof row.name !== "string") throw teamValidation("GitHub CLI returned invalid team metadata.")
+    validateTeam(organization, row.slug)
+    return [{ id: String(row.id), organization, slug: row.slug, name: row.name }]
+  }).sort((a, b) => `${a.organization}/${a.name}`.localeCompare(`${b.organization}/${b.name}`)),
+  catch: (error) => error instanceof GitHubApiError ? error : teamValidation("GitHub CLI returned invalid teams."),
+})))
+
+const searchItem = (row: Json, viewer: string): PullRequestListItem => {
+  const url = typeof row.html_url === "string" ? row.html_url : ""
+  const match = /^https:\/\/github\.com\/([a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+)\/pull\/(\d+)$/.exec(url)
+  if (!match || typeof row.number !== "number" || row.number !== Number(match[2]) ||
+      typeof row.title !== "string" || typeof row.updated_at !== "string" || typeof row.draft !== "boolean") {
+    throw teamValidation("GitHub CLI returned an invalid PR row. Refresh to retry.")
+  }
+  return mapPullRequestListItem({ ...row, author: row.user, isDraft: row.draft }, match[1]!, viewer)
+}
+
+const searchPage = (q: string, page: number, viewer: string) =>
+  teamApi("search/issues", ["per_page=100", `page=${page}`, "sort=updated", "order=desc", `q=${q}`]).pipe(
+    Effect.flatMap((raw) => Effect.try({
+      try: () => {
+        const result = jsonRecord(raw)
+        if (typeof result.total_count !== "number" || !Number.isSafeInteger(result.total_count) || result.total_count < 0 ||
+            typeof result.incomplete_results !== "boolean" || !Array.isArray(result.items)) {
+          throw teamValidation("GitHub CLI returned invalid search pagination. Refresh to retry.")
+        }
+        return { total: result.total_count, incomplete: result.incomplete_results, prs: result.items.map((row) => searchItem(jsonRecord(row), viewer)) }
+      },
+      catch: (error) => error instanceof GitHubApiError ? error : teamValidation("GitHub CLI returned invalid search data. Refresh to retry."),
+    }))
+  )
+
+const warnIncomplete = (incomplete: boolean, warnings: string[]) => {
+  if (incomplete) warnings.push("GitHub timed out part of the search. This queue is incomplete; refresh to retry.")
+}
+const rateLimited = (warnings: ReadonlyArray<string>) => warnings.some((warning) => /rate limit/i.test(warning))
+
+const searchTeamPrs = (
+  query: string,
+  viewer: string,
+  warnings: string[],
+  from = 0,
+  to = Math.floor(Date.now() / 1000)
+): Effect.Effect<ReadonlyArray<PullRequestListItem>, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    const date = (seconds: number) => new Date(seconds * 1000).toISOString().replace(".000Z", "Z")
+    const q = `${query} created:${date(from)}..${date(to)}`
+    const first = yield* searchPage(q, 1, viewer)
+    if (first.total > 1000 && from < to) {
+      const middle = Math.floor((from + to) / 2)
+      const prs: PullRequestListItem[] = []
+      for (const [start, end] of [[from, middle], [middle + 1, to]] as const) {
+        const result = yield* searchTeamPrs(query, viewer, warnings, start, end).pipe(Effect.either)
+        if (result._tag === "Right") prs.push(...result.right)
+        else warnings.push(teamCliError(result.left).message)
+        if (rateLimited(warnings)) break
+      }
+      return prs
+    }
+    return yield* collectSearchPages(q, first, viewer, warnings)
+  })
+
+const collectSearchPages = (
+  q: string, first: { total: number; incomplete: boolean; prs: PullRequestListItem[] },
+  viewer: string, warnings: string[]
+) => Effect.gen(function* () {
+    if (first.total > 1000) warnings.push("Some PRs share the same creation second and exceed GitHub's search limit. This queue is incomplete.")
+    warnIncomplete(first.incomplete, warnings)
+    const prs = [...first.prs]
+    for (let page = 2; page <= Math.ceil(Math.min(first.total, 1000) / 100); page++) {
+      const result = yield* searchPage(q, page, viewer).pipe(Effect.either)
+      if (result._tag === "Left") {
+        warnings.push(teamCliError(result.left).message)
+        break
+      }
+      warnIncomplete(result.right.incomplete, warnings)
+      prs.push(...result.right.prs)
+    }
+    if (first.total <= 1000 && new Set(prs.map((pr) => `${pr.repository}#${pr.number}`)).size < first.total) {
+      warnings.push("GitHub returned fewer PRs than its search count. This queue is incomplete; refresh to retry.")
+    }
+    return prs
+  })
+
+type DiscoveryCache = Map<string, { rows: ReadonlyArray<Json>; at: number }>
+const cachedTeamPages = (accountId: string, endpoint: string, refresh: boolean, cache: DiscoveryCache) =>
+  Effect.gen(function* () {
+    const key = `${accountId}/${endpoint}`
+    const cached = cache.get(key)
+    if (!refresh && cached && Date.now() - cached.at < 60_000) return cached.rows
+    const rows = yield* teamPages(endpoint)
+    cache.set(key, { rows, at: Date.now() })
+    return rows
+  })
+
+const checkOrganizationSearchScope = (
+  accountId: string, organization: string, refresh: boolean, cache: DiscoveryCache, warnings: string[]
+) => cachedTeamPages(accountId, `orgs/${organization}/repos`, refresh, cache).pipe(
+  Effect.tap((rows) => Effect.sync(() => {
+    if (rows.length > 4000) warnings.push("This organization exceeds GitHub's 4,000-repository search scope. Reviews and authored results may be incomplete; use the team repositories queue to search each repository separately.")
+  })),
+  Effect.catchAll((error) => Effect.sync(() => {
+    warnings.push(`Could not verify GitHub's repository search scope. Results may be incomplete. ${teamCliError(error).message}`)
+  })),
+)
+
+const teamQueries = (
+  account: GitHubCliAccount, organization: string, slug: string, queue: GitHubTeamQueue,
+  refresh: boolean, discoveryCache: DiscoveryCache, warnings: string[]
+) => Effect.gen(function* () {
+  if (queue !== "repositories") yield* checkOrganizationSearchScope(account.id, organization, refresh, discoveryCache, warnings)
+  if (queue === "reviews") return [`is:pr is:open org:${organization} team-review-requested:${organization}/${slug}`]
+  const endpoint = `orgs/${organization}/teams/${slug}/${queue === "authored" ? "members" : "repos"}`
+  const rows = yield* cachedTeamPages(account.id, endpoint, refresh, discoveryCache)
+  return rows.map((row) => {
+    if (queue === "authored") {
+      if (typeof row.login !== "string" || !USER_LOGIN.test(row.login)) throw teamValidation("GitHub CLI returned an invalid team member.")
+      return `is:pr is:open org:${organization} author:${row.login}`
+    }
+    if (typeof row.full_name !== "string") throw teamValidation("GitHub CLI returned an invalid team repository.")
+    validateTeamPr(row.full_name, 1)
+    return `is:pr is:open repo:${row.full_name}`
+  })
+})
+
+const teamQueuePrs = (
+  account: GitHubCliAccount,
+  organization: string,
+  slug: string,
+  queue: GitHubTeamQueue,
+  refresh: boolean,
+  discoveryCache: Map<string, { rows: ReadonlyArray<Json>; at: number }>
+): Effect.Effect<GitHubTeamPrResult, GitHubApiError, CommandExecutor.CommandExecutor> =>
+  Effect.gen(function* () {
+    validateTeam(organization, slug)
+    if (!["reviews", "authored", "repositories"].includes(queue)) return yield* Effect.fail(teamValidation("Choose a valid team queue."))
+    const membership = jsonRecord(yield* teamApi(`orgs/${organization}/teams/${slug}/memberships/${account.login}`))
+    if (membership.state !== "active") return yield* Effect.fail(teamValidation("You are no longer an active member of this team. Refresh teams."))
+    const warnings: string[] = []
+    const queries = yield* teamQueries(account, organization, slug, queue, refresh, discoveryCache, warnings)
+    const prs: PullRequestListItem[] = []
+    // ponytail: sequential searches respect GitHub's separate search quota; bounded parallelism only if measured latency warrants it.
+    for (const query of new Set(queries)) {
+      const result = yield* searchTeamPrs(query, account.login, warnings).pipe(Effect.either)
+      if (result._tag === "Right") prs.push(...result.right)
+      else warnings.push(teamCliError(result.left).message)
+      if (rateLimited(warnings)) break
+    }
+    return {
+      prs: [...new Map(prs.map((pr) => [`${pr.repository.toLowerCase()}#${pr.number}`, pr])).values()]
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      warnings: [...new Set(warnings)],
+    }
+  })
+
 export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli", {
   accessors: true,
-  effect: Effect.succeed({
+  effect: Effect.sync(() => {
+    const discoveryCache = new Map<string, { rows: ReadonlyArray<Json>; at: number }>()
+    return {
+    teams: () => withTeamAccount(null, (account) => discoverTeams().pipe(Effect.map((teams) => ({ account, teams })))),
+    teamPrs: (input: { accountId: string; organization: string; teamSlug: string; queue: GitHubTeamQueue; refresh: boolean }) =>
+      withTeamAccount(input.accountId, (account) => teamQueuePrs(account, input.organization, input.teamSlug, input.queue, input.refresh, discoveryCache)),
+    teamPr: (input: { accountId: string; repository: string; number: number }) =>
+      withTeamAccount(input.accountId, () => Effect.gen(function* () {
+        validateTeamPr(input.repository, input.number)
+        return yield* prView(null, `github.com/${input.repository}`, input.number)
+      })),
+    teamCheckout: (input: { accountId: string; repository: string; number: number }) =>
+      withTeamAccount(input.accountId, (_account, token) => Effect.gen(function* () {
+        validateTeamPr(input.repository, input.number)
+        const repository = yield* repositoryBySlug(null, input.repository)
+        const head = yield* prCheckoutForRepo(null, input.number, `github.com/${input.repository}`)
+        validateTeamPr(head.fullName, input.number)
+        return {
+          repository, head,
+          // Private main-process closure. Credentials never enter RPC or persisted session data.
+          fetchBase: (cwd: string, branch: string) => fetchWithGitHubToken(cwd, repository.fullName,
+            `+refs/heads/${branch}:refs/remotes/origin/${branch}`, token),
+          fetchHead: (cwd: string, trackingRef: string) => fetchWithGitHubToken(cwd, head.fullName,
+            `+refs/heads/${head.ref}:${trackingRef}`, token),
+        }
+      })),
+    teamComment: (input: { accountId: string; repository: string; number: number; body: string }) =>
+      withTeamAccount(input.accountId, () => Effect.gen(function* () {
+        validateTeamPr(input.repository, input.number)
+        if (!input.body.trim()) return yield* Effect.fail(teamValidation("Write a comment before posting."))
+        yield* execute(null, ["pr", "comment", String(input.number), "--repo", `github.com/${input.repository}`, "--body-file", "-"], input.body)
+      })),
+    teamClose: (input: { accountId: string; repository: string; number: number }) =>
+      withTeamAccount(input.accountId, () => Effect.gen(function* () {
+        validateTeamPr(input.repository, input.number)
+        yield* execute(null, ["pr", "close", String(input.number), "--repo", `github.com/${input.repository}`])
+      })),
+    teamMerge: (input: { accountId: string; repository: string; number: number; method: PrMergeMethod }) =>
+      withTeamAccount(input.accountId, () => Effect.gen(function* () {
+        validateTeamPr(input.repository, input.number)
+        if (!["merge", "squash", "rebase"].includes(input.method)) return yield* Effect.fail(teamValidation("Choose a valid merge method."))
+        yield* execute(null, ["pr", "merge", String(input.number), "--repo", `github.com/${input.repository}`, mergeFlag(input.method)])
+      })),
     available: () =>
       execute(null, ["auth", "status", "--active", "--hostname", "github.com"]).pipe(
         Effect.as(true),
@@ -413,22 +733,7 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
             : []
         }))
       ),
-    repository: (cwd: string) =>
-      Effect.gen(function* () {
-        const repository = yield* slugAt(cwd)
-        const raw = yield* repositoryMetadata(cwd, repository)
-        const [owner, name] = slugParts(repository)
-        if (typeof raw.id !== "number" || typeof raw.node_id !== "string") {
-          return yield* Effect.fail(new GitHubApiError({
-            reason: "unavailable",
-            message: "GitHub CLI returned invalid repository metadata."
-          }))
-        }
-        return {
-          id: String(raw.id), nodeId: raw.node_id, owner, name, fullName: repository,
-          installationId: undefined
-        }
-      }),
+    repository: (cwd: string) => slugAt(cwd).pipe(Effect.flatMap((repository) => repositoryBySlug(cwd, repository))),
     prForBranch: (cwd: string, branch: string) =>
       Effect.flatMap(slugAt(cwd), (repository) => prForBranch(cwd, repository, branch)),
     prForBranchBySlug: (repository: string, branch: string) =>
@@ -477,25 +782,7 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
         return mapApiFiles(yield* pullRequestFiles(cwd, repository, number))
       }),
     prDiff: (cwd: string, number: number) => execute(cwd, ["pr", "diff", String(number)]),
-    prCheckout: (cwd: string, number: number) =>
-      Effect.gen(function* () {
-        const raw = jsonRecord(yield* json(cwd, [
-          "pr", "view", String(number), "--json", "headRefName,headRefOid,headRepository"
-        ]))
-        const headRepository = jsonRecord(raw.headRepository)
-        const fullName = headRepository.nameWithOwner
-        if (typeof fullName !== "string" || typeof raw.headRefName !== "string" || typeof raw.headRefOid !== "string") {
-          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request head." }))
-        }
-        const metadata = yield* repositoryMetadata(cwd, fullName)
-        if (typeof metadata.id !== "number" || typeof metadata.clone_url !== "string") {
-          return yield* Effect.fail(new GitHubApiError({ reason: "validation", message: "GitHub did not return a fetchable pull-request repository." }))
-        }
-        return {
-          repositoryId: String(metadata.id), fullName, ref: raw.headRefName, sha: raw.headRefOid,
-          cloneUrl: metadata.clone_url, sshUrl: typeof metadata.ssh_url === "string" ? metadata.ssh_url : null
-        }
-      }),
+    prCheckout: (cwd: string, number: number) => prCheckoutForRepo(cwd, number, null),
     prCreate: (cwd: string, input: { readonly title: string; readonly body: string; readonly base: string; readonly draft: boolean }) =>
       execute(cwd, [
         "pr", "create",
@@ -586,5 +873,6 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
           })
         })
       })
+    }
   })
 }) {}

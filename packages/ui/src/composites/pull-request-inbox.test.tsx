@@ -51,6 +51,31 @@ const prs = [
 afterEach(cleanup)
 
 describe("PullRequestInbox", () => {
+  it("shows team queues independently of personal relationships and exposes partial results/refresh", () => {
+    const onTeam = vi.fn()
+    const onQueue = vi.fn()
+    const onRefresh = vi.fn()
+    const onActivate = vi.fn()
+    render(<WidthTierValue width={1200}><PullRequestInbox
+      prs={prs} viewerLogin="someone-else" selected={null} detail={null} onSelect={() => {}}
+      onActivate={onActivate}
+      teamControls={{
+        teams: [{ id: "7", organization: "acme", slug: "platform", name: "Platform" }],
+        teamId: "7", queue: "reviews", onTeam, onQueue, onRefresh, discovering: false, error: null,
+      }}
+      warnings={["GitHub search timed out."]}
+    /></WidthTierValue>)
+    expect(onActivate).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole("button", { name: UPDATE_API })).toBeTruthy()
+    expect(screen.getByText("Partial results")).toBeTruthy()
+    fireEvent.change(screen.getByRole("combobox", { name: "Team pull request queue" }), { target: { value: "authored" } })
+    expect(onQueue).toHaveBeenCalledWith("authored")
+    fireEvent.change(screen.getByRole("combobox", { name: "Pull request scope" }), { target: { value: "" } })
+    expect(onTeam).toHaveBeenCalledWith(null)
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    expect(onRefresh).toHaveBeenCalledTimes(1)
+  })
+
   it("filters by viewer relationship and search", () => {
     expect(filterPullRequests(prs, "created", "", "morgan").map((pr) => pr.number)).toEqual([42])
     expect(filterPullRequests(prs, "assigned", "", "morgan").map((pr) => pr.number)).toEqual([7])

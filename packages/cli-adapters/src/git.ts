@@ -68,7 +68,14 @@ const linkChecked = new Set<string>()
 const ASKPASS_SOURCE = `import { createConnection } from "node:net"
 const endpoint = process.env.JINGLER_GIT_ASKPASS_ENDPOINT ?? ""
 const nonce = process.env.JINGLER_GIT_ASKPASS_NONCE ?? ""
-const type = process.argv.slice(2).join(" ").toLowerCase().includes("username") ? "username" : "password"
+const prompt = process.argv.slice(2).join(" ")
+if (process.env.JINGLER_GIT_ASKPASS_GITHUB_ONLY === "1") {
+  try {
+    const url = new URL(prompt.match(/https:\\/\\/[^'\\s]+/)?.[0] ?? "")
+    if (url.hostname !== "github.com" || url.protocol !== "https:") process.exit(1)
+  } catch { process.exit(1) }
+}
+const type = prompt.toLowerCase().includes("username") ? "username" : "password"
 if (!endpoint || !nonce) process.exit(1)
 const socket = createConnection(endpoint)
 let response = ""
@@ -160,7 +167,8 @@ const prepareAskpassBoundary = async (token: string): Promise<AskpassBoundary> =
 const runGitWithInstallationToken = (
   cwd: string,
   args: ReadonlyArray<string>,
-  token: string
+  token: string,
+  githubOnly = false
 ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
   Effect.acquireUseRelease(
     Effect.tryPromise({
@@ -188,7 +196,12 @@ const runGitWithInstallationToken = (
           JINGLER_GIT_ASKPASS_RUNTIME: process.execPath,
           JINGLER_GIT_ASKPASS_MODULE: module,
           GITHUB_TOKEN: "",
-          GH_TOKEN: ""
+          GH_TOKEN: "",
+          ...(githubOnly ? {
+            JINGLER_GIT_ASKPASS_GITHUB_ONLY: "1", GIT_ALLOW_PROTOCOL: "https",
+            GIT_CONFIG_COUNT: "0", GIT_CONFIG_PARAMETERS: "",
+            GIT_TRACE: "0", GIT_TRACE_CURL: "0", GIT_CURL_VERBOSE: "0",
+          } : {}),
         }
       ).pipe(
         Effect.mapError((error) =>
@@ -204,6 +217,32 @@ const runGitWithInstallationToken = (
       })
   )
 
+/** Private credential-bound fetch, shared by initial team pickup and the existing askpass boundary. */
+export const fetchWithGitHubToken = (
+  cwd: string, repository: string, refspec: string, token: string
+): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> => {
+  const url = githubHttpsPushUrl(repository)
+  if (url === null || !token || !refspec.startsWith("+refs/heads/") || /[\s\0]/.test(refspec)) {
+    return Effect.fail(new GitError({ message: "GitHub returned an invalid fetch identity or ref." }))
+  }
+  return Effect.gen(function* () {
+    const environment = { GIT_CONFIG_COUNT: "0", GIT_CONFIG_PARAMETERS: "" }
+    const expanded = yield* runGitWithEnv(cwd, ["ls-remote", "--get-url", "--", url], environment)
+    if (expanded.trim() !== url) return yield* Effect.fail(new GitError({
+      message: "Disable Git URL rewrites for github.com before picking up a team pull request.",
+    }))
+    const scoped = yield* runGitWithEnv(cwd, ["config", "--name-only", "--get-regexp", "^(http\\..*\\.(extraheader|followredirects)|credential\\..*\\.helper)$"], environment).pipe(
+      Effect.catchAll(() => Effect.succeed("")),
+    )
+    const overrides = scoped.trim().split("\n").filter(Boolean).flatMap((key) => ["-c", `${key}=${key.toLowerCase().endsWith(".followredirects") ? "false" : ""}`])
+    yield* runGitWithInstallationToken(cwd, [
+      ...overrides, "-c", "http.followRedirects=false", "fetch", "--no-tags", "--", url, refspec,
+    ], token, true)
+  }).pipe(Effect.mapError(() => new GitError({
+    message: "GitHub CLI credentials could not fetch the pull request. Check repository access, SSO authorization and Git URL rewrites, then refresh.",
+  })))
+}
+
 /** Canonical GitHub.com HTTPS transport derived only from API-verified identity. */
 export const githubHttpsPushUrl = (fullName: string): string | null => {
   const [owner, repository, extra] = fullName.split("/")
@@ -211,7 +250,7 @@ export const githubHttpsPushUrl = (fullName: string): string | null => {
     !owner ||
     !repository ||
     extra !== undefined ||
-    !/^[a-z0-9](?:[a-z0-9-]{0,38})$/i.test(owner) ||
+    !/^[a-z0-9][a-z0-9_-]{0,99}$/i.test(owner) ||
     !/^[a-z0-9._-]+$/i.test(repository)
   ) {
     return null
@@ -497,12 +536,15 @@ export class GitService extends Effect.Service<GitService>()(
      * and as the landing pad for a "session from PR" flow.
      */
     const createDetachedWorktree = (
-        input: CreateWorktreeInput
+        input: CreateWorktreeInput,
+        authenticatedBaseFetch?: Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
       ): Effect.Effect<Worktree, GitError, GitEnv> =>
         Effect.gen(function* () {
           const worktreePath = yield* resolveWorktreePath(input)
           yield* reclaimStaleWorktree(input.repoPath, worktreePath)
-          const fetched = yield* fetchBase(input.repoPath, input.baseBranch)
+          const fetched = authenticatedBaseFetch
+            ? yield* authenticatedBaseFetch.pipe(Effect.as(true))
+            : yield* fetchBase(input.repoPath, input.baseBranch)
           const startPoint = yield* resolveStartPoint(
             input.repoPath,
             input.baseBranch,
@@ -787,7 +829,8 @@ export class GitService extends Effect.Service<GitService>()(
     const checkoutPullRequestHead = (
         cwd: string,
         head: GitHubPullRequestHead,
-        allowSharedCheckout = false
+        allowSharedCheckout = false,
+        authenticatedFetch?: (trackingRef: string) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
       ): Effect.Effect<string, GitError, CommandExecutor.CommandExecutor> =>
         Effect.gen(function* () {
           const safeId = head.repositoryId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 40)
@@ -796,7 +839,8 @@ export class GitService extends Effect.Service<GitService>()(
           cwd,
           head,
           allowSharedCheckout,
-          checkoutBranch
+          checkoutBranch,
+          authenticatedFetch
         )
       })
 
@@ -944,6 +988,21 @@ export class GitService extends Effect.Service<GitService>()(
   }
 }) {}
 
+function* fetchPullRequestRemote(
+  cwd: string, head: GitHubPullRequestHead, remoteName: string,
+  authenticatedFetch?: (trackingRef: string) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
+) {
+  const originUrl = yield* runString("git", "-C", cwd, "remote", "get-url", "origin")
+  const fetchUrl = authenticatedFetch ? githubHttpsPushUrl(head.fullName)! : originUrl?.startsWith("git@") && head.sshUrl ? head.sshUrl : head.cloneUrl
+  const currentUrl = yield* runString("git", "-C", cwd, "remote", "get-url", remoteName)
+  if (currentUrl === null) yield* runGit(cwd, ["remote", "add", remoteName, fetchUrl])
+  else if (currentUrl !== fetchUrl) yield* runGit(cwd, ["remote", "set-url", remoteName, fetchUrl])
+  const trackingRef = `refs/remotes/${remoteName}/${head.ref}`
+  if (authenticatedFetch) yield* authenticatedFetch(trackingRef)
+  else yield* runGit(cwd, ["fetch", "--no-tags", remoteName, `+refs/heads/${head.ref}:${trackingRef}`])
+  return trackingRef
+}
+
 function* checkoutFetchedPullRequest(
   safeId: string,
   cwd: string,
@@ -952,24 +1011,11 @@ function* checkoutFetchedPullRequest(
   checkoutBranch: (
     cwd: string,
     branch: string
-  ) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
+  ) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>,
+  authenticatedFetch?: (trackingRef: string) => Effect.Effect<void, GitError, CommandExecutor.CommandExecutor>
 ) {
   const remoteName = `jingler-pr-${safeId || "head"}`
-          const originUrl = yield* runString("git", "-C", cwd, "remote", "get-url", "origin")
-          const fetchUrl = originUrl?.startsWith("git@") && head.sshUrl ? head.sshUrl : head.cloneUrl
-          const currentUrl = yield* runString("git", "-C", cwd, "remote", "get-url", remoteName)
-          if (currentUrl === null) {
-            yield* runGit(cwd, ["remote", "add", remoteName, fetchUrl])
-          } else if (currentUrl !== fetchUrl) {
-            yield* runGit(cwd, ["remote", "set-url", remoteName, fetchUrl])
-          }
-          const trackingRef = `refs/remotes/${remoteName}/${head.ref}`
-          yield* runGit(cwd, [
-            "fetch",
-            "--no-tags",
-            remoteName,
-            `+refs/heads/${head.ref}:${trackingRef}`
-          ])
+  const trackingRef = yield* fetchPullRequestRemote(cwd, head, remoteName, authenticatedFetch)
           const local = yield* gitLine(cwd, "show-ref", "--verify", `refs/heads/${head.ref}`)
           if (local === null) {
             yield* runGit(cwd, [

@@ -64,6 +64,9 @@ import type {
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
+  GitHubTeamDiscovery,
+  GitHubTeamQueue,
+  GitHubTeamPrResult,
   QuestionAnswer,
   ReasoningSetting,
   Repo,
@@ -903,6 +906,17 @@ export const rpc = {
     run((c) => c.Github.pr({ sessionId })),
   githubPrState: (sessionId: string): Promise<SessionPrStatus | null> =>
     run((c) => c.Github.prState({ sessionId })),
+  githubTeams: (): Promise<GitHubTeamDiscovery> => run((c) => c.Github.teams()),
+  githubTeamPrs: (input: { accountId: string; organization: string; teamSlug: string; queue: GitHubTeamQueue; refresh: boolean }): Promise<GitHubTeamPrResult> =>
+    run((c) => c.Github.teamPrs(input)),
+  githubTeamPr: (input: { accountId: string; repository: string; number: number }): Promise<PullRequest> =>
+    run((c) => c.Github.teamPr(input)),
+  githubTeamComment: (input: { accountId: string; repository: string; number: number; body: string }): Promise<void> =>
+    run((c) => c.Github.teamComment(input)),
+  githubTeamClose: (input: { accountId: string; repository: string; number: number }): Promise<void> =>
+    run((c) => c.Github.teamClose(input)),
+  githubTeamMerge: (input: { accountId: string; repository: string; number: number; method: PrMergeMethod }): Promise<void> =>
+    run((c) => c.Github.teamMerge(input)),
   githubPrInbox: (): Promise<ReadonlyArray<PullRequestListItem>> =>
     run((c) => c.Github.inbox()),
   githubPrBySlug: (repository: string, number: number): Promise<PullRequest | null> =>

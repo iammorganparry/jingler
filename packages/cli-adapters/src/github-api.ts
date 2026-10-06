@@ -1212,6 +1212,14 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         return (await run(cli.available())) ? run(cliEffect) : app()
       })
     return {
+      // Team requests never fall back to the App or change identity for writes.
+      teams: () => cli.teams().pipe(Effect.provide(runtime)),
+      teamPrs: (input: Parameters<typeof cli.teamPrs>[0]) => cli.teamPrs(input).pipe(Effect.provide(runtime)),
+      teamPr: (input: Parameters<typeof cli.teamPr>[0]) => cli.teamPr(input).pipe(Effect.provide(runtime)),
+      teamCheckout: (input: Parameters<typeof cli.teamCheckout>[0]) => cli.teamCheckout(input).pipe(Effect.provide(runtime)),
+      teamComment: (input: Parameters<typeof cli.teamComment>[0]) => cli.teamComment(input).pipe(Effect.provide(runtime)),
+      teamClose: (input: Parameters<typeof cli.teamClose>[0]) => cli.teamClose(input).pipe(Effect.provide(runtime)),
+      teamMerge: (input: Parameters<typeof cli.teamMerge>[0]) => cli.teamMerge(input).pipe(Effect.provide(runtime)),
       cliAvailable: () => wrap(() => run(cli.available())),
       cloneRepository: (repository: string, destination: string) =>
         wrap(() => run(cli.cloneRepository(repository, destination))),

@@ -1,5 +1,5 @@
-import { type ReactNode, useMemo, useState } from "react"
-import type { PrMergeMethod, PullRequest, PullRequestListItem } from "@jingler/core"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
+import type { GitHubTeam, GitHubTeamQueue, PrMergeMethod, PullRequest, PullRequestListItem } from "@jingler/core"
 import { ArrowLeft, GitPullRequest, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
@@ -42,6 +42,18 @@ export function filterPullRequests(
 
 export interface PullRequestInboxProps {
   prs: ReadonlyArray<PullRequestListItem>
+  teamControls?: {
+    readonly teams: ReadonlyArray<GitHubTeam>
+    readonly teamId: string | null
+    readonly queue: GitHubTeamQueue
+    readonly onTeam: (id: string | null) => void
+    readonly onQueue: (queue: GitHubTeamQueue) => void
+    readonly onRefresh: () => void
+    readonly discovering: boolean
+    readonly error: string | null
+  }
+  onActivate?: () => void
+  warnings?: ReadonlyArray<string>
   viewerLogin: string
   selected: { repository: string; number: number } | null
   detail: PullRequest | null
@@ -69,6 +81,9 @@ export interface PullRequestInboxProps {
 /** Global GitHub-style PR list with a responsive read-only detail pane. */
 export function PullRequestInbox({
   prs,
+  teamControls,
+  onActivate,
+  warnings = [],
   viewerLogin,
   selected,
   detail,
@@ -114,7 +129,7 @@ export function PullRequestInbox({
          function getLoading() {
            if (loading) return (<InboxMessage><Spinner size={18} />Loading pull requests…</InboxMessage>)
            if (error) return (<InboxMessage>{error}</InboxMessage>)
-           if (visible.length === 0) return (<InboxMessage><GitPullRequest className="size-5 text-dim" />No pull requests match this view.</InboxMessage>)
+           if (visible.length === 0) return (<InboxMessage><GitPullRequest className="size-5 text-dim" />{warnings.length > 0 ? "No pull requests loaded. Some results could not be retrieved." : "No pull requests match this view."}</InboxMessage>)
            return (visible.map((pr) => {
               const active = keyOf(pr) === selectedKey
               return (
@@ -159,12 +174,24 @@ export function PullRequestInbox({
   const [query, setQuery] = useState("")
   const [mobileDetail, setMobileDetail] = useState(false)
   const compact = !atLeast(useWidthTier(), "mid")
+  const isTeam = Boolean(teamControls?.teamId)
   const visible = useMemo(
-    () => filterPullRequests(prs, filter, query, viewerLogin),
-    [filter, prs, query, viewerLogin]
+    () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin),
+    [filter, prs, query, viewerLogin, isTeam]
   )
+  useEffect(() => {
+    onActivate?.()
+    const onVisible = () => { if (document.visibilityState === "visible") onActivate?.() }
+    const onFocus = () => onActivate?.()
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [onActivate])
   const selectedKey = selected ? `${selected.repository}#${selected.number}` : null
-  const showList = !(compact && mobileDetail)
+  const showList = !(compact && mobileDetail && selected !== null)
 
   return (
     <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
@@ -177,7 +204,13 @@ export function PullRequestInbox({
               <Badge tone="count" size="xs">{visible.length}</Badge>
             </div>
             <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
-            <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />
+            {teamControls ? <InboxTeamControls controls={teamControls} filter={filter} onFilter={setFilter} />
+              : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
+            {warnings.length > 0 && <div role="status" className="text-xs text-yellow">
+              <strong>Partial results</strong>
+              {warnings.map((warning) => <p key={warning}>{warning}</p>)}
+              <p>Use Refresh to retry missing results.</p>
+            </div>}
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -204,6 +237,49 @@ export function PullRequestInbox({
       )}
     </div>
   )
+}
+
+function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter }: {
+  controls: NonNullable<PullRequestInboxProps["teamControls"]>
+  filter: PullRequestInboxFilter
+  onFilter: (filter: PullRequestInboxFilter) => void
+}) {
+  return <>
+            <>
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label="Pull request scope"
+                  value={teamControls.teamId ?? ""}
+                  onChange={(event) => teamControls.onTeam(event.target.value || null)}
+                  disabled={teamControls.discovering}
+                  className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-1.5 text-xs text-text focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">Personal</option>
+                  {[...new Set(teamControls.teams.map((team) => team.organization))].map((organization) =>
+                    <optgroup key={organization} label={organization}>
+                      {teamControls.teams.filter((team) => team.organization === organization).map((team) =>
+                        <option key={team.id} value={team.id}>{team.name}</option>)}
+                    </optgroup>)}
+                </select>
+                <button type="button" onClick={teamControls.onRefresh} disabled={teamControls.discovering} className="rounded border border-line px-2 py-1.5 text-xs text-text hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring">
+                  {teamControls.discovering ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
+              {teamControls.error && <p role="alert" className="text-xs text-red">{teamControls.error}</p>}
+              {!teamControls.discovering && !teamControls.error && teamControls.teams.length === 0 && <p className="text-xs text-muted-foreground">No organization teams are visible to your GitHub CLI account.</p>}
+            </>
+            {teamControls.teamId !== null ? <select
+              aria-label="Team pull request queue"
+              value={teamControls.queue}
+              onChange={(event) => teamControls.onQueue(event.target.value as GitHubTeamQueue)}
+              disabled={teamControls.discovering}
+              className="rounded border border-line bg-surface px-2 py-1.5 text-xs text-text focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="reviews">Requested reviews</option>
+              <option value="authored">Member-authored</option>
+              <option value="repositories">Team repositories</option>
+            </select> : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
+  </>
 }
 
 function InboxMessage({ children }: { children: ReactNode }) {

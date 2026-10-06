@@ -5,6 +5,7 @@ import { Effect } from "effect"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import {
   GitService,
+  fetchWithGitHubToken,
   ensureWorktreeLinked,
   gitAskpassWrapperSource,
   githubHttpsPushUrl,
@@ -641,6 +642,22 @@ describe("GitService.publishInspection", () => {
     expect(exit.value.changedPaths).toEqual(
       expect.arrayContaining([".github/workflows/ci.yml", "ci.yml"])
     )
+  })
+})
+
+describe("fetchWithGitHubToken", () => {
+  it("refuses SSH and alternate-HTTPS URL rewrites before network access or credential delivery", async () => {
+    const temp = withTempRoot()
+    const repo = initGitRepo(join(temp.root, "repo"))
+    try {
+      for (const rewrite of ["git@github.com:acme/widget.git", "https://other.example/widget.git"]) {
+        execFileSync("git", ["config", `url.${rewrite}.insteadOf`, "https://github.com/acme/widget.git"], { cwd: repo })
+        const exit = await runExit(fetchWithGitHubToken(repo, "acme/widget", "+refs/heads/main:refs/remotes/origin/main", "fixture-private"), temp.layer)
+        expect(failureOf(exit)?.message).toContain("Git URL rewrites")
+        execFileSync("git", ["config", "--remove-section", `url.${rewrite}`], { cwd: repo })
+      }
+      expect(readFileSync(join(repo, ".git/config"), "utf8")).not.toContain("fixture-private")
+    } finally { temp.cleanup() }
   })
 })
 

@@ -161,7 +161,8 @@ export interface FakeCommandResult {
 export type FakeCommandHandler = (
   command: string,
   args: ReadonlyArray<string>,
-  stdin: string
+  stdin: string,
+  environment: ReadonlyMap<string, string>
 ) => FakeCommandResult | undefined
 
 const encoder = new TextEncoder()
@@ -212,7 +213,7 @@ export const fakeCommandExecutor = (
     Effect.gen(function* () {
       if (command._tag !== "StandardCommand") return makeProcess({ exitCode: 0 })
       const stdin = yield* stdinOf(command.stdin)
-      return makeProcess(handler(command.command, command.args, stdin) ?? { exitCode: 0, stdout: "" })
+      return makeProcess(handler(command.command, command.args, stdin, new Map(command.env)) ?? { exitCode: 0, stdout: "" })
     })
   )
   return Layer.succeed(CommandExecutor.CommandExecutor, executor)

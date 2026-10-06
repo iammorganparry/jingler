@@ -1662,6 +1662,34 @@ export const PullRequestListItem = Schema.extend(
 );
 export type PullRequestListItem = Schema.Schema.Type<typeof PullRequestListItem>;
 
+/** CLI account identity: stable GitHub user id, never credentials. */
+export const GitHubCliAccount = Schema.Struct({ id: Schema.String, login: Schema.String });
+export type GitHubCliAccount = Schema.Schema.Type<typeof GitHubCliAccount>;
+
+export const GitHubTeam = Schema.Struct({
+  id: Schema.String,
+  organization: Schema.String,
+  slug: Schema.String,
+  name: Schema.String,
+});
+export type GitHubTeam = Schema.Schema.Type<typeof GitHubTeam>;
+
+export const GitHubTeamQueue = Schema.Literal("reviews", "authored", "repositories");
+export type GitHubTeamQueue = Schema.Schema.Type<typeof GitHubTeamQueue>;
+
+export const GitHubTeamDiscovery = Schema.Struct({
+  account: GitHubCliAccount,
+  teams: Schema.Array(GitHubTeam),
+});
+export type GitHubTeamDiscovery = Schema.Schema.Type<typeof GitHubTeamDiscovery>;
+
+export const GitHubTeamPrResult = Schema.Struct({
+  prs: Schema.Array(PullRequestListItem),
+  /** Nonempty when any discovery/search portion was incomplete. */
+  warnings: Schema.Array(Schema.String),
+});
+export type GitHubTeamPrResult = Schema.Schema.Type<typeof GitHubTeamPrResult>;
+
 /** A provider-neutral person reference used by issue metadata. */
 export const IssueActor = Schema.Struct({
   /** Provider-owned opaque id. */
@@ -1939,6 +1967,8 @@ export type CreateSessionInput = Schema.Schema.Type<typeof CreateSessionInput>;
  */
 export const CreateSessionFromPrInput = Schema.Struct({
   projectId: Schema.optional(Schema.String),
+  /** Initial team-inbox checkout must use this CLI identity; never persisted on the session. */
+  githubCliAccountId: Schema.optional(Schema.String),
   requestedSessionId: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u)),
   ),

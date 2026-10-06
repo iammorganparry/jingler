@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 vi.mock("./rpc-client.js", () => ({ rpc: {} }))
 
-import { pullRequestSessionTarget } from "./use-pull-request-inbox.js"
+import { pullRequestSessionTarget, pullRequestInboxViewerLogin } from "./use-pull-request-inbox.js"
 
 const pr: PullRequestListItem = {
   repository: "acme/widget",
@@ -69,6 +69,13 @@ const session = (id: string, repoPath: string): Session => ({
   baseBranch: "main",
   mode: "auto"
 }) as Session
+
+it("only overrides the viewer for a ready team queue, preserving personal App fallback identity", () => {
+  expect(pullRequestInboxViewerLogin(false, true, "cli-account")).toBeUndefined()
+  expect(pullRequestInboxViewerLogin(false, false, "stale-cli-account")).toBeUndefined()
+  expect(pullRequestInboxViewerLogin(true, true, "cli-account")).toBe("cli-account")
+  expect(pullRequestInboxViewerLogin(true, false, "stale-cli-account")).toBeUndefined()
+})
 
 describe("pullRequestSessionTarget", () => {
   it("matches linked sessions by repository path and pull request number", () => {
