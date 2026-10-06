@@ -25,3 +25,38 @@ try { enterDirectory(root + '/ancestor', false, false, (part) => {
     expect(readFileSync(join(root, "external", "sentinel"), "utf8")).toBe("untouched")
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
+
+it("checks bytes, permissions and absence after temporary file fsync, preserving normal writes", () => {
+  const root = mkdtempSync(join(tmpdir(), "anchor-cas-"))
+  try {
+    const worker = fileURLToPath(new URL("./anchored-fs-worker.ts", import.meta.url))
+    const script = join(root, "cas.mjs")
+    writeFileSync(script, `import { operate } from ${JSON.stringify(worker)};
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import { createHash } from 'node:crypto';
+const root = ${JSON.stringify(root)};
+const target = root + '/file';
+const sha256 = createHash('sha256').update('base').digest('hex');
+const fsync = fs.fsyncSync;
+for (const variant of ['bytes', 'permissions', 'absent']) {
+  fs.rmSync(target, {force:true});
+  if (variant !== 'absent') { fs.writeFileSync(target, 'base'); fs.chmodSync(target, 0o600); }
+  fs.fsyncSync = fd => {
+    fsync(fd);
+    if (variant === 'permissions') fs.chmodSync(target, 0o700);
+    else fs.writeFileSync(target, 'late');
+  };
+  syncBuiltinESMExports();
+  let refused = false;
+  try { operate({op:'write', path:target, bytes:Buffer.from('restore').toString('base64'), expected:variant === 'absent' ? null : {sha256,permissions:0o600}}); }
+  catch(error) { if (!error.message.includes('after backup')) throw error; refused = true; }
+  if (!refused || fs.readFileSync(target,'utf8') === 'restore') throw new Error('Late change overwritten');
+}
+fs.fsyncSync = fsync; syncBuiltinESMExports();
+operate({op:'write',path:target,bytes:Buffer.from('normal').toString('base64')});
+if(fs.readFileSync(target,'utf8') !== 'normal') throw new Error('Normal write failed');
+`)
+    execFileSync(process.execPath, ["--import", createRequire(import.meta.url).resolve("tsx"), script], { stdio: "pipe" })
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})

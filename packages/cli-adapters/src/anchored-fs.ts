@@ -2,7 +2,9 @@ import { createRequire } from "node:module"
 import { fork } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
+export interface AnchoredExpectation { sha256: string; permissions: number }
 export interface AnchoredRequest {
+  expected?: AnchoredExpectation | null
   op: "mkdir" | "read" | "stat" | "list" | "remove" | "unlink" | "rename" | "write" | "git"
   path: string
   to?: string
@@ -69,9 +71,9 @@ export const anchoredFs = {
     const value = await request<{ bytes: string; mode: number; nlink: number }>({ op: "read", path, limit })
     return { ...value, bytes: Buffer.from(value.bytes, "base64") }
   },
-  write: (path: string, bytes: Buffer | string, mode = 0o600, exclusive = false) => request<void>({ op: "write", path, bytes: Buffer.from(bytes).toString("base64"), mode, exclusive, createParents: true }),
+  write: (path: string, bytes: Buffer | string, mode = 0o600, exclusive = false, expected?: AnchoredExpectation | null) => request<void>({ op: "write", expected, path, bytes: Buffer.from(bytes).toString("base64"), mode, exclusive, createParents: true }),
   list: (path: string) => request<string[]>({ op: "list", path }),
-  unlink: (path: string) => request<void>({ op: "unlink", path }),
+  unlink: (path: string, expected?: AnchoredExpectation | null) => request<void>({ op: "unlink", path, expected }),
   remove: (path: string) => request<void>({ op: "remove", path }),
   rename: (path: string, to: string) => request<void>({ op: "rename", path, to }),
   git: async (path: string, args: string[], env?: Record<string, string>, bytes?: Buffer) => Buffer.from(await request<string>({ op: "git", path, args, env, bytes: bytes?.toString("base64") }), "base64")

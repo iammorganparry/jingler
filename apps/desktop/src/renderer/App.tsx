@@ -655,6 +655,7 @@ function AuthedApp({
   // Manual archive from the sidebar quick-actions. The store only models a
   // merged/closed reason, so a hand-archived session records "closed".
   const [archiveState, sendArchive] = useMachine(sessionArchiveMachine, { input: {
+    load: rpc.sessionsGet,
     archive: (id, acknowledged) => rpc.sessionsArchive(id, "closed", false, acknowledged),
     onSession: session => send({ type: "SESSION_UPDATED", session })
   } });
@@ -2259,9 +2260,9 @@ function ArchiveConfirmation({ state, send }: { state: import("xstate").Snapshot
   return <ConfirmDialog
     open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
     onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
-    title="Archive without cleanup?"
+    title={state.matches("failed") ? "Archive failed" : "Archive without cleanup?"}
     description={state.context.error ?? "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked."}
-    confirmLabel="Archive without cleanup"
+    confirmLabel={state.matches("failed") ? "Retry" : "Archive without cleanup"}
     onConfirm={() => { send({ type: "CONFIRM" }); }}
   />
 }

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import * as fs from "node:fs"
 import { dirname, basename, isAbsolute } from "node:path"
 import type { AnchoredRequest } from "./anchored-fs.js"
@@ -59,6 +59,18 @@ const read = (path: string, limit: number) => {
     return { bytes: bytes.toString("base64"), mode: info.mode & 0o777, nlink: info.nlink }
   } finally { fs.closeSync(fd) }
 }
+// Host-only restore condition; undefined preserves normal write semantics.
+const checkExpected = (file: string, expected: AnchoredRequest["expected"]): void => {
+  if (expected === undefined) return
+  if (expected === null) {
+    if (stat(file)) throw new Error("Restore target appeared after backup; recovery backup retained.")
+    return
+  }
+  const actual = read(file, 32 * 1024 * 1024)
+  if (actual.mode !== expected.permissions || createHash("sha256").update(Buffer.from(actual.bytes, "base64")).digest("hex") !== expected.sha256) {
+    throw new Error("Restore target changed after backup; recovery backup retained.")
+  }
+}
 const removeDirectory = (entry: string): void => {
   const fd = fs.openSync(entry, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
   const parent = fs.openSync(".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
@@ -98,7 +110,7 @@ export const operate = (request: AnchoredRequest): unknown => {
       enterDirectory(request.path)
       return fs.readdirSync(".")
     }
-    case "unlink": { fs.unlinkSync(file); return null }
+    case "unlink": { checkExpected(file, request.expected); fs.unlinkSync(file); return null }
     case "remove": {
       const info = stat(file)
       if (!info) return null
@@ -120,6 +132,7 @@ export const operate = (request: AnchoredRequest): unknown => {
         fs.writeFileSync(fd, Buffer.from(request.bytes!, "base64"))
         fs.fchmodSync(fd, request.mode ?? 0o600)
         fs.fsyncSync(fd)
+        checkExpected(file, request.expected)
         if (request.exclusive) { fs.linkSync(temporary, file); fs.unlinkSync(temporary) }
         else fs.renameSync(temporary, file) // Break hardlinks instead of truncating their inode.
       } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }) }

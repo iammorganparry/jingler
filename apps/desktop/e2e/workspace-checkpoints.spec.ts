@@ -49,6 +49,8 @@ test("safe creation captures before the production Pi turn and restores files an
   const dialog = window.getByRole("dialog", { name: "Workspace checkpoints" })
   await dialog.getByText(/Before agent turn/).locator("..").getByRole("button", { name: "Preview restore" }).click()
   await expect(dialog.getByText("overwrite: checkpoint-proof.txt", { exact: true })).toBeVisible()
+  await expect(dialog).toContainText("Stop external editors and file watchers before confirming")
+  await expect(dialog).toContainText("cannot lock external writers")
   await dialog.getByRole("button", { name: "Confirm restore" }).click()
   await expect(dialog.getByText(/pinned recovery backup/)).toBeVisible()
   expect(readFileSync(join(cwd, "checkpoint-proof.txt"), "utf8")).toBe("unstaged")

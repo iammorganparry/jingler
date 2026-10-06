@@ -749,8 +749,22 @@ const contextCompactionResponse = (context: PiContext): ReturnType<typeof fauxAs
   return defaultResponse(context)
 }
 
+const routineProofResponse = async (context: PiContext): Promise<ReturnType<typeof fauxAssistantMessage>> => {
+  const prompt = latestOperatorText(context)
+  if (!prompt.includes("routine proof")) return defaultResponse(context)
+  const write = prompt.includes("WRITE")
+  const tool = write ? WRITE_TOOL : READ_TOOL
+  if (recentToolResultCount(context, tool) === 0) {
+    return callTool(tool, write ? { path: "routine-proof.txt", content: "unsafe" } : { path: "README.md" }, "routine-inspect")
+  }
+  await new Promise((resolve) => setTimeout(resolve, 10000))
+  return fauxAssistantMessage("Routine proof inspection complete.")
+}
+
 const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> => {
   switch (fixture.scenarioId) {
+    case "workspace-routines":
+      return Array.from({ length: 64 }, () => routineProofResponse)
     case "workspace-checkpoints":
       return Array.from({ length: 12 }, () => async (context: PiContext) => {
         if (!latestOperatorText(context).includes("checkpoint")) return defaultResponse(context)

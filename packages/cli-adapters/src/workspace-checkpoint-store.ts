@@ -164,7 +164,7 @@ export class WorkspaceCheckpointStore {
     }
     return snapshots.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
-  async #save(current: Current, label: string, pinned = false): Promise<WorkspaceCheckpoint> {
+  async #save(current: Current, label: string, pinned = false, protectedId?: string): Promise<WorkspaceCheckpoint> {
     await this.#directory()
     const existing = await this.list()
     const byteLength = [...current.blobs.values()].reduce((sum, bytes) => sum + bytes.length, 0)
@@ -173,7 +173,7 @@ export class WorkspaceCheckpointStore {
     let count = existing.length + 1
     for (const snapshot of [...existing].reverse()) {
       if (total <= STORAGE_BYTES && count <= KEEP) break
-      if (snapshot.pinned) continue
+      if (snapshot.pinned || snapshot.id === protectedId) continue
       evict.push(snapshot); total -= snapshot.byteLength; count--
     }
     if (total > STORAGE_BYTES || count > KEEP) throw new Error("Checkpoint storage is full; pinned recovery backups are retained.")
@@ -226,27 +226,21 @@ export class WorkspaceCheckpointStore {
   async #restoreFile(operation: WorkspaceCheckpointPreview["operations"][number], current: Current, snapshot: Snapshot, id: string): Promise<void> {
         const path = join(this.#cwd, operation.path)
         const expected = current.files.find((entry) => entry.path === operation.path)
-        const actual = await anchoredFs.stat(path)
-        if (expected) {
-          const bytes = await anchoredFs.read(path, MAX_BYTES)
-          if (digest(bytes.bytes) !== expected.sha256 || bytes.mode !== expected.permissions) throw new Error("Restore target changed after backup; recovery backup retained.")
-        } else if (actual) throw new Error("Restore target appeared after backup; recovery backup retained.")
+        const condition = expected ? { sha256: expected.sha256, permissions: expected.permissions } : null
         if (operation.action === "delete") {
-          const stat = await anchoredFs.stat(path)
-          if (!stat?.file) throw new Error("Restore deletion path changed.")
-          await anchoredFs.unlink(path)
+          await anchoredFs.unlink(path, condition)
           return
         }
         const entry = snapshot.files.find((file) => file.path === operation.path)!
         if (await ignored(this.#cwd, entry.path)) throw new Error(`Checkpoint path is now ignored: ${entry.path}`)
-        await anchoredFs.write(path, await regularBytes(join(this.#root, id, entry.sha256)), entry.permissions)
+        await anchoredFs.write(path, await regularBytes(join(this.#root, id, entry.sha256)), entry.permissions, false, condition)
   }
   async restore(id: string, token: string): Promise<WorkspaceCheckpoint> {
     const snapshot = await this.#read(id)
     const current = await this.#current()
     const preview = await this.#preview(snapshot, current)
     if (preview.token !== token) throw new Error("Restore preview is stale. Preview again before confirming.")
-    const backup = await this.#save(current, "Safety backup before restore", true)
+    const backup = await this.#save(current, "Safety backup before restore", true, id)
     const lock = `${current.indexPath}.lock`
     let locked = false
     try {

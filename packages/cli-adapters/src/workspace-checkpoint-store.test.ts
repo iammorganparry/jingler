@@ -2,12 +2,12 @@ import { execFileSync } from "node:child_process"
 import { mkdtemp, writeFile, readFile, rm, chmod, stat, symlink, link, readdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceCheckpointStore } from "./workspace-checkpoint-store.js"
 import { anchoredFs } from "./anchored-fs.js"
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "checkpoint-test-")); roots.push(root)
@@ -164,4 +164,40 @@ describe("workspace checkpoint recovery", () => {
     } finally { resetWorkspaceAdmissions() }
   }, 10000)
 
+})
+
+it("retains the oldest restore source when all twenty slots are full", async () => {
+  const { root, store } = await fixture()
+  const oldest = await store.capture("oldest")
+  for (let i = 0; i < 19; i++) await store.capture(`later ${i}`)
+  await writeFile(join(root, "file"), "edited")
+  const preview = await store.preview(oldest.id)
+  const backup = await store.restore(oldest.id, preview.token)
+  expect(await readFile(join(root, "file"), "utf8")).toBe("base")
+  expect((await store.list()).map(item => item.id)).toContain(oldest.id)
+  expect(backup.pinned).toBe(true)
+  expect((await store.list()).length).toBe(20)
+})
+it.each(["overwrite", "delete", "create"] as const)("refuses late external %s changes inside the anchored worker", async action => {
+  const { root, store } = await fixture()
+  if (action === "delete") { await writeFile(join(root, "file"), "base"); git(root, "rm", "file") }
+  const checkpoint = await store.capture()
+  if (action === "delete") { await writeFile(join(root, "file"), "current"); git(root, "add", "file") }
+  else if (action === "create") { await rm(join(root, "file")); git(root, "add", "file") }
+  else await writeFile(join(root, "file"), "current")
+  const preview = await store.preview(checkpoint.id)
+  const target = join(root, "file")
+  const originalWrite = anchoredFs.write
+  const originalUnlink = anchoredFs.unlink
+  vi.spyOn(anchoredFs, "write").mockImplementation(async (path, ...args) => {
+    if (path === target) await writeFile(target, "late external bytes")
+    return originalWrite(path, ...args)
+  })
+  vi.spyOn(anchoredFs, "unlink").mockImplementation(async (path, ...args) => {
+    if (path === target) await writeFile(target, "late external bytes")
+    return originalUnlink(path, ...args)
+  })
+  await expect(store.restore(checkpoint.id, preview.token)).rejects.toThrow("backup")
+  expect(await readFile(target, "utf8")).toBe("late external bytes")
+  expect((await store.list()).some(item => item.pinned)).toBe(true)
 })

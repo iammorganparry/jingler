@@ -5,7 +5,8 @@ Mission97e6ba17-f6d3-4d4b-803f-cbf002b9b607 remains active. No push/release. App
 - [x] Preserve integrated workflow/ports/checkpoint work locally (d66c9e33 latest WIP).
 - [x] Parent production Electron checkpoint scenario passes; workflow/ports earlier scenarios pass.
 - [x] Receive independent checkpoint review710a5172; acceptance BLOCKED on two P1s.
-- [ ] Await sole writer7a514 handoff: fully wired desktop routines, warned metadata-only terminal-history archive, and six terminal-fixture regressions. Parent does not edit application code concurrently.
+- [x] Receive sole writer7a514 handoff and preserve cd157198: routines/metadata archive implemented,123 focused tests reported. Parent host e2e exposed stale archive history and correct Ask write needs-attention vs wrong test expectation; not accepted.
+- [ ] Sole final-fix writer in workflow76491b47 implements checkpoint review corrections, fresh archive-session load and real read-only/needs-attention routine e2e. Concurrent independent review uses immutable cd157198. Parent does not edit application code concurrently.
 - [ ] Fix exact Git inspection option allowlist, source-protected checkpoint eviction, near-replacement worker expectation checks and external-editor/watcher warning; add/run behavioral regressions.
 - [ ] Independently review routines/launch/crash/cancel/shutdown integration; resolve findings.
 - [ ] Run parent affected tests, loopback Pi factory tests, real Electron workflow/ports/checkpoints/routines/metadata archive scenarios.
