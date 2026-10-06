@@ -50,19 +50,22 @@ export class WorkspaceCheckpointStore {
   readonly #sessionId: string
   readonly #cwd: string
   readonly #beforeWrite?: () => Promise<void>
+  readonly #afterFileWrite?: (path: string) => Promise<void>
   readonly #afterIndexCopy?: () => Promise<void>
   readonly #verifiedBranch: string
-  constructor(input: { root: string; sessionId: string; cwd: string; beforeWrite?: () => Promise<void>; afterIndexCopy?: () => Promise<void>; verifiedBranch?: string }) {
+  constructor(input: { root: string; sessionId: string; cwd: string; beforeWrite?: () => Promise<void>; afterIndexCopy?: () => Promise<void>; afterFileWrite?: (path: string) => Promise<void>; verifiedBranch?: string }) {
     this.#root = join(input.root, digest(input.sessionId))
     this.#sessionId = input.sessionId
     this.#cwd = input.cwd
     this.#beforeWrite = input.beforeWrite
     this.#afterIndexCopy = input.afterIndexCopy
+    this.#afterFileWrite = input.afterFileWrite
     this.#verifiedBranch = input.verifiedBranch ?? ""
   }
   async #directory(): Promise<void> {
     await anchoredFs.mkdir(this.#root)
   }
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one immutable-index consistency boundary validates repository, bytes, modes and enumeration before publishing either tree.
   async #current(): Promise<Current> {
     const cwd = this.#cwd
     if (await text(cwd, ["rev-parse", "--show-toplevel"]) !== await realpath(cwd)) throw new Error("Checkpoints require the worktree root.")
@@ -74,6 +77,8 @@ export class WorkspaceCheckpointStore {
       const value = await text(cwd, ["config", "--bool", "--get", key]).catch((cause) => { if ((cause as { code?: number }).code === 1) return "false"; throw cause })
       if (value === "true") throw new Error("Checkpoints do not support sparse/split index.")
     }
+    const indexInfo = await anchoredFs.stat(indexPath)
+    if (!indexInfo?.file || indexInfo.nlink !== 1 || (indexInfo.mode & 0o022) !== 0) throw new Error("Unsafe checkpoint index permissions or hardlinks.")
     const original = await regularBytes(indexPath)
     const indexDigest = digest(original)
     const temp = await mkdtemp(join(tmpdir(), "jingler-checkpoint-"))
@@ -127,6 +132,7 @@ export class WorkspaceCheckpointStore {
         const again = await anchoredFs.read(join(cwd, file.path), MAX_BYTES)
         if (digest(again.bytes) !== file.sha256 || again.mode !== file.permissions) throw new Error("Workspace changed during checkpoint capture. Retry.")
       }
+      for (const path of paths.filter((path) => !files.some((file) => file.path === path))) if (await anchoredFs.stat(join(cwd, path))) throw new Error("Workspace changed during checkpoint capture. Retry.")
       const againUntracked = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"])).toString("utf8").split("\0").filter(Boolean)
       if (JSON.stringify(againUntracked) !== JSON.stringify(untracked)) throw new Error("Workspace changed during checkpoint capture. Retry.")
       return { head, branch, repository, indexPath, index, files, blobs, indexTree, worktreeTree, tracked: new Set(listed.map((entry) => entry.path)), indexDigest }
@@ -140,7 +146,9 @@ export class WorkspaceCheckpointStore {
     if (!ID.test(id)) throw new Error("Invalid checkpoint identity.")
     const snapshot = Schema.decodeUnknownSync(Snapshot)(JSON.parse((await regularBytes(join(this.#root, id, "snapshot.json"))).toString("utf8")))
     if (snapshot.summary.id !== id || snapshot.summary.sessionId !== this.#sessionId) throw new Error("Checkpoint ownership mismatch.")
+    if (!/^[a-f0-9]{64}$/.test(snapshot.indexDigest) || digest(await regularBytes(join(this.#root, id, snapshot.indexDigest))) !== snapshot.indexDigest) throw new Error("Corrupt checkpoint index.")
     for (const entry of [...snapshot.index, ...snapshot.files]) {
+      if (!Number.isInteger(entry.permissions) || entry.permissions < 0 || entry.permissions > 0o777) throw new Error("Corrupt checkpoint permissions.")
       safePath(entry.path)
       if (!HASH.test(entry.oid) || !/^[a-f0-9]{64}$/.test(entry.sha256)) throw new Error("Corrupt checkpoint manifest.")
       const bytes = await regularBytes(join(this.#root, id, entry.sha256))
@@ -189,7 +197,9 @@ export class WorkspaceCheckpointStore {
       return summary
     } catch (cause) { await anchoredFs.remove(temporary); throw cause }
   }
+  async worktreeSnapshot(): Promise<{ cwd: string; tree: string }> { return { cwd: this.#cwd, tree: (await this.#current()).worktreeTree } }
   async capture(label = "Manual checkpoint"): Promise<WorkspaceCheckpoint> { return this.#save(await this.#current(), label) }
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: every path disposition and collision must be validated before issuing the confirmation token.
   async #preview(snapshot: Snapshot, current: Current): Promise<WorkspaceCheckpointPreview> {
     const hostActivation = snapshot.branch === "(detached)" && this.#verifiedBranch !== "" && current.branch === `refs/heads/${this.#verifiedBranch}`
     if (snapshot.summary.head !== current.head || (!hostActivation && snapshot.branch !== current.branch) || snapshot.repository !== current.repository) throw new Error("HEAD or branch changed since this checkpoint; restore is refused.")
@@ -213,6 +223,24 @@ export class WorkspaceCheckpointStore {
     return { checkpointId: snapshot.summary.id, token: digest(JSON.stringify({ current: fingerprint(current), snapshot, operations })), operations, diff: rawDiff.toString("utf8") }
   }
   async preview(id: string): Promise<WorkspaceCheckpointPreview> { return this.#preview(await this.#read(id), await this.#current()) }
+  async #restoreFile(operation: WorkspaceCheckpointPreview["operations"][number], current: Current, snapshot: Snapshot, id: string): Promise<void> {
+        const path = join(this.#cwd, operation.path)
+        const expected = current.files.find((entry) => entry.path === operation.path)
+        const actual = await anchoredFs.stat(path)
+        if (expected) {
+          const bytes = await anchoredFs.read(path, MAX_BYTES)
+          if (digest(bytes.bytes) !== expected.sha256 || bytes.mode !== expected.permissions) throw new Error("Restore target changed after backup; recovery backup retained.")
+        } else if (actual) throw new Error("Restore target appeared after backup; recovery backup retained.")
+        if (operation.action === "delete") {
+          const stat = await anchoredFs.stat(path)
+          if (!stat?.file) throw new Error("Restore deletion path changed.")
+          await anchoredFs.unlink(path)
+          return
+        }
+        const entry = snapshot.files.find((file) => file.path === operation.path)!
+        if (await ignored(this.#cwd, entry.path)) throw new Error(`Checkpoint path is now ignored: ${entry.path}`)
+        await anchoredFs.write(path, await regularBytes(join(this.#root, id, entry.sha256)), entry.permissions)
+  }
   async restore(id: string, token: string): Promise<WorkspaceCheckpoint> {
     const snapshot = await this.#read(id)
     const current = await this.#current()
@@ -227,16 +255,8 @@ export class WorkspaceCheckpointStore {
       await this.#beforeWrite?.()
       if ((await this.#preview(snapshot, await this.#current())).token !== token) throw new Error("Workspace changed before restore. Preview again.")
       for (const operation of preview.operations) {
-        const path = join(this.#cwd, operation.path)
-        if (operation.action === "delete") {
-          const stat = await anchoredFs.stat(path)
-          if (!stat?.file) throw new Error("Restore deletion path changed.")
-          await anchoredFs.remove(path)
-          continue
-        }
-        const entry = snapshot.files.find((file) => file.path === operation.path)!
-        if (await ignored(this.#cwd, entry.path)) throw new Error(`Checkpoint path is now ignored: ${entry.path}`)
-        await anchoredFs.write(path, await regularBytes(join(this.#root, id, entry.sha256)), entry.permissions)
+        await this.#restoreFile(operation, current, snapshot, id)
+        await this.#afterFileWrite?.(operation.path)
       }
       await anchoredFs.write(lock, await regularBytes(join(this.#root, id, snapshot.indexDigest)), 0o600)
       await anchoredFs.rename(lock, current.indexPath)

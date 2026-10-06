@@ -4,6 +4,8 @@ interface Closure {
 }
 
 const safeModes = new Set<string>()
+const checkpointGenerations = new Map<string, number>()
+export const checkpointTurnGeneration = (sessionId: string): number => checkpointGenerations.get(sessionId) ?? 0
 const checkpointOwners = new Map<string, symbol>()
 export const setWorkspaceCheckpointMode = (sessionId: string, enabled: boolean): void => { if (enabled) safeModes.add(sessionId); else safeModes.delete(sessionId) }
 export const workspaceCheckpointMode = (sessionId: string): boolean => safeModes.has(sessionId)
@@ -68,6 +70,7 @@ export const acquireCheckpointTurnOwner = (sessionId: string, closure: symbol): 
   const activity = acquire(sessionId, "checkpoint-owner-turn", closure)
   const owner = Symbol("checkpoint-owner-turn")
   checkpointOwners.set(sessionId, owner)
+  checkpointGenerations.set(sessionId, checkpointTurnGeneration(sessionId) + 1)
   reopenWorkspaceAdmission(sessionId, closure)
   return { ...activity, release: () => { if (checkpointOwners.get(sessionId) === owner) checkpointOwners.delete(sessionId); activity.release() } }
 }
@@ -120,6 +123,7 @@ export const workspaceActivityCount = (sessionId: string): number => active.get(
 export const resetWorkspaceAdmissions = (): void => {
   safeModes.clear()
   checkpointOwners.clear()
+  checkpointGenerations.clear()
   closed.clear()
   readiness.clear()
   active.clear()

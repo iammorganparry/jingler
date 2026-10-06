@@ -1,3 +1,5 @@
+import { checkpointFiles } from "../../checkpoint-file-tools.js"
+import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
 import { worktreeEnv } from "../../worktree-env.js"
 import {
@@ -250,7 +252,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_write",
       description: "Create or replace a UTF-8 text file inside the workspace.",
       input: Schema.Struct({ path: PathInput, content: Schema.String }),
-      execute: ({ path, content }) => Effect.runPromise(workspace.write(cwd, path, content))
+      execute: ({ path, content }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.write(cwd, path, content) : Effect.runPromise(workspace.write(cwd, path, content))
     })
   )
   registry.register(
@@ -264,7 +266,7 @@ export const registerWorkspaceMutationTools = (
         replaceAll: Schema.optionalWith(Schema.Boolean, { default: () => false })
       }),
       execute: ({ path, oldText, newText, replaceAll }) =>
-        Effect.runPromise(workspace.edit(cwd, path, oldText, newText, replaceAll))
+        routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.edit(cwd, path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(cwd, path, oldText, newText, replaceAll))
     })
   )
   registry.register(
@@ -272,7 +274,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_delete",
       description: "Delete one existing file inside the workspace.",
       input: Schema.Struct({ path: PathInput }),
-      execute: ({ path }) => Effect.runPromise(workspace.remove(cwd, path))
+      execute: ({ path }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.remove(cwd, path) : Effect.runPromise(workspace.remove(cwd, path))
     })
   )
   registry.register(
@@ -280,7 +282,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_rename",
       description: "Rename one workspace file without overwriting the destination.",
       input: Schema.Struct({ from: PathInput, to: PathInput }),
-      execute: ({ from, to }) => Effect.runPromise(workspace.rename(cwd, from, to))
+      execute: ({ from, to }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.rename(cwd, from, to) : Effect.runPromise(workspace.rename(cwd, from, to))
     })
   )
   registry.register({

@@ -575,6 +575,8 @@ export const Session = Schema.Struct({
   checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
   checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
+  /** An interactive terminal may leave descendants after its leader or the app exits. */
+  checkpointPtyHistory: Schema.optional(Schema.Boolean),
   workspacePorts: Schema.optional(WorkspacePorts),
   id: Schema.String,
   /** Durable project identity. Absent on sessions created before Projects existed. */
@@ -1948,6 +1950,8 @@ export const adversarialReviewModelLabel = (
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
+  /** Explicit consent to edit/inspect-only managed Pi checkpoint execution. */
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Internal remote provision fence; omitted by renderer-originated requests. */
   requestedSessionId: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u)),

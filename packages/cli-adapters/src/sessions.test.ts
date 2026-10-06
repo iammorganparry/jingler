@@ -137,6 +137,22 @@ describe("SessionStore", () => {
     ...over
   })
 
+  it("persists fresh safe creation and taint before any terminal launch", async () => {
+    const session = await Effect.runPromise(Effect.gen(function* () {
+      const created = yield* SessionStore.create(input({ checkpointSafeMode: true, runtimeId: "pi", projectId: "safe-project" }))
+      expect(created.checkpointExecutionHistory).toBe("clean")
+      expect(created.checkpointSafeMode).toBe(true)
+      expect(created.workspaceLifecycle?.status).toBe("setup-skipped")
+      yield* SessionStore.markCheckpointTerminalExecutionUnprovable(created.id)
+      return yield* SessionStore.get(created.id)
+    }).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const restarted = await Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restarted.checkpointExecutionHistory).toBe("unprovable")
+    expect(restarted.checkpointPtyHistory).toBe(true)
+    await expect(Effect.runPromise(SessionStore.archive(session.id, "closed").pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+    await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+  })
+
   it("atomically assigns distinct ports to concurrent creates and reserves archives across store restart", async () => {
     const result = await runExit(Effect.gen(function* () {
       const sessions = yield* Effect.all([SessionStore.create(input({ title: "port one" })), SessionStore.create(input({ title: "port two" }))], { concurrency: 2 })

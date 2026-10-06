@@ -1,4 +1,4 @@
-import { validateWorkspacePortConfig } from "./workspace-ports.js"
+import { validateWorkspacePortConfig, resolveWorkspacePreview } from "./workspace-ports.js"
 import { createHash } from "node:crypto"
 import { isAbsolute, normalize, sep } from "node:path"
 import type { ProjectWorkflow } from "@jingler/core"
@@ -37,4 +37,22 @@ export const normalizeWorkflow = (workflow: WorkflowDraft, approve: boolean): Pr
   if (workflow.ports) validateWorkspacePortConfig(workflow.ports)
   const value = canonical(workflow)
   return approve ? { ...value, approvedDigest: workflowDigest(value) } : value
+}
+
+export const requireApprovedWorkflow = (workflow: ProjectWorkflow | undefined): ProjectWorkflow => {
+  const approved = approvedWorkflow(workflow)
+  if (!approved) throw new Error("Approve the current project workflow before opening its preview.")
+  return approved
+}
+
+/** Approval is checked before URL resolution and before the first network request. */
+export const readyWorkspacePreview = async (workflow: ProjectWorkflow | undefined, ports: import("@jingler/core").WorkspacePorts, request: typeof fetch = globalThis.fetch): Promise<string> => {
+  const approved = requireApprovedWorkflow(workflow)
+  const url = resolveWorkspacePreview(approved.ports?.previewUrl ?? "http://localhost:{port}", ports)
+  try {
+    const response = await request(url, { signal: AbortSignal.timeout(3000), redirect: "error" })
+    await response.body?.cancel()
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  } catch (cause) { throw new Error(`Preview is not ready at ${url}. Start the server and retry. ${cause instanceof Error ? cause.message : ""}`) }
+  return url
 }

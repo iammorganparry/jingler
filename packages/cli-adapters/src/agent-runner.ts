@@ -1288,7 +1288,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               const workspaceLease = yield* Effect.tryPromise({
                 try: async () => {
                   if (!gatedSession) throw new Error("Workspace session not found.")
-                  return acquireCheckpointedTurn(gatedSession, join(checkpointPaths.root, "checkpoints"))
+                  return acquireCheckpointedTurn(gatedSession, join(checkpointPaths.root, "checkpoints"), chatId)
                 },
                 catch: (cause) => cause
               }).pipe(Effect.either)
@@ -1358,7 +1358,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               )
             })
           )
-        })
+        }).pipe(Effect.catchAll((error) => Effect.succeed(Stream.fromIterable<StreamEvent>([{
+          _tag: "Failed",
+          message: error.message
+        }]))))
       )
     }
 

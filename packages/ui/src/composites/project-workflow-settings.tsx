@@ -22,6 +22,16 @@ const runsText = (project: Project | undefined): string =>
 
 const portsOf = (project: Project | undefined) => project?.workflow?.ports ?? { primary: 3100, extras: [], previewUrl: "http://localhost:{port}" }
 
+const parseExtraPorts = (value: string) => {
+  const extras = value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+        const match = /^([A-Za-z][A-Za-z0-9_]*)=(\d+)$/.exec(line)
+        if (!match || Number(match[2]) < 1024 || Number(match[2]) > 65535) throw new Error("Additional ports must use NAME=port with a port from 1024 to 65535.")
+        return { name: match[1]!, start: Number(match[2]) }
+      })
+  if (new Set(extras.map((extra) => extra.name.toUpperCase())).size !== extras.length) throw new Error("Additional port names must be unique.")
+  return extras
+}
+
 export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSettingsProps) {
   const [projectId, setProjectId] = React.useState(projects[0]?.id ?? "")
   const project = projects.find((candidate) => candidate.id === projectId) ?? projects[0]
@@ -30,6 +40,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
   const [runs, setRuns] = React.useState(runsText(project))
   const [copyFiles, setCopyFiles] = React.useState((project?.workflow?.copyFiles ?? []).join("\n"))
   const [ports, setPorts] = React.useState(portsOf(project))
+  const [extraPortsText, setExtraPortsText] = React.useState(portsOf(project).extras.map((extra) => `${extra.name}=${extra.start}`).join("\n"))
   const [approved, setApproved] = React.useState(project?.workflow?.approvedDigest !== undefined)
   const [busy, setBusy] = React.useState(false)
   const [message, setMessage] = React.useState<string | null>(null)
@@ -42,6 +53,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
     setRuns(runsText(next))
     setCopyFiles((next?.workflow?.copyFiles ?? []).join("\n"))
     setPorts(portsOf(next))
+    setExtraPortsText(portsOf(next).extras.map((extra) => `${extra.name}=${extra.start}`).join("\n"))
     setApproved(next?.workflow?.approvedDigest !== undefined)
     setMessage(null)
   }
@@ -57,12 +69,13 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
     setBusy(true)
     setMessage(null)
     try {
+      const extras = parseExtraPorts(extraPortsText)
       await onSave({
         projectId: project.id,
         ...(setup.trim() ? { setup: setup.trim() } : {}),
         ...(cleanup.trim() ? { cleanup: cleanup.trim() } : {}),
         runs: parsedRuns,
-        ports: { ...ports, previewUrl: ports.previewUrl?.trim() || undefined },
+        ports: { ...ports, extras, previewUrl: ports.previewUrl?.trim() || undefined },
         copyFiles: copyFiles.split("\n").map((line) => line.trim()).filter(Boolean),
         approve: approved
       })
@@ -87,7 +100,7 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
         </label>
         <p className="text-xs text-dim">Use {"{port}"} for the app port or {"{API_port}"} for a named service. Commands receive JINGLER_PORT and JINGLER_API_PORT.</p>
         <label htmlFor="workspace-extra-ports" className="text-sm text-text-bright">Additional service ports (NAME=starting port)
-          <textarea id="workspace-extra-ports" aria-label="Additional service ports" className="w-full border border-line bg-sunken text-text-bright" value={ports.extras.map((extra) => `${extra.name}=${extra.start}`).join("\n")} onChange={(event) => { setPorts({ ...ports, extras: event.currentTarget.value.split("\n").filter(Boolean).map((line) => { const [name, start] = line.split("="); return { name: name ?? "", start: Number(start) } }) }); setApproved(false) }} />
+          <textarea id="workspace-extra-ports" aria-label="Additional service ports" className="w-full border border-line bg-sunken text-text-bright" value={extraPortsText} onChange={(event) => { setExtraPortsText(event.currentTarget.value); setApproved(false) }} />
         </label>
       </div>
       <div>

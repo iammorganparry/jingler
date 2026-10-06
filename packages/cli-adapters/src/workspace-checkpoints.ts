@@ -25,11 +25,12 @@ const exclusive = async <T>(session: Session, reason: string, operation: () => P
 }
 
 /** Shared automatic-turn gate, also used by routines and the built-app harness. */
-export const acquireCheckpointedTurn = async (session: Session, checkpointRoot: string): Promise<WorkspaceActivity> => {
+export const acquireCheckpointedTurn = async (session: Session, checkpointRoot: string, chatId = session.activeChatId): Promise<WorkspaceActivity> => {
   setWorkspaceCheckpointMode(session.id, session.checkpointSafeMode === true)
   if (session.checkpointSafeMode !== true) return acquireWorkspaceActivity(session.id, "agent-turn")
   supported(session)
-  const selectedRuntime = session.chats.find((chat) => chat.id === session.activeChatId)?.runtimeId ?? session.runtimeId ?? "pi"
+  const requestedChat = session.chats.find((chat) => chat.id === chatId)
+  const selectedRuntime = requestedChat?.runtimeId ?? session.runtimeId ?? "pi"
   if (selectedRuntime !== "pi") throw new Error("Checkpoint-safe mode currently supports managed Pi tools only; this native harness has unsupported process ownership.")
   const readiness = workspaceAdmissionReason(session.id)
   if (readiness) throw new Error(`Workspace is unavailable while ${readiness}.`)
@@ -59,6 +60,7 @@ export class WorkspaceCheckpointService extends Effect.Service<WorkspaceCheckpoi
     return {
       setMode: (sessionId: string, enabled: boolean) => operation(sessionId, (session) => exclusive(session, "changing checkpoint-safe mode", async () => {
         if (enabled) {
+          if (session.chats.some((chat) => (chat.runtimeId ?? session.runtimeId ?? "pi") !== "pi")) throw new Error("Checkpoint-safe mode requires managed Pi for every chat. Recreate a fresh managed Pi workspace; no model or permissions are changed automatically.")
           // Validate repository/filesystem support before persisting operator consent.
           await store(session, root).capture("Enabling checkpoint-safe mode")
         }

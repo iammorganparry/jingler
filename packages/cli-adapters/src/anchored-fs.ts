@@ -1,8 +1,9 @@
+import { createRequire } from "node:module"
 import { fork } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 export interface AnchoredRequest {
-  op: "mkdir" | "read" | "stat" | "list" | "remove" | "rename" | "write" | "git"
+  op: "mkdir" | "read" | "stat" | "list" | "remove" | "unlink" | "rename" | "write" | "git"
   path: string
   to?: string
   bytes?: string
@@ -24,7 +25,7 @@ let launch: (() => AnchoredProcess) | undefined
 export const configureAnchoredFsProcess = (factory: () => AnchoredProcess): void => { launch = factory }
 const nodeProcess = (): AnchoredProcess => {
   if (process.versions.electron) throw new Error("Anchored filesystem utility process is not configured.")
-  const child = fork(fileURLToPath(new URL("./anchored-fs-worker.ts", import.meta.url)), [], { execArgv: ["--import", "tsx"], cwd: "/", stdio: ["ignore", "ignore", "ignore", "ipc"] })
+  const child = fork(fileURLToPath(new URL("./anchored-fs-worker.ts", import.meta.url)), [], { execArgv: ["--import", createRequire(import.meta.url).resolve("tsx")], cwd: "/", stdio: ["ignore", "ignore", "ignore", "ipc"] })
   return { post: (message) => child.send(message as object), onMessage: (handler) => child.on("message", handler), onExit: (handler) => child.on("exit", handler), kill: () => { child.kill() } }
 }
 let worker: AnchoredProcess | undefined
@@ -70,6 +71,7 @@ export const anchoredFs = {
   },
   write: (path: string, bytes: Buffer | string, mode = 0o600, exclusive = false) => request<void>({ op: "write", path, bytes: Buffer.from(bytes).toString("base64"), mode, exclusive, createParents: true }),
   list: (path: string) => request<string[]>({ op: "list", path }),
+  unlink: (path: string) => request<void>({ op: "unlink", path }),
   remove: (path: string) => request<void>({ op: "remove", path }),
   rename: (path: string, to: string) => request<void>({ op: "rename", path, to }),
   git: async (path: string, args: string[], env?: Record<string, string>, bytes?: Buffer) => Buffer.from(await request<string>({ op: "git", path, args, env, bytes: bytes?.toString("base64") }), "base64")

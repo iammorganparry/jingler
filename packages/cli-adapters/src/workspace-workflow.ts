@@ -46,6 +46,7 @@ const runCommand = async (
   onSpawn?: (child: ChildProcess) => void,
   lifecycleOwner?: symbol
 ): Promise<{ exitCode: number; output: string }> => {
+  if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
   if (!session.worktreePath) throw new Error("Workspace checkout is unavailable.")
   const shell = shellCommand(command)
   const lease = lifecycleOwner
@@ -93,7 +94,7 @@ const runCommand = async (
 
 const isIgnored = async (root: string, relative: string): Promise<boolean> => {
   try { await anchoredFs.git(root, ["check-ignore", "--quiet", "--", relative]); return true }
-  catch (cause) { if (String(cause).includes("failed")) return false; throw cause }
+  catch (cause) { if ((cause as { code?: number }).code === 1) return false; throw cause }
 }
 
 export const copyApprovedFile = async (root: string, targetRoot: string, configured: string): Promise<void> => {
@@ -163,6 +164,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           if (workflow) {
             for (const file of workflow.copyFiles) await copyApprovedFile(project.path, session.worktreePath!, file)
             if (workflow.setup) {
+              await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
               const result = await runCommand(session, "setup", workflow.setup, undefined, closure)
               if (result.exitCode !== 0) throw Object.assign(new Error(`Setup exited with code ${result.exitCode}.`), { output: result.output })
             }
@@ -236,6 +238,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           const workflow = approvedWorkflow(project.workflow)
           if (project.workflow && !workflow) throw new Error("Project workflow changed and needs operator approval before cleanup.")
           if (workflow?.cleanup) {
+            await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
             const result = await runCommand(session, "cleanup", workflow.cleanup, undefined, owner)
             if (result.exitCode !== 0) throw Object.assign(new Error(`Cleanup exited with code ${result.exitCode}.`), { output: result.output })
           }
@@ -290,6 +293,8 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           let resolveSpawn!: () => void
           let rejectSpawn!: (cause: unknown) => void
           const spawned = new Promise<void>((resolve, reject) => { resolveSpawn = resolve; rejectSpawn = reject })
+          if (session.checkpointSafeMode) throw new Error("Project shell commands are unsupported in checkpoint-safe mode.")
+          await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
           const resultPromise = runCommand(session, `run:${runId}`, command.command, (child) => {
             sessionRuns.set(runId, { state, child })
             runs.set(sessionId, sessionRuns)

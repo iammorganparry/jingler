@@ -1,4 +1,7 @@
-import { workspaceEnvironment, resolveWorkspacePreview, workspacePortAvailable } from "@jingler/cli-adapters/workspace-ports";
+import { AssetWriteIoError } from "@jingler/core";
+import { TerminalError } from "@jingler/core";
+import { readyWorkspacePreview } from "@jingler/cli-adapters/project-workflow";
+import { workspaceEnvironment, workspacePortAvailable } from "@jingler/cli-adapters/workspace-ports";
 import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
@@ -662,6 +665,10 @@ export const createSession = (input: CreateSessionInput) =>
                 : { environmentId: project.environmentId }),
             })),
           );
+    if (resolvedInput.checkpointSafeMode && resolvedInput.projectId) {
+      const project = yield* ProjectService.get(resolvedInput.projectId);
+      if (project.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot run this project's setup shell command. Use a project without setup commands or create an ordinary workspace; models and permissions are unchanged." }));
+    }
     const runtimeInput = yield* resolvePiCreateInput(resolvedInput).pipe(
       Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
     )
@@ -721,7 +728,9 @@ const sessionCreationStream = <E, R>(
 const prepareLocalWorkspace = (session: Session) =>
   Effect.gen(function* () {
     const workflow = yield* WorkspaceWorkflowService;
-    yield* workflow.setup(session.id).pipe(Effect.either)
+    if (session.checkpointSafeMode) {
+      yield* WorkspaceCheckpointService.setMode(session.id, true)
+    } else yield* workflow.setup(session.id).pipe(Effect.either)
     return yield* SessionStore.get(session.id).pipe(
       Effect.mapError((cause) => new GitError({ message: "Created workspace could not be reloaded", cause })),
     )
@@ -1461,14 +1470,16 @@ export const assetWrite = (input: {
   text: string;
   expectedRevision: string;
 }) =>
-  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+  Effect.flatMap(resolveSession(input.sessionId), (session) => session?.checkpointSafeMode
+    ? Effect.fail(new AssetWriteIoError({ path: input.path, message: "Use managed Pi structured file tools in checkpoint-safe mode; direct editor mutations are unsupported." }))
+    : Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
     AssetService.write(
       worktree,
       input.path,
       input.text,
       input.expectedRevision,
     ),
-  );
+  ));
 
 /**
  * `Asset.reveal` handler — show the file in the OS file manager.
@@ -1517,6 +1528,7 @@ export const workspaceRevertFile = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     if (!session?.worktreePath) return;
+    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
     if (workspaceModeOf(session) === "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -1541,6 +1553,7 @@ export const workspaceRevertLines = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     if (!session?.worktreePath) return;
+    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
     if (workspaceModeOf(session) === "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -1612,6 +1625,8 @@ const lifecycleClosures = new Map<string, symbol>();
 const lifecycleOperations = new Set<string>();
 const beginWorkspaceLifecycle = (sessionId: string, reason: string) =>
   Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for workspace lifecycle", cause })));
+    if (session.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Interactive terminal descendants cannot be proven stopped, including after restart. Archive/delete is refused; the ordinary workspace remains usable." }));
     const owner = yield* Effect.try({
       try: () => {
         if (lifecycleOperations.has(sessionId)) throw new Error("Workspace lifecycle operation is already in progress.");
@@ -2602,6 +2617,7 @@ export const githubPublish = (sessionId: string) =>
         Effect.tryPromise({
           try: async () => {
             let session = await run(SessionStore.get(sessionId));
+            if (session.checkpointSafeMode) throw new Error("Publishing invokes unsupported Git commands in checkpoint-safe mode. Disable safe mode before publishing.");
             if (!session.worktreePath) {
               const failure = publishFailure(
                 "This session has no worktree to publish.",
@@ -3227,7 +3243,7 @@ export const createTerminal = (input: {
     const cwd = input.cwd ?? session?.worktreePath ?? undefined;
     const terminals = yield* TerminalService;
     if (session?.checkpointSafeMode) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in checkpoint-safe mode." }));
-    if (session) yield* SessionStore.markCheckpointExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
+    if (session) yield* SessionStore.markCheckpointTerminalExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
     return yield* terminals.create({
       executionHistoryPersisted: session !== null && session !== undefined,
       sessionId: input.sessionId,
@@ -4518,13 +4534,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     const project = yield* ProjectService.get(session.projectId);
     return yield* Effect.tryPromise({
       try: async () => {
-        const url = resolveWorkspacePreview(project.workflow?.ports?.previewUrl ?? "http://localhost:{port}", session.workspacePorts!);
-        try {
-          const response = await fetch(url, { signal: AbortSignal.timeout(3000), redirect: "error" });
-          await response.body?.cancel();
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        } catch (cause) { throw new Error(`Preview is not ready at ${url}. Start the server and retry. ${cause instanceof Error ? cause.message : ""}`); }
-        return url;
+        return await readyWorkspacePreview(project.workflow, session.workspacePorts!);
       }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Preview unavailable", cause })
     });
   }),

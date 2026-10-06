@@ -106,10 +106,10 @@ export const makeWorkspaceInspectionPort = Effect.gen(function* () {
       const commandProgram = "git"
       const commandArgs = program === "rg"
         ? ["grep", "--untracked", "--exclude-standard", ...args, "--", "."]
-        : args
-      const command = Command.make(commandProgram, ...commandArgs).pipe(
+        : [args[0]!, ...(["diff", "show", "log"].includes(args[0]!) ? ["--no-ext-diff", "--no-textconv"] : []), ...args.slice(1)]
+      const command = Command.make(commandProgram, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=", "--no-pager", ...commandArgs).pipe(
         Command.workingDirectory(cwd),
-        Command.env({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
+        Command.env({ ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
       )
       const child = yield* Command.start(command)
       const [stdout, stderr, exitCode] = yield* Effect.all(

@@ -10,6 +10,7 @@ const same = (a: fs.Stats, b: fs.Stats) => a.dev === b.dev && a.ino === b.ino
 /** A dedicated process owns cwd. Every descent verifies the held no-follow inode
  * against cwd before doing anything there. Renames cannot redirect relative I/O.
  * Descriptor-path traversal is not supported by Darwin; do not substitute it. */
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: descriptor validation and private ownership checks must precede every relative operation during descent.
 export const enterDirectory = (path: string, create = false, privateDirectory = false, beforeEnter?: (part: string) => void): void => {
   if (process.platform === "win32") throw new Error("Anchored filesystem operations require POSIX directory ownership.")
   if (!isAbsolute(path) || path.split("/").includes("..")) throw new Error("Unsafe filesystem ancestor.")
@@ -23,7 +24,9 @@ export const enterDirectory = (path: string, create = false, privateDirectory = 
       try { fs.mkdirSync(part, { mode: 0o700 }) }
       catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause }
     }
-    const fd = fs.openSync(part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    let fd: number
+    try { fd = fs.openSync(part, O_RDONLY | O_DIRECTORY | O_NOFOLLOW) }
+    catch (cause) { throw Object.assign(new Error(`Unsafe filesystem ancestor: ${part}`, { cause }), { code: (cause as NodeJS.ErrnoException).code }) }
     try {
       const info = fs.fstatSync(fd)
       beforeEnter?.(part)
@@ -49,7 +52,8 @@ const read = (path: string, limit: number) => {
   const fd = fs.openSync(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
   try {
     const info = fs.fstatSync(fd)
-    if (!info.isFile() || info.size > limit) throw new Error("Unsafe file or file size limit exceeded.")
+    if (!info.isFile()) throw new Error("Unsafe file type.")
+    if (info.size > limit) throw new Error(`File exceeds ${limit / 1024 / 1024} MiB size limit.`)
     const bytes = fs.readFileSync(fd)
     if (bytes.length > limit) throw new Error("File size limit exceeded.")
     return { bytes: bytes.toString("base64"), mode: info.mode & 0o777, nlink: info.nlink }
@@ -73,6 +77,7 @@ const removeDirectory = (entry: string): void => {
     fs.rmdirSync(entry)
   } finally { fs.closeSync(fd); fs.closeSync(parent) }
 }
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: the worker dispatch keeps atomic replacement and cleanup in the same anchored cwd.
 export const operate = (request: AnchoredRequest): unknown => {
   if (request.op === "mkdir") { enterDirectory(request.path, true, true); return null }
   if (request.op === "git") {
@@ -93,6 +98,7 @@ export const operate = (request: AnchoredRequest): unknown => {
       enterDirectory(request.path)
       return fs.readdirSync(".")
     }
+    case "unlink": { fs.unlinkSync(file); return null }
     case "remove": {
       const info = stat(file)
       if (!info) return null
@@ -116,7 +122,7 @@ export const operate = (request: AnchoredRequest): unknown => {
         fs.fsyncSync(fd)
         if (request.exclusive) { fs.linkSync(temporary, file); fs.unlinkSync(temporary) }
         else fs.renameSync(temporary, file) // Break hardlinks instead of truncating their inode.
-      } finally { fs.closeSync(fd); try { fs.unlinkSync(temporary) } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause } }
+      } finally { fs.closeSync(fd); fs.rmSync(temporary, { force: true }) }
       return null
     }
   }

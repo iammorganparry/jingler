@@ -55,6 +55,7 @@
     "./runtime/codex/login": "./src/runtime/codex/login.ts",
     "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
     "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts",
+    "./project-workflow": "./src/project-workflow.ts",
     "./workspace-ports": "./src/workspace-ports.ts",
     "./routine-store": "./src/routine-store.ts",
     "./workspace-checkpoints": "./src/workspace-checkpoints.ts",

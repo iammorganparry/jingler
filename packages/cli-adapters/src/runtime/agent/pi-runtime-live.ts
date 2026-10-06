@@ -1,3 +1,4 @@
+import { checkpointTurnOwner, checkpointTurnGeneration, workspaceCheckpointMode } from "../../workspace-admission.js"
 import { makeSharedPlanningRuntime } from "./shared-planning.js"
 import { createHash } from "node:crypto"
 import { isAbsolute, join, resolve } from "node:path"
@@ -280,7 +281,7 @@ export const makePiAgentRuntimeLive = (
       resolveConnection: (spec) => validateProviderConnection(providers, spec),
       resolveSubagentConfig: (spec) => Effect.gen(function* () {
         const saved = yield* config.get()
-        const enabled = saved?.subagentDelegationEnabled ?? true
+        const enabled = !workspaceCheckpointMode(spec.sessionId) && (saved?.subagentDelegationEnabled ?? true)
         const models = enabled && spec.providerId !== undefined
           ? modelsForProvider(saved, spec.providerId)
           : {}
@@ -302,6 +303,7 @@ export const makePiAgentRuntimeLive = (
         Effect.provideService(AppPaths, paths)
       ),
       terminalTracker: (spec) => new FileChangeTracker({
+        checkpointSafeMode: workspaceCheckpointMode(spec.sessionId),
         artifactDir: join(paths.runJournalsDir, "artifacts", spec.runId),
         sessionId: spec.continuation?.id ?? spec.runId
       }),
@@ -342,6 +344,8 @@ export const makePiAgentRuntimeLive = (
           preparedCatalogs.delete(oldest)
         }
         return JSON.stringify({
+          checkpointSafeMode: workspaceCheckpointMode(spec.sessionId),
+          checkpointGeneration: checkpointTurnGeneration(spec.sessionId),
           subagentModels: runtimeConfig?.subagentModels ?? {},
           subagentConnectionId: runtimeConfig?.defaultConnectionId ?? null,
           managedMcp: managedMcp.map((server) => server.transport === "stdio"
@@ -398,7 +402,7 @@ export const makePiAgentRuntimeLive = (
       createToolRegistry: (spec, context, tracker) => {
         const preparedCatalog = preparedCatalogs.get(spec.runId)
         preparedCatalogs.delete(spec.runId)
-        Effect.runFork(
+        if (!workspaceCheckpointMode(spec.sessionId)) Effect.runFork(
           offload.primeSession(spec.cwd, spec.sessionId).pipe(Effect.ignore)
         )
         const runWebSearch = selectRunWebSearch(webSearch, browserControl, context, spec)
@@ -487,6 +491,8 @@ export const makePiAgentRuntimeLive = (
               mcpClientIdentityForModel(spec.providerId, spec.modelId)
             ),
             registryOptions: {
+              checkpointSessionId: spec.sessionId,
+              checkpointOwner: checkpointTurnOwner(spec.sessionId),
               ...(plugins
                 ? {
                     onSuccessfulResult: async (result: ToolSuccessfulResult) => {

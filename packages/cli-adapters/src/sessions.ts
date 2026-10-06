@@ -485,6 +485,13 @@ const nextOpId = (): number => ++opSeq
  * Reads are best-effort: a missing or malformed file yields an empty list so
  * the app still boots.
  */
+const checkpointCreationFields = (input: CreateSessionInput) => input.checkpointSafeMode ? { checkpointSafeMode: true } : {}
+const checkpointCreationSupported = (input: CreateSessionInput): boolean => !input.checkpointSafeMode || (!input.environmentId && input.useWorktree !== false && (input.runtimeId ?? "pi") === "pi" && process.platform !== "win32")
+
+const validateCheckpointCreation = (input: CreateSessionInput) => checkpointCreationSupported(input) ? Effect.void : Effect.fail(new GitError({ message: "Checkpoint-safe mode requires a fresh isolated local managed Pi workspace." }))
+
+const initialWorkspaceLifecycle = (input: CreateSessionInput, updatedAt: string) => ({ status: input.checkpointSafeMode ? "setup-skipped" as const : "setup-running" as const, updatedAt })
+
 export class SessionStore extends Effect.Service<SessionStore>()(
   "@jingler/SessionStore",
   {
@@ -522,6 +529,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         if (session.environmentId || session.workspaceMode === "direct" || !session.worktreePath || session.workspacePorts) return session
         const projectService = yield* Effect.serviceOption(ProjectService)
         const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project port configuration", cause }))) : undefined
+        if (session.checkpointSafeMode && project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
         const config = approvedWorkflow(project?.workflow)?.ports
         const workspacePorts = yield* Effect.tryPromise({ try: () => allocateWorkspacePorts(current, config), catch: (cause) => new GitError({ message: "Could not allocate workspace ports", cause }) })
         return { ...session, workspacePorts }
@@ -669,6 +677,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         | AppPaths
       > =>
         Effect.gen(function* () {
+          yield* validateCheckpointCreation(input)
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           // Title is optional now: blank → the agent auto-names it (provisional
@@ -723,6 +732,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           ): Session => ({
             id,
             checkpointExecutionHistory: "clean",
+            ...checkpointCreationFields(input),
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -749,7 +759,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             baseBranch: input.baseBranch,
             ...propertiesWhen(
               workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
-              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+              { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
             )
           })
 
@@ -1046,7 +1056,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...propertiesWhen(input.githubSlug !== undefined, { githubSlug: input.githubSlug }),
             branch: worktree.branch,
             semanticBranchPending: true,
-            checkpointExecutionHistory: "clean",
             // Seed (and pin) the title from the issue.
             title: input.issue.title,
             autoTitle: false,
@@ -1837,6 +1846,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
 
       const setCheckpointSafeMode = (id: string, enabled: boolean) =>
         update(id, (session) => ({ ...session, checkpointSafeMode: enabled })).pipe(Effect.tap(() => Effect.sync(() => setWorkspaceCheckpointMode(id, enabled))))
+      const markCheckpointTerminalExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable", checkpointPtyHistory: true }))
       const markCheckpointExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable" }))
 
       const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
@@ -1942,6 +1952,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       /** Archive a session (its linked PR was merged/closed) — read-only, kept. */
       const archive = (id: string, reason: "merged" | "closed") =>
         Effect.gen(function* () {
+          const session = yield* get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for archive", cause })))
+          if (session.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; archive is refused. The workspace remains usable." }))
           const now = yield* Effect.sync(() => new Date().toISOString())
           yield* update(id, (s) => ({
             ...s,
@@ -1979,6 +1991,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
+          if (target.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
           if (
             target.worktreePath &&
             workspaceModeOf(target) === "worktree"
@@ -2087,6 +2100,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setWorkspaceLifecycle,
         setCheckpointSafeMode,
         markCheckpointExecutionUnprovable,
+        markCheckpointTerminalExecutionUnprovable,
         reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
         setProject,
