@@ -70,6 +70,9 @@ import {
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
+  GitHubTeamDiscovery,
+  GitHubTeamQueue,
+  GitHubTeamPrResult,
   QuestionAnswer,
   ReasoningSetting,
   Repo,
@@ -1598,6 +1601,43 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.inbox", {
     success: Schema.Array(PullRequestListItem),
     error: GitHubApiError
+  }),
+
+  /** Organization teams for the current github.com CLI account; no App fallback. */
+  Rpc.make("Github.teams", {
+    success: GitHubTeamDiscovery,
+    error: GitHubApiError,
+  }),
+  Rpc.make("Github.teamPrs", {
+    success: GitHubTeamPrResult,
+    error: GitHubApiError,
+    payload: {
+      accountId: Schema.String,
+      organization: Schema.String,
+      teamSlug: Schema.String,
+      queue: GitHubTeamQueue,
+      refresh: Schema.Boolean,
+    },
+  }),
+  Rpc.make("Github.teamPr", {
+    success: PullRequest,
+    error: GitHubApiError,
+    payload: { accountId: Schema.String, repository: Schema.String, number: Schema.Number },
+  }),
+  Rpc.make("Github.teamComment", {
+    success: Schema.Void,
+    error: GitHubApiError,
+    payload: { accountId: Schema.String, repository: Schema.String, number: Schema.Number, body: Schema.String },
+  }),
+  Rpc.make("Github.teamClose", {
+    success: Schema.Void,
+    error: GitHubApiError,
+    payload: { accountId: Schema.String, repository: Schema.String, number: Schema.Number },
+  }),
+  Rpc.make("Github.teamMerge", {
+    success: Schema.Void,
+    error: GitHubApiError,
+    payload: { accountId: Schema.String, repository: Schema.String, number: Schema.Number, method: PrMergeMethod },
   }),
 
   /** Read one PR without requiring a linked Jingler session. */

@@ -864,18 +864,25 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               new GitError({ message: "A session already exists for this pull request." })
             )
           }
+          const teamCheckout = input.githubCliAccountId === undefined ? null
+            : yield* GitHubApi.teamCheckout({
+                accountId: input.githubCliAccountId,
+                repository: input.githubSlug ?? "",
+                number: input.pr.number,
+              })
           const worktree = yield* GitService.createDetachedWorktree({
             repoPath: input.repoPath,
             repoName: input.repoName,
             slug,
             baseBranch: input.pr.baseRefName
-          })
-          const repository = yield* GitHubApi.repository(input.repoPath)
-          const head = yield* GitHubApi.prCheckout(input.repoPath, input.pr.number)
+          }, teamCheckout?.fetchBase(input.repoPath, input.pr.baseRefName))
+          const repository = teamCheckout?.repository ?? (yield* GitHubApi.repository(input.repoPath))
+          const head = teamCheckout?.head ?? (yield* GitHubApi.prCheckout(input.repoPath, input.pr.number))
           yield* GitService.checkoutPullRequestHead(
             worktree.path,
             head,
-            opts.allowSharedCheckout ?? false
+            opts.allowSharedCheckout ?? false,
+            teamCheckout?.fetchHead.bind(null, worktree.path)
           )
           // The live branch after checkout is the PR head; fall back to the
           // reported head ref if `rev-parse` can't resolve it.

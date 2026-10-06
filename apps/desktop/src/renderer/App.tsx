@@ -270,6 +270,8 @@ function AuthedApp({
   const [newSessionRequest, setNewSessionRequest] = useState<{
     projectId: string;
     pr: PrSummary;
+    githubCliAccountId?: string;
+    githubSlug?: string;
     tabId?: string;
     nonce: number;
   } | null>(null);
@@ -1333,14 +1335,21 @@ function AuthedApp({
     if (project) {
       setNewSessionRequest((previous) => ({
         projectId: project.id,
-        pr: selectedPullRequest,
+        pr: pullRequestInbox.detail ? { ...selectedPullRequest,
+          headRefName: pullRequestInbox.detail.headRefName,
+          baseRefName: pullRequestInbox.detail.baseRefName,
+        } : selectedPullRequest,
+        ...(pullRequestInbox.cliAccountId ? {
+          githubCliAccountId: pullRequestInbox.cliAccountId,
+          githubSlug: selectedPullRequest.repository,
+        } : {}),
         ...(tabId ? { tabId } : {}),
         nonce: (previous?.nonce ?? 0) + 1,
       }));
     }
   };
   const openSelectedPullRequestSession = () => openSelectedPullRequestTarget();
-  const openSelectedPullRequestFiles = () => openSelectedPullRequestTarget("review");
+  const openSelectedPullRequestFiles = () => openSelectedPullRequestTarget("files");
 
   return (
     <>
@@ -1923,7 +1932,19 @@ function renderPullRequestInbox(
 ) {
   return <PullRequestInbox
     prs={pullRequestInbox.prs}
-    viewerLogin={github.connection.user?.login ?? ""}
+    viewerLogin={pullRequestInbox.viewerLogin ?? github.connection.user?.login ?? ""}
+    teamControls={{
+      teams: pullRequestInbox.teams,
+      teamId: pullRequestInbox.teamId,
+      queue: pullRequestInbox.queue,
+      onTeam: pullRequestInbox.selectTeam,
+      onQueue: pullRequestInbox.selectQueue,
+      onRefresh: pullRequestInbox.discover,
+      discovering: pullRequestInbox.discovering,
+      error: pullRequestInbox.discoveryError,
+    }}
+    onActivate={pullRequestInbox.discover}
+    warnings={pullRequestInbox.warnings}
     selected={pullRequestInbox.selected ? {
       repository: pullRequestInbox.selected.repository,
       number: pullRequestInbox.selected.number,

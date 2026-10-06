@@ -323,6 +323,8 @@ export interface JinglerAppProps {
   newSessionRequest?: {
     readonly projectId: string
     readonly pr: PrSummary
+    readonly githubCliAccountId?: string
+    readonly githubSlug?: string
     readonly tabId?: TabKey
     readonly nonce: number
   } | null
@@ -1283,9 +1285,13 @@ function getActiveTabContext(active: Session) {
   const handleCreateFromPr = useCallback(
     async (input: CreateSessionFromPrInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => {
       if (!onCreateSessionFromPr) return
-      await runTrackedCreation(input, onProgress, (report) => onCreateSessionFromPr(input, images, report))
+      const request = requestedNewSession
+      const pinnedInput = request?.githubCliAccountId && input.pr.number === request.pr.number && input.projectId === request.projectId
+        ? { ...input, githubCliAccountId: request.githubCliAccountId, githubSlug: request.githubSlug }
+        : input
+      await runTrackedCreation(pinnedInput, onProgress, (report) => onCreateSessionFromPr(pinnedInput, images, report))
     },
-    [onCreateSessionFromPr, runTrackedCreation]
+    [onCreateSessionFromPr, runTrackedCreation, requestedNewSession]
   )
   const handleCreateFromIssue = useCallback(
     async (input: CreateSessionFromIssueInput, images: ReadonlyArray<Attachment>, onProgress?: (phase: SessionCreationPhase) => void) => {

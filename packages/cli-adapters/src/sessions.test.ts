@@ -1503,6 +1503,45 @@ describe("SessionStore", () => {
     expect(reread._tag === "Success" && reread.value.prNumber).toBe(482)
   })
 
+  it("createFromPr keeps initial team pickup CLI-only and never persists the account pin", async () => {
+    const calls: string[] = []
+    const teamInput = { ...prInput(), githubSlug: "acme/trigify-app", githubCliAccountId: "123" }
+    const teamApi = Layer.succeed(GitHubApi, {
+      repository: () => Effect.die("must not use personal/App repository routing"),
+      prCheckout: () => Effect.die("must not use personal/App checkout routing"),
+      teamCheckout: (input: { accountId: string; repository: string; number: number }) => {
+        expect(input).toEqual({ accountId: "123", repository: "acme/trigify-app", number: 482 })
+        calls.push("team checkout")
+        return Effect.succeed({
+          repository: { id: "repo-301", nodeId: "R_trigify", owner: "acme", name: "trigify-app", fullName: "acme/trigify-app" },
+          head: { repositoryId: "fork-42", fullName: "contributor/trigify-app", ref: "chore/bump", sha: "abc123", cloneUrl: "https://github.com/contributor/trigify-app.git", sshUrl: null },
+          fetchBase: (_cwd: string, branch: string) => Effect.sync(() => { calls.push(`pinned base ${branch}`) }),
+          fetchHead: (_cwd: string, ref: string) => Effect.sync(() => { calls.push(`pinned head ${ref}`) }),
+        })
+      },
+    } as never)
+    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("chore/bump", calls)), teamApi)
+    const exit = await runExit(SessionStore.createFromPr(teamInput).pipe(Effect.provide(prServices)), env)
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(calls).toContain("pinned base main")
+    expect(calls).toContain("pinned head refs/remotes/jingler-pr-fork-42/chore/bump")
+    expect(calls.some((call) => call.includes(" fetch "))).toBe(false)
+    expect(exit.value).not.toHaveProperty("githubCliAccountId")
+    expect(exit.value).not.toHaveProperty("githubInstallationId")
+    expect(calls.indexOf("team checkout")).toBeLessThan(calls.findIndex((call) => call.includes("worktree add --detach")))
+  })
+
+  it("createFromPr rejects a changed team account before creating a worktree", async () => {
+    const calls: string[] = []
+    const env = Layer.mergeAll(temp.layer, fakeCommandExecutor(prExecutor("chore/bump", calls)), Layer.succeed(GitHubApi, {
+      teamCheckout: () => Effect.fail(new GitHubApiError({ reason: "validation", message: "The GitHub CLI account changed. Refresh teams." })),
+    } as never))
+    const exit = await runExit(SessionStore.createFromPr({ ...prInput(), githubSlug: "acme/trigify-app", githubCliAccountId: "123" }).pipe(Effect.provide(prServices)), env)
+    expect(failureOf(exit)?.message).toContain("account changed")
+    expect(calls.some((call) => call.includes("worktree add"))).toBe(false)
+  })
+
   it("createFromPr gives same-titled PRs DISTINCT worktrees (slug carries the PR number)", async () => {
     const env = Layer.mergeAll(
       temp.layer,

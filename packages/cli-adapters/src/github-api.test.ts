@@ -149,6 +149,34 @@ describe("preferGitHubCli", () => {
 })
 
 describe("GitHubApi backend selection", () => {
+  it("never selects App credentials or fallback for any team operation, even when CLI fails", async () => {
+    const credentialsForOwner = vi.fn()
+    const appRepositories = vi.fn()
+    const input = { accountId: "1", repository: "acme/widget", number: 42 }
+    const error = new GitHubApiError({ reason: "repository-access", message: "SSO required" })
+    const cli = {
+      teams: () => Effect.fail(error),
+      teamPrs: () => Effect.fail(error),
+      teamPr: () => Effect.fail(error),
+      teamCheckout: () => Effect.fail(error),
+      teamComment: () => Effect.fail(error),
+      teamClose: () => Effect.fail(error),
+      teamMerge: () => Effect.fail(error),
+    }
+    const operations = [
+      GitHubApi.teams(),
+      GitHubApi.teamPrs({ accountId: "1", organization: "acme", teamSlug: "platform", queue: "reviews", refresh: false }),
+      GitHubApi.teamPr(input), GitHubApi.teamCheckout(input),
+      GitHubApi.teamComment({ ...input, body: "hi" }), GitHubApi.teamClose(input),
+      GitHubApi.teamMerge({ ...input, method: "merge" }),
+    ]
+    for (const operation of operations) await expect(runApi<unknown>(operation, cli, {
+      credentialsForOwner, repositories: appRepositories,
+    })).rejects.toThrow("SSO required")
+    expect(credentialsForOwner).not.toHaveBeenCalled()
+    expect(appRepositories).not.toHaveBeenCalled()
+  })
+
   it("lists CLI repositories before checking App installations", async () => {
     const appRepositories = vi.fn(() => Effect.succeed([{
       installationId: "77", repositoryId: "8", fullName: "app/widget"

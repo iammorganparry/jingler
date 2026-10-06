@@ -5428,6 +5428,12 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
 
 const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.inbox": () => githubPrInbox(),
+  "Github.teams": () => GitHubApi.teams(),
+  "Github.teamPrs": (input) => GitHubApi.teamPrs(input),
+  "Github.teamPr": (input) => GitHubApi.teamPr(input),
+  "Github.teamComment": (input) => GitHubApi.teamComment(input),
+  "Github.teamClose": (input) => GitHubApi.teamClose(input),
+  "Github.teamMerge": (input) => GitHubApi.teamMerge(input),
   "Github.prBySlug": ({ repository, number }) => githubPrBySlug(repository, number),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
