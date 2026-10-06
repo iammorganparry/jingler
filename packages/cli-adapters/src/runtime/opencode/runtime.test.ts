@@ -7,7 +7,7 @@ import { join } from "node:path"
 import { AgentEndpointCatalogEntry, CURRENT_RUNTIME_CONTRACTS, nativeCliEndpointId, ProviderId, ProviderModelId, type AgentRunSpec } from "@jingler/core"
 import { Effect, Schema, Stream } from "effect"
 import { describe, expect, it, vi } from "vitest"
-import { liveChildCount } from "../../child-registry.js"
+import { liveChildCount, ownedChildCount, stopOwnedChildren } from "../../child-registry.js"
 import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { probeOpenCodeEndpoint } from "./endpoint.js"
 import { OpenCodeServer, boundedResponse, makeOpenCodePool, openCodeEnvironment } from "./server.js"
@@ -244,6 +244,22 @@ it("rejects malformed endpoint JSON and reaps the probe process", async () => {
   } })
   expect(entry.endpoint.status).toBe("error")
   expect(liveChildCount()).toBe(0)
+})
+
+it.skipIf(process.platform === "win32")("reports an actual shutdown refusal instead of a ready endpoint", async () => {
+  const kill = process.kill.bind(process)
+  const spy = vi.spyOn(process, "kill").mockImplementation((pid, sig) => {
+    if (pid < 0 && sig === 0) throw Object.assign(new Error("kill EPERM"), { code: "EPERM" })
+    return kill(pid, sig)
+  })
+  try {
+    const entry = await probeOpenCodeEndpoint({ ...options, owner: { sessionId: "refused-probe", action: "probe" } })
+    expect(entry.endpoint.status).toBe("error")
+    expect(ownedChildCount("refused-probe")).toBe(1)
+  } finally {
+    spy.mockRestore()
+    await stopOwnedChildren("refused-probe", undefined, 0)
+  }
 })
 
 it("keeps one completion when interrupt arrives at the terminal event", async () => {

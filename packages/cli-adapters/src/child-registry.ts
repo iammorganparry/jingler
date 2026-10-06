@@ -8,6 +8,7 @@ export interface ChildOwner {
 
 interface ChildRecord {
   spawned: boolean
+  stopping?: Promise<void>
   readonly processGroup: boolean
   readonly owner?: ChildOwner
 }
@@ -22,6 +23,8 @@ const isAlive = (proc: ChildProcess): boolean =>
 const signal = (proc: ChildProcess, sig: NodeJS.Signals): void => {
   try {
     const record = live.get(proc)
+    if (!record) return
+    if (record.processGroup && !record.spawned) return
     if (record?.processGroup && proc.pid && process.platform !== "win32") process.kill(-proc.pid, sig)
     else if (isAlive(proc)) proc.kill(sig)
   } catch {
@@ -70,21 +73,48 @@ const groupAlive = (proc: ChildProcess): boolean => {
   }
 }
 
-export const stopChildAndWait = async (
+const waitForChildStop = async (
   proc: ChildProcess,
   graceMs: number = GRACE_MS,
   timeoutMs: number = graceMs + 3_000
 ): Promise<void> => {
-  const started = Date.now()
+  const started = performance.now()
   signal(proc, graceMs === 0 ? "SIGKILL" : "SIGTERM")
-  while (groupAlive(proc)) {
-    const elapsed = Date.now() - started
-    if (elapsed >= timeoutMs) throw new Error(`Timed out stopping child process ${proc.pid ?? "unknown"}.`)
+  while (true) {
+    let refusal: unknown
+    try {
+      if (!groupAlive(proc)) break
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== "EPERM") throw cause
+      // Darwin filters zombies out of killpg's member iteration, returning EPERM
+      // until they are reaped. This is still unknown, never proof of group death.
+      refusal = cause
+    }
+    const elapsed = performance.now() - started
+    if (elapsed >= timeoutMs) throw refusal ?? new Error(`Timed out stopping child process ${proc.pid ?? "unknown"}.`)
     if (elapsed >= graceMs) signal(proc, "SIGKILL")
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(25, timeoutMs - elapsed)))
   }
   live.get(proc)?.owner?.onStopped?.()
   live.delete(proc)
+}
+
+export const stopChildAndWait = (
+  proc: ChildProcess,
+  graceMs: number = GRACE_MS,
+  timeoutMs: number = graceMs + 3_000
+): Promise<void> => {
+  const record = live.get(proc)
+  if (!record) return Promise.resolve()
+  if (record.stopping) return record.stopping
+  const stopping = waitForChildStop(proc, graceMs, timeoutMs)
+  record.stopping = stopping
+  // Failed shutdown remains owned and can be retried. Concurrent exit/close
+  // callers share one poller and one onStopped notification.
+  void stopping.finally(() => {
+    if (record.stopping === stopping) delete record.stopping
+  }).catch(() => {})
+  return stopping
 }
 
 /** Stop only children provably owned by this live app/session. Persisted PIDs are never used. */

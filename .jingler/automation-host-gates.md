@@ -1,0 +1,10 @@
+# Host verification5825726f — acceptance pending
+
+- PASS pnpm lint,88warnings0errors: /tmp/jingler-parent-root-lint-final.log.
+- PASS full pnpm typecheck21tasks: /tmp/jingler-parent-root-types-build-fixture.log. Production Next build prerequisite requires BETTER_AUTH_SECRET/CRON_SECRET/BETTER_AUTH_URL; provided two independent ephemeral random32-byte build-only keys and https://build.example.invalid through subprocess env, never printed/persisted. Plain command failed missing environment, not waived/source production checks unchanged.
+- FAIL full pnpm test:4778pass,3fail,5skip502files /tmp/jingler-parent-root-tests-final.log. workspace-workflow early-exiting leader descendants fails stopping; OpenCode discovery ready/signed-out receives error. Shared groupAlive negative-PGID signal probe EPERM remains suspect; finalwriterassignedrootcause, no unsafe ignore permission.
+- Full fivefeature e2e attempt /tmp/jingler-parent-five-feature-e2e.log:3PASS,3FAIL. Readonly routine COMPLETE UI save→manual→capture+read inspection→overlap→scheduled→disable→cancel→history link→restart/no replay PASS. Workflow PASS; warned archive PASS. Checkpoints/ports/AskWRITE failinitialappShell withpage "Failed toload: kill EPERM". Priorparentad80 checkpoint/AskWRITE passed, but latestfinal exactsuite NOTgreen.
+- Parent standalone owned detachedNode SIGTERM/awaitexit/negative-PGID0 probe returnedESRCH,psgroupmembers empty. This is not proof of actualSDK/probe path, suppliedto solewriter for diagnosis. DAP nodeadapter unavailable; minimalstandalone diagnosticremoved, no appcode edited.
+- Sole writer in workflow2e7aa5d7 assigned sharedchildregistrygroupfix. Independent reviewer of immutable5825726f reassesses checkpoint/routine reviewedfixes; excludes separatelyownedgroupissue. Allprevious applicationwriters completed/Native71f paused. Parent application readonly until handoff.
+
+Pending: definitive groupstop fix+tests, rerunfullunit/features/allElectron suite, finalindependentapproval, allplan/evidencecheckboxes. Scanners unavailable. No push/release/missioncompletion.

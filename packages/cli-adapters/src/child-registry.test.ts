@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess } from "node:child_process"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { killAllChildren, liveChildCount, ownedChildCount, stopChild, stopChildAndWait, stopOwnedChildren, trackChild } from "./child-registry.js"
 
 /**
@@ -215,4 +215,85 @@ it.skipIf(process.platform === "win32")("bounds shutdown polling, retains owners
   } finally {
     await stopChildAndWait(child, 0)
   }
+})
+
+describe.skipIf(process.platform === "win32")("process-group shutdown races", () => {
+  it("waits through a transient EPERM until ESRCH proves the group disappeared", async () => {
+    const child = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }), true)
+    await new Promise<void>((resolve) => child.once("spawn", resolve))
+    const kill = process.kill.bind(process)
+    let probes = 0
+    const spy = vi.spyOn(process, "kill").mockImplementation((pid, sig) => {
+      if (pid === -child.pid! && sig === 0 && ++probes <= 2) {
+        throw Object.assign(new Error("kill EPERM"), { code: "EPERM" })
+      }
+      return kill(pid, sig)
+    })
+    try {
+      await stopChildAndWait(child, 0)
+      expect(probes).toBeGreaterThan(2)
+      expect(isRunning(child)).toBe(false)
+    } finally { spy.mockRestore(); await stopChildAndWait(child, 0) }
+  })
+
+  it("retains ownership on persistent permission denial and retries without signaling foreign PIDs", async () => {
+    const onStopped = vi.fn()
+    const child = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }), true, { sessionId: "denied", action: "run", onStopped })
+    await new Promise<void>((resolve) => child.once("spawn", resolve))
+    const refusal = Object.assign(new Error("kill EPERM"), { code: "EPERM" })
+    const spy = vi.spyOn(process, "kill").mockImplementation(() => { throw refusal })
+    let deadline: ReturnType<typeof setTimeout> | undefined
+    let clock: ReturnType<typeof vi.spyOn> | undefined
+    try {
+      const first = stopChildAndWait(child, 0, 60)
+      clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() - 60_000)
+      expect(stopChildAndWait(child, 0, 60)).toBe(first)
+      const stalled = new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error("Shutdown exceeded its elapsed deadline")), 1000) })
+      await expect(Promise.race([first, stalled])).rejects.toBe(refusal)
+      expect(ownedChildCount("denied")).toBe(1)
+      expect(onStopped).not.toHaveBeenCalled()
+      expect(spy.mock.calls.every(([pid]) => pid === -child.pid!)).toBe(true)
+    } finally { clearTimeout(deadline); clock?.mockRestore(); spy.mockRestore(); await stopChildAndWait(child, 0) }
+    expect(onStopped).toHaveBeenCalledTimes(1)
+    const spyAfter = vi.spyOn(process, "kill")
+    try { await stopChildAndWait(child, 0); expect(spyAfter).not.toHaveBeenCalled() }
+    finally { spyAfter.mockRestore() }
+  })
+
+  it("releases failed spawns without probing or signaling a group", async () => {
+    const onStopped = vi.fn()
+    const child = trackChild(spawn("/nonexistent/jingler-owned-child", [], { detached: true, stdio: "ignore" }), true, { sessionId: "spawn-failed", action: "run", onStopped })
+    const spy = vi.spyOn(process, "kill")
+    try {
+      await stopChildAndWait(child, 0)
+      expect(ownedChildCount("spawn-failed")).toBe(0)
+      expect(onStopped).toHaveBeenCalledTimes(1)
+      expect(spy).not.toHaveBeenCalled()
+    } finally { spy.mockRestore() }
+  })
+
+  it("retains ownership when group existence fails with an unknown error", async () => {
+    const child = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }), true, { sessionId: "unknown-group", action: "run" })
+    await new Promise<void>((resolve) => child.once("spawn", resolve))
+    const kill = process.kill.bind(process)
+    const refusal = Object.assign(new Error("group probe failed"), { code: "EIO" })
+    const spy = vi.spyOn(process, "kill").mockImplementation((pid, sig) => {
+      if (pid === -child.pid! && sig === 0) throw refusal
+      return kill(pid, sig)
+    })
+    try {
+      await expect(stopChildAndWait(child, 0)).rejects.toBe(refusal)
+      expect(ownedChildCount("unknown-group")).toBe(1)
+    } finally { spy.mockRestore(); await stopChildAndWait(child, 0) }
+  })
+
+  it("shares shutdown with the leader exit callback and notifies the owner once", async () => {
+    const onStopped = vi.fn()
+    const child = trackChild(spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" }), true, { sessionId: "concurrent", action: "run", onStopped })
+    const stopped = stopChildAndWait(child, 0)
+    expect(stopChildAndWait(child, 0)).toBe(stopped)
+    await stopped
+    expect(onStopped).toHaveBeenCalledTimes(1)
+    expect(ownedChildCount("concurrent")).toBe(0)
+  })
 })
