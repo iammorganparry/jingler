@@ -1,4 +1,4 @@
-import { createContext, isValidElement, useContext, useMemo, type ReactNode } from "react"
+import { createContext, isValidElement, useContext, useMemo, type MouseEvent, type ReactNode } from "react"
 import { Streamdown, defaultUrlTransform, type AllowedTags, type MathPlugin, type UrlTransform } from "streamdown"
 import rehypeKatex from "rehype-katex"
 import remarkMath from "remark-math"
@@ -110,6 +110,18 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
   return <CodeBlock code={text} language={language} fileIcon={<FileIcon path={iconPath} size={14} />} status={streaming ? "streaming" : "complete"} />
 }
 
+const handleLinkClick = (open?: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
+  const selection = window.getSelection()
+  if (event.detail !== 0 && selection?.toString() && selection.getRangeAt(0).intersectsNode(event.currentTarget)) {
+    event.preventDefault()
+    return
+  }
+  if (open) {
+    event.preventDefault()
+    open()
+  }
+}
+
 /**
  * An inline `code` span that names a real file becomes a link into the Preview
  * dock; everything else renders exactly as it always did.
@@ -131,9 +143,9 @@ function MarkdownCode({ children, ...rest }: { children?: ReactNode; className?:
   const open = useOpenPath(fenced || rest.className ? null : text)
   if (!open || text === null) return <code {...rest}>{children}</code>
   return (
-    <button type="button" onClick={open} title={`Open ${text}`} className="sb-md-path">
+    <a href={text} draggable={false} onClick={handleLinkClick(open)} onAuxClick={event => event.preventDefault()} title={`Open ${text}`} className="sb-md-path">
       <code {...rest}>{children}</code>
-    </button>
+    </a>
   )
 }
 
@@ -189,9 +201,9 @@ function MarkdownAnchor({
   const open = useOpenPath(href)
   if (open) {
     return (
-      <button type="button" onClick={open} title={`Open ${href}`} className="sb-md-path">
+      <a href={href} draggable={false} onClick={handleLinkClick(open)} onAuxClick={event => event.preventDefault()} title={`Open ${href}`} className="sb-md-path">
         {children}
-      </button>
+      </a>
     )
   }
   return (
@@ -199,6 +211,9 @@ function MarkdownAnchor({
       className={cn("wrap-anywhere font-medium underline", className)}
       data-streamdown="link"
       href={href}
+      draggable={false}
+
+      onClick={handleLinkClick()}
       rel="noreferrer"
       target="_blank"
       {...rest}

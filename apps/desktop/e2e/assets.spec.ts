@@ -151,7 +151,7 @@ test("routes every transcript file gesture to an editor tab and keeps Browser se
 
   // Relative markdown link → the existing file tab.
   await conversationTab(window).click()
-  await window.getByRole("button", { name: "the spec" }).click()
+  await window.getByRole("link", { name: "the spec" }).click()
   await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
     timeout: 15_000
   })

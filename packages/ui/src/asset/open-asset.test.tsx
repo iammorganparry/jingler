@@ -98,6 +98,24 @@ describe("inline code paths in prose", () => {
 })
 
 describe("markdown links to relative paths", () => {
+  it.each(["`docs/spec.md`", "[the spec](./docs/spec.md)", "[the docs](https://example.com/a.md)"])("does not open a link when its text is selected: %s", (source) => {
+    const open = withProvider(<Markdown>{source}</Markdown>)
+    const link = screen.getByRole("link")
+    const selection = window.getSelection()!
+    const range = document.createRange()
+    range.selectNodeContents(link)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 })
+    link.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(open).not.toHaveBeenCalled()
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }))
+    if (source.includes("docs/spec.md")) expect(open).toHaveBeenCalledWith("docs/spec.md")
+    else expect(open).not.toHaveBeenCalled()
+    selection.removeAllRanges()
+  })
+
   it("opens the file instead of navigating", async () => {
     const open = withProvider(<Markdown>{"Read [the spec](./docs/spec.md)."}</Markdown>)
     await userEvent.click(screen.getByText("the spec"))
