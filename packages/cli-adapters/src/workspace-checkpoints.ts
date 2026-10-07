@@ -7,14 +7,14 @@ import { SessionStore } from "./sessions.js"
 import { WorkspaceCheckpointStore } from "./workspace-checkpoint-store.js"
 import { acquireWorkspaceActivity, acquireCheckpointTurnOwner, closeWorkspaceAdmission, reopenWorkspaceAdmission, setWorkspaceCheckpointMode, workspaceActivityCount, workspaceAdmissionReason, type WorkspaceActivity } from "./workspace-admission.js"
 
-const supported = (session: Session): void => {
+const supported = (session: Session, requireClean = true): void => {
   if (session.environmentId || session.executionLocation === "cloud" || session.workspaceMode !== "worktree" || !session.worktreePath || session.archived) throw new Error("Checkpoints require an unarchived isolated local worktree.")
-  if (session.checkpointExecutionHistory !== "clean") throw new Error("This workspace has prior or unknown interactive-terminal/unsupported execution history. Create a fresh workspace to enable safe checkpoints.")
+  if (requireClean && session.checkpointExecutionHistory !== "clean") throw new Error("This workspace has prior or unknown interactive-terminal/unsupported execution history. Create a fresh workspace to enable safe checkpoints.")
   if (process.platform === "win32") throw new Error("Checkpoint-safe filesystem operations are unsupported on Windows.")
 }
 const store = (session: Session, root: string) => new WorkspaceCheckpointStore({ root, sessionId: session.id, cwd: session.worktreePath!, verifiedBranch: session.semanticBranchProposal && session.semanticBranchPending === false ? session.branch : undefined })
-const exclusive = async <T>(session: Session, reason: string, operation: () => Promise<T>): Promise<T> => {
-  supported(session)
+const exclusive = async <T>(session: Session, reason: string, operation: () => Promise<T>, requireClean = true): Promise<T> => {
+  supported(session, requireClean)
   const readiness = workspaceAdmissionReason(session.id)
   if (readiness) throw new Error(`Workspace is unavailable while ${readiness}.`)
   const closure = closeWorkspaceAdmission(session.id, reason)
@@ -45,6 +45,13 @@ export const acquireCheckpointedTurn = async (session: Session, checkpointRoot: 
   }
 }
 
+/** Acquisition stays uninterruptible until its scope owns the lease, even while capture is pending. */
+export const acquireCheckpointedTurnScoped = (session: Session, checkpointRoot: string, chatId = session.activeChatId, release: (lease: WorkspaceActivity) => void = (lease) => lease.release()) =>
+  Effect.acquireRelease(
+    Effect.tryPromise({ try: () => acquireCheckpointedTurn(session, checkpointRoot, chatId), catch: (cause) => cause }),
+    (lease) => Effect.sync(() => release(lease))
+  )
+
 export class WorkspaceCheckpointService extends Effect.Service<WorkspaceCheckpointService>()("@jingler/WorkspaceCheckpointService", {
   accessors: true,
   effect: Effect.gen(function* () {
@@ -66,7 +73,7 @@ export class WorkspaceCheckpointService extends Effect.Service<WorkspaceCheckpoi
         }
         await run(sessions.setCheckpointSafeMode(sessionId, enabled))
         return run(sessions.get(sessionId))
-      })),
+      }, enabled)),
       capture: (sessionId: string, label?: string) => operation(sessionId, (session) => exclusive(session, "capturing checkpoint", () => store(session, root).capture(label))),
       list: (sessionId: string) => operation(sessionId, (session) => { supported(session); return store(session, root).list() }),
       preview: (sessionId: string, checkpointId: string) => operation(sessionId, (session) => exclusive(session, "previewing checkpoint restore", () => store(session, root).preview(checkpointId))),

@@ -76,5 +76,6 @@ export const anchoredFs = {
   unlink: (path: string, expected?: AnchoredExpectation | null) => request<void>({ op: "unlink", path, expected }),
   remove: (path: string) => request<void>({ op: "remove", path }),
   rename: (path: string, to: string) => request<void>({ op: "rename", path, to }),
+  renameNoClobber: (path: string, to: string) => request<void>({ op: "rename", path, to, exclusive: true }),
   git: async (path: string, args: string[], env?: Record<string, string>, bytes?: Buffer) => Buffer.from(await request<string>({ op: "git", path, args, env, bytes: bytes?.toString("base64") }), "base64")
 }

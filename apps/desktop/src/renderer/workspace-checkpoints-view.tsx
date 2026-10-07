@@ -29,8 +29,12 @@ export function WorkspaceCheckpointsView({ session, onSession }: { session: Sess
         <Button size="sm" onClick={() => send({ type: "CONFIRM" })}>Agree and enable</Button>
       </> : null}
       {state.matches("confirming") && state.context.preview ? <>
+        <p>Workspace file changes</p>
         <ul>{state.context.preview.operations.map((op) => <li key={op.path}>{op.action}: {op.path}</li>)}</ul>
         <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{state.context.preview.diff}</pre>
+        <p>Staging changes</p>
+        <ul>{state.context.preview.indexOperations.map((op) => <li key={op.path}>{op.action}: {op.path}</li>)}</ul>
+        <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{state.context.preview.indexDiff}</pre>
         <p>Stop external editors and file watchers before confirming. A pinned safety backup is created before restore. Restore checks are best-effort and cannot lock external writers; late changes may not be in the backup. Later untracked and ignored files are preserved.</p>
         <Button size="sm" variant="danger" onClick={() => send({ type: "CONFIRM" })}>Confirm restore</Button>
       </> : null}

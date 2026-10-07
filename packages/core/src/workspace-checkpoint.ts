@@ -9,6 +9,7 @@ export const WorkspaceCheckpoint = Schema.Struct({
   indexTree: Schema.String,
   worktreeTree: Schema.String,
   pinned: Schema.Boolean,
+  restoreOutcome: Schema.optional(Schema.Literal("pending", "succeeded", "failed")),
   byteLength: Schema.Number
 })
 export type WorkspaceCheckpoint = typeof WorkspaceCheckpoint.Type
@@ -21,6 +22,8 @@ export const WorkspaceCheckpointPreview = Schema.Struct({
   checkpointId: Schema.String,
   token: Schema.String,
   operations: Schema.Array(CheckpointFileOperation),
-  diff: Schema.String
+  indexOperations: Schema.Array(CheckpointFileOperation),
+  diff: Schema.String,
+  indexDiff: Schema.String
 })
 export type WorkspaceCheckpointPreview = typeof WorkspaceCheckpointPreview.Type

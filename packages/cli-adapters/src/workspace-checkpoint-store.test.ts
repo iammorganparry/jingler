@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { mkdtemp, writeFile, readFile, rm, chmod, stat, symlink, link, readdir } from "node:fs/promises"
+import { mkdtemp, writeFile, readFile, rm, chmod, stat, symlink, link, readdir, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -200,4 +200,103 @@ it.each(["overwrite", "delete", "create"] as const)("refuses late external %s ch
   await expect(store.restore(checkpoint.id, preview.token)).rejects.toThrow("backup")
   expect(await readFile(target, "utf8")).toBe("late external bytes")
   expect((await store.list()).some(item => item.pinned)).toBe(true)
+})
+
+it.each([10, 40])("measures Git subprocesses for a %i-file capture", async count => {
+  const { root, store } = await fixture()
+  for (let i = 0; i < count; i++) await writeFile(join(root, `batch-${i}`), `bytes-${i}`)
+  git(root, "add", ".")
+  const calls = vi.spyOn(anchoredFs, "git")
+  const started = performance.now()
+  await store.capture()
+  console.log(`capture measurement: added=${count}, Git subprocesses=${calls.mock.calls.length}, elapsedMs=${Math.round(performance.now() - started)}`)
+  expect(calls.mock.calls.length).toBe(24)
+  for (const operation of ["check-ignore", "cat-file", "hash-object"]) expect(calls.mock.calls.filter(([, args]) => args[0] === operation)).toHaveLength(1)
+}, 30000)
+
+
+it.each(["overwrite", "create", "mode"])("previews and restores staged-only %s without claiming file changes", async action => {
+  const { root, store } = await fixture(); const checkpoint = await store.capture()
+  if (action === "overwrite") { await writeFile(join(root, "file"), "staged only"); git(root, "add", "file"); await writeFile(join(root, "file"), "base") }
+  if (action === "create") { await writeFile(join(root, "new"), "staged new"); git(root, "add", "new"); await rm(join(root, "new")) }
+  if (action === "mode") git(root, "update-index", "--chmod=+x", "file")
+  const preview = await store.preview(checkpoint.id)
+  expect(preview.operations).toEqual([]); expect(preview.diff).toBe("")
+  expect(preview.indexOperations).toEqual([{ path: action === "create" ? "new" : "file", action: action === "create" ? "delete" : "overwrite" }])
+  expect(preview.indexDiff).toContain(action === "create" ? "new" : "file")
+  await store.restore(checkpoint.id, preview.token)
+  expect(git(root, "write-tree")).toBe(checkpoint.indexTree)
+})
+it("retains failed and latest successful backups durably across more than twenty restores", async () => {
+  const { root, storage, store } = await fixture(); const checkpoint = await store.capture()
+  const failed = new WorkspaceCheckpointStore({ cwd: root, root: storage, sessionId: "test", beforeWrite: async () => { throw new Error("injected failure") } })
+  await expect(failed.restore(checkpoint.id, (await failed.preview(checkpoint.id)).token)).rejects.toThrow("injected failure")
+  const failedBackup = (await store.list()).find(item => item.restoreOutcome === "failed")!
+  expect(failedBackup.pinned).toBe(true)
+  let latest = ""
+  for (let i = 0; i < 23; i++) {
+    await writeFile(join(root, "file"), `edit ${i}`)
+    latest = (await store.restore(checkpoint.id, (await store.preview(checkpoint.id)).token)).id
+  }
+  const reopened = new WorkspaceCheckpointStore({ cwd: root, root: storage, sessionId: "test" })
+  const items = await reopened.list()
+  expect(items).toHaveLength(20)
+  expect(items.filter(item => item.pinned).map(item => item.id).sort()).toEqual([failedBackup.id, latest].sort())
+  expect(items.find(item => item.id === latest)?.restoreOutcome).toBe("succeeded")
+  expect(items.find(item => item.id === failedBackup.id)?.restoreOutcome).toBe("failed")
+  expect(items.find(item => item.id === checkpoint.id)).toBeDefined()
+}, 60000)
+it("captures a deleted tracked directory and restores its contents", async () => {
+  const { root, store } = await fixture()
+  await mkdir(join(root, "tracked/nested"), { recursive: true })
+  await writeFile(join(root, "tracked/nested/file"), "tracked bytes"); git(root, "add", "tracked")
+  const before = await store.capture()
+  await rm(join(root, "tracked"), { recursive: true })
+  const deleted = await store.capture()
+  expect(git(root, "ls-tree", "-r", "--name-only", deleted.worktreeTree)).not.toContain("tracked/nested/file")
+  expect(git(root, "show", `${deleted.indexTree}:tracked/nested/file`)).toBe("tracked bytes")
+  await store.restore(before.id, (await store.preview(before.id)).token)
+  expect(await readFile(join(root, "tracked/nested/file"), "utf8")).toBe("tracked bytes")
+})
+it("batches binary/newline path bytes without filters or hooks and preserves private modes", async () => {
+  const { root, store } = await fixture(); const path = "space tab\tnewline\nfile"
+  const raw = Buffer.from([0, 255, 13, 10, 36, 0, 9])
+  await writeFile(join(root, path), raw); await chmod(join(root, path), 0o700)
+  await writeFile(join(root, ".gitattributes"), "* text eol=lf\n")
+  git(root, "add", ".")
+  const checkpoint = await store.capture()
+  expect(execFileSync("git", ["show", `${checkpoint.worktreeTree}:${path}`], { cwd: root })).toEqual(raw)
+  await writeFile(join(root, path), "later"); await chmod(join(root, path), 0o600)
+  await store.restore(checkpoint.id, (await store.preview(checkpoint.id)).token)
+  expect(await readFile(join(root, path))).toEqual(raw)
+  expect((await stat(join(root, path))).mode & 0o777).toBe(0o700)
+  await writeFile(join(root, ".gitattributes"), "* filter=unsafe\n")
+  git(root, "config", "filter.unsafe.clean", "touch filter-sentinel; cat")
+  await expect(store.capture()).rejects.toThrow("unsupported Git filter")
+  await expect(stat(join(root, "filter-sentinel"))).rejects.toMatchObject({ code: "ENOENT" })
+})
+it("rejects a malformed size-delimited staged blob batch", async () => {
+  const { store } = await fixture(); const original = anchoredFs.git
+  vi.spyOn(anchoredFs, "git").mockImplementation(async (cwd, args, ...rest) => args[0] === "cat-file" ? Buffer.from("0".repeat(40) + " blob 999999999999999999999\n") : original(cwd, args, ...rest))
+  await expect(store.capture()).rejects.toThrow("Invalid or oversized checkpoint blob batch")
+  expect(await store.list()).toEqual([])
+})
+
+it("restores staged deletion with an absent worktree target", async () => {
+  const { root, store } = await fixture(); const checkpoint = await store.capture()
+  git(root, "rm", "file")
+  const preview = await store.preview(checkpoint.id)
+  expect(preview.operations).toEqual([{ path: "file", action: "create" }])
+  expect(preview.indexOperations).toEqual([{ path: "file", action: "create" }])
+  expect(preview.indexDiff).toContain("file")
+  await store.restore(checkpoint.id, preview.token)
+  expect(git(root, "write-tree")).toBe(checkpoint.indexTree)
+  expect(await readFile(join(root, "file"), "utf8")).toBe("base")
+})
+it("refuses later untracked collisions even when bytes match the checkpoint", async () => {
+  const { root, store } = await fixture(); const checkpoint = await store.capture()
+  git(root, "rm", "--cached", "file")
+  await expect(store.preview(checkpoint.id)).rejects.toThrow("untracked collision")
+  expect(await readFile(join(root, "file"), "utf8")).toBe("base")
+  expect(git(root, "ls-files", "file")).toBe("")
 })

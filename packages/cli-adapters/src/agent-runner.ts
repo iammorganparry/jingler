@@ -76,7 +76,7 @@ import { BrowserControlMcpService,
 } from "./browser-control-mcp-service.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
-import { acquireCheckpointedTurn } from "./workspace-checkpoints.js"
+import { acquireCheckpointedTurnScoped } from "./workspace-checkpoints.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { UsageFactStore } from "./usage-facts.js"
@@ -1294,23 +1294,19 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 }])
               }
               const checkpointPaths = yield* AppPaths
-              const workspaceLease = yield* Effect.tryPromise({
-                try: async () => {
-                  if (!gatedSession) throw new Error("Workspace session not found.")
-                  return acquireCheckpointedTurn(gatedSession, join(checkpointPaths.root, "checkpoints"), chatId)
-                },
-                catch: (cause) => cause
-              }).pipe(Effect.either)
+              let runOwnsLease = false
+              const workspaceLease = yield* (gatedSession
+                ? acquireCheckpointedTurnScoped(gatedSession, join(checkpointPaths.root, "checkpoints"), chatId, (lease) => {
+                  if (!runOwnsLease) lease.release()
+                })
+                : Effect.fail(new Error("Workspace session not found."))
+              ).pipe(Effect.either)
               if (workspaceLease._tag === "Left") {
                 return Stream.fromIterable<StreamEvent>([{
                   _tag: "Failed",
                   message: workspaceLease.left instanceof Error ? workspaceLease.left.message : "Workspace is unavailable."
                 }])
               }
-              let runOwnsLease = false
-              yield* Effect.addFinalizer(() => Effect.sync(() => {
-                if (!runOwnsLease) workspaceLease.right.release()
-              }))
               if (gatedSession?.checkpointSafeMode !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
 
               // Concurrent chats in one session are allowed, but a single chat is

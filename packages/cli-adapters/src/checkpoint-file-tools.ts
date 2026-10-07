@@ -16,7 +16,7 @@ export const checkpointFiles = {
     const target = file(cwd, requested); const current = await anchoredFs.read(target)
     const text = current.bytes.toString("utf8"); const matches = text.split(oldText).length - 1
     if (!matches || (!replaceAll && matches !== 1)) throw new ToolError("invalid-input", "Edit must match existing text exactly and unambiguously.")
-    await anchoredFs.write(target, replaceAll ? text.split(oldText).join(newText) : text.replace(oldText, newText), current.mode)
+    await anchoredFs.write(target, replaceAll ? text.split(oldText).join(newText) : text.replace(oldText, () => newText), current.mode)
     return { path: requested, replacements: replaceAll ? matches : 1 }
   },
   remove: async (cwd: string, requested: string) => {
@@ -26,6 +26,6 @@ export const checkpointFiles = {
   rename: async (cwd: string, from: string, to: string) => {
     const source = file(cwd, from); const target = file(cwd, to)
     if (!(await anchoredFs.stat(source))?.file || await anchoredFs.stat(target)) throw new ToolError("forbidden", "Rename requires a regular source and an absent destination.")
-    await anchoredFs.rename(source, target); return { from, to }
+    await anchoredFs.renameNoClobber(source, target); return { from, to }
   }
 }

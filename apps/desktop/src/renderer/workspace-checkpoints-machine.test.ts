@@ -16,7 +16,7 @@ it("requires consent, exposes failure and retries without enabling automatically
   expect(onSession).toHaveBeenCalledWith(expect.objectContaining({ checkpointSafeMode: true })); actor.stop()
 })
 it("requires preview confirmation and retains its exact token", async () => {
-  const preview = { checkpointId: "cp", token: "exact", operations: [], diff: "diff" }
+  const preview = { checkpointId: "cp", token: "exact", operations: [], indexOperations: [{ path: "staged", action: "overwrite" as const }], diff: "diff", indexDiff: "index diff" }
   const api = { setMode: vi.fn(), list: vi.fn().mockResolvedValue([]), capture: vi.fn(), preview: vi.fn().mockResolvedValue(preview), restore: vi.fn().mockResolvedValue({}) }
   const actor = createActor(workspaceCheckpointsMachine, { input: { session, api, onSession: vi.fn() } }).start()
   actor.send({ type: "OPEN" }); await waitFor(actor, (s) => s.matches("ready"))
