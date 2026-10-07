@@ -62,7 +62,22 @@ const rejectedFileDrag = async (page: Page, sourceSelector: string, targetGroup:
     }
     source.dispatchEvent(new DragEvent("dragstart", init))
     target.dispatchEvent(new DragEvent("dragover", init))
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await new Promise<void>((resolve, reject) => {
+      const observer = new MutationObserver(check)
+      const timeout = setTimeout(() => {
+        observer.disconnect()
+        reject(new Error("Rejected drag feedback did not render"))
+      }, 2000)
+      function check() {
+        if (target.querySelector('[data-testid="editor-drop-overlay"][data-rejected="true"]')) {
+          observer.disconnect()
+          clearTimeout(timeout)
+          resolve()
+        }
+      }
+      observer.observe(target, { childList: true, subtree: true, attributes: true })
+      check()
+    })
     const overlay = target.querySelector('[data-testid="editor-drop-overlay"]')
     const result = {
       rejected: overlay?.getAttribute("data-rejected"),

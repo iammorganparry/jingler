@@ -144,6 +144,8 @@ const cloudCreationTitle = (input: CloudCreationInput): string => {
 }
 
 export interface JinglerAppProps {
+  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
+
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
@@ -169,7 +171,7 @@ export interface JinglerAppProps {
   onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
   onCloneProjectFromGitHub?: (input: { installationId?: string; repository: string; destination: string; name?: string }) => Promise<Project>
   onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
-  routines?: ReactNode
+  routines?: (projectId: string) => ReactNode
   onSaveProjectWorkflow?: (input: {
     projectId: string
     setup?: string
@@ -473,6 +475,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
 
          function renderSessionWorkspace() {
            return (<SessionConversation
+        onOpenCheckpoints={props.onOpenCheckpoints}
         search={
           <TitleSearch
             onOpen={() => setPaletteOpen(true)}
@@ -618,7 +621,7 @@ function getActiveTabContext(active: Session) {
               key={settingsSection}
               initialSection={settingsSection}
               routines={routines}
-              projectWorkflows={onSaveProjectWorkflow ? { projects, onSave: onSaveProjectWorkflow } : undefined}
+              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow } : undefined}
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
