@@ -364,7 +364,7 @@ function DiffViewContent({
         annotation={model.annotation}
         selection={handleSelectionChange === undefined ? undefined : model.activeSelection}
         onSelectionChange={handleSelectionChange}
-        renderAnnotation={actions === undefined ? undefined : renderAnnotation}
+        renderAnnotation={model.annotation === null ? undefined : renderAnnotation}
         options={options}
         scrollRequest={scrollRequest}
         onTokenEnter={onTokenEnter}
@@ -436,6 +436,14 @@ function PierreDiffRenderer({
   readonly onTokenEnter: PierreFileDiffViewProps["onTokenEnter"]
   readonly onTokenLeave: PierreFileDiffViewProps["onTokenLeave"]
 }) {
+  const codeViewTokenEnter = useCallback<NonNullable<PierreCodeViewProps["onTokenEnter"]>>(
+    (token, event) => { if ("side" in token) onTokenEnter?.(token, event) },
+    [onTokenEnter]
+  )
+  const codeViewTokenLeave = useCallback<NonNullable<PierreCodeViewProps["onTokenLeave"]>>(
+    (token, event) => { if ("side" in token) onTokenLeave?.(token, event) },
+    [onTokenLeave]
+  )
   if (fileDiffs.length === 0) {
     return (
       <section
@@ -446,16 +454,6 @@ function PierreDiffRenderer({
     )
   }
   const className = cn("min-h-0 min-w-0 flex-1", !fill && "h-auto")
-  const codeViewTokenEnter: PierreCodeViewProps["onTokenEnter"] = onTokenEnter === undefined
-    ? undefined
-    : (token, event) => {
-        if ("side" in token) onTokenEnter(token, event)
-      }
-  const codeViewTokenLeave: PierreCodeViewProps["onTokenLeave"] = onTokenLeave === undefined
-    ? undefined
-    : (token, event) => {
-        if ("side" in token) onTokenLeave(token, event)
-      }
   if (fileDiffs.length === 1 && scrollRequest === undefined) {
     return (
       <PierreFileDiffView
@@ -483,8 +481,8 @@ function PierreDiffRenderer({
       renderAnnotation={renderAnnotation}
       options={options}
       scrollRequest={scrollRequest}
-      onTokenEnter={codeViewTokenEnter}
-      onTokenLeave={codeViewTokenLeave}
+      onTokenEnter={onTokenEnter === undefined ? undefined : codeViewTokenEnter}
+      onTokenLeave={onTokenLeave === undefined ? undefined : codeViewTokenLeave}
     />
   )
 }

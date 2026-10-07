@@ -335,7 +335,7 @@ const fileBrowserResponse = (
     }
     return fauxAssistantMessage("Updated and created the configuration files.")
   }
-  return followedFileResponse(context, prompt, writes)
+  return stabilityFileResponse(prompt, writes) ?? followedFileResponse(context, prompt, writes)
 }
 
 const mutationResponse = (
@@ -855,7 +855,7 @@ export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
     provider: PROVIDER_ID,
     api: "jingler-e2e-api",
     models: [{ id: "eval-model", contextWindow: E2E_CONTEXT_WINDOW }],
-    tokensPerSecond: 0,
+    tokensPerSecond: fixture.scenarioId === "follow-stability" ? 60 : 0,
     ...(tokenSize === null ? {} : { tokenSize })
   })
   provider.setResponses([...responsesFor(fixture)])
@@ -955,6 +955,21 @@ function scenarioFixtureResponse(context: PiContext) {
       : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
   }
   return offloadFixtureResponse(context)
+}
+
+function stabilityFileResponse(prompt: string, writes: number) {
+  const operation = /\[\[follow-stability\]\] (first|second|other)/u.exec(prompt)?.[1]
+  if (operation === undefined) return null
+  if (writes > 0) return fauxAssistantMessage(fauxText([
+    `${operation}: Settled file operation. `,
+    `${operation}: Still streaming the same completed operation. `.repeat(60),
+    `${operation}: Stability stream finished.`
+  ].join("")))
+  return callTool(WRITE_TOOL, {
+    path: operation === "other" ? "src/other.ts" : "src/config.ts",
+    content: operation === "other" ? "export const other = 'changed'\n"
+      : operation === "second" ? "export const mode = 'second'\n" : MODERN_CONFIG
+  }, `stability-${operation}`)
 }
 
 function followedFileResponse(context: PiContext, prompt: string, writes: number) {

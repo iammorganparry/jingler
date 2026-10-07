@@ -7,6 +7,7 @@ import type {
 import type { SessionFileDiff } from "@jingler/contracts"
 import { Cause, Option, Runtime } from "effect"
 import { assign, enqueueActions, fromPromise, raise, setup } from "xstate"
+import { normalizeAgentFileTarget } from "./agent-file-activity.js"
 import { resolveAgentFollowPath } from "./file-diff-context.js"
 
 export interface FileBrowserApi {
@@ -73,6 +74,8 @@ export interface FileBrowserContext {
   readonly failure: FileBrowserFailure | null
   readonly pendingDiscard: FileBrowserPendingDiscard | null
   readonly viewMode: "diff" | "edit"
+  /** Incoming identity survives resolution to a rename destination. */
+  readonly agentTargetSourcePath: string | null
   readonly agentTargetPath: string | null
   readonly agentTargetEventId: string | null
   readonly agentTargetPreview: string | null
@@ -309,9 +312,10 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             }
           : {}
       ),
-      rememberAgentTarget: assign(({ event }) =>
+      rememberAgentTarget: assign(({ context, event }) =>
         event.type === "AGENT_TARGET"
           ? {
+              agentTargetSourcePath: normalizeAgentFileTarget(event.path, context.worktreePath) ?? event.path,
               agentTargetPath: event.path,
               agentTargetEventId: event.eventId,
               agentTargetPreview: event.preview ?? null,
@@ -396,6 +400,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
             : { ...context.pendingAgentTarget, refreshRequested: true }
       })),
       clearFollowTarget: assign({
+        agentTargetSourcePath: null,
         agentTargetPath: null,
         agentTargetEventId: null,
         agentTargetPreview: null,
@@ -565,6 +570,11 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       pendingAgentTargetNeedsRefresh: ({ context }) =>
         context.pendingAgentTarget?.completed === true &&
         !context.pendingAgentTarget.refreshRequested,
+      sameAgentMutation: ({ context, event }) =>
+        event.type === "AGENT_TARGET" &&
+        (normalizeAgentFileTarget(event.path, context.worktreePath) ?? event.path) === context.agentTargetSourcePath &&
+        event.eventId === context.agentTargetEventId &&
+        event.completed === context.agentTargetCompleted,
       completedAgentTarget: ({ event }) =>
         event.type === "AGENT_TARGET" && event.completed
     }
@@ -590,6 +600,7 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
       failure: null,
       pendingDiscard: null,
       viewMode: "edit",
+      agentTargetSourcePath: null,
       agentTargetPath: null,
       agentTargetEventId: null,
       agentTargetPreview: null,
@@ -604,12 +615,24 @@ export const createFileBrowserMachine = (api: FileBrowserApi) =>
         initial: "disabled",
         states: {
           disabled: {
-            on: { ENABLE_FOLLOW: "enabled" }
+            on: { ENABLE_FOLLOW: { target: "enabled", actions: "clearFollowTarget" } }
           },
           enabled: {
             on: {
               DISABLE_FOLLOW: { target: "disabled", actions: "clearFollowTarget" },
               AGENT_TARGET: [
+                {
+                  guard: "sameAgentMutation",
+                  actions: enqueueActions(({ context, event, enqueue }) => {
+                    if (event.type !== "AGENT_TARGET" || (event.preview ?? null) === context.agentTargetPreview) return
+                    enqueue.assign({
+                      agentTargetPreview: event.preview ?? null,
+                      pendingAgentTarget: context.pendingAgentTarget === null
+                        ? null
+                        : { ...context.pendingAgentTarget, preview: event.preview ?? null }
+                    })
+                  })
+                },
                 {
                   guard: "completedAgentTarget",
                   actions: [
