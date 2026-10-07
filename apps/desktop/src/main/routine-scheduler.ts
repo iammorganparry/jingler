@@ -4,7 +4,6 @@ import type { RoutineStore } from "@jingler/cli-adapters/routine-store"
 import { RoutinePreparationPendingError } from "./routine-execution.js"
 
 class RoutineRequestError extends Error {}
-const teardownFailure = /teardown|timed out/i
 export interface RoutineClock {
   now(): number
   setTimer(callback: () => void, ms: number): unknown
@@ -23,13 +22,17 @@ export interface RoutineExecution {
 /** Desktop-only, one next-due timer. The durable cursor, not this timer, owns time. */
 export class RoutineScheduler {
   #timer: unknown
-  #active: { run: RoutineRun; generation: number; controller: AbortController; deadlineTimer: unknown; pending?: Promise<unknown>; done: Promise<void> } | undefined
+  #active: { run: RoutineRun; generation: number; revision: number | undefined; controller: AbortController; deadlineTimer: unknown; pending?: Promise<unknown>; done: Promise<void> } | undefined
   #queue = Promise.resolve()
   #stopped = true
   #suspended = false
   #generation = 0
+  #revisions = new Map<string, number>()
   error: string | null = null
   constructor(readonly store: RoutineStore, readonly execution: RoutineExecution, readonly clock: RoutineClock = desktopRoutineClock, readonly elapsedClock: Pick<RoutineClock, "setTimer" | "clearTimer"> = desktopRoutineClock) {}
+  async list() {
+    return { ...await this.store.read(), health: { error: this.error, recovery: this.error ? "Restart the desktop, then sign in and retry" : null } }
+  }
   get running() { return !this.#stopped }
   get activityUnresolved() { return this.#active?.pending !== undefined }
   async start() {
@@ -52,20 +55,21 @@ export class RoutineScheduler {
     })
     return next
   }
-  invalidatePending() { this.#generation++ }
+  invalidatePending(id: string) { this.#revisions.set(id, (this.#revisions.get(id) ?? 0) + 1) }
   async refresh() { await this.#serial(() => this.#arm()) }
   suspend() { this.#generation++; this.#suspended = true; this.clock.clearTimer(this.#timer) }
   async wake() { this.#suspended = false; await this.#serial(() => this.#tick(true)) }
   async runNow(id: string) {
     let result: RoutineRun | undefined
     await this.#serial(async () => {
-      if (this.#stopped || this.#suspended) throw new Error(this.error ?? "Desktop scheduler is unavailable")
+      if (this.#stopped || this.#suspended) throw new RoutineRequestError(this.error ?? "Desktop scheduler is unavailable")
       const generation = this.#generation
+      const revision = this.#revisions.get(id)
       const claimed = await this.store.claim(id, "manual", this.clock.now())
       if (!claimed) throw new RoutineRequestError("Routine no longer exists")
       result = claimed.run
       if (routineRunActive(claimed.run)) {
-        if (this.#unavailable(generation)) await this.store.finish(claimed.run.id, "interrupted", "Desktop stopped before dispatch", this.clock.now())
+        if (this.#unavailable(generation) || revision !== this.#revisions.get(id)) await this.store.finish(claimed.run.id, "interrupted", "Desktop stopped before dispatch", this.clock.now())
         else this.#launch(claimed.routine, claimed.run)
       }
       await this.#arm()
@@ -102,8 +106,9 @@ export class RoutineScheduler {
   }
   async #current(run: RoutineRun, signal: AbortSignal) {
     const generation = this.#active?.run.id === run.id ? this.#active.generation : this.#generation
-    if (signal.aborted || this.#unavailable(generation)) return false
-    return await this.store.isCurrent(run) && !signal.aborted && !this.#unavailable(generation)
+    const revision = this.#active?.run.id === run.id ? this.#active.revision : this.#revisions.get(run.routineId)
+    if (signal.aborted || this.#unavailable(generation) || revision !== this.#revisions.get(run.routineId)) return false
+    return await this.store.isCurrent(run) && !signal.aborted && !this.#unavailable(generation) && revision === this.#revisions.get(run.routineId)
   }
   async #tick(missed: boolean) {
     if (this.#stopped || this.#suspended) return
@@ -112,14 +117,16 @@ export class RoutineScheduler {
     if (this.#unavailable(generation)) return
     for (const routine of document.routines.filter(item => item.enabled && item.nextAt !== null && item.nextAt <= this.clock.now()).sort((a, b) => a.nextAt! - b.nextAt!)) {
       if (this.#unavailable(generation)) break
+      const revision = this.#revisions.get(routine.id)
       const claim = await this.store.claim(routine.id, "scheduled", this.clock.now(), missed)
-      if (claim) await this.#dispatch(claim.routine, claim.run, generation)
+      if (claim && revision !== this.#revisions.get(routine.id) && routineRunActive(claim.run)) await this.store.finish(claim.run.id, "interrupted", "Routine changed before dispatch", this.clock.now())
+      else if (claim) await this.#dispatch(claim.routine, claim.run, generation)
     }
     await this.#arm()
   }
   #launch(routine: Routine, run: RoutineRun) {
     const controller = new AbortController()
-    const active = { run, generation: this.#generation, controller, deadlineTimer: this.elapsedClock.setTimer(() => controller.abort(new Error("Maximum duration reached")), routine.maxDurationMs), pending: undefined as Promise<unknown> | undefined, done: Promise.resolve() }
+    const active = { run, generation: this.#generation, revision: this.#revisions.get(run.routineId), controller, deadlineTimer: this.elapsedClock.setTimer(() => controller.abort(new Error("Maximum duration reached")), routine.maxDurationMs), pending: undefined as Promise<unknown> | undefined, done: Promise.resolve() }
     this.#active = active
     controller.signal.addEventListener("abort", () => this.elapsedClock.clearTimer(active.deadlineTimer), { once: true })
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: completion and cancellation share one durable history boundary.
@@ -136,12 +143,12 @@ export class RoutineScheduler {
           active.pending = error.pending
           void error.pending.catch(() => {}).finally(() => { if (this.#active === active) this.#active = undefined })
         }
-        if (error instanceof Error && teardownFailure.test(error.message)) {
+        if (error instanceof RoutinePreparationPendingError) {
           this.error = error.message
           this.#stopped = true
           this.clock.clearTimer(this.#timer)
         }
-        await this.store.finish(run.id, controller.signal.aborted && !(error instanceof Error && teardownFailure.test(error.message)) ? "cancelled" : "failed", error instanceof Error ? error.message : "Routine execution failed", this.clock.now())
+        await this.store.finish(run.id, controller.signal.aborted && !(error instanceof RoutinePreparationPendingError) ? "cancelled" : "failed", error instanceof Error ? error.message : "Routine execution failed", this.clock.now())
       } finally {
         this.elapsedClock.clearTimer(active.deadlineTimer)
         if (this.#active === active && !active.pending) this.#active = undefined

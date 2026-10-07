@@ -14,7 +14,7 @@ export function runOwnedRoutineEffect<A, E, R>(runtime: Runtime.Runtime<R>, effe
   return Runtime.runPromise(runtime)(effect.pipe(Effect.tap(value => Effect.promise(() => committed(value))), Effect.uninterruptible), { signal })
 }
 
-const preparation = <A>(operation: Promise<A>, signal: AbortSignal): Promise<A> => new Promise((resolve, reject) => {
+export const preparation = <A>(operation: Promise<A>, signal: AbortSignal): Promise<A> => new Promise((resolve, reject) => {
   let timer: ReturnType<typeof setTimeout> | undefined
   const abort = () => { timer ??= setTimeout(() => reject(new RoutinePreparationPendingError(operation)), 10_000) }
   signal.addEventListener("abort", abort, { once: true })

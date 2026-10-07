@@ -7,6 +7,7 @@ import { SessionStore, GitService, WorkspaceCheckpointService } from "@jingler/c
 import { RoutineStore } from "@jingler/cli-adapters/routine-store"
 import { acquireCheckpointedTurn } from "@jingler/cli-adapters/workspace-checkpoints"
 import { initGitRepo, mkTemp, withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
+import { revalidateRoutineAuth } from "./routine-auth.js"
 import { routineExecution, runOwnedRoutineEffect, RoutinePreparationPendingError } from "./routine-execution.js"
 vi.mock("@jingler/cli-adapters/workspace-ports", async importOriginal => {
   const actual = await importOriginal<typeof import("@jingler/cli-adapters/workspace-ports")>()
@@ -27,6 +28,18 @@ describe("routine execution adapter", () => {
     const setMode = (id: string) => Effect.runPromise(WorkspaceCheckpointService.setMode(id, true).pipe(Effect.provide(services), Effect.provide(temp.layer)))
     return { temp, repoPath, store, claim, create, setMode }
   }
+  it.each([1, 2, 3])("revoked desktop auth at validation %i prevents unattended prompt", async revokedAt => {
+    const { claim, create, store, setMode } = await fixture()
+    const prompt = vi.fn(); const createSession = vi.fn((_: unknown, run: RoutineRun) => create(run))
+    let checks = 0
+    const execute = routineExecution({
+      validate: async () => { if (++checks === revokedAt) await Effect.runPromise(revalidateRoutineAuth(() => Effect.succeed(null))) },
+      create: createSession, setMode, prompt
+    })
+    await expect(execute(claim.routine, claim.run, new AbortController().signal, () => store.isCurrent(claim.run), () => store.link(claim.run, 0))).rejects.toThrow("Sign in")
+    expect(prompt).not.toHaveBeenCalled()
+    expect(createSession).toHaveBeenCalledTimes(revokedAt === 1 ? 0 : 1)
+  })
   it("durably reserves identity, creates a real isolated Git session, and captures before prompt work", async () => {
     const { temp, repoPath, store, claim, create, setMode } = await fixture()
     const prompt = vi.fn(async (session: Session) => {

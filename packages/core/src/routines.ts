@@ -55,6 +55,6 @@ export const RoutineRun = Schema.Struct({
   skippedCount: Schema.Number.pipe(Schema.int(), Schema.positive())
 })
 export type RoutineRun = Schema.Schema.Type<typeof RoutineRun>
-export const RoutineDocument = Schema.Struct({ version: Schema.Literal(1), routines: Schema.Array(Routine), runs: Schema.Array(RoutineRun) })
+export const RoutineDocument = Schema.Struct({ version: Schema.Literal(1), routines: Schema.Array(Routine), runs: Schema.Array(RoutineRun), health: Schema.optional(Schema.Struct({ error: Schema.NullOr(Schema.String), recovery: Schema.NullOr(Schema.String) })) })
 export type RoutineDocument = Schema.Schema.Type<typeof RoutineDocument>
 export const routineRunActive = (run: RoutineRun) => run.status === "claimed" || run.status === "running"

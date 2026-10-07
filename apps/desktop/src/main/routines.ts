@@ -1,14 +1,17 @@
-import { routineExecution, runOwnedRoutineEffect } from "./routine-execution.js"
+import { routineExecution, runOwnedRoutineEffect, preparation } from "./routine-execution.js"
 import { validateRoutineProject, validateRoutineModel } from "./routine-validation.js"
 import { join } from "node:path"
-import { AgentRunner, AppPaths, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
+import { AgentRunner, AppPaths, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
 import { RoutineStore } from "@jingler/cli-adapters/routine-store"
 import { GitError, type RoutineInput, type RoutineRun } from "@jingler/core"
 import { Effect, Runtime, Stream } from "effect"
+import { revalidateRoutineAuth, routineStartup } from "./routine-auth.js"
 import { RoutineScheduler } from "./routine-scheduler.js"
 
 export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/Routines", {
   effect: Effect.gen(function* () {
+    const auth = yield* AuthService
+    const requireAuth = () => revalidateRoutineAuth(() => auth.getSession())
     const paths = yield* AppPaths
     const sessions = yield* SessionStore
     const projects = yield* ProjectService
@@ -26,6 +29,7 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
       return { project, digest }
     }).pipe(Effect.mapError(cause => new GitError({ message: cause.message, cause })))
     const create = (input: RoutineInput, run: RoutineRun) => Effect.gen(function* () {
+      yield* requireAuth()
       const { project } = yield* validate(input)
       return yield* sessions.create({ ...input, repoPath: project.path, repoName: project.name, title: input.name, requestedSessionId: run.requestedSessionId, routineOccurrence: { routineId: run.routineId, runId: run.id }, checkpointSafeMode: true, useWorktree: true }, { defaultMode: input.mode, defaultReasoning: input.reasoning ?? undefined })
     })
@@ -41,15 +45,16 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
         return session !== null && run !== undefined && session.routineOccurrence?.routineId === run.routineId && session.routineOccurrence.runId === run.id
       },
       execute: routineExecution({
-        validate: (routine, signal) => runEffect(validate(routine, routine.workflowDigest), { signal }),
+        validate: (routine, signal) => runEffect(requireAuth().pipe(Effect.zipRight(validate(routine, routine.workflowDigest))), { signal }),
         create: (routine, run, signal, committed) => runOwnedRoutineEffect(effectRuntime, create(routine, run), signal, committed),
         setMode: (id, signal) => runOwnedRoutineEffect(effectRuntime, checkpoints.setMode(id, true), signal),
         prompt: async (session, routine, signal) => {
+        await runEffect(requireAuth(), { signal })
         const chatId = session.activeChatId
         let status: "succeeded" | "failed" | "needs-attention" = "failed"
         let message = "Agent ended without a completion event"
         let stopped: Promise<void> | undefined
-        const stop = () => { stopped ??= runEffect(runner.stop(session.id, chatId, true).pipe(Effect.disconnect, Effect.timeoutFail({ duration: "10 seconds", onTimeout: () => new GitError({ message: "Routine cancellation teardown timed out" }) }))); void stopped.catch(() => {}) }
+        const stop = () => { stopped ??= runEffect(runner.stop(session.id, chatId, true).pipe(Effect.disconnect)); void stopped.catch(() => {}) }
         signal.addEventListener("abort", stop, { once: true })
         try {
           if (signal.aborted) throw new Error("Routine cancelled before prompt")
@@ -58,27 +63,27 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
             if (event._tag === "Failed" && status !== "needs-attention") { status = "failed"; message = event.message }
             if (event._tag === "GateRequested" || event._tag === "QuestionRequested") { status = "needs-attention"; message = "Operator approval or answer required"; stop() }
           })), Effect.disconnect), { signal })
-          if (stopped) await stopped
+          if (stopped) { const teardown = new AbortController(); teardown.abort(); await preparation(stopped, teardown.signal) }
           return { status, message }
         } finally {
           signal.removeEventListener("abort", stop)
-          if (signal.aborted) { stop(); await stopped }
+          if (signal.aborted) { stop(); await preparation(stopped!, signal) }
         }
         }
       })
     })
     const request = <A>(operation: () => Promise<A>) => Effect.tryPromise({ try: operation, catch: cause => new GitError({ message: cause instanceof Error ? cause.message : String(cause), cause }) })
-    let started = false
+    const startScheduler = routineStartup(() => scheduler.start())
     let authenticated = false
     return {
       scheduler,
-      start: request(async () => { authenticated = true; if (!started) { started = true; await scheduler.start(); started = scheduler.running } }),
-      resume: request(async () => { if (authenticated) { await scheduler.wake(); if (!scheduler.running) { await scheduler.start(); started = scheduler.running } } }),
-      stop: request(async () => { authenticated = false; started = false; await scheduler.stop() }),
-      list: request(async () => { if (scheduler.error) throw new Error(scheduler.error); return store.read() }),
-      save: (id: string | undefined, input: RoutineInput) => Effect.sync(() => scheduler.invalidatePending()).pipe(Effect.zipRight(validate(input))).pipe(Effect.flatMap(({ digest }) => request(async () => { const result = await store.save(id, input, digest, Date.now()); if (id) await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }))),
-      enable: (id: string, enabled: boolean) => request(async () => { scheduler.invalidatePending(); const result = await store.enable(id, enabled, Date.now()); await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }),
-      delete: (id: string) => request(async () => { scheduler.invalidatePending(); const result = await store.delete(id); await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }),
+      start: request(async () => { authenticated = true; await startScheduler() }),
+      resume: requireAuth().pipe(Effect.zipRight(request(async () => { if (authenticated) { await scheduler.wake(); if (!scheduler.running) { await startScheduler() } } }))),
+      stop: request(async () => { authenticated = false; await scheduler.stop() }),
+      list: request(() => scheduler.list()),
+      save: (id: string | undefined, input: RoutineInput) => validate(input).pipe(Effect.flatMap(({ digest }) => request(async () => { if (id) scheduler.invalidatePending(id); const result = await store.save(id, input, digest, Date.now()); if (id) await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }))),
+      enable: (id: string, enabled: boolean) => request(async () => { scheduler.invalidatePending(id); const result = await store.enable(id, enabled, Date.now()); await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }),
+      delete: (id: string) => request(async () => { scheduler.invalidatePending(id); const result = await store.delete(id); await scheduler.cancelRoutine(id); await scheduler.refresh(); return result }),
       runNow: (id: string) => request(() => scheduler.runNow(id)),
       cancel: (id: string) => request(async () => { await scheduler.cancel(id); return store.read() })
     }

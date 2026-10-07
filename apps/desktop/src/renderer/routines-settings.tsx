@@ -26,7 +26,7 @@ export function RoutinesSettings({ projects, catalog, onSession }: { projects: R
     <p>Runs only while this desktop is open and signed in. Missed schedules and overlapping runs are skipped. One routine runs at a time; interactive agents remain independent.</p>
     <p>Every run uses a fresh checkpoint-safe worktree. Edit and inspect files only: arbitrary shell, tests, builds, terminals, delegation, offload and external tools are unsupported. Saved model, reasoning and Ask permissions are used without escalation or fallback.</p>
     {error && <p role="alert">{error}<button type="button" onClick={() => send({ type: "REFRESH" })}>Retry</button></p>}
-    <RoutineForm key={editing ?? "new"} {...{ projects, models, selected, editing, busy, send }} />
+    <RoutineForm key={selected ? `${selected.id}/${selected.revision}` : "new"} {...{ projects, models, selected, editing, busy, send }} />
     {document.routines.map(routine => <div key={routine.id}>
       <strong>{routine.name}</strong><p>Next: {routine.enabled && routine.nextAt !== null ? new Date(routine.nextAt).toLocaleString() : "Not scheduled"}</p>
       <button disabled={busy} type="button" onClick={() => send({ type: "EDIT", id: routine.id })}>Edit {routine.name}</button>
@@ -34,6 +34,7 @@ export function RoutinesSettings({ projects, catalog, onSession }: { projects: R
       <button disabled={busy} type="button" onClick={() => send({ type: "RUN", id: routine.id })}>Run now {routine.name}</button>
       <button disabled={busy} type="button" onClick={() => send({ type: "DELETE", id: routine.id })}>Delete {routine.name}</button>
     </div>)}
+    {document.health?.error && <p role="alert">{document.health.error}. {document.health.recovery}. <button type="button" onClick={() => send({ type: "REFRESH" })}>Refresh history and health</button></p>}
     <h4>Run history</h4>
     {document.runs.slice().sort((a, b) => b.createdAt - a.createdAt).map(run => <div key={run.id}><span>{run.routineName}: {run.status} — {run.message}</span>{run.sessionId && <button type="button" disabled={busy} onClick={() => send({ type: "OPEN", id: run.sessionId! })}>Open workspace {run.routineName}</button>}{(run.status === "running" || run.status === "claimed") && <button disabled={busy} type="button" onClick={() => send({ type: "CANCEL", id: run.id })}>Cancel {run.routineName}</button>}</div>)}
   </section>

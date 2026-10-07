@@ -69,19 +69,55 @@ describe("desktop routine clock and dispatch fence", () => {
     expect((await store.read()).runs[0]!.sessionId).toBeNull()
   })
 
+  it("returns history and linked workspaces with health after a scheduler failure", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const claim = (await store.claim(id, "manual", 0))!
+    await store.link(claim.run, 0); await store.finish(claim.run.id, "failed", "attention required", 1)
+    scheduler.error = "Owned activity remains unresolved"
+    const document = await scheduler.list()
+    expect(document.runs[0]!.sessionId).toBe(claim.run.requestedSessionId)
+    expect(document.health.error).toContain("unresolved")
+    expect(document.health.recovery).toContain("Restart the desktop")
+  })
+  it("suspended manual requests refuse without poisoning persistence or consuming a claim", async () => {
+    const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    await scheduler.start(); scheduler.suspend()
+    await expect(scheduler.runNow(id)).rejects.toThrow("unavailable")
+    expect(scheduler.error).toBeNull(); expect((await store.read()).runs).toHaveLength(0)
+    await scheduler.wake(); await scheduler.runNow(id)
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+  })
+  it("retries startup reconciliation after a transient failure", async () => {
+    vi.spyOn(store, "reconcile").mockRejectedValueOnce(new Error("temporary read failure"))
+    await expect(scheduler.start()).rejects.toThrow("temporary")
+    expect(scheduler.running).toBe(false)
+    await scheduler.start(); expect(scheduler.running).toBe(true)
+  })
+  it("editing a different routine does not cancel preparation awaiting a claim", async () => {
+    const first = (await store.save(undefined, input, null, 0)).routines[0]!.id
+    const other = (await store.save(undefined, { ...input, name: "Other" }, null, 0)).routines[1]!.id
+    await scheduler.start()
+    const entered = deferred<void>(); const release = deferred<void>(); const original = store.claim.bind(store)
+    vi.spyOn(store, "claim").mockImplementation(async (...args) => { entered.resolve(); await release.promise; return original(...args) })
+    const request = scheduler.runNow(first); await entered.promise
+    scheduler.invalidatePending(other); await store.enable(other, false, 1); release.resolve(); await request
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(1))
+    expect(scheduler.error).toBeNull()
+  })
   it("definition invalidation fences a manual claim still awaiting persistence", async () => {
     const id = (await store.save(undefined, input, null, 0)).routines[0]!.id; await scheduler.start()
     const entered = deferred<void>(); const release = deferred<void>(); const original = store.claim.bind(store)
     vi.spyOn(store, "claim").mockImplementation(async (...args) => { entered.resolve(); await release.promise; return original(...args) })
-    const request = scheduler.runNow(id); await entered.promise; scheduler.invalidatePending(); await store.enable(id, false, 1); release.resolve(); await request
+    const request = scheduler.runNow(id); await entered.promise; scheduler.invalidatePending(id); await store.enable(id, false, 1); release.resolve(); await request
     expect(execute).not.toHaveBeenCalled(); expect((await store.read()).runs[0]!.status).toBe("interrupted")
   })
-  it("cannot restart in-process after cancellation teardown failure", async () => {
+  it("ordinary timeout messages do not poison scheduler health", async () => {
     const id = (await store.save(undefined, input, null, 0)).routines[0]!.id
     scheduler = new RoutineScheduler(store, { execute: async () => { throw new Error("Routine cancellation teardown timed out") }, sessionExists: async () => false }, clock)
     await scheduler.start(); await scheduler.runNow(id)
-    await vi.waitFor(() => expect(scheduler.error).toContain("timed out"))
-    await expect(scheduler.start()).rejects.toThrow("Restart the desktop")
+    await vi.waitFor(async () => expect((await store.read()).runs[0]!.status).toBe("failed"))
+    expect(scheduler.error).toBeNull()
+    await scheduler.start()
     await scheduler.stop()
     expect((await store.read()).runs[0]!.status).toBe("failed")
   })
