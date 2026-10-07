@@ -1,4 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { useMachine } from "@xstate/react"
+import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger } from "../components/beui/select.js"
+import { initialInboxFilters, pullRequestInboxFilterMachine, type PullRequestInboxFacets, type PullRequestInboxFilter } from "./pull-request-inbox-filter-machine.js"
 import type { GitHubTeam, GitHubTeamQueue, PrMergeMethod, PullRequest, PullRequestListItem } from "@jingler/core"
 import { ArrowLeft, GitPullRequest, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -13,7 +16,7 @@ import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
 import { PullRequestView } from "./pull-request-view.js"
 
-export type PullRequestInboxFilter = "all" | "created" | "assigned" | "review-requested"
+export type { PullRequestInboxFilter, PullRequestInboxFacets } from "./pull-request-inbox-filter-machine.js"
 
 const FILTERS: ReadonlyArray<{ value: PullRequestInboxFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -25,17 +28,33 @@ const FILTERS: ReadonlyArray<{ value: PullRequestInboxFilter; label: string }> =
 const keyOf = (pr: Pick<PullRequestListItem, "repository" | "number">) =>
   `${pr.repository}#${pr.number}`
 
+const matchesRelationship = (pr: PullRequestListItem, filter: PullRequestInboxFilter, viewerLogin: string) => {
+  switch (filter) {
+    case "created": return pr.author.login.toLowerCase() === viewerLogin.toLowerCase()
+    case "assigned": return pr.assignedToViewer
+    case "review-requested": return pr.reviewRequestedFromViewer
+    default: return true
+  }
+}
+const hasActiveInboxFilters = (filters: typeof initialInboxFilters) => Boolean(
+  filters.query || filters.filter !== "all" || filters.repository || filters.author || filters.label || filters.draft !== "all"
+)
+const matchesChoice = (actual: string, selected: string) => !selected || actual.toLowerCase() === selected.toLowerCase()
+const matchesFacets = (pr: PullRequestListItem, facets: PullRequestInboxFacets) =>
+  matchesChoice(pr.repository, facets.repository) && matchesChoice(pr.author.login, facets.author) &&
+  (!facets.label || pr.labels.some((label) => matchesChoice(label.name, facets.label))) &&
+  (facets.draft === "all" || pr.isDraft === (facets.draft === "draft"))
+
 export function filterPullRequests(
   prs: ReadonlyArray<PullRequestListItem>,
   filter: PullRequestInboxFilter,
   query: string,
-  viewerLogin: string
+  viewerLogin: string,
+  facets: PullRequestInboxFacets = initialInboxFilters
 ): ReadonlyArray<PullRequestListItem> {
   const search = query.trim().toLowerCase()
   return prs.filter((pr) => {
-    if (filter === "created" && pr.author.login.toLowerCase() !== viewerLogin.toLowerCase()) return false
-    if (filter === "assigned" && !pr.assignedToViewer) return false
-    if (filter === "review-requested" && !pr.reviewRequestedFromViewer) return false
+    if (!matchesRelationship(pr, filter, viewerLogin) || !matchesFacets(pr, facets)) return false
     return search.length === 0 || `${pr.title} ${pr.repository} ${pr.author.login} ${pr.number}`.toLowerCase().includes(search)
   })
 }
@@ -126,6 +145,15 @@ export function PullRequestInbox({
             />)
          }
 
+  function renderDetailPane() {
+    if (selected === null) return <InboxMessage><GitPullRequest className="size-6 text-dim" />Select a pull request to review it.</InboxMessage>
+    if (detailError && detail === null) return <InboxMessage>{detailError}</InboxMessage>
+    return <>
+      {detailError && <p role="alert" className="px-4 py-2 text-xs text-red">{detailError}</p>}
+      {renderSelectedPullRequest()}
+    </>
+  }
+
          function getLoading() {
            if (loading) return (<InboxMessage><Spinner size={18} />Loading pull requests…</InboxMessage>)
            if (error) return (<InboxMessage>{error}</InboxMessage>)
@@ -170,14 +198,22 @@ export function PullRequestInbox({
             }))
          }
 
-  const [filter, setFilter] = useState<PullRequestInboxFilter>("all")
-  const [query, setQuery] = useState("")
+  const [filterState, sendFilters] = useMachine(pullRequestInboxFilterMachine)
+  const facets = filterState.context
+  const { filter, query } = facets
+  const setFilter = (next: PullRequestInboxFilter) => sendFilters({ type: "CHANGE", fields: { filter: next } })
+  const setQuery = (next: string) => sendFilters({ type: "CHANGE", fields: { query: next } })
+  const options = useMemo(() => ({
+    repository: filterOptions(prs.map((pr) => pr.repository)),
+    author: filterOptions(prs.map((pr) => pr.author.login)),
+    label: filterOptions(prs.flatMap((pr) => pr.labels.map((label) => label.name))),
+  }), [prs])
   const [mobileDetail, setMobileDetail] = useState(false)
   const compact = !atLeast(useWidthTier(), "mid")
   const isTeam = Boolean(teamControls?.teamId)
   const visible = useMemo(
-    () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin),
-    [filter, prs, query, viewerLogin, isTeam]
+    () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin, facets),
+    [filter, prs, query, viewerLogin, isTeam, facets]
   )
   useEffect(() => {
     onActivate?.()
@@ -196,7 +232,7 @@ export function PullRequestInbox({
   return (
     <div data-testid="pull-request-inbox" className="flex min-h-0 min-w-0 flex-1 bg-editor">
       {showList && (
-        <section className={cn("flex min-h-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
+        <section className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
               <GitPullRequest className="size-4 text-green" />
@@ -206,6 +242,22 @@ export function PullRequestInbox({
             <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
             {teamControls ? <InboxTeamControls controls={teamControls} filter={filter} onFilter={setFilter} />
               : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
+            <div className="grid min-w-0 grid-cols-2 gap-2">
+              {(["repository", "author", "label"] as const).map((kind) => <InboxFilterSelect
+                key={kind} label={kind === "repository" ? "Repository" : kind === "author" ? "Author" : "Label"}
+                value={facets[kind]} options={[{ value: "", label: "All" }, ...options[kind]]}
+                onChange={(value) => sendFilters({ type: "CHANGE", fields: { [kind]: value } })}
+              />)}
+              <InboxFilterSelect label="Draft status" value={facets.draft} searchable={false}
+                options={[{ value: "all", label: "All" }, { value: "draft", label: "Draft" }, { value: "ready", label: "Ready" }]}
+                onChange={(value) => sendFilters({ type: "CHANGE", fields: { draft: value === "draft" || value === "ready" ? value : "all" } })}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>{visible.length} of {prs.length} loaded PRs</span>
+              {hasActiveInboxFilters(facets) &&
+                <button type="button" className="shrink-0 text-brand hover:underline" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</button>}
+            </div>
             {warnings.length > 0 && <div role="status" className="text-xs text-yellow">
               <strong>Partial results</strong>
               {warnings.map((warning) => <p key={warning}>{warning}</p>)}
@@ -226,13 +278,7 @@ export function PullRequestInbox({
               <ArrowLeft className="size-3.5" /> Back
             </button>
           )}
-          {selected === null ? (
-            <InboxMessage><GitPullRequest className="size-6 text-dim" />Select a pull request to review it.</InboxMessage>
-          ) : detailError ? (
-            <InboxMessage>{detailError}</InboxMessage>
-          ) : (
-            renderSelectedPullRequest()
-          )}
+          {renderDetailPane()}
         </WidthTierProvider>
       )}
     </div>
@@ -258,7 +304,7 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
                   {[...new Set(teamControls.teams.map((team) => team.organization))].map((organization) =>
                     <optgroup key={organization} label={organization}>
                       {teamControls.teams.filter((team) => team.organization === organization).map((team) =>
-                        <option key={team.id} value={team.id}>{team.name}</option>)}
+                        <option key={team.id} value={team.id} disabled={teamControls.error !== null}>{team.name}</option>)}
                     </optgroup>)}
                 </select>
                 <button type="button" onClick={teamControls.onRefresh} disabled={teamControls.discovering} className="rounded border border-line px-2 py-1.5 text-xs text-text hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring">
@@ -272,7 +318,7 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
               aria-label="Team pull request queue"
               value={teamControls.queue}
               onChange={(event) => teamControls.onQueue(event.target.value as GitHubTeamQueue)}
-              disabled={teamControls.discovering}
+              disabled={teamControls.discovering || teamControls.error !== null}
               className="rounded border border-line bg-surface px-2 py-1.5 text-xs text-text focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="reviews">Requested reviews</option>
@@ -280,6 +326,29 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
               <option value="repositories">Team repositories</option>
             </select> : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
   </>
+}
+
+const filterOptions = (values: ReadonlyArray<string>) =>
+  [...new Map(values.map((label) => [label.toLowerCase(), { value: label.toLowerCase(), label }])).values()]
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+function InboxFilterSelect({ label, value, options, onChange, searchable = true }: {
+  label: string
+  value: string
+  options: ReadonlyArray<{ value: string; label: string }>
+  onChange: (value: string) => void
+  searchable?: boolean
+}) {
+  const selected = options.find((option) => option.value === value)?.label ?? value
+  return <Select value={value} onValueChange={onChange} className="min-w-0">
+    <SelectTrigger ariaLabel={`Filter by ${label.toLowerCase()}`} className="h-8 w-full min-w-0 text-xs">
+      <span className="truncate" title={`${label}: ${selected}`}>{label}: {selected}</span>
+    </SelectTrigger>
+    <SelectContent listMaxHeight={240} listClassName="overflow-y-auto overscroll-contain"
+      search={searchable ? <SelectSearch aria-label={`Search ${label.toLowerCase()} options`} /> : undefined}>
+      {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+    </SelectContent>
+  </Select>
 }
 
 function InboxMessage({ children }: { children: ReactNode }) {
