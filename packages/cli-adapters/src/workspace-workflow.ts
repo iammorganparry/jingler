@@ -1,3 +1,4 @@
+/// <reference lib="es2024.promise" />
 import { spawn, type ChildProcess } from "node:child_process"
 import { resolve } from "node:path"
 import { anchoredFs } from "./anchored-fs.js"
@@ -29,9 +30,6 @@ const safeOutput = (value: string): string =>
     .replace(/((?:api[_-]?key|token|password|secret)\s*[=:]\s*)\S+/giu, "$1[redacted]")
     .slice(-OUTPUT_LIMIT)
 
-const shellCommand = (command: string): { file: string; args: string[] } =>
-  ({ file: process.env.SHELL || "/bin/sh", args: ["-lc", command] })
-
 const assertShellSupported = (session: Session): void => {
   if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
   if (process.platform === "win32") throw new Error("Workspace commands are not supported on Windows until owned process-tree termination is available.")
@@ -47,13 +45,12 @@ const runCommand = async (
 ): Promise<{ exitCode: number; output: string }> => {
   assertShellSupported(session)
   if (!session.worktreePath) throw new Error("Workspace checkout is unavailable.")
-  const shell = shellCommand(command)
   const lease = lifecycleOwner
     ? acquireWorkspaceLifecycleActivity(session.id, action, lifecycleOwner)
     : acquireWorkspaceActivity(session.id, action)
   let ownedChild: ChildProcess | undefined
   try {
-    const child = trackChild(spawn(shell.file, shell.args, {
+    const child = trackChild(spawn(process.env.SHELL || "/bin/sh", ["-lc", command], {
       cwd: session.worktreePath,
       env: workspaceProcessEnvironment(process.env, session),
       detached: true,
@@ -292,9 +289,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           if (sessionRuns.get(runId)?.status === "running") throw new Error(`${command.label} is already running.`)
           const startedAt = new Date().toISOString()
           const state: WorkspaceRunState = { id: runId, label: command.label, status: "running", startedAt }
-          let resolveSpawn!: () => void
-          let rejectSpawn!: (cause: unknown) => void
-          const spawned = new Promise<void>((resolve, reject) => { resolveSpawn = resolve; rejectSpawn = reject })
+          const { promise: spawned, resolve: resolveSpawn, reject: rejectSpawn } = Promise.withResolvers<void>()
           assertShellSupported(session)
           await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
           const resultPromise = runCommand(session, `run:${runId}`, command.command, () => {

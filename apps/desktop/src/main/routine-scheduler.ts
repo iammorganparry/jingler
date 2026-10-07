@@ -149,8 +149,6 @@ export class RoutineScheduler {
           } else {
             void error.pending.catch(() => {}).finally(() => { if (this.#active === active) this.#active = undefined })
           }
-        }
-        if (error instanceof RoutinePreparationPendingError || error instanceof RoutineTeardownUnresolvedError) {
           this.error = error.message
           this.#stopped = true
           this.clock.clearTimer(this.#timer)
