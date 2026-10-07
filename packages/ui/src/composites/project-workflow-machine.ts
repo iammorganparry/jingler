@@ -33,15 +33,6 @@ type Event =
   | { type: "EDIT"; draft: WorkflowDraft }
   | { type: "APPROVE"; approved: boolean }
   | { type: "SAVE" }
-const emptyProject: Project = {
-  id: "",
-  name: "",
-  path: "",
-  imported: true,
-  availability: "available",
-  createdAt: "",
-  updatedAt: "",
-}
 export const workflowDraft = (project: Project): WorkflowDraft => ({
   setup: project.workflow?.setup ?? "",
   cleanup: project.workflow?.cleanup ?? "",
@@ -109,20 +100,12 @@ export function workflowPayload(projectId: string, draft: WorkflowDraft, approve
     approve: approved,
   }
 }
-const types: { context: Context; input: Input; events: Event } = {
-  context: {
-    project: emptyProject,
-    onSave: () => {},
-    draft: workflowDraft(emptyProject),
-    approved: false,
-    message: null,
-    error: false,
-  },
-  input: { project: emptyProject, onSave: () => {} },
-  events: { type: "SAVE" },
-}
 export const projectWorkflowMachine = setup({
-  types,
+  types: {
+    context: {} as Context,
+    input: {} as Input,
+    events: {} as Event,
+  },
   actors: {
     save: fromPromise(async ({ input }: { input: Context }) => {
       await input.onSave(workflowPayload(input.project.id, input.draft, input.approved))

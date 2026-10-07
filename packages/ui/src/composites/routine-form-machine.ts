@@ -55,12 +55,13 @@ export const routineDraft = ({ selected, models }: Input): RoutineDraft => ({
   duration: String(selected ? selected.maxDurationMs / 60000 : 10),
   enabled: selected?.enabled ?? false,
 })
-const types: { context: Context; events: Event; input: Input } = {
-  context: { draft: routineDraft({ models: [] }), approved: false, error: null },
-  events: { type: "APPROVE", approved: false },
-  input: { models: [] },
-}
-export const routineFormMachine = setup({ types }).createMachine({
+export const routineFormMachine = setup({
+  types: {
+    context: {} as Context,
+    events: {} as Event,
+    input: {} as Input,
+  },
+}).createMachine({
   context: ({ input }) => ({ draft: routineDraft(input), approved: false, error: null }),
   on: {
     RESET: { actions: assign({ draft: ({ event }) => event.draft, approved: false, error: null }) },
