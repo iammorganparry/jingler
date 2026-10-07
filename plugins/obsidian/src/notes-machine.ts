@@ -1,7 +1,9 @@
 import { assign, fromPromise, setup } from "xstate"
+import type { VaultChoice } from "./discovery.js"
 import type { Note } from "./vault.js"
 
 export interface NotesServices {
+  discover?(): Promise<VaultChoice[]>
   configuration(): Promise<string>
   configure(root: string): Promise<string>
   list(): Promise<string[]>
@@ -10,6 +12,8 @@ export interface NotesServices {
 interface Context {
   services: NotesServices
   root: string
+  configuredRoot: string
+  vaults: VaultChoice[]
   paths: string[]
   selected: string
   note: Note | null
@@ -23,7 +27,11 @@ export const notesMachine = setup({
     input: {} as { services: NotesServices }
   },
   actors: {
-    configuration: fromPromise(({ input }: { input: NotesServices }) => input.configuration()),
+    configuration: fromPromise(async ({ input }: { input: NotesServices }) => {
+      const vaults = await input.discover?.().catch(() => []) ?? []
+      try { return { vaults, root: await input.configuration(), error: "" } }
+      catch (cause) { return { vaults, root: "", error: cause instanceof Error ? cause.message : String(cause) } }
+    }),
     configure: fromPromise(({ input }: { input: Context }) => input.services.configure(input.root)),
     read: fromPromise(({ input }: { input: Context }) => input.services.read(input.selected)),
     load: fromPromise(async ({ input }: { input: Context }) => {
@@ -44,14 +52,14 @@ export const notesMachine = setup({
 }).createMachine({
   id: "obsidian-notes",
   initial: "configuration",
-  context: ({ input }) => ({ services: input.services, root: "", paths: [], selected: "", note: null, error: "" }),
+  context: ({ input }) => ({ services: input.services, root: "", configuredRoot: "", vaults: [], paths: [], selected: "", note: null, error: "" }),
   states: {
     configuration: {
       invoke: {
         src: "configuration", input: ({ context }) => context.services,
         onDone: [
-          { guard: ({ event }) => !!event.output, target: "loading", actions: assign({ root: ({ event }) => event.output }) },
-          { target: "ready" }
+          { guard: ({ event }) => !!event.output.root, target: "loading", actions: assign(({ event }) => ({ ...event.output, configuredRoot: event.output.root })) },
+          { target: "ready", actions: assign(({ event }) => event.output) }
         ],
         onError: { target: "ready", actions: "fail" }
       }
@@ -60,14 +68,14 @@ export const notesMachine = setup({
       on: {
         ROOT: { actions: assign({ root: ({ event }) => event.value }) },
         SAVE: { target: "saving", actions: "clear" },
-        REFRESH: { target: "loading", actions: "clear" },
+        REFRESH: { guard: ({ context }) => !!context.configuredRoot, target: "loading", actions: "clear" },
         SELECT: { target: "reading", actions: ["clear", assign({ selected: ({ event }) => event.path })] }
       }
     },
     saving: {
       invoke: {
         src: "configure", input: ({ context }) => context,
-        onDone: { target: "loading", actions: assign({ root: ({ event }) => event.output, selected: "", paths: [] }) },
+        onDone: { target: "loading", actions: assign({ root: ({ event }) => event.output, configuredRoot: ({ event }) => event.output, selected: "", paths: [] }) },
         onError: { target: "ready", actions: "fail" }
       }
     },

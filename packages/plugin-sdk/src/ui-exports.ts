@@ -18,6 +18,7 @@
 export const UI_EXPORT_NAMES = [
   "Avatar",
   "Badge",
+  "Button",
   "Callout",
   "Card",
   "CodeChip",

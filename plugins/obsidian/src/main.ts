@@ -1,3 +1,4 @@
+import { discoverVaults } from "./discovery.js"
 import type { Activate, AgentToolDefinition, HostContext } from "@jingler/plugin-sdk/host"
 import { listNotes, readNote, validateRoot, writeNote } from "./vault.js"
 
@@ -24,6 +25,7 @@ export const activateWithContext = async (ctx: VaultHost) => {
     return validateRoot(await ctx.storage.get(storageKey(sessionId)))
   }
   const commands: Record<string, (raw: unknown) => Promise<unknown>> = {
+    "obsidian.discover": async () => discoverVaults(),
     "obsidian.configuration": async (raw) => {
       const id = await session(input(raw).sessionId)
       const saved = await ctx.storage.get(storageKey(id))
