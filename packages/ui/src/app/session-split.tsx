@@ -11,6 +11,8 @@ import type { TabContribution, TabKey } from "./tab-contributions.js"
 import { dockedPanes, type PaneContribution } from "./pane-contributions.js"
 
 export interface SessionSplitProps {
+  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
+
   /** The group on screen — one pane per session. `null` renders the empty state. */
   group: SplitGroup | null
   sessions: ReadonlyArray<Session>
@@ -110,6 +112,7 @@ export function SessionSplit(props: SessionSplitProps) {
   )
   const editor = session ? (
     <SessionPane
+      onOpenCheckpoints={props.onOpenCheckpoints}
       session={session}
       renderConversation={props.renderConversation}
       renderExplanation={props.renderExplanation}

@@ -1,4 +1,3 @@
-import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js"
 import { useEffect, useState } from "react"
 import type { Project, Session, WorkspaceRunState } from "@jingler/core"
 import { Button } from "@jingler/ui"
@@ -6,6 +5,13 @@ import { rpc } from "./rpc-client.js"
 
 const readyForRuns = (lifecycle: Session["workspaceLifecycle"]): boolean =>
   lifecycle === undefined || lifecycle.status === "ready" || lifecycle.status === "setup-skipped"
+
+const hasWorkspaceContent = (session: Session, commandCount: number, runs: ReadonlyArray<WorkspaceRunState>, error: string | null): boolean => {
+  const lifecycle = session.workspaceLifecycle
+  const hasNotice = lifecycle?.status === "setup-running" || lifecycle?.status === "setup-failed" || lifecycle?.status === "cleanup-failed"
+  const hasControls = readyForRuns(lifecycle) && (commandCount > 0 || runs.some(run => run.status === "running"))
+  return Boolean(session.workspacePorts || hasNotice || lifecycle?.output || hasControls || runs.some(run => run.status === "failed") || error)
+}
 
 export function WorkspaceWorkflowBar({
   session,
@@ -34,7 +40,7 @@ export function WorkspaceWorkflowBar({
     return () => { cancelled = true; clearInterval(timer) }
   }, [session.id])
 
-  if (!lifecycle && commands.length === 0 && !session.workspacePorts && session.workspaceMode !== "worktree") return null
+  if (!hasWorkspaceContent(session, commands.length, runs, error)) return null
 
   const mutateSession = async (action: () => Promise<Session>) => {
     setError(null)
@@ -43,7 +49,6 @@ export function WorkspaceWorkflowBar({
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-3 py-2 text-xs" data-testid="workspace-workflow-bar">
-      <WorkspaceCheckpointsView key={session.id} session={session} onSession={onSession} />
       {session.workspacePorts ? <>
         <span data-testid="workspace-port">Port {session.workspacePorts.primary}</span>
         <Button size="sm" variant="outline" onClick={async () => {

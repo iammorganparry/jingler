@@ -111,7 +111,6 @@ const NAV: ReadonlyArray<NavItem> = [
     icon: <SlidersHorizontal size={14} />,
     ready: true
   },
-  { key: "routines", label: "Routines", icon: <FolderCog size={14} />, ready: true },
   { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
   { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true },
   {
@@ -163,7 +162,7 @@ const NAV: ReadonlyArray<NavItem> = [
 ]
 
 export interface SettingsViewProps {
-  routines?: import("react").ReactNode
+  routines?: (projectId: string) => import("react").ReactNode
   projectWorkflows?: ProjectWorkflowSettingsProps
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps
@@ -305,9 +304,9 @@ export function SettingsView({
 case "devices": {
 return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
 }
-case "routines": { return routines ?? <p>Desktop routines are unavailable.</p> }
+case "routines":
 case "projects": {
-return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} />, "Projects")
+return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} routines={routines} />, "Projects")
 }
 case "general": {
 return (<GeneralSection

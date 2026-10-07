@@ -193,3 +193,5 @@ export * from "./seed.js"
 export * from "./theme-provider.js"
 export * from "./composites/themes-settings.js"
 export * from "./composites/plugins-settings.js"
+
+export * from "./composites/routines-settings-view.js"

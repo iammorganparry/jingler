@@ -1,0 +1,50 @@
+// @vitest-environment node
+import { createActor } from "xstate"
+import { expect, it, vi } from "vitest"
+import { projectWorkflowMachine, workflowDraft, workflowPayload } from "./project-workflow-machine.js"
+import { settingsProjects } from "./project-settings-fixtures.js"
+const project = settingsProjects[0]!
+it("preserves retry IDs and couples async save state", async () => {
+  const onSave = vi.fn().mockRejectedValueOnce(new Error("Disk failed")).mockResolvedValueOnce(undefined)
+  const actor = createActor(projectWorkflowMachine, { input: { project, onSave } }).start()
+  actor.send({ type: "EDIT", draft: { ...workflowDraft(project), setup: "changed" } })
+  actor.send({ type: "APPROVE", approved: true })
+  actor.send({ type: "SAVE" })
+  expect(actor.getSnapshot().matches("saving")).toBe(true)
+  actor.send({ type: "EDIT", draft: workflowDraft(project) })
+  await vi.waitFor(() => expect(actor.getSnapshot().context.message).toBe("Disk failed"))
+  expect(actor.getSnapshot().context.draft.setup).toBe("changed")
+  actor.send({ type: "SAVE" })
+  await vi.waitFor(() => expect(actor.getSnapshot().context.error).toBe(false))
+  expect(onSave).toHaveBeenCalledTimes(2)
+  expect(onSave.mock.calls[0]).toEqual(onSave.mock.calls[1])
+  actor.stop()
+})
+it("persists edited drafts without granting execution approval", async () => {
+  const onSave = vi.fn()
+  const actor = createActor(projectWorkflowMachine, { input: { project, onSave } }).start()
+  actor.send({ type: "EDIT", draft: { ...workflowDraft(project), setup: "changed setup" } })
+  actor.send({ type: "SAVE" })
+  await vi.waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+    projectId: project.id, setup: "changed setup", approve: false,
+  })))
+  await vi.waitFor(() => expect(actor.getSnapshot().context.message).toBe("Saved without approval. Commands will not run."))
+  expect(actor.getSnapshot().context.approved).toBe(false)
+  actor.stop()
+})
+it("preserves consent for no-op edits and revokes it for real edits", () => {
+  const actor = createActor(projectWorkflowMachine, { input: { project, onSave: vi.fn() } }).start()
+  const draft = actor.getSnapshot().context.draft
+  actor.send({ type: "EDIT", draft: { ...draft } })
+  expect(actor.getSnapshot().context.approved).toBe(true)
+  actor.send({ type: "EDIT", draft: { ...draft, primary: "3200" } })
+  expect(actor.getSnapshot().context.approved).toBe(false)
+  actor.stop()
+})
+it("preserves unchanged command IDs and rejects unsafe payloads before invoking persistence", () => {
+  const draft = workflowDraft(project)
+  const payload = workflowPayload(project.id, { ...draft, runs: [...draft.runs].reverse() }, true)
+  expect(payload.runs.map((run) => run.id)).toEqual(["test-id", "dev-id"])
+  for (const path of ["../file", "/file", ".git/config", "C:/file", "dir\\file"])
+    expect(() => workflowPayload(project.id, { ...draft, copyFiles: path }, true)).toThrow(/safe relative/)
+})

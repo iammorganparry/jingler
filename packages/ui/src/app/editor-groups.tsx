@@ -27,7 +27,7 @@ import {
   type ReactNode
 } from "react"
 import { createPortal } from "react-dom"
-import { ChevronRight, Plus, X, type LucideIcon } from "lucide-react"
+import { ChevronRight, Ellipsis, Plus, X, type LucideIcon } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
@@ -60,6 +60,7 @@ export interface EditorTabMeta {
 }
 
 export interface EditorGroupsProps {
+  readonly onOpenCheckpoints?: (trigger: HTMLButtonElement | null) => void
   readonly sessionId: string
   readonly layout: EditorLayout
   /** Changes whenever tab bodies must re-render (the host passes its session). */
@@ -125,6 +126,7 @@ export function EditorGroups(props: EditorGroupsProps) {
       onDrop: (d, g, e, c) => latest.current.onDrop(d, g, e, c),
       onFocusGroup: (g) => latest.current.onFocusGroup(g),
       onResize: (s, i, d) => latest.current.onResize(s, i, d),
+      get onOpenCheckpoints() { return latest.current.onOpenCheckpoints },
       get launcherItems() {
         return latest.current.launcherItems
       }
@@ -468,6 +470,7 @@ const EditorGroup = memo(function EditorGroup({
           ))}
           <Launcher api={api} />
         </div>
+        {active.kind === "chat" && api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
         {tabStripDrop.overlay}
       </div>
       {crumbs.length > 0 && (
@@ -650,4 +653,24 @@ function Launcher({ api }: { api: Api }) {
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   )
+}
+
+function ConversationActions({ onOpen }: { onOpen(trigger: HTMLButtonElement | null): void }) {
+  const trigger = useRef<HTMLButtonElement>(null)
+  const openingDialog = useRef(false)
+  return <DropdownMenu.Root onOpenChange={(open) => { if (open) openingDialog.current = false }}>
+    <DropdownMenu.Trigger asChild>
+      <button ref={trigger} type="button" aria-label="More conversation actions" className="flex flex-none items-center px-2 text-dim outline-none hover:text-text focus-visible:ring-2 focus-visible:ring-ring">
+        <Ellipsis className="size-3.5" />
+      </button>
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content align="end" sideOffset={6} collisionPadding={8}
+        onCloseAutoFocus={(event) => { if (openingDialog.current) event.preventDefault() }}
+        className="z-50 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl">
+        <DropdownMenu.Item onSelect={() => { openingDialog.current = true; onOpen(trigger.current) }}
+          className="cursor-pointer rounded-md px-2.5 py-2 text-[12.5px] text-text-body outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright">Checkpoints</DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
 }
