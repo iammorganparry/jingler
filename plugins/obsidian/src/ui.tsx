@@ -2,7 +2,7 @@ import { definePlugin, useHost, type TabProps } from "@jingler/plugin-sdk"
 import { atLeast, Button, Card, Input, Markdown, useWidthTier } from "@jingler/plugin-sdk/ui"
 import { useMachine } from "@xstate/react"
 import { manifest } from "./manifest.js"
-import type { VaultChoice } from "./discovery.js"
+import type { VaultChoice } from "./vault-choices.js"
 import { notesMachine } from "./notes-machine.js"
 
 function Notes(props: TabProps) {
@@ -53,7 +53,7 @@ function SessionNotes({ session }: TabProps) {
           {!busy && !error && !paths.length && <p className="p-2 text-sm text-dim">{configuredRoot ? "No Markdown notes to preview." : "Save a vault to browse its notes."}</p>}
         </nav>
       </Card>
-      <Card className="min-w-0 flex-1">
+      <Card className={stacked ? "min-h-64 flex-none" : "min-w-0 flex-1"}>
         <article className="h-full overflow-auto p-4" data-testid="obsidian-preview">
           {note ? <><h3 className="mb-4 break-all text-xs text-dim">{note.path}</h3><Markdown>{note.content}</Markdown></> : <p className="text-sm text-dim">{busy ? "Loading preview…" : "Choose a note to preview."}</p>}
         </article>

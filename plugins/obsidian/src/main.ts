@@ -1,4 +1,4 @@
-import { discoverVaults } from "./discovery.js"
+import { discoverVaults } from "./vault-choices.js"
 import type { Activate, AgentToolDefinition, HostContext } from "@jingler/plugin-sdk/host"
 import { listNotes, readNote, validateRoot, writeNote } from "./vault.js"
 

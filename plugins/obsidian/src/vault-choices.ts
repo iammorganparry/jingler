@@ -45,9 +45,14 @@ async function readRegistry(file: string): Promise<unknown> {
       const stat = await handle.stat()
       if (!stat.isFile() || stat.size > 262_144) return null
       const bytes = Buffer.alloc(262_145)
-      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
-      if (bytesRead > 262_144) return null
-      raw = JSON.parse(bytes.subarray(0, bytesRead).toString("utf8"))
+      let size = 0
+      while (size < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, size, bytes.length - size, size)
+        if (!bytesRead) break
+        size += bytesRead
+      }
+      if (size > 262_144) return null
+      raw = JSON.parse(bytes.subarray(0, size).toString("utf8"))
     } finally { await handle.close() }
     return raw
 }

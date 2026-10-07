@@ -1,5 +1,5 @@
 import { assign, fromPromise, setup } from "xstate"
-import type { VaultChoice } from "./discovery.js"
+import type { VaultChoice } from "./vault-choices.js"
 import type { Note } from "./vault.js"
 
 export interface NotesServices {
@@ -27,10 +27,13 @@ export const notesMachine = setup({
     input: {} as { services: NotesServices }
   },
   actors: {
+    discover: fromPromise(async ({ input }: { input: NotesServices }) => {
+      try { return await input.discover?.() ?? [] }
+      catch { return [] }
+    }),
     configuration: fromPromise(async ({ input }: { input: NotesServices }) => {
-      const vaults = await input.discover?.().catch(() => []) ?? []
-      try { return { vaults, root: await input.configuration(), error: "" } }
-      catch (cause) { return { vaults, root: "", error: cause instanceof Error ? cause.message : String(cause) } }
+      try { return { root: await input.configuration(), error: "" } }
+      catch (cause) { return { root: "", error: cause instanceof Error ? cause.message : String(cause) } }
     }),
     configure: fromPromise(({ input }: { input: Context }) => input.services.configure(input.root)),
     read: fromPromise(({ input }: { input: Context }) => input.services.read(input.selected)),
@@ -53,6 +56,10 @@ export const notesMachine = setup({
   id: "obsidian-notes",
   initial: "configuration",
   context: ({ input }) => ({ services: input.services, root: "", configuredRoot: "", vaults: [], paths: [], selected: "", note: null, error: "" }),
+  invoke: {
+    src: "discover", input: ({ context }) => context.services,
+    onDone: { actions: assign({ vaults: ({ event }) => event.output }) }
+  },
   states: {
     configuration: {
       invoke: {

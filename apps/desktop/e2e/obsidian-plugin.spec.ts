@@ -8,10 +8,16 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
     const vault = join(home, "vault")
     mkdirSync(vault)
     writeFileSync(join(vault, "known.md"), "# Known vault note")
+    for (let index = 0; index < 12; index++) writeFileSync(join(vault, `note-${index}.md`), `# Note ${index}`)
+    const alternatives = Object.fromEntries(Array.from({ length: 8 }, (_, index) => {
+      const path = join(home, `vault-alt-${index}`)
+      mkdirSync(path)
+      return [`alternative-${index}`, { path: realpathSync(path) }]
+    }))
     const metadata = process.platform === "darwin" ? join(home, "Library", "Application Support", "obsidian")
       : process.platform === "win32" ? join(home, "AppData", "Roaming", "obsidian") : join(home, ".config", "obsidian")
     mkdirSync(metadata, { recursive: true })
-    writeFileSync(join(metadata, "obsidian.json"), JSON.stringify({ vaults: { opaque: { path: realpathSync(vault), ts: 123, open: true } } }))
+    writeFileSync(join(metadata, "obsidian.json"), JSON.stringify({ vaults: { opaque: { path: realpathSync(vault), ts: 123, open: true }, ...alternatives } }))
   }, e2eEnv: { XDG_CONFIG_HOME: "", APPDATA: "" }, sessions: [{
     id: "obsidian-preview", repo: "widget", branch: "notes", title: "Vault preview", status: "idle",
     diff: { added: 0, removed: 0 }, prNumber: null, costUsd: 0, tokens: 0, updatedAt: "2026-10-07T00:00:00.000Z"
@@ -31,7 +37,7 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await expect(window.getByTestId("obsidian-preview")).not.toContainText("Known vault note")
   await window.getByRole("button", { name: "Save vault" }).click()
   await expect(window.getByTestId("obsidian-preview").getByRole("heading", { name: "Known vault note" })).toBeVisible()
-  await window.setViewportSize({ width: 900, height: 700 })
+  await window.setViewportSize({ width: 900, height: 600 })
   const divider = await window.getByRole("separator", { name: "Resize editor group 1" }).boundingBox()
   if (!divider) throw new Error("Missing editor split divider")
   await window.mouse.move(divider.x + divider.width / 2, divider.y + divider.height / 2)
@@ -40,6 +46,15 @@ test("Obsidian previews a configured local vault and refreshes external edits", 
   await window.mouse.up()
   await expect.poll(() => window.getByTestId("obsidian-notes").evaluate((el) => el.getBoundingClientRect().width)).toBeLessThan(400)
   await expect(window.getByTestId("obsidian-browser-layout")).toHaveClass(/flex-col/)
+  const choices = window.getByTestId("obsidian-vault-choices")
+  expect(await choices.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+  const noteList = window.getByRole("navigation", { name: "Vault notes" })
+  expect(await noteList.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true)
+  const stackedPreview = window.getByTestId("obsidian-preview")
+  expect(await stackedPreview.locator("..").evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(256)
+  expect(await stackedPreview.evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThan(200)
+  await stackedPreview.scrollIntoViewIfNeeded()
+  await expect(stackedPreview.getByRole("heading", { name: "Known vault note" })).toBeVisible()
   await window.setViewportSize({ width: 1500, height: 900 })
   await window.reload()
   await window.getByTestId("session-row-obsidian-preview").click()
