@@ -5,7 +5,12 @@ import type { Menu } from "electron"
 
 const prose = "Select this chat output and copy it."
 const url = "https://example.com/selection"
-type ContextMenuRecorder = typeof globalThis & { __chatMenu?: Menu; __chatMenuPopups: number }
+type ContextMenuRecorder = typeof globalThis & {
+  __chatMenu?: Menu
+  __chatMenuPopups: number
+  __chatContextMenuEvents: number
+  __chatLastContext?: { linkURL: string; selectionText: string }
+}
 type ExternalOpenRecorder = typeof globalThis & { __chatSelectionOpened: string[] }
 
 const selectionApp: LaunchOptions = {
@@ -89,9 +94,14 @@ test("chat output and links can be selected and copied", async ({ launchApp }) =
 test("right-click offers native text and link actions without replacing app menus", async ({ launchApp }) => {
   const { window, app } = await launchApp(selectionApp)
   await expect(appShell(window)).toBeVisible()
-  await app.evaluate(({ Menu }) => {
+  await app.evaluate(({ BrowserWindow, Menu }) => {
     const recorder = globalThis as ContextMenuRecorder
     recorder.__chatMenuPopups = 0
+    recorder.__chatContextMenuEvents = 0
+    BrowserWindow.getAllWindows()[0]!.webContents.on("context-menu", (_event, params) => {
+      recorder.__chatContextMenuEvents++
+      recorder.__chatLastContext = { linkURL: params.linkURL, selectionText: params.selectionText }
+    })
     Menu.prototype.popup = function () {
       recorder.__chatMenu = this
       recorder.__chatMenuPopups++
@@ -126,6 +136,56 @@ test("right-click offers native text and link actions without replacing app menu
     item?.click({}, host, host?.webContents)
   })
   await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(url)
+
+  for (const name of ["notes.md", "selection notes"]) {
+    await text.click()
+    await window.evaluate(() => window.getSelection()?.removeAllRanges())
+    await expect.poll(() => window.evaluate(() => window.getSelection()?.toString())).toBe("")
+    const link = transcript.getByRole("link", { name, exact: true })
+    const before = await app.evaluate(() => {
+      const recorder = globalThis as ContextMenuRecorder
+      return { events: recorder.__chatContextMenuEvents, popups: recorder.__chatMenuPopups }
+    })
+    await link.click({ button: "right" })
+    // Wait for Electron to receive the event before asserting that no native menu appeared.
+    await expect.poll(() => app.evaluate(() => (globalThis as ContextMenuRecorder).__chatContextMenuEvents)).toBe(before.events + 1)
+    const native = await app.evaluate(() => {
+      const recorder = globalThis as ContextMenuRecorder
+      return {
+        context: recorder.__chatLastContext!, popups: recorder.__chatMenuPopups,
+        items: recorder.__chatMenu?.items.map(item => ({ role: item.role, enabled: item.enabled }))
+      }
+    })
+    expect(native.context.linkURL).toBe(await link.evaluate(el => (el as HTMLAnchorElement).href))
+    // macOS may select the word under a right-click; that selection must still offer Copy, never its app-local address.
+    if (native.context.selectionText) {
+      expect(native.popups).toBe(before.popups + 1)
+      expect(native.items).toEqual([{ role: "copy", enabled: true }])
+    } else {
+      expect(native.popups).toBe(before.popups)
+    }
+    expect(await app.evaluate(({ clipboard }) => clipboard.readText())).toBe(url)
+
+    await window.evaluate(() => window.getSelection()?.removeAllRanges())
+    const box = await link.evaluate(el => {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const rect = range.getBoundingClientRect()
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+    })
+    await window.mouse.move(box.x + 0.1, box.y + box.height / 2)
+    await window.mouse.down()
+    await window.mouse.move(box.x + box.width - 0.1, box.y + box.height / 2, { steps: 15 })
+    await window.mouse.up()
+    await expect.poll(() => window.evaluate(() => window.getSelection()?.toString())).toBe(name)
+    await window.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { button: "right" })
+    await expect.poll(() => app.evaluate(() => (globalThis as ContextMenuRecorder).__chatMenuPopups)).toBe(native.popups + 1)
+    expect(await app.evaluate(() =>
+      (globalThis as ContextMenuRecorder).__chatMenu?.items.map(item => ({ role: item.role, enabled: item.enabled }))
+    )).toEqual([{ role: "copy", enabled: true }])
+    await expect.poll(() => window.evaluate(() => window.getSelection()?.toString())).toBe(name)
+    await expect(window.getByTestId("editor-body-file-notes.md")).toHaveCount(0)
+  }
 
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.click({ button: "right" })

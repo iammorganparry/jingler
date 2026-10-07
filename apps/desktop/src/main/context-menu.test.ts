@@ -24,8 +24,8 @@ const context = (overrides = {}) => ({
   ...overrides
 })
 
-const dispatch = (params = context(), defaultPrevented = false) => {
-  const webContents = new EventEmitter()
+const dispatch = (params = context(), defaultPrevented = false, rendererURL = "file:///app/index.html") => {
+  const webContents = Object.assign(new EventEmitter(), { getURL: () => rendererURL })
   const window = { webContents } as unknown as BrowserWindow
   registerTextContextMenu(window)
   webContents.emit("context-menu", { defaultPrevented }, params)
@@ -60,6 +60,44 @@ describe("registerTextContextMenu", () => {
     expect(items()).toEqual([
       { role: "copy", enabled: true },
       { type: "separator" },
+      { label: "Copy Link Address", click: expect.any(Function) }
+    ])
+  })
+
+  const localLinks = [
+    ["file:///app/index.html", "file:///app/notes.md"],
+    ["file:///app/index.html", "file:///worktree/notes.md"],
+    ["http://localhost:5173", "http://localhost:5173/notes.md"],
+    ["http://localhost:5173/chat", "http://localhost:5173/docs/notes.md"]
+  ]
+
+  it.each(localLinks)("omits link copying for renderer-local links (%s, %s)", (rendererURL, linkURL) => {
+    dispatch(context({ linkURL }), false, rendererURL)
+    expect(mocks.buildFromTemplate).not.toHaveBeenCalled()
+  })
+
+  it.each(localLinks)("keeps selected-text Copy for renderer-local links (%s, %s)", (rendererURL, linkURL) => {
+    dispatch(context({ linkURL, selectionText: "notes.md" }), false, rendererURL)
+    expect(items()).toEqual([{ role: "copy", enabled: true }])
+  })
+
+  it.each([
+    ["file:///app/index.html", "mailto:dev@example.com"],
+    ["http://localhost:5173", "https://example.com/docs"],
+    ["http://localhost:5173", "http://localhost:5174/docs"]
+  ])("still copies non-local addresses (%s, %s)", (rendererURL, linkURL) => {
+    dispatch(context({ linkURL }), false, rendererURL)
+    expect(items()).toEqual([{ label: "Copy Link Address", click: expect.any(Function) }])
+    Reflect.apply(items()[0]!.click!, undefined, [])
+    expect(mocks.writeText).toHaveBeenCalledWith(linkURL)
+  })
+
+  it("safely ignores malformed link URLs and tolerates an unavailable renderer URL", () => {
+    dispatch(context({ linkURL: "http://[", selectionText: "selected" }), false, "")
+    expect(items()).toEqual([{ role: "copy", enabled: true }])
+    dispatch(context({ linkURL: "https://example.com/docs" }), false, "not a URL")
+    expect(mocks.buildFromTemplate).toHaveBeenCalledTimes(2)
+    expect(mocks.buildFromTemplate.mock.calls[1]![0]).toEqual([
       { label: "Copy Link Address", click: expect.any(Function) }
     ])
   })
