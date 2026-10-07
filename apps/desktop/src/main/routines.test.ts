@@ -7,7 +7,7 @@ import { RoutinesService } from "./routines.js"
 
 const input = Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "desktop:pi:test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "once", at: Date.now() + 60_000 }, maxDurationMs: 60_000 })
 const cleanup: Array<() => void> = []
-afterEach(() => { vi.useRealTimers(); cleanup.splice(0).forEach(fn => fn()); vi.restoreAllMocks() })
+afterEach(() => { vi.useRealTimers(); cleanup.splice(0).forEach(fn => { fn() }); vi.restoreAllMocks() })
 async function fixture(stop: () => Effect.Effect<void, Error> = () => Effect.void) {
   const temp = withTempRoot(); cleanup.push(temp.cleanup)
   let session: AuthSession | null = { user: { id: "u", name: "", email: "", image: null }, expiresAt: new Date(Date.now() + 3600_000).toISOString() }

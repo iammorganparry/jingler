@@ -57,7 +57,7 @@ test("safe creation captures before the production Pi turn and restores files an
   await expect.poll(async () => {
     const settling = dialog.getByRole("alert").filter({ hasText: "Stop all workspace work" })
     if (await settling.isVisible()) await dialog.getByRole("button", { name: "Retry", exact: true }).click()
-    return dialog.getByText("overwrite: checkpoint-proof.txt", { exact: true }).isVisible()
+    return dialog.getByRole("list", { name: "Workspace file changes" }).getByText("overwrite: checkpoint-proof.txt", { exact: true }).isVisible()
   }).toBe(true)
   await expect(dialog).toContainText("Stop external editors and file watchers before confirming")
   await expect(dialog).toContainText("cannot lock external writers")

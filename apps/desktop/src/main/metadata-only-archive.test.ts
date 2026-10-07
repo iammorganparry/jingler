@@ -34,5 +34,18 @@ it("acknowledged archive needs no lifecycle/cleanup/PTY services and preserves a
     expect(restored.workspaceLifecycle).toEqual(archived.workspaceLifecycle)
     await expect(run(restoreMetadataOnly(session.id))).rejects.toThrow("requires an archived")
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+    // Legacy Windows archives have unknown shell ownership, but unarchive is metadata only.
+    writeFileSync(join(temp.root, "sessions.json"), JSON.stringify([{ ...archived, checkpointPtyHistory: false, checkpointExecutionHistory: undefined }]))
+    const platform = process.platform
+    Object.defineProperty(process, "platform", { value: "win32" })
+    try {
+      const legacy = await run(restoreMetadataOnly(session.id))
+      expect(legacy.archived).toBe(false)
+      expect(legacy.checkpointPtyHistory).toBe(false)
+      expect(legacy.checkpointExecutionHistory).toBeUndefined()
+      expect(legacy.workspaceLifecycle).toEqual(archived.workspaceLifecycle)
+      await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+      expect(readFileSync(join(session.worktreePath!, "keep"), "utf8")).toBe("preserved")
+    } finally { Object.defineProperty(process, "platform", { value: platform }) }
   } finally { temp.cleanup(); repo.cleanup() }
 })

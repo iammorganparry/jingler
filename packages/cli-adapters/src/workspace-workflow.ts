@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process"
-import { randomUUID } from "node:crypto"
 import { resolve } from "node:path"
 import { anchoredFs } from "./anchored-fs.js"
 import type { FileSystem, Path, CommandExecutor } from "@effect/platform"
@@ -27,15 +26,12 @@ const safeOutput = (value: string): string =>
     .replace(/((?:api[_-]?key|token|password|secret)\s*[=:]\s*)\S+/giu, "$1[redacted]")
     .slice(-OUTPUT_LIMIT)
 
-const shellCommand = (command: string): { file: string; args: string[] } => {
-  if (process.platform === "win32") {
-    throw new Error("Workspace commands are not supported on Windows until owned process-tree termination is available.")
-  }
-  return { file: process.env.SHELL || "/bin/sh", args: ["-lc", command] }
-}
+const shellCommand = (command: string): { file: string; args: string[] } =>
+  ({ file: process.env.SHELL || "/bin/sh", args: ["-lc", command] })
 
 const assertShellSupported = (session: Session): void => {
   if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
+  if (process.platform === "win32") throw new Error("Workspace commands are not supported on Windows until owned process-tree termination is available.")
 }
 
 const runCommand = async (
@@ -296,7 +292,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           let resolveSpawn!: () => void
           let rejectSpawn!: (cause: unknown) => void
           const spawned = new Promise<void>((resolve, reject) => { resolveSpawn = resolve; rejectSpawn = reject })
-          if (session.checkpointSafeMode) throw new Error("Project shell commands are unsupported in checkpoint-safe mode.")
+          assertShellSupported(session)
           await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
           const resultPromise = runCommand(session, `run:${runId}`, command.command, () => {
             sessionRuns.set(runId, state)

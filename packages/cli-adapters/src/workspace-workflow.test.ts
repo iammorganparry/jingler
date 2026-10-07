@@ -55,6 +55,25 @@ const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService,
   ))
 }
 
+it("refuses unsupported Windows commands before marking execution history", async () => {
+  await harness("touch setup-proof", async (workflow, id, cwd, state) => {
+    const platform = process.platform
+    Object.defineProperty(process, "platform", { value: "win32" })
+    try {
+      await expect(Effect.runPromise(workflow.setup(id))).rejects.toThrow("Windows")
+      expect((await state.read()).checkpointExecutionHistory).toBe("clean")
+      expect(existsSync(join(cwd, "setup-proof"))).toBe(false)
+      await Effect.runPromise(workflow.skipSetup(id))
+      await expect(Effect.runPromise(workflow.startRun(id, "run"))).rejects.toThrow("Windows")
+      expect((await state.read()).checkpointExecutionHistory).toBe("clean")
+      const owner = closeWorkspaceAdmission(id, "cleanup test")
+      await expect(Effect.runPromise(workflow.cleanup(id, owner))).rejects.toThrow("Windows")
+      expect((await state.read()).checkpointExecutionHistory).toBe("clean")
+      expect(existsSync(join(cwd, "cleanup-proof"))).toBe(false)
+    } finally { Object.defineProperty(process, "platform", { value: platform }) }
+  }, "touch run-proof", "touch cleanup-proof")
+})
+
 describe("approved file safety", () => {
   it("copies through an owner-only replacement without truncating an existing inode", async () => {
     const { root, target } = fixture()

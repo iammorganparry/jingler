@@ -1,4 +1,4 @@
-import { SessionStore } from "@jingler/cli-adapters"
+import { SessionStore, workspaceHasUnprovenProcesses } from "@jingler/cli-adapters"
 import { GitError } from "@jingler/core"
 import { Effect } from "effect"
 /** Explicit operator acknowledgement archives metadata only, without touching jobs or files. */
@@ -12,7 +12,7 @@ export const archiveMetadataOnly = (id: string, reason: "merged" | "closed", ack
 /** Restore metadata only; never reset lifecycle evidence or execution restrictions. */
 export const restoreMetadataOnly = (id: string) => Effect.gen(function* () {
   const session = yield* SessionStore.get(id)
-  if (!session.archived || !session.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Metadata-only restore requires an archived workspace with unproven terminal history." }))
+  if (!session.archived || !workspaceHasUnprovenProcesses(session)) return yield* Effect.fail(new GitError({ message: "Metadata-only restore requires an archived workspace with unproven process history." }))
   yield* SessionStore.restore(id)
   return yield* SessionStore.get(id)
 })

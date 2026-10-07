@@ -1822,7 +1822,7 @@ export const restoreSession = (sessionId: string) =>
     const archived = yield* SessionStore.get(sessionId);
     if (!archived.archived) return yield* Effect.fail(new GitError({ message: "Only archived workspaces can be restored." }));
     // Metadata-only restore touches neither jobs nor checkout: no destructive ownership proof needed.
-    if (archived.checkpointPtyHistory) return yield* restoreMetadataOnly(sessionId);
+    if (workspaceHasUnprovenProcesses(archived)) return yield* restoreMetadataOnly(sessionId);
     const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace restoration is in progress");
     yield* SessionStore.restore(sessionId);
     // Preserve failed/in-progress setup and cleanup evidence on restoration.

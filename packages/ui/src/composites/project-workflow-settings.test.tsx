@@ -74,7 +74,6 @@ describe("ProjectWorkflowSettings", () => {
     fireEvent.change(screen.getByLabelText("Run commands"), { target: { value: "New=pnpm new" } })
     fireEvent.click(screen.getByRole("button", { name: "Save workflow" }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
-    expect(onSave.mock.calls[0][0].runs[0].id).not.toBe("dev-id")
-    expect(onSave.mock.calls[0][0].runs[0].id).not.toBe("test-id")
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ runs: [{ id: expect.stringMatching(/^run-/), label: "New", command: "pnpm new" }] }))
   })
 })
