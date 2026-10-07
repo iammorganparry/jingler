@@ -669,3 +669,63 @@ async function expandMatchingTreeFolder(tree: import("@playwright/test").Locator
   }
   return expanded
 }
+
+test("following a settled operation keeps its rendered file mounted while Pi streams", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true, isolateSystemHome: true, withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath)],
+    piFixture: { scenarioId: "follow-stability", authRoute: "api-key" }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("composer").getByRole("button", { name: "Follow agent", exact: true }).click()
+  await splitChatBesideFiles(window)
+  const composer = window.getByPlaceholder("Message the agent…")
+  const operations: readonly [string, string, string][] = [
+    ["first", "stability-first", "export const mode = 'modern'"],
+    ["second", "stability-second", "export const mode = 'second'"],
+    ["other", "stability-other", "export const other = 'changed'"]
+  ]
+  for (const [marker, id, content] of operations) {
+    const finished = window.getByText(`${marker}: Stability stream finished.`, { exact: false })
+    await expect(finished).toHaveCount(0)
+    await composer.fill(`[[follow-stability]] ${marker}`)
+    await composer.press("Enter")
+    const followed = window.locator(`[data-follow-agent-change="${id}"]`).filter({ visible: true })
+    await expect(followed.getByText(content, { exact: true })).toBeVisible({ timeout: 20_000 })
+    await window.waitForTimeout(1_000)
+    await expect(finished).toHaveCount(0)
+    const streaming = window.getByText(`${marker}: Still streaming the same completed operation.`, { exact: false })
+    await expect(streaming).toBeVisible()
+    const streamBefore = await streaming.textContent()
+    const churn = await followed.evaluate(async element => {
+      const host = element.querySelector("diffs-container")
+      const root = host?.shadowRoot
+      const code = root?.querySelector("code")
+      if (!host || !root || !code) throw new Error("Followed code did not render")
+      let mutations = 0
+      let removals = 0
+      const editor = new MutationObserver(records => { mutations += records.length })
+      const pane = new MutationObserver(records => {
+        removals += records.flatMap(record => Array.from(record.removedNodes))
+          .filter(removed => removed === host || removed.contains(host)).length
+      })
+      editor.observe(root, { childList: true, subtree: true, characterData: true })
+      pane.observe(document.body, { childList: true, subtree: true })
+      try {
+        // Real runtime snapshots continue arriving after the write completed.
+        await new Promise<void>(resolve => setTimeout(resolve, 2_000))
+        return { removals, mutations,
+          sameHost: element.isConnected && element.querySelector("diffs-container") === host,
+          sameCode: root.querySelector("code") === code }
+      } finally {
+        editor.disconnect()
+        pane.disconnect()
+      }
+    })
+    expect((await streaming.textContent())?.length).toBeGreaterThan(streamBefore?.length ?? 0)
+    await expect(finished).toHaveCount(0)
+    expect(churn).toEqual({ removals: 0, mutations: 0, sameHost: true, sameCode: true })
+    await expect(finished).toHaveCount(1, { timeout: 30_000 })
+  }
+})

@@ -530,6 +530,57 @@ describe("fileBrowserMachine", () => {
     })
   })
 
+  it("does not reload repeated completed targets or late preview metadata", async () => {
+    const { actor, api } = start()
+    await waitFor(actor, (s) => s.matches({ tree: "ready" }))
+    actor.send({ type: "ENABLE_FOLLOW" })
+    const target = { type: "AGENT_TARGET" as const, path: "src/app.ts", eventId: "repeat", completed: true }
+    actor.send(target)
+    await waitFor(actor, (s) => s.matches({ document: { ready: "clean" } }) && s.matches({ tree: "ready" }) && s.matches({ changes: "ready" }))
+    const counts = () => [vi.mocked(api.read).mock.calls.length, vi.mocked(api.diff).mock.calls.length, vi.mocked(api.list).mock.calls.length]
+    const before = counts()
+    const context = actor.getSnapshot().context
+    let loading = 0
+    let wasLoading = false
+    const subscription = actor.subscribe(s => {
+      const isLoading = s.matches({ document: "loading" })
+      if (isLoading && !wasLoading) loading++
+      wasLoading = isLoading
+    })
+    for (let i = 0; i < 5; i++) actor.send({ ...target, path: i % 2 === 0 ? "./src/app.ts" : target.path })
+    const unchanged = actor.getSnapshot().context === context
+    actor.send({ ...target, preview: "+late highlight" })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(unchanged).toBe(true)
+    expect(counts()).toEqual(before)
+    expect(loading).toBe(0)
+    expect(actor.getSnapshot().context.agentTargetPreview).toBe("+late highlight")
+    subscription.unsubscribe()
+    actor.stop()
+  })
+
+  it("ignores repeated targets while the first document read is in flight", async () => {
+    const { promise, resolve: finish } = Promise.withResolvers<AssetPayload>()
+    const read = vi.fn(() => promise)
+    const { actor, api } = start({ read })
+    await waitFor(actor, s => s.matches({ tree: "ready" }))
+    actor.send({ type: "ENABLE_FOLLOW" })
+    const target = { type: "AGENT_TARGET" as const, path: "src/app.ts", eventId: "in-flight", completed: true }
+    actor.send(target)
+    await waitFor(actor, s => s.matches({ document: "loading" }))
+    const context = actor.getSnapshot().context
+    const before = [vi.mocked(api.diff).mock.calls.length, vi.mocked(api.list).mock.calls.length]
+    for (let i = 0; i < 5; i++) actor.send(target)
+    expect(actor.getSnapshot().context).toBe(context)
+    actor.send({ ...target, preview: "+late while reading" })
+    finish(payload("changed", "sha256:changed"))
+    await waitFor(actor, s => s.matches({ document: { ready: "clean" } }))
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(actor.getSnapshot().context.agentTargetPreview).toBe("+late while reading")
+    expect([vi.mocked(api.diff).mock.calls.length, vi.mocked(api.list).mock.calls.length]).toEqual(before)
+    actor.stop()
+  })
+
   it("shows the live diff and reloads it when the followed mutation completes", async () => {
     const diff = vi
       .fn()
@@ -582,6 +633,33 @@ describe("fileBrowserMachine", () => {
       agentTargetCompleted: true
     })
     expect(actor.getSnapshot().matches({ follow: "enabled" })).toBe(true)
+  })
+
+  it("reloads new event IDs on the same path and different paths on the same event ID", async () => {
+    let reads = 0
+    const read = vi.fn(async (_: string, path: string) => {
+      reads++
+      return { ...payload(`changed ${reads}`, `revision:${reads}`), path }
+    })
+    const { actor } = start({ read, list: vi.fn().mockResolvedValue([
+      { path: "src/app.ts", status: "modified" }, { path: "src/other.ts", status: "modified" }
+    ]) })
+    await waitFor(actor, s => s.matches({ tree: "ready" }))
+    actor.send({ type: "ENABLE_FOLLOW" })
+    for (const [path, eventId, expected] of [["src/app.ts", "edit-1", "changed 1"], ["src/app.ts", "edit-2", "changed 2"], ["src/other.ts", "edit-2", "changed 3"]]) {
+      actor.send({ type: "AGENT_TARGET", path: path!, eventId: eventId!, completed: true })
+      await waitFor(actor, s => s.context.draft === expected && s.matches({ changes: "ready" }) && s.matches({ tree: "ready" }))
+    }
+    expect(read).toHaveBeenCalledTimes(3)
+    actor.send({ type: "RELOAD" })
+    await waitFor(actor, s => s.context.draft === "changed 4")
+    actor.send({ type: "DISABLE_FOLLOW" })
+    actor.send({ type: "ENABLE_FOLLOW" })
+    expect(actor.getSnapshot().context.agentTargetSourcePath).toBeNull()
+    actor.send({ type: "AGENT_TARGET", path: "src/other.ts", eventId: "edit-2", completed: true })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    await waitFor(actor, s => s.context.draft === "changed 5")
+    actor.stop()
   })
 
   it("stops following when the user changes the file view or contents", async () => {
@@ -665,6 +743,13 @@ describe("fileBrowserMachine", () => {
         snapshot.matches({ document: { ready: "clean" } }) &&
         snapshot.context.selectedPath === "src/settings/config.ts"
     )
+
+    const settled = actor.getSnapshot().context
+    const calls = [list.mock.calls.length, diff.mock.calls.length, read.mock.calls.length]
+    actor.send({ type: "AGENT_TARGET", path: "src/config.ts", eventId: "move-1", completed: true })
+    expect(actor.getSnapshot().context).toBe(settled)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect([list.mock.calls.length, diff.mock.calls.length, read.mock.calls.length]).toEqual(calls)
 
     expect(list.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(read).toHaveBeenCalledWith("session-a", "src/settings/config.ts")

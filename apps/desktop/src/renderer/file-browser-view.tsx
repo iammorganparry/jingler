@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import type { AssetPayload, DebugViewSnapshot, PrFileChange, Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
@@ -380,6 +380,8 @@ export function FileBrowserView({
     [agentFileActivity, session.worktreePath]
   )
 
+  const openFollowedPath = useEffectEvent((followedPath: string) => onOpenPath?.(followedPath))
+
   useEffect(() => {
     if (path !== undefined || !browser.followEnabled || agentFileActivity === null || normalizedAgentTarget === null) return
     browser.followAgentTarget(
@@ -393,14 +395,13 @@ export function FileBrowserView({
       preview: agentFileActivity.preview,
       completed: agentFileActivity.phase === "completed"
     })
-    onOpenPath?.(normalizedAgentTarget)
+    openFollowedPath(normalizedAgentTarget)
   }, [
     agentFileActivity,
     browser.followAgentTarget,
     browser.followEnabled,
     normalizedAgentTarget,
     path,
-    onOpenPath,
     session.id,
     session.worktreePath
   ])
