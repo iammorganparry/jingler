@@ -63,7 +63,8 @@ function vaultTools(ctx: VaultHost, rootFor: (id: unknown) => Promise<string>): 
     },
     risk: action === "write" ? "mutate" : "read",
     idempotency: action === "write" ? "unsafe" : "safe",
-    outputBudget: 1_100_000,
+    // JSON can expand each byte of a 1 MB note into a six-character escape.
+    outputBudget: 6_100_000,
     execute: async (raw, context) => {
       context.signal.throwIfAborted()
       const actual = await ctx.sessions.get(context.session.id)
@@ -74,7 +75,8 @@ function vaultTools(ctx: VaultHost, rootFor: (id: unknown) => Promise<string>): 
       const path = text(args.path)
       if (action === "write") {
         if (args.vault !== root) throw new Error("Vault changed: list/read again before writing.")
-        return { vault: root, ...await writeNote(root, path, args.content, args.revision) }
+        const note = await writeNote(root, path, args.content, args.revision, context.signal)
+        return { vault: root, path: note.path, revision: note.revision }
       }
       return { vault: root, ...await readNote(root, path) }
     }

@@ -26,6 +26,13 @@ describe("local vault", () => {
     await expect(writeNote(root, "note.md", "Clobber", next.revision)).rejects.toThrow("Revision conflict")
     expect(await readFile(join(root, "note.md"), "utf8")).toBe("External edit")
   })
+  it("does not mutate a cancelled write", async () => {
+    const note = await readNote(root, "note.md")
+    const controller = new AbortController()
+    controller.abort()
+    await expect(writeNote(root, note.path, "cancelled", note.revision, controller.signal)).rejects.toThrow()
+    expect(await readFile(join(root, "note.md"), "utf8")).toBe(note.content)
+  })
   it("serializes competing plugin writes", async () => {
     const note = await readNote(root, "note.md")
     const results = await Promise.allSettled([

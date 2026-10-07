@@ -24,6 +24,25 @@ it("loads persisted configuration, browses, refreshes, and saves through invoked
   actor.stop()
 })
 
+it("keeps the note list when one preview cannot be read", async () => {
+  const services: NotesServices = {
+    configuration: async () => "/vault", configure: async (root) => root,
+    list: async () => ["large.md", "small.md"],
+    read: async (path) => {
+      if (path === "large.md") throw new Error("Note is too large.")
+      return { path, content: "Readable", revision: "rev" }
+    }
+  }
+  const actor = createActor(notesMachine, { input: { services } }).start()
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(actor.getSnapshot().context.paths).toEqual(["large.md", "small.md"])
+  expect(actor.getSnapshot().context.error).toBe("Note is too large.")
+  actor.send({ type: "SELECT", path: "small.md" })
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(actor.getSnapshot().context.note?.content).toBe("Readable")
+  actor.stop()
+})
+
 it("surfaces invalid configuration and permits recovery", async () => {
   const services: NotesServices = {
     configuration: async () => { throw new Error("Invalid vault") },

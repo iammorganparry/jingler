@@ -86,7 +86,7 @@ async function readContent(file: Awaited<ReturnType<typeof open>>): Promise<stri
 // Serialize this plugin's writes; Obsidian edits are checked against the latest
 // bytes immediately before writing through the validated descriptor.
 let writes: Promise<unknown> = Promise.resolve()
-export function writeNote(root: string, path: string, content: unknown, expectedRevision: unknown): Promise<Note> {
+export function writeNote(root: string, path: string, content: unknown, expectedRevision: unknown, signal?: AbortSignal): Promise<Note> {
   const operation = writes.catch(() => undefined).then(async () => {
     if (typeof content !== "string" || Buffer.byteLength(content) > MAX_BYTES || typeof expectedRevision !== "string" || !expectedRevision) {
       throw new Error("A bounded Markdown body and the revision from read are required.")
@@ -94,6 +94,7 @@ export function writeNote(root: string, path: string, content: unknown, expected
     return withNote(root, path, true, async (file) => {
       const current = await readContent(file)
       if (revision(current) !== expectedRevision) throw new Error("Revision conflict: read the note again before writing.")
+      signal?.throwIfAborted()
       const bytes = Buffer.from(content)
       let offset = 0
       while (offset < bytes.length) {

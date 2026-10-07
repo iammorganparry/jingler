@@ -29,8 +29,11 @@ Writes reject traversal, symlinks, special files, and hard links; they use a
 validated open descriptor and serialize plugin writes. A revision precondition
 detects edits made since reading. Local filesystems have no portable atomic
 compare-and-swap: an external writer changing a file during the final write can
-still race. Avoid simultaneous edits to the same note; writes are in place and
-are not crash-atomic. This plugin is not a backup or synchronization service.
+still race. Node's path-based checks also cannot prevent a hostile local process
+from swapping a parent directory for a symlink between checks; do not use a
+vault writable by an untrusted local process as a security boundary. Avoid
+simultaneous edits to the same note; writes are in place and are not
+crash-atomic. This plugin is not a backup or synchronization service.
 
 Run `pnpm --filter @jingler/plugin-obsidian test` and `typecheck` for host/vault
 and state-machine behavior; `pnpm --filter @jingler/desktop e2e obsidian-plugin.spec.ts`

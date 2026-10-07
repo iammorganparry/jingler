@@ -28,8 +28,12 @@ export const notesMachine = setup({
     load: fromPromise(async ({ input }: { input: Context }) => {
       const paths = await input.services.list()
       const selected = paths.includes(input.selected) ? input.selected : paths[0] ?? ""
-      const note = selected ? await input.services.read(selected) : null
-      return { paths, selected, note }
+      try {
+        const note = selected ? await input.services.read(selected) : null
+        return { paths, selected, note, error: "" }
+      } catch (cause) {
+        return { paths, selected, note: null, error: cause instanceof Error ? cause.message : String(cause) }
+      }
     })
   },
   actions: {
