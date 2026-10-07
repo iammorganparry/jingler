@@ -1,7 +1,7 @@
 import { routineRunActive, type Routine, type RoutineRun } from "@jingler/core"
 import type { RoutineStore } from "@jingler/cli-adapters/routine-store"
 
-import { RoutinePreparationPendingError } from "./routine-execution.js"
+import { RoutinePreparationPendingError, RoutineTeardownUnresolvedError } from "./routine-execution.js"
 
 class RoutineRequestError extends Error {}
 export interface RoutineClock {
@@ -89,10 +89,13 @@ export class RoutineScheduler {
     }
     await this.refresh()
   }
-  async stop() {
+  closeAdmission() {
     this.#generation++
     this.#stopped = true
     this.clock.clearTimer(this.#timer)
+  }
+  async stop() {
+    this.closeAdmission()
     const active = this.#active
     active?.controller.abort(new Error("Desktop is quitting"))
     await this.#queue
@@ -139,16 +142,20 @@ export class RoutineScheduler {
         const result = await this.execution.execute(routine, run, controller.signal, () => this.#current(run, controller.signal), () => this.store.link(run, this.clock.now()))
         await this.store.finish(run.id, controller.signal.aborted ? "cancelled" : result.status, controller.signal.aborted ? String(controller.signal.reason?.message ?? "Cancelled") : result.message, this.clock.now())
       } catch (error) {
-        if (error instanceof RoutinePreparationPendingError) {
+        if (error instanceof RoutinePreparationPendingError || error instanceof RoutineTeardownUnresolvedError) {
           active.pending = error.pending
-          void error.pending.catch(() => {}).finally(() => { if (this.#active === active) this.#active = undefined })
+          if (error instanceof RoutineTeardownUnresolvedError) {
+            void error.pending.then(() => { if (this.#active === active) this.#active = undefined }, () => {})
+          } else {
+            void error.pending.catch(() => {}).finally(() => { if (this.#active === active) this.#active = undefined })
+          }
         }
-        if (error instanceof RoutinePreparationPendingError) {
+        if (error instanceof RoutinePreparationPendingError || error instanceof RoutineTeardownUnresolvedError) {
           this.error = error.message
           this.#stopped = true
           this.clock.clearTimer(this.#timer)
         }
-        await this.store.finish(run.id, controller.signal.aborted && !(error instanceof RoutinePreparationPendingError) ? "cancelled" : "failed", error instanceof Error ? error.message : "Routine execution failed", this.clock.now())
+        await this.store.finish(run.id, controller.signal.aborted && !(error instanceof RoutinePreparationPendingError || error instanceof RoutineTeardownUnresolvedError) ? "cancelled" : "failed", error instanceof Error ? error.message : "Routine execution failed", this.clock.now())
       } finally {
         this.elapsedClock.clearTimer(active.deadlineTimer)
         if (this.#active === active && !active.pending) this.#active = undefined

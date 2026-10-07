@@ -8,6 +8,17 @@ export class RoutinePreparationPendingError extends Error {
   }
 }
 
+/** A rejected stop never proves the agent has stopped. */
+export class RoutineTeardownUnresolvedError extends Error {
+  constructor(readonly pending: Promise<unknown>) {
+    super("Routine agent teardown remains unresolved. Restart the desktop before admitting another routine.")
+  }
+}
+export const routineTeardown = async (operation: Promise<void>, signal: AbortSignal) => {
+  try { await preparation(operation, signal) }
+  catch { throw new RoutineTeardownUnresolvedError(operation) }
+}
+
 /** Mutation promises cannot prove cancellation. Retain ownership through commit and
  * association even after an interrupt; the caller bounds its wait, not the operation. */
 export function runOwnedRoutineEffect<A, E, R>(runtime: Runtime.Runtime<R>, effect: Effect.Effect<A, E, R>, signal: AbortSignal, committed: (value: A) => Promise<unknown> = async () => {}) {

@@ -1,4 +1,4 @@
-import { routineExecution, runOwnedRoutineEffect, preparation } from "./routine-execution.js"
+import { routineExecution, runOwnedRoutineEffect, routineTeardown } from "./routine-execution.js"
 import { validateRoutineProject, validateRoutineModel } from "./routine-validation.js"
 import { join } from "node:path"
 import { AgentRunner, AppPaths, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
@@ -11,7 +11,10 @@ import { RoutineScheduler } from "./routine-scheduler.js"
 export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/Routines", {
   effect: Effect.gen(function* () {
     const auth = yield* AuthService
-    const requireAuth = () => revalidateRoutineAuth(() => auth.getSession())
+    let authenticated = false
+    const requireAuth = () => revalidateRoutineAuth(() => auth.getSession()).pipe(
+      Effect.onError(() => Effect.sync(() => { authenticated = false; scheduler.closeAdmission() }))
+    )
     const paths = yield* AppPaths
     const sessions = yield* SessionStore
     const projects = yield* ProjectService
@@ -63,21 +66,20 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
             if (event._tag === "Failed" && status !== "needs-attention") { status = "failed"; message = event.message }
             if (event._tag === "GateRequested" || event._tag === "QuestionRequested") { status = "needs-attention"; message = "Operator approval or answer required"; stop() }
           })), Effect.disconnect), { signal })
-          if (stopped) { const teardown = new AbortController(); teardown.abort(); await preparation(stopped, teardown.signal) }
+          if (stopped) { const teardown = new AbortController(); teardown.abort(); await routineTeardown(stopped, teardown.signal) }
           return { status, message }
         } finally {
           signal.removeEventListener("abort", stop)
-          if (signal.aborted) { stop(); await preparation(stopped!, signal) }
+          if (signal.aborted) { stop(); await routineTeardown(stopped!, signal) }
         }
         }
       })
     })
     const request = <A>(operation: () => Promise<A>) => Effect.tryPromise({ try: operation, catch: cause => new GitError({ message: cause instanceof Error ? cause.message : String(cause), cause }) })
     const startScheduler = routineStartup(() => scheduler.start())
-    let authenticated = false
     return {
       scheduler,
-      start: request(async () => { authenticated = true; await startScheduler() }),
+      start: request(async () => { await runEffect(requireAuth()); authenticated = true; await startScheduler() }),
       resume: requireAuth().pipe(Effect.zipRight(request(async () => { if (authenticated) { await scheduler.wake(); if (!scheduler.running) { await startScheduler() } } }))),
       stop: request(async () => { authenticated = false; await scheduler.stop() }),
       list: request(() => scheduler.list()),

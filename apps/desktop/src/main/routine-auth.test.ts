@@ -27,3 +27,12 @@ it("shares an inflight startup and retries a failed attempt", async () => {
   reject(new Error("temporary")); await rejection
   await startup(); expect(start).toHaveBeenCalledTimes(2)
 })
+it.each([-1, 0, 1])("honors known session expiry offset %i", async offset => {
+  const now = Date.now()
+  vi.spyOn(Date, "now").mockReturnValue(now)
+  try {
+    const effect = revalidateRoutineAuth(() => Effect.succeed({ user: { id: "u", name: "", email: "", image: null }, expiresAt: new Date(now + offset).toISOString() }))
+    if (offset > 0) await expect(Effect.runPromise(effect)).resolves.toBeUndefined()
+    else await expect(Effect.runPromise(effect)).rejects.toThrow("Sign in")
+  } finally { vi.restoreAllMocks() }
+})
