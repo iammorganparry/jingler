@@ -62,7 +62,15 @@ export const pullRequestInboxMachine = setup({
   on: {
     DISCOVER: {
       target: ".discovering",
-      actions: assign({ selected: null, discoveryError: null, refreshDiscovery: true }),
+      actions: assign({ discoveryError: null, refreshDiscovery: true }),
+    },
+    SELECT: {
+      guard: ({ context }) => context.teamId === null,
+      actions: assign(({ event }) => ({ selected: event.pr })),
+    },
+    TEAM: {
+      guard: ({ event }) => event.teamId === null,
+      actions: [assign({ teamId: null, queue: "reviews", selected: null }), "persist"],
     },
   },
   states: {
@@ -73,18 +81,22 @@ export const pullRequestInboxMachine = setup({
         input: ({ context }) => ({ discover: context.discover }),
         onDone: {
           target: "ready",
-          actions: [assign(({ context, event }) => ({
-            account: event.output.account,
-            teams: event.output.teams,
-            ...restore(event.output.account, event.output.teams),
-            revision: context.revision + 1,
-            selected: null,
-          })), "persist"],
+          actions: [assign(({ context, event }) => {
+            const sameAccount = context.account?.id === event.output.account.id
+            const scope = sameAccount || context.teamId === null && context.selected !== null
+              ? { teamId: context.teams.some((team) => team.id === context.teamId) && event.output.teams.some((team) => team.id === context.teamId) ? context.teamId : null, queue: context.queue }
+              : restore(event.output.account, event.output.teams)
+            const keepSelection = context.teamId === null && scope.teamId === null || sameAccount && context.teamId === scope.teamId
+            return {
+              account: event.output.account, teams: event.output.teams, ...scope,
+              revision: context.revision + 1,
+              selected: keepSelection ? context.selected : null,
+            }
+          }), "persist"],
         },
         onError: {
           target: "failed",
           actions: assign(({ context, event }) => ({
-            selected: null,
             revision: context.revision + 1,
             discoveryError: event.error instanceof Error ? event.error.message :
               typeof event.error === "object" && event.error !== null && "message" in event.error && typeof event.error.message === "string"
@@ -107,11 +119,6 @@ export const pullRequestInboxMachine = setup({
         SELECT: { actions: assign(({ event }) => ({ selected: event.pr })) },
       },
     },
-    failed: {
-      on: {
-        TEAM: { actions: assign({ teamId: null, selected: null }) },
-        SELECT: { actions: assign(({ event }) => ({ selected: event.pr })) },
-      },
-    },
+    failed: {},
   },
 })

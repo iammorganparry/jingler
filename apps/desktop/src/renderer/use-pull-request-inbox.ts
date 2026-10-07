@@ -74,7 +74,7 @@ export function usePullRequestInbox(_connected: boolean) {
     refetchOnReconnect: false,
   })
   const detail = useQuery({
-    queryKey: ["github", "pr-inbox", "detail", teamMode ? "team-cli" : "personal", identity.accountId, identity.repository, identity.number],
+    queryKey: ["github", "pr-inbox", "detail", teamMode ? "team-cli" : "personal", teamMode ? identity.accountId : undefined, identity.repository, identity.number],
     queryFn: () => selected
       ? teamMode && account
         ? rpc.githubTeamPr({ accountId: account.id, repository: selected.repository, number: selected.number })
@@ -84,8 +84,11 @@ export function usePullRequestInbox(_connected: boolean) {
     retry: teamMode ? false : undefined,
   })
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox"] })
-  const discover = useCallback(() => send({ type: "DISCOVER" }), [send])
-  const target = teamPrTarget(selected, account)
+  const discover = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox", "detail"] }, { cancelRefetch: false })
+    send({ type: "DISCOVER" })
+  }, [queryClient, send])
+  const target = teamPrTarget(selected, ready ? account : null)
   const commentMutation = useMutation({
     mutationFn: (body: string) => selected
       ? teamMode

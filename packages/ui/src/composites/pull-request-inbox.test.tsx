@@ -3,6 +3,7 @@ import type { PullRequest, PullRequestListItem } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { filterPullRequests, PullRequestInbox } from "./pull-request-inbox.js"
+import { initialInboxFilters } from "./pull-request-inbox-filter-machine.js"
 
 const item = (over: Partial<PullRequestListItem> = {}): PullRequestListItem => ({
   repository: "acme/widget",
@@ -51,6 +52,56 @@ const prs = [
 afterEach(cleanup)
 
 describe("PullRequestInbox", () => {
+  it("combines case-insensitive repository, author and label with draft, text and personal relationship filters", () => {
+    const rows = [
+      item({ labels: [{ name: "Bug", color: "ff0000" }] }),
+      item({ number: 43, isDraft: true, author: { login: "Lee", avatarUrl: null }, assignedToViewer: true, labels: [{ name: "Bug", color: "ff0000" }] }),
+      item({ repository: "acme/api", number: 7, author: { login: "Lee", avatarUrl: null }, isDraft: true }),
+    ]
+    const facets = { ...initialInboxFilters, repository: "ACME/WIDGET", author: "LEE", label: "BUG", draft: "draft" as const }
+    expect(filterPullRequests(rows, "assigned", "token", "morgan", facets).map((pr) => pr.number)).toEqual([43])
+    expect(filterPullRequests(rows, "created", "", "morgan", facets)).toEqual([])
+    expect(filterPullRequests(rows, "all", "", "morgan", { ...initialInboxFilters, draft: "ready" }).map((pr) => pr.number)).toEqual([42])
+    expect(filterPullRequests(rows, "all", "", "morgan", { ...initialInboxFilters, label: "missing" })).toEqual([])
+  })
+
+  it("searches BeUI filter choices, retains unfiltered options and preserves the draft when filtering and clearing", async () => {
+    const rows = [
+      item({ labels: [{ name: "Bug", color: "ff0000" }] }),
+      item({ number: 43, title: "Draft token fix", isDraft: true, author: { login: "lee", avatarUrl: null }, labels: [{ name: "Bug", color: "ff0000" }] }),
+      item({ repository: "acme/api", number: 7, title: "Update API", author: { login: "sam", avatarUrl: null } }),
+    ]
+    render(<WidthTierValue width={1200}><PullRequestInbox prs={rows} viewerLogin="morgan"
+      selected={rows[0]!} detail={detail} onSelect={() => {}} onComment={async () => {}}
+    /></WidthTierValue>)
+    const composer = screen.getByPlaceholderText("Leave a comment…")
+    fireEvent.change(composer, { target: { value: "Keep this draft" } })
+    fireEvent.click(screen.getByRole("button", { name: "Filter by repository" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Search repository options" }), { target: { value: "widget" } })
+    expect(screen.queryByRole("option", { name: "acme/api" })).toBeNull()
+    fireEvent.click(screen.getByRole("option", { name: "acme/widget" }))
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Filter by author" }))
+    expect(screen.getByRole("option", { name: "sam" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("option", { name: "lee" }))
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Filter by label" }))
+    fireEvent.click(screen.getByRole("option", { name: "Bug" }))
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    fireEvent.click(screen.getByRole("button", { name: "Filter by draft status" }))
+    fireEvent.click(screen.getByRole("option", { name: "Draft" }))
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    fireEvent.change(screen.getByPlaceholderText("Search pull requests"), { target: { value: "Draft token" } })
+    expect(screen.getByText("1 of 3 loaded PRs")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Update API/ })).toBeNull()
+    expect(composer).toHaveProperty("value", "Keep this draft")
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
+    expect(screen.getByText("3 of 3 loaded PRs")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Update API/ })).toBeTruthy()
+    expect(composer).toHaveProperty("value", "Keep this draft")
+    expect(screen.getByPlaceholderText("Search pull requests")).toHaveProperty("value", "")
+  })
+
   it("shows team queues independently of personal relationships and exposes partial results/refresh", () => {
     const onTeam = vi.fn()
     const onQueue = vi.fn()
