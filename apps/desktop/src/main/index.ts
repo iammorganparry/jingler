@@ -44,6 +44,7 @@ import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 import { registerAppVersionChannel } from "./app-version.js"
+import { registerTextContextMenu } from "./context-menu.js"
 
 app.setName("Jingler")
 registerAppVersionChannel()
@@ -288,6 +289,7 @@ if (!gotPrimaryLock) {
       }
     })
     mainWindow = window
+    registerTextContextMenu(window)
     let allowClose = false
     let flushInFlight = false
 

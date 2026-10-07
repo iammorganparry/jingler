@@ -748,6 +748,11 @@
   text-align: inherit;
   cursor: pointer;
 }
+/* Chromium traps forward selection at an inline link's first caret. Only
+ * remove its box during pointer presses; keyboard focus keeps its outline. */
+.sb-md-path:active:not(:focus-visible) {
+  display: contents;
+}
 .sb-md-path:hover code {
   border-color: var(--sb-blue);
   color: var(--sb-blue);
@@ -757,7 +762,7 @@
   text-decoration-color: var(--sb-blue);
 }
 .sb-md-path:focus-visible {
-  outline: 2px solid var(--sb-ring);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
   border-radius: 3px;
 }
@@ -896,6 +901,6 @@
 
 .jingler-pierre-host:focus-visible,
 .jingler-pierre-file-tree:focus-visible {
-  outline: 2px solid var(--sb-ring);
+  outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
