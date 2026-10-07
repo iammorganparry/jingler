@@ -16,11 +16,13 @@ import {
 } from "./conversation-registry.js"
 
 import { setVisibleSessionIds } from "./active-session.js"
+import { sessionActivitiesSnapshot } from "./session-activity.js"
 
 const mocks = vi.hoisted(() => ({ snapshot: vi.fn() }))
 vi.mock("./rpc-client.js", () => ({
   rpc: {
     agentSubagentFleetSnapshot: mocks.snapshot,
+    notifyShow: vi.fn(async () => {}),
     sessionsTranscriptPage: vi.fn(async () => ({ messages: [], hasMore: false, cursor: null })),
     planCurrent: vi.fn(async () => null),
     agentChatBusy: vi.fn(async () => false),
@@ -125,6 +127,88 @@ afterEach(() => {
 })
 
 describe("conversation registry fleet recovery", () => {
+  it.each(["queued", "running"] as const)("reports delegating for an idle parent with a %s child", async (status) => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(actor.getSnapshot().matches("awaitingInput")).toBe(true)
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [{ ...upsert, node: { ...node, status } }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toMatchObject({ kind: "delegating", target: node.task })
+  })
+
+  it.each(["completed", "failed", "stopped", "unknown", "paused"] as const)("clears activity when the last running child becomes %s", async (status) => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [upsert] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]?.kind).toBe("delegating")
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [{
+      ...upsert, eventId: "settled", occurredAt: 11,
+      node: { ...node, status, registryRevision: 11, updatedAt: 11 }
+    }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toBeUndefined()
+  })
+
+  it("does not count workflow containers as independently running children", async () => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    const workflow = { ...node, id: "parent/workflow", runId: "workflow", subagentId: "workflow", nodeKind: "workflow" as const }
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [upsert, { ...upsert, eventId: "workflow", node: workflow }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toMatchObject({ kind: "delegating", target: node.task })
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [{
+      ...upsert, eventId: "completed", node: { ...node, status: "completed", registryRevision: 11, updatedAt: 11 }
+    }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toBeUndefined()
+  })
+
+  it("reports attention rather than working for a blocked Fleet child", async () => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [{ ...upsert, node: { ...node, status: "needs-attention" } }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]?.kind).toBe("needs-input")
+  })
+
+  it("counts live children and keeps delegating after one completes", async () => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [upsert, {
+      ...upsert, eventId: "second", node: { ...node, id: "parent/run-2", runId: "run-2", subagentId: "run-2", status: "queued" }
+    }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]?.target).toBe("2 agents")
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [{
+      ...upsert, eventId: "completed", node: { ...node, status: "completed", registryRevision: 11, updatedAt: 11 }
+    }] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toMatchObject({ kind: "delegating", target: node.task })
+  })
+
+  it.each(["input", "approval"] as const)("preserves pending operator %s priority over Fleet work", async (kind) => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    await vi.advanceTimersByTimeAsync(100)
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: {
+      version: 1, eventId: "started", sessionId: session.id, sequence: 1, revision: 1, occurredAt: 1,
+      event: { _tag: "Stream", event: { _tag: "Started", sessionId: "parent", model: "test" } }
+    } })
+    actor.send({ type: "SESSION_EVENT_ENVELOPE", envelope: {
+      version: 1, eventId: "pending", sessionId: session.id, sequence: 2, revision: 1, occurredAt: 2,
+      event: { _tag: "Stream", event: kind === "input" ? {
+        _tag: "GateRequested", gate: { id: "gate", kind: "command", title: "Confirm", detail: "Confirm command", command: "ls", allowLabel: "Allow", status: "pending" }
+      } : {
+        _tag: "PlanProposed", plan: { id: "plan", summary: "Review", graph: { nodes: [], edges: [] }, steps: [], comments: [], status: "proposed", structured: true, raw: "Review" }
+      } }
+    } })
+    actor.send({ type: "RECOVER_SUBAGENT_FLEET", events: [upsert] })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]?.kind).toBe(kind === "input" ? "needs-input" : "needs-approval")
+  })
+
   it("keeps newly mounted sibling actors alive until session visibility commits", async () => {
     vi.useFakeTimers()
     const chats = Array.from({ length: 6 }, (_, i) => ({ id: `chat-${i}`, title: `Chat ${i}`, createdAt: session.updatedAt, updatedAt: session.updatedAt }))
