@@ -89,7 +89,7 @@ it.each(["personal", "team"])("manual %s refresh supersedes an older in-flight d
     const composer = await screen.findByPlaceholderText("Leave a comment…")
     fireEvent.change(composer, { target: { value: "Keep the in-flight draft" } })
     const read = scope === "team" ? vi.mocked(rpc.githubTeamPr) : vi.mocked(rpc.githubPrBySlug)
-    read.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve }))
+    read.mockImplementationOnce(() => new Promise<PullRequest>((resolve) => { finishOld = resolve }))
     await act(async () => { background = client.refetchQueries({ queryKey: ["github", "pr-inbox", "detail"] }) })
     expect(read).toHaveBeenCalledTimes(2)
     read.mockResolvedValue({ ...detail, body: "Newest manual refresh" })
