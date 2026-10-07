@@ -6,7 +6,7 @@ it("loads persisted configuration, browses, refreshes, and saves through invoked
   const services: NotesServices = {
     configuration: async () => "/vault",
     configure: vi.fn(async (root) => root),
-    list: async () => ["one.md", "two.md"],
+    list: vi.fn(async () => ["one.md", "two.md"]),
     read: async (path) => ({ path, content: path, revision: "rev" })
   }
   const actor = createActor(notesMachine, { input: { services } }).start()
@@ -15,12 +15,14 @@ it("loads persisted configuration, browses, refreshes, and saves through invoked
   actor.send({ type: "SELECT", path: "two.md" })
   await waitFor(actor, (s) => s.matches("ready"))
   expect(actor.getSnapshot().context.note?.path).toBe("two.md")
+  expect(services.list).toHaveBeenCalledTimes(1)
   actor.send({ type: "REFRESH" })
   await waitFor(actor, (s) => s.matches("ready"))
   expect(actor.getSnapshot().context.note?.path).toBe("two.md")
   actor.send({ type: "ROOT", value: "/other" }); actor.send({ type: "SAVE" })
   await waitFor(actor, (s) => s.matches("ready"))
   expect(services.configure).toHaveBeenCalledWith("/other")
+  expect(services.list).toHaveBeenCalledTimes(3)
   actor.stop()
 })
 
@@ -40,6 +42,11 @@ it("keeps the note list when one preview cannot be read", async () => {
   actor.send({ type: "SELECT", path: "small.md" })
   await waitFor(actor, (s) => s.matches("ready"))
   expect(actor.getSnapshot().context.note?.content).toBe("Readable")
+  actor.send({ type: "SELECT", path: "large.md" })
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(actor.getSnapshot().context.paths).toEqual(["large.md", "small.md"])
+  expect(actor.getSnapshot().context.note).toBeNull()
+  expect(actor.getSnapshot().context.error).toBe("Note is too large.")
   actor.stop()
 })
 

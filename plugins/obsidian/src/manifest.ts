@@ -3,7 +3,7 @@ import { defineManifest } from "@jingler/plugin-sdk"
 export const manifest = defineManifest({
   id: "obsidian",
   name: "Obsidian",
-  version: "1.0.0",
+  version: "1.0.1",
   apiVersion: 1,
   description: "Browse a local Markdown vault and let this session's agent update notes.",
   ui: "dist/ui.js",

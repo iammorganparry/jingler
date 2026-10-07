@@ -25,6 +25,7 @@ export const notesMachine = setup({
   actors: {
     configuration: fromPromise(({ input }: { input: NotesServices }) => input.configuration()),
     configure: fromPromise(({ input }: { input: Context }) => input.services.configure(input.root)),
+    read: fromPromise(({ input }: { input: Context }) => input.services.read(input.selected)),
     load: fromPromise(async ({ input }: { input: Context }) => {
       const paths = await input.services.list()
       const selected = paths.includes(input.selected) ? input.selected : paths[0] ?? ""
@@ -60,13 +61,20 @@ export const notesMachine = setup({
         ROOT: { actions: assign({ root: ({ event }) => event.value }) },
         SAVE: { target: "saving", actions: "clear" },
         REFRESH: { target: "loading", actions: "clear" },
-        SELECT: { target: "loading", actions: ["clear", assign({ selected: ({ event }) => event.path })] }
+        SELECT: { target: "reading", actions: ["clear", assign({ selected: ({ event }) => event.path })] }
       }
     },
     saving: {
       invoke: {
         src: "configure", input: ({ context }) => context,
         onDone: { target: "loading", actions: assign({ root: ({ event }) => event.output, selected: "", paths: [] }) },
+        onError: { target: "ready", actions: "fail" }
+      }
+    },
+    reading: {
+      invoke: {
+        src: "read", input: ({ context }) => context,
+        onDone: { target: "ready", actions: assign({ note: ({ event }) => event.output }) },
         onError: { target: "ready", actions: "fail" }
       }
     },
