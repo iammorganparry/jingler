@@ -763,6 +763,19 @@ const routineProofResponse = async (context: PiContext): Promise<ReturnType<type
 
 const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> => {
   switch (fixture.scenarioId) {
+    case "workspace-workflow":
+      return Array.from({ length: 32 }, () => () => fauxAssistantMessage("Workflow turn admitted."))
+    case "workspace-safe-refusals":
+      return Array.from({ length: 32 }, () => (context: PiContext) => {
+        if (recentToolResultCount(context, RENAME_TOOL) === 0) {
+          return callTool(RENAME_TOOL, { from: "rename-source.txt", to: "rename-destination.txt" }, "safe-rename-refusal")
+        }
+        if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+          return callTool(COMMAND_TOOL, { command: "node -e \"require('node:fs').writeFileSync('shell-sentinel.txt','changed')\"" }, "safe-shell-refusal")
+        }
+        const diagnostics = context.messages.filter(message => message.role === "toolResult").map(message => toolResultText(message)).join("\n")
+        return fauxAssistantMessage(`Safe refusal diagnostics: ${diagnostics}`)
+      })
     case "workspace-routines":
       return Array.from({ length: 64 }, () => routineProofResponse)
     case "workspace-checkpoints":

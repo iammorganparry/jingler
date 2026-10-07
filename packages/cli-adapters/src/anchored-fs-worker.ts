@@ -113,20 +113,6 @@ const runGit = (request: AnchoredRequest): string => {
       timeout: 30_000, maxBuffer: 34 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"]
     }).toString("base64")
 }
-const renameNoClobber = (file: string, target: string): void => {
-      const fd = fs.openSync(file, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-      try {
-        const info = fs.fstatSync(fd)
-        if (!info.isFile()) throw new Error("Rename requires a regular source.")
-        fs.linkSync(file, target) // Atomic no-clobber destination creation; EEXIST preserves both files.
-        if (!same(info, fs.lstatSync(target)) || !same(info, fs.lstatSync(file))) {
-          fs.unlinkSync(target)
-          throw new Error("Rename source changed during linking.")
-        }
-        // link/unlink is not a transactional move; a crash may leave both names.
-        fs.unlinkSync(file)
-      } finally { fs.closeSync(fd) }
-}
 export const operate = (request: AnchoredRequest): unknown => {
   if (request.op === "mkdir") { enterDirectory(request.path, true, true); return null }
   if (request.op === "git") return runGit(request)
@@ -154,9 +140,7 @@ export const operate = (request: AnchoredRequest): unknown => {
     }
     case "rename": {
       if (dirname(request.to!) !== dirname(request.path)) throw new Error("Atomic rename requires one anchored directory.")
-      const target = name(request.to!)
-      if (!request.exclusive) { fs.renameSync(file, target); return null }
-      renameNoClobber(file, target); return null
+      fs.renameSync(file, name(request.to!)); return null
     }
     case "write": {
       writeFile(file, request)

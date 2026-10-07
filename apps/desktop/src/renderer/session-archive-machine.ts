@@ -31,7 +31,13 @@ export const sessionArchiveMachine = setup({
       on: { CANCEL: "idle" }
     },
     confirming: { on: { CONFIRM: { target: "archiving", actions: assign({ acknowledged: true }) }, CANCEL: "idle" } },
-    archiving: { invoke: { src: "archive", input: ({ context }) => ({ id: context.session!.id, acknowledged: context.acknowledged, archive: context.archive }), onDone: { target: "idle", actions: [({ context, event }) => context.onSession(event.output), assign({ session: null })] }, onError: { target: "failed", actions: assign({ error: ({ event }) => String(event.error) }) } } },
+    archiving: { invoke: { src: "archive", input: ({ context }) => ({ id: context.session!.id, acknowledged: context.acknowledged, archive: context.archive }), onDone: { target: "idle", actions: [({ context, event }) => context.onSession(event.output), assign({ session: null })] }, onError: { target: "recovering", actions: assign({ error: ({ event }) => String(event.error) }) } } },
+    recovering: {
+      invoke: { src: "load", input: ({ context }) => ({ id: context.session!.id, load: context.load }),
+        onDone: { target: "failed", actions: [assign({ session: ({ event }) => event.output }), ({ context, event }) => context.onSession(event.output)] },
+        onError: { target: "failed" }
+      }
+    },
     failed: { on: { CONFIRM: { target: "loading", actions: assign({ acknowledged: false, error: null }) }, CANCEL: "idle" } }
   }
 })

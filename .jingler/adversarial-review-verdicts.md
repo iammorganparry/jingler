@@ -1,6 +1,6 @@
 # PR #338 — adversarial review verdicts
 
-All 26 findings have been assessed. 25 have fixes; #6 remains blocked on the operator's safe-mode rename decision. This report does not claim full acceptance or merge readiness. Integrated full gates and fresh Electron rerun remain in progress.
+All 26 findings are addressed. The operator chose explicit safe-mode rename refusal for #6; ordinary rename remains supported. Current-source root gates and 21 real Electron cases pass. Remote checks must still be verified on the final pushed head. No merge or release is authorized.
 
 | # | Verdict and resolution | Regression evidence |
 |---|---|---|
@@ -9,7 +9,7 @@ All 26 findings have been assessed. 25 have fixes; #6 remains blocked on the ope
 | 3 | Real. Unsupported workflow commands are refused before execution taint; disabling safe mode bypasses clean-history requirement only, retains exclusive admission and history. | workspace-workflow.test.ts; workspace-checkpoints.test.ts |
 | 4 | Real. Preview exposes separate index operations/diff, includes staging in confirmation token. | workspace-checkpoint-store.test.ts staged add/overwrite/mode/deletion; checkpoint Electron visible index-only preview |
 | 5 | Real for restore capacity, not total workspace usability. Persist successful/failed/pending restore outcomes; obsolete successful pins released; latest successful and unresolved/legacy pins retained. | 23 restores, reopen, failed-backup retention in workspace-checkpoint-store.test.ts |
-| 6 | Real; BLOCKED. Initial link/unlink no-clobber fix fails independent review: replacement source/destination can be deleted. Operator asked to choose explicit unsupported safe rename or native atomic no-replace implementation. Do not count current draft as safe. | Independent review 0e94e687 exact interleaving; choice checkpoint-rename-safety pending |
+| 6 | Real; addressed by the approved refusal policy. Removed unsafe link/unlink helper. Checkpoint-safe rename refuses before filesystem access and leaves both paths unchanged; ordinary rename remains supported. | checkpoint-file-tools.test.ts; production Pi safe-refusal Electron case; independent refusal review 04e14497 |
 | 7 | Real lifecycle gap; claim of no process groups overstated. Effect used groups but did not clean descendants after successful leader exit. Local POSIX shell now uses shared owned group registry, scoped awaited shutdown and retained admission. Unsupported Windows destructive ownership stays refused. | workspace-mutation-tools.test.ts actual redirected descendant and cancellation |
 | 8 | Real. Named Run uses no execution timer; setup/cleanup retain bounded deadlines. | workspace-workflow.test.ts ten-minute timer boundary |
 | 9 | Real for newly allocated worktrees, not all workspaces. Port allocation alone no longer suppresses offload classification; explicit port references stay local, offload eligibility still rejects server commands; safe-mode execution/priming stays excluded. | workspace-mutation-tools.test.ts; offload-session-primer.test.ts |
@@ -31,15 +31,17 @@ All 26 findings have been assessed. 25 have fixes; #6 remains blocked on the ope
 | 25 | Real. Failed named run shows label, exit code and bounded output with retry control. | workspace-workflow.spec.ts intentional failure diagnostics |
 | 26 | Real child-reference retention; no measured heap-leak claim. Map holds bounded run states only, not ChildProcess; delete explicitly forgets session state after verified shutdown. | workspace-workflow.test.ts forget/list and owned process shutdown |
 
-## Host verification so far
+## Final current-source verification (2026-10-07)
 
-- Integrated focused suite: 122 tests passed across 12 files (`/tmp/jingler-adversarial-integrated-focused.log`).
-- Windows guard followups: 18 tests passed (`/tmp/jingler-review-windows-guards.log`).
-- Final routine/metadata/settings followups: 10 tests passed; desktop typecheck passed.
-- Final root lint passed: complexity gate 0 errors, 87 warnings; Biome warnings also reported. Final root typecheck passed all 21 tasks after fixing PR-created test typing issues; ephemeral build-only fixture credentials used. Logs: `/tmp/jingler-pr338-review-lint-final.log`, `/tmp/jingler-pr338-review-types-final.log`. Final full unit gate still pending.
-- Earlier fresh-build checkpoint/routine run: routines 2 passed; checkpoint test hit duplicate text caused by the newly exposed staging section. Fixed with distinctly labeled lists, without weakening restore assertions.
-- Integrated fresh-build Electron run was interrupted by a new operator request after direct deletion/checkpoint scenarios passed. SIGTERM is not counted as a suite pass; rerun pending.
-- Independent review approves routine/Windows followups (f0a20b5e). Checkpoint batch parsing approved, but rename BLOCKED (0e94e687). Workflow review's Windows findings fixed with regression tests.
+- Fresh-built workflow/ports: 5/5 passed in 2.4 minutes. Same unchanged build: checkpoints/routines 5/5 in 3.5 minutes; terminal archive 1/1 in 19.5 seconds; direct sessions/background tasks 10/10 in 3.6 minutes. Total: **21 real Electron cases passed**.
+- `pnpm test`: **5,114 passed, 5 skipped** across five root/follow-on runs. Root primary suite: 506 files / 4,851 passing cases; follow-ons: 50 + 53 + 25 + 135 passed. Duration: about 4.8 minutes.
+- Root lint: zero errors (87 complexity warnings plus Biome warnings); root typecheck: 21 successful tasks with ephemeral subprocess-only fixture secrets/URL. `git diff --check` passed.
+- Acceptance uncovered and fixed setup Retry's stale lifecycle snapshot, native Error RPC failure delivery, failure-dialog ownership, and stale archive/restore snapshots. Durable timestamps now increase under the store lock even on clock ties/rollback. Metadata-only Restore preserves all lifecycle content while advancing its timestamp; both ordinary and legacy Windows regressions assert this.
+- Independent final source review `4ab22892` reports **OK, no issues found**. Earlier reviewer rollback/tie/recovery-reload-rejection notes are covered. Review did not run Electron or claim provider/platform certification.
+- Security scanner availability rechecked: semgrep, trivy and gitleaks are unavailable. No configured external QA check; real Electron acceptance is distinct from external QA certification.
+- Exact logs: `/tmp/jingler-pr338-final-{workflow-ports,checkpoints-routines,terminal-direct,direct-background,lint,typecheck,test}.log`. The terminal-direct selection matched the terminal spec only; direct checkout coverage comes from the separate direct-background run.
+
+Earlier failed/interrupted runs are superseded by fixed behavior and current-source acceptance, not counted as passes. Per-case mapping: [parity-acceptance-matrix.md](parity-acceptance-matrix.md).
 
 ## Sources and unchanged limits
 

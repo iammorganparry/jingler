@@ -18,6 +18,9 @@ import {
 } from "./workspace-admission.js"
 import { workspaceProcessEnvironment } from "./workspace-ports.js"
 
+// Native Error causes do not survive Electron's context bridge.
+const workflowError = (message: string, cause: unknown) => new GitError({ message, cause: String(cause) })
+
 const OUTPUT_LIMIT = 64 * 1024
 const COMMAND_TIMEOUT_MS = 10 * 60_000
 
@@ -179,7 +182,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
             ? { output: (cause as { output: string }).output }
             : {})
         }).pipe(Effect.ignore))),
-        Effect.mapError((cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace setup failed", cause })),
+        Effect.mapError((cause) => workflowError(cause instanceof Error ? cause.message : "Workspace setup failed", cause)),
         Effect.provide(env)
       )
       }
@@ -190,17 +193,17 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           if (workspaceActivityCount(sessionId) > 0) return yield* Effect.fail(new GitError({ message: "Workspace activity is still stopping." }))
           operations.add(sessionId)
           yield* Effect.addFinalizer(() => Effect.sync(() => operations.delete(sessionId)))
-          const session = yield* sessions.get(sessionId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace", cause })))
+          const session = yield* sessions.get(sessionId).pipe(Effect.mapError((cause) => workflowError("Could not reload workspace", cause)))
           if (session.workspaceLifecycle?.status === "setup-running") {
             return yield* Effect.fail(new GitError({ message: "Cannot skip setup while it is running." }))
           }
           const closure = yield* Effect.try({
             try: () => setupClosures.get(sessionId) ?? closeWorkspaceAdmission(sessionId, "workspace setup is incomplete"),
-            catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause })
+            catch: (cause) => workflowError(cause instanceof Error ? cause.message : "Workspace is unavailable", cause)
           })
           const lease = yield* Effect.try({
             try: () => acquireWorkspaceLifecycleActivity(sessionId, "skip-setup", closure),
-            catch: (cause) => new GitError({ message: "Workspace setup ownership changed", cause })
+            catch: (cause) => workflowError("Workspace setup ownership changed", cause)
           })
           yield* Effect.addFinalizer(() => Effect.sync(() => lease.release()))
           yield* lifecycle(sessionId, "setup-skipped")
@@ -209,7 +212,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           }
           setupClosures.delete(sessionId)
           return yield* sessions.get(sessionId).pipe(
-            Effect.mapError((cause) => new GitError({ message: "Could not reload workspace", cause }))
+            Effect.mapError((cause) => workflowError("Could not reload workspace", cause))
           )
         }).pipe(Effect.scoped, Effect.provide(env))
 
@@ -223,7 +226,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           if (!reopenWorkspaceAdmission(sessionId, owner)) throw new Error("Workspace setup ownership changed.")
           setupClosures.delete(sessionId)
         },
-        catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause })
+        catch: (cause) => workflowError(cause instanceof Error ? cause.message : "Workspace is unavailable", cause)
       })
 
       const executeCleanup = async (sessionId: string, owner: symbol) => {
@@ -261,7 +264,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
             ? { output: (cause as { output: string }).output }
             : {})
         }).pipe(Effect.ignore) : Effect.void)),
-        Effect.mapError((cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace cleanup failed", cause })),
+        Effect.mapError((cause) => workflowError(cause instanceof Error ? cause.message : "Workspace cleanup failed", cause)),
         Effect.provide(env)
       )
       }
@@ -315,18 +318,18 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           return state
           } finally { pendingRuns.delete(key) }
         },
-        catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Could not run project command", cause })
+        catch: (cause) => workflowError(cause instanceof Error ? cause.message : "Could not run project command", cause)
       })
 
       const stopRun = (sessionId: string, runId: string) =>
         Effect.tryPromise({
           try: async () => { await stopOwnedChildren(sessionId, `run:${runId}`) },
-          catch: (cause) => new GitError({ message: "Could not stop project command", cause })
+          catch: (cause) => workflowError("Could not stop project command", cause)
         })
 
       const stopAll = (sessionId: string) => Effect.tryPromise({
         try: async () => { await stopOwnedChildren(sessionId) },
-        catch: (cause) => new GitError({ message: "Could not stop workspace commands", cause })
+        catch: (cause) => workflowError("Could not stop workspace commands", cause)
       })
 
       const listRuns = (sessionId: string): Effect.Effect<ReadonlyArray<WorkspaceRunState>> =>

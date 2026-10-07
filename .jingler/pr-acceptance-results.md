@@ -1,23 +1,35 @@
-# PR #338 — refreshed acceptance
+# PR #338 — final current-source acceptance
 
-## Current host verification
+Date: 2026-10-07. PR is open for review, not draft. No merge/release requested.
 
-- Fresh built Electron admission/features: 16/16 passed (6.6 minutes), `/tmp/jingler-pr338-acceptance-e2e.log`.
-- Strengthened feature acceptance on another fresh build: 6/6 passed (3.8 minutes), `/tmp/jingler-pr338-strengthened-e2e.log`.
-- `pnpm test`: 5,053 passed, 5 skipped across root and follow-on suites; `/tmp/jingler-pr338-unit.log`.
-- Final `pnpm lint`: 0 errors, 88 warnings; `/tmp/jingler-pr338-lint-strengthened.log`.
-- Final `pnpm typecheck`: 21 successful tasks; `/tmp/jingler-pr338-types-strengthened.log`. Production server build uses ephemeral subprocess-only build keys and `https://build.example.invalid`; no secrets printed or persisted.
+## Current build
+
+- **21 real Electron cases passed**, about 9.8 minutes across four bounded serial batches: expanded workflow/ports 5, checkpoints/routines 5, terminal metadata archive 1, direct sessions/background tasks 10.
+- Workflow acceptance proves actual setup failure admission, Retry/Skip, named Run/Stop, visible cleanup failure, Retry/explicit cleanup Skip, durable Archive and Restore without hook replay.
+- Ports prove primary/extras environment across restart, approved actual previews, reassignment preserving an unrelated listener, and isolated server ownership.
+- Checkpoints prove real production Pi structured edits, capture failure admission, staging/worktree restore, secret preservation, pinned recovery and safe rename/shell refusal without sentinel mutation.
+- Routines prove consent/CRUD, saved settings, actual scheduled/manual dispatch, Ask needs-attention, cancellation, disabled restart/no redispatch and sign-out gating.
+
+The fresh build preceded the workflow/ports batch. Subsequent batches reused that unchanged production build. Test/document-only changes afterward do not alter the built app.
+
+## Gates and source review
+
+- `pnpm test`: **5,114 passed, 5 skipped** across root and follow-on suites (4,851 + 50 + 53 + 25 + 135); approximately 4.8 minutes.
+- `pnpm lint`: zero errors; existing warnings reported (87 complexity warnings plus Biome warnings).
+- `pnpm typecheck`: all 21 tasks successful. Build-only auth/cron secrets were generated only in a subprocess environment; invalid fixture URL, no persisted credentials or production bypass.
 - `git diff --check`: passed.
+- Independent source review `4ab22892`: **OK; no issues found**. This source review does not itself certify Electron/provider/platform behavior.
 
-## Strengthened assertions
+All 26 adversarial findings are addressed. The operator chose checkpoint-safe rename refusal rather than unsafe link/unlink or new native packaging. Ordinary rename remains supported. Acceptance also uncovered and fixed stale setup/archive snapshots, native Error failure delivery, and archive-dialog closing. Locked lifecycle timestamps increase under ties/rollback; metadata-only Restore preserves failed lifecycle content while advancing the version timestamp. Recovery-load rejection remains actionable without consent escalation.
 
-1. Checkpoint index contents are deliberately changed after capture, then restored alongside unstaged bytes; ignored secrets remain untouched.
-2. Workflow cleanup must finish with persisted archived metadata, not merely create its marker.
-3. Metadata-only terminal archive preserves an actual terminal job's heartbeat after archive; the test explicitly stops its job in `finally`.
-4. Disabled routine crosses its actual due time without a new run, then remains disabled with unchanged history after app restart.
+## Historical coverage, not current-build certification
 
-Read-only independent review found no source-proven production blocker and identified these assertion gaps; all four were strengthened and verified on the host. Prior whole-suite coverage and security reviews remain in [automation-acceptance.md](automation-acceptance.md).
+Earlier acceptance exercised all 84 desktop spec files / 291 discovered cases in serial batches and fixed observed regressions. Those results remain historical; the 21 cases above are the current-build rerun, not a claim that every desktop spec was rerun after these changes.
 
-## What this does not claim
+## Limits
 
-Real Electron, Git, file, HTTP-server and terminal behavior is exercised; agent provider responses are scripted while using the production Pi runtime. Live paid providers, unsupported platforms, remote execution, hostile external writers, and every crash timing are not certified. Recovery races and additional lifecycle branches also have unit/service tests. No tests can establish perfect behavior. No release or merge is authorized by this acceptance.
+Provider responses are scripted, while production Pi tool dispatch, Git/files/HTTP/PTYS/RPC/scheduling are real. No paid-provider, unsupported-platform, hostile concurrent-writer or exactly-once external-effect certification. Electron covers successful pinned recovery; injected partial restore failure remains service coverage. Security scanners semgrep/trivy/gitleaks are unavailable. No configured external QA check exists; do not report one as passed.
+
+Final remote checks and reviews are verified after push, on the exact remote head. No merge or release authorized.
+
+Details: [per-finding verdicts](adversarial-review-verdicts.md), [case matrix](parity-acceptance-matrix.md), [historical acceptance](automation-acceptance.md).

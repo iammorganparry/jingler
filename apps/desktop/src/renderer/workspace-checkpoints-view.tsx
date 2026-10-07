@@ -25,7 +25,7 @@ export function WorkspaceCheckpointsView({ session, onSession }: { session: Sess
         {state.context.items.map((item) => <div key={item.id}><span>{item.label} · {item.createdAt}{item.pinned ? " · pinned recovery backup" : ""}</span><Button size="sm" onClick={() => send({ type: "PREVIEW", id: item.id })}>Preview restore</Button></div>)}
       </> : null}
       {state.matches("consent") ? <>
-        <p>Safe mode supports managed Pi structured file edits and read-only inspection only. Shell commands, builds, tests, interactive terminals, delegation and offload are blocked. Every turn captures first; failed capture blocks the turn. Models and permissions are never changed automatically.</p>
+        <p>Safe mode supports managed Pi structured file edits and read-only inspection only. File rename is unsupported in safe mode; no files are changed. Shell commands, builds, tests, interactive terminals, delegation and offload are blocked. Every turn captures first; failed capture blocks the turn. Models and permissions are never changed automatically.</p>
         <Button size="sm" onClick={() => send({ type: "CONFIRM" })}>Agree and enable</Button>
       </> : null}
       {state.matches("confirming") && state.context.preview ? <>

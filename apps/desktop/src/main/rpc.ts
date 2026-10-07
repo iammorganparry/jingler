@@ -1779,6 +1779,7 @@ export const archiveSession = (
       Effect.fail(new GitError({ message: "Session not found" })),
     ),
     Effect.scoped,
+    Effect.mapError(cause => new GitError({ message: cause.message, cause: String(cause.cause ?? cause) })),
   );
 
 export const archiveSessionRouted = (

@@ -198,6 +198,64 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 
+  it.each(["ready-first", "running-first"])("preserves the latest durable lifecycle with %s replies while accepting metadata", async (order) => {
+    const configured = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => ({
+          configured: true, providerReady: true, reposDir: "/repos",
+          repos: [], sessions: [], providerCatalog,
+        })),
+      },
+    });
+    const actor = createActor(configured).start();
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+    const running: Session = {
+      id: "retry", repo: "widget", branch: "main", title: "Preparing",
+      status: "idle", diff: { added: 0, removed: 0 }, prNumber: null,
+      costUsd: 0, tokens: 0, chats: [], activeChatId: "chat-1",
+      updatedAt: "2026-08-08T08:00:03.000Z",
+      workspaceLifecycle: { status: "setup-running", updatedAt: "2026-08-08T08:00:01.000Z" },
+    };
+    const ready: Session = {
+      ...running, title: "Ready", updatedAt: "2026-08-08T08:00:02.000Z",
+      workspaceLifecycle: { status: "ready", updatedAt: "2026-08-08T08:00:02.000Z" },
+    };
+    const replies = order === "ready-first" ? [ready, running] : [running, ready];
+    for (const session of replies) actor.send({ type: "SESSION_UPDATED", session });
+    expect(actor.getSnapshot().context.sessions).toEqual([{
+      ...replies[1], workspaceLifecycle: ready.workspaceLifecycle,
+    }]);
+    // An unrelated session must never inherit this session's lifecycle.
+    actor.send({ type: "SESSION_UPDATED", session: { ...running, id: "other" } });
+    expect(actor.getSnapshot().context.sessions[1]?.workspaceLifecycle).toEqual(running.workspaceLifecycle);
+    // Legacy replies omit lifecycle; they still carry useful metadata.
+    const { workspaceLifecycle: _lifecycle, ...legacy } = running;
+    actor.send({ type: "SESSION_UPDATED", session: { ...legacy, title: "Retitled" } });
+    expect(actor.getSnapshot().context.sessions[0]).toEqual({
+      ...legacy, title: "Retitled", workspaceLifecycle: ready.workspaceLifecycle,
+    });
+    // Newer retries and failures are authoritative, even after ready.
+    for (const [status, second] of [["setup-running", "04"], ["setup-failed", "05"], ["ready", "06"]] as const) {
+      const session: Session = { ...running, workspaceLifecycle: {
+        status, updatedAt: `2026-08-08T08:00:${second}.000Z`,
+      } };
+      actor.send({ type: "SESSION_UPDATED", session });
+      expect(actor.getSnapshot().context.sessions[0]).toEqual(session);
+    }
+    const archived: Session = { ...ready, archived: true, archiveReason: "closed", archivedAt: ready.updatedAt,
+      workspaceLifecycle: { status: "cleanup-failed", updatedAt: "2026-08-08T08:00:07.000Z", error: "failed", output: "history" } };
+    actor.send({ type: "SESSION_UPDATED", session: archived });
+    actor.send({ type: "SESSION_UPDATED", session: { ...running, title: "Delayed retitle", status: "idle" } });
+    expect(actor.getSnapshot().context.sessions[0]).toMatchObject({ title: "Delayed retitle", status: "idle", archived: true, archiveReason: "closed", archivedAt: archived.archivedAt, workspaceLifecycle: archived.workspaceLifecycle });
+    const restored: Session = { ...ready, archived: false, workspaceLifecycle: { ...archived.workspaceLifecycle!, updatedAt: "2026-08-08T08:00:07.001Z" } };
+    actor.send({ type: "SESSION_UPDATED", session: restored });
+    actor.send({ type: "SESSION_UPDATED", session: archived });
+    expect(actor.getSnapshot().context.sessions[0]).toMatchObject({ archived: false, workspaceLifecycle: restored.workspaceLifecycle });
+    expect(actor.getSnapshot().context.sessions[0]?.archiveReason).toBeUndefined();
+    expect(actor.getSnapshot().context.sessions[0]?.archivedAt).toBeUndefined();
+    actor.stop();
+  });
+
   it("coordinates workspace, GitHub, provider auth, resources, and startup", async () => {
     const actor = createActor(unconfigured()).start();
     await reachProvider(actor);

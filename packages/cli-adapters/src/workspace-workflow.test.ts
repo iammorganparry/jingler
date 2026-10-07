@@ -2,7 +2,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, statSync, symlinkSync, w
 import { join } from "node:path"
 import type { CreateSessionInput } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
-import { Effect, Layer, Schema } from "effect"
+import { Cause, Effect, Layer, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { GitService } from "./git.js"
 import { ProjectService } from "./projects.js"
@@ -240,4 +240,30 @@ it("rejects safe shell cleanup before tainting execution history", async () => {
     expect((await state.read()).workspaceLifecycle?.status).toBe("cleanup-failed")
     expect(existsSync(join(cwd, "forbidden"))).toBe(false)
   }, "true", "touch forbidden")
+})
+
+it("returns IPC-safe cleanup failures with bounded redacted output retained", async () => {
+  // Port binding is independent of cleanup serialization; sandbox disallows sockets.
+  const ports = await import("./workspace-ports.js")
+  const allocate = ports.allocateWorkspacePorts
+  vi.spyOn(ports, "allocateWorkspacePorts").mockImplementation((sessions, config) => allocate(sessions, config, async () => true))
+  await harness("true", async (workflow, id, _cwd, state) => {
+    await Effect.runPromise(workflow.setup(id))
+    const owner = closeWorkspaceAdmission(id, "archive")
+    const exit = await Effect.runPromiseExit(workflow.cleanup(id, owner))
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag !== "Failure") return
+    const failure = Cause.failureOption(exit.cause)
+    expect(failure._tag).toBe("Some")
+    if (failure._tag !== "Some") return
+    expect(failure.value.message).toBe("Cleanup exited with code 7.")
+    expect(typeof failure.value.cause).toBe("string")
+    expect(failure.value.cause).toContain("Cleanup exited with code 7.")
+    const lifecycle = (await state.read()).workspaceLifecycle!
+    expect(lifecycle.status).toBe("cleanup-failed")
+    expect(lifecycle.output!.length).toBeLessThanOrEqual(64 * 1024)
+    expect(lifecycle.output).toContain("token=[redacted]")
+    expect(lifecycle.output).not.toContain("private-value")
+    expect(lifecycle.output).toContain("cleanup proof")
+  }, "true", "head -c 70000 /dev/zero | tr '\\0' x; printf '\\ntoken=private-value\\ncleanup proof\\n'; exit 7")
 })

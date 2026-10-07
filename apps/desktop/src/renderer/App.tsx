@@ -2258,6 +2258,7 @@ function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): bo
 
 function ArchiveConfirmation({ state, send }: { state: import("xstate").SnapshotFrom<typeof sessionArchiveMachine>; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
   return <ConfirmDialog
+    closeOnConfirm={false}
     open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
     onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
     title={state.matches("failed") ? "Archive failed" : "Archive without cleanup?"}

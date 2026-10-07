@@ -24,7 +24,7 @@ export function RoutinesSettings({ projects, catalog, onSession }: { projects: R
   return <section aria-label="Saved desktop routines" className="space-y-3 text-[var(--sb-fg)]">
     <h3>Saved desktop routines</h3>
     <p>Runs only while this desktop is open and signed in. Missed schedules and overlapping runs are skipped. One routine runs at a time; interactive agents remain independent.</p>
-    <p>Every run uses a fresh checkpoint-safe worktree. Edit and inspect files only: arbitrary shell, tests, builds, terminals, delegation, offload and external tools are unsupported. Saved model, reasoning and Ask permissions are used without escalation or fallback.</p>
+    <p>Every run uses a fresh checkpoint-safe worktree. Edit and inspect files only. File rename is unsupported in safe mode; no files are changed. Arbitrary shell, tests, builds, terminals, delegation, offload and external tools are unsupported. Saved model, reasoning and Ask permissions are used without escalation or fallback.</p>
     {error && <p role="alert">{error}<button type="button" onClick={() => send({ type: "REFRESH" })}>Retry</button></p>}
     <RoutineForm key={selected ? `${selected.id}/${selected.revision}` : "new"} {...{ projects, models, selected, editing, busy, send }} />
     {document.routines.map(routine => <div key={routine.id}>

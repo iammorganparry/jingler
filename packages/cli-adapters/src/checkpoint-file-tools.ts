@@ -23,9 +23,7 @@ export const checkpointFiles = {
     const target = file(cwd, requested); if (!(await anchoredFs.stat(target))?.file) throw new ToolError("forbidden", "Only regular workspace files may be deleted.")
     await anchoredFs.unlink(target); return { path: requested }
   },
-  rename: async (cwd: string, from: string, to: string) => {
-    const source = file(cwd, from); const target = file(cwd, to)
-    if (!(await anchoredFs.stat(source))?.file || await anchoredFs.stat(target)) throw new ToolError("forbidden", "Rename requires a regular source and an absent destination.")
-    await anchoredFs.renameNoClobber(source, target); return { from, to }
+  rename: async (_cwd: string, _from: string, _to: string): Promise<never> => {
+    throw new ToolError("forbidden", "Rename is unsupported in checkpoint-safe mode: an atomic no-overwrite move is unavailable. No files were changed.")
   }
 }

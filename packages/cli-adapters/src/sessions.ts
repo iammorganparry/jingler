@@ -490,6 +490,17 @@ const checkpointCreationSupported = (input: CreateSessionInput): boolean => !inp
 
 const validateCheckpointCreation = (input: CreateSessionInput) => checkpointCreationSupported(input) ? Effect.void : Effect.fail(new GitError({ message: "Checkpoint-safe mode requires a fresh isolated local managed Pi workspace." }))
 
+// Called inside update's SessionStore lock: wall clocks can tie or move backwards.
+const nextLifecycleTimestamp = (session: Session, requested = new Date().toISOString()) => {
+  const previous = Date.parse(session.workspaceLifecycle?.updatedAt ?? "")
+  return new Date(Math.max(Date.parse(requested), Number.isFinite(previous) ? previous + 1 : 0)).toISOString()
+}
+
+const advanceLifecycle = (session: Session) => ({
+  ...(session.workspaceLifecycle ?? { status: "ready" as const }),
+  updatedAt: nextLifecycleTimestamp(session)
+})
+
 const initialWorkspaceLifecycle = (input: CreateSessionInput, updatedAt: string) => ({ status: input.checkpointSafeMode ? "setup-skipped" as const : "setup-running" as const, updatedAt })
 
 export class SessionStore extends Effect.Service<SessionStore>()(
@@ -1850,7 +1861,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const markCheckpointExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable" }))
 
       const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
-        update(id, (session) => ({ ...session, workspaceLifecycle: lifecycle })).pipe(Effect.andThen(get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace lifecycle", cause })), Effect.tap((session) => Effect.sync(() => updateWorkspaceReadiness(session))), Effect.asVoid)))
+        update(id, (session) => ({ ...session, workspaceLifecycle: { ...lifecycle, updatedAt: nextLifecycleTimestamp(session, lifecycle.updatedAt) } })).pipe(Effect.andThen(get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace lifecycle", cause })), Effect.tap((session) => Effect.sync(() => updateWorkspaceReadiness(session))), Effect.asVoid)))
 
       const reconcileInterruptedWorkspaceLifecycles = (): Effect.Effect<void, GitError, PersistEnv> =>
         atomically(Effect.gen(function* () {
@@ -1866,7 +1877,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
               ...session,
               workspaceLifecycle: {
                 status: status === "setup-running" ? "setup-failed" as const : "cleanup-failed" as const,
-                updatedAt: now,
+                updatedAt: nextLifecycleTimestamp(session, now),
                 error: `${status === "setup-running" ? "Setup" : "Cleanup"} was interrupted when Jingler stopped. Retry explicitly.`
               }
             }
@@ -1960,7 +1971,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...s,
             archived: true,
             archiveReason: reason,
-            archivedAt: now
+            archivedAt: now,
+            workspaceLifecycle: advanceLifecycle(s)
           }))
         })
 
@@ -1970,7 +1982,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           ...s,
           archived: false,
           archiveReason: undefined,
-          archivedAt: undefined
+          archivedAt: undefined,
+          workspaceLifecycle: advanceLifecycle(s)
         }))
 
     /**

@@ -10,6 +10,10 @@ vi.mock("@jingler/cli-adapters/workspace-ports", async importOriginal => {
   const actual = await importOriginal<typeof import("@jingler/cli-adapters/workspace-ports")>()
   return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[]) => actual.allocateWorkspacePorts(sessions, undefined, async () => true) }
 })
+const expectLifecycleAdvanced = (previous: Session, next: Session) => {
+  expect(next.workspaceLifecycle).toEqual({ ...previous.workspaceLifecycle, updatedAt: next.workspaceLifecycle?.updatedAt })
+  expect(Date.parse(next.workspaceLifecycle?.updatedAt ?? "")).toBeGreaterThan(Date.parse(previous.workspaceLifecycle?.updatedAt ?? ""))
+}
 it("acknowledged archive needs no lifecycle/cleanup/PTY services and preserves a real worktree; deletion stays refused", async () => {
   const temp = withTempRoot(); const repo = mkTemp("metadata-archive-")
   try {
@@ -31,7 +35,7 @@ it("acknowledged archive needs no lifecycle/cleanup/PTY services and preserves a
     expect(restored.archived).toBe(false)
     expect(restored.checkpointPtyHistory).toBe(true)
     expect(restored.checkpointExecutionHistory).toBe("unprovable")
-    expect(restored.workspaceLifecycle).toEqual(archived.workspaceLifecycle)
+    expectLifecycleAdvanced(archived, restored)
     await expect(run(restoreMetadataOnly(session.id))).rejects.toThrow("requires an archived")
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
     // Legacy Windows archives have unknown shell ownership, but unarchive is metadata only.
@@ -43,7 +47,7 @@ it("acknowledged archive needs no lifecycle/cleanup/PTY services and preserves a
       expect(legacy.archived).toBe(false)
       expect(legacy.checkpointPtyHistory).toBe(false)
       expect(legacy.checkpointExecutionHistory).toBeUndefined()
-      expect(legacy.workspaceLifecycle).toEqual(archived.workspaceLifecycle)
+      expectLifecycleAdvanced(archived, legacy)
       await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
       expect(readFileSync(join(session.worktreePath!, "keep"), "utf8")).toBe("preserved")
     } finally { Object.defineProperty(process, "platform", { value: platform }) }

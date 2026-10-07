@@ -632,7 +632,26 @@ export const appMachine = setup({
             return {
               sessions: exists
                 ? context.sessions.map((session) =>
-                    session.id === event.session.id ? event.session : session,
+                    session.id === event.session.id
+                      ? {
+                          ...event.session,
+                          // RPC replies can arrive after setup has finished.
+                          // Lifecycle timestamps belong to the durable workflow,
+                          // independently of status/title and other session writes.
+                          // No writer clears lifecycle; omission is a legacy reply.
+                          ...(session.workspaceLifecycle &&
+                          (!event.session.workspaceLifecycle ||
+                            Date.parse(session.workspaceLifecycle.updatedAt) >
+                              Date.parse(event.session.workspaceLifecycle.updatedAt))
+                            ? {
+                                workspaceLifecycle: session.workspaceLifecycle,
+                                archived: session.archived,
+                                archiveReason: session.archiveReason,
+                                archivedAt: session.archivedAt,
+                              }
+                            : {}),
+                        }
+                      : session,
                   )
                 : [...context.sessions, event.session],
             };

@@ -1720,6 +1720,53 @@ describe("SessionStore", () => {
     expect(calls.some((c) => c.includes("checkout --ignore-other-worktrees chore/bump"))).toBe(true)
   })
 
+  it("orders lifecycle writes through tied and rolled back clocks, preserving archive history", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input())
+      const read = () => SessionStore.get(session.id)
+      const future = "2099-01-01T00:00:00.000Z"
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { status: "cleanup-failed", updatedAt: future, error: "cleanup failed", output: "retained output" })
+      const failed = yield* read()
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { ...failed.workspaceLifecycle!, updatedAt: future })
+      const tied = yield* read()
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { ...failed.workspaceLifecycle!, updatedAt: "2000-01-01T00:00:00.000Z" })
+      const rollback = yield* read()
+      yield* SessionStore.archive(session.id, "closed", true)
+      const archived = yield* read()
+      yield* SessionStore.restore(session.id)
+      const restored = yield* read()
+      return [failed, tied, rollback, archived, restored]
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    const times = result.value.map(session => Date.parse(session.workspaceLifecycle!.updatedAt))
+    for (let i = 1; i < times.length; i++) expect(times[i]).toBe(times[i - 1]! + 1)
+    for (const session of result.value) expect(session.workspaceLifecycle).toMatchObject({ status: "cleanup-failed", error: "cleanup failed", output: "retained output" })
+    expect(result.value[3]?.archived).toBe(true)
+    expect(result.value[4]?.archived).toBe(false)
+  })
+
+  it("archives and restores legacy records without lifecycle", async () => {
+    const created = await runExit(SessionStore.create(input()).pipe(Effect.provide(services)), temp.layer)
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const path = join(temp.root, "sessions.json")
+    const records = JSON.parse(readFileSync(path, "utf-8"))
+    for (const record of records) delete record.workspaceLifecycle
+    writeFileSync(path, JSON.stringify(records))
+    const result = await runExit(Effect.gen(function* () {
+      yield* SessionStore.archive(created.value.id, "closed")
+      const archived = yield* SessionStore.get(created.value.id)
+      yield* SessionStore.restore(created.value.id)
+      return [archived, yield* SessionStore.get(created.value.id)]
+    }).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value[0]?.archived).toBe(true)
+    expect(result.value[1]?.archived).toBe(false)
+    expect(Date.parse(result.value[1]!.workspaceLifecycle!.updatedAt)).toBeGreaterThan(Date.parse(result.value[0]!.workspaceLifecycle!.updatedAt))
+  })
+
   it("archive sets archived + reason + archivedAt; restore clears them", async () => {
     const created = await runExit(
       SessionStore.create(input({ title: "Archive Me" })).pipe(Effect.provide(services)),
