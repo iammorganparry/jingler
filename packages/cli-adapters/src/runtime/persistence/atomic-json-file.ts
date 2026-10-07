@@ -42,7 +42,7 @@ export class AtomicJsonFile<Value> {
     await mkdir(dirname(this.#file), { recursive: true })
     const temporary = `${this.#file}.${process.pid}.${randomUUID()}.tmp`
     try {
-      await writeFile(temporary, JSON.stringify(value, null, 2), "utf8")
+      await writeFile(temporary, JSON.stringify(value, null, 2), { encoding: "utf8", mode: 0o600, flag: "wx" })
       await rename(temporary, this.#file)
     } catch (error) {
       await rm(temporary, { force: true }).catch(() => undefined)

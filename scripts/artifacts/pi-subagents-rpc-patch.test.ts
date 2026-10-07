@@ -90,6 +90,8 @@ describe("Jingler pi-subagents compatibility patch", () => {
       writeFile(join(agentDir, "auth.json"), "{}", { mode: 0o600 }),
       writeFile(join(agentDir, `capability-${agent}.json`), "{}", { mode: 0o600 }),
       writeFile(fakePi, `
+        export const convertToLlm = () => { throw new Error("Unexpected model conversion in credential fixture"); };
+        export const createReadOnlyTools = () => { throw new Error("Unexpected review tools in credential fixture"); };
         export const ModelRuntime = { create: async () => ({ registerProvider() {}, registerNativeProvider() {} }) };
         export const SettingsManager = { create: () => ({}) };
         export class DefaultResourceLoader {
@@ -116,6 +118,14 @@ describe("Jingler pi-subagents compatibility patch", () => {
         };
       `)
     ])
+    const workerBundle = join(root, "process-worker.mjs")
+    await build({
+      entryPoints: [resolve("node_modules/pi-subagents/src/runs/shared/process-child-session-worker.ts")],
+      bundle: true, platform: "node", format: "esm", target: "node24",
+      banner: { js: `import { createRequire as fixtureCreateRequire } from "node:module"; const require = fixtureCreateRequire(${JSON.stringify(pathToFileURL(resolve("package.json")).href)});` },
+      alias: { "@earendil-works/pi-coding-agent": fakePi },
+      outfile: workerBundle
+    })
     const factoryUrl = pathToFileURL(
       resolve("node_modules/pi-subagents/src/runs/shared/process-child-session.ts")
     ).href
@@ -146,7 +156,7 @@ describe("Jingler pi-subagents compatibility patch", () => {
           CLAUDE_CODE_USE_BEDROCK: "1",
           CLAUDE_CODE_USE_VERTEX: "1",
           CLAUDE_CODE_USE_FOUNDRY: "1",
-          JITI_ALIAS: JSON.stringify({ "@earendil-works/pi-coding-agent": fakePi })
+          JINGLER_SUBAGENT_PROCESS_WORKER: workerBundle
         }
       })
       const result = JSON.parse(stdout)

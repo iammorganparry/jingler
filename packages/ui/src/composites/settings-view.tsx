@@ -28,6 +28,7 @@ import {
   Cloud,
   Cpu,
   Keyboard,
+  FolderCog,
   Palette,
   Plug,
   RefreshCw,
@@ -74,11 +75,14 @@ import {
   type WebSearchSettingsProps
 } from "./web-search-settings.js"
 import { ProviderModelBrowser } from "./provider-model-browser.js"
+import { ProjectWorkflowSettings, type ProjectWorkflowSettingsProps } from "./project-workflow-settings.js"
 
 // ── Section registry ─────────────────────────────────────────────────────────
 
 type SectionKey =
   | "general"
+  | "projects"
+  | "routines"
   | "providers"
   | "context"
   | "plan"
@@ -107,6 +111,8 @@ const NAV: ReadonlyArray<NavItem> = [
     icon: <SlidersHorizontal size={14} />,
     ready: true
   },
+  { key: "routines", label: "Routines", icon: <FolderCog size={14} />, ready: true },
+  { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
   { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true },
   {
     key: "providers",
@@ -157,6 +163,8 @@ const NAV: ReadonlyArray<NavItem> = [
 ]
 
 export interface SettingsViewProps {
+  routines?: import("react").ReactNode
+  projectWorkflows?: ProjectWorkflowSettingsProps
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps
   /** Operator-controlled skills, prompts, and MCP resources. */
@@ -254,6 +262,8 @@ function renderOptionalSection<Props extends object>(
 }
 
 export function SettingsView({
+  projectWorkflows,
+  routines,
   providerConnections,
   agents,
   webSearch,
@@ -294,6 +304,10 @@ export function SettingsView({
            switch (section) {
 case "devices": {
 return (renderOptionalSection(devices, (props) => <DevicesSection {...props} />, "Devices"))
+}
+case "routines": { return routines ?? <p>Desktop routines are unavailable.</p> }
+case "projects": {
+return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} />, "Projects")
 }
 case "general": {
 return (<GeneralSection

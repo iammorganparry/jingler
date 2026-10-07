@@ -1,3 +1,4 @@
+import { WorkspaceCheckpointStore } from "../../workspace-checkpoint-store.js"
 import { execFile, spawn } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises"
@@ -52,7 +53,7 @@ const git = async (
   args: ReadonlyArray<string>,
   env?: Readonly<Record<string, string>>
 ): Promise<string> => {
-  const result = await exec("git", ["-C", cwd, ...args], {
+  const result = await exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", cwd, ...args], {
     encoding: "utf8",
     maxBuffer: GIT_OUTPUT_BYTES,
     env: env ? { ...process.env, ...env } : process.env
@@ -78,7 +79,7 @@ const boundedGit = (
   args: ReadonlyArray<string>,
   maxBytes: number
 ): Promise<BoundedGitOutput> => new Promise((resolve, reject) => {
-  const child = spawn("git", ["-C", cwd, ...args], { stdio: ["ignore", "pipe", "pipe"] })
+  const child = spawn("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", cwd, ...args], { stdio: ["ignore", "pipe", "pipe"] })
   const stdout: Array<Buffer> = []
   const stderr: Array<Buffer> = []
   let stdoutBytes = 0
@@ -141,6 +142,7 @@ const treeSize = async (cwd: string, tree: string, path: string | null): Promise
 }
 
 export class FileChangeTracker {
+  readonly #checkpointSafeMode: boolean
   readonly #artifactDir: string
   readonly #sessionId: string
   readonly #maxArtifactBytes: number
@@ -150,11 +152,13 @@ export class FileChangeTracker {
   #disposed = false
 
   constructor(input: {
+    readonly checkpointSafeMode?: boolean
     readonly artifactDir: string
     readonly sessionId: string
     readonly maxArtifactBytes?: number
     readonly shadowIndexRoot?: string
   }) {
+    this.#checkpointSafeMode = input.checkpointSafeMode === true
     this.#artifactDir = input.artifactDir
     this.#sessionId = input.sessionId
     this.#maxArtifactBytes = input.maxArtifactBytes ?? 2 * 1024 * 1024
@@ -197,6 +201,7 @@ export class FileChangeTracker {
   }
 
   async #capture(cwd: string): Promise<WorktreeSnapshot> {
+    if (this.#checkpointSafeMode) return new WorkspaceCheckpointStore({ cwd, root: this.#shadowIndexRoot, sessionId: this.#sessionId }).worktreeSnapshot()
     const canonical = await realpath(cwd)
     const shadow = await this.#indexFor(canonical)
     await git(canonical, ["add", "-A", "--", "."], shadow.environment)
@@ -260,7 +265,7 @@ export class FileChangeTracker {
     const paths = changedPaths(status)
     const changes = await Promise.all(paths.map(async (entry): Promise<FileChange> => {
       const selectedPaths = entry.oldPath === null ? [entry.path] : [entry.oldPath, entry.path]
-      const diffArgs = ["diff", "--find-renames", "--no-ext-diff", before.tree, after.tree, "--", ...selectedPaths]
+      const diffArgs = ["diff", "--find-renames", "--no-ext-diff", "--no-textconv", before.tree, after.tree, "--", ...selectedPaths]
       const counts = gitDiffStat(await git(after.cwd, ["diff", "--numstat", "-z", "--find-renames", before.tree, after.tree, "--", ...selectedPaths]))
       const patch = counts.binary
         ? { bytes: Buffer.alloc(0), truncated: false }

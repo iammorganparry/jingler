@@ -39,6 +39,7 @@ import { ContextManager } from "./context-manager.js"
 import { SessionStore } from "./sessions.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
+import { workspaceActivityCount } from "./workspace-admission.js"
 import { reserveSessionRun } from "./run-coordinator.js"
 import { initGitRepo, withTempRoot } from "./test-support.js"
 import {
@@ -1510,6 +1511,9 @@ describe("AgentRunner stop", () => {
         yield* Effect.sleep("7 seconds")
         const dead = yield* Deferred.isDone(interrupted)
         const tasks = yield* BackgroundTaskStore.list(SESSION)
+        expect(workspaceActivityCount(SESSION)).toBe(1)
+        yield* runner.stop(SESSION, SESSION, true)
+        expect(workspaceActivityCount(SESSION)).toBe(0)
         return { dead, running: tasks.filter((t) => t.status === "running").length }
       }).pipe(Effect.provide(base))
     }).pipe(Effect.runPromise)

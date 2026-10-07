@@ -59,20 +59,24 @@ const inspectFailure = (message: string, cause?: unknown): WorkspaceInspectionEr
 const READ_ONLY_GIT_COMMANDS = new Set([
   "branch", "diff", "grep", "log", "ls-tree", "rev-parse", "show", "status"
 ])
-const FORBIDDEN_GIT_ARGUMENTS = new Set([
-  "--exec-path", "--ext-diff", "--git-dir", "--no-index", "--open-files-in-pager",
-  "--output", "--paginate", "--textconv", "--work-tree", "-C", "-c"
-])
-const MUTATING_BRANCH_ARGUMENTS = new Set([
-  "--copy", "--create-reflog", "--delete", "--edit-description", "--force", "--move",
-  "--set-upstream-to", "--unset-upstream", "-C", "-D", "-M", "-c", "-d", "-f", "-m"
-])
+// Exact spellings only: Git accepts long abbreviations, automatic negation and
+// bundled short options. Do not delegate that option grammar to Git.
+const GIT_INSPECTION_FLAGS: Record<string, readonly string[]> = {
+  branch: ["--list", "--all", "--remotes", "--show-current", "-a", "-r", "-v"],
+  diff: ["--stat", "--name-only", "--name-status", "--cached", "--staged", "--numstat", "--check", "--no-ext-diff", "--no-textconv", "-U0"],
+  grep: ["-n", "-i", "-l", "-F", "-E", "--cached", "--name-only"],
+  log: ["--oneline", "--stat", "--name-only", "--graph", "--all", "--decorate", "--no-ext-diff", "--no-textconv"],
+  "ls-tree": ["-r", "-t", "-l", "--name-only", "--long", "-z"],
+  "rev-parse": ["--verify", "--short", "--show-toplevel", "--show-prefix", "--is-inside-work-tree", "--abbrev-ref"],
+  show: ["--stat", "--name-only", "--oneline", "--no-ext-diff", "--no-textconv"],
+  status: ["--short", "--branch", "--porcelain", "--porcelain=v1", "--porcelain=v2", "-s", "-b", "-z"]
+}
 const RG_FLAGS = new Set(["-i", "-l", "-n"])
 
 const invalidInspectionArgument = (argument: string): boolean =>
   argument.includes("\0") ||
   argument.startsWith("/") ||
-  argument.split(/[\\/]/).includes("..")
+  argument.split(/[\\/:]/).includes("..")
 
 export const validateInspectionCommand = (
   program: "git" | "rg",
@@ -106,10 +110,10 @@ export const makeWorkspaceInspectionPort = Effect.gen(function* () {
       const commandProgram = "git"
       const commandArgs = program === "rg"
         ? ["grep", "--untracked", "--exclude-standard", ...args, "--", "."]
-        : args
-      const command = Command.make(commandProgram, ...commandArgs).pipe(
+        : [args[0]!, ...(["diff", "show", "log"].includes(args[0]!) ? ["--no-ext-diff", "--no-textconv"] : []), ...args.slice(1)]
+      const command = Command.make(commandProgram, "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=", "--no-pager", ...commandArgs).pipe(
         Command.workingDirectory(cwd),
-        Command.env({ ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
+        Command.env({ ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_OPTIONAL_LOCKS: "0", GIT_PAGER: "cat" })
       )
       const child = yield* Command.start(command)
       const [stdout, stderr, exitCode] = yield* Effect.all(
@@ -228,26 +232,34 @@ function validateInspectionArguments(args: readonly string[], program: string) {
   validateInspectionProgram(program, args)
 }
 
-function validateInspectionProgram(program: string, args: readonly string[]) {
-  if (program === "git") {
-    const [subcommand, ...rest] = args
-    if (!subcommand || !READ_ONLY_GIT_COMMANDS.has(subcommand)) {
-      throw new ToolError("forbidden", "Git subcommand is not read-only")
+const GIT_COUNT = /^-[1-9][0-9]{0,3}$/
+const unsafeGitOperand = (argument: string): boolean =>
+  argument.includes(":/") || argument.includes(":\\") || argument.startsWith(":")
+const permittedGitFlag = (command: string, argument: string): boolean =>
+  GIT_INSPECTION_FLAGS[command]!.includes(argument) ||
+  ((command === "log" || command === "show") && GIT_COUNT.test(argument))
+const rejectGitArgument = (command: string): never => {
+  throw new ToolError("forbidden", command === "branch" ? "git branch is limited to listing branches" : "Git argument can execute code or escape the workspace")
+}
+function validateGitInspection(command: string, rest: readonly string[]): void {
+  let paths = false
+  for (const argument of rest) {
+    if (argument === "--") { paths = true; continue }
+    if (argument.startsWith("-")) {
+      if (paths || !permittedGitFlag(command, argument)) rejectGitArgument(command)
+      continue
     }
-    if (rest.some((argument) => FORBIDDEN_GIT_ARGUMENTS.has(argument) ||
-      [...FORBIDDEN_GIT_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`)))) {
-      throw new ToolError("forbidden", "Git argument can execute code or escape the workspace")
-    }
-    if (subcommand === "branch" && (
-      rest.some((argument) => MUTATING_BRANCH_ARGUMENTS.has(argument) ||
-        [...MUTATING_BRANCH_ARGUMENTS].some((flag) => argument.startsWith(`${flag}=`))) ||
-      rest.some((argument) => !argument.startsWith("-") && !rest.includes("--list"))
-    )) {
-      throw new ToolError("forbidden", "git branch is limited to listing branches")
-    }
-  } else {
-    validateRipgrepArguments(args)
+    if (unsafeGitOperand(argument)) rejectGitArgument(command)
+    if (command === "branch" && !rest.includes("--list")) rejectGitArgument(command)
   }
+}
+function validateInspectionProgram(program: string, args: readonly string[]) {
+  if (program !== "git") { validateRipgrepArguments(args); return }
+  const [subcommand, ...rest] = args
+  if (!subcommand || !READ_ONLY_GIT_COMMANDS.has(subcommand)) {
+    throw new ToolError("forbidden", "Git subcommand is not read-only")
+  }
+  validateGitInspection(subcommand, rest)
 }
 
 function validateRipgrepArguments(args: readonly string[]) {

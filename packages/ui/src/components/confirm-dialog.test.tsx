@@ -34,3 +34,15 @@ describe("ConfirmDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 })
+
+it("leaves closing to the machine after a synchronous confirmation", async () => {
+  const onOpenChange = vi.fn()
+  const confirm = vi.fn()
+  render(<ConfirmDialog open title="Archive failed" confirmLabel="Retry" closeOnConfirm={false} onConfirm={confirm} onOpenChange={onOpenChange} />)
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+  await waitFor(() => expect((screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement).disabled).toBe(false))
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(onOpenChange).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+  expect(onOpenChange).toHaveBeenCalledWith(false)
+})

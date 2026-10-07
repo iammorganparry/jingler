@@ -21,6 +21,7 @@ export interface AppPathsShape {
   readonly sessionsFile: string
   /** `~/jingler/projects.json` — durable registered repository catalogue. */
   readonly projectsFile: string
+  readonly routinesFile: string
   /** `~/jingler/worktrees` — parent of every session's isolated worktree. */
   readonly worktreesDir: string
   /** `~/jingler/transcripts` — parent of every session's persisted transcript. */

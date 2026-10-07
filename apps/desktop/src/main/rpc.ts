@@ -1,3 +1,9 @@
+import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
+import { RoutinesService } from "./routines.js"
+import { AssetWriteIoError } from "@jingler/core";
+import { TerminalError } from "@jingler/core";
+import { readyWorkspacePreview } from "@jingler/cli-adapters/project-workflow";
+import { workspaceEnvironment, workspacePortAvailable } from "@jingler/cli-adapters/workspace-ports";
 import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
@@ -77,6 +83,12 @@ import {
   adoptableChatIdentities,
   sessionNeedsRuntimeIdentity,
   WorkspaceService,
+  WorkspaceWorkflowService,
+  WorkspaceCheckpointService,
+  workspaceHasUnprovenProcesses,
+  closeWorkspaceAdmission,
+  reopenWorkspaceAdmission,
+  waitForWorkspaceIdle,
   RuntimeDiagnostics,
   RuntimeRecoveryService,
   disposeLanguageIntelligence,
@@ -223,6 +235,8 @@ import {
 } from "./github-relay.js";
 
 /** The single IPC channel both directions of the RPC transport ride on. */
+export const authenticatedSession = () => AuthService.getSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
+
 export const RPC_CHANNEL = "jingler/rpc";
 
 /**
@@ -656,6 +670,10 @@ export const createSession = (input: CreateSessionInput) =>
                 : { environmentId: project.environmentId }),
             })),
           );
+    if (resolvedInput.checkpointSafeMode && resolvedInput.projectId) {
+      const project = yield* ProjectService.get(resolvedInput.projectId);
+      if (project.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot run this project's setup shell command. Use a project without setup commands or create an ordinary workspace; models and permissions are unchanged." }));
+    }
     const runtimeInput = yield* resolvePiCreateInput(resolvedInput).pipe(
       Effect.mapError((cause) => new GitError({ message: cause.message, cause }))
     )
@@ -712,6 +730,17 @@ const sessionCreationStream = <E, R>(
     }),
   );
 
+const prepareLocalWorkspace = (session: Session) =>
+  Effect.gen(function* () {
+    const workflow = yield* WorkspaceWorkflowService;
+    if (session.checkpointSafeMode) {
+      yield* WorkspaceCheckpointService.setMode(session.id, true)
+    } else yield* workflow.setup(session.id).pipe(Effect.either)
+    return yield* SessionStore.get(session.id).pipe(
+      Effect.mapError((cause) => new GitError({ message: "Created workspace could not be reloaded", cause })),
+    )
+  })
+
 export const createSessionRouted = (
   input: CreateSessionInput,
   progress?: SessionCreationProgress,
@@ -722,9 +751,10 @@ export const createSessionRouted = (
     )
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
-      const session = yield* createSession(runtimeInput);
+      const created = yield* createSession(runtimeInput);
+      const session = yield* prepareLocalWorkspace(created);
       const initialPrompt = runtimeInput.initialPrompt?.trim();
-      if (!initialPrompt) {
+      if (!initialPrompt || session.workspaceLifecycle?.status === "setup-failed") {
         yield* reportSessionCreation(progress, "ready");
         return session;
       }
@@ -970,8 +1000,9 @@ export const createSessionFromPrRouted = (
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
       const session = yield* createSessionFromPr(runtimeInput);
+      const prepared = yield* prepareLocalWorkspace(session);
       yield* reportSessionCreation(progress, "ready");
-      return session;
+      return prepared;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
@@ -993,8 +1024,9 @@ export const createSessionFromIssueRouted = (
     if (runtimeInput.environmentId === undefined) {
       yield* reportSessionCreation(progress, "creating-session");
       const session = yield* createSessionFromIssue(runtimeInput);
+      const prepared = yield* prepareLocalWorkspace(session);
       yield* reportSessionCreation(progress, "ready");
-      return session;
+      return prepared;
     }
     yield* reportSessionCreation(progress, "checking-access");
     return yield* provisionRemoteSession(
@@ -1443,14 +1475,16 @@ export const assetWrite = (input: {
   text: string;
   expectedRevision: string;
 }) =>
-  Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
+  Effect.flatMap(resolveSession(input.sessionId), (session) => session?.checkpointSafeMode
+    ? Effect.fail(new AssetWriteIoError({ path: input.path, message: "Use managed Pi structured file tools in checkpoint-safe mode; direct editor mutations are unsupported." }))
+    : Effect.flatMap(assetWorktree(input.sessionId), (worktree) =>
     AssetService.write(
       worktree,
       input.path,
       input.text,
       input.expectedRevision,
     ),
-  );
+  ));
 
 /**
  * `Asset.reveal` handler — show the file in the OS file manager.
@@ -1499,6 +1533,7 @@ export const workspaceRevertFile = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     if (!session?.worktreePath) return;
+    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
     if (workspaceModeOf(session) === "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -1523,6 +1558,7 @@ export const workspaceRevertLines = (input: {
   Effect.gen(function* () {
     const session = yield* resolveSession(input.sessionId);
     if (!session?.worktreePath) return;
+    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
     if (workspaceModeOf(session) === "direct") {
       return yield* Effect.fail(
         new GitError({
@@ -1585,13 +1621,140 @@ export const backgroundTaskOutput = (sessionId: string, taskId: string) =>
     return yield* fs.readFileString(file).pipe(Effect.orElseSucceed(() => ""));
   });
 
+const allSessionChats = (session: Session | null) =>
+  session ? [...session.chats, ...(session.closedChats ?? [])] : [];
+
+// A failed archive/delete retains admission ownership for an explicit retry.
+// Only this coordinator can transfer that token; concurrent callers cannot reuse it.
+const lifecycleClosures = new Map<string, symbol>();
+const lifecycleOperations = new Set<string>();
+const beginWorkspaceLifecycle = (sessionId: string, reason: string) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for workspace lifecycle", cause })));
+    if (workspaceHasUnprovenProcesses(session)) return yield* Effect.fail(new GitError({ message: "Interactive terminal descendants cannot be proven stopped, including after restart. Archive/delete is refused; the ordinary workspace remains usable." }));
+    const owner = yield* Effect.try({
+      try: () => {
+        if (lifecycleOperations.has(sessionId)) throw new Error("Workspace lifecycle operation is already in progress.");
+        const previous = lifecycleClosures.get(sessionId);
+        if (previous && !reopenWorkspaceAdmission(sessionId, previous)) throw new Error("Workspace lifecycle ownership changed.");
+        const token = closeWorkspaceAdmission(sessionId, reason);
+        lifecycleClosures.set(sessionId, token);
+        lifecycleOperations.add(sessionId);
+        return token;
+      },
+      catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is unavailable", cause }),
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(() => lifecycleOperations.delete(sessionId)));
+    return owner;
+  });
+
+export const deleteSession = (sessionId: string, skipCleanup = false) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (session?.environmentId) {
+        const remote = yield* RemoteSessionService;
+        yield* removeRemoteSessionMirror(
+          remote.request(session, "Sessions.delete", { skipCleanup }),
+          remote
+            .forget(sessionId)
+            .pipe(
+              Effect.ignore,
+              Effect.zipRight(SessionStore.forgetRemote(sessionId)),
+            ),
+        );
+        return;
+      }
+      const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(
+        Effect.map(
+          (routes) =>
+            routes.find((candidate) => candidate.sessionId === sessionId) ??
+            null,
+        ),
+        Effect.orElseSucceed(() => null),
+      );
+      const workflow = yield* WorkspaceWorkflowService;
+      yield* workflow.prepareLifecycle(sessionId);
+      const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace deletion is in progress");
+      const runner = yield* AgentRunner;
+      const terminals = yield* TerminalService;
+      const browserControl = yield* BrowserControlMcpService;
+      const preview = yield* PreviewViewService;
+      const chats = allSessionChats(session);
+      for (const chat of chats) {
+        // Deletion is stronger than an ordinary Stop click: do not remove the
+        // transcript/state until the harness finalizers have actually finished.
+        yield* runner.stop(sessionId, chat.id, true);
+      }
+      yield* terminals.killSession(sessionId).pipe(
+        Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+      );
+      yield* workflow.stopAll(sessionId);
+      yield* Effect.tryPromise({
+        try: () => waitForWorkspaceIdle(sessionId),
+        catch: (cause) => new GitError({ message: "Workspace activity did not stop before deletion", cause }),
+      });
+      if (!skipCleanup && session && workspaceModeOf(session) === "worktree") yield* workflow.cleanup(sessionId, closure);
+      yield* browserControl.revoke(sessionId);
+      yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
+      yield* BackgroundTaskStore.clear(sessionId);
+      const offload = yield* makeOffloadCommandRouter
+      yield* offload.destroySession(sessionId).pipe(Effect.ignore)
+      if (session?.worktreePath) {
+        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
+      }
+      yield* SessionStore.remove(sessionId);
+      yield* workflow.forget(sessionId);
+      if (relayRoute) {
+        yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
+          Effect.ignore,
+        );
+      }
+      for (const chat of chats) {
+        yield* TranscriptStore.remove(chat.id);
+        yield* ContextManager.forget(chat.id);
+        // Same per-chat reclaim `Chats.delete` does — without it, a session
+        // deleted whole left every chat's mode/approval entries in the
+        // runner's maps for the app's lifetime.
+        yield* runner.forgetChat(chat.id);
+      }
+      if (session?.worktreePath) {
+        yield* ExplanationStore.removeAll(session.worktreePath, session.id);
+      }
+      yield* ReviewStore.clear(sessionId);
+      lifecycleClosures.delete(sessionId);
+    }).pipe(Effect.scoped);
+
 /** `Sessions.archive` handler — archive a session and return the updated record. */
 export const archiveSession = (
   sessionId: string,
   reason: "merged" | "closed",
+  skipCleanup = false,
+  metadataOnlyAcknowledged = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
+    if (session.checkpointPtyHistory && metadataOnlyAcknowledged) {
+      return yield* archiveMetadataOnly(sessionId, reason, metadataOnlyAcknowledged);
+    }
+    const workflow = yield* WorkspaceWorkflowService;
+    yield* workflow.prepareLifecycle(sessionId);
+    const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace archive is in progress");
+    const runner = yield* AgentRunner;
+    const terminals = yield* TerminalService;
+    for (const chat of [...session.chats, ...(session.closedChats ?? [])]) {
+      yield* runner.stop(sessionId, chat.id, true);
+    }
+    yield* terminals.killSession(sessionId).pipe(
+      Effect.mapError((cause) => new GitError({ message: cause.message, cause })),
+    );
+    yield* workflow.stopAll(sessionId);
+    yield* Effect.tryPromise({
+      try: () => waitForWorkspaceIdle(sessionId),
+      catch: (cause) => new GitError({ message: "Workspace activity did not stop before archive", cause }),
+    });
+    if (!skipCleanup && session && workspaceModeOf(session) === "worktree") yield* workflow.cleanup(sessionId, closure);
     yield* SessionStore.archive(sessionId, reason);
     const worktreePath = session.worktreePath;
     if (worktreePath) {
@@ -1615,11 +1778,15 @@ export const archiveSession = (
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(new GitError({ message: "Session not found" })),
     ),
+    Effect.scoped,
+    Effect.mapError(cause => new GitError({ message: cause.message, cause: String(cause.cause ?? cause) })),
   );
 
 export const archiveSessionRouted = (
   sessionId: string,
   reason: "merged" | "closed",
+  skipCleanup = false,
+  metadataOnlyAcknowledged = false,
 ) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId);
@@ -1627,11 +1794,11 @@ export const archiveSessionRouted = (
     return yield* routeSessionOperation(
       session,
       "Sessions.archive",
-      { reason },
-      { execute: () => archiveSession(sessionId, reason) },
+      { reason, skipCleanup, metadataOnlyAcknowledged },
+      { execute: () => archiveSession(sessionId, reason, skipCleanup, metadataOnlyAcknowledged) },
       {
         execute: () =>
-          remote.request(session, "Sessions.archive", { reason }).pipe(
+          remote.request(session, "Sessions.archive", { reason, skipCleanup, metadataOnlyAcknowledged }).pipe(
             Effect.flatMap(Schema.decodeUnknown(SessionSchema)),
             Effect.flatMap(SessionStore.upsertRemote),
             Effect.mapError(
@@ -1653,9 +1820,17 @@ export const archiveSessionRouted = (
 /** `Sessions.restore` handler — un-archive a session and return the updated record. */
 export const restoreSession = (sessionId: string) =>
   Effect.gen(function* () {
+    const archived = yield* SessionStore.get(sessionId);
+    if (!archived.archived) return yield* Effect.fail(new GitError({ message: "Only archived workspaces can be restored." }));
+    // Metadata-only restore touches neither jobs nor checkout: no destructive ownership proof needed.
+    if (workspaceHasUnprovenProcesses(archived)) return yield* restoreMetadataOnly(sessionId);
+    const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace restoration is in progress");
     yield* SessionStore.restore(sessionId);
+    // Preserve failed/in-progress setup and cleanup evidence on restoration.
+    reopenWorkspaceAdmission(sessionId, closure);
+    lifecycleClosures.delete(sessionId);
     const session = yield* SessionStore.get(sessionId);
-    if (session.worktreePath) {
+    if (session.worktreePath && !session.checkpointSafeMode) {
       const offload = yield* makeOffloadCommandRouter
       yield* Effect.forkDaemon(
         offload.primeSession(session.worktreePath, session.id).pipe(Effect.ignore)
@@ -1676,6 +1851,7 @@ export const restoreSession = (sessionId: string) =>
     }
     return session;
   }).pipe(
+    Effect.scoped,
     Effect.catchTag("SessionNotFoundError", () =>
       Effect.fail(new GitError({ message: "Session not found" })),
     ),
@@ -2531,6 +2707,7 @@ export const githubPublish = (sessionId: string) =>
         Effect.tryPromise({
           try: async () => {
             let session = await run(SessionStore.get(sessionId));
+            if (session.checkpointSafeMode) throw new Error("Publishing invokes unsupported Git commands in checkpoint-safe mode. Disable safe mode before publishing.");
             if (!session.worktreePath) {
               const failure = publishFailure(
                 "This session has no worktree to publish.",
@@ -3152,13 +3329,16 @@ export const createTerminal = (input: {
   rows: number;
 }) =>
   Effect.gen(function* () {
-    const cwd =
-      input.cwd ??
-      (yield* resolveSession(input.sessionId))?.worktreePath ??
-      undefined;
+    const session = yield* SessionStore.get(input.sessionId).pipe(Effect.catchTag("SessionNotFoundError", () => Effect.succeed(null)));
+    const cwd = input.cwd ?? session?.worktreePath ?? undefined;
     const terminals = yield* TerminalService;
+    if (session?.checkpointSafeMode) return yield* Effect.fail(new TerminalError({ message: "Interactive terminals are unsupported in checkpoint-safe mode." }));
+    if (session) yield* SessionStore.markCheckpointTerminalExecutionUnprovable(session.id).pipe(Effect.mapError((cause) => new TerminalError({ message: "Could not persist terminal history; terminal creation blocked.", cause })));
     return yield* terminals.create({
+      executionHistoryPersisted: session !== null && session !== undefined,
+      unscoped: session === null || session === undefined,
       sessionId: input.sessionId,
+      workspaceEnvironment: session ? workspaceEnvironment(session) : {},
       cwd,
       cols: input.cols,
       rows: input.rows,
@@ -4414,6 +4594,51 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const project = yield* ProjectService.get(projectId);
       return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
+  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, ports, approve }) =>
+    ProjectService.setWorkflow(
+      projectId,
+      {
+        ...(setup === undefined ? {} : { setup }),
+        ...(cleanup === undefined ? {} : { cleanup }),
+        runs,
+        copyFiles,
+        ...(ports ? { ports } : {}),
+      },
+      approve,
+    ),
+  "WorkspacePorts.check": ({ sessionId }) => Effect.gen(function* () {
+    const session = yield* resolveSession(sessionId);
+    const ports = session?.workspacePorts;
+    if (!ports) return [];
+    const sessions = yield* SessionStore.list();
+    const reserved = new Set(sessions.filter((item) => item.id !== sessionId).flatMap((item) => item.workspacePorts ? [item.workspacePorts.primary, ...Object.values(item.workspacePorts.extras)] : []));
+    return yield* Effect.tryPromise({ try: async () => {
+      const assigned = [ports.primary, ...Object.values(ports.extras)];
+      const availability = await Promise.all(assigned.map(workspacePortAvailable));
+      return assigned.filter((port, index) => reserved.has(port) || !availability[index]);
+    }, catch: (cause) => new GitError({ message: "Could not check workspace ports", cause }) });
+  }),
+  "WorkspacePorts.reassign": ({ sessionId }) => SessionStore.reassignWorkspacePorts(sessionId),
+  "WorkspacePorts.preview": ({ sessionId }) => Effect.gen(function* () {
+    const session = yield* resolveSession(sessionId);
+    if (!session?.workspacePorts || !session.projectId || session.environmentId || session.workspaceMode === "direct") return yield* Effect.fail(new GitError({ message: "Preview requires an isolated local workspace with assigned ports." }));
+    const project = yield* ProjectService.get(session.projectId);
+    return yield* Effect.tryPromise({
+      try: async () => {
+        return await readyWorkspacePreview(project.workflow, session.workspacePorts!);
+      }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Preview unavailable", cause })
+    });
+  }),
+  "WorkspaceCheckpoints.setMode": ({ sessionId, enabled }) => WorkspaceCheckpointService.setMode(sessionId, enabled),
+  "WorkspaceCheckpoints.list": ({ sessionId }) => WorkspaceCheckpointService.list(sessionId),
+  "WorkspaceCheckpoints.capture": ({ sessionId }) => WorkspaceCheckpointService.capture(sessionId),
+  "WorkspaceCheckpoints.preview": ({ sessionId, checkpointId }) => WorkspaceCheckpointService.preview(sessionId, checkpointId),
+  "WorkspaceCheckpoints.restore": ({ sessionId, checkpointId, token }) => WorkspaceCheckpointService.restore(sessionId, checkpointId, token),
+  "WorkspaceWorkflow.retrySetup": ({ sessionId }) => WorkspaceWorkflowService.setup(sessionId),
+  "WorkspaceWorkflow.skipSetup": ({ sessionId }) => WorkspaceWorkflowService.skipSetup(sessionId),
+  "WorkspaceWorkflow.startRun": ({ sessionId, runId }) => WorkspaceWorkflowService.startRun(sessionId, runId),
+  "WorkspaceWorkflow.stopRun": ({ sessionId, runId }) => WorkspaceWorkflowService.stopRun(sessionId, runId),
+  "WorkspaceWorkflow.listRuns": ({ sessionId }) => WorkspaceWorkflowService.listRuns(sessionId),
   "Projects.remove": ({ id, environmentId }) =>
     environmentId === undefined
       ? ProjectService.remove(id)
@@ -4477,6 +4702,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   // satisfy them — so a pre-PI conversation continues without the operator
   // re-choosing what they already had. No-op for healthy sessions.
   "Sessions.list": () => healMigratedRuntimeIdentities.pipe(
+    Effect.andThen(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.ignore)),
     Effect.andThen(SessionStore.list()),
   ),
   "Sessions.get": ({ id }) => SessionStore.get(id),
@@ -4519,8 +4745,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       yield* SessionStore.clearInitialPrompt(sessionId);
       return yield* SessionStore.get(sessionId);
     }),
-  "Sessions.archive": ({ sessionId, reason }) =>
-    archiveSessionRouted(sessionId, reason),
+  "Routines.list": () => RoutinesService.pipe(Effect.flatMap(service => service.list)),
+  "Routines.save": ({ id, input }) => RoutinesService.pipe(Effect.flatMap(service => service.save(id, input))),
+  "Routines.enable": ({ id, enabled }) => RoutinesService.pipe(Effect.flatMap(service => service.enable(id, enabled))),
+  "Routines.delete": ({ id }) => RoutinesService.pipe(Effect.flatMap(service => service.delete(id))),
+  "Routines.runNow": ({ id }) => RoutinesService.pipe(Effect.flatMap(service => service.runNow(id))),
+  "Routines.cancel": ({ runId }) => RoutinesService.pipe(Effect.flatMap(service => service.cancel(runId))),
+  "Sessions.archive": ({ sessionId, reason, skipCleanup, metadataOnlyAcknowledged }) =>
+    archiveSessionRouted(sessionId, reason, skipCleanup, metadataOnlyAcknowledged),
   "Sessions.restore": ({ sessionId }) => restoreSession(sessionId),
   "Sessions.resolveRuntimeRecovery": ({ sessionId, runId, callId }) =>
     RuntimeRecoveryService.resolve(sessionId, runId, callId),
@@ -4543,71 +4775,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     continueOnEnvironment(sessionId, environmentId),
   "Sessions.adoptBranch": ({ sessionId }) => adoptBranch(sessionId),
   "Sessions.forkOntoBranch": ({ sessionId }) => forkOntoBranch(sessionId),
-  "Sessions.delete": ({ sessionId }) =>
-    Effect.gen(function* () {
-      const session = yield* SessionStore.get(sessionId).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (session?.environmentId) {
-        const remote = yield* RemoteSessionService;
-        yield* removeRemoteSessionMirror(
-          remote.request(session, "Sessions.delete", {}),
-          remote
-            .forget(sessionId)
-            .pipe(
-              Effect.ignore,
-              Effect.zipRight(SessionStore.forgetRemote(sessionId)),
-            ),
-        );
-        return;
-      }
-      const relayRoute = yield* GitHubAuth.sessionRoutes().pipe(
-        Effect.map(
-          (routes) =>
-            routes.find((candidate) => candidate.sessionId === sessionId) ??
-            null,
-        ),
-        Effect.orElseSucceed(() => null),
-      );
-      const runner = yield* AgentRunner;
-      const browserControl = yield* BrowserControlMcpService;
-      const preview = yield* PreviewViewService;
-      const chats = [
-        ...(session?.chats ?? []),
-        ...(session?.closedChats ?? []),
-      ];
-      for (const chat of chats) {
-        // Deletion is stronger than an ordinary Stop click: do not remove the
-        // transcript/state until the harness finalizers have actually finished.
-        yield* runner.stop(sessionId, chat.id, true);
-      }
-      yield* browserControl.revoke(sessionId);
-      yield* preview.deleteSession(sessionId, chats.map((chat) => chat.id));
-      yield* BackgroundTaskStore.clear(sessionId);
-      const offload = yield* makeOffloadCommandRouter
-      yield* offload.destroySession(sessionId).pipe(Effect.ignore)
-      if (session?.worktreePath) {
-        yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
-      }
-      yield* SessionStore.remove(sessionId);
-      if (relayRoute) {
-        yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
-          Effect.ignore,
-        );
-      }
-      for (const chat of chats) {
-        yield* TranscriptStore.remove(chat.id);
-        yield* ContextManager.forget(chat.id);
-        // Same per-chat reclaim `Chats.delete` does — without it, a session
-        // deleted whole left every chat's mode/approval entries in the
-        // runner's maps for the app's lifetime.
-        yield* runner.forgetChat(chat.id);
-      }
-      if (session?.worktreePath) {
-        yield* ExplanationStore.removeAll(session.worktreePath, session.id);
-      }
-      yield* ReviewStore.clear(sessionId);
-    }),
+  "Sessions.delete": ({ sessionId, skipCleanup }) => deleteSession(sessionId, skipCleanup),
   "Sessions.createChat": ({ sessionId }) =>
     SessionStore.createChat(sessionId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
@@ -5589,11 +5757,11 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
 
   // Auth — the sign-in wall. Delegates to AuthService, which bridges the OS
   // keychain (SecretStore) and the BetterAuth backend.
-  "Auth.getSession": () => AuthService.getSession(),
+  "Auth.getSession": authenticatedSession,
   "Auth.startSignIn": ({ provider }) => AuthService.startSignIn(provider),
   "Auth.sendMagicLink": ({ email, name }) =>
     AuthService.sendMagicLink(email, name),
-  "Auth.signOut": () => AuthService.signOut(),
+  "Auth.signOut": () => RoutinesService.pipe(Effect.flatMap(service => service.stop), Effect.catchAll(cause => Effect.logError(cause.message)), Effect.zipRight(AuthService.signOut())),
 
   // Themes — the picker, the editor, and live reload of `~/jingler/themes`.
   "Theme.list": () => ThemeService.list(),
@@ -5976,6 +6144,7 @@ const RpcServerLayer = RpcServer.layer(JinglerRpcs).pipe(
 // ManagedRuntime check. The assignment below also verifies this list stays a
 // superset of every handler requirement.
 export type RpcServerRequirements =
+  | RoutinesService
   | AgentRunner
   | AgentRuntime
   | AppPaths
@@ -6015,6 +6184,8 @@ export type RpcServerRequirements =
   | TranscriptStore
   | UsageService
   | WorkspaceService
+  | WorkspaceWorkflowService
+  | WorkspaceCheckpointService
   | RuntimeDiagnostics
   | RuntimeRecoveryService
   | ProviderConnections;

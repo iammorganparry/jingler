@@ -1,3 +1,4 @@
+import { acquireWorkspaceToolActivity, workspaceCheckpointMode, type WorkspaceActivity } from "../../workspace-admission.js"
 import type {
   AgentRole,
   FileChangeSet,
@@ -75,6 +76,7 @@ export class ToolError extends Error {
 }
 
 export interface ToolExecutionContext {
+  readonly workspaceEnvironment?: Readonly<Record<string, string>>
   readonly signal: AbortSignal
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void
@@ -119,6 +121,8 @@ export interface ToolDefinition<Input, Encoded = Input> {
 type AnyToolDefinition = ToolDefinition<unknown, unknown>
 
 export interface ToolRegistryOptions {
+  readonly checkpointSessionId?: string
+  readonly checkpointOwner?: symbol
   readonly writeArtifact?: (toolId: string, content: string) => Promise<ToolArtifactReference>
   readonly observer?: ToolExecutionObserver
   /** Observe settled, bounded successful values without changing the tool outcome. */
@@ -409,6 +413,10 @@ export class ToolRegistry {
   async #execute(input: ToolExecutionRequest): Promise<ToolResultEnvelope> {
     const tool = this.#tools.get(input.id)
     if (!tool) return errorEnvelope(new ToolError("forbidden", `Unknown tool: ${input.id}`))
+    const sessionId = this.#options.checkpointSessionId
+    if (sessionId && workspaceCheckpointMode(sessionId) && !new Set(["workspace_list_files", "workspace_read_file", "workspace_write", "workspace_edit", "workspace_delete", "workspace_rename", "command_inspect", "ask_question", "explain", "session_complete"]).has(input.id)) {
+      return errorEnvelope(new ToolError("forbidden", "Checkpoint-safe mode permits structured file edits and read-only inspection only. Shell/build/test, delegation, offload and external tools are unsupported."))
+    }
     const validated = validateExecution(tool, input)
     if (!validated.ok) return validated.result
     if (mutatingRisk(tool.risk) && !this.#options.observer) {
@@ -421,7 +429,9 @@ export class ToolRegistry {
     }
 
     let result: ToolResultEnvelope
+    let activity: WorkspaceActivity | undefined
     try {
+      if (sessionId && workspaceCheckpointMode(sessionId)) activity = acquireWorkspaceToolActivity(sessionId, this.#options.checkpointOwner)
       const observation = await startObservation(this.#options, input, tool)
       const executed = await executeDefinition(
         this.#options,
@@ -443,6 +453,7 @@ export class ToolRegistry {
           : new ToolError("execution-failed", "Mutation tracking failed")
       )
     }
+    activity?.release()
     await publishSuccessfulResult(this.#options, input, tool, result)
     return result
   }

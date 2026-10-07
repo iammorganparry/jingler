@@ -6,6 +6,7 @@ import type { Project, Session } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { runGit, runGitWithEnv } from "./command.js"
+import { normalizeWorkflow, safeWorkflowRelativePath, type WorkflowDraft } from "./project-workflow.js"
 
 const ProjectArray = Schema.Array(ProjectSchema)
 let projectWriteSequence = 0
@@ -143,7 +144,8 @@ export class ProjectService extends Effect.Service<ProjectService>()(
                 path: resolvedPath,
                 availability: "available",
                 createdAt: existing?.createdAt ?? now,
-                updatedAt: now
+                updatedAt: now,
+                ...(existing?.workflow === undefined ? {} : { workflow: existing.workflow })
               }
               yield* writePersisted([project, ...current.filter((item) => item.id !== id)])
               return project
@@ -199,6 +201,37 @@ export class ProjectService extends Effect.Service<ProjectService>()(
               ? {}
               : { environmentId: input.environmentId })
           })
+        })
+
+      const setWorkflow = (
+        id: string,
+        workflow: WorkflowDraft,
+        approve: boolean
+      ): Effect.Effect<Project, GitError, ProjectStoreEnv> =>
+        Effect.gen(function* () {
+          const ids = new Set<string>()
+          for (const run of workflow.runs) {
+            if (!run.id.trim() || !run.label.trim() || !run.command.trim() || ids.has(run.id.trim())) {
+              return yield* Effect.fail(new GitError({ message: "Run commands need unique ids, labels, and commands." }))
+            }
+            ids.add(run.id.trim())
+          }
+          if (workflow.copyFiles.some((file) => safeWorkflowRelativePath(file) === null)) {
+            return yield* Effect.fail(new GitError({ message: "Copied files must use safe repository-relative paths outside .git." }))
+          }
+          const normalized = yield* Effect.try({ try: () => normalizeWorkflow(workflow, approve), catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Invalid workspace port configuration", cause }) })
+          return yield* lock.withPermits(1)(Effect.gen(function* () {
+          const current = yield* readPersisted()
+          const existing = current.find((project) => project.id === id)
+          if (!existing) return yield* Effect.fail(new GitError({ message: `Project not found: ${id}` }))
+          const updated: Project = {
+            ...existing,
+            workflow: normalized,
+            updatedAt: new Date().toISOString()
+          }
+          yield* writePersisted(current.map((project) => project.id === id ? updated : project))
+          return updated
+          }))
         })
 
       const remove = (id: string): Effect.Effect<void, GitError, ProjectStoreEnv> =>
@@ -258,7 +291,7 @@ export class ProjectService extends Effect.Service<ProjectService>()(
           return yield* list()
         })
 
-      return { list, get, register, createDirectory, clone, remove, backfill }
+      return { list, get, register, createDirectory, clone, setWorkflow, remove, backfill }
     }
   }
 ) {}

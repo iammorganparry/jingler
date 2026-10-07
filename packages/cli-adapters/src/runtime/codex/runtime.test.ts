@@ -16,7 +16,7 @@ import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { CodexClient, codexEnvironment, readCodexVersion } from "./client.js"
 import { probeCodexEndpoint, startCodexEndpointLogin } from "./endpoint.js"
 import { CodexEvents } from "./events.js"
-import { codexMcpConfig, makeCodexAgentRuntime } from "./runtime.js"
+import { codexWorkspaceConfig, codexMcpConfig, makeCodexAgentRuntime } from "./runtime.js"
 
 const binary = fileURLToPath(new URL("./fixtures/app-server.mjs", import.meta.url))
 const endpointId = nativeCliEndpointId("desktop", "codex")
@@ -346,3 +346,22 @@ it("keeps one completion when interrupt arrives at the terminal event", async ()
   expect(events.some(event => event._tag === "Failed")).toBe(false)
   expect(liveChildCount()).toBe(0)
 })
+
+ it("passes distinct trusted environments to actual concurrent Codex child shell commands", async () => {
+   const before = process.env.JINGLER_PORT
+   const clients = [3100, 3101].map((port) => new CodexClient({ binary, workspaceEnvironment: { JINGLER_PORT: String(port), JINGLER_WORKSPACE_PATH: `/tmp/work-${port}`, ANTHROPIC_API_KEY: "never" }, environment: { ...process.env, JINGLER_PORT: "9999" } }))
+   try {
+     await Promise.all(clients.map((client) => client.initialize()))
+     const results = await Promise.all(clients.map((client) => client.request<{ output: string }>("workspace/environment", {})))
+     expect(results.map((result) => result.output)).toEqual(["3100:/tmp/work-3100", "3101:/tmp/work-3101"])
+     expect(process.env.JINGLER_PORT).toBe(before)
+   } finally { await Promise.all(clients.map((client) => client.close())) }
+ })
+
+ it("keeps Codex operator shell policy and credentials outside workspace overrides", () => {
+   const policy = { inherit: "none", include_only: ["PATH"], set: { OPERATOR_VALUE: "kept" } }
+   const config = codexWorkspaceConfig({ shell_environment_policy: policy }, { JINGLER_PORT: "3100", OPENAI_API_KEY: "not-a-workspace-variable" })
+   expect(config.shell_environment_policy).toEqual(policy)
+   expect(config["shell_environment_policy.set.JINGLER_PORT"]).toBe("3100")
+   expect(config["shell_environment_policy.set.OPENAI_API_KEY"]).toBeUndefined()
+ })

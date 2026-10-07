@@ -1,3 +1,5 @@
+import { worktreeEnv } from "../../worktree-env.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -5,13 +7,16 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer } from "node:net"
 import { createOpencodeClient } from "@opencode-ai/sdk/v2/client"
-import { execFileText, stopChild, trackChild } from "../../child-registry.js"
+import { execFileText, stopChildAndWait, trackChild, type ChildOwner } from "../../child-registry.js"
 import { nativeCliEnvironment } from "../providers/native-cli-environment.js"
 
 /** Minimum and maximum tested server are deliberately the same release. */
 export const OPENCODE_VERSION = "1.18.14"
 export class UnsupportedOpenCode extends Error {}
 export interface OpenCodeOptions {
+  workspaceEnvironment?: Readonly<Record<string, string>>
+  cwd?: string
+  owner?: ChildOwner
   binary?: string
   environment?: NodeJS.ProcessEnv
   spawnProcess?: typeof spawn
@@ -115,15 +120,16 @@ export class OpenCodeServer {
     const port = await (options.port ?? ephemeralPort)()
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid loopback port")
     const password = randomBytes(32).toString("base64url")
-    const original = options.environment ?? process.env
+    const original = worktreeEnv(options.environment ?? process.env, options.cwd)
     const configRoot = await mkdtemp(join(tmpdir(), "jingler-opencode-"))
     const environment = isolatedEnvironment(original, configRoot)
     let child: ChildProcess
     try {
       child = trackChild((options.spawnProcess ?? spawn)(options.binary ?? process.env.JINGLER_OPENCODE_BINARY ?? "opencode", ["serve", "--hostname", "127.0.0.1", "--port", String(port)], {
-        env: { ...environment, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
+        cwd: options.cwd,
+        env: { ...environment, ...trustedWorkspaceEnvironment(options.workspaceEnvironment), OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: password },
         stdio: ["ignore", "pipe", "pipe"], detached: true
-      }), true)
+      }), true, options.owner)
     } catch (cause) {
       await rm(configRoot, { recursive: true, force: true })
       throw cause
@@ -162,7 +168,7 @@ export class OpenCodeServer {
   close(): Promise<void> {
     this.closing ??= (async () => {
       this.stopped.abort()
-      stopChild(this.child, 250)
+      await stopChildAndWait(this.child, 250)
       await this.closed
       await rm(this.configRoot, { recursive: true, force: true })
     })()

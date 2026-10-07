@@ -425,6 +425,63 @@ export type ProjectAvailability = Schema.Schema.Type<
   typeof ProjectAvailability
 >;
 
+export const ProjectRunCommand = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  command: Schema.String,
+});
+export type ProjectRunCommand = Schema.Schema.Type<typeof ProjectRunCommand>;
+
+export const WorkspacePortConfig = Schema.Struct({
+  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
+  extras: Schema.Array(Schema.Struct({ name: Schema.String, start: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) })),
+  previewUrl: Schema.optional(Schema.String),
+});
+export type WorkspacePortConfig = Schema.Schema.Type<typeof WorkspacePortConfig>;
+export const WorkspacePorts = Schema.Struct({
+  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
+  extras: Schema.Record({ key: Schema.String, value: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) }),
+});
+export type WorkspacePorts = Schema.Schema.Type<typeof WorkspacePorts>;
+
+/** Machine-local commands and ignored files explicitly approved by the operator. */
+export const ProjectWorkflow = Schema.Struct({
+  ports: Schema.optional(WorkspacePortConfig),
+  setup: Schema.optional(Schema.String),
+  cleanup: Schema.optional(Schema.String),
+  runs: Schema.Array(ProjectRunCommand),
+  copyFiles: Schema.Array(Schema.String),
+  /** SHA-256 of the executable fields above. Missing means configured but not approved. */
+  approvedDigest: Schema.optional(Schema.String),
+});
+export type ProjectWorkflow = Schema.Schema.Type<typeof ProjectWorkflow>;
+
+export const WorkspaceLifecycle = Schema.Struct({
+  status: Schema.Literal(
+    "ready",
+    "setup-running",
+    "setup-failed",
+    "setup-skipped",
+    "cleanup-running",
+    "cleanup-failed",
+  ),
+  updatedAt: Schema.String,
+  error: Schema.optional(Schema.String),
+  /** Bounded, redacted-by-contract command output for operator diagnosis. */
+  output: Schema.optional(Schema.String),
+});
+export type WorkspaceLifecycle = Schema.Schema.Type<typeof WorkspaceLifecycle>;
+
+export const WorkspaceRunState = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  status: Schema.Literal("running", "exited", "failed"),
+  startedAt: Schema.String,
+  exitCode: Schema.optional(Schema.Number),
+  output: Schema.optional(Schema.String),
+});
+export type WorkspaceRunState = Schema.Schema.Type<typeof WorkspaceRunState>;
+
 /** A durable repository registration, independent of any workspace/session. */
 export const Project = Schema.Struct({
   id: Schema.String,
@@ -437,6 +494,8 @@ export const Project = Schema.Struct({
   availability: ProjectAvailability,
   createdAt: Schema.String,
   updatedAt: Schema.String,
+  /** Approved machine-local workspace commands; absent on legacy projects. */
+  workflow: Schema.optional(ProjectWorkflow),
 });
 export type Project = Schema.Schema.Type<typeof Project>;
 
@@ -512,6 +571,14 @@ export const PublishCheckpoint = Schema.Struct({
 export type PublishCheckpoint = Schema.Schema.Type<typeof PublishCheckpoint>;
 
 export const Session = Schema.Struct({
+  routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
+  /** Explicit opt-in: quiescent workspace-wide checkpoints before turns; no delegated children. */
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
+  /** Absent means legacy/unknown, never proven clean. Persist before any unowned launch. */
+  checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
+  /** An interactive terminal may leave descendants after its leader or the app exits. */
+  checkpointPtyHistory: Schema.optional(Schema.Boolean),
+  workspacePorts: Schema.optional(WorkspacePorts),
   id: Schema.String,
   /** Durable project identity. Absent on sessions created before Projects existed. */
   projectId: Schema.optional(Schema.String),
@@ -655,6 +722,8 @@ export const Session = Schema.Struct({
   repoPath: Schema.optional(Schema.String),
   /** The branch this session's worktree was forked from. */
   baseBranch: Schema.optional(Schema.String),
+  /** Durable setup/cleanup gate for machine-local workspace automation. */
+  workspaceLifecycle: Schema.optional(WorkspaceLifecycle),
   /** Legacy single-chat mode and allowlist aliases retained during rolling migration. */
   mode: Schema.optional(PermissionMode),
   allowlist: Schema.optional(Schema.Array(Schema.String)),
@@ -1910,6 +1979,9 @@ export const adversarialReviewModelLabel = (
 
 /** Parameters for creating a new session. */
 export const CreateSessionInput = Schema.Struct({
+  routineOccurrence: Schema.optional(Schema.Struct({ routineId: Schema.String, runId: Schema.String })),
+  /** Explicit consent to edit/inspect-only managed Pi checkpoint execution. */
+  checkpointSafeMode: Schema.optional(Schema.Boolean),
   /** Internal remote provision fence; omitted by renderer-originated requests. */
   requestedSessionId: Schema.optional(
     Schema.String.pipe(Schema.pattern(/^s_[A-Za-z0-9_-]{8,120}$/u)),

@@ -25,6 +25,7 @@ import {
 } from "pi-subagents/external-job-provider"
 import type { AgentRuntimeContext, AgentRuntimeShape } from "./agent-runtime.js"
 import { directNativeChildSpec } from "./direct-native-subagent.js"
+import { acquireWorkspaceActivity } from "../../workspace-admission.js"
 
 export const JINGLER_NATIVE_EXTERNAL_JOB_PROVIDER = "jingler-native"
 const MAX_TRANSCRIPT_CHARS = 128_000
@@ -291,8 +292,11 @@ export const makeNativeExternalJobProvider = (
   const failAmbiguous = async (record: NativeExternalJobRecord): Promise<NativeExternalJobRecord> => {
     if (record.state !== "queued" && record.state !== "running") return record
     if (active.has(record.providerJobId)) return record
+    // The first read can precede terminal persistence and active ownership release.
+    const latest = await read(record.providerJobId)
+    if (latest.state !== "queued" && latest.state !== "running") return latest
     const failed: NativeExternalJobRecord = {
-      ...record,
+      ...latest,
       state: "failed",
       updatedAt: Date.now(),
       endedAt: Date.now(),
@@ -477,6 +481,15 @@ export const makeNativeExternalJobProvider = (
         code: "binding-mismatch"
       })
     }
+    let workspaceLease: ReturnType<typeof acquireWorkspaceActivity>
+    try {
+      workspaceLease = acquireWorkspaceActivity(binding.spec.sessionId, `native-child:${input.runId}`)
+    } catch (cause) {
+      throw new ExternalJobProviderError(
+        cause instanceof Error ? cause.message : "Workspace is unavailable",
+        { code: "workspace-unavailable", cause }
+      )
+    }
     const providerJobId = randomUUID()
     const now = Date.now()
     const record: NativeExternalJobRecord = {
@@ -493,11 +506,19 @@ export const makeNativeExternalJobProvider = (
       updatedAt: now,
       state: "queued"
     }
-    await persist(record)
+    try {
+      await persist(record)
+    } catch (cause) {
+      workspaceLease.release()
+      throw cause
+    }
     const controller = new AbortController()
     const settled = execute(record, binding, input.prompt, controller.signal, continuationId)
       .catch(() => undefined)
-      .finally(() => active.delete(providerJobId))
+      .finally(() => {
+        active.delete(providerJobId)
+        workspaceLease.release()
+      })
     active.set(providerJobId, {
       sourceRunId: input.runId,
       parentRuntimeSessionId: binding.parentRuntimeSessionId,

@@ -45,6 +45,31 @@ describe("ProjectService", () => {
     })
   })
 
+  it("binds workflow consent to exact content and preserves it on re-registration", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "workflow"))
+    const registered = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    if (registered._tag !== "Success") throw new Error("Registration failed")
+    const configured = await runExit(ProjectService.setWorkflow(registered.value.id, {
+      setup: "pnpm install",
+      runs: [{ id: "dev", label: "Dev", command: "pnpm dev" }],
+      copyFiles: [".env.local"]
+    }, true).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(configured._tag).toBe("Success")
+    if (configured._tag !== "Success") return
+    expect(configured.value.workflow?.approvedDigest).toMatch(/^[a-f0-9]{64}$/)
+
+    const restored = await runExit(ProjectService.register({ path: repoPath, name: "Renamed" }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(restored).toMatchObject({ _tag: "Success", value: { name: "Renamed", workflow: configured.value.workflow } })
+
+    const changed = await runExit(ProjectService.setWorkflow(registered.value.id, {
+      setup: "pnpm install --frozen-lockfile",
+      runs: [],
+      copyFiles: []
+    }, false).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(changed).toMatchObject({ _tag: "Success", value: { workflow: { setup: "pnpm install --frozen-lockfile", runs: [], copyFiles: [] } } })
+    if (changed._tag === "Success") expect(changed.value.workflow?.approvedDigest).toBeUndefined()
+  })
+
   it("hides unmarked legacy registrations without deleting them and restores an explicit re-import", async () => {
     const repoPath = initGitRepo(join(repos.dir, "legacy"))
     const registered = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)

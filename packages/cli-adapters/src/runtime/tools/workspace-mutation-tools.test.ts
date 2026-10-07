@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { NodeContext } from "@effect/platform-node"
 import { Effect, Layer } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { workspaceActivityCount, resetWorkspaceAdmissions } from "../../workspace-admission.js"
 import { AssetService } from "../../asset.js"
 import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import { FileChangeTracker } from "../file-changes/file-change-tracker.js"
@@ -33,6 +34,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  resetWorkspaceAdmissions()
   await Promise.all([
     rm(workspace, { recursive: true, force: true }),
     rm(outside, { recursive: true, force: true })
@@ -52,7 +54,7 @@ const execute = (
   idempotencyKey
 }))
 
-const makeRegistry = (offload?: OffloadCommandRouterPort): ToolRegistry => {
+const makeRegistry = (offload?: OffloadCommandRouterPort, workspaceEnvironment?: Readonly<Record<string, string>>): ToolRegistry => {
   const registry = new ToolRegistry({
     observer: createMutationObserver({
       cwd: workspace,
@@ -71,7 +73,7 @@ const makeRegistry = (offload?: OffloadCommandRouterPort): ToolRegistry => {
     registry,
     workspace,
     port,
-    offload ? { sessionId: "session-one", offload } : undefined
+    offload ? { sessionId: "session-one", offload, workspaceEnvironment } : undefined
   )
   return registry
 }
@@ -215,4 +217,31 @@ describe("workspace mutation tools", () => {
     await expect(readFile(join(workspace, "marker.txt"), "utf8")).rejects.toThrow()
     expect(executeIfEligible).toHaveBeenCalledTimes(2)
   })
+})
+
+ it("runs simultaneous Pi and child commands with isolated trusted workspace environments", async () => {
+   const context = { signal: new AbortController().signal, idempotencyKey: null, progress: () => undefined }
+   const command = 'printf "%s:%s" "$JINGLER_PORT" "$JINGLER_WORKSPACE_PATH"'
+   const before = process.env.JINGLER_PORT
+   const results = await Promise.all([3100, 3101].map((value) => Effect.runPromise(port.execute(workspace, command, { ...context, workspaceEnvironment: { JINGLER_PORT: String(value), JINGLER_WORKSPACE_PATH: workspace } }))))
+   expect(results.map((result) => result.stdout)).toEqual([`3100:${workspace}`, `3101:${workspace}`])
+   expect(process.env.JINGLER_PORT).toBe(before)
+ })
+
+it("proves shell descendants stopped before releasing command admission", async () => {
+  const context = { signal: new AbortController().signal, idempotencyKey: null, progress: () => {} }
+  await Effect.runPromise(port.execute(workspace, "sleep 60 >/dev/null 2>&1 & echo $! > descendant; exit 0", context, "shell-session"))
+  const pid = Number(await readFile(join(workspace, "descendant"), "utf8"))
+  expect(() => process.kill(pid, 0)).toThrow()
+  expect(workspaceActivityCount("shell-session")).toBe(0)
+})
+
+it("allocated ports do not suppress unrelated eligible offload", async () => {
+  const executeIfEligible = vi.fn<OffloadCommandRouterPort["executeIfEligible"]>(() => Effect.succeed({ command: "pnpm test", exitCode: 0, stdout: "remote", stderr: "", offloaded: true, jobId: "job_aaaaaaaaaaaaaaaa" }))
+  const registry = makeRegistry({ executeIfEligible, primeSession: () => Effect.succeed("accepted"), destroySession: () => Effect.void }, { JINGLER_PORT: "3100" })
+  expect(await execute(registry, "command_execute", { command: "pnpm test" })).toMatchObject({ status: "success", value: { stdout: "remote" } })
+  expect(executeIfEligible).toHaveBeenCalledOnce()
+  executeIfEligible.mockClear()
+  expect(await execute(registry, "command_execute", { command: 'printf "$JINGLER_PORT"' })).toMatchObject({ status: "success", value: { stdout: "3100" } })
+  expect(executeIfEligible).not.toHaveBeenCalled()
 })

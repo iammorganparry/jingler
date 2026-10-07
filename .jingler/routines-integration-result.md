@@ -1,0 +1,33 @@
+# Phase4 integration evidence — reviewer acceptance required
+
+Implemented in the current keen-planck checkout; no stage, commit, worktree, transfer, push, release, or wider-access request.
+
+## Production integration
+
+- `RoutinesService` is an app-lifetime Effect service sharing one `RoutineStore` and `RoutineScheduler` across all six RPC handlers, authenticated startup, sign-out, quit and suspend/resume. Construction does not launch work. Startup/sleep skip missed occurrences; one next-due timer respects Node's maximum timer delay. One active routine globally does not serialize interactive agents.
+- Settings → Routines provides save/edit, enable/disable/delete, exact local Pi connection/model/reasoning, Ask permissions, native datetime once/interval schedules, next occurrence, Run now, bounded duration, errors/retry, cancellation, history and session links. Each changed form field clears the required consent checkbox. The UI explicitly discloses edit/inspect-only execution and desktop-only scheduling.
+- Claims atomically reserve the requested session ID before actual `SessionStore.create`. Sessions persist typed `routineOccurrence` identity, clean execution history and safe mode; arbitrary project setup is rejected. Creation explicitly skips setup. `WorkspaceCheckpointService.setMode(id, true)` precedes the existing `AgentRunner.prompt(sessionId, actualChatId, ...)` gate. There is no alternate native executor or automatic model/permission fallback.
+- Validation checks available local projects, current workflow digest/approval, authenticated exact saved Pi model and supported reasoning. Mutation invalidates pending dispatch before awaiting persistence. Revision checks, abort signals and generation fences stop launch after mutation/cancel/stop/suspend across awaits.
+- Cancellation interrupts the actual stream and awaits owned `AgentRunner.stop(..., true)`; teardown has a ten-second failure bound. A failed teardown halts the scheduler and requires desktop restart rather than claiming it stopped or admitting another routine. No exactly-once external-effects guarantee is made.
+- Unchanged schedule edits preserve the durable cursor. Restart reconciles only the reserved session plus matching routine/run identity, marks unfinished claims interrupted, and never redispatches them. Mismatched identities are not linked. JSON corruption fails closed; atomic replacement uses exclusive temporary files with mode 0600 for prompts/history.
+- Ordinary terminal callers now provide the durable-history protocol flag; tests retain the pre-PTY guard. Archive has a separate explicit `metadataOnlyAcknowledged` contract. Only unproven terminal workspaces use the acknowledged early metadata path, preserving jobs/files and calling no lifecycle/PTY/cleanup services. Automatic/unacknowledged archive and destructive deletion remain refused; normal provable archive retains cleanup. Renderer consent is an XState machine using ConfirmDialog.
+
+## Checks obtained
+
+- Focused phase4, terminal and session suite: 123 tests in nine files passed (`/tmp/phase4-final-tests.log`). After linked-session navigation was updated, its renderer machine passed all three tests, including one additional load-error regression (`/tmp/phase4-link-tests.log`).
+- Existing Settings and project workflow rendering: eight tests passed (`/tmp/phase4-settings-tests.log`).
+- Core/contracts/cli-adapters/UI typechecks passed (`/tmp/phase4-packages-typecheck.log`); desktop typecheck passed after integration (`/tmp/phase4-typecheck.log`).
+- Changed-file Biome lint passed with warnings (`/tmp/phase4-changed-lint.log`); later new/edited routine and archive files passed (`/tmp/phase4-final-lint.log`).
+- Built Electron e2e was attempted with `pnpm --filter @jingler/desktop e2e workspace-routines.spec.ts workspace-terminal-archive.spec.ts`. Plugin building failed before Electron launch: `listen EPERM /tmp/tsx-501/5179.pipe` (`/tmp/phase4-e2e.log`). No Electron scenario is claimed passed here. Playwright `--list` successfully discovered both specs (`/tmp/phase4-e2e-discovery.log`).
+- New built scenarios cover production fixture Pi/gate, UI save/manual run, overlap, fresh safe worktree and linked identity, scheduled occurrence within seconds, disable, cancellation and restart without replay; ordinary-terminal warned archive preserves a sentinel and never creates the configured cleanup sentinel. These scenarios require a host rerun.
+- Real-Git execution-adapter unit tests prove reservation → isolated creation → actual mode capture → shared turn capture, and no prompt after capture failure/cancellation during creation. Loopback port probes are deterministic test doubles in service fixtures; socket coverage belongs to existing port tests and built Electron.
+
+## Sources and installed APIs
+
+Installed versions inspected: Node 24.19.0, Effect 3.21.4, XState 5.32.4, Electron 43.1.0, `@earendil-works/pi-ai`/`pi-coding-agent` 0.84.1, pi-subagents 0.65.0. The latter exports background-work/delegation APIs, not a durable desktop routine scheduler; it is not used for launching routines. This change calls the existing typed AgentRunner API, not Pi SDK APIs directly.
+
+Official sources read: [Node 24.19 timers](https://raw.githubusercontent.com/nodejs/node/v24.19.0/doc/api/timers.md), [Node 24.19 child processes](https://raw.githubusercontent.com/nodejs/node/v24.19.0/doc/api/child_process.md), [Effect v3 Runtime](https://effect.website/docs/v3/runtime), [XState promise/actor lifecycle](https://stately.ai/docs/actors), [Electron powerMonitor](https://www.electronjs.org/docs/latest/api/power-monitor), [Electron app quit](https://www.electronjs.org/docs/latest/api/app), [Electron utilityProcess](https://www.electronjs.org/docs/latest/api/utility-process). Exact installed Effect `Runtime.d.ts` confirms AbortSignal options, XState `actors/promise.d.ts` confirms invoked promise signatures, and repository/installed declarations supply the APIs used. Version-tagged Effect/XState web sources were unavailable; no claim that latest docs are exact package sources.
+
+## Review gate and residuals
+
+Independent reviewer gate remains required. Rerun both new Electron specs and all repository gates on the parent host; this sandbox cannot allocate the build's tsx IPC listener. Full root lint/typecheck/test/e2e are not claimed run. Electron embedded Node was not measured because Electron never launched. The shared mode/restore system still carries the phase3 review concerns tracked separately by the parent. Other `.jingler` parent review artifacts appearing during this turn were not edited by this writer.

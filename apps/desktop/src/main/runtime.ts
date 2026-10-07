@@ -1,3 +1,4 @@
+import { RoutinesService } from "./routines.js"
 /**
  * The main-process Effect runtime. `AppLayer` wires every backend dependency the
  * RPC handlers need — the Node platform (`CommandExecutor` + `FileSystem` +
@@ -41,6 +42,8 @@ import {
   BackgroundTaskStore,
   UsageService,
   WorkspaceService,
+  WorkspaceWorkflowService,
+  WorkspaceCheckpointService,
   WebSearchCredentialService,
   WebSearchService,
   makeWebSearchService,
@@ -163,7 +166,8 @@ const AgentExecutionLayer = AgentTurnDriverLive.pipe(
 // Later `Layer.provide`s satisfy the requirements of earlier ones, so the leaf
 // dependencies (paths, dialog, Node platform) come last.
 const RpcServicesLayer = RpcServerLive.pipe(
-  Layer.provideMerge(RuntimeRecoveryService.Default),
+  Layer.provideMerge(Layer.merge(RuntimeRecoveryService.Default, RoutinesService.Default)),
+  Layer.provideMerge(Layer.merge(WorkspaceWorkflowService.Default, WorkspaceCheckpointService.Default)),
   Layer.provideMerge(AgentResourcesLive),
   Layer.provide(ProviderConnectionsLive),
   Layer.provide(RemoteSessionsLive),
