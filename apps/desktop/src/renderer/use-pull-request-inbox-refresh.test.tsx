@@ -30,7 +30,7 @@ const Harness = () => {
   return <WidthTierValue width={1200}><PullRequestInbox
     {...inbox} viewerLogin="octocat" onSelect={inbox.select} onComment={inbox.comment} onActivate={inbox.discover}
     teamControls={{ teams: inbox.teams, teamId: inbox.teamId, queue: inbox.queue,
-      onTeam: inbox.selectTeam, onQueue: inbox.selectQueue, onRefresh: inbox.discover,
+      onTeam: inbox.selectTeam, onQueue: inbox.selectQueue, onRefresh: inbox.refreshInbox,
       discovering: inbox.discovering, error: inbox.discoveryError }}
   /></WidthTierValue>
 }
@@ -75,6 +75,36 @@ it.each(["personal", "team"])("preserves the %s draft across focus/visibility an
   expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
   expect((composer as HTMLTextAreaElement).value).toBe("Do not delete this draft")
   client.clear()
+})
+
+it.each(["personal", "team"])("manual %s refresh supersedes an older in-flight detail read without losing the draft", async (scope) => {
+  vi.mocked(rpc.githubTeams).mockResolvedValue(discovery)
+  const client = mount()
+  let finishOld: ((value: PullRequest) => void) | undefined
+  let background: Promise<void> | undefined
+  try {
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Pull request scope" }).hasAttribute("disabled")).toBe(false))
+    if (scope === "team") fireEvent.change(screen.getByRole("combobox", { name: "Pull request scope" }), { target: { value: "7" } })
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    const composer = await screen.findByPlaceholderText("Leave a comment…")
+    fireEvent.change(composer, { target: { value: "Keep the in-flight draft" } })
+    const read = scope === "team" ? vi.mocked(rpc.githubTeamPr) : vi.mocked(rpc.githubPrBySlug)
+    read.mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve }))
+    await act(async () => { background = client.refetchQueries({ queryKey: ["github", "pr-inbox", "detail"] }) })
+    expect(read).toHaveBeenCalledTimes(2)
+    read.mockResolvedValue({ ...detail, body: "Newest manual refresh" })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await screen.findByText("Newest manual refresh")
+    expect(read).toHaveBeenCalledTimes(3)
+    await act(async () => { finishOld?.({ ...detail, body: "Older in-flight response" }); await background })
+    expect(screen.queryByText("Older in-flight response")).toBeNull()
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+    expect(composer).toHaveProperty("value", "Keep the in-flight draft")
+  } finally {
+    finishOld?.(detail)
+    await background
+    client.clear()
+  }
 })
 
 it("accepts a personal PR during initial delayed discovery and preserves its draft when CLI identity arrives", async () => {

@@ -84,8 +84,9 @@ export function usePullRequestInbox(_connected: boolean) {
     retry: teamMode ? false : undefined,
   })
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox"] })
-  const discover = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox", "detail"] }, { cancelRefetch: false })
+  // Focus/visibility share their read; an explicit refresh supersedes an older one.
+  const discover = useCallback((cancelRefetch = false) => {
+    void queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox", "detail"] }, { cancelRefetch })
     send({ type: "DISCOVER" })
   }, [queryClient, send])
   const target = teamPrTarget(selected, ready ? account : null)
@@ -141,6 +142,7 @@ export function usePullRequestInbox(_connected: boolean) {
     selectTeam: (id: string | null) => { resetActionErrors(); send({ type: "TEAM", teamId: id }) },
     selectQueue: (next: GitHubTeamQueue) => { resetActionErrors(); send({ type: "QUEUE", queue: next }) },
     discover,
+    refreshInbox: () => discover(true),
     discovering: state.matches("discovering"),
     discoveryError,
     warnings: teamData?.warnings ?? [],
