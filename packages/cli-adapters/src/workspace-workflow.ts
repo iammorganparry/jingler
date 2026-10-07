@@ -22,11 +22,6 @@ import { workspaceProcessEnvironment } from "./workspace-ports.js"
 const OUTPUT_LIMIT = 64 * 1024
 const COMMAND_TIMEOUT_MS = 10 * 60_000
 
-interface LiveRun {
-  readonly state: WorkspaceRunState
-  readonly child: ChildProcess
-}
-
 const safeOutput = (value: string): string =>
   value
     .replace(/((?:api[_-]?key|token|password|secret)\s*[=:]\s*)\S+/giu, "$1[redacted]")
@@ -39,14 +34,19 @@ const shellCommand = (command: string): { file: string; args: string[] } => {
   return { file: process.env.SHELL || "/bin/sh", args: ["-lc", command] }
 }
 
+const assertShellSupported = (session: Session): void => {
+  if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
+}
+
 const runCommand = async (
   session: Session,
   action: string,
   command: string,
   onSpawn?: (child: ChildProcess) => void,
-  lifecycleOwner?: symbol
+  lifecycleOwner?: symbol,
+  timeoutMs: number | null = COMMAND_TIMEOUT_MS
 ): Promise<{ exitCode: number; output: string }> => {
-  if (session.checkpointSafeMode) throw new Error("Shell/build/test commands are unsupported in checkpoint-safe mode.")
+  assertShellSupported(session)
   if (!session.worktreePath) throw new Error("Workspace checkout is unavailable.")
   const shell = shellCommand(command)
   const lease = lifecycleOwner
@@ -71,10 +71,10 @@ const runCommand = async (
     child.stdout?.on("data", append)
     child.stderr?.on("data", append)
     const result = await new Promise<{ exitCode: number; output: string }>((resolveResult, reject) => {
-      const timeout = setTimeout(() => {
+      const timeout = timeoutMs === null ? undefined : setTimeout(() => {
         void stopOwnedChildren(session.id, action).then(() => reject(new Error("Workspace command timed out.")), reject)
-      }, COMMAND_TIMEOUT_MS)
-      timeout.unref?.()
+      }, timeoutMs)
+      timeout?.unref?.()
       child.once("error", (cause) => {
         clearTimeout(timeout)
         reject(cause)
@@ -123,7 +123,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
         E,
         FileSystem.FileSystem | Path.Path | CommandExecutor.CommandExecutor | AppPaths
       >): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(env)))
-      const runs = new Map<string, Map<string, LiveRun>>()
+      const runs = new Map<string, Map<string, WorkspaceRunState>>()
       const setupClosures = new Map<string, symbol>()
       const operations = new Set<string>()
       const pendingRuns = new Set<string>()
@@ -164,6 +164,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           if (workflow) {
             for (const file of workflow.copyFiles) await copyApprovedFile(project.path, session.worktreePath!, file)
             if (workflow.setup) {
+              assertShellSupported(session)
               await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
               const result = await runCommand(session, "setup", workflow.setup, undefined, closure)
               if (result.exitCode !== 0) throw Object.assign(new Error(`Setup exited with code ${result.exitCode}.`), { output: result.output })
@@ -238,6 +239,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           const workflow = approvedWorkflow(project.workflow)
           if (project.workflow && !workflow) throw new Error("Project workflow changed and needs operator approval before cleanup.")
           if (workflow?.cleanup) {
+            assertShellSupported(session)
             await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
             const result = await runCommand(session, "cleanup", workflow.cleanup, undefined, owner)
             if (result.exitCode !== 0) throw Object.assign(new Error(`Cleanup exited with code ${result.exitCode}.`), { output: result.output })
@@ -252,6 +254,7 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           admitted = true
           try {
             await executeCleanup(sessionId, owner)
+            await runEffect(lifecycle(sessionId, "ready"))
           } finally { lease.release() }
         },
         catch: (cause) => cause
@@ -286,8 +289,8 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           pendingRuns.add(key)
           try {
           const { session, command } = await commandForRun(sessionId, runId)
-          const sessionRuns = runs.get(sessionId) ?? new Map<string, LiveRun>()
-          if (sessionRuns.get(runId)?.state.status === "running") throw new Error(`${command.label} is already running.`)
+          const sessionRuns = runs.get(sessionId) ?? new Map<string, WorkspaceRunState>()
+          if (sessionRuns.get(runId)?.status === "running") throw new Error(`${command.label} is already running.`)
           const startedAt = new Date().toISOString()
           const state: WorkspaceRunState = { id: runId, label: command.label, status: "running", startedAt }
           let resolveSpawn!: () => void
@@ -295,26 +298,23 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
           const spawned = new Promise<void>((resolve, reject) => { resolveSpawn = resolve; rejectSpawn = reject })
           if (session.checkpointSafeMode) throw new Error("Project shell commands are unsupported in checkpoint-safe mode.")
           await runEffect(sessions.markCheckpointExecutionUnprovable(sessionId))
-          const resultPromise = runCommand(session, `run:${runId}`, command.command, (child) => {
-            sessionRuns.set(runId, { state, child })
+          const resultPromise = runCommand(session, `run:${runId}`, command.command, () => {
+            sessionRuns.set(runId, state)
             runs.set(sessionId, sessionRuns)
             resolveSpawn()
-          })
+          }, undefined, null)
           void resultPromise.catch(rejectSpawn)
           await spawned
           void resultPromise.then((result) => {
             sessionRuns.set(runId, {
-              state: {
-                ...state,
-                status: result.exitCode === 0 ? "exited" : "failed",
-                exitCode: result.exitCode,
-                ...(result.output ? { output: result.output } : {})
-              },
-              child: sessionRuns.get(runId)!.child
+              ...state,
+              status: result.exitCode === 0 ? "exited" : "failed",
+              exitCode: result.exitCode,
+              ...(result.output ? { output: result.output } : {})
             })
           }).catch((cause) => {
             const current = sessionRuns.get(runId)
-            if (current) sessionRuns.set(runId, { ...current, state: { ...state, status: "failed", output: safeOutput(cause instanceof Error ? cause.message : String(cause)) } })
+            if (current) sessionRuns.set(runId, { ...state, status: "failed", output: safeOutput(cause instanceof Error ? cause.message : String(cause)) })
           })
           return state
           } finally { pendingRuns.delete(key) }
@@ -334,9 +334,11 @@ export class WorkspaceWorkflowService extends Effect.Service<WorkspaceWorkflowSe
       })
 
       const listRuns = (sessionId: string): Effect.Effect<ReadonlyArray<WorkspaceRunState>> =>
-        Effect.sync(() => [...(runs.get(sessionId)?.values() ?? [])].map(({ state }) => state))
+        Effect.sync(() => [...(runs.get(sessionId)?.values() ?? [])])
 
-      return { setup, skipSetup, prepareLifecycle, cleanup, startRun, stopRun, stopAll, listRuns }
+      const forget = (sessionId: string) => stopAll(sessionId).pipe(Effect.andThen(Effect.sync(() => runs.delete(sessionId))))
+
+      return { setup, skipSetup, prepareLifecycle, cleanup, startRun, stopRun, stopAll, listRuns, forget }
     })
   }
 ) {}

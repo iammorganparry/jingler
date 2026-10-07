@@ -3,7 +3,7 @@ import { join } from "node:path"
 import type { CreateSessionInput } from "@jingler/core"
 import { ProviderConnectionId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Effect, Layer, Schema } from "effect"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { GitService } from "./git.js"
 import { ProjectService } from "./projects.js"
 import { SessionStore } from "./sessions.js"
@@ -13,6 +13,7 @@ import { copyApprovedFile, WorkspaceWorkflowService } from "./workspace-workflow
 
 const resources: Array<() => void> = []
 afterEach(() => {
+  vi.restoreAllMocks()
   resetWorkspaceAdmissions()
   for (const cleanup of resources.splice(0)) cleanup()
 })
@@ -27,14 +28,14 @@ const fixture = () => {
   return { files, root, target }
 }
 
-const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService, sessionId: string, worktree: string) => Promise<void>, run = "sleep 5") => {
+const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService, sessionId: string, worktree: string, state: { read(): Promise<import("@jingler/core").Session>; safe(): Promise<unknown>; reconcile(): Promise<unknown> }) => Promise<void>, run = "sleep 5", cleanup?: string) => {
   const temp = withTempRoot()
   resources.push(temp.cleanup)
   const { root } = fixture()
   const services = Layer.mergeAll(SessionStore.Default, ProjectService.Default, GitService.Default)
   await Effect.runPromise(Effect.gen(function* () {
     const project = yield* ProjectService.register({ path: root })
-    yield* ProjectService.setWorkflow(project.id, { setup, runs: [{ id: "run", label: "Run", command: run }], copyFiles: [] }, true)
+    yield* ProjectService.setWorkflow(project.id, { setup, ...(cleanup ? { cleanup } : {}), runs: [{ id: "run", label: "Run", command: run }], copyFiles: [] }, true)
     const input: CreateSessionInput = {
       repoPath: root, repoName: "project", title: "Safety test", projectId: project.id, baseBranch: "main",
       connectionId: Schema.decodeUnknownSync(ProviderConnectionId)("claude-max"),
@@ -43,7 +44,11 @@ const harness = async (setup: string, body: (workflow: WorkspaceWorkflowService,
     }
     const session = yield* SessionStore.create(input)
     const workflow = yield* WorkspaceWorkflowService
-    yield* Effect.promise(() => body(workflow, session.id, session.worktreePath!))
+    yield* Effect.promise(() => body(workflow, session.id, session.worktreePath!, {
+      read: () => Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer))),
+      safe: () => Effect.runPromise(SessionStore.setCheckpointSafeMode(session.id, true).pipe(Effect.provide(services), Effect.provide(temp.layer))),
+      reconcile: () => Effect.runPromise(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    }))
   }).pipe(
     Effect.provide(WorkspaceWorkflowService.Default.pipe(Layer.provideMerge(services))),
     Effect.provide(temp.layer)
@@ -155,4 +160,65 @@ it("transfers only an idle failed setup to an exclusive archive owner", async ()
     await Effect.runPromise(workflow.cleanup(id, owner))
     await expect(Effect.runPromise(workflow.setup(id))).rejects.toThrow(/already unavailable/)
   })
+})
+
+it("copies ignored nested files when fresh destination parents do not exist", async () => {
+  const { root, target } = fixture()
+  mkdirSync(join(root, "config", "nested"), { recursive: true })
+  writeFileSync(join(root, "config", "nested", "local.secret"), "nested secret")
+  await copyApprovedFile(root, target, "config/nested/local.secret")
+  expect(readFileSync(join(target, "config", "nested", "local.secret"), "utf8")).toBe("nested secret")
+})
+
+it("does not reconcile a live setup as interrupted", async () => {
+  await harness("touch preparing; sleep 0.3", async (workflow, id, cwd, state) => {
+    const setup = Effect.runPromise(workflow.setup(id))
+    await expect.poll(() => existsSync(join(cwd, "preparing"))).toBe(true)
+    await state.reconcile()
+    expect((await state.read()).workspaceLifecycle?.status).toBe("setup-running")
+    await setup
+  })
+})
+
+it("rejects safe shell setup before tainting execution history", async () => {
+  await harness("touch forbidden", async (workflow, id, cwd, state) => {
+    await state.safe()
+    await expect(Effect.runPromise(workflow.setup(id))).rejects.toThrow(/unsupported/)
+    expect((await state.read()).checkpointExecutionHistory).toBe("clean")
+    expect(existsSync(join(cwd, "forbidden"))).toBe(false)
+  })
+})
+
+it("named Run has no setup deadline and forgetting removes settled output", async () => {
+  await harness("true", async (workflow, id) => {
+    await Effect.runPromise(workflow.setup(id))
+    const timer = vi.spyOn(globalThis, "setTimeout")
+    await Effect.runPromise(workflow.startRun(id, "run"))
+    expect(timer.mock.calls.some(call => call[1] === 600000)).toBe(false)
+    await Effect.runPromise(workflow.forget(id))
+    expect(await Effect.runPromise(workflow.listRuns(id))).toEqual([])
+    expect(workspaceActivityCount(id)).toBe(0)
+  })
+})
+
+it("retains bounded failed command diagnostics without process references", async () => {
+  await harness("true", async (workflow, id) => {
+    await Effect.runPromise(workflow.setup(id))
+    await Effect.runPromise(workflow.startRun(id, "run"))
+    await expect.poll(async () => (await Effect.runPromise(workflow.listRuns(id)))[0]?.status).toBe("failed")
+    expect((await Effect.runPromise(workflow.listRuns(id)))[0]).toMatchObject({ exitCode: 7, output: "launch failed" })
+  }, "printf 'launch failed'; exit 7")
+})
+
+it("rejects safe shell cleanup before tainting execution history", async () => {
+  await harness("true", async (workflow, id, cwd, state) => {
+    await state.safe()
+    await expect(Effect.runPromise(workflow.setup(id))).rejects.toThrow(/unsupported/)
+    await Effect.runPromise(workflow.skipSetup(id))
+    const owner = closeWorkspaceAdmission(id, "cleanup")
+    await expect(Effect.runPromise(workflow.cleanup(id, owner))).rejects.toThrow(/unsupported/)
+    expect((await state.read()).checkpointExecutionHistory).toBe("clean")
+    expect((await state.read()).workspaceLifecycle?.status).toBe("cleanup-failed")
+    expect(existsSync(join(cwd, "forbidden"))).toBe(false)
+  }, "true", "touch forbidden")
 })

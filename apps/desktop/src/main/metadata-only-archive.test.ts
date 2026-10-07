@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest"
 import { SessionStore, GitService } from "@jingler/cli-adapters"
 import { CreateSessionInput, type Session } from "@jingler/core"
 import { initGitRepo, mkTemp, withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
-import { archiveMetadataOnly } from "./metadata-only-archive.js"
+import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
 vi.mock("@jingler/cli-adapters/workspace-ports", async importOriginal => {
   const actual = await importOriginal<typeof import("@jingler/cli-adapters/workspace-ports")>()
   return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[]) => actual.allocateWorkspacePorts(sessions, undefined, async () => true) }
@@ -21,10 +21,18 @@ it("acknowledged archive needs no lifecycle/cleanup/PTY services and preserves a
     writeFileSync(join(session.worktreePath!, "keep"), "preserved")
     await run(SessionStore.markCheckpointTerminalExecutionUnprovable(session.id))
     await expect(run(archiveMetadataOnly(session.id, "closed", false))).rejects.toThrow("acknowledgement")
+    await run(SessionStore.setWorkspaceLifecycle(session.id, { status: "setup-failed", updatedAt: "2026-01-01T00:00:00.000Z", error: "proof" }))
+    await expect(run(restoreMetadataOnly(session.id))).rejects.toThrow("requires an archived")
     const archived = await run(archiveMetadataOnly(session.id, "closed", true))
     expect(archived.archived).toBe(true); expect(archived.checkpointPtyHistory).toBe(true)
     expect(readFileSync(join(session.worktreePath!, "keep"), "utf8")).toBe("preserved")
     expect(existsSync(join(session.worktreePath!, ".git"))).toBe(true)
+    const restored = await run(restoreMetadataOnly(session.id))
+    expect(restored.archived).toBe(false)
+    expect(restored.checkpointPtyHistory).toBe(true)
+    expect(restored.checkpointExecutionHistory).toBe("unprovable")
+    expect(restored.workspaceLifecycle).toEqual(archived.workspaceLifecycle)
+    await expect(run(restoreMetadataOnly(session.id))).rejects.toThrow("requires an archived")
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
   } finally { temp.cleanup(); repo.cleanup() }
 })

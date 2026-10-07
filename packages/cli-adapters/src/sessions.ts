@@ -1,4 +1,4 @@
-import { setWorkspaceCheckpointMode } from "./workspace-admission.js"
+import { workspaceAdmissionClosed, workspaceHasUnprovenProcesses, setWorkspaceCheckpointMode } from "./workspace-admission.js"
 import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { allocateWorkspacePorts } from "./workspace-ports.js"
 import { ProjectService } from "./projects.js"
@@ -1859,7 +1859,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           let changed = false
           const reconciled = sessions.map((session) => {
             const status = session.workspaceLifecycle?.status
-            if (status !== "setup-running" && status !== "cleanup-running") return session
+            // Current-process closures own live work; only stale running records are interrupted.
+            if (!["setup-running", "cleanup-running"].includes(status ?? "") || workspaceAdmissionClosed(session.id)) return session
             changed = true
             return {
               ...session,
@@ -1991,7 +1992,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
-          if (target.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
+          if (workspaceHasUnprovenProcesses(target)) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
           if (
             target.worktreePath &&
             workspaceModeOf(target) === "worktree"

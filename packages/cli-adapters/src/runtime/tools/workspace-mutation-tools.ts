@@ -1,3 +1,7 @@
+import { spawn } from "node:child_process"
+import { StringDecoder } from "node:string_decoder"
+import { acquireWorkspaceActivity } from "../../workspace-admission.js"
+import { trackChild, stopChildAndWait } from "../../child-registry.js"
 import { checkpointFiles } from "../../checkpoint-file-tools.js"
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
@@ -52,7 +56,8 @@ export interface WorkspaceMutationPort {
   readonly execute: (
     cwd: string,
     command: string,
-    context: ToolExecutionContext
+    context: ToolExecutionContext,
+    sessionId?: string
   ) => Effect.Effect<{
     readonly command: string
     readonly exitCode: number
@@ -76,8 +81,8 @@ const isContained = (path: Path.Path, root: string, target: string): boolean =>
 export const makeWorkspaceMutationPort = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const assets = yield* AssetService
   const executor = yield* CommandExecutor.CommandExecutor
+  const assets = yield* AssetService
 
   const workspacePath = (
     cwd: string,
@@ -166,54 +171,53 @@ export const makeWorkspaceMutationPort = Effect.gen(function* () {
     }).pipe(mapFailure("Could not rename workspace file"))
 
   const maxCommandOutput = 32_000
-  const collect = (
-    stream: Stream.Stream<Uint8Array, unknown>,
-    context: ToolExecutionContext
-  ): Effect.Effect<string, unknown> =>
-    stream.pipe(
-      Stream.decodeText(),
-      Stream.tap((chunk) =>
-        Effect.sync(() => context.progress({
-          message: chunk.slice(-maxCommandOutput),
-          completed: null,
-          total: null
-        }))
-      ),
-      Stream.runFold("", (output, chunk) =>
-        `${output}${chunk}`.slice(-maxCommandOutput)
-      )
-    )
-
-  const execute: WorkspaceMutationPort["execute"] = (cwd, source, context) => {
-    const shell = process.platform === "win32"
-      ? Command.make("cmd.exe", "/d", "/s", "/c", source)
-      : Command.make("/bin/sh", "-lc", source)
-    const program = Effect.scoped(
-      Effect.gen(function* () {
-        const process = yield* shell.pipe(
-          Command.workingDirectory(cwd),
-          Command.env({ ...worktreeEnv(globalThis.process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) }),
-          Command.start
-        )
-        const [stdout, stderr, exitCode] = yield* Effect.all(
-          [collect(process.stdout, context), collect(process.stderr, context), process.exitCode],
-          { concurrency: 3 }
-        )
-        if (exitCode !== 0) {
-          return yield* Effect.fail(
-            failure(stderr.trim() || stdout.trim() || `Command exited ${exitCode}`)
-          )
-        }
+  const execute: WorkspaceMutationPort["execute"] = (cwd, source, context, sessionId) => Effect.scoped(
+    Effect.gen(function* () {
+      if (process.platform === "win32") {
+        // Windows keeps ordinary shell access; destructive lifecycle refuses its unprovable history.
+        const child = yield* Command.make("cmd.exe", "/d", "/s", "/c", source).pipe(Command.workingDirectory(cwd), Command.env({ ...worktreeEnv(process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) }), Command.start, Effect.provideService(CommandExecutor.CommandExecutor, executor), mapFailure("Command launch failed"))
+        const collect = (stream: Stream.Stream<Uint8Array, unknown>) => stream.pipe(Stream.decodeText(), Stream.tap(chunk => Effect.sync(() => context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null }))), Stream.runFold("", (text, chunk) => (text + chunk).slice(-maxCommandOutput)))
+        const [stdout, stderr, exitCode] = yield* Effect.all([collect(child.stdout), collect(child.stderr), child.exitCode], { concurrency: 3 }).pipe(mapFailure("Command execution failed"))
+        if (exitCode !== 0) return yield* Effect.fail(failure(stderr.trim() || stdout.trim() || `Command exited ${exitCode}`))
         return { command: source, exitCode: Number(exitCode), stdout, stderr }
-      })
-    ).pipe(
-      Effect.provideService(CommandExecutor.CommandExecutor, executor),
-      Effect.mapError((cause) =>
-        cause instanceof ToolError ? cause : failure("Command execution failed")
+      }
+      const child = yield* Effect.acquireRelease(
+        Effect.try({
+          try: () => {
+            const lease = sessionId ? acquireWorkspaceActivity(sessionId, "command-execute") : undefined
+            try {
+              return trackChild(spawn("/bin/sh", ["-lc", source], {
+                cwd, detached: true,
+                env: { ...worktreeEnv(process.env, cwd), ...trustedWorkspaceEnvironment(context.workspaceEnvironment) },
+                stdio: ["ignore", "pipe", "pipe"]
+              }), true, sessionId ? { sessionId, action: "command-execute", onStopped: () => lease?.release() } : undefined)
+            } catch (cause) { lease?.release(); throw cause }
+          }, catch: cause => failure(cause instanceof Error ? cause.message : "Command launch failed")
+        }),
+        child => Effect.tryPromise({ try: () => stopChildAndWait(child, 0), catch: cause => cause }).pipe(Effect.orDie)
       )
-    )
-    return program
-  }
+      const result = yield* Effect.tryPromise({
+        try: () => new Promise<{ command: string; exitCode: number; stdout: string; stderr: string }>((resolve, reject) => {
+          let stdout = "", stderr = ""
+          const out = new StringDecoder("utf8"), err = new StringDecoder("utf8")
+          const append = (chunk: string, isError: boolean) => {
+            if (isError) stderr = (stderr + chunk).slice(-maxCommandOutput)
+            else stdout = (stdout + chunk).slice(-maxCommandOutput)
+            context.progress({ message: chunk.slice(-maxCommandOutput), completed: null, total: null })
+          }
+          child.stdout?.on("data", chunk => append(out.write(chunk), false))
+          child.stderr?.on("data", chunk => append(err.write(chunk), true))
+          child.once("error", reject)
+          child.once("close", code => {
+            append(out.end(), false); append(err.end(), true)
+            if (code !== 0) reject(failure(stderr.trim() || stdout.trim() || `Command exited ${code}`))
+            else resolve({ command: source, exitCode: code, stdout, stderr })
+          })
+        }), catch: cause => cause instanceof ToolError ? cause : failure("Command execution failed")
+      })
+      return result
+    })
+  )
 
   return { write, edit, remove, rename, execute } satisfies WorkspaceMutationPort
 })
@@ -288,7 +292,7 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Workspaces with assigned local ports execute here so app servers remain local. Other eligible commands may offload automatically when Offload Compute is enabled.",
+    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Port-dependent commands stay local. Eligible build/test commands may offload automatically when Offload Compute is enabled.",
     input: Schema.Struct({
       command: Schema.String.pipe(Schema.minLength(1))
     }),
@@ -303,7 +307,7 @@ export const registerWorkspaceMutationTools = (
     idempotency: "unsafe",
     execute: ({ command }, context) =>
       Effect.runPromise(
-        (routing && !routing.workspaceEnvironment?.JINGLER_PORT
+        (routing && !workspaceCheckpointMode(routing.sessionId) && !/\bJINGLER_(?:[A-Z0-9_]*_)?PORT\b/.test(command)
           ? routing.offload.executeIfEligible(
               cwd,
               routing.sessionId,
@@ -312,11 +316,11 @@ export const registerWorkspaceMutationTools = (
             ).pipe(
               Effect.flatMap((remote) =>
                 remote === null
-                  ? workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment })
+                  ? workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)
                   : Effect.succeed(remote)
               )
             )
-          : workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment })),
+          : workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)),
         { signal: context.signal }
       )
   })

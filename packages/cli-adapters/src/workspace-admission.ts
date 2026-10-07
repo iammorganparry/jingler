@@ -1,3 +1,5 @@
+import type { Session } from "@jingler/core"
+
 interface Closure {
   readonly reason: string
   readonly token: symbol
@@ -27,6 +29,8 @@ export interface WorkspaceActivity {
   readonly action: string
   release(): void
 }
+
+export const workspaceAdmissionClosed = (sessionId: string): boolean => closed.has(sessionId)
 
 export const workspaceAdmissionReason = (sessionId: string): string | undefined => closed.get(sessionId)?.reason ?? readiness.get(sessionId)
 
@@ -129,3 +133,7 @@ export const resetWorkspaceAdmissions = (): void => {
   active.clear()
   waiters.clear()
 }
+
+/** Never infer descendant shutdown from history that cannot be owned on this platform. */
+export const workspaceHasUnprovenProcesses = (session: Session): boolean =>
+  session.checkpointPtyHistory === true || (process.platform === "win32" && session.workspaceMode !== "direct" && session.checkpointExecutionHistory !== "clean")

@@ -1,4 +1,4 @@
-import { archiveMetadataOnly } from "./metadata-only-archive.js"
+import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
 import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
 import { TerminalError } from "@jingler/core";
@@ -85,6 +85,7 @@ import {
   WorkspaceService,
   WorkspaceWorkflowService,
   WorkspaceCheckpointService,
+  workspaceHasUnprovenProcesses,
   closeWorkspaceAdmission,
   reopenWorkspaceAdmission,
   waitForWorkspaceIdle,
@@ -1630,7 +1631,7 @@ const lifecycleOperations = new Set<string>();
 const beginWorkspaceLifecycle = (sessionId: string, reason: string) =>
   Effect.gen(function* () {
     const session = yield* SessionStore.get(sessionId).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for workspace lifecycle", cause })));
-    if (session.checkpointPtyHistory) return yield* Effect.fail(new GitError({ message: "Interactive terminal descendants cannot be proven stopped, including after restart. Archive/delete is refused; the ordinary workspace remains usable." }));
+    if (workspaceHasUnprovenProcesses(session)) return yield* Effect.fail(new GitError({ message: "Interactive terminal descendants cannot be proven stopped, including after restart. Archive/delete is refused; the ordinary workspace remains usable." }));
     const owner = yield* Effect.try({
       try: () => {
         if (lifecycleOperations.has(sessionId)) throw new Error("Workspace lifecycle operation is already in progress.");
@@ -1704,6 +1705,7 @@ export const deleteSession = (sessionId: string, skipCleanup = false) =>
         yield* Effect.tryPromise(() => disposeLanguageIntelligence(session.worktreePath!)).pipe(Effect.ignore);
       }
       yield* SessionStore.remove(sessionId);
+      yield* workflow.forget(sessionId);
       if (relayRoute) {
         yield* GitHubAuth.unlinkSessionRoute(relayRoute.relaySessionId).pipe(
           Effect.ignore,
@@ -1817,16 +1819,17 @@ export const archiveSessionRouted = (
 /** `Sessions.restore` handler — un-archive a session and return the updated record. */
 export const restoreSession = (sessionId: string) =>
   Effect.gen(function* () {
+    const archived = yield* SessionStore.get(sessionId);
+    if (!archived.archived) return yield* Effect.fail(new GitError({ message: "Only archived workspaces can be restored." }));
+    // Metadata-only restore touches neither jobs nor checkout: no destructive ownership proof needed.
+    if (archived.checkpointPtyHistory) return yield* restoreMetadataOnly(sessionId);
     const closure = yield* beginWorkspaceLifecycle(sessionId, "workspace restoration is in progress");
     yield* SessionStore.restore(sessionId);
-    yield* SessionStore.setWorkspaceLifecycle(sessionId, {
-      status: "ready",
-      updatedAt: new Date().toISOString(),
-    });
+    // Preserve failed/in-progress setup and cleanup evidence on restoration.
     reopenWorkspaceAdmission(sessionId, closure);
     lifecycleClosures.delete(sessionId);
     const session = yield* SessionStore.get(sessionId);
-    if (session.worktreePath) {
+    if (session.worktreePath && !session.checkpointSafeMode) {
       const offload = yield* makeOffloadCommandRouter
       yield* Effect.forkDaemon(
         offload.primeSession(session.worktreePath, session.id).pipe(Effect.ignore)

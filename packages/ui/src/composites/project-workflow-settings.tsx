@@ -60,15 +60,21 @@ export function ProjectWorkflowSettings({ projects, onSave }: ProjectWorkflowSet
 
   const save = async () => {
     if (!project) return
-    const parsedRuns = runs.split("\n").map((line) => line.trim()).filter(Boolean).map((line, index) => {
-      const separator = line.indexOf("=")
-      const label = separator < 0 ? line : line.slice(0, separator).trim()
-      const command = separator < 0 ? "" : line.slice(separator + 1).trim()
-      return { id: `run-${index + 1}`, label, command }
-    }).filter((run) => run.label && run.command)
     setBusy(true)
     setMessage(null)
     try {
+      const used = new Set<string>()
+      const parsedRuns = runs.split("\n").flatMap((line, index) => {
+        if (!line.trim()) return []
+        const separator = line.indexOf("=")
+        const label = separator < 0 ? "" : line.slice(0, separator).trim()
+        const command = separator < 0 ? "" : line.slice(separator + 1).trim()
+        if (!label || !command) throw new Error(`Run command line ${index + 1} must use a nonempty label=command.`)
+        const existing = project.workflow?.runs.find(run => !used.has(run.id) && run.label === label && run.command === command)
+        const id = existing?.id ?? `run-${crypto.randomUUID()}`
+        used.add(id)
+        return [{ id, label, command }]
+      })
       const extras = parseExtraPorts(extraPortsText)
       await onSave({
         projectId: project.id,

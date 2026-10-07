@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { addProject, appShell, expect, test } from "./fixtures.js"
+import { addProject, appShell, expect, showSessions, test } from "./fixtures.js"
 
 test("warned ordinary-terminal archive preserves files and never runs cleanup", async ({ launchApp }) => {
   const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true })
@@ -58,6 +58,17 @@ setInterval(() => {
     await expect.poll(() => sessions()[0].archived).toBe(true)
     const afterArchive = heartbeat()
     await expect.poll(heartbeat).toBeGreaterThan(afterArchive)
+    expect(readFileSync(join(cwd, "preserve-me"), "utf8")).toBe("preserved")
+    expect(existsSync(join(cwd, "cleanup-proof.txt"))).toBe(false)
+    await showSessions(window, "Archived")
+    const archivedRow = window.locator("[data-testid^='session-row-']").first()
+    await archivedRow.hover()
+    await archivedRow.getByRole("button", { name: /^Restore / }).click()
+    await expect.poll(() => sessions()[0].archived).toBe(false)
+    expect(sessions()[0].checkpointPtyHistory).toBe(true)
+    expect(sessions()[0].checkpointExecutionHistory).toBe("unprovable")
+    const afterRestore = heartbeat()
+    await expect.poll(heartbeat).toBeGreaterThan(afterRestore)
     expect(readFileSync(join(cwd, "preserve-me"), "utf8")).toBe("preserved")
     expect(existsSync(join(cwd, "cleanup-proof.txt"))).toBe(false)
   } finally {

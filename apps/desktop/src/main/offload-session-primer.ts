@@ -2,6 +2,8 @@ import { Effect } from "effect"
 
 export interface PrimeableOffloadSession {
   readonly id: string
+  readonly checkpointSafeMode?: boolean
+  readonly archived?: boolean
   readonly worktreePath?: string | null
 }
 
@@ -12,7 +14,7 @@ export const primeOffloadSessions = <E>(
 ): Effect.Effect<void> =>
   Effect.forEach(
     sessions,
-    (session) => session.worktreePath
+    (session) => session.worktreePath && !session.checkpointSafeMode && !session.archived
       ? prime(session.worktreePath, session.id).pipe(Effect.ignore)
       : Effect.void,
     { concurrency: 3, discard: true }
