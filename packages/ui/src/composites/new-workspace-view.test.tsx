@@ -56,10 +56,27 @@ it("describes the concise checkpoint-safe checkbox on keyboard focus without cha
   const checkbox = await screen.findByRole("checkbox", { name: "Checkpoint-safe mode" })
   expect(checkbox).toHaveProperty("checked", false)
   expect(checkbox.closest("label")?.textContent?.trim()).toBe("Checkpoint-safe mode")
+  await waitFor(() => expect(checkbox).toHaveProperty("disabled", false))
   checkbox.focus()
   const tooltip = await screen.findByRole("tooltip", { hidden: true })
   expect(checkbox.getAttribute("aria-describedby")).toBe(tooltip.id)
   expect(tooltip.textContent).toBe("Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked.")
+  checkbox.click()
+  expect(checkbox).toHaveProperty("checked", true)
+})
+it("accepts checkpoint-safe selection only after branch loading finishes", async () => {
+  let resolve!: (branches: ReadonlyArray<string>) => void
+  render(<NewWorkspaceView open projects={projects} defaultProjectId="alpha"
+    prepareProject={async () => projects[0]!}
+    loadBranches={() => new Promise((done) => { resolve = done })}
+    onCreate={vi.fn(async () => undefined)} onClose={() => {}} />)
+  const checkbox = screen.getByRole("checkbox", { name: "Checkpoint-safe mode" })
+  expect(checkbox).toHaveProperty("disabled", true)
+  checkbox.click()
+  expect(checkbox).toHaveProperty("checked", false)
+  await waitFor(() => expect(resolve).toBeDefined())
+  await act(async () => resolve(["main"]))
+  expect(checkbox).toHaveProperty("disabled", false)
   checkbox.click()
   expect(checkbox).toHaveProperty("checked", true)
 })
@@ -83,6 +100,7 @@ it("shows send-button submission, ignores duplicate mouse/Enter and retains the 
   const button = await screen.findByRole("button", { name: "Creating session" })
   expect(button).toHaveProperty("disabled", true)
   expect(button.getAttribute("aria-busy")).toBe("true")
+  expect(screen.getByRole("checkbox", { name: "Checkpoint-safe mode" })).toHaveProperty("disabled", true)
   expect(button.querySelector("svg.lucide-loader-circle")).not.toBeNull()
   expect(screen.queryByText("Creating session…")).toBeNull()
   fireEvent.click(button)

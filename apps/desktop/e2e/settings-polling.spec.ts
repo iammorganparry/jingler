@@ -8,6 +8,7 @@ test("checkpoint-safe label exposes all restrictions on keyboard focus", async (
   const checkbox = window.getByRole("checkbox", { name: "Checkpoint-safe mode", exact: true })
   await expect(checkbox).not.toBeChecked()
   await expect(checkbox.locator("xpath=ancestor::label")).toHaveText("Checkpoint-safe mode")
+  await expect(checkbox).toBeEnabled()
   await checkbox.focus()
   await window.keyboard.press("Tab")
   await window.keyboard.press("Shift+Tab")

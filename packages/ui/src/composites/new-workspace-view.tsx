@@ -416,7 +416,7 @@ function NewWorkspaceContent({ props, context, send, submitting, loading, source
               label="Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked."
               className="max-w-sm whitespace-normal"
             >
-              <input type="checkbox" aria-label="Checkpoint-safe mode" checked={context.checkpointSafeMode} onChange={(event) => send({ type: "SET_CHECKPOINT_SAFE_MODE", enabled: event.currentTarget.checked })} />
+              <input type="checkbox" aria-label="Checkpoint-safe mode" disabled={loading || submitting} checked={context.checkpointSafeMode} onChange={(event) => send({ type: "SET_CHECKPOINT_SAFE_MODE", enabled: event.currentTarget.checked })} />
             </Tooltip>{" "}
             Checkpoint-safe mode
           </label>
