@@ -393,6 +393,12 @@ if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", wakeFleetReconcilers)
 }
 
+/** Turn sub-agents plus the session reviewer, which lives outside any turn. */
+const legacyAgentsOf = (snap: ConversationSnapshot) =>
+  snap.context.reviewer === null
+    ? snap.context.subagents
+    : [...snap.context.subagents, snap.context.reviewer]
+
 /** Where the machine is, in the terms `activityOf` reasons about. */
 const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
   if (snap.matches("running")) return "running"
@@ -424,7 +430,7 @@ const agentFileActivityFor = (snap: ConversationSnapshot): AgentFileActivity | n
  * translates machine states into a phase and includes durable Fleet activity.
  */
 const activityFor = (snap: ConversationSnapshot): SessionActivity | null => {
-  let activity = activityOf(snap.context.messages, phaseOf(snap), snap.context.subagents)
+  let activity = activityOf(snap.context.messages, phaseOf(snap), legacyAgentsOf(snap))
   // Operator decisions retain priority over independently running children.
   if (activity?.kind === "needs-input" || activity?.kind === "needs-approval") {
     return { ...activity, startedAt: snap.context.runStartedAt ?? undefined }
@@ -518,9 +524,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   const chatId = snap.context.chatId
   const fleet = fleetProjection(snap)
   ensureFleetReconciliation(key, snap, fleet)
-  const legacyAgents = snap.context.reviewer === null
-    ? snap.context.subagents
-    : [...snap.context.subagents, snap.context.reviewer]
+  const legacyAgents = legacyAgentsOf(snap)
   publishActorSubagentTabs(
     session.id,
     projectSubagentTabs({
