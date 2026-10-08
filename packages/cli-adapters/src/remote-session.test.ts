@@ -65,7 +65,10 @@ describe("RemoteSessionService envelopes", () => {
   })
   it("rejects a tampered encrypted event", () => {
     const key = randomBytes(32); const envelope = encryptRemotePayload(key, "s_remote", 1, "device", { value: 1 }, 1)
-    expect(() => decryptRemotePayload(key, { ...envelope, ciphertext: `${envelope.ciphertext.slice(0, -1)}A` }, Schema.Unknown)).toThrow("authentication failed")
+    const bytes = Buffer.from(envelope.ciphertext, "base64url")
+    const middle = bytes.length >> 1
+    bytes.writeUInt8(bytes.readUInt8(middle) ^ 1, middle)
+    expect(() => decryptRemotePayload(key, { ...envelope, ciphertext: bytes.toString("base64url") }, Schema.Unknown)).toThrow("authentication failed")
   })
   it("maps encrypted remote events to StreamEvent values", () => {
     const key = randomBytes(32); const event = { version: 1 as const, commandId: "cmd_1", sessionId: "s_remote", eventSequence: 1, kind: "event" as const, payload: { type: "text", text: "hello" } }
