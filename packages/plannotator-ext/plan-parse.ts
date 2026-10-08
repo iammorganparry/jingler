@@ -361,18 +361,24 @@ class StageBuilder {
 		this.#lastTask = subtask;
 	}
 
+	/** Indented lines under a task continue its description; anything else ends it. */
+	#describeTask(raw: string, trimmed: string): boolean {
+		const task = this.#lastTask;
+		if (task !== null && /^\s/.test(raw)) {
+			task.description = task.description === undefined ? trimmed : `${task.description}\n${trimmed}`;
+			return true;
+		}
+		this.#lastTask = null;
+		return false;
+	}
+
 	line(raw: string): void {
 		const trimmed = raw.trim();
 		if (trimmed.length === 0) {
 			this.#flushParagraph();
 			return;
 		}
-		if (this.#lastTask !== null && /^\s/.test(raw)) {
-			const task = this.#lastTask;
-			task.description = task.description === undefined ? trimmed : `${task.description}\n${trimmed}`;
-			return;
-		}
-		this.#lastTask = null;
+		if (this.#describeTask(raw, trimmed)) return;
 		const sub = SUB_HEADING.exec(raw);
 		if (sub) {
 			this.#flushParagraph();
