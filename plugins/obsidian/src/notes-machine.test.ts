@@ -63,3 +63,50 @@ it("surfaces invalid configuration and permits recovery", async () => {
   expect(actor.getSnapshot().context.error).toBe("")
   actor.stop()
 })
+
+it("discovers choices without configuring until explicitly saved", async () => {
+  const services: NotesServices = {
+    discover: async () => [{ name: "Notes", path: "/notes" }],
+    configuration: async () => "", configure: vi.fn(async (root) => root),
+    list: async () => [], read: vi.fn()
+  }
+  const actor = createActor(notesMachine, { input: { services } }).start()
+  await waitFor(actor, (s) => s.matches("ready") && s.context.vaults.length === 1)
+  expect(actor.getSnapshot().context.vaults).toHaveLength(1)
+  expect(actor.getSnapshot().context.root).toBe("")
+  actor.send({ type: "ROOT", value: "/notes" })
+  expect(services.configure).not.toHaveBeenCalled()
+  actor.send({ type: "SAVE" })
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(services.configure).toHaveBeenCalledWith("/notes")
+  actor.stop()
+})
+
+it("opens saved notes and allows manual setup while discovery never resolves", async () => {
+  const discover = () => new Promise<never>(() => {})
+  const services: NotesServices = {
+    discover,
+    configuration: async () => "/saved", configure: vi.fn(async (root) => root),
+    list: async () => ["saved.md"],
+    read: async (path) => ({ path, content: "Saved note", revision: "rev" })
+  }
+  const actor = createActor(notesMachine, { input: { services } }).start()
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(actor.getSnapshot().context.note?.content).toBe("Saved note")
+  actor.send({ type: "ROOT", value: "/new" }); actor.send({ type: "SAVE" })
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(services.configure).toHaveBeenCalledWith("/new")
+  actor.stop()
+})
+
+it("allows manual configuration when discovery fails", async () => {
+  const actor = createActor(notesMachine, { input: { services: {
+    discover: async () => { throw new Error("private metadata unavailable") },
+    configuration: async () => "", configure: async (root) => root,
+    list: async () => [], read: vi.fn()
+  } } }).start()
+  await waitFor(actor, (s) => s.matches("ready"))
+  expect(actor.getSnapshot().context.vaults).toEqual([])
+  expect(actor.getSnapshot().context.error).toBe("")
+  actor.stop()
+})

@@ -51,6 +51,7 @@ export { useWidthTier, atLeast } from "@jingler/ui"
 
 // ── Primitives ───────────────────────────────────────────────────────────────
 
+export { Button } from "@jingler/ui"
 export { Badge } from "@jingler/ui"
 export { Pill } from "@jingler/ui"
 export { Spinner } from "@jingler/ui"

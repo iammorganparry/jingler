@@ -51,3 +51,16 @@ This plugin is not a backup or synchronization service.
 Run `pnpm --filter @jingler/plugin-obsidian test` and `typecheck` for host/vault
 and state-machine behavior; `pnpm --filter @jingler/desktop e2e obsidian-plugin.spec.ts`
 drives the built plugin through real Electron.
+
+Known vault choices are discovered best-effort from Obsidian desktop's private
+`obsidian.json` registry in the platform app-data directory. This is undocumented
+metadata, not an official API; missing, invalid, oversized, stale, or unsafe entries
+are silently skipped. Discovery reads at most 256 KiB, examines 200 entries, and
+returns at most 50 deduplicated existing local directories within a 30,000-character
+result budget. Only names and paths reach the UI. Selecting a choice fills the path;
+Save vault explicitly persists it for the session. An absolute manual path remains
+available for unregistered vaults and installations with different metadata layouts.
+
+Obsidian's [Syncing for teams](https://help.obsidian.md/Teams/Syncing+for+teams)
+describes vaults as local Markdown directories; it does not document this registry.
+Discovery does not scan disks or access Obsidian Sync. Symlink roots are unsupported.
