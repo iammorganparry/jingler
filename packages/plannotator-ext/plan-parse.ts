@@ -365,6 +365,11 @@ class StageBuilder {
 		this.#openTask(task, indent);
 	}
 
+	addCheckbox({ step, mark, text, indent }: { step: number; mark: string; text: string; indent: string }): void {
+		if (indent.length > 0) this.nestedCheckbox(step, mark, text, indent.length);
+		else this.checkbox(step, mark, text);
+	}
+
 	nestedCheckbox(step: number, mark: string, text: string, indent: number): void {
 		const completed = /[xX]/.test(mark);
 		if (this.#subsection === "acceptance") {
@@ -517,6 +522,10 @@ const consumeFence = (
 	return null;
 };
 
+/** A non-checkbox line that an open task in the current stage claims as description. */
+const continuesTask = (stage: StageBuilder | null, isCheckbox: boolean, raw: string): boolean =>
+	!isCheckbox && stage !== null && stage.describe(raw);
+
 export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
 	const frontmatter = parseFrontmatter(allLines);
@@ -545,7 +554,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	let fence: OpenFence | null = null;
 
 	for (const [line, raw] of lines.entries()) {
-		if (fence === null && !checkboxByLine.has(line) && stage?.describe(raw)) continue;
+		if (fence === null && continuesTask(stage, checkboxByLine.has(line), raw)) continue;
 		const fenceMatch = FENCE_LINE.exec(raw.trim());
 		if (fence !== null) {
 			fence = consumeFence(fence, fenceMatch, raw, stage, section);
@@ -584,13 +593,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 				text: checkbox.text,
 				completed: checkbox.completed,
 			});
-			if (stage !== null) {
-				if (checkbox.indent.length > 0) {
-					stage.nestedCheckbox(checkbox.step, checkbox.mark, checkbox.text, checkbox.indent.length);
-				} else {
-					stage.checkbox(checkbox.step, checkbox.mark, checkbox.text);
-				}
-			}
+			stage?.addCheckbox(checkbox);
 			continue;
 		}
 
