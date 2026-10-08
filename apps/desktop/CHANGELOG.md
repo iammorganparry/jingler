@@ -1,5 +1,15 @@
 # @jingler/desktop
 
+## 0.7.0
+
+### Minor Changes
+
+- ba35fb9: Plan review now reads like a technical document: proper heading sizes, stages laid out in review order with a contents rail, technical details shown inline, task descriptions, file rows that open in Files, and finished stages folded away.
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.7.0
+
 ## 0.6.0
 
 ### Minor Changes

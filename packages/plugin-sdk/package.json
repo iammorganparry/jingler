@@ -1,6 +1,6 @@
 {
   "name": "@jingler/plugin-sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Types and helpers for writing a Jingler plugin — the renderer half (`.`) and the extension-host half (`./host`).",
