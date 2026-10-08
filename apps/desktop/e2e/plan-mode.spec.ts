@@ -155,7 +155,12 @@ test("projects explicit deliverable stages without treating overview headings as
   await persistentTab.click()
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
     .toContain("- [x] Verify the auth change")
-  await expect.poll(() => reviewText(launched)).toContain("Verify the auth change")
+  // Finished stages fold to their header; expand one to read its completed task.
+  const verifyStage = review(launched).getByRole("region", { name: "Verify auth", exact: true })
+  await verifyStage.getByRole("button", { name: "Show stage details" }).click()
+  const verifyTask = verifyStage.getByRole("region", { name: "Verify auth tasks" }).locator("[data-task-status]")
+  await expect(verifyTask).toContainText("Verify the auth change")
+  await expect(verifyTask).toHaveAttribute("data-task-status", "completed")
 })
 
 test("diagram node opens linked stage", async ({ launchApp }) => {
