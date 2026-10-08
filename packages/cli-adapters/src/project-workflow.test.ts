@@ -34,11 +34,3 @@ describe("project workflow approval", () => {
     expect(safeWorkflowRelativePath("config/.env.local")).toBe("config/.env.local")
   })
 })
-
- it("binds approval to port names, values and preview templates", () => {
-   const draft = { runs: [], copyFiles: [], ports: { primary: 3100, extras: [{ name: "API", start: 3101 }], previewUrl: "http://localhost:{port}" } }
-   const approved = normalizeWorkflow(draft, true)
-   expect(approvedWorkflow(approved)).toBeDefined()
-   expect(approvedWorkflow({ ...approved, ports: { ...draft.ports, previewUrl: "http://localhost:{API_port}" } })).toBeUndefined()
-   expect(() => normalizeWorkflow({ ...draft, ports: { ...draft.ports, previewUrl: "file:///etc/passwd" } }, true)).toThrow()
- })

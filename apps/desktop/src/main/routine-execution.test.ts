@@ -9,10 +9,6 @@ import { acquireCheckpointedTurn } from "@jingler/cli-adapters/workspace-checkpo
 import { initGitRepo, mkTemp, withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
 import { revalidateRoutineAuth } from "./routine-auth.js"
 import { routineExecution, runOwnedRoutineEffect, RoutinePreparationPendingError } from "./routine-execution.js"
-vi.mock("@jingler/cli-adapters/workspace-ports", async importOriginal => {
-  const actual = await importOriginal<typeof import("@jingler/cli-adapters/workspace-ports")>()
-  return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[]) => actual.allocateWorkspacePorts(sessions, undefined, async () => true) }
-})
 const input = Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "pi:test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "once", at: 1000 }, maxDurationMs: 1000 })
 const cleanup: Array<() => void> = []
 afterEach(() => { for (const dispose of cleanup.splice(0)) dispose() })

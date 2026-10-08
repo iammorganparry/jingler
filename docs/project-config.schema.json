@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "version": {
+      "type": "number",
+      "enum": [
+        1
+      ]
+    },
+    "workflow": {
+      "type": "object",
+      "required": [
+        "runs",
+        "copyFiles"
+      ],
+      "properties": {
+        "setup": {
+          "type": "string"
+        },
+        "cleanup": {
+          "type": "string"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "command"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "copyFiles": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Nonempty safe relative path; no absolute paths, backslashes, nulls, empty/dot/dotdot or .git components (case insensitive)."
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "Run ids must be unique; each id, label and command must have non-whitespace content."
+    },
+    "routines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "prompt",
+          "baseBranch",
+          "schedule",
+          "reasoning",
+          "maxDurationMs"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "a string at least 1 character(s) long",
+            "title": "minLength(1)",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "name": {
+            "type": "string",
+            "description": "a string at most 120 character(s) long",
+            "title": "maxLength(120)",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "prompt": {
+            "type": "string",
+            "description": "a string at most 100000 character(s) long",
+            "title": "maxLength(100000)",
+            "minLength": 1,
+            "maxLength": 100000
+          },
+          "baseBranch": {
+            "type": "string",
+            "description": "a string at most 256 character(s) long",
+            "title": "maxLength(256)",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "schedule": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "at"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "once"
+                    ]
+                  },
+                  "at": {
+                    "type": "integer",
+                    "description": "a number between 0 and 9007199254740991",
+                    "title": "between(0, 9007199254740991)",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "at",
+                  "everyMs"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "interval"
+                    ]
+                  },
+                  "at": {
+                    "type": "integer",
+                    "description": "a number between 0 and 9007199254740991",
+                    "title": "between(0, 9007199254740991)",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "everyMs": {
+                    "type": "integer",
+                    "description": "a number between 1000 and 31536000000",
+                    "title": "between(1000, 31536000000)",
+                    "minimum": 1000,
+                    "maximum": 31536000000
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "enabled"
+                ],
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "effort": {
+                    "type": "string",
+                    "enum": [
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "maxDurationMs": {
+            "type": "integer",
+            "description": "a number between 1000 and 86400000",
+            "title": "between(1000, 86400000)",
+            "minimum": 1000,
+            "maximum": 86400000
+          },
+          "providerId": {
+            "type": "string",
+            "description": "a string at least 1 character(s) long",
+            "title": "minLength(1)",
+            "minLength": 1
+          },
+          "modelId": {
+            "type": "string",
+            "description": "a string at least 3 character(s) long",
+            "title": "minLength(3)",
+            "minLength": 3
+          }
+        },
+        "additionalProperties": false,
+        "description": "Name, prompt and base branch require non-whitespace content."
+      },
+      "description": "Template ids must be unique."
+    }
+  },
+  "additionalProperties": false
+}

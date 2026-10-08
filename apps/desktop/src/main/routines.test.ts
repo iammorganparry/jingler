@@ -4,6 +4,8 @@ import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionS
 import { RoutineInput, type AuthSession } from "@jingler/core"
 import { withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
 import { RoutinesService } from "./routines.js"
+import { RoutineStore } from "@jingler/cli-adapters/routine-store"
+import { join } from "node:path"
 
 const input = Schema.decodeUnknownSync(RoutineInput)({ name: "Inspect", projectId: "local", prompt: "Inspect", baseBranch: "main", runtimeId: "pi", endpointId: "desktop:pi:test", connectionId: "test", providerId: "test", modelId: "model", mode: "ask", reasoning: null, enabled: true, approved: true, schedule: { kind: "once", at: Date.now() + 60_000 }, maxDurationMs: 60_000 })
 const cleanup: Array<() => void> = []
@@ -19,7 +21,7 @@ async function fixture(stop: () => Effect.Effect<void, Error> = () => Effect.voi
   const mocks = Layer.mergeAll(
     Layer.succeed(AuthService, { getSession: () => unreachable ? Effect.never : Effect.succeed(session) } as unknown as AuthService),
     Layer.succeed(SessionStore, { create, get: () => Effect.succeed(null) } as unknown as SessionStore),
-    Layer.succeed(ProjectService, { get: () => Effect.succeed({ path: temp.root, name: "repo", availability: "available" }) } as unknown as ProjectService),
+    Layer.succeed(ProjectService, { routineStore: new RoutineStore(join(temp.root, "routines.json")), get: () => Effect.succeed({ path: temp.root, name: "repo", availability: "available" }) } as unknown as ProjectService),
     Layer.succeed(ProviderConnections, { list: Effect.succeed({ connections: [{ connection: { status: "authenticated", targetId: "desktop", id: "test" }, models: [{ providerId: "test", id: "model", selectable: true }] }] }) } as unknown as typeof ProviderConnections.Service),
     Layer.succeed(WorkspaceCheckpointService, { setMode: () => Effect.void } as unknown as WorkspaceCheckpointService),
     Layer.succeed(AgentRunner, { prompt, stop } as unknown as AgentRunner)

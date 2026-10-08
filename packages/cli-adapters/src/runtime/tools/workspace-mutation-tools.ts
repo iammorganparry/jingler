@@ -4,7 +4,7 @@ import { acquireWorkspaceActivity } from "../../workspace-admission.js"
 import { trackChild, stopChildAndWait } from "../../child-registry.js"
 import { checkpointFiles } from "../../checkpoint-file-tools.js"
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
-import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { worktreeEnv } from "../../worktree-env.js"
 import {
   Command,
@@ -292,7 +292,7 @@ export const registerWorkspaceMutationTools = (
   registry.register({
     id: "command_execute",
     version: "1",
-    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Port-dependent commands stay local. Eligible build/test commands may offload automatically when Offload Compute is enabled.",
+    description: "Run a shell command in the workspace and stream its output. Commands are killed after 10 minutes — run servers/watchers detached and split longer work into smaller commands. Eligible build/test commands may offload automatically when Offload Compute is enabled.",
     input: Schema.Struct({
       command: Schema.String.pipe(Schema.minLength(1))
     }),
@@ -307,7 +307,7 @@ export const registerWorkspaceMutationTools = (
     idempotency: "unsafe",
     execute: ({ command }, context) =>
       Effect.runPromise(
-        (routing && !workspaceCheckpointMode(routing.sessionId) && !/\bJINGLER_(?:[A-Z0-9_]*_)?PORT\b/.test(command)
+        (routing && !workspaceCheckpointMode(routing.sessionId)
           ? routing.offload.executeIfEligible(
               cwd,
               routing.sessionId,

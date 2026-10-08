@@ -37,7 +37,6 @@ describe("ProjectWorkflowSettings", () => {
         setup: "pnpm install",
         runs: [{ id: expect.stringMatching(/^run-/), label: "Dev", command: "pnpm dev" }],
         copyFiles: [".env.local"],
-        ports: { primary: 3100, extras: [], previewUrl: "http://localhost:{port}" },
         approve: true,
       }),
     )
@@ -45,30 +44,11 @@ describe("ProjectWorkflowSettings", () => {
     change("Setup command", "pnpm install --frozen-lockfile")
     expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false")
   })
-  it("keeps partial port text editable and parses only when saving", async () => {
-    const onSave = vi.fn().mockResolvedValue(undefined)
-    render(<ProjectWorkflowSettings projects={[project]} onSave={onSave} />)
-    fireEvent.click(screen.getByRole("button", { name: "Add service port" }))
-    change("Service name 1", "API")
-    change("Service port 1", "46000")
-    expect(screen.getByLabelText("Service port 1")).toHaveProperty("value", "46000")
-    approve()
-    save()
-    await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ports: expect.objectContaining({ extras: [{ name: "API", start: 46000 }] }),
-        }),
-      ),
-    )
-    await screen.findByText("Saved and approved for this exact content.")
-    onSave.mockClear()
-    change("Service port 1", "")
-    approve()
-    save()
-    await screen.findByText(/Ports must be whole numbers/)
-    expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByLabelText("Service port 1")).toHaveProperty("value", "")
+  it("omits ports and workflow preview controls", () => {
+    render(<ProjectWorkflowSettings projects={[project]} onSave={vi.fn()} />)
+    expect(screen.queryByLabelText("Starting app port")).toBeNull()
+    expect(screen.queryByLabelText("Preview URL template")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add service port" })).toBeNull()
   })
   it("rejects incomplete rows without saving partial commands", async () => {
     const onSave = vi.fn()
@@ -134,12 +114,7 @@ describe("ProjectWorkflowSettings", () => {
     approve()
     fireEvent.click(screen.getByRole("button", { name: "Remove run command 1" }))
     expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false")
-    approve()
-    fireEvent.click(screen.getByRole("button", { name: "Add service port" }))
-    expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false")
-    approve()
-    fireEvent.click(screen.getByRole("button", { name: "Remove service port 1" }))
-    expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("false")
+
   })
   it("switches the shared project and isolates late save feedback", async () => {
     let finish: (() => void) | undefined
@@ -191,7 +166,7 @@ describe("ProjectWorkflowSettings", () => {
     await screen.findByText("Saved and approved for this exact content.")
     expect(onSave).toHaveBeenCalledTimes(2)
   })
-  it("rejects unsafe copies, duplicate names and invalid primary ports", async () => {
+  it("rejects unsafe copies", async () => {
     const onSave = vi.fn()
     render(<ProjectWorkflowSettings projects={[project]} onSave={onSave} />)
     change("Copied files", "../secret")
@@ -199,23 +174,7 @@ describe("ProjectWorkflowSettings", () => {
     save()
     await screen.findByText(/safe relative paths/)
     expect(onSave).not.toHaveBeenCalled()
-    change("Copied files", "")
-    change("Starting app port", "80")
-    approve()
-    save()
-    await screen.findByText(/Ports must be whole numbers/)
-    expect(onSave).not.toHaveBeenCalled()
-    change("Starting app port", "3100")
-    fireEvent.click(screen.getByRole("button", { name: "Add service port" }))
-    change("Service name 1", "API")
-    change("Service port 1", "4000")
-    fireEvent.click(screen.getByRole("button", { name: "Add service port" }))
-    change("Service name 2", "api")
-    change("Service port 2", "4001")
-    approve()
-    save()
-    await screen.findByText(/port names must be unique/)
-    expect(onSave).not.toHaveBeenCalled()
+
   })
 })
 
@@ -238,4 +197,22 @@ it("pins the first asynchronously loaded project and preserves both drafts acros
   rendered.rerender(<ProjectWorkflowSettings projects={[other]} onSave={onSave} routines={routines} />)
   expect(screen.getByRole("button", { name: "Local project" }).textContent).toContain("other")
   expect(screen.getByLabelText("Routine draft")).toHaveProperty("value", "")
+})
+it("isolates a late config read and its routine templates after the selected project changes", async () => {
+  let finish!: (value: import("@jingler/core").ProjectConfig) => void
+  const onReadConfig = vi.fn(() => new Promise<import("@jingler/core").ProjectConfig>((done) => { finish = done }))
+  const second = { ...project, id: "second", name: "Second", workflow: { setup: "second setup", runs: [], copyFiles: [] } }
+  const routines = (id: string, templates?: ReadonlyArray<import("@jingler/core").ProjectRoutineTemplate>) => <p>{id}: {templates?.map((template) => template.name).join(",")}</p>
+  const onSave = vi.fn()
+  render(<ProjectWorkflowSettings projects={[project, second]} onSave={onSave} onReadConfig={onReadConfig} routines={routines} />)
+  fireEvent.click(screen.getByRole("button", { name: "Load .jingler/project.json" }))
+  expect(onReadConfig).toHaveBeenCalledWith(project.id)
+  expect(screen.getByRole("button", { name: "Save workflow" })).toHaveProperty("disabled", true)
+  expect(screen.queryByText("Saving…")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Local project" }))
+  fireEvent.click(screen.getByRole("option", { name: "Second" }))
+  finish({ version: 1, workflow: { setup: "old shared setup", runs: [], copyFiles: [] }, routines: [{ id: "old", name: "Old template", prompt: "Inspect", baseBranch: "main", reasoning: null, schedule: { kind: "once", at: 0 }, maxDurationMs: 60000 }] })
+  await waitFor(() => expect(screen.getByLabelText("Setup command")).toHaveProperty("value", "second setup"))
+  expect(screen.queryByText(/Old template/)).toBeNull()
+  expect(onSave).not.toHaveBeenCalled()
 })

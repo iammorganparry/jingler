@@ -168,5 +168,5 @@ describe("worktreeEnv", () => {
 })
 
  it("never inherits another workspace's trusted environment", () => {
-   expect(worktreeEnv({ JINGLER_PORT: "3100", JINGLER_API_PORT: "3101", JINGLER_WORKSPACE_PATH: "/other", JINGLER_ROOT_PATH: "/root", PATH: "/bin" }, "/work")).toEqual({ PATH: "/bin" })
+   expect(worktreeEnv({ JINGLER_WORKSPACE_PATH: "/other", JINGLER_ROOT_PATH: "/root", PATH: "/bin" }, "/work")).toEqual({ PATH: "/bin" })
  })

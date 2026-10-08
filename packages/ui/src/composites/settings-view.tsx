@@ -162,7 +162,7 @@ const NAV: ReadonlyArray<NavItem> = [
 ]
 
 export interface SettingsViewProps {
-  routines?: (projectId: string) => import("react").ReactNode
+  routines?: (projectId: string, templates?: ReadonlyArray<import("@jingler/core").ProjectRoutineTemplate>) => import("react").ReactNode
   projectWorkflows?: ProjectWorkflowSettingsProps
   /** Canonical provider connections. When present, legacy CLI cards stay hidden. */
   providerConnections?: ProviderConnectionsSettingsProps

@@ -1,15 +1,11 @@
 import { join } from "node:path"
 import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { Effect, Layer, Schema } from "effect"
-import { expect, it, vi } from "vitest"
+import { expect, it } from "vitest"
 import { SessionStore, GitService } from "@jingler/cli-adapters"
 import { CreateSessionInput, type Session } from "@jingler/core"
 import { initGitRepo, mkTemp, withTempRoot } from "../../../../packages/cli-adapters/src/test-support.js"
 import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
-vi.mock("@jingler/cli-adapters/workspace-ports", async importOriginal => {
-  const actual = await importOriginal<typeof import("@jingler/cli-adapters/workspace-ports")>()
-  return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[]) => actual.allocateWorkspacePorts(sessions, undefined, async () => true) }
-})
 const expectLifecycleAdvanced = (previous: Session, next: Session) => {
   expect(next.workspaceLifecycle).toEqual({ ...previous.workspaceLifecycle, updatedAt: next.workspaceLifecycle?.updatedAt })
   expect(Date.parse(next.workspaceLifecycle?.updatedAt ?? "")).toBeGreaterThan(Date.parse(previous.workspaceLifecycle?.updatedAt ?? ""))

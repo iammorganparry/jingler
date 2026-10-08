@@ -243,10 +243,6 @@ it("rejects safe shell cleanup before tainting execution history", async () => {
 })
 
 it("returns IPC-safe cleanup failures with bounded redacted output retained", async () => {
-  // Port binding is independent of cleanup serialization; sandbox disallows sockets.
-  const ports = await import("./workspace-ports.js")
-  const allocate = ports.allocateWorkspacePorts
-  vi.spyOn(ports, "allocateWorkspacePorts").mockImplementation((sessions, config) => allocate(sessions, config, async () => true))
   await harness("true", async (workflow, id, _cwd, state) => {
     await Effect.runPromise(workflow.setup(id))
     const owner = closeWorkspaceAdmission(id, "archive")

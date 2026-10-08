@@ -1,4 +1,4 @@
-import { workspaceEnvironment } from "./workspace-ports.js"
+import { workspaceEnvironment } from "./workspace-environment.js"
 import { join } from "node:path"
 import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 

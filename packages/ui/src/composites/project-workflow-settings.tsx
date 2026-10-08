@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
-import type { Project } from "@jingler/core"
+import type { Project, ProjectConfig, ProjectRoutineTemplate } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { Button } from "../components/button.js"
 import { Checkbox } from "../components/checkbox.js"
@@ -11,10 +11,12 @@ export interface ProjectWorkflowSettingsProps {
   projects: ReadonlyArray<Project>
   loading?: boolean
   onSave(input: WorkflowInput): Promise<void> | void
-  routines?: (projectId: string) => ReactNode
+  onReadConfig?(projectId: string): Promise<ProjectConfig>
+  routines?: (projectId: string, templates?: ReadonlyArray<ProjectRoutineTemplate>) => ReactNode
 }
 
-export function ProjectWorkflowSettings({ projects, loading = false, onSave, routines }: ProjectWorkflowSettingsProps) {
+export function ProjectWorkflowSettings({ projects, loading = false, onSave, onReadConfig, routines }: ProjectWorkflowSettingsProps) {
+  const [importedTemplates, setImportedTemplates] = useState<Record<string, ReadonlyArray<ProjectRoutineTemplate>>>({})
   const locals = projects.filter((project) => project.environmentId === undefined)
   const [projectId, setProjectId] = useState(locals[0]?.id ?? "")
   const project = locals.find((item) => item.id === projectId) ?? locals[0]
@@ -29,7 +31,7 @@ export function ProjectWorkflowSettings({ projects, loading = false, onSave, rou
       <div>
         <h2 className="text-lg font-semibold text-text-bright">Projects</h2>
         <p className="mt-1 text-sm text-dim">
-          Machine-local commands, preview ports and saved routines for your project.
+          Machine-local commands and saved routines for your project.
         </p>
       </div>
       {project ? (
@@ -51,14 +53,14 @@ export function ProjectWorkflowSettings({ projects, loading = false, onSave, rou
               </SelectContent>
             </Select>
           </div>
-          <WorkflowEditor key={project.id} project={project} onSave={onSave} />
+          <WorkflowEditor key={project.id} project={project} onSave={onSave} onReadConfig={onReadConfig} onConfigLoaded={(id, templates) => setImportedTemplates((current) => ({ ...current, [id]: templates }))} />
         </>
       ) : loading ? (
         <p role="status" className="text-sm text-dim">Loading local projects…</p>
       ) : (
         <p className="text-sm text-dim">Add a local project before configuring workspace commands.</p>
       )}
-      {routines?.(project?.id ?? "")}
+      {routines?.(project?.id ?? "", importedTemplates[project?.id ?? ""] ?? [])}
     </div>
     </div>
   )
@@ -66,16 +68,26 @@ export function ProjectWorkflowSettings({ projects, loading = false, onSave, rou
 function WorkflowEditor({
   project,
   onSave,
+  onReadConfig,
+  onConfigLoaded,
 }: {
   project: Project
+  onReadConfig?: ProjectWorkflowSettingsProps["onReadConfig"]
+  onConfigLoaded: (projectId: string, templates: ReadonlyArray<ProjectRoutineTemplate>) => void
   onSave: ProjectWorkflowSettingsProps["onSave"]
 }) {
-  const [state, send] = useMachine(projectWorkflowMachine, { input: { project, onSave } })
+  const [state, send] = useMachine(projectWorkflowMachine, { input: { project, onSave, onReadConfig, onConfigLoaded } })
   const { draft, approved, message, error } = state.context
-  const busy = state.matches("saving")
+  const busy = !state.matches("editing")
   const edit = (patch: Partial<typeof draft>) => send({ type: "EDIT", draft: { ...draft, ...patch } })
   return (
     <div className="space-y-6">
+      {onReadConfig && <div className="space-y-2">
+        <Button variant="outline" disabled={busy} aria-busy={state.matches("readingConfig")} onClick={() => send({ type: "LOAD_CONFIG" })}>
+          {state.matches("readingConfig") ? "Loading project configuration…" : "Load .jingler/project.json"}
+        </Button>
+        <p className="text-sm text-dim">Load shared commands and routine templates for review. Save and local approval remain explicit.</p>
+      </div>}
       <fieldset disabled={busy} className="min-w-0 space-y-4">
         <legend className="mb-2 font-semibold text-text-bright">Commands</legend>
         <p className="text-sm text-dim">
@@ -182,87 +194,6 @@ function WorkflowEditor({
           />
         </label>
       </fieldset>
-      <fieldset disabled={busy} className="min-w-0 space-y-4">
-        <legend className="mb-2 font-semibold text-text-bright">Ports &amp; preview</legend>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="text-sm text-text-bright" htmlFor="workflow-primary">
-            Starting app port
-            <Input
-              id="workflow-primary"
-              aria-label="Starting app port"
-              type="number"
-              min={1024}
-              max={65535}
-              value={draft.primary}
-              onChange={(event) => edit({ primary: event.currentTarget.value })}
-            />
-          </label>
-          <label className="text-sm text-text-bright" htmlFor="workflow-preview">
-            Preview URL template
-            <Input
-              id="workflow-preview"
-              aria-label="Preview URL template"
-              value={draft.previewUrl}
-              onChange={(event) => edit({ previewUrl: event.currentTarget.value })}
-            />
-          </label>
-        </div>
-        <p className="text-xs text-dim">
-          Use {"{port}"} for the app port or {"{API_port}"} for a named service. Commands receive JINGLER_PORT
-          and JINGLER_API_PORT.
-        </p>
-        {draft.extras.length === 0 && <p className="text-sm text-dim">No additional service ports.</p>}
-        {draft.extras.map((extra, index) => (
-          <div key={extra.id} className="flex flex-wrap items-end gap-2">
-            <label className="min-w-32 flex-1 text-sm text-text-bright" htmlFor={`service-name-${extra.id}`}>
-              Service name
-              <Input
-                id={`service-name-${extra.id}`}
-                aria-label={`Service name ${index + 1}`}
-                value={extra.name}
-                onChange={(event) =>
-                  edit({
-                    extras: draft.extras.map((item) =>
-                      item.id === extra.id ? { ...item, name: event.currentTarget.value } : item,
-                    ),
-                  })
-                }
-              />
-            </label>
-            <label className="min-w-32 flex-1 text-sm text-text-bright" htmlFor={`service-port-${extra.id}`}>
-              Starting port
-              <Input
-                id={`service-port-${extra.id}`}
-                aria-label={`Service port ${index + 1}`}
-                type="number"
-                value={extra.start}
-                onChange={(event) =>
-                  edit({
-                    extras: draft.extras.map((item) =>
-                      item.id === extra.id ? { ...item, start: event.currentTarget.value } : item,
-                    ),
-                  })
-                }
-              />
-            </label>
-            <Button
-              variant="outline"
-              aria-label={`Remove service port ${index + 1}`}
-              onClick={() => edit({ extras: draft.extras.filter((item) => item.id !== extra.id) })}
-            >
-              Remove
-            </Button>
-          </div>
-        ))}
-        <Button
-          variant="outline"
-          onClick={() =>
-            edit({ extras: [...draft.extras, { id: crypto.randomUUID(), name: "", start: "" }] })
-          }
-        >
-          Add service port
-        </Button>
-      </fieldset>
       <div className="space-y-3 border-t border-line pt-4">
         <Checkbox
           id="workflow-approval"
@@ -273,7 +204,7 @@ function WorkflowEditor({
         />
         <div>
           <Button disabled={busy} onClick={() => send({ type: "SAVE" })}>
-            {busy ? "Saving…" : "Save workflow"}
+            {state.matches("saving") ? "Saving…" : "Save workflow"}
           </Button>
         </div>
         {message && (

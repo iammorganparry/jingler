@@ -130,7 +130,7 @@ export const worktreeEnv = (
 ): Record<string, string> => {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (value === undefined || isDropped(key) || /^JINGLER_(PORT|[A-Z0-9_]+_PORT|WORKSPACE_PATH|ROOT_PATH)$/.test(key)) continue
+    if (value === undefined || isDropped(key) || /^JINGLER_(WORKSPACE_PATH|ROOT_PATH)$/.test(key)) continue
     out[key] = value
   }
   // PATH casing varies by platform (`Path` on Windows), so find it rather than

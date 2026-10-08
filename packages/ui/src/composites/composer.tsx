@@ -22,6 +22,7 @@ import type {
 } from "@jingler/core";
 import {
   ArrowUp,
+  LoaderCircle,
   ChevronDown,
   Cloud,
   FileDiff,
@@ -39,6 +40,7 @@ import {
   Sparkles,
   Square,
 } from "lucide-react";
+import { Spin } from "../components/spin.js";
 import { cn } from "../lib/cn.js";
 import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
@@ -243,6 +245,10 @@ type ComposerProps =  {
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>;
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>;
   onAuthorizeMcp?: (name: string) => Promise<void>;
+  /** Creation request in flight, separate from agent busy/queue. */
+  submitting?: boolean;
+  /** Creation owns the draft until success. */
+  preserveDraftOnSend?: boolean;
   onSend?: (text: string, images?: ReadonlyArray<Attachment>) => void;
   /** Halt the running agent. Given one, the button becomes Stop while `busy`. */
   onStop?: () => void;
@@ -703,7 +709,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -810,12 +816,13 @@ export function Composer(props: ComposerProps) {
                 variant="primary"
                 size="icon"
                 className="size-7 rounded-full"
-              disabled={actionsOpen}
-              aria-label={busy ? "Queue ↵" : "Send ↵"}
-              title={busy ? "Queue this message (↵)" : "Send (↵)"}
+              disabled={actionsOpen || submitting}
+              aria-busy={submitting || undefined}
+              aria-label={submitting ? "Creating session" : busy ? "Queue ↵" : "Send ↵"}
+              title={submitting ? "Creating session" : busy ? "Queue this message (↵)" : "Send (↵)"}
               onClick={send}
             >
-              <ArrowUp size={14} />
+              {submitting ? <Spin><LoaderCircle size={14} aria-hidden="true" /></Spin> : <ArrowUp size={14} />}
             </Button>)
   }
 
@@ -826,6 +833,7 @@ export function Composer(props: ComposerProps) {
            if (paused) return (<Pill tone="yellow" dot>
               {roomy ? "paused for approval" : "paused"}
             </Pill>)
+           if (submitting) return renderSendButton()
            if (busy && onStop) return (<Button
               variant="primary"
               size="icon"
@@ -1103,7 +1111,7 @@ export function Composer(props: ComposerProps) {
   };
 
   const send = () => {
-    if (actionsOpen) return
+    if (actionsOpen || submitting) return
     const text = value.trim();
     if (
       (text.length === 0 &&
@@ -1114,9 +1122,11 @@ export function Composer(props: ComposerProps) {
     )
       return;
     onSend?.(text, attachments);
-    setValue("");
-    setAttachments([]);
-    onCodeReferencesClear?.();
+    if (!preserveDraftOnSend) {
+      setValue("");
+      setAttachments([]);
+      onCodeReferencesClear?.();
+    }
     setMenu(null);
   };
 

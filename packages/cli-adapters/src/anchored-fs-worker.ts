@@ -49,13 +49,23 @@ const stat = (path: string) => {
   catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return null; throw cause }
 }
 const read = (path: string, limit: number) => {
+  if (!Number.isSafeInteger(limit) || limit < 0) throw new Error("Invalid file size limit.")
   const fd = fs.openSync(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
   try {
     const info = fs.fstatSync(fd)
     if (!info.isFile()) throw new Error("Unsafe file type.")
     if (info.size > limit) throw new Error(`File exceeds ${limit / 1024 / 1024} MiB size limit.`)
-    const bytes = fs.readFileSync(fd)
+    // Never let readFileSync allocate from a file that grows after fstat.
+    const buffer = Buffer.alloc(Math.min(info.size + 1, limit + 1))
+    let length = 0
+    while (length < buffer.length) {
+      const count = fs.readSync(fd, buffer, length, buffer.length - length, length)
+      if (count === 0) break
+      length += count
+    }
+    const bytes = buffer.subarray(0, length)
     if (bytes.length > limit) throw new Error("File size limit exceeded.")
+    if (bytes.length > info.size) throw new Error("File grew beyond observed size during read.")
     return { bytes: bytes.toString("base64"), mode: info.mode & 0o777, nlink: info.nlink }
   } finally { fs.closeSync(fd) }
 }

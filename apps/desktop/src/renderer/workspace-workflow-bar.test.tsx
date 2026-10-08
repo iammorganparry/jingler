@@ -10,7 +10,7 @@ const session = Schema.decodeUnknownSync(Session)({ id: "owner", repo: "widget",
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.resetAllMocks() })
 it("hides an empty ready worktree bar and keeps polling for orphan runs and failure diagnostics", async () => {
   listRuns.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "orphan", label: "Orphan", status: "running" }]).mockResolvedValue([{ id: "orphan", label: "Orphan", status: "failed", output: "crashed" }])
-  render(<WorkspaceWorkflowBar session={session} onSession={vi.fn()} onPreview={vi.fn()} />)
+  render(<WorkspaceWorkflowBar session={session} onSession={vi.fn()} />)
   await waitFor(() => expect(listRuns).toHaveBeenCalledWith("owner"))
   expect(screen.queryByTestId("workspace-workflow-bar")).toBeNull()
   await screen.findByRole("button", { name: "Stop Orphan" }, { timeout: 3500 })

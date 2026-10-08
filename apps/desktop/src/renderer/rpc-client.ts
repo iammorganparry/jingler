@@ -1,4 +1,4 @@
-import type { RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
+import type { ProjectConfig, RoutineInput, RoutineDocument, RoutineRun } from "@jingler/core"
 /**
  * Renderer-side RPC client. Mirror image of `src/main/rpc.ts`: a custom
  * `RpcClient.Protocol` that shuttles encoded frames over the preload bridge
@@ -479,12 +479,12 @@ export const rpc = {
     run((c) => c.Projects.ensureOnEnvironment({ projectId, environmentId })),
   projectsRemove: (id: string, environmentId?: string): Promise<void> =>
     run((c) => c.Projects.remove({ id, ...(environmentId === undefined ? {} : { environmentId }) })),
+  projectsReadConfig: (projectId: string): Promise<ProjectConfig> => run((c) => c.Projects.readConfig({ projectId })),
   projectsSetWorkflow: (input: {
     projectId: string
     setup?: string
     cleanup?: string
     runs: ReadonlyArray<ProjectRunCommand>
-    ports?: import("@jingler/core").WorkspacePortConfig
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }): Promise<Project> => run((c) => c.Projects.setWorkflow({ ...input, runs: [...input.runs], copyFiles: [...input.copyFiles] })),
@@ -493,9 +493,6 @@ export const rpc = {
   workspaceCheckpointsCapture: (sessionId: string): Promise<import("@jingler/core").WorkspaceCheckpoint> => run((c) => c.WorkspaceCheckpoints.capture({ sessionId })),
   workspaceCheckpointsPreview: (sessionId: string, checkpointId: string): Promise<import("@jingler/core").WorkspaceCheckpointPreview> => run((c) => c.WorkspaceCheckpoints.preview({ sessionId, checkpointId })),
   workspaceCheckpointsRestore: (sessionId: string, checkpointId: string, token: string): Promise<import("@jingler/core").WorkspaceCheckpoint> => run((c) => c.WorkspaceCheckpoints.restore({ sessionId, checkpointId, token })),
-  workspacePortsCheck: (sessionId: string): Promise<ReadonlyArray<number>> => run((c) => c.WorkspacePorts.check({ sessionId })),
-  workspacePortsReassign: (sessionId: string): Promise<Session> => run((c) => c.WorkspacePorts.reassign({ sessionId })),
-  workspacePortsPreview: (sessionId: string): Promise<string> => run((c) => c.WorkspacePorts.preview({ sessionId })),
   workspaceWorkflowRetrySetup: (sessionId: string): Promise<Session> =>
     run((c) => c.WorkspaceWorkflow.retrySetup({ sessionId })),
   workspaceWorkflowSkipSetup: (sessionId: string): Promise<Session> =>

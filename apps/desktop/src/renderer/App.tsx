@@ -1394,7 +1394,8 @@ function AuthedApp({
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
-        routines={projectId => <RoutinesSettings projectId={projectId} projects={projectController.projects} catalog={providerCatalog.catalog} onSession={id => rpc.sessionsGet(id).then(session => { send({ type: "SESSION_UPDATED", session }); setSelectRequest({ sessionId: id, nonce: Date.now() }); })} />}
+        onReadProjectConfig={rpc.projectsReadConfig}
+        routines={(projectId, templates) => <RoutinesSettings key={projectId} templates={templates} projectId={projectId} projects={projectController.projects} catalog={providerCatalog.catalog} onSession={id => rpc.sessionsGet(id).then(session => { send({ type: "SESSION_UPDATED", session }); setSelectRequest({ sessionId: id, nonce: Date.now() }); })} />}
         onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
@@ -1641,7 +1642,6 @@ function AuthedApp({
               session={session}
               project={projectController.projects.find((project) => project.id === session.projectId)}
               onSession={publishSessionUpdate}
-              onPreview={(url) => { const browser = browserDock.forAgent(session.id, session.activeChatId); browser.navigate(url); ctx.onSelectBrowser?.(); }}
             />
           {/* The registry keeps each actor alive, but React state must remount per
               chat or useSelector can display the previous actor until the new

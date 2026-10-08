@@ -56,7 +56,7 @@
     "./runtime/opencode/runtime": "./src/runtime/opencode/runtime.ts",
     "./runtime/opencode/endpoint": "./src/runtime/opencode/endpoint.ts",
     "./project-workflow": "./src/project-workflow.ts",
-    "./workspace-ports": "./src/workspace-ports.ts",
+    "./workspace-environment": "./src/workspace-environment.ts",
     "./routine-store": "./src/routine-store.ts",
     "./workspace-checkpoints": "./src/workspace-checkpoints.ts",
     "./anchored-fs": "./src/anchored-fs.ts"

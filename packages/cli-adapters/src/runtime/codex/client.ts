@@ -1,5 +1,5 @@
 import { worktreeEnv } from "../../worktree-env.js"
-import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { nativeCliEnvironment, withMacCliPath } from "../providers/native-cli-environment.js"
 import { execFileText, stopChildAndWait, trackChild, type ChildOwner } from "../../child-registry.js"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"

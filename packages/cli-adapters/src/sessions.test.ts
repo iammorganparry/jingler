@@ -10,7 +10,7 @@ import {
 } from "node:fs"
 import { basename, join } from "node:path"
 import { Cause, Effect, Layer, Schema } from "effect"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type {
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -46,12 +46,6 @@ import {
 } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
 
-// Store tests exercise the real allocator and write lock with a deterministic
-// listener probe. Actual IPv4/IPv6 sockets are covered in workspace-ports.test.ts.
-vi.mock("./workspace-ports.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./workspace-ports.js")>()
-  return { ...actual, allocateWorkspacePorts: (sessions: readonly Session[], config?: import("@jingler/core").WorkspacePortConfig) => actual.allocateWorkspacePorts(sessions, config, async () => true) }
-})
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
@@ -137,6 +131,33 @@ describe("SessionStore", () => {
     ...over
   })
 
+  it("reads legacy port assignments without losing session metadata or sibling sessions", async () => {
+    const original = await Effect.runPromise(SessionStore.create(input({ title: "Legacy ports" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const file = join(temp.root, "sessions.json")
+    const sibling = { ...original, id: "s_legacy_sibling", title: "Sibling", archived: true }
+    writeFileSync(file, JSON.stringify([{ ...original, workspacePorts: { primary: 3100, extras: { API: 4100 } } }, sibling]))
+    const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restored).toMatchObject(original)
+    expect(restored).not.toHaveProperty("workspacePorts")
+    await Effect.runPromise(SessionStore.setStatus(original.id, "idle").pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const persisted = JSON.parse(readFileSync(file, "utf8"))
+    expect(persisted.find((item: { id: string }) => item.id === sibling.id)).toMatchObject(sibling)
+    expect(persisted.find((item: { id: string }) => item.id === original.id)).not.toHaveProperty("workspacePorts")
+  })
+
+  it.each([true, false])("checkpoint-safe creation rejects configured setup (approved=%s) without allocating ports", async (approve) => {
+    const layer = Layer.mergeAll(services, ProjectService.Default)
+    const project = await Effect.runPromise(ProjectService.register({ path: repoPath }).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    await Effect.runPromise(ProjectService.setWorkflow(project.id, { setup: "touch forbidden", runs: [], copyFiles: [] }, approve).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    await expect(Effect.runPromise(SessionStore.create(input({ title: "Safe setup denied", projectId: project.id, runtimeId: "pi", checkpointSafeMode: true })).pipe(Effect.provide(layer), Effect.provide(temp.layer)))).rejects.toThrow("cannot execute project setup")
+    const sessions = await Effect.runPromise(SessionStore.list().pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    expect(sessions).toEqual([])
+    await Effect.runPromise(ProjectService.setWorkflow(project.id, { runs: [], copyFiles: [] }, true).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    const safe = await Effect.runPromise(SessionStore.create(input({ title: "Safe without setup", projectId: project.id, runtimeId: "pi", checkpointSafeMode: true })).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    expect(safe.checkpointExecutionHistory).toBe("clean")
+    expect(safe).not.toHaveProperty("workspacePorts")
+  })
+
   it("persists fresh safe creation and taint before any terminal launch", async () => {
     const session = await Effect.runPromise(Effect.gen(function* () {
       const created = yield* SessionStore.create(input({ checkpointSafeMode: true, runtimeId: "pi", projectId: "safe-project" }))
@@ -157,64 +178,6 @@ describe("SessionStore", () => {
     expect(archived.worktreePath).toBe(session.worktreePath)
     expect(existsSync(session.worktreePath!)).toBe(true)
     await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
-  })
-
-  it("atomically assigns distinct ports to concurrent creates and reserves archives across store restart", async () => {
-    const result = await runExit(Effect.gen(function* () {
-      const sessions = yield* Effect.all([SessionStore.create(input({ title: "port one" })), SessionStore.create(input({ title: "port two" }))], { concurrency: 2 })
-      yield* SessionStore.archive(sessions[0]!.id, "closed")
-      return sessions
-    }).pipe(Effect.provide(services)), temp.layer)
-    if (result._tag !== "Success") throw new Error(String(result.cause))
-    const [one, two] = result.value
-    expect(one!.workspacePorts?.primary).toBeDefined()
-    expect(one!.workspacePorts?.primary).not.toBe(two!.workspacePorts?.primary)
-    const restarted = await runExit(SessionStore.create(input({ title: "port three" })).pipe(Effect.provide(services)), temp.layer)
-    if (restarted._tag !== "Success") throw new Error(String(restarted.cause))
-    expect(restarted.value.workspacePorts?.primary).not.toBe(one!.workspacePorts?.primary)
-    expect(restarted.value.workspacePorts?.primary).not.toBe(two!.workspacePorts?.primary)
-  })
-
-  it("releases deleted assignments and explicitly reassigns only idle workspaces", async () => {
-    const result = await runExit(Effect.gen(function* () {
-      const one = yield* SessionStore.create(input({ title: "deleted port" }))
-      yield* SessionStore.remove(one.id)
-      const two = yield* SessionStore.create(input({ title: "reused port" }))
-      expect(two.workspacePorts?.primary).toBe(one.workspacePorts?.primary)
-      const next = yield* SessionStore.reassignWorkspacePorts(two.id)
-      expect(next.workspacePorts).toBeDefined()
-      const persisted = yield* SessionStore.get(two.id)
-      expect(persisted.workspacePorts).toEqual(next.workspacePorts)
-    }).pipe(Effect.provide(services)), temp.layer)
-    expect(result._tag).toBe("Success")
-  })
-
-  it("allocates approved project service ports for reserved routine creation", async () => {
-    const result = await runExit(Effect.gen(function* () {
-      const project = yield* ProjectService.register({ path: repoPath })
-      yield* ProjectService.setWorkflow(project.id, { runs: [], copyFiles: [], ports: { primary: 45000, extras: [{ name: "API", start: 46000 }], previewUrl: "http://localhost:{API_port}" } }, true)
-      const session = yield* SessionStore.create(input({ projectId: project.id, requestedSessionId: "s_routine_reserved_ports" }))
-      expect(session.id).toBe("s_routine_reserved_ports")
-      expect(session.workspacePorts).toEqual({ primary: 45000, extras: { API: 46000 } })
-    }).pipe(Effect.provide(Layer.mergeAll(services, ProjectService.Default))), temp.layer)
-    expect(result._tag).toBe("Success")
-  })
-
-  it("refuses reassignment while an owned workspace command is active", async () => {
-    const result = await runExit(Effect.gen(function* () {
-      const session = yield* SessionStore.create(input({ title: "busy ports" }))
-      const denied = yield* Effect.acquireUseRelease(
-        Effect.sync(() => acquireWorkspaceActivity(session.id, "command")),
-        () => Effect.exit(SessionStore.reassignWorkspacePorts(session.id)),
-        (activity) => Effect.sync(() => activity.release())
-      )
-      expect(denied._tag).toBe("Failure")
-      const persisted = yield* SessionStore.get(session.id)
-      expect(persisted.workspacePorts).toEqual(session.workspacePorts)
-      const next = yield* SessionStore.reassignWorkspacePorts(session.id)
-      expect(next.workspacePorts).toBeDefined()
-    }).pipe(Effect.provide(services)), temp.layer)
-    expect(result._tag).toBe("Success")
   })
 
   it.each(["setup-running", "cleanup-running"] as const)("recovers interrupted %s without admitting work or redispatching commands", async (status) => {

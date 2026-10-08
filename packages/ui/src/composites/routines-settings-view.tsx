@@ -1,4 +1,4 @@
-import type { Project, Routine, RoutineDocument, RoutineInput } from "@jingler/core"
+import type { ProjectRoutineTemplate, Project, Routine, RoutineDocument, RoutineInput } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { Button } from "../components/button.js"
 import { Input } from "../components/input.js"
@@ -14,6 +14,10 @@ import {
 } from "./routine-form-machine.js"
 
 export interface RoutinesSettingsViewProps {
+  templates?: ReadonlyArray<ProjectRoutineTemplate>
+  template?: ProjectRoutineTemplate
+  templateLoad?: number
+  onTemplate?(template: ProjectRoutineTemplate): void
   projects: ReadonlyArray<Project>
   projectId: string
   models: RoutineModel[]
@@ -76,9 +80,13 @@ export function RoutinesSettingsView(props: RoutinesSettingsViewProps) {
           </Button>
         </p>
       )}
+      {projectId && (props.templates?.length ?? 0) > 0 && <div className="space-y-2">
+        <h4 className="font-medium">Shared routine templates</h4>
+        {props.templates?.map((template) => <Button key={template.id} variant="outline" disabled={busy} onClick={() => props.onTemplate?.(template)}>Load template {template.name}</Button>)}
+      </div>}
       {projectId ? (
         <RoutineForm
-          key={`${projectId}/${selected?.id ?? "new"}/${selected?.revision ?? ""}`}
+          key={`${projectId}/${selected?.id ?? "new"}/${selected?.revision ?? ""}/${props.templateLoad ?? ""}`}
           {...props}
           selected={selected}
         />
@@ -216,6 +224,7 @@ function Choice({
 }
 function RoutineForm({
   selected,
+  template,
   models,
   projectId,
   busy,
@@ -223,7 +232,7 @@ function RoutineForm({
   onSave,
   onEdit,
 }: RoutinesSettingsViewProps & { selected?: Routine }) {
-  const [state, send] = useMachine(routineFormMachine, { input: { selected, models } })
+  const [state, send] = useMachine(routineFormMachine, { input: { selected, models, template } })
   const { draft, approved, error } = state.context
   const edit = (patch: Partial<typeof draft>) => send({ type: "EDIT", patch })
   const disabled = busy || loading
@@ -236,7 +245,7 @@ function RoutineForm({
         event.preventDefault()
         if (busy || loading) return
         try {
-          onSave(selected?.id, routinePayload(draft, approved, projectId, models, selected))
+          onSave(selected?.id, routinePayload(draft, approved, projectId, models, selected, template))
         } catch (error) {
           send({ type: "ERROR", message: error instanceof Error ? error.message : "Could not save routine." })
         }
@@ -289,7 +298,7 @@ function RoutineForm({
           <p role="status" className="text-dim">
             {models.length === 0
               ? "No available managed Pi models. Configure a desktop provider first."
-              : "The saved model is unavailable. Choose another model and approve again."}
+              : "Choose an available local model explicitly and approve these settings."}
           </p>
         )}
         <Choice
@@ -300,6 +309,7 @@ function RoutineForm({
           options={[
             { value: "default", label: "Provider default" },
             { value: "off", label: "Off" },
+            { value: "on", label: "On (provider effort)" },
             ...["minimal", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, label: value })),
           ]}
         />
@@ -342,7 +352,8 @@ function RoutineForm({
                 id="routine-interval"
                 aria-label="Interval minutes"
                 type="number"
-                min={1}
+                min={1 / 60}
+                step="any"
                 max={525600}
                 value={draft.interval}
                 onChange={(event) => edit({ interval: event.currentTarget.value })}
@@ -355,7 +366,8 @@ function RoutineForm({
               id="routine-duration"
               aria-label="Maximum run minutes"
               type="number"
-              min={1}
+              min={1 / 60}
+                step="any"
               max={1440}
               value={draft.duration}
               onChange={(event) => edit({ duration: event.currentTarget.value })}
