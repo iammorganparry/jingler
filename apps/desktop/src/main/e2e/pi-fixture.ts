@@ -518,6 +518,7 @@ const STRUCTURED_REVIEW_PLAN = [
   "- Focused tests and typecheck pass",
   "### Files",
   "- `src/auth.test.ts` — M",
+  "- `README.md` — M",
   "> complexity: low",
   "> depends: implement-auth",
   "",

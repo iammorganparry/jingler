@@ -1,5 +1,5 @@
-import type { PlanAnnotation, PlanAnnotationAnchor, PlanDocument, PlanPrd } from "@jingler/core"
-import { MessageSquarePlus } from "lucide-react"
+import { planStageExecutionStatus, type PlanAnnotation, type PlanAnnotationAnchor, type PlanDocument, type PlanPrd } from "@jingler/core"
+import { Check, MessageSquarePlus } from "lucide-react"
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { Button } from "../components/button.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
@@ -86,6 +86,7 @@ interface ContentsItem {
   readonly id: string
   readonly label: string
   readonly number: number | undefined
+  readonly done?: boolean
 }
 
 /** Sticky contents rail; highlights whichever section is at the top of the reader's view. */
@@ -120,7 +121,9 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
               onClick={() => jump(item.id)}
               className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-[13px] leading-snug text-muted-foreground hover:bg-surface hover:text-text-bright aria-[current]:bg-surface aria-[current]:text-text-bright"
             >
-              {item.number !== undefined && <span className="flex-none font-mono text-[11px] text-dim">{item.number}</span>}
+              {item.done
+                ? <Check aria-label="Done" className="size-3 flex-none self-center text-green" strokeWidth={3} />
+                : item.number !== undefined && <span className="flex-none font-mono text-[11px] text-dim">{item.number}</span>}
               <span className="min-w-0">{item.label}</span>
             </button>
           </li>
@@ -238,7 +241,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const fileCount = new Set(plan.stages.flatMap((stage) => stage.files.map((file) => file.path))).size
   const contents = [
     ...plan.sections.filter((section) => section.title.length > 0).map((section) => ({ id: `section:${section.id}`, label: section.title, number: undefined })),
-    ...plan.stages.map((stage, index) => ({ id: `stage:${stage.id}`, label: stage.title, number: index + 1 }))
+    ...plan.stages.map((stage, index) => ({ id: `stage:${stage.id}`, label: stage.title, number: index + 1, done: planStageExecutionStatus(stage) === "completed" }))
   ]
 
   return (

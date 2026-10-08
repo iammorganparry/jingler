@@ -1,6 +1,6 @@
 import { planStageExecutionStatus, type PlanFile, type PlanPrdStage } from "@jingler/core"
-import { Check, Circle, CircleDot, MessageSquarePlus, MinusCircle, X } from "lucide-react"
-import type { ReactNode } from "react"
+import { Check, ChevronRight, Circle, CircleDot, MessageSquarePlus, MinusCircle, X } from "lucide-react"
+import { useState, type ReactNode } from "react"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { Badge, type BadgeTone } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
@@ -81,9 +81,9 @@ function StageFile({ file }: { readonly file: PlanFile }) {
         {file.change}
       </span>
       <FileIcon path={file.path} size={14} className="mt-[3px] flex-none" />
-      <span className="min-w-0 flex-1 font-mono text-[13px] leading-[20px] [overflow-wrap:anywhere]">
-        <span className={file.change === "D" ? "text-text-bright line-through decoration-red/60" : "text-text-bright"}>{name}</span>
-        {dir.length > 0 && <span className="ml-2 text-[12px] text-dim">{dir}</span>}
+      <span title={file.path} className="flex min-w-0 flex-1 items-baseline gap-2 font-mono text-[13px] leading-[20px]">
+        <span className={`max-w-full flex-none truncate text-text-bright ${file.change === "D" ? "line-through decoration-red/60" : ""}`}>{name}</span>
+        {dir.length > 0 && <span className="min-w-0 truncate text-[12px] text-dim">{dir}</span>}
       </span>
       {changed && <DiffStat added={file.added ?? 0} removed={file.removed} className="mt-[3px] flex-none text-[11px]" />}
     </>
@@ -127,7 +127,11 @@ function StageHeader({ stage, number, stages = [], onComment }: StageProps) {
           STAGE {number}{stages.length > 0 && ` OF ${stages.length}`}
         </span>
         {stage.complexity && <Badge tone={complexityTone[stage.complexity]} size="xs">{stage.complexity} complexity</Badge>}
-        {status !== "queued" && <Badge tone={statusTone[status]} size="xs">{status}</Badge>}
+        {status === "completed" ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-green/15 px-2 py-px font-medium text-green">
+            <Check className="size-3" strokeWidth={3} /> Done
+          </span>
+        ) : status !== "queued" && <Badge tone={statusTone[status]} size="xs">{status}</Badge>}
         {onComment && (
           <button
             type="button"
@@ -220,15 +224,33 @@ function Acceptance({ stage }: { readonly stage: PlanPrdStage }) {
 export function PlanStageCard({ stage, number, stages = [], onComment }: StageProps) {
   const details = [...stage.notes, ...(stage.walkthrough ?? [])]
   const done = stage.definitionOfDone ?? []
+  const completed = planStageExecutionStatus(stage) === "completed"
+  // Finished stages start folded so the reader's eye lands on the work still ahead.
+  const [open, setOpen] = useState(!completed)
 
   return (
     <section
       data-stage={stage.id}
       data-toc={`stage:${stage.id}`}
+      data-status={completed ? "completed" : undefined}
       aria-labelledby={`stage-${stage.id}`}
-      className="mt-14 scroll-mt-8 border-t border-line pt-10"
+      className="mt-14 scroll-mt-8 border-t border-line pt-10 data-[status=completed]:border-green/40"
     >
       <StageHeader stage={stage} number={number} stages={stages} onComment={onComment} />
+
+      {completed && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((current) => !current)}
+          className="mt-3 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[13px] text-muted-foreground hover:bg-surface hover:text-text-bright"
+        >
+          <ChevronRight className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
+          {open ? "Hide stage details" : "Show stage details"}
+        </button>
+      )}
+
+      {open && <>
 
       {stage.userStory !== undefined && (
         <section
@@ -289,6 +311,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
           </ul>
         </Part>
       )}
+      </>}
     </section>
   )
 }

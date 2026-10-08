@@ -213,6 +213,30 @@ test("selection comments reach the agent and the revision diff shows what change
     .toBeVisible({ timeout: 30_000 })
 })
 
+test("plan review reads as a document: real heading scale, inline detail, file rows open Files", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const stageHeading = review(launched).getByRole("heading", { name: "Implement auth", exact: true })
+  await expect(stageHeading).toBeVisible({ timeout: 20_000 })
+  const size = (locator: typeof stageHeading) =>
+    locator.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  const body = review(launched).locator(".sb-plan").first()
+  // Headings once inherited the body size; the stage title must clearly outrank prose.
+  expect(await size(stageHeading)).toBeGreaterThan(await size(body))
+
+  // Technical detail is inline, not behind a disclosure.
+  await expect(review(launched).getByRole("region", { name: "Implement auth technical details" })).toBeVisible()
+  await expect(review(launched).locator(".sb-plan details")).toHaveCount(0)
+
+  const files = review(launched).getByRole("region", { name: "Verify auth files" })
+  // Untracked paths stay plain text; tracked ones open in Files.
+  await expect(files.getByRole("button", { name: "Open src/auth.test.ts" })).toHaveCount(0)
+  await files.getByRole("button", { name: "Open README.md" }).click()
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+})
+
 test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched)
@@ -222,7 +246,7 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   await expect(readmeChange).toBeVisible()
   // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
   await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
-  await review(launched).getByRole("button", { name: "Open README.md" }).click()
+  await review(launched).locator('[data-plan-change="README.md"]').getByRole("button", { name: "Open README.md" }).click()
   await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
 
   await openPlanTab(launched)

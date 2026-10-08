@@ -149,3 +149,23 @@ type Story = StoryObj<typeof meta>
 export const Proposed: Story = {}
 
 export const Approved: Story = { args: { document: { ...document, status: "approved" } } }
+
+/** Stage 1 finished (every task done, every criterion passed); stage 2 underway. */
+export const Executing: Story = {
+  args: {
+    document: {
+      ...document,
+      status: "executing",
+      plan: {
+        ...document.plan,
+        stages: document.plan.stages.map((stage, index) => index === 0
+          ? {
+              ...stage,
+              tasks: (stage.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+              acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
+            }
+          : { ...stage, tasks: [{ id: "r1", text: "Add `signOut` to the contract", status: "in-progress" as const }] })
+      }
+    }
+  }
+}

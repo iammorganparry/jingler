@@ -271,6 +271,21 @@ describe("PlanReview", () => {
     expect(screen.queryByRole("region", { name: "Changes since the previous revision" })).toBeNull()
   })
 
+  it("folds a completed stage until the reviewer expands it", () => {
+    const stage = document.plan.stages[0]!
+    renderReview({ document: { ...document, plan: { ...document.plan, stages: [{
+      ...stage,
+      tasks: (stage.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+      acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
+    }] } } })
+    expect(screen.getByRole("heading", { name: "Implement auth" })).toBeTruthy()
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Show stage details" }))
+    expect(screen.getByRole("region", { name: "Implement auth files" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Hide stage details" }))
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+  })
+
   it("is read-only once the plan is approved", () => {
     renderReview({ document: { ...document, status: "approved" } })
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()
