@@ -22,6 +22,27 @@ export interface PlanCommentLayerProps {
   readonly onResolve: (id: string, resolved: boolean) => void
 }
 
+const detachedHighlight = (id: string): Highlight => ({ id, top: 0, left: 0, width: 0, height: 0, detached: true })
+
+/** Where one comment's quote sits in the scroller, or nothing when it has no anchor or no box. */
+const highlightFor = (comment: PlanAnnotation, body: HTMLElement, root: HTMLElement, base: DOMRect): Highlight[] => {
+  if (comment.anchor === undefined) return []
+  if (!(body.textContent ?? "").includes(comment.anchor.quote)) return [detachedHighlight(comment.id)]
+  const range = domRangeFromAnchor(body, comment.anchor)
+  if (range === null) return [detachedHighlight(comment.id)]
+  const rect = range.getBoundingClientRect()
+  // Text inside a folded stage has no box; it isn't detached, just not drawn.
+  if (rect.width === 0 && rect.height === 0) return []
+  return [{
+    id: comment.id,
+    top: rect.top - base.top + root.scrollTop,
+    left: rect.left - base.left + root.scrollLeft,
+    width: rect.width,
+    height: rect.height,
+    detached: false
+  }]
+}
+
 export function PlanCommentLayer({ container, content, comments, editable, onReply, onResolve }: PlanCommentLayerProps) {
   const [highlights, setHighlights] = useState<ReadonlyArray<Highlight>>([])
   const [replies, setReplies] = useState<Readonly<Record<string, string>>>({})
@@ -32,23 +53,7 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
     if (root === null || body === null) return setHighlights([])
     const recompute = () => {
       const base = root.getBoundingClientRect()
-      setHighlights(comments.flatMap((comment): Highlight[] => {
-        if (comment.anchor === undefined) return []
-        if (!(body.textContent ?? "").includes(comment.anchor.quote)) {
-          return [{ id: comment.id, top: 0, left: 0, width: 0, height: 0, detached: true }]
-        }
-        const range = domRangeFromAnchor(body, comment.anchor)
-        if (range === null) return [{ id: comment.id, top: 0, left: 0, width: 0, height: 0, detached: true }]
-        const rect = range.getBoundingClientRect()
-        return [{
-          id: comment.id,
-          top: rect.top - base.top + root.scrollTop,
-          left: rect.left - base.left + root.scrollLeft,
-          width: rect.width,
-          height: rect.height,
-          detached: false
-        }]
-      }))
+      setHighlights(comments.flatMap((comment) => highlightFor(comment, body, root, base)))
     }
     recompute()
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(recompute)
@@ -75,9 +80,9 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
           />
         ))}
       </div>
-      <aside aria-label="Plan comments" className="mx-auto mt-5 flex max-w-3xl flex-col gap-2 px-6 pb-5">
+      <aside aria-label="Plan comments" className="mx-auto mt-5 flex max-w-[760px] flex-col gap-2 px-8 pb-10">
         {comments.map((comment) => (
-          <article key={comment.id} data-comment-thread={comment.id} className="rounded-lg border border-line bg-panel p-3 text-[12px]">
+          <article key={comment.id} data-comment-thread={comment.id} className="rounded-lg border border-line bg-panel p-3 text-[13px]">
             <header className="mb-2 flex items-center gap-2 text-muted-foreground">
               <MessageSquare className="size-3.5" />
               <span>{comment.stageId === null ? "Plan" : comment.stageId}</span>

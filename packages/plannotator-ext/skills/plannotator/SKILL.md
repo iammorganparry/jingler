@@ -26,6 +26,7 @@ One user-valued outcome that could stand alone as a ticket.
 - Up to three implementation choices.
 
 - [ ] Concrete step
+  Indented lines describe what the step changes and why.
 
 ### Technical explanation
 One short paragraph for non-obvious behavior or tradeoffs.

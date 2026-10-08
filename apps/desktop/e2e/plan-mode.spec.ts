@@ -54,10 +54,6 @@ const ensurePlanTab = async (launched: LaunchedApp) => {
 }
 const reviewText = (launched: LaunchedApp) => review(launched).innerText().catch(() => "")
 
-const expandTechnicalDetails = async (launched: LaunchedApp, index: number) => {
-  await review(launched).getByText("Technical details", { exact: true }).nth(index).click()
-}
-
 const approveReview = async (launched: LaunchedApp) => {
   await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
 }
@@ -119,7 +115,6 @@ test("projects explicit deliverable stages without treating overview headings as
 
   await expect(review(launched)).toBeVisible()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
-  await expandTechnicalDetails(launched, 0)
   // Proposed diffs, typed tests, and the test strategy render natively.
   await expect(review(launched).getByRole("region", { name: "Proposed change to src/auth.ts" }))
     .toBeVisible()
@@ -160,7 +155,12 @@ test("projects explicit deliverable stages without treating overview headings as
   await persistentTab.click()
   await expect.poll(() => readFileSync(join(launched.repoPath, "PLAN.md"), "utf8"))
     .toContain("- [x] Verify the auth change")
-  await expect.poll(() => reviewText(launched)).toContain("Verify the auth change")
+  // Finished stages fold to their header; expand one to read its completed task.
+  const verifyStage = review(launched).getByRole("region", { name: "Verify auth", exact: true })
+  await verifyStage.getByRole("button", { name: "Show stage details" }).click()
+  const verifyTask = verifyStage.getByRole("region", { name: "Verify auth tasks" }).locator("[data-task-status]")
+  await expect(verifyTask).toContainText("Verify the auth change")
+  await expect(verifyTask).toHaveAttribute("data-task-status", "completed")
 })
 
 test("diagram node opens linked stage", async ({ launchApp }) => {
@@ -218,17 +218,40 @@ test("selection comments reach the agent and the revision diff shows what change
     .toBeVisible({ timeout: 30_000 })
 })
 
+test("plan review reads as a document: real heading scale, inline detail, file rows open Files", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const stageHeading = review(launched).getByRole("heading", { name: "Implement auth", exact: true })
+  await expect(stageHeading).toBeVisible({ timeout: 20_000 })
+  const size = (locator: typeof stageHeading) =>
+    locator.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))
+  const body = review(launched).locator(".sb-plan").first()
+  // Headings once inherited the body size; the stage title must clearly outrank prose.
+  expect(await size(stageHeading)).toBeGreaterThan(await size(body))
+
+  // Technical detail is inline, not behind a disclosure.
+  await expect(review(launched).getByRole("region", { name: "Implement auth technical details" })).toBeVisible()
+  await expect(review(launched).locator(".sb-plan details")).toHaveCount(0)
+
+  const files = review(launched).getByRole("region", { name: "Verify auth files" })
+  // Untracked paths stay plain text; tracked ones open in Files.
+  await expect(files.getByRole("button", { name: "Open src/auth.test.ts" })).toHaveCount(0)
+  await files.getByRole("button", { name: "Open README.md" }).click()
+  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+})
+
 test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched)
   await openPlanTab(launched)
-  await expandTechnicalDetails(launched, 1)
 
   const readmeChange = review(launched).getByRole("region", { name: "Proposed change to README.md" })
   await expect(readmeChange).toBeVisible()
   // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
   await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
-  await review(launched).getByRole("button", { name: "Open README.md" }).click()
+  await review(launched).locator('[data-plan-change="README.md"]').getByRole("button", { name: "Open README.md" }).click()
   await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
 
   await openPlanTab(launched)
@@ -394,7 +417,6 @@ test("revises one stage approach through native review feedback", async ({
   const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
-  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation replaces the token format")
   const originalPlan = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
@@ -412,7 +434,6 @@ test("revises one stage approach through native review feedback", async ({
     originalPlan.match(/<!-- id: [\w-]+ -->/g)
   )
   expect(revisedPlan.split("## Verify auth")[1]).toBe(originalPlan.split("## Verify auth")[1])
-  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)

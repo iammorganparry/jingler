@@ -13,7 +13,8 @@
  * - `### Deliverable`, `### User story`, and `### Definition of Done` → ticket fields
  * - the first legacy body paragraph under a stage → its intent; later paragraphs → notes
  * - `### Approach` bullets (or the stage's first plain bullet list) → approach
- * - checkboxes → tasks; indentation nests one level of subtasks;
+ * - checkboxes → tasks; indentation nests one level of subtasks; indented
+ *   non-checkbox lines under a task become its description;
  *   `[ ]` pending, `[x]` completed, `[~]` in-progress, `[-]` blocked
  * - `### Acceptance` checkboxes → acceptance criteria; a
  *   `(test: path::case, case)` suffix becomes test references
@@ -36,6 +37,8 @@ export interface PlanStageSubtask {
 	step: number;
 	text: string;
 	status: PlanTaskStatus;
+	/** Indented lines under the checkbox (Markdown list continuation). */
+	description?: string;
 }
 
 export interface PlanStageTask extends PlanStageSubtask {
@@ -121,7 +124,16 @@ const DEPENDS_LINE = /^>\s*depends:\s*(.+?)\s*$/i;
 const USER_ROLE_LINE = /^\*{0,2}As (a|an)\*{0,2}\s+(.+?)\s*$/i;
 const USER_CAPABILITY_LINE = /^\*{0,2}I want\*{0,2}\s+(.+?)\s*$/i;
 const USER_BENEFIT_LINE = /^\*{0,2}So that\*{0,2}\s+(.+?)\s*$/i;
+const FENCE_MARK = /^(?:`{3,}|~{3,})/;
 const TEST_REFERENCE_SUFFIX = /\s*\(test(?:\[(unit|integration|e2e|manual)\])?:\s*([^)]+)\)\s*$/;
+
+const indentOf = (line: string): number => line.length - line.trimStart().length;
+
+interface OpenTask {
+	task: PlanStageSubtask;
+	indent: number;
+	lines: string[];
+}
 
 const slugOf = (title: string): string => {
 	const slug = title
@@ -269,6 +281,11 @@ class StageBuilder {
 	#paragraph: string[] = [];
 	#sawIntent = false;
 	#bodyBullets: string[] = [];
+	/** Tasks whose description an indented line may continue, outermost first. */
+	#openTasks: OpenTask[] = [];
+	#describedTasks: OpenTask[] = [];
+	#taskFence: OpenTask | null = null;
+	#blanks = 0;
 
 	constructor(heading: string) {
 		const idMatch = STAGE_ID_COMMENT.exec(heading);
@@ -312,6 +329,13 @@ class StageBuilder {
 
 	finish(): ParsedPlanStage {
 		this.#flushParagraph();
+		for (const { task, lines } of this.#describedTasks) {
+			if (lines.length === 0) continue;
+			// Strip only the shared continuation indent; relative indent, blank
+			// lines and trailing hard-break spaces are Markdown structure.
+			const margin = Math.min(...lines.filter((line) => line.trim().length > 0).map(indentOf));
+			task.description = lines.map((line) => line.slice(margin)).join("\n");
+		}
 		// No explicit `### Approach`: the stage's plain (non-checkbox) bullet
 		// list carries the ordered steps.
 		if (this.stage.approach.length === 0 && this.#bodyBullets.length > 0) {
@@ -320,10 +344,11 @@ class StageBuilder {
 		return this.stage;
 	}
 
-	checkbox(step: number, mark: string, text: string): void {
+	checkbox(step: number, mark: string, text: string, indent = 0): void {
 		this.#flushParagraph();
 		const completed = /[xX]/.test(mark);
 		if (this.#subsection === "acceptance") {
+			this.#openTasks = [];
 			const parsed = parseTestReferences(text);
 			this.stage.acceptance.push({
 				step,
@@ -335,26 +360,66 @@ class StageBuilder {
 			});
 			return;
 		}
-		this.stage.tasks.push({
-			step,
-			text,
-			status: taskStatusOf(mark, completed),
-			subtasks: [],
-		});
+		const task = { step, text, status: taskStatusOf(mark, completed), subtasks: [] };
+		this.stage.tasks.push(task);
+		this.#openTask(task, indent);
 	}
 
-	nestedCheckbox(step: number, mark: string, text: string): void {
+	addCheckbox({ step, mark, text, indent }: { step: number; mark: string; text: string; indent: string }): void {
+		if (indent.length > 0) this.nestedCheckbox(step, mark, text, indent.length);
+		else this.checkbox(step, mark, text);
+	}
+
+	nestedCheckbox(step: number, mark: string, text: string, indent: number): void {
 		const completed = /[xX]/.test(mark);
 		if (this.#subsection === "acceptance") {
-			this.checkbox(step, mark, text);
+			this.checkbox(step, mark, text, indent);
 			return;
 		}
 		const parent = this.stage.tasks.at(-1);
 		if (parent === undefined) {
-			this.checkbox(step, mark, text);
+			this.checkbox(step, mark, text, indent);
 			return;
 		}
-		parent.subtasks.push({ step, text, status: taskStatusOf(mark, completed) });
+		const subtask = { step, text, status: taskStatusOf(mark, completed) };
+		parent.subtasks.push(subtask);
+		this.#openTask(subtask, indent);
+	}
+
+	#openTask(task: PlanStageSubtask, indent: number): void {
+		const entry = { task, indent, lines: [] };
+		this.#openTasks = [...this.#openTasks.filter((open) => open.indent < indent), entry];
+		this.#describedTasks.push(entry);
+	}
+
+	/**
+	 * Markdown list continuation: a line indented past a task's checkbox (and any
+	 * fence it opens) belongs to that task's description. Returns false — and
+	 * closes every open task — for anything else, including stage metadata.
+	 */
+	describe(raw: string): boolean {
+		const trimmed = raw.trim();
+		let owner = this.#taskFence;
+		if (owner === null) {
+			if (trimmed.length === 0) {
+				this.#blanks++;
+				return this.#openTasks.length > 0;
+			}
+			const indent = indentOf(raw);
+			owner = COMPLEXITY_LINE.test(trimmed) || DEPENDS_LINE.test(trimmed)
+				? null
+				: (this.#openTasks.filter((open) => open.indent < indent).at(-1) ?? null);
+			if (owner === null) {
+				this.#openTasks = [];
+				this.#blanks = 0;
+				return false;
+			}
+		}
+		if (FENCE_MARK.test(trimmed)) this.#taskFence = this.#taskFence === null ? owner : null;
+		if (owner.lines.length > 0) owner.lines.push(...Array<string>(this.#blanks).fill(""));
+		this.#blanks = 0;
+		owner.lines.push(raw);
+		return true;
 	}
 
 	line(raw: string): void {
@@ -457,6 +522,10 @@ const consumeFence = (
 	return null;
 };
 
+/** A non-checkbox line that an open task in the current stage claims as description. */
+const continuesTask = (stage: StageBuilder | null, isCheckbox: boolean, raw: string): boolean =>
+	!isCheckbox && stage !== null && stage.describe(raw);
+
 export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	const allLines = content.split("\n");
 	const frontmatter = parseFrontmatter(allLines);
@@ -485,6 +554,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 	let fence: OpenFence | null = null;
 
 	for (const [line, raw] of lines.entries()) {
+		if (fence === null && continuesTask(stage, checkboxByLine.has(line), raw)) continue;
 		const fenceMatch = FENCE_LINE.exec(raw.trim());
 		if (fence !== null) {
 			fence = consumeFence(fence, fenceMatch, raw, stage, section);
@@ -523,13 +593,7 @@ export function parsePlanMarkdown(content: string): ParsedPlanMarkdown {
 				text: checkbox.text,
 				completed: checkbox.completed,
 			});
-			if (stage !== null) {
-				if (checkbox.indent.length > 0) {
-					stage.nestedCheckbox(checkbox.step, checkbox.mark, checkbox.text);
-				} else {
-					stage.checkbox(checkbox.step, checkbox.mark, checkbox.text);
-				}
-			}
+			stage?.addCheckbox(checkbox);
 			continue;
 		}
 

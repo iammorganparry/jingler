@@ -1,6 +1,6 @@
-import type { PlanAnnotation, PlanAnnotationAnchor, PlanDocument, PlanPrd } from "@jingler/core"
-import { MessageSquarePlus } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { planStageExecutionStatus, type PlanAnnotation, type PlanAnnotationAnchor, type PlanDocument, type PlanPrd } from "@jingler/core"
+import { Check, MessageSquarePlus } from "lucide-react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import { Button } from "../components/button.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
 import { PlanCommentLayer } from "../composites/plan-comment-layer.js"
@@ -80,6 +80,63 @@ const currentSelection = (root: HTMLElement, scroller: HTMLElement | null): Sele
     top: rect.bottom - base.top + (scroller?.scrollTop ?? 0) + 4,
     left: rect.left - base.left + (scroller?.scrollLeft ?? 0)
   }
+}
+
+interface ContentsItem {
+  readonly id: string
+  readonly label: string
+  readonly number: number | undefined
+  readonly done?: boolean
+}
+
+/** Sticky contents rail; highlights whichever section is at the top of the reader's view. */
+function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<ContentsItem>; readonly scroller: RefObject<HTMLDivElement | null> }) {
+  const [active, setActive] = useState<string | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the rendered sections change
+  useEffect(() => {
+    const root = scroller.current
+    if (root === null) return
+    // The active section is the last one whose top has reached the reader's top
+    // band — read from live geometry on every scroll, in either direction.
+    const update = () => {
+      const line = root.getBoundingClientRect().top + 96
+      let current: string | null = null
+      for (const element of root.querySelectorAll<HTMLElement>("[data-toc]")) {
+        if (element.getBoundingClientRect().top <= line) current = element.dataset.toc ?? null
+      }
+      setActive(current ?? root.querySelector<HTMLElement>("[data-toc]")?.dataset.toc ?? null)
+    }
+    update()
+    root.addEventListener("scroll", update, { passive: true })
+    return () => root.removeEventListener("scroll", update)
+  }, [items, scroller])
+  if (items.length < 2) return null
+  const jump = (id: string) =>
+    [...(scroller.current?.querySelectorAll<HTMLElement>("[data-toc]") ?? [])]
+      .find((element) => element.dataset.toc === id)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" })
+  return (
+    <nav aria-label="Plan contents" className="sticky top-10 hidden max-h-[calc(100vh-120px)] w-52 flex-none self-start overflow-y-auto @min-[1000px]:block">
+      <p className="m-0 mb-2 px-2 font-mono text-[11px] uppercase tracking-wide text-dim">Contents</p>
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {items.map((item) => (
+          <li key={item.id}>
+            <button
+              type="button"
+              aria-current={active === item.id ? "location" : undefined}
+              onClick={() => jump(item.id)}
+              className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-[13px] leading-snug text-muted-foreground hover:bg-surface hover:text-text-bright aria-[current]:bg-surface aria-[current]:text-text-bright"
+            >
+              {item.done
+                ? <Check aria-label="Done" className="size-3 flex-none self-center text-green" strokeWidth={3} />
+                : item.number !== undefined && <span className="flex-none font-mono text-[11px] text-dim">{item.number}</span>}
+              <span className="min-w-0">{item.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  )
 }
 
 export function PlanReview({ document, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
@@ -187,41 +244,60 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     comment.id === id ? { ...comment, status: resolved ? "resolved" as const : "open" as const } : comment
   ))
 
+  const fileCount = new Set(plan.stages.flatMap((stage) => stage.files.map((file) => file.path))).size
+  const contents = [
+    ...plan.sections.filter((section) => section.title.length > 0).map((section) => ({ id: `section:${section.id}`, label: section.title, number: undefined })),
+    ...plan.stages.map((stage, index) => ({ id: `stage:${stage.id}`, label: stage.title, number: index + 1, done: planStageExecutionStatus(stage) === "completed" }))
+  ]
+
   return (
     <section aria-label="Plan review" data-testid="plan-review" className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
-      <div ref={container} className="relative min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <article ref={content} className="sb-plan mx-auto flex max-w-3xl flex-col gap-4 text-[13px] text-text-body">
-          <h1 className="text-xl font-semibold text-text-bright">{plan.title}</h1>
-          {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                className="self-start"
-                aria-expanded={showChanges}
-                onClick={() => setShowChanges((current) => !current)}
-              >
-                {showChanges ? "Hide changes" : `Changes since revision ${Math.max(1, document.revision - 1)}`}
-              </Button>
-              {showChanges && (
-                <PlanRevisionDiff
-                  path={document.id.replace(PLANNOTATOR_ID_PREFIX, "")}
-                  before={document.previousSourceMarkdown}
-                  after={document.sourceMarkdown}
-                />
-              )}
-            </div>
-          )}
+      <div ref={container} className="@container relative min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-10">
+          <PlanContents items={contents} scroller={container} />
+        <article ref={content} className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
+          <header className="border-b border-line pb-8">
+            <p className="m-0 font-mono text-[12px] uppercase tracking-wide text-dim">
+              Plan · revision {document.revision} · {document.status}
+            </p>
+            <h1 className="sb-plan-doc-title mt-2">{plan.title}</h1>
+            {plan.stages.length > 0 && (
+              <p className="mt-3 text-[14px] text-muted-foreground">
+                {plan.stages.length} {plan.stages.length === 1 ? "stage" : "stages"} · {fileCount} {fileCount === 1 ? "file" : "files"} touched
+              </p>
+            )}
+            {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
+              <div className="mt-4 flex flex-col gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="self-start"
+                  aria-expanded={showChanges}
+                  onClick={() => setShowChanges((current) => !current)}
+                >
+                  {showChanges ? "Hide changes" : `Changes since revision ${Math.max(1, document.revision - 1)}`}
+                </Button>
+                {showChanges && (
+                  <PlanRevisionDiff
+                    path={document.id.replace(PLANNOTATOR_ID_PREFIX, "")}
+                    before={document.previousSourceMarkdown}
+                    after={document.sourceMarkdown}
+                  />
+                )}
+              </div>
+            )}
+          </header>
           {plan.sections.map((section) => (
-            <section key={section.id} data-section={section.id}>
+            <section key={section.id} data-section={section.id} data-toc={`section:${section.id}`} className="mt-10 scroll-mt-8">
               {section.title.length > 0 && <h2 className="sb-plan-heading">{section.title}</h2>}
               <VisualBlocks blocks={section.blocks} />
             </section>
           ))}
           {plan.stages.map((stage, index) => (
-            <PlanStageCard key={stage.id} stage={stage} number={index + 1} onComment={canDecide ? commentOnStage : undefined} />
+            <PlanStageCard key={stage.id} stage={stage} number={index + 1} stages={plan.stages} onComment={canDecide ? commentOnStage : undefined} />
           ))}
         </article>
+        </div>
 
         <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} onReply={reply} onResolve={resolve} />
 
@@ -233,7 +309,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               setDraft(selection)
               setSelection(null)
             }}
-            className="absolute z-20 inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1 text-[10.5px] text-text-bright shadow-lg"
+            className="absolute z-20 inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1 text-[12px] text-text-bright shadow-lg"
             style={{ top: selection.top, left: selection.left }}
           >
             <MessageSquarePlus className="size-3" /> Add comment
@@ -241,7 +317,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         )}
         {draft !== null && (
           <div
-            className="absolute z-30 w-[280px] rounded-lg border border-line bg-editor p-2 shadow-xl"
+            className="absolute z-30 w-[320px] rounded-lg border border-line bg-editor p-2 shadow-xl"
             style={{ top: draft.top, left: Math.max(8, draft.left) }}
           >
             <textarea
@@ -249,7 +325,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={draftBody}
               onChange={(event) => setDraftBody(event.target.value)}
               rows={3}
-              className="w-full resize-none rounded border border-line bg-editor p-1.5 text-[11.5px] outline-none"
+              className="w-full resize-none rounded border border-line bg-editor p-1.5 text-[13px] outline-none"
             />
             <div className="mt-1.5 flex justify-end gap-1.5">
               <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
@@ -269,7 +345,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={general}
               onChange={(event) => setGeneral(event.target.value)}
               rows={1}
-              className="min-w-0 flex-1 resize-none rounded border border-line bg-editor px-2 py-1.5 text-[12px] outline-none"
+              className="min-w-0 flex-1 resize-none rounded border border-line bg-editor px-2 py-1.5 text-[13px] outline-none"
             />
             <Button variant="danger" size="sm" disabled={busy} onClick={() => void decide(false)}>
               Request changes
