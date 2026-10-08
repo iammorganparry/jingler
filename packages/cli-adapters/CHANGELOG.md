@@ -1,5 +1,24 @@
 # @jingler/cli-adapters
 
+## 0.6.0
+
+### Minor Changes
+
+- e6e6777: Add approved per-project workspace setup, run, stop, copied-file, and cleanup workflows with setup admission gates and recoverable failures.
+- bad21c3: Review team work from the Pull requests inbox using your GitHub CLI account. Switch between team review requests, PRs authored by team members, and team-repository PRs, then open the existing local session actions. Team queues show access failures and partial results explicitly and never require a GitHub App connection.
+
+### Patch Changes
+
+- e6e6777: Fix metadata-only archive restoration, shell descendant shutdown, persistent named Run commands, port-aware offload, live lifecycle reconciliation, stable workflow command identities and visible diagnostics. Refused safe-mode shell commands no longer taint history, and deleted workspace run state is reclaimed.
+- e6e6777: Fix deleting completed direct sessions while preserving their repository checkout and stopping owned workspace activity before deletion.
+- 5c862cd: Pick up current models from compatible Codex CLI updates, prevent duplicate PI provider connections on the same target, and allow adversarial reviews to run beside an active conversation.
+- 99be166: Show and run models advertised by the installed Codex CLI through PI ChatGPT subscription connections.
+- Updated dependencies [e6e6777]
+- Updated dependencies [bad21c3]
+  - @jingler/core@0.6.0
+  - @jingler/themes@0.6.0
+  - @jingler/plannotator-ext@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes

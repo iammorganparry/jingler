@@ -1,5 +1,19 @@
 # @jingler/device-agent
 
+## 0.6.0
+
+### Patch Changes
+
+- f80f1c2: Fix PI subagents using OAuth-backed models in the bundled process worker.
+- Updated dependencies [e6e6777]
+- Updated dependencies [e6e6777]
+- Updated dependencies [e6e6777]
+- Updated dependencies [5c862cd]
+- Updated dependencies [99be166]
+- Updated dependencies [bad21c3]
+  - @jingler/cli-adapters@0.6.0
+  - @jingler/core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes

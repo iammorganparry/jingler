@@ -1,5 +1,11 @@
 # @jingler/plugin-sdk
 
+## 0.6.0
+
+### Patch Changes
+
+- fc02384: Choose a known local Obsidian vault or enter its path, with a refreshed note browser and preview.
+
 ## 0.5.0
 
 ## 0.4.1

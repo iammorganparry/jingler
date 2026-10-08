@@ -1,5 +1,13 @@
 # @jingler/themes
 
+## 0.6.0
+
+### Patch Changes
+
+- Updated dependencies [e6e6777]
+- Updated dependencies [bad21c3]
+  - @jingler/core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes

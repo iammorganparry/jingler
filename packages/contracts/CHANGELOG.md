@@ -1,5 +1,18 @@
 # @jingler/contracts
 
+## 0.6.0
+
+### Minor Changes
+
+- e6e6777: Add approved per-project workspace setup, run, stop, copied-file, and cleanup workflows with setup admission gates and recoverable failures.
+- bad21c3: Review team work from the Pull requests inbox using your GitHub CLI account. Switch between team review requests, PRs authored by team members, and team-repository PRs, then open the existing local session actions. Team queues show access failures and partial results explicitly and never require a GitHub App connection.
+
+### Patch Changes
+
+- Updated dependencies [e6e6777]
+- Updated dependencies [bad21c3]
+  - @jingler/core@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes
