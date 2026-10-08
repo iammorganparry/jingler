@@ -165,6 +165,18 @@ describe("conversation registry fleet recovery", () => {
     expect(sessionActivitiesSnapshot()[session.id]).toBeUndefined()
   })
 
+  it("reports delegating while the session reviewer works on an idle parent", async () => {
+    vi.useFakeTimers()
+    const actor = getConversationActor(session)
+    await vi.advanceTimersByTimeAsync(100)
+    actor.send({ type: "REVIEW_EVENT", event: { _tag: "Started", sessionId: "review", model: "test" } })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toMatchObject({ kind: "delegating", target: "Adversarial review" })
+    actor.send({ type: "REVIEW_EVENT", event: { _tag: "Done", costUsd: 0, tokens: 0 } })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sessionActivitiesSnapshot()[session.id]).toBeUndefined()
+  })
+
   it("reports attention rather than working for a blocked Fleet child", async () => {
     vi.useFakeTimers()
     const actor = getConversationActor(session)
