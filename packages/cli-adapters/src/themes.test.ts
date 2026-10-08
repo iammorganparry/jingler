@@ -492,14 +492,15 @@ describe("ThemeService", () => {
           // The fork and native watcher attach asynchronously. Retry the
           // idempotent write until an event proves the watcher is live instead
           // of assuming a loaded CI runner will attach within a fixed delay.
-          // The overall timeout stays under the package's 20s testTimeout.
-          while ((yield* Fiber.poll(fiber))._tag === "None") {
+          for (let attempt = 0; attempt < 12; attempt++) {
             yield* Effect.sync(act)
             yield* Effect.sleep("250 millis")
+            const completed = yield* Fiber.poll(fiber)
+            if (completed._tag === "Some") break
           }
           const chunks = yield* Fiber.join(fiber)
           return Chunk.toReadonlyArray(chunks)[0]
-        }).pipe(Effect.timeout("15 seconds"))
+        }).pipe(Effect.timeout("5 seconds"))
       )
 
     it("re-emits the catalog when a theme file appears", async () => {
