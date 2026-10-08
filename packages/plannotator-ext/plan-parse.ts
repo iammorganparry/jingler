@@ -13,7 +13,8 @@
  * - `### Deliverable`, `### User story`, and `### Definition of Done` → ticket fields
  * - the first legacy body paragraph under a stage → its intent; later paragraphs → notes
  * - `### Approach` bullets (or the stage's first plain bullet list) → approach
- * - checkboxes → tasks; indentation nests one level of subtasks;
+ * - checkboxes → tasks; indentation nests one level of subtasks; indented
+ *   non-checkbox lines under a task become its description;
  *   `[ ]` pending, `[x]` completed, `[~]` in-progress, `[-]` blocked
  * - `### Acceptance` checkboxes → acceptance criteria; a
  *   `(test: path::case, case)` suffix becomes test references
@@ -36,6 +37,8 @@ export interface PlanStageSubtask {
 	step: number;
 	text: string;
 	status: PlanTaskStatus;
+	/** Indented lines under the checkbox (Markdown list continuation). */
+	description?: string;
 }
 
 export interface PlanStageTask extends PlanStageSubtask {
@@ -269,6 +272,7 @@ class StageBuilder {
 	#paragraph: string[] = [];
 	#sawIntent = false;
 	#bodyBullets: string[] = [];
+	#lastTask: PlanStageSubtask | null = null;
 
 	constructor(heading: string) {
 		const idMatch = STAGE_ID_COMMENT.exec(heading);
@@ -324,6 +328,7 @@ class StageBuilder {
 		this.#flushParagraph();
 		const completed = /[xX]/.test(mark);
 		if (this.#subsection === "acceptance") {
+			this.#lastTask = null;
 			const parsed = parseTestReferences(text);
 			this.stage.acceptance.push({
 				step,
@@ -335,12 +340,9 @@ class StageBuilder {
 			});
 			return;
 		}
-		this.stage.tasks.push({
-			step,
-			text,
-			status: taskStatusOf(mark, completed),
-			subtasks: [],
-		});
+		const task = { step, text, status: taskStatusOf(mark, completed), subtasks: [] };
+		this.stage.tasks.push(task);
+		this.#lastTask = task;
 	}
 
 	nestedCheckbox(step: number, mark: string, text: string): void {
@@ -354,7 +356,9 @@ class StageBuilder {
 			this.checkbox(step, mark, text);
 			return;
 		}
-		parent.subtasks.push({ step, text, status: taskStatusOf(mark, completed) });
+		const subtask = { step, text, status: taskStatusOf(mark, completed) };
+		parent.subtasks.push(subtask);
+		this.#lastTask = subtask;
 	}
 
 	line(raw: string): void {
@@ -363,6 +367,12 @@ class StageBuilder {
 			this.#flushParagraph();
 			return;
 		}
+		if (this.#lastTask !== null && /^\s/.test(raw)) {
+			const task = this.#lastTask;
+			task.description = task.description === undefined ? trimmed : `${task.description}\n${trimmed}`;
+			return;
+		}
+		this.#lastTask = null;
 		const sub = SUB_HEADING.exec(raw);
 		if (sub) {
 			this.#flushParagraph();

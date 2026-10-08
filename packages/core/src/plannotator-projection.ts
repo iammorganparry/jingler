@@ -48,7 +48,8 @@ const stageTaskFields = {
   /** 1-based position in the FLAT checklist — the [DONE:n] number. */
   step: Schema.Number,
   text: Schema.String,
-  status: PlannotatorTaskStatus
+  status: PlannotatorTaskStatus,
+  description: Schema.optional(Schema.String)
 }
 export const PlannotatorStageSubtask = Schema.Struct(stageTaskFields)
 export type PlannotatorStageSubtask = Schema.Schema.Type<typeof PlannotatorStageSubtask>
@@ -240,12 +241,14 @@ const structuredStageToPlanStage = (
     {
       id: `plannotator-task-${task.step}`,
       text: task.text,
-      status: task.status
+      status: task.status,
+      ...(task.description === undefined ? {} : { description: task.description })
     },
     ...task.subtasks.map((subtask) => ({
       id: `plannotator-task-${subtask.step}`,
       text: subtask.text,
-      status: subtask.status
+      status: subtask.status,
+      ...(subtask.description === undefined ? {} : { description: subtask.description })
     }))
   ]),
   files: stage.files.map((file) => ({ path: file.path, change: file.change })),

@@ -54,10 +54,6 @@ const ensurePlanTab = async (launched: LaunchedApp) => {
 }
 const reviewText = (launched: LaunchedApp) => review(launched).innerText().catch(() => "")
 
-const expandTechnicalDetails = async (launched: LaunchedApp, index: number) => {
-  await review(launched).getByText("Technical details", { exact: true }).nth(index).click()
-}
-
 const approveReview = async (launched: LaunchedApp) => {
   await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
 }
@@ -119,7 +115,6 @@ test("projects explicit deliverable stages without treating overview headings as
 
   await expect(review(launched)).toBeVisible()
   await expect.poll(() => reviewText(launched)).toContain("Implement the auth change")
-  await expandTechnicalDetails(launched, 0)
   // Proposed diffs, typed tests, and the test strategy render natively.
   await expect(review(launched).getByRole("region", { name: "Proposed change to src/auth.ts" }))
     .toBeVisible()
@@ -222,7 +217,6 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched)
   await openPlanTab(launched)
-  await expandTechnicalDetails(launched, 1)
 
   const readmeChange = review(launched).getByRole("region", { name: "Proposed change to README.md" })
   await expect(readmeChange).toBeVisible()
@@ -394,7 +388,6 @@ test("revises one stage approach through native review feedback", async ({
   const planTab = await ensurePlanTab(launched)
   await planTab.click()
   await expect(review(launched)).toBeVisible()
-  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation replaces the token format")
   const originalPlan = readFileSync(join(launched.repoPath, "PLAN.md"), "utf8")
@@ -412,7 +405,6 @@ test("revises one stage approach through native review feedback", async ({
     originalPlan.match(/<!-- id: [\w-]+ -->/g)
   )
   expect(revisedPlan.split("## Verify auth")[1]).toBe(originalPlan.split("## Verify auth")[1])
-  await expandTechnicalDetails(launched, 0)
   await expect.poll(() => reviewText(launched))
     .toContain("The implementation preserves compatibility")
   await approveReview(launched)

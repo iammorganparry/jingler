@@ -75,9 +75,9 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
           />
         ))}
       </div>
-      <aside aria-label="Plan comments" className="mx-auto mt-5 flex max-w-3xl flex-col gap-2 px-6 pb-5">
+      <aside aria-label="Plan comments" className="mx-auto mt-5 flex max-w-[760px] flex-col gap-2 px-8 pb-10">
         {comments.map((comment) => (
-          <article key={comment.id} data-comment-thread={comment.id} className="rounded-lg border border-line bg-panel p-3 text-[12px]">
+          <article key={comment.id} data-comment-thread={comment.id} className="rounded-lg border border-line bg-panel p-3 text-[13px]">
             <header className="mb-2 flex items-center gap-2 text-muted-foreground">
               <MessageSquare className="size-3.5" />
               <span>{comment.stageId === null ? "Plan" : comment.stageId}</span>

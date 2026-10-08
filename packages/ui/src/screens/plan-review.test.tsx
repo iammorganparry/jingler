@@ -112,7 +112,7 @@ const addComment = (quote: string, body: string) => {
 }
 
 describe("PlanReview", () => {
-  it("renders a compact stage summary and discloses technical detail on demand", async () => {
+  it("renders each stage as a document section with technical detail inline", async () => {
     const open = vi.fn()
     renderReview({}, open)
 
@@ -126,15 +126,13 @@ describe("PlanReview", () => {
     expect(screen.getByRole("region", { name: "Implement auth definition of done" }).textContent)
       .toContain("Focused tests and typecheck pass")
     expect(screen.getByRole("region", { name: "Implement auth tasks" }).textContent).toContain("Implement the auth change")
-    expect(screen.getByRole("region", { name: "Implement auth files" }).textContent).toContain("src/auth.ts")
+    const files = screen.getByRole("region", { name: "Implement auth files" })
+    expect(files.querySelector('[data-change="M"]')?.textContent).toBe("Mauth.tssrc")
     expect(screen.getByRole("region", { name: "Implement auth acceptance criteria" }).textContent).toContain("e2e · src/auth.test.ts::implements auth")
     expect(screen.getByText("medium", { exact: false })).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId("stage-diagram")).toBeTruthy())
 
-    const disclosure = screen.getByText("Technical details").closest("details")
-    expect(disclosure?.hasAttribute("open")).toBe(false)
-    fireEvent.click(screen.getByText("Technical details"))
-    expect(disclosure?.hasAttribute("open")).toBe(true)
+    expect(screen.getByRole("region", { name: "Implement auth technical details" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "Proposed change to src/auth.ts" })).toBeTruthy()
     fireEvent.click(screen.getAllByRole("button", { name: "Open src/auth.ts" })[0]!)
     expect(open).toHaveBeenCalledWith("src/auth.ts")

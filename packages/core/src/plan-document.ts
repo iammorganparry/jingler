@@ -50,7 +50,9 @@ export type PlanTaskStatus = Schema.Schema.Type<typeof PlanTaskStatus>
 export const PlanTask = Schema.Struct({
   id: Schema.String,
   text: Schema.String,
-  status: PlanTaskStatus
+  status: PlanTaskStatus,
+  /** What the task changes and why; absent on older plans. */
+  description: Schema.optional(Schema.String)
 })
 export type PlanTask = Schema.Schema.Type<typeof PlanTask>
 

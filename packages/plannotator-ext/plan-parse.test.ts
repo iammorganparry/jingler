@@ -185,4 +185,29 @@ describe("parsePlanMarkdown", () => {
     expect(stage.approach).toEqual(["first step", "second step"])
     expect(stage.tasks.map(({ text }) => text)).toEqual(["task"])
   })
+
+  it("reads indented lines under a task as its description", () => {
+    const parsed = parsePlanMarkdown([
+      "## Auth <!-- id: auth -->",
+      "- [ ] Add the service",
+      "  Wraps the keychain behind `TokenStore`.",
+      "  Falls back to settings once.",
+      "  - [x] Wire the route",
+      "    Calls `TokenStore.get`.",
+      "- [ ] Migrate the tokens",
+      "### Acceptance",
+      "- [ ] Tokens move",
+      "  not a task description"
+    ].join("\n"))
+    expect(parsed.stages[0]?.tasks).toEqual([
+      {
+        step: 1,
+        text: "Add the service",
+        status: "pending",
+        description: "Wraps the keychain behind `TokenStore`.\nFalls back to settings once.",
+        subtasks: [{ step: 2, text: "Wire the route", status: "completed", description: "Calls `TokenStore.get`." }]
+      },
+      { step: 3, text: "Migrate the tokens", status: "pending", subtasks: [] }
+    ])
+  })
 })
