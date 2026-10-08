@@ -1,4 +1,4 @@
-import type { RoutineDocument, RoutineInput } from "@jingler/core"
+import type { ProjectRoutineTemplate, RoutineDocument, RoutineInput } from "@jingler/core"
 import { assign, fromPromise, setup } from "xstate"
 export interface RoutinesApi {
   open(id: string): Promise<void>
@@ -18,11 +18,15 @@ interface RoutinesContext {
   api: RoutinesApi
   document: RoutineDocument
   command: Command
+  loaded: boolean
   error: string | null
+  template: ProjectRoutineTemplate | undefined
+  templateProjectId: string | undefined
+  templateLoad: number
   editing: string | undefined
   feedback: { projectId: string; message: string } | null
 }
-type RoutinesEvent = Command | { type: "EDIT"; id?: string }
+type RoutinesEvent = Command | { type: "TEMPLATE"; projectId: string; template: ProjectRoutineTemplate } | { type: "EDIT"; id?: string }
 const operation = fromPromise(async ({ input }: { input: { api: RoutinesApi; command: Command } }) => {
   const { api, command } = input
   if (command.type === "SAVE") return api.save(command.id, command.input)
@@ -52,22 +56,51 @@ export const routinesMachine = setup<
     ...input,
     document: { version: 1, routines: [], runs: [] },
     command: { type: "REFRESH" },
+    loaded: false,
     error: null,
+    template: undefined,
+    templateProjectId: undefined,
+    templateLoad: 0,
     editing: undefined,
     feedback: null,
   }),
   states: {
     ready: {
-      after: { 2000: { target: "working", actions: assign({ command: { type: "REFRESH" } }) } },
+      initial: "idle",
+      states: {
+        idle: {
+          after: { 2000: { target: "refreshing", actions: assign({ command: { type: "REFRESH" } }) } },
+        },
+        refreshing: {
+          // Exiting ready for a user command stops this actor. A late read
+          // cannot overwrite the mutation result; EDIT keeps the read alive.
+          invoke: {
+            src: "operation",
+            input: ({ context }) => ({ api: context.api, command: { type: "REFRESH" } }),
+            onDone: {
+              target: "idle",
+              actions: assign({ document: ({ event }) => event.output, error: null }),
+            },
+            onError: {
+              target: "idle",
+              actions: assign({
+                error: ({ event }) => (event.error instanceof Error ? event.error.message : String(event.error)),
+              }),
+            },
+          },
+          on: { REFRESH: {} },
+        },
+      },
       on: {
-        EDIT: { actions: assign({ editing: ({ event }) => event.id, feedback: null }) },
-        SAVE: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        ENABLE: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        DELETE: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        OPEN: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        RUN: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        CANCEL: { target: "working", actions: assign({ command: ({ event }) => event }) },
-        REFRESH: { target: "working", actions: assign({ command: ({ event }) => event }) },
+        TEMPLATE: { actions: assign({ editing: undefined, templateProjectId: ({ event }) => event.projectId, template: ({ event }) => event.template, templateLoad: ({ context }) => context.templateLoad + 1, feedback: null }) },
+        EDIT: { actions: assign({ template: undefined, editing: ({ event }) => event.id, feedback: null }) },
+        SAVE: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        ENABLE: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        DELETE: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        OPEN: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        RUN: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        CANCEL: { target: "#routines.working", actions: assign({ command: ({ event }) => event }) },
+        REFRESH: { target: ".refreshing", actions: assign({ command: ({ event }) => event }) },
       },
     },
     working: {
@@ -81,6 +114,8 @@ export const routinesMachine = setup<
         onDone: {
           target: "ready",
           actions: assign({
+            template: ({ context }) => context.command.type === "SAVE" ? undefined : context.template,
+            loaded: true,
             document: ({ event }) => event.output,
             feedback: ({ context }) =>
               context.command.type === "SAVE"

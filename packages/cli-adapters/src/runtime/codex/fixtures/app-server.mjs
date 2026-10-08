@@ -127,7 +127,7 @@ const handleTurn = (method, id, p) => {
   return false
 }
 const handleFailure = (method, id) => {
-  if (method === 'workspace/environment') { reply(id, { output: execFileSync('/bin/sh', ['-c', 'printf "%s:%s" "$JINGLER_PORT" "$JINGLER_WORKSPACE_PATH"'], { encoding: 'utf8' }) }); return true }
+  if (method === 'workspace/environment') { reply(id, { output: execFileSync('/bin/sh', ['-c', 'printf "%s:%s" "$JINGLER_ROOT_PATH" "$JINGLER_WORKSPACE_PATH"'], { encoding: 'utf8' }) }); return true }
   if (method === 'malformed') process.stdout.write('{broken\n')
   else if (method === 'oversized') process.stdout.write('x'.repeat(10000))
   else if (method === 'exit') process.exit(1)

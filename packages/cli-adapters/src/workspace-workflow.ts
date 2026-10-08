@@ -17,7 +17,7 @@ import {
   reopenWorkspaceAdmission,
   workspaceActivityCount
 } from "./workspace-admission.js"
-import { workspaceProcessEnvironment } from "./workspace-ports.js"
+import { workspaceProcessEnvironment } from "./workspace-environment.js"
 
 // Native Error causes do not survive Electron's context bridge.
 const workflowError = (message: string, cause: unknown) => new GitError({ message, cause: String(cause) })

@@ -1,4 +1,4 @@
-import type { Project, ProviderCatalog } from "@jingler/core"
+import type { ProjectRoutineTemplate, Project, ProviderCatalog } from "@jingler/core"
 import { useMachine } from "@xstate/react"
 import { RoutinesSettingsView } from "@jingler/ui"
 import { rpc } from "./rpc-client.js"
@@ -13,10 +13,12 @@ const api = {
 }
 export function RoutinesSettings({
   projects,
+  templates,
   projectId,
   catalog,
   onSession,
 }: {
+  templates?: ReadonlyArray<ProjectRoutineTemplate>
   projects: ReadonlyArray<Project>
   projectId: string
   catalog: ProviderCatalog | null
@@ -41,12 +43,16 @@ export function RoutinesSettings({
     )
   return (
     <RoutinesSettingsView
+      templates={templates}
+      template={state.context.templateProjectId === projectId ? state.context.template : undefined}
+      templateLoad={state.context.templateLoad}
+      onTemplate={(template) => send({ type: "TEMPLATE", projectId, template })}
       {...{ projects, projectId, models, document, editing }}
       error={visibleError}
       feedback={feedback?.projectId === projectId ? feedback.message : undefined}
       busy={!state.matches("ready")}
       loading={
-        state.matches("working") && document.routines.length === 0 && state.context.command.type === "REFRESH"
+        !state.context.loaded && state.matches("working") && state.context.command.type === "REFRESH"
       }
       onEdit={(id) => send({ type: "EDIT", id })}
       onSave={(id, input) => send({ type: "SAVE", id, input })}

@@ -432,21 +432,8 @@ export const ProjectRunCommand = Schema.Struct({
 });
 export type ProjectRunCommand = Schema.Schema.Type<typeof ProjectRunCommand>;
 
-export const WorkspacePortConfig = Schema.Struct({
-  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
-  extras: Schema.Array(Schema.Struct({ name: Schema.String, start: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) })),
-  previewUrl: Schema.optional(Schema.String),
-});
-export type WorkspacePortConfig = Schema.Schema.Type<typeof WorkspacePortConfig>;
-export const WorkspacePorts = Schema.Struct({
-  primary: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)),
-  extras: Schema.Record({ key: Schema.String, value: Schema.Number.pipe(Schema.int(), Schema.between(1024, 65535)) }),
-});
-export type WorkspacePorts = Schema.Schema.Type<typeof WorkspacePorts>;
-
 /** Machine-local commands and ignored files explicitly approved by the operator. */
 export const ProjectWorkflow = Schema.Struct({
-  ports: Schema.optional(WorkspacePortConfig),
   setup: Schema.optional(Schema.String),
   cleanup: Schema.optional(Schema.String),
   runs: Schema.Array(ProjectRunCommand),
@@ -578,7 +565,6 @@ export const Session = Schema.Struct({
   checkpointExecutionHistory: Schema.optional(Schema.Literal("clean", "unprovable")),
   /** An interactive terminal may leave descendants after its leader or the app exits. */
   checkpointPtyHistory: Schema.optional(Schema.Boolean),
-  workspacePorts: Schema.optional(WorkspacePorts),
   id: Schema.String,
   /** Durable project identity. Absent on sessions created before Projects existed. */
   projectId: Schema.optional(Schema.String),

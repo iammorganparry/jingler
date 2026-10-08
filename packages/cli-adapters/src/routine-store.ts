@@ -3,6 +3,8 @@ import { RoutineDocument, RoutineInput, routineRunActive, type Routine, type Rou
 import { Schema } from "effect"
 import { AtomicJsonFile } from "./runtime/persistence/atomic-json-file.js"
 
+import type { LegacyWorkflowBinding } from "./project-workflow.js"
+
 const needsAssociation = (run: RoutineRun) => routineRunActive(run) || (run.status === "failed" && run.sessionId === null)
 const empty = (): RoutineDocument => ({ version: 1, routines: [], runs: [] })
 const trimHistory = (runs: ReadonlyArray<RoutineRun>) => runs.filter(routineRunActive).concat(runs.filter(run => !routineRunActive(run)).slice(-500))
@@ -33,6 +35,13 @@ export class RoutineStore {
       if (value.runs.filter(routineRunActive).length > 1 || new Set(value.runs.map(run => run.requestedSessionId)).size !== value.runs.length) throw new Error("Invalid routine run identities")
       return value
     }, fallback: empty })
+  }
+  async migrateWorkflowBindings(bindings: ReadonlyArray<LegacyWorkflowBinding>) {
+    if (!bindings.length) return
+    await this.document.update(current => ({ ...current, routines: current.routines.map(routine => {
+      const binding = bindings.find(item => item.projectId === routine.projectId && item.oldDigest === routine.workflowDigest)
+      return binding ? { ...routine, workflowDigest: binding.newDigest } : routine
+    }) }))
   }
   read() { return this.document.read() }
   async save(id: string | undefined, input: RoutineInput, workflowDigest: string | null, now: number) {

@@ -1,3 +1,6 @@
+import { RoutineStore } from "./routine-store.js"
+import { join } from "node:path"
+import { readProjectConfig } from "./project-config.js"
 import { createHash } from "node:crypto"
 import type { CommandExecutor } from "@effect/platform"
 import { FileSystem, Path } from "@effect/platform"
@@ -6,7 +9,7 @@ import type { Project, Session } from "@jingler/core"
 import { Effect, Option, Schema } from "effect"
 import { AppPaths } from "./app-paths.js"
 import { runGit, runGitWithEnv } from "./command.js"
-import { normalizeWorkflow, safeWorkflowRelativePath, type WorkflowDraft } from "./project-workflow.js"
+import { legacyWorkflowBinding, migrateProjectWorkflow, normalizeWorkflow, safeWorkflowRelativePath, type WorkflowDraft } from "./project-workflow.js"
 
 const ProjectArray = Schema.Array(ProjectSchema)
 let projectWriteSequence = 0
@@ -39,7 +42,32 @@ export class ProjectService extends Effect.Service<ProjectService>()(
   "@jingler/ProjectService",
   {
     accessors: true,
-    sync: () => {
+    effect: Effect.gen(function* () {
+      const startupFs = yield* FileSystem.FileSystem
+      const startupPaths = yield* AppPaths
+      const routineStore = new RoutineStore(join(startupPaths.root, "routines.json"))
+      // Migrate routines before exposing ANY project writer: otherwise a project
+      // save can discard the legacy payload that proves the operator's consent.
+      const startupRaw = yield* startupFs.readFileString(startupPaths.projectsFile).pipe(Effect.catchAll(cause =>
+        cause._tag === "SystemError" && cause.reason === "NotFound"
+          ? Effect.succeed("")
+          : Effect.fail(new GitError({ message: "Failed to read legacy workflow bindings", cause }))
+      ))
+      yield* Effect.tryPromise({ try: async () => {
+        if (!startupRaw.trim()) return
+        let raw: unknown
+        try { raw = JSON.parse(startupRaw) } catch { return }
+        if (!Array.isArray(raw)) return
+        // Validate the complete catalogue before using any of its identities.
+        let catalogue: ReadonlyArray<Project>
+        try { catalogue = Schema.decodeUnknownSync(ProjectArray)(raw.map(migrateProjectWorkflow)) } catch { return }
+        if (new Set(catalogue.map(project => project.id)).size !== catalogue.length) return
+        const bindings = raw.flatMap(project => {
+          const binding = legacyWorkflowBinding(project)
+          return binding ? [binding] : []
+        })
+        await routineStore.migrateWorkflowBindings(bindings)
+      }, catch: cause => new GitError({ message: "Failed to migrate legacy workflow bindings", cause }) })
       const lock = Effect.unsafeMakeSemaphore(1)
 
       const readPersisted = (): Effect.Effect<ReadonlyArray<Project>, never, ProjectStoreEnv> =>
@@ -50,7 +78,11 @@ export class ProjectService extends Effect.Service<ProjectService>()(
             Effect.orElseSucceed(() => "")
           )
           if (raw.trim().length === 0) return []
-          return yield* Schema.decodeUnknown(Schema.parseJson(ProjectArray))(raw).pipe(
+          return yield* Effect.try(() => {
+            const data: unknown = JSON.parse(raw)
+            return Array.isArray(data) ? data.map(migrateProjectWorkflow) : data
+          }).pipe(
+            Effect.flatMap(Schema.decodeUnknown(ProjectArray)),
             Effect.orElseSucceed(() => [])
           )
         })
@@ -219,7 +251,7 @@ export class ProjectService extends Effect.Service<ProjectService>()(
           if (workflow.copyFiles.some((file) => safeWorkflowRelativePath(file) === null)) {
             return yield* Effect.fail(new GitError({ message: "Copied files must use safe repository-relative paths outside .git." }))
           }
-          const normalized = yield* Effect.try({ try: () => normalizeWorkflow(workflow, approve), catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Invalid workspace port configuration", cause }) })
+          const normalized = yield* Effect.try({ try: () => normalizeWorkflow(workflow, approve), catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Invalid project workflow", cause }) })
           return yield* lock.withPermits(1)(Effect.gen(function* () {
           const current = yield* readPersisted()
           const existing = current.find((project) => project.id === id)
@@ -291,7 +323,9 @@ export class ProjectService extends Effect.Service<ProjectService>()(
           return yield* list()
         })
 
-      return { list, get, register, createDirectory, clone, setWorkflow, remove, backfill }
-    }
+      const readConfig = (id: string) => get(id).pipe(Effect.flatMap(readProjectConfig))
+
+      return { routineStore, readConfig, list, get, register, createDirectory, clone, setWorkflow, remove, backfill }
+    })
   }
 ) {}

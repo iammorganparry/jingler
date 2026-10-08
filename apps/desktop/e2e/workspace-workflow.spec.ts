@@ -16,6 +16,8 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   await window.getByRole("button", { name: "Projects" }).click()
+  await expect(window.getByLabel("Starting app port")).toHaveCount(0)
+  await expect(window.getByLabel("Preview URL template")).toHaveCount(0)
   await window.getByLabel("Setup command").fill("node -e \"require('node:fs').writeFileSync('setup-proof.txt','ready')\"")
   await window.getByRole("button", { name: "Add run command" }).click()
   await window.getByLabel("Run name 1", { exact: true }).fill("Dev")
@@ -31,6 +33,8 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   await window.getByRole("button", { name: "Create workspace" }).click()
   await expect(window.getByTestId("workspace-workflow-bar")).toBeVisible({ timeout: 20_000 })
   await expect(window.getByRole("button", { name: "Run Dev" })).toBeVisible()
+  await expect(window.getByTestId("workspace-port")).toHaveCount(0)
+  await expect(window.getByRole("button", { name: /^(Open preview|Check ports|Reassign ports)$/ })).toHaveCount(0)
 
   const sessionsPath = join(home, "jingler", "sessions.json")
   await expect.poll(() => existsSync(sessionsPath) ? JSON.parse(readFileSync(sessionsPath, "utf8"))[0]?.worktreePath : null).not.toBeNull()
@@ -39,6 +43,11 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   expect(readFileSync(join(session.worktreePath, ".env.local"), "utf8")).toContain("WORKFLOW_COPY=ready")
 
   await window.getByRole("button", { name: "Run Dev" }).click()
+  await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()
+  // The general browser remains available beside a running project command.
+  await window.getByTestId("view-tab-browser").click()
+  await expect(window.getByLabel("Preview URL").filter({ visible: true }).first()).toBeVisible()
+  await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
   await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()
   // Remove a live definition: its original label and Stop control must survive.
   await window.getByRole("button", { name: "Account menu" }).click()

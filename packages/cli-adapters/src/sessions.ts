@@ -1,8 +1,6 @@
 import { workspaceAdmissionClosed, workspaceHasUnprovenProcesses, setWorkspaceCheckpointMode } from "./workspace-admission.js"
-import { closeWorkspaceAdmission, reopenWorkspaceAdmission, workspaceActivityCount, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
-import { allocateWorkspacePorts } from "./workspace-ports.js"
+import { setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
 import { ProjectService } from "./projects.js"
-import { approvedWorkflow } from "./project-workflow.js"
 import { createHash } from "node:crypto"
 import type {
   AgentEndpointId,
@@ -536,14 +534,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
-      const assignPorts = (session: Session, current: readonly Session[]) => Effect.gen(function* () {
-        if (session.environmentId || session.workspaceMode === "direct" || !session.worktreePath || session.workspacePorts) return session
+      const checkWorkspaceSetup = (session: Session) => Effect.gen(function* () {
+        if (!session.checkpointSafeMode || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return session
         const projectService = yield* Effect.serviceOption(ProjectService)
-        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project port configuration", cause }))) : undefined
-        if (session.checkpointSafeMode && project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
-        const config = approvedWorkflow(project?.workflow)?.ports
-        const workspacePorts = yield* Effect.tryPromise({ try: () => allocateWorkspacePorts(current, config), catch: (cause) => new GitError({ message: "Could not allocate workspace ports", cause }) })
-        return { ...session, workspacePorts }
+        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
+        if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
+        return session
       })
       const repositoryLocks = new Map<string, Effect.Semaphore>()
       const repositoryLock = (identity: string): Effect.Semaphore => {
@@ -864,7 +860,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readAll,
           ensureSessionIdAvailable,
           writeAll,
-          assignPorts
+          checkWorkspaceSetup
         )
             })
 
@@ -983,7 +979,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
-              session = yield* assignPorts(session, current)
+              session = yield* checkWorkspaceSetup(session)
               yield* writeAll([session, ...current])
             })
           )
@@ -1118,7 +1114,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
-              session = yield* assignPorts(session, current)
+              session = yield* checkWorkspaceSetup(session)
               yield* writeAll([session, ...current])
             })
           )
@@ -1137,24 +1133,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             yield* writeAll(all.map((s) => (s.id === id ? patch(s) : s)))
           })
         )
-
-      const reassignWorkspacePorts = (id: string) => Effect.acquireUseRelease(
-        Effect.try({ try: () => {
-          const token = closeWorkspaceAdmission(id, "reassigning workspace ports")
-          if (workspaceActivityCount(id) !== 0) { reopenWorkspaceAdmission(id, token); throw new Error("Stop all agents, commands and terminals before reassigning ports.") }
-          return token
-        }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Workspace is busy", cause }) }),
-        () => atomically(Effect.gen(function* () {
-          const current = yield* readAll()
-          const session = current.find((item) => item.id === id)
-          if (!session || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return yield* Effect.fail(new GitError({ message: "Ports require an isolated local workspace." }))
-          const unassigned = { ...session, workspacePorts: undefined }
-          const next = yield* assignPorts(unassigned, current.filter((item) => item.id !== id))
-          yield* writeAll(current.map((item) => item.id === id ? next : item))
-          return next
-        })),
-        (token) => Effect.sync(() => { reopenWorkspaceAdmission(id, token) })
-      )
 
       const updateChat = (
         sessionId: string,
@@ -2081,7 +2059,6 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         create,
         createFromPr,
         createFromIssue,
-        reassignWorkspacePorts,
         createChat,
         selectChat,
         renameChat,
@@ -2263,7 +2240,7 @@ function* createIsolatedSession(
     sessionId: string
   ) => Effect.Effect<void, GitError>,
   writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>,
-  assignPorts: (session: Session, current: readonly Session[]) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
+  checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
   const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
   if (existing.some((s) => s.worktreePath === worktreePath)) {
@@ -2298,7 +2275,7 @@ function* createIsolatedSession(
     Effect.gen(function* () {
       const current = yield* readAll()
       yield* ensureSessionIdAvailable(current, session.id)
-      session = yield* assignPorts(session, current)
+      session = yield* checkWorkspaceSetup(session)
               yield* writeAll([session, ...current])
     })
   )

@@ -1,4 +1,4 @@
-import type { ProviderCatalog, Routine, RoutineInput, ReasoningSetting } from "@jingler/core"
+import type { ProjectRoutineTemplate, ProviderCatalog, Routine, RoutineInput, ReasoningSetting } from "@jingler/core"
 import { piEndpointId } from "@jingler/core"
 import { assign, setup } from "xstate"
 export type RoutineModel = ProviderCatalog["connections"][number]["models"][number] & {
@@ -32,14 +32,15 @@ type Event =
   | { type: "APPROVE"; approved: boolean }
   | { type: "ERROR"; message: string }
 interface Input {
+  template?: ProjectRoutineTemplate
   selected?: Routine
   models: RoutineModel[]
 }
 const draftReasoning = (reasoning: Routine["reasoning"] | undefined): string => {
   if (!reasoning) return "default"
-  return reasoning.enabled ? (reasoning.effort ?? "medium") : "off"
+  return reasoning.enabled ? (reasoning.effort ?? "on") : "off"
 }
-export const routineDraft = ({ selected, models }: Input): RoutineDraft => ({
+const localRoutineDraft = ({ selected, models }: Input): RoutineDraft => ({
   name: selected?.name ?? "",
   branch: selected?.baseBranch ?? "main",
   model: selected
@@ -55,6 +56,19 @@ export const routineDraft = ({ selected, models }: Input): RoutineDraft => ({
   duration: String(selected ? selected.maxDurationMs / 60000 : 10),
   enabled: selected?.enabled ?? false,
 })
+export const routineDraft = (input: Input): RoutineDraft => input.template ? templateDraft(input.template, input.models) : localRoutineDraft(input)
+export const templateDraft = (template: ProjectRoutineTemplate, models: RoutineModel[]): RoutineDraft => {
+  const matches = template.providerId && template.modelId
+    ? models.filter((model) => model.connection.targetId === "desktop" && model.selectable && model.providerId === template.providerId && model.id === template.modelId) : []
+  return {
+    name: template.name, branch: template.baseBranch, prompt: template.prompt,
+    model: matches.length === 1 ? modelKey(matches[0]!) : "",
+    reasoning: draftReasoning(template.reasoning), schedule: template.schedule.kind,
+    at: localDateTime(template.schedule.at),
+    interval: template.schedule.kind === "interval" ? String(template.schedule.everyMs / 60000) : "60",
+    duration: String(template.maxDurationMs / 60000), enabled: false,
+  }
+}
 export const routineFormMachine = setup({
   types: {
     context: {} as Context,
@@ -79,6 +93,7 @@ export const routineFormMachine = setup({
 })
 const reasoningSetting = (value: string): ReasoningSetting | null => {
   if (value === "default") return null
+  if (value === "on") return { enabled: true }
   if (value === "off") return { enabled: false }
   if (
     value === "minimal" ||
@@ -97,6 +112,7 @@ export function routinePayload(
   projectId: string,
   models: RoutineModel[],
   selected?: Routine,
+  template?: ProjectRoutineTemplate,
 ): RoutineInput {
   if (!approved) throw new Error("Approve these exact settings before saving or running.")
   if (!projectId || (selected && selected.projectId !== projectId))
@@ -105,12 +121,13 @@ export function routinePayload(
   if (!model)
     throw new Error("The saved model is unavailable. Choose an available managed Pi model and approve again.")
   validateRoutineDraft(draft)
+  const source = selected ?? template
   const at =
-    selected && draft.at === localDateTime(selected.schedule.at)
-      ? selected.schedule.at
+    source && draft.at === localDateTime(source.schedule.at)
+      ? source.schedule.at
       : new Date(draft.at).getTime()
-  const duration = Number(draft.duration) * 60000
-  const interval = Number(draft.interval) * 60000
+  const duration = Math.round(Number(draft.duration) * 60000)
+  const interval = Math.round(Number(draft.interval) * 60000)
   return {
     name: draft.name.trim(),
     prompt: draft.prompt,
@@ -121,7 +138,7 @@ export function routinePayload(
     connectionId: model.connection.id,
     providerId: model.providerId,
     modelId: model.id,
-    reasoning: reasoningSetting(draft.reasoning),
+    reasoning: source && draft.reasoning === draftReasoning(source.reasoning) ? source.reasoning : reasoningSetting(draft.reasoning),
     mode: "ask",
     schedule:
       draft.schedule === "interval" ? { kind: "interval", at, everyMs: interval } : { kind: "once", at },
@@ -143,15 +160,15 @@ function validateRoutineDraft(draft: RoutineDraft) {
     throw new Error("Provide a name, prompt and base branch within their allowed lengths.")
   const at = new Date(draft.at).getTime()
   if (!Number.isSafeInteger(at) || at < 0) throw new Error("Choose a valid first occurrence.")
-  const duration = Number(draft.duration) * 60000
-  if (!Number.isInteger(duration) || duration < 60000 || duration > 86400000)
-    throw new Error("Maximum run minutes must be from 1 to 1440.")
-  const interval = Number(draft.interval) * 60000
+  const duration = Math.round(Number(draft.duration) * 60000)
+  if (!Number.isInteger(duration) || duration < 1000 || duration > 86400000)
+    throw new Error("Maximum duration must be from 1 second to 1440 minutes.")
+  const interval = Math.round(Number(draft.interval) * 60000)
   if (draft.schedule !== "once" && draft.schedule !== "interval")
     throw new Error("Choose a supported schedule.")
   if (
     draft.schedule === "interval" &&
-    (!Number.isInteger(interval) || interval < 60000 || interval > 365 * 86400000)
+    (!Number.isInteger(interval) || interval < 1000 || interval > 365 * 86400000)
   )
-    throw new Error("Interval minutes must be from 1 to 525600.")
+    throw new Error("Interval must be from 1 second to 525600 minutes.")
 }

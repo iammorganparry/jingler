@@ -1,4 +1,4 @@
-import { trustedWorkspaceEnvironment } from "./workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "./workspace-environment.js"
 /**
  * TerminalService — the main-process manager for PTY-backed terminals.
  *

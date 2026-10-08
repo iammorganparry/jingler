@@ -219,13 +219,14 @@ describe("workspace mutation tools", () => {
   })
 })
 
- it("runs simultaneous Pi and child commands with isolated trusted workspace environments", async () => {
+ it("runs simultaneous commands with isolated trusted workspace paths", async () => {
    const context = { signal: new AbortController().signal, idempotencyKey: null, progress: () => undefined }
-   const command = 'printf "%s:%s" "$JINGLER_PORT" "$JINGLER_WORKSPACE_PATH"'
-   const before = process.env.JINGLER_PORT
-   const results = await Promise.all([3100, 3101].map((value) => Effect.runPromise(port.execute(workspace, command, { ...context, workspaceEnvironment: { JINGLER_PORT: String(value), JINGLER_WORKSPACE_PATH: workspace } }))))
-   expect(results.map((result) => result.stdout)).toEqual([`3100:${workspace}`, `3101:${workspace}`])
-   expect(process.env.JINGLER_PORT).toBe(before)
+   const command = 'printf "%s" "$JINGLER_WORKSPACE_PATH"'
+   const before = process.env.JINGLER_WORKSPACE_PATH
+   const paths = ["/work-one", "/work-two"]
+   const results = await Promise.all(paths.map((value) => Effect.runPromise(port.execute(workspace, command, { ...context, workspaceEnvironment: { JINGLER_WORKSPACE_PATH: value } }))))
+   expect(results.map((result) => result.stdout)).toEqual(paths)
+   expect(process.env.JINGLER_WORKSPACE_PATH).toBe(before)
  })
 
 it("proves shell descendants stopped before releasing command admission", async () => {
@@ -236,12 +237,9 @@ it("proves shell descendants stopped before releasing command admission", async 
   expect(workspaceActivityCount("shell-session")).toBe(0)
 })
 
-it("allocated ports do not suppress unrelated eligible offload", async () => {
+it("workspace paths do not suppress eligible offload", async () => {
   const executeIfEligible = vi.fn<OffloadCommandRouterPort["executeIfEligible"]>(() => Effect.succeed({ command: "pnpm test", exitCode: 0, stdout: "remote", stderr: "", offloaded: true, jobId: "job_aaaaaaaaaaaaaaaa" }))
-  const registry = makeRegistry({ executeIfEligible, primeSession: () => Effect.succeed("accepted"), destroySession: () => Effect.void }, { JINGLER_PORT: "3100" })
+  const registry = makeRegistry({ executeIfEligible, primeSession: () => Effect.succeed("accepted"), destroySession: () => Effect.void }, { JINGLER_WORKSPACE_PATH: workspace })
   expect(await execute(registry, "command_execute", { command: "pnpm test" })).toMatchObject({ status: "success", value: { stdout: "remote" } })
   expect(executeIfEligible).toHaveBeenCalledOnce()
-  executeIfEligible.mockClear()
-  expect(await execute(registry, "command_execute", { command: 'printf "$JINGLER_PORT"' })).toMatchObject({ status: "success", value: { stdout: "3100" } })
-  expect(executeIfEligible).not.toHaveBeenCalled()
 })

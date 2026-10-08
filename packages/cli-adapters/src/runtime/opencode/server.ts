@@ -1,5 +1,5 @@
 import { worktreeEnv } from "../../worktree-env.js"
-import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { mkdtemp, rm } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"

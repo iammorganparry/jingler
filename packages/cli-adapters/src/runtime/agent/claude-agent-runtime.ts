@@ -1,6 +1,6 @@
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import { worktreeEnv } from "../../worktree-env.js"
-import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process"
 import { randomUUID } from "node:crypto"
 import {

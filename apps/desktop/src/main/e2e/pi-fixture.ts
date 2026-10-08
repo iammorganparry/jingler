@@ -763,6 +763,13 @@ const routineProofResponse = async (context: PiContext): Promise<ReturnType<type
 
 const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> => {
   switch (fixture.scenarioId) {
+    case "send-progress":
+      // The real title role waits on the scripted transport, so creation stays
+      // pending after the workspace exists. No provider/network request occurs.
+      return Array.from({ length: 16 }, () => async () => {
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        return fauxAssistantMessage(JSON.stringify({ title: "Delayed naming proof", branch: { type: "chore", slug: "delayed-naming-proof" } }))
+      })
     case "workspace-workflow":
       return Array.from({ length: 32 }, () => () => fauxAssistantMessage("Workflow turn admitted."))
     case "workspace-safe-refusals":

@@ -121,3 +121,5 @@ export { BUILTIN_SKILLS } from "./runtime/resources/portable-skills.js"
 export { WorkspaceCheckpointService, acquireCheckpointedTurn } from "./workspace-checkpoints.js"
 export { configureAnchoredFsProcess, anchoredFs } from "./anchored-fs.js"
 export type { AnchoredProcess } from "./anchored-fs.js"
+
+export * from "./project-config.js"

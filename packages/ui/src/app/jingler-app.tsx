@@ -171,13 +171,13 @@ export interface JinglerAppProps {
   onCloneProject?: (input: { url: string; destination: string; name?: string }) => Promise<Project>
   onCloneProjectFromGitHub?: (input: { installationId?: string; repository: string; destination: string; name?: string }) => Promise<Project>
   onEnsureProjectOnEnvironment?: (projectId: string, environmentId: string) => Promise<Project>
-  routines?: (projectId: string) => ReactNode
+  onReadProjectConfig?: (projectId: string) => Promise<import("@jingler/core").ProjectConfig>
+  routines?: (projectId: string, templates?: ReadonlyArray<import("@jingler/core").ProjectRoutineTemplate>) => ReactNode
   onSaveProjectWorkflow?: (input: {
     projectId: string
     setup?: string
     cleanup?: string
     runs: ReadonlyArray<ProjectRunCommand>
-    ports?: import("@jingler/core").WorkspacePortConfig
     copyFiles: ReadonlyArray<string>
     approve: boolean
   }) => Promise<void> | void
@@ -621,7 +621,7 @@ function getActiveTabContext(active: Session) {
               key={settingsSection}
               initialSection={settingsSection}
               routines={routines}
-              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow } : undefined}
+              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow, onReadConfig: props.onReadProjectConfig } : undefined}
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}

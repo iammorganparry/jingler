@@ -1,5 +1,5 @@
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
-import { trustedWorkspaceEnvironment } from "../../workspace-ports.js"
+import { trustedWorkspaceEnvironment } from "../../workspace-environment.js"
 import { INTERACTIVE_TOOL_TIMEOUT_MS } from "../tools/tool-registry.js"
 import { CodexInbox } from "./inbox.js"
 import { prepareNativeRuntimeTools, type NativeRuntimeToolsOptions } from "../agent/native-runtime-tools.js"

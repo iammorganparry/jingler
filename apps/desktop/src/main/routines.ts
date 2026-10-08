@@ -1,8 +1,6 @@
 import { routineExecution, runOwnedRoutineEffect, routineTeardown } from "./routine-execution.js"
 import { validateRoutineProject, validateRoutineModel } from "./routine-validation.js"
-import { join } from "node:path"
-import { AgentRunner, AppPaths, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
-import { RoutineStore } from "@jingler/cli-adapters/routine-store"
+import { AgentRunner, AuthService, ProjectService, ProviderConnections, SessionStore, WorkspaceCheckpointService } from "@jingler/cli-adapters"
 import { GitError, type RoutineInput, type RoutineRun } from "@jingler/core"
 import { Effect, Runtime, Stream } from "effect"
 import { revalidateRoutineAuth, routineStartup } from "./routine-auth.js"
@@ -15,7 +13,6 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
     const requireAuth = () => revalidateRoutineAuth(() => auth.getSession()).pipe(
       Effect.onError(() => Effect.sync(() => { authenticated = false; scheduler.closeAdmission() }))
     )
-    const paths = yield* AppPaths
     const sessions = yield* SessionStore
     const projects = yield* ProjectService
     const runner = yield* AgentRunner
@@ -39,7 +36,7 @@ export class RoutinesService extends Effect.Service<RoutinesService>()("desktop/
     type Environment = Effect.Effect.Context<ReturnType<typeof create>> | Stream.Stream.Context<ReturnType<typeof runner.prompt>> | Effect.Effect.Context<ReturnType<typeof validate>> | Effect.Effect.Context<ReturnType<typeof checkpoints.setMode>>
     const effectRuntime = yield* Effect.runtime<Environment>()
     const runEffect = Runtime.runPromise(effectRuntime)
-    const store = new RoutineStore(join(paths.root, "routines.json"))
+    const store = projects.routineStore
     const scheduler = new RoutineScheduler(store, {
       sessionExists: async id => {
         const session = await runEffect(sessions.get(id).pipe(Effect.orElseSucceed(() => null)))

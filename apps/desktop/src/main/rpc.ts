@@ -2,8 +2,7 @@ import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archiv
 import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
 import { TerminalError } from "@jingler/core";
-import { readyWorkspacePreview } from "@jingler/cli-adapters/project-workflow";
-import { workspaceEnvironment, workspacePortAvailable } from "@jingler/cli-adapters/workspace-ports";
+import { workspaceEnvironment } from "@jingler/cli-adapters/workspace-environment";
 import { BUILTIN_SKILLS } from "@jingler/cli-adapters"
 import { probeOpenCodeEndpoint } from "@jingler/cli-adapters/runtime/opencode/endpoint"
 import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
@@ -4594,7 +4593,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const project = yield* ProjectService.get(projectId);
       return yield* ensureProjectOnOwnedEnvironment(project, environmentId);
     }),
-  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, ports, approve }) =>
+  "Projects.readConfig": ({ projectId }) => ProjectService.readConfig(projectId),
+  "Projects.setWorkflow": ({ projectId, setup, cleanup, runs, copyFiles, approve }) =>
     ProjectService.setWorkflow(
       projectId,
       {
@@ -4602,33 +4602,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         ...(cleanup === undefined ? {} : { cleanup }),
         runs,
         copyFiles,
-        ...(ports ? { ports } : {}),
       },
       approve,
     ),
-  "WorkspacePorts.check": ({ sessionId }) => Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
-    const ports = session?.workspacePorts;
-    if (!ports) return [];
-    const sessions = yield* SessionStore.list();
-    const reserved = new Set(sessions.filter((item) => item.id !== sessionId).flatMap((item) => item.workspacePorts ? [item.workspacePorts.primary, ...Object.values(item.workspacePorts.extras)] : []));
-    return yield* Effect.tryPromise({ try: async () => {
-      const assigned = [ports.primary, ...Object.values(ports.extras)];
-      const availability = await Promise.all(assigned.map(workspacePortAvailable));
-      return assigned.filter((port, index) => reserved.has(port) || !availability[index]);
-    }, catch: (cause) => new GitError({ message: "Could not check workspace ports", cause }) });
-  }),
-  "WorkspacePorts.reassign": ({ sessionId }) => SessionStore.reassignWorkspacePorts(sessionId),
-  "WorkspacePorts.preview": ({ sessionId }) => Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
-    if (!session?.workspacePorts || !session.projectId || session.environmentId || session.workspaceMode === "direct") return yield* Effect.fail(new GitError({ message: "Preview requires an isolated local workspace with assigned ports." }));
-    const project = yield* ProjectService.get(session.projectId);
-    return yield* Effect.tryPromise({
-      try: async () => {
-        return await readyWorkspacePreview(project.workflow, session.workspacePorts!);
-      }, catch: (cause) => new GitError({ message: cause instanceof Error ? cause.message : "Preview unavailable", cause })
-    });
-  }),
   "WorkspaceCheckpoints.setMode": ({ sessionId, enabled }) => WorkspaceCheckpointService.setMode(sessionId, enabled),
   "WorkspaceCheckpoints.list": ({ sessionId }) => WorkspaceCheckpointService.list(sessionId),
   "WorkspaceCheckpoints.capture": ({ sessionId }) => WorkspaceCheckpointService.capture(sessionId),
