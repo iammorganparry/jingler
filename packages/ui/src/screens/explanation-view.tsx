@@ -31,19 +31,18 @@ export function ExplanationView({
 
   return (
     <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-editor">
-      <article aria-label="Technical explanation" className="mx-auto flex w-full max-w-[820px] flex-col gap-5 px-4 py-8">
-        <header className="flex flex-col gap-2 border-b border-hairline px-1 pb-5">
-          <div className="flex items-center gap-2 text-blue">
-            <Sparkles className="size-4" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.6px]">Explanation</span>
-          </div>
-          <h1 className="m-0 text-[20px] font-semibold leading-[1.3] text-text-bright">{document.title}</h1>
-          <p className="m-0 max-w-[68ch] text-[13px] leading-[1.65] text-muted-foreground">{document.summary}</p>
+      <article aria-label="Technical explanation" className="sb-plan mx-auto flex w-full max-w-[760px] flex-col px-8 py-10">
+        <header className="border-b border-line pb-8">
+          <p className="m-0 flex items-center gap-2 font-mono text-[12px] uppercase tracking-wide text-blue">
+            <Sparkles className="size-3.5" /> Explanation
+          </p>
+          <h1 className="sb-plan-doc-title mt-2">{document.title}</h1>
+          <p className="sb-plan-lead mt-3 text-muted-foreground">{document.summary}</p>
         </header>
         {document.sections.map((section) => (
-          <section key={section.id} aria-label={section.title} className="flex flex-col gap-2 rounded-lg border border-hairline bg-panel px-4 py-4">
-            <h2 className="m-0 text-[14px] font-semibold text-text-bright">{section.title}</h2>
-            <VisualBlocks blocks={section.blocks} className="sb-md text-[13px] leading-[1.7] text-text-body" />
+          <section key={section.id} aria-label={section.title} className="mt-10">
+            <h2 className="sb-plan-heading">{section.title}</h2>
+            <VisualBlocks blocks={section.blocks} />
           </section>
         ))}
       </article>

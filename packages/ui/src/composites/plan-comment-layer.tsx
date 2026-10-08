@@ -22,6 +22,27 @@ export interface PlanCommentLayerProps {
   readonly onResolve: (id: string, resolved: boolean) => void
 }
 
+const detachedHighlight = (id: string): Highlight => ({ id, top: 0, left: 0, width: 0, height: 0, detached: true })
+
+/** Where one comment's quote sits in the scroller, or nothing when it has no anchor or no box. */
+const highlightFor = (comment: PlanAnnotation, body: HTMLElement, root: HTMLElement, base: DOMRect): Highlight[] => {
+  if (comment.anchor === undefined) return []
+  if (!(body.textContent ?? "").includes(comment.anchor.quote)) return [detachedHighlight(comment.id)]
+  const range = domRangeFromAnchor(body, comment.anchor)
+  if (range === null) return [detachedHighlight(comment.id)]
+  const rect = range.getBoundingClientRect()
+  // Text inside a folded stage has no box; it isn't detached, just not drawn.
+  if (rect.width === 0 && rect.height === 0) return []
+  return [{
+    id: comment.id,
+    top: rect.top - base.top + root.scrollTop,
+    left: rect.left - base.left + root.scrollLeft,
+    width: rect.width,
+    height: rect.height,
+    detached: false
+  }]
+}
+
 export function PlanCommentLayer({ container, content, comments, editable, onReply, onResolve }: PlanCommentLayerProps) {
   const [highlights, setHighlights] = useState<ReadonlyArray<Highlight>>([])
   const [replies, setReplies] = useState<Readonly<Record<string, string>>>({})
@@ -32,23 +53,7 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
     if (root === null || body === null) return setHighlights([])
     const recompute = () => {
       const base = root.getBoundingClientRect()
-      setHighlights(comments.flatMap((comment): Highlight[] => {
-        if (comment.anchor === undefined) return []
-        if (!(body.textContent ?? "").includes(comment.anchor.quote)) {
-          return [{ id: comment.id, top: 0, left: 0, width: 0, height: 0, detached: true }]
-        }
-        const range = domRangeFromAnchor(body, comment.anchor)
-        if (range === null) return [{ id: comment.id, top: 0, left: 0, width: 0, height: 0, detached: true }]
-        const rect = range.getBoundingClientRect()
-        return [{
-          id: comment.id,
-          top: rect.top - base.top + root.scrollTop,
-          left: rect.left - base.left + root.scrollLeft,
-          width: rect.width,
-          height: rect.height,
-          detached: false
-        }]
-      }))
+      setHighlights(comments.flatMap((comment) => highlightFor(comment, body, root, base)))
     }
     recompute()
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(recompute)

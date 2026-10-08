@@ -286,6 +286,26 @@ describe("PlanReview", () => {
     expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
   })
 
+  it("shows a reopened stage's body even after it was folded as done", () => {
+    const stage = document.plan.stages[0]!
+    const withStage = (next: typeof stage) => ({ ...document, plan: { ...document.plan, stages: [next] } })
+    const done = {
+      ...stage,
+      tasks: (stage.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+      acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
+    }
+    const view = renderReview({ document: withStage(done) })
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+    view.rerender(
+      <ThemeProvider tokens={toTokens(jinglerDark)}>
+        <OpenAssetProvider open={vi.fn()} knownFiles={new Set(["src/auth.ts"])}>
+          <PlanReview document={withStage({ ...done, tasks: [{ id: "task-1", text: "Redo", status: "pending" }] })} />
+        </OpenAssetProvider>
+      </ThemeProvider>
+    )
+    expect(screen.getByRole("region", { name: "Implement auth files" })).toBeTruthy()
+  })
+
   it("is read-only once the plan is approved", () => {
     renderReview({ document: { ...document, status: "approved" } })
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull()

@@ -122,7 +122,7 @@ function StageHeader({ stage, number, stages = [], onComment }: StageProps) {
   const deliverable = stage.deliverable ?? stage.intent
   return (
     <header>
-      <div className="flex items-center gap-2 text-[12px] text-dim">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] text-dim">
         <span className="font-mono font-medium tracking-wide">
           STAGE {number}{stages.length > 0 && ` OF ${stages.length}`}
         </span>
@@ -226,7 +226,9 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
   const done = stage.definitionOfDone ?? []
   const completed = planStageExecutionStatus(stage) === "completed"
   // Finished stages start folded so the reader's eye lands on the work still ahead.
-  const [open, setOpen] = useState(!completed)
+  // A stage that reopens (a task back to pending) always shows its body.
+  const [expanded, setExpanded] = useState(false)
+  const open = !completed || expanded
 
   return (
     <section
@@ -242,7 +244,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
         <button
           type="button"
           aria-expanded={open}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => setExpanded((current) => !current)}
           className="mt-3 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[13px] text-muted-foreground hover:bg-surface hover:text-text-bright"
         >
           <ChevronRight className={`size-4 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -250,7 +252,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
         </button>
       )}
 
-      {open && <>
+      <div hidden={!open}>
 
       {stage.userStory !== undefined && (
         <section
@@ -311,7 +313,7 @@ export function PlanStageCard({ stage, number, stages = [], onComment }: StagePr
           </ul>
         </Part>
       )}
-      </>}
+      </div>
     </section>
   )
 }

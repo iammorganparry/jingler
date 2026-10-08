@@ -872,7 +872,6 @@
   line-height: inherit;
 }
 .sb-plan-doc-title {
-  margin: 0;
   font-size: calc(28px * var(--sb-font-scale, 1));
   font-weight: 650;
   line-height: 1.25;
@@ -881,7 +880,6 @@
 }
 .sb-plan-title,
 .sb-plan h2.sb-plan-heading {
-  margin: 0;
   font-size: calc(22px * var(--sb-font-scale, 1));
   font-weight: 600;
   line-height: 1.3;

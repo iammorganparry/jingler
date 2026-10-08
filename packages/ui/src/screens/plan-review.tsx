@@ -92,17 +92,23 @@ interface ContentsItem {
 /** Sticky contents rail; highlights whichever section is at the top of the reader's view. */
 function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<ContentsItem>; readonly scroller: RefObject<HTMLDivElement | null> }) {
   const [active, setActive] = useState<string | null>(null)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-observe when the rendered sections change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the rendered sections change
   useEffect(() => {
     const root = scroller.current
-    if (root === null || typeof IntersectionObserver === "undefined") return
-    const observer = new IntersectionObserver((entries) => {
-      const top = entries.filter((entry) => entry.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
-      const id = top?.target.getAttribute("data-toc")
-      if (id) setActive(id)
-    }, { root, rootMargin: "0px 0px -70% 0px" })
-    for (const element of root.querySelectorAll("[data-toc]")) observer.observe(element)
-    return () => observer.disconnect()
+    if (root === null) return
+    // The active section is the last one whose top has reached the reader's top
+    // band — read from live geometry on every scroll, in either direction.
+    const update = () => {
+      const line = root.getBoundingClientRect().top + 96
+      let current: string | null = null
+      for (const element of root.querySelectorAll<HTMLElement>("[data-toc]")) {
+        if (element.getBoundingClientRect().top <= line) current = element.dataset.toc ?? null
+      }
+      setActive(current ?? root.querySelector<HTMLElement>("[data-toc]")?.dataset.toc ?? null)
+    }
+    update()
+    root.addEventListener("scroll", update, { passive: true })
+    return () => root.removeEventListener("scroll", update)
   }, [items, scroller])
   if (items.length < 2) return null
   const jump = (id: string) =>
