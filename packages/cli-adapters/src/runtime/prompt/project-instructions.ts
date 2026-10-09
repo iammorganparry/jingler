@@ -1,11 +1,14 @@
-import { constants, type Stats } from "node:fs"
-import { lstat, open, realpath } from "node:fs/promises"
-import { join } from "node:path"
+import { constants, type Dirent, type Stats } from "node:fs"
+import { lstat, open, readdir, realpath, stat } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join, relative } from "node:path"
 import { promptLayer } from "./role-profiles.js"
 import type { PromptLayer } from "./prompt-compiler.js"
 
 const FILES = ["AGENTS.md", "CLAUDE.md"] as const
 const MAX_FILE_BYTES = 32 * 1024
+const MAX_RULE_FILES = 64
+const MAX_RULE_DEPTH = 4
 
 const sameFile = (left: Stats, right: Stats): boolean =>
   left.dev === right.dev && left.ino === right.ino
@@ -20,12 +23,11 @@ const decodeUtf8Prefix = (buffer: Buffer): string => {
   return buffer.subarray(0, end).toString("utf8")
 }
 
-const readBoundedRootFile = async (
-  root: string,
-  name: typeof FILES[number],
+const readBoundedFile = async (
+  path: string,
+  name: string,
   limit: number
 ): Promise<string | null> => {
-  const path = join(root, name)
   const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null
     throw error
@@ -61,22 +63,76 @@ const readBoundedRootFile = async (
   }
 }
 
-export const projectInstructionsLayer = async (cwd: string): Promise<PromptLayer | null> => {
+const isRealDirectory = async (path: string): Promise<boolean> =>
+  (await lstat(path).catch(() => null))?.isDirectory() === true
+
+/**
+ * `*.md` under a Claude Code rules directory, sorted for a stable prompt.
+ * Repo-controlled rules never follow symlinks (a checkout could point one at a
+ * secret); the operator's own `~/.claude/rules` does, like Claude Code itself.
+ */
+const ruleFiles = async (dir: string, followLinks: boolean, depth = 0): Promise<ReadonlyArray<string>> => {
+  if (depth > MAX_RULE_DEPTH) return []
+  const entries: Array<Dirent> = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  const files: Array<string> = []
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const path = join(dir, entry.name)
+    if (entry.isSymbolicLink() && !followLinks) continue
+    const kind: Dirent | Stats | null = entry.isSymbolicLink() ? await stat(path).catch(() => null) : entry
+    if (kind?.isDirectory()) files.push(...await ruleFiles(path, followLinks, depth + 1))
+    else if (kind?.isFile() && entry.name.endsWith(".md")) files.push(path)
+  }
+  return files.slice(0, MAX_RULE_FILES)
+}
+
+interface InstructionFile {
+  readonly label: string
+  readonly path: string
+  readonly followLinks: boolean
+}
+
+const instructionFiles = async (root: string, home: string): Promise<ReadonlyArray<InstructionFile>> => {
+  const userRules = join(home, ".claude", "rules")
+  const projectRules = join(root, ".claude", "rules")
+  const projectRulesExist = await isRealDirectory(join(root, ".claude")) && await isRealDirectory(projectRules)
+  return [
+    { label: "~/.claude/CLAUDE.md", path: join(home, ".claude", "CLAUDE.md"), followLinks: true },
+    ...(await ruleFiles(userRules, true)).map((path) => ({
+      label: `~/.claude/rules/${relative(userRules, path)}`, path, followLinks: true
+    })),
+    ...FILES.map((name) => ({ label: name, path: join(root, name), followLinks: false })),
+    ...(projectRulesExist ? await ruleFiles(projectRules, false) : []).map((path) => ({
+      label: relative(root, path), path, followLinks: false
+    }))
+  ]
+}
+
+/**
+ * The instruction files a native Claude Code session would load: user
+ * `~/.claude/CLAUDE.md` and rules, then the workspace's AGENTS.md, CLAUDE.md
+ * and `.claude/rules`. Jingler runs harnesses with their own setting sources
+ * off, so this layer is the only way these reach the agent.
+ */
+export const projectInstructionsLayer = async (
+  cwd: string,
+  home: string = homedir()
+): Promise<PromptLayer | null> => {
   const root = await realpath(cwd)
-  const files = await Promise.all(
-    FILES.map((name) => readBoundedRootFile(root, name, MAX_FILE_BYTES))
-  )
-  const sections = files.flatMap((content, index) =>
-    content ? [`## ${FILES[index]}\n${content}`] : []
-  )
-  return sections.length === 0
+  const candidates = await instructionFiles(root, home)
+  const loaded = (await Promise.all(candidates.map(async ({ label, path, followLinks }) => {
+    const target = followLinks ? await realpath(path).catch(() => null) : path
+    const content = target === null ? null : await readBoundedFile(target, label, MAX_FILE_BYTES)
+    return content ? [{ label, content }] : []
+  }))).flat()
+  return loaded.length === 0
     ? null
     : promptLayer(
         "workspace",
         "workspace.project-instructions",
         [
-          "Follow these workspace-root project instructions unless they conflict with higher-priority Jingler or operator instructions.",
-          ...sections
+          "Follow these instruction files unless they conflict with higher-priority Jingler or operator instructions.",
+          `Loaded: ${loaded.map(({ label }) => label).join(", ")}`,
+          ...loaded.map(({ label, content }) => `## ${label}\n${content}`)
         ].join("\n\n")
       )
 }

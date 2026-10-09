@@ -11,6 +11,7 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { ProviderId, ProviderModelId, RuntimeDiagnosticMcpHealth } from "@jingler/core"
 import { Data, Effect, Schema } from "effect"
 import type { RuntimeMcpServer } from "../mcp/attachment.js"
+import { loginShellEnvironment } from "../../login-shell-env.js"
 import { ToolError, type ToolRegistry, type ToolRisk } from "./tool-registry.js"
 
 const TOOL_PAGE_LIMIT = 32
@@ -185,12 +186,26 @@ export const makeMcpToolClientFactory = (identity: McpClientIdentity): McpToolCl
   Effect.tryPromise({
       try: async () => {
         const client = new Client({ ...identity, version: "1.0.0" })
-        const transport = transportFor(server)
-        await client.connect(transport)
+        const transport = transportFor(server, await loginShellEnvironment())
+        // Always drain stderr: an unread pipe fills and stalls a chatty server.
+        let stderr = ""
+        transport instanceof StdioClientTransport && transport.stderr?.on("data", (chunk: Buffer) => {
+          stderr = `${stderr}${chunk.toString("utf8")}`.slice(-STDERR_TAIL)
+        })
+        try {
+          await client.connect(transport)
+        } catch (cause) {
+          await client.close().catch(() => undefined)
+          throw new Error(connectFailureMessage(cause, stderr), { cause })
+        }
         return client
       },
       catch: (cause) =>
-        clientFailure(server.name, `Could not connect to MCP server ${server.name}`, cause)
+        clientFailure(
+          server.name,
+          `Could not connect to MCP server ${server.name}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          cause
+        )
     }).pipe(
     Effect.map((client): McpToolClient => ({
       listTools: (cursor) =>
@@ -233,12 +248,21 @@ const authenticatedFetch = (
   return response
 }
 
-const transportFor = (server: RuntimeMcpServer) => {
+const STDERR_TAIL = 1_000
+
+/** The cause plus the server's last stderr, so a missing binary, env var or crash is distinguishable. */
+export const connectFailureMessage = (cause: unknown, stderr: string): string => {
+  const reason = cause instanceof Error ? cause.message : String(cause)
+  const tail = stderr.trim()
+  return tail === "" ? reason : `${reason}\nserver stderr:\n${tail}`
+}
+
+const transportFor = (server: RuntimeMcpServer, shellEnv: Readonly<Record<string, string>>) => {
   if (server.transport === "stdio") {
     return new StdioClientTransport({
       command: server.command,
       args: [...server.args],
-      env: { ...getDefaultEnvironment(), ...server.env },
+      env: { ...getDefaultEnvironment(), ...shellEnv, ...server.env },
       cwd: server.cwd,
       stderr: "pipe"
     })
