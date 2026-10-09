@@ -290,6 +290,32 @@ test("team account changes reject actions until refresh, and removed memberships
   } finally { rmSync(cli.root, { recursive: true, force: true }) }
 })
 
+test("a confirmed Personal account switch clears the old pane and draft before selecting the same PR again", async ({ launchApp }) => {
+  const cli = installCli()
+  cli.update({ personal: true })
+  try {
+    const { window } = await launchApp({ configured: true, withRepo: true, sessions, e2eEnv: cli.env })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("pull-requests-sidebar-item").click()
+    const inbox = window.getByTestId("pull-request-inbox")
+    const scope = inbox.getByRole("combobox", { name: "Pull request scope" })
+    await expect(scope).toBeEnabled()
+    await inbox.getByRole("button", { name: /Team PR 42/ }).click()
+    await expect(inbox.getByText("Team detail from the pinned CLI account.")).toBeVisible()
+    await inbox.getByPlaceholder("Leave a comment…").fill("Private account A draft")
+    cli.update({ accountId: 2, detailVersion: 1 })
+    await inbox.getByRole("button", { name: "Refresh", exact: true }).click()
+    await expect(scope).toBeEnabled()
+    await expect(inbox.getByText("Select a pull request to review it.")).toBeVisible()
+    await expect(inbox.getByPlaceholder("Leave a comment…")).toHaveCount(0)
+    await expect(inbox.getByRole("button", { name: "Comment", exact: true })).toHaveCount(0)
+    await inbox.getByRole("button", { name: /Team PR 42/ }).click()
+    await expect(inbox.getByText("Updated external PR detail.")).toBeVisible()
+    await expect(inbox.getByPlaceholder("Leave a comment…")).toHaveValue("")
+    expect(cli.requests().filter((request) => request.args[0] === "pr" && ["comment", "close", "merge"].includes(request.args[1]!))).toHaveLength(0)
+  } finally { rmSync(cli.root, { recursive: true, force: true }) }
+})
+
 for (const mode of ["personal", "team"] as const) {
   test(`${mode} drafts survive focus, delayed discovery and fresh detail; failed team controls stay honest`, async ({ launchApp }) => {
     test.setTimeout(120_000)

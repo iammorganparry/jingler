@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { GitHubTeamDiscovery, PullRequest, PullRequestListItem } from "@jingler/core"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { PullRequestInbox } from "../../../../packages/ui/src/composites/pull-request-inbox.js"
 import { WidthTierValue } from "../../../../packages/ui/src/hooks/width-tier.js"
@@ -11,6 +11,7 @@ import { usePullRequestInbox } from "./use-pull-request-inbox.js"
 vi.mock("./rpc-client.js", () => ({ rpc: {
   githubTeams: vi.fn(), githubPrInbox: vi.fn(), githubTeamPrs: vi.fn(),
   githubPrBySlug: vi.fn(), githubTeamPr: vi.fn(),
+  githubCommentBySlug: vi.fn(), githubCloseBySlug: vi.fn(), githubMergeBySlug: vi.fn(),
 } }))
 
 const discovery: GitHubTeamDiscovery = { account: { id: "1", login: "octocat" }, teams: [
@@ -117,7 +118,11 @@ it("accepts a personal PR during initial delayed discovery and preserves its dra
   await act(async () => complete(discovery))
   expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
   expect((composer as HTMLTextAreaElement).value).toBe("Personal draft")
-  expect(rpc.githubPrBySlug).toHaveBeenCalledTimes(1)
+  // Identity now owns an independent key: the unknown read plus one known read.
+  await waitFor(() => expect(rpc.githubPrBySlug).toHaveBeenCalledTimes(2))
+  expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+  expect(composer).toHaveProperty("value", "Personal draft")
+  expect(screen.getByText("Before refresh")).toBeTruthy()
   client.clear()
 })
 
@@ -137,4 +142,124 @@ it("disables stale team/queue choices after discovery fails but allows switching
   fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
   await screen.findByPlaceholderText("Leave a comment…")
   client.clear()
+})
+
+it.each([false, true])("isolates personal detail on a known account switch (cached A: %s), including a late A response for the same PR", async (cached) => {
+  vi.mocked(rpc.githubTeams).mockResolvedValue(discovery)
+  const client = mount()
+  let complete!: (value: PullRequest) => void
+  try {
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Pull request scope" }).hasAttribute("disabled")).toBe(false))
+    if (!cached) vi.mocked(rpc.githubPrBySlug).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    if (cached) {
+      const composer = await screen.findByPlaceholderText("Leave a comment…")
+      fireEvent.change(composer, { target: { value: "Private A draft" } })
+      vi.mocked(rpc.githubPrBySlug).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    }
+    await waitFor(() => expect(rpc.githubPrBySlug).toHaveBeenCalledTimes(1))
+    vi.mocked(rpc.githubTeams).mockResolvedValue({ ...discovery, account: { id: "2", login: "other" } })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await screen.findByText("Select a pull request to review it.")
+    expect(screen.queryByPlaceholderText("Leave a comment…")).toBeNull()
+    expect(screen.queryByText("Before refresh")).toBeNull()
+    vi.mocked(rpc.githubPrBySlug).mockResolvedValue({ ...detail, body: "Only B detail" })
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    await screen.findByText("Only B detail")
+    expect(screen.getByPlaceholderText("Leave a comment…")).toHaveProperty("value", "")
+    await act(async () => complete({ ...detail, body: "Late A detail" }))
+    expect(screen.queryByText("Late A detail")).toBeNull()
+    expect(screen.getByText("Only B detail")).toBeTruthy()
+    expect(client.getQueryData(["github", "pr-inbox", "detail", "personal", "1", pr.repository, pr.number])).toMatchObject({ body: "Late A detail" })
+    expect(client.getQueryData(["github", "pr-inbox", "detail", "personal", "2", pr.repository, pr.number])).toMatchObject({ body: "Only B detail" })
+    expect(rpc.githubTeamPr).not.toHaveBeenCalled()
+  } finally { complete?.(detail); client.clear() }
+})
+
+it("keeps the unknown/App personal composer after failed discovery and uses only a display placeholder during first identity arrival", async () => {
+  vi.mocked(rpc.githubTeams).mockRejectedValue(new Error("CLI unavailable"))
+  const client = mount()
+  let complete!: (value: PullRequest) => void
+  try {
+    await screen.findAllByText("CLI unavailable")
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    const composer = await screen.findByPlaceholderText("Leave a comment…")
+    fireEvent.change(composer, { target: { value: "App draft survives" } })
+    vi.mocked(rpc.githubTeams).mockResolvedValue(discovery)
+    vi.mocked(rpc.githubPrBySlug).mockResolvedValueOnce(detail).mockImplementationOnce(() => new Promise((resolve) => { complete = resolve }))
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await waitFor(() => expect(client.getQueryState(["github", "pr-inbox", "detail", "personal", "1", pr.repository, pr.number])?.fetchStatus).toBe("fetching"))
+    expect(client.getQueryData(["github", "pr-inbox", "detail", "personal", "1", pr.repository, pr.number])).toBeUndefined()
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+    expect(composer).toHaveProperty("value", "App draft survives")
+    expect(screen.getByText("Before refresh")).toBeTruthy()
+    await act(async () => complete({ ...detail, body: "Known account detail" }))
+    await screen.findByText("Known account detail")
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+    expect(composer).toHaveProperty("value", "App draft survives")
+    expect(rpc.githubTeamPr).not.toHaveBeenCalled()
+  } finally { complete?.(detail); client.clear() }
+})
+
+it("preserves the first-identity personal draft even if the independent known-account detail read fails", async () => {
+  let discover!: (value: GitHubTeamDiscovery) => void
+  vi.mocked(rpc.githubTeams).mockImplementation(() => new Promise((resolve) => { discover = resolve }))
+  const client = mount()
+  let read: ((value: PullRequest) => void) | undefined
+  try {
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    const composer = await screen.findByPlaceholderText("Leave a comment…")
+    fireEvent.change(composer, { target: { value: "Keep draft through identity error" } })
+    const refreshedPr = { ...pr }
+    vi.mocked(rpc.githubPrInbox).mockResolvedValue([refreshedPr])
+    vi.mocked(rpc.githubPrBySlug).mockRejectedValue(new Error("Known detail unavailable"))
+    await act(async () => discover(discovery))
+    await screen.findByText("Known detail unavailable")
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+    expect(composer).toHaveProperty("value", "Keep draft through identity error")
+    expect(screen.getByText("Before refresh")).toBeTruthy()
+    expect(client.getQueryData(["github", "pr-inbox", "detail", "personal", "1", pr.repository, pr.number])).toBeUndefined()
+    await waitFor(() => expect(client.getQueryData(["github", "pr-inbox", "personal", "1", 1])).toEqual([refreshedPr]))
+    fireEvent.click(screen.getByRole("button", { name: /Team PR 42/ }))
+    expect(screen.getByPlaceholderText("Leave a comment…")).toBe(composer)
+    expect(composer).toHaveProperty("value", "Keep draft through identity error")
+    vi.mocked(rpc.githubTeams).mockResolvedValue({ ...discovery, account: { id: "2", login: "other" } })
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }))
+    await screen.findByText("Select a pull request to review it.")
+    await act(async () => client.cancelQueries({ queryKey: ["github", "pr-inbox", "detail", "personal", "1"] }))
+    vi.mocked(rpc.githubPrBySlug).mockImplementationOnce(() => new Promise((resolve) => { read = resolve }))
+    fireEvent.click(await screen.findByRole("button", { name: /Team PR 42/ }))
+    await waitFor(() => expect(client.getQueryState(["github", "pr-inbox", "detail", "personal", "2", pr.repository, pr.number])?.fetchStatus).toBe("fetching"))
+    // The observer's last successful query is still unknown/App. It is not a B placeholder.
+    expect(screen.queryByText("Before refresh")).toBeNull()
+    expect(screen.queryByPlaceholderText("Leave a comment…")).toBeNull()
+    await act(async () => read?.({ ...detail, body: "Independent B read" }))
+    await screen.findByText("Independent B read")
+    expect(screen.getByPlaceholderText("Leave a comment…")).toHaveProperty("value", "")
+  } finally { read?.(detail); discover(discovery); client.clear() }
+})
+
+it("rejects personal comment, close and merge after a confirmed account switch until a new selection", async () => {
+  vi.mocked(rpc.githubTeams).mockResolvedValue(discovery)
+  vi.mocked(rpc.githubPrInbox).mockResolvedValue([pr])
+  vi.mocked(rpc.githubPrBySlug).mockResolvedValue(detail)
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const { result } = renderHook(() => usePullRequestInbox(false), { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
+  try {
+    act(() => result.current.discover())
+    await waitFor(() => expect(result.current.discovering).toBe(false))
+    act(() => result.current.select(pr))
+    await waitFor(() => expect(result.current.detail).toEqual(detail))
+    vi.mocked(rpc.githubTeams).mockResolvedValue({ ...discovery, account: { id: "2", login: "other" } })
+    act(() => result.current.discover())
+    await waitFor(() => expect(result.current.discovering).toBe(false))
+    await act(async () => {
+      await expect(result.current.comment("Old draft")).rejects.toThrow("Select a pull request first")
+      await expect(result.current.close()).rejects.toThrow("Select a pull request first")
+      await expect(result.current.merge("merge")).rejects.toThrow("Select a pull request first")
+    })
+    expect(rpc.githubCommentBySlug).not.toHaveBeenCalled()
+    expect(rpc.githubCloseBySlug).not.toHaveBeenCalled()
+    expect(rpc.githubMergeBySlug).not.toHaveBeenCalled()
+  } finally { client.clear() }
 })

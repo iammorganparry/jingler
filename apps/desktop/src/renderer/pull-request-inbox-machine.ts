@@ -83,10 +83,10 @@ export const pullRequestInboxMachine = setup({
           target: "ready",
           actions: [assign(({ context, event }) => {
             const sameAccount = context.account?.id === event.output.account.id
-            const scope = sameAccount || context.teamId === null && context.selected !== null
+            const scope = sameAccount || context.account === null && context.teamId === null && context.selected !== null
               ? { teamId: context.teams.some((team) => team.id === context.teamId) && event.output.teams.some((team) => team.id === context.teamId) ? context.teamId : null, queue: context.queue }
               : restore(event.output.account, event.output.teams)
-            const keepSelection = context.teamId === null && scope.teamId === null || sameAccount && context.teamId === scope.teamId
+            const keepSelection = (context.account === null || sameAccount) && context.teamId === scope.teamId
             return {
               account: event.output.account, teams: event.output.teams, ...scope,
               revision: context.revision + 1,

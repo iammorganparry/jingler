@@ -215,11 +215,12 @@ describe("GitHubCli team inbox", () => {
     expect(result.warnings.join(" ")).toContain("unfinished")
   })
 
-  it.each(["authored", "repositories"] as const)("resumes %s work after successive quota windows without restarting its prefix", async (queue) => {
+  it.each(["authored", "repositories"] as const)("resumes %s work first after successive quota windows, then revalidates completed queries", async (queue) => {
     let now = Date.UTC(2026, 0, 1)
     vi.spyOn(Date, "now").mockImplementation(() => now)
     let allowance = 2
     const successful: string[] = []
+    const attempted: string[] = []
     let searches = 0
     const results = await run(Effect.gen(function* () {
       const first = yield* GitHubCli.teamPrs({ ...input, queue, refresh: true })
@@ -235,17 +236,88 @@ describe("GitHubCli team inbox", () => {
       if (args[1]?.endsWith("/members")) return { stdout: JSON.stringify([[1, 2, 3, 4, 5].map((i) => ({ login: `member${i}` }))]) }
       if (args[1]?.endsWith("/repos")) return { stdout: JSON.stringify([[1, 2, 3, 4, 5].map((i) => ({ full_name: `acme/repo${i}` }))]) }
       searches++
-      if (allowance-- <= 0) return { exitCode: 1, stderr: "HTTP 403 rate limit exceeded" }
       const query = args.find((arg) => arg.startsWith("q="))!
       const id = Number(/(?:member|repo)(\d+)/.exec(query)![1])
+      attempted.push(String(id))
+      if (allowance-- <= 0) return { exitCode: 1, stderr: "HTTP 403 rate limit exceeded" }
       successful.push(String(id))
       return search([row(id)])
     }))
-    expect(successful).toEqual(["1", "2", "3", "4", "5"])
-    expect(searches).toBe(7)
+    expect(successful).toEqual(["1", "2", "3", "4", "5", "1"])
+    expect(attempted).toEqual(["1", "2", "3", "3", "4", "5", "5", "1", "2"])
+    expect(searches).toBe(9)
     expect(results.map((result) => result.prs.length)).toEqual([2, 2, 4, 5])
     expect(results[2]!.warnings.join(" ")).toContain("unfinished")
-    expect(results[3]!.warnings).toEqual([])
+    expect(results[3]!.warnings.join(" ")).toContain("unfinished")
+  })
+
+  it("revalidates completed queries behind unfinished work and retires historical rows only when fresh work completes", async () => {
+    let round = 0
+    const order: string[] = []
+    const results = await run(Effect.gen(function* () {
+      const values = []
+      for (round = 0; round < 3; round++) values.push(yield* GitHubCli.teamPrs({ ...input, queue: "repositories", refresh: true }))
+      return values
+    }), handler((_command, args) => {
+      if (args[1]?.endsWith("/repos")) return { stdout: '[[{"full_name":"acme/repo1"},{"full_name":"acme/repo2"}]]' }
+      const id = /repo:(acme\/repo\d)/.exec(args.find((arg) => arg.startsWith("q="))!)![1]!
+      order.push(`${round}/${id}`)
+      if (id === "acme/repo2") return search([row(3)], 1, true)
+      return round === 0 ? search([row(1)]) : search([row(2)], 1, round === 1)
+    }))
+    expect(order).toEqual(["0/acme/repo1", "0/acme/repo2", "1/acme/repo2", "1/acme/repo1", "2/acme/repo2", "2/acme/repo1"])
+    expect(results.map((result) => result.prs.map((pr) => pr.number).sort())).toEqual([[1, 3], [1, 2, 3], [2, 3]])
+    expect(results.every((result) => result.warnings.join(" ").includes("unfinished"))).toBe(true)
+  })
+
+  it("counts only the current recovery attempt, retaining partial history until it is complete", async () => {
+    let calls = 0
+    const results = await run(Effect.gen(function* () {
+      const values = []
+      for (let round = 0; round < 3; round++) values.push(yield* GitHubCli.teamPrs({ ...input, refresh: true }))
+      return values
+    }), handler(() => search(++calls === 1 ? [row(1)] : calls === 2 ? [row(2)] : [row(2), row(3)], 2)))
+    expect(results.map((result) => result.prs.map((pr) => pr.number).sort())).toEqual([[1], [1, 2], [2, 3]])
+    expect(results[1]!.warnings.join(" ")).toContain("fewer PRs")
+    expect(results[2]!.warnings).toEqual([])
+    expect(calls).toBe(3)
+  })
+
+  it("releases completed queue PR maps but retains unfinished progress until confirmed membership removal", async () => {
+    const key = "1/acme/platform/authored"
+    const cacheKey = "1/orgs/acme/teams/platform/members"
+    let cached!: Map<string, unknown>
+    let retained!: Map<string, unknown>
+    const set = Map.prototype.set
+    vi.spyOn(Map.prototype, "set").mockImplementation(function (this: Map<unknown, unknown>, name, value) {
+      if (name === key) retained = this as Map<string, unknown>
+      if (name === cacheKey) cached = this as Map<string, unknown>
+      return set.call(this, name, value)
+    })
+    let partial = false
+    let discoveryFails = true
+    const results = await run(Effect.gen(function* () {
+      const first = yield* GitHubCli.teamPrs({ ...input, queue: "authored" })
+      expect(retained.has(key)).toBe(false)
+      partial = true
+      const second = yield* GitHubCli.teamPrs({ ...input, queue: "authored" })
+      expect(retained.has(key)).toBe(true)
+      expect(cached.has(cacheKey)).toBe(true)
+      expect((yield* GitHubCli.teams().pipe(Effect.either))._tag).toBe("Left")
+      expect(retained.has(key)).toBe(true)
+      expect(cached.has(cacheKey)).toBe(true)
+      discoveryFails = false
+      yield* GitHubCli.teams()
+      expect(retained.has(key)).toBe(false)
+      expect(cached.has(cacheKey)).toBe(false)
+      return [first, second]
+    }), handler((_command, args) => {
+      if (args[1] === "user/teams") return discoveryFails ? { exitCode: 1, stderr: "HTTP 403 SSO required" } : { stdout: "[[]]" }
+      if (args[1]?.endsWith("/members")) return { stdout: '[[{"login":"teammate"}]]' }
+      return search([row(42)], 1, partial)
+    }))
+    expect(results.map((result) => result.prs.length)).toEqual([1, 1])
+    expect(results[1]!.warnings.join(" ")).toContain("unfinished")
   })
 
   it("resumes inside a paginated query without re-fetching successful pages", async () => {
@@ -468,7 +540,7 @@ describe("GitHubCli team inbox", () => {
     const results = await run(Effect.gen(function* () {
       const first = yield* GitHubCli.teamPrs({ ...input, queue: "repositories", refresh: true })
       now += 70_000
-      allowance = 10
+      allowance = 30
       const second = yield* GitHubCli.teamPrs({ ...input, queue: "repositories", refresh: true })
       return [first, second]
     }), handler((_command, args) => {
@@ -476,6 +548,9 @@ describe("GitHubCli team inbox", () => {
       if (allowance-- <= 0) return { exitCode: 1, stderr: "HTTP 403 rate limit exceeded" }
       const query = args.find((arg) => arg.startsWith("q="))!
       if (query.includes("repo:acme/repo2 ")) return search([row(1001, false, "acme/repo2")])
+      // All 1001 rows were created at epoch second zero, not in every split.
+      const range = /created:(\S+)\.\.(\S+)/.exec(query)!
+      if (Date.parse(range[1]!) > 0) return search([])
       const page = Number(args.find((arg) => arg.startsWith("page="))!.slice(5))
       return search(Array.from({ length: 100 }, (_, i) => row((page - 1) * 100 + i + 1, false, "acme/repo1")), 1001)
     }))

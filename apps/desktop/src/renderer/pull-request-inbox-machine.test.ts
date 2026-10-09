@@ -76,6 +76,26 @@ describe("pullRequestInboxMachine", () => {
     actor.stop()
   })
 
+  it("preserves unknown personal selection on first identity but clears it on a known personal account switch", async () => {
+    setupStorage()
+    let current = discovery()
+    const actor = createActor(pullRequestInboxMachine, { input: { discover: async () => current } }).start()
+    const selected = { repository: "acme/widget", number: 42 } as PullRequestListItem
+    actor.send({ type: "SELECT", pr: selected })
+    actor.send({ type: "DISCOVER" })
+    await waitFor(actor, (state) => state.matches("ready"))
+    expect(actor.getSnapshot().context.selected).toBe(selected)
+    actor.send({ type: "DISCOVER" })
+    await waitFor(actor, (state) => state.matches("ready"))
+    expect(actor.getSnapshot().context.selected).toBe(selected)
+    current = discovery("2")
+    actor.send({ type: "DISCOVER" })
+    await waitFor(actor, (state) => state.matches("ready"))
+    expect(actor.getSnapshot().context.selected).toBeNull()
+    expect(actor.getSnapshot().context.teamId).toBeNull()
+    actor.stop()
+  })
+
   it("ignores stale discovery completion after a new account refresh", async () => {
     setupStorage()
     let resolveOld!: (value: GitHubTeamDiscovery) => void

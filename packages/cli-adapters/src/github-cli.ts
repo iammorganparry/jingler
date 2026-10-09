@@ -548,6 +548,10 @@ type SearchTask = { from: number; to: number; page: number }
 type SearchProgress = {
   tasks: Map<string, SearchTask>
   prs: Map<string, PullRequestListItem>
+  // Historical rows stay visible, but only this attempt can satisfy the search count.
+  observed: Map<string, PullRequestListItem>
+  // Keep a historical ceiling warning until a fresh attempt verifies completeness.
+  previousCeiling: boolean
   counts: Map<string, number>
   completed: Set<string>
   ceiling: boolean
@@ -563,7 +567,7 @@ const moveWorkToEnd = <T>(queue: Map<string, T>, key: string) => {
 }
 const newSearchProgress = (): SearchProgress => {
   const task = { from: 0, to: Math.floor(Date.now() / 1000), page: 1 }
-  return { tasks: new Map([[taskKey(task), task]]), prs: new Map(), counts: new Map(), completed: new Set(), ceiling: false }
+  return { tasks: new Map([[taskKey(task), task]]), prs: new Map(), observed: new Map(), previousCeiling: false, counts: new Map(), completed: new Set(), ceiling: false }
 }
 
 const splitSearchRange = (progress: SearchProgress, task: SearchTask): void => {
@@ -581,7 +585,10 @@ const splitSearchRange = (progress: SearchProgress, task: SearchTask): void => {
 const rememberSearchPage = (progress: SearchProgress, task: SearchTask, result: {
   total: number; incomplete: boolean; prs: PullRequestListItem[]
 }): void => {
-  for (const pr of result.prs) progress.prs.set(prKey(pr), pr)
+  for (const pr of result.prs) {
+    progress.prs.set(prKey(pr), pr)
+    progress.observed.set(prKey(pr), pr)
+  }
   const range = `${task.from}/${task.to}`
   if (result.total > 1000 && task.from < task.to) {
     splitSearchRange(progress, task)
@@ -612,12 +619,16 @@ const recordSearchCooldown = (error: GitHubApiError, cooldowns: Map<string, numb
 
 const retryMissingSearch = (progress: SearchProgress, warnings: string[]): void => {
   const expected = [...progress.counts.values()].reduce((sum, count) => sum + count, 0)
-  if (progress.tasks.size === 0 && !progress.ceiling && progress.prs.size < expected) {
+  if (progress.tasks.size === 0 && !progress.ceiling && progress.observed.size < expected) {
     const retry = { from: 0, to: Math.floor(Date.now() / 1000), page: 1 }
     progress.counts.clear()
     progress.completed.clear()
+    progress.observed.clear()
     progress.tasks.set(taskKey(retry), retry)
     warnings.push("GitHub returned fewer PRs than its search count. This queue is incomplete; refresh to retry.")
+  } else if (progress.tasks.size === 0 && !progress.ceiling) {
+    progress.prs = new Map(progress.observed)
+    progress.previousCeiling = false
   }
 }
 
@@ -700,11 +711,19 @@ const teamQueries = (
     authors: orgRepos.length > 4000 ? new Set(members.map((login) => login.toLowerCase())) : null }
 })
 
-const resumeSearchQueue = (currentQueries: ReadonlyArray<string>, previous: QueueProgress | undefined): QueueProgress => {
+const resumeSearchQueue = (currentQueries: ReadonlyArray<string>, previous: QueueProgress | undefined, refresh: boolean): QueueProgress => {
   const queries = new Set(currentQueries)
-  const progress: QueueProgress = hasUnfinishedSearches(previous) && previous
-    ? new Map([...previous].filter(([query]) => queries.has(query))) : new Map()
-  for (const query of queries) if (!progress.has(query)) progress.set(query, newSearchProgress())
+  const progress: QueueProgress = new Map([...(previous ?? [])].filter(([query, search]) => queries.has(query) && search.tasks.size > 0))
+  for (const query of queries) {
+    if (progress.has(query)) continue
+    const old = previous?.get(query)
+    const search = old && !refresh ? old : newSearchProgress()
+    if (old && refresh) {
+      search.prs = new Map(old.prs)
+      search.previousCeiling = old.ceiling || old.previousCeiling
+    }
+    progress.set(query, search)
+  }
   return progress
 }
 
@@ -741,16 +760,17 @@ const teamQueuePrs = (
     const warnings: string[] = []
     const plan = yield* teamQueries(account, organization, slug, queue, refresh, discoveryCache, warnings)
     const key = `${account.id}/${organization.toLowerCase()}/${slug.toLowerCase()}/${queue}`
-    const progress = resumeSearchQueue(plan.queries, queues.get(key))
-    // Incomplete work intentionally has no TTL: quota reset must not restart a successful prefix.
+    const progress = resumeSearchQueue(plan.queries, queues.get(key), refresh)
+    // Incomplete work intentionally has no TTL: quota reset must not restart completed pages.
     queues.set(key, progress)
     yield* advanceSearchQueue(progress, account, warnings, cooldowns)
     if (hasUnfinishedSearches(progress)) {
-      warnings.push("Some searches are unfinished. Refresh resumes missing results without restarting successful searches.")
+      warnings.push("Some searches are unfinished. Refresh resumes missing results without restarting completed pages.")
     }
-    if ([...progress.values()].some((search) => search.ceiling)) {
+    if ([...progress.values()].some((search) => search.ceiling || search.previousCeiling)) {
       warnings.push("Some PRs share the same creation second and exceed GitHub's search limit. This queue is incomplete.")
     }
+    if (!hasUnfinishedSearches(progress)) queues.delete(key)
     const prs = [...progress.values()].flatMap((search) => [...search.prs.values()])
       .filter((pr) => plan.authors === null || plan.authors.has(pr.author.login.toLowerCase()))
     return {
@@ -758,6 +778,19 @@ const teamQueuePrs = (
       warnings: [...new Set(warnings)],
     }
   })
+
+const pruneRemovedTeamProgress = (
+  accountId: string, teams: ReadonlyArray<GitHubTeam>, queues: Map<string, QueueProgress>, discoveryCache: DiscoveryCache
+): void => {
+  const memberships = new Set(teams.map((team) => `${accountId}/${team.organization.toLowerCase()}/${team.slug.toLowerCase()}`))
+  for (const key of queues.keys()) {
+    if (key.startsWith(`${accountId}/`) && !memberships.has(key.slice(0, key.lastIndexOf("/")))) queues.delete(key)
+  }
+  for (const key of discoveryCache.keys()) {
+    const match = /^(\d+)\/orgs\/([^/]+)\/teams\/([^/]+)\//.exec(key)
+    if (match?.[1] === accountId && !memberships.has(`${accountId}/${match[2]!.toLowerCase()}/${match[3]!.toLowerCase()}`)) discoveryCache.delete(key)
+  }
+}
 
 export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli", {
   accessors: true,
@@ -774,7 +807,10 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
         teamQueuePrs(account, input.organization, input.teamSlug, input.queue, input.refresh, discoveryCache, queues, cooldowns)))
     }
     return {
-    teams: () => withTeamAccount(null, (account) => discoverTeams().pipe(Effect.map((teams) => ({ account, teams })))),
+    teams: () => withTeamAccount(null, (account) => discoverTeams().pipe(Effect.map((teams) => {
+      pruneRemovedTeamProgress(account.id, teams, queues, discoveryCache)
+      return { account, teams }
+    }))),
     teamPrs,
     teamPr: (input: { accountId: string; repository: string; number: number }) =>
       withTeamAccount(input.accountId, () => Effect.gen(function* () {
