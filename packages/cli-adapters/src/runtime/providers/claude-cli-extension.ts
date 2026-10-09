@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent"
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all"
+import { claudeCliModels } from "./claude-cli-models.js"
 import { createClaudeCliStreamSimple } from "./claude-cli-provider.js"
 
 interface PiAuthFile {
@@ -27,6 +29,7 @@ export default function claudeCliProviderExtension(pi: ExtensionAPI): void {
   if (agentDir === undefined || !hasClaudeCliCredential(agentDir)) return
   pi.registerProvider("anthropic", {
     api: "anthropic-messages",
-    streamSimple: createClaudeCliStreamSimple()
+    streamSimple: createClaudeCliStreamSimple(),
+    models: [...claudeCliModels(getBuiltinModels("anthropic"))]
   })
 }
