@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.7.2
+
+### Patch Changes
+
+- 364b0aa: Flatten indentation in the file browser so deeply nested folders (like Java packages) stay readable.
+  - @jingler/plannotator-ext@0.7.2
+
 ## 0.7.1
 
 ### Patch Changes
