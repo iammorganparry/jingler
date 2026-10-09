@@ -63,8 +63,13 @@ describe("Claude CLI child provider extension", () => {
     expect(registerProvider).toHaveBeenCalledOnce()
     expect(registerProvider).toHaveBeenCalledWith("anthropic", {
       api: "anthropic-messages",
-      streamSimple: expect.any(Function)
+      streamSimple: expect.any(Function),
+      models: expect.any(Array)
     })
+    // The child must know the same aliases as the parent, or pi-subagents
+    // resolves `sonnet` to a concrete id and fails model verification.
+    const ids = registerProvider.mock.calls[0]![1].models.map(({ id }: { id: string }) => id)
+    expect(ids).toEqual(expect.arrayContaining(["sonnet", "opus", "haiku", "claude-sonnet-5"]))
   })
 
   it("does not replace Anthropic HTTP for an API credential", async () => {

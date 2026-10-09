@@ -42,7 +42,7 @@ import {
   PromptCompiler,
   type PromptToolCapability
 } from "../prompt/prompt-compiler.js"
-import { projectInstructionsLayer } from "../prompt/project-instructions.js"
+import { instructionLayers } from "../prompt/project-instructions.js"
 import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
 import {
   DELEGATION_DEFAULT_PROMPT_LAYER,
@@ -300,13 +300,13 @@ const createResources = (
   // operator would see a bare "The agent run failed." with the reason lost.
   return Effect.tryPromise({
     try: async () => {
-      const workspaceInstructions = await projectInstructionsLayer(spec.cwd)
+      const workspaceInstructions = await instructionLayers(spec.cwd)
       return (options.promptCompiler ?? new PromptCompiler()).compile({
         layers: [
           ...runtimeInvariantLayers(spec.mode === "plan" ? spec.role : runtimeSpec.role, runtimeSpec.mode),
           ...ponytailPromptLayers(spec.ponytailMode),
           ...(nativeSubagentsEnabled ? [DELEGATION_DEFAULT_PROMPT_LAYER] : []),
-          ...(workspaceInstructions === null ? [] : [workspaceInstructions])
+          ...workspaceInstructions
         ],
         tools,
         tokenBudget: options.promptTokenBudget ?? DEFAULT_PROMPT_TOKEN_BUDGET
