@@ -13,7 +13,8 @@ import {
 /**
  * A small yes/no confirmation modal for destructive or irreversible actions
  * (e.g. deleting a session). Controlled via `open`/`onOpenChange`; `onConfirm`
- * fires then the dialog closes. `tone="danger"` styles the confirm button red.
+ * fires then the dialog closes unless `closeOnConfirm={false}` leaves closing to
+ * the caller. `tone="danger"` styles the confirm button red.
  */
 export function ConfirmDialog({
   open,
@@ -23,7 +24,8 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   tone = "default",
-  onConfirm
+  onConfirm,
+  closeOnConfirm = true
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -32,6 +34,7 @@ export function ConfirmDialog({
   confirmLabel?: string
   cancelLabel?: string
   tone?: "default" | "danger"
+  closeOnConfirm?: boolean
   onConfirm: () => void | Promise<void>
 }) {
   const [pending, setPending] = useState(false)
@@ -39,7 +42,7 @@ export function ConfirmDialog({
     if (pending) return
     setPending(true)
     void Promise.resolve(onConfirm())
-      .then(() => onOpenChange(false))
+      .then(() => { if (closeOnConfirm) onOpenChange(false) })
       .catch(() => {})
       .finally(() => setPending(false))
   }

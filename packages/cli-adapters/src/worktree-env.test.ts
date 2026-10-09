@@ -166,3 +166,7 @@ describe("worktreeEnv", () => {
     expect(env.PATH!.split(delimiter)).toEqual(["/usr/bin"])
   })
 })
+
+ it("never inherits another workspace's trusted environment", () => {
+   expect(worktreeEnv({ JINGLER_WORKSPACE_PATH: "/other", JINGLER_ROOT_PATH: "/root", PATH: "/bin" }, "/work")).toEqual({ PATH: "/bin" })
+ })

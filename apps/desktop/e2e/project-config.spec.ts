@@ -1,0 +1,102 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { addProject, appShell, expect, test } from "./fixtures.js"
+import { E2E_PI_MODEL_ID, E2E_PI_PROVIDER_ID } from "../src/main/e2e/fixture-identity.js"
+
+test("loads agent-authored project config into review drafts, saves only with local consent, and shows creation in the send button", async ({ launchApp }) => {
+  test.setTimeout(90000)
+  const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true, seed: ({ repoPath }) => {
+    mkdirSync(join(repoPath, ".jingler"))
+    writeFileSync(join(repoPath, ".jingler/project.json"), JSON.stringify({
+      version: 1,
+      workflow: { setup: 'node -e "setTimeout(()=>{},5000)"', cleanup: "echo cleanup", runs: [{ id: "check", label: "Check", command: "echo check" }], copyFiles: [] },
+      routines: [{ id: "shared-inspect", name: "Shared inspection", prompt: "Inspect README.md", baseBranch: "main", reasoning: null, maxDurationMs: 60000, schedule: { kind: "once", at: Date.now() + 3600000 }, providerId: E2E_PI_PROVIDER_ID, modelId: E2E_PI_MODEL_ID }],
+    }))
+  } })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("new-session").click()
+  await addProject(window, repoPath)
+  await window.keyboard.press("Escape")
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "Projects", exact: true }).click()
+  const projectsFile = join(home, "jingler/projects.json")
+  const savedProjects = readFileSync(projectsFile, "utf8")
+  await expect(window.getByLabel("Setup command")).toHaveValue("")
+  await window.getByRole("button", { name: "Load .jingler/project.json", exact: true }).click()
+  await expect(window.getByLabel("Setup command")).toHaveValue('node -e "setTimeout(()=>{},5000)"')
+  await expect(window.getByLabel("Run command 1", { exact: true })).toHaveValue("echo check")
+  await expect(window.getByRole("checkbox", { name: /I approve these commands/ })).toHaveAttribute("aria-checked", "false")
+  expect(readFileSync(projectsFile, "utf8")).toBe(savedProjects)
+  const routines = window.getByRole("region", { name: "Saved desktop routines" })
+  await routines.getByRole("button", { name: "Load template Shared inspection", exact: true }).click()
+  await expect(routines.getByLabel("Name", { exact: true })).toHaveValue("Shared inspection")
+  await expect(routines.getByLabel("Prompt", { exact: true })).toHaveValue("Inspect README.md")
+  await expect(routines.getByRole("button", { name: "Managed Pi model", exact: true })).toContainText(E2E_PI_MODEL_ID)
+  await expect(routines.getByRole("switch", { name: "Enable schedule" })).toHaveAttribute("aria-checked", "false")
+  await expect(routines.getByRole("checkbox", { name: /I approve these exact settings/ })).toHaveAttribute("aria-checked", "false")
+  const routineFile = join(home, "jingler/routines.json")
+  const savedRoutines = () => existsSync(routineFile) ? JSON.parse(readFileSync(routineFile, "utf8")).routines : []
+  await routines.getByRole("button", { name: "Save routine", exact: true }).click()
+  await expect(routines.getByRole("alert")).toContainText("Approve these exact settings")
+  expect(savedRoutines()).toEqual([])
+  await routines.getByRole("checkbox", { name: /I approve these exact settings/ }).click()
+  await routines.getByRole("button", { name: "Save routine", exact: true }).click()
+  await expect(routines.getByRole("button", { name: "Edit Shared inspection", exact: true })).toBeVisible()
+  expect(savedRoutines()[0]).toMatchObject({ enabled: false, approved: true, providerId: E2E_PI_PROVIDER_ID, modelId: E2E_PI_MODEL_ID })
+  expect(savedRoutines()[0].id).not.toBe("shared-inspect")
+  // Loading while editing a saved record creates a fresh review draft, never overwrites its id.
+  const before = JSON.stringify(savedRoutines())
+  await routines.getByRole("button", { name: "Edit Shared inspection", exact: true }).click()
+  await routines.getByRole("button", { name: "Load template Shared inspection", exact: true }).click()
+  await expect(routines.getByRole("group", { name: "New routine", exact: true })).toBeVisible()
+  expect(JSON.stringify(savedRoutines())).toBe(before)
+  await window.getByRole("button", { name: "Save workflow", exact: true }).click()
+  await expect(window.getByText("Saved without approval. Commands will not run.")).toBeVisible()
+  expect(JSON.parse(readFileSync(projectsFile, "utf8"))[0].workflow.approvedDigest).toBeUndefined()
+  await window.getByRole("checkbox", { name: /I approve these commands/ }).click()
+  await window.getByRole("button", { name: "Save workflow", exact: true }).click()
+  await expect(window.getByText("Saved and approved for this exact content.")).toBeVisible()
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await window.getByTestId("new-session").click()
+  const prompt = window.locator("textarea").filter({ visible: true }).first()
+  await prompt.fill("Inspect README.md")
+  await window.getByRole("button", { name: "Send ↵", exact: true }).click()
+  const submitting = window.getByRole("button", { name: "Creating session", exact: true })
+  await expect(submitting).toBeVisible()
+  await expect(submitting).toBeDisabled()
+  await expect(submitting).toHaveAttribute("aria-busy", "true")
+  await expect(submitting.locator(".lucide-loader-circle")).toBeVisible()
+  await expect(window.getByText("Creating session…", { exact: true })).toHaveCount(0)
+  await prompt.press("Enter")
+  await expect(submitting).toHaveCount(0, { timeout: 30000 })
+  const sessionsFile = join(home, "jingler/sessions.json")
+  expect(JSON.parse(readFileSync(sessionsFile, "utf8"))).toHaveLength(1)
+})
+
+
+test("send spinner lasts through delayed model naming and rejects duplicate creation", async ({ launchApp }) => {
+  const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true,
+    piFixture: { scenarioId: "send-progress", authRoute: "api-key" },
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("new-session").click()
+  await addProject(window, repoPath)
+  const prompt = window.getByTestId("new-session-view").getByRole("textbox")
+  await prompt.fill("Inspect README.md")
+  await window.getByRole("button", { name: "Send ↵", exact: true }).click()
+  const spinner = window.getByRole("button", { name: "Creating session", exact: true })
+  await expect(spinner).toHaveAttribute("aria-busy", "true")
+  await expect(spinner).toBeDisabled()
+  const sessionsFile = join(home, "jingler/sessions.json")
+  // Prove this is the naming wait, not a setup command or disabled reason.
+  await expect.poll(() => existsSync(sessionsFile) ? JSON.parse(readFileSync(sessionsFile, "utf8")).length : 0).toBe(1)
+  await expect(spinner).toBeVisible()
+  expect(JSON.parse(readFileSync(sessionsFile, "utf8"))[0].title).not.toBe("Delayed naming proof")
+  await spinner.click({ force: true })
+  await prompt.press("Enter")
+  await expect(spinner).toHaveCount(0, { timeout: 30000 })
+  const sessions = JSON.parse(readFileSync(sessionsFile, "utf8"))
+  expect(sessions).toHaveLength(1)
+  expect(sessions[0].title).toBe("Delayed naming proof")
+})

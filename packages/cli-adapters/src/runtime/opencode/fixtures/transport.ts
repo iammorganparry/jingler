@@ -1,5 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import type { ProviderListResponse } from "@opencode-ai/sdk/v2/client"
 import { randomUUID } from "node:crypto"
 import type { OpenCodeOptions } from "../server.js"
 
@@ -19,7 +20,21 @@ export const fixtureTransport = () => {
     const data = encoder.encode(`data: ${JSON.stringify({ directory, payload: { id: randomUUID(), type, properties } })}\n\n`)
     for (const stream of streams) stream.enqueue(data)
   }
-  const providers = ["alpha", "beta"].map(id => ({ id, name: id, models: { "fixture-model": { id: "fixture-model", providerID: id, name: `OpenCode ${id}`, status: "active", limit: { context: 128000 }, capabilities: { input: { image: true } } } } }))
+  const providers: ProviderListResponse["all"] = ["alpha", "beta"].map(id => ({
+    id, name: id, source: "config", env: [], options: {},
+    models: { "fixture-model": {
+      id: "fixture-model", providerID: id, name: `OpenCode ${id}`, status: "active",
+      api: { id: "fixture-model", url: "https://fixture.invalid", npm: "fixture" },
+      limit: { context: 128000, output: 8192 },
+      capabilities: {
+        temperature: true, reasoning: false, attachment: true, toolcall: true, interleaved: false,
+        input: { text: true, audio: false, image: true, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false }
+      },
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      options: {}, headers: {}, release_date: "2026-01-01"
+    } }
+  }))
   const finishPrompt = (directory: string, id: string, parentID: string, messageID: string, prompt: string, reply = "") => {
     emit(directory, "message.updated", { sessionID: id, info: { id: messageID, sessionID: id, role: "assistant", parentID, cost: 0.01, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } } })
     emit(directory, "message.part.updated", { sessionID: id, part: { id: messageID, sessionID: id, messageID, type: "text", text: `OpenCode: ${prompt}${reply}`, time: { start: 1, end: 2 } } })

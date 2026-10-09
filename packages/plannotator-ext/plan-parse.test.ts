@@ -185,4 +185,64 @@ describe("parsePlanMarkdown", () => {
     expect(stage.approach).toEqual(["first step", "second step"])
     expect(stage.tasks.map(({ text }) => text)).toEqual(["task"])
   })
+
+  it("reads indented lines under a task as its description", () => {
+    const parsed = parsePlanMarkdown([
+      "## Auth <!-- id: auth -->",
+      "- [ ] Add the service",
+      "  Wraps the keychain behind `TokenStore`.",
+      "  Falls back to settings once.",
+      "  - [x] Wire the route",
+      "    Calls `TokenStore.get`.",
+      "- [ ] Migrate the tokens",
+      "### Acceptance",
+      "- [ ] Tokens move",
+      "  not a task description"
+    ].join("\n"))
+    expect(parsed.stages[0]?.tasks).toEqual([
+      {
+        step: 1,
+        text: "Add the service",
+        status: "pending",
+        description: "Wraps the keychain behind `TokenStore`.\nFalls back to settings once.",
+        subtasks: [{ step: 2, text: "Wire the route", status: "completed", description: "Calls `TokenStore.get`." }]
+      },
+      { step: 3, text: "Migrate the tokens", status: "pending", subtasks: [] }
+    ])
+  })
+
+  it("keeps description structure, routes continuation to the right task, and leaves metadata alone", () => {
+    const parsed = parsePlanMarkdown([
+      "## Auth <!-- id: auth -->",
+      "- [ ] Parent",
+      "  First paragraph.",
+      "",
+      "  Second paragraph.  ",
+      "    - nested bullet",
+      "  - [ ] Child",
+      "    Child detail.",
+      "  Parent again after the child.",
+      "  ```ts",
+      "  const token = yield* TokenStore.get",
+      "",
+      "  ```",
+      "  > depends: other",
+      "  > complexity: high"
+    ].join("\n"))
+    const stage = parsed.stages[0]!
+    expect(stage.tasks[0]?.description).toBe([
+      "First paragraph.",
+      "",
+      "Second paragraph.  ",
+      "  - nested bullet",
+      "Parent again after the child.",
+      "```ts",
+      "const token = yield* TokenStore.get",
+      "",
+      "```"
+    ].join("\n"))
+    expect(stage.tasks[0]?.subtasks[0]?.description).toBe("Child detail.")
+    expect(stage.dependencies).toEqual(["other"])
+    expect(stage.complexity).toBe("high")
+  })
 })

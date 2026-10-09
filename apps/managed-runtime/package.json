@@ -1,6 +1,6 @@
 {
   "name": "@jingler/managed-runtime",
-  "version": "0.5.0",
+  "version": "0.7.3",
   "private": true,
   "type": "module",
   "description": "Authenticated, session-isolated Cloudflare Sandbox execution for Jingler.",

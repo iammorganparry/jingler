@@ -1,3 +1,4 @@
+import { workspaceEnvironment } from "./workspace-environment.js"
 import { join } from "node:path"
 import { sharedPlanReviewPending } from "./runtime/agent/shared-planning.js"
 
@@ -75,6 +76,7 @@ import { BrowserControlMcpService,
 } from "./browser-control-mcp-service.js"
 import type { SecretStore } from "./secret-store.js"
 import { SessionStore } from "./sessions.js"
+import { acquireCheckpointedTurnScoped } from "./workspace-checkpoints.js"
 import { TranscriptStore } from "./transcripts.js"
 import { BackgroundTaskStore } from "./background-tasks.js"
 import { UsageFactStore } from "./usage-facts.js"
@@ -478,9 +480,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
       text: string,
       images: ReadonlyArray<Attachment>,
       reasoning: ReasoningSetting | null | undefined,
-      planExecutionId?: string,
-      externalInstruction?: ExternalInstructionIdentity,
-      displayText?: string
+      planExecutionId: string | undefined,
+      externalInstruction: ExternalInstructionIdentity | undefined,
+      displayText: string | undefined,
+      workspaceTurn: { release(): void; transfer(): void }
     ) =>
       Effect.suspend(() =>
         Effect.gen(function* () {
@@ -1127,6 +1130,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 )
               }).pipe(Effect.provide(env), Effect.ignore)
             ),
+            Effect.ensuring(Effect.sync(() => workspaceTurn.release())),
             Effect.ensuring(out.end)
           )
           /**
@@ -1140,7 +1144,14 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * addressed a handle into nothing. Background work has to outlive the
            * turn that started it or the feature does not exist.
            */
-          const fiber = yield* Effect.forkDaemon(run)
+          // Transfer the lease atomically with the daemon fork. The request
+          // consumer can linger after Done or detach while background work lives;
+          // neither changes whether the actual harness still owns the workspace.
+          const fiber = yield* Effect.uninterruptibleMask(restore =>
+            Effect.forkDaemon(restore(run)).pipe(
+              Effect.tap(() => Effect.sync(() => workspaceTurn.transfer()))
+            )
+          )
           yield* Ref.update(fibers, (m) =>
             new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
           )
@@ -1258,6 +1269,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
         Effect.gen(function* () {
           const lock = yield* chatLock(chatId)
           return yield* lock.withPermits(1)(
+            // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: admission, dedupe, model rollback, and run reservation share one atomic chat boundary.
             Effect.gen(function* () {
               if (
                 externalInstruction !== undefined &&
@@ -1269,6 +1281,34 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   duplicate: true
                 }])
               }
+              const gatedSession = yield* SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null))
+              const lifecycleStatus = gatedSession?.workspaceLifecycle?.status
+              if (gatedSession?.archived || (lifecycleStatus !== undefined && lifecycleStatus !== "ready" && lifecycleStatus !== "setup-skipped")) {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: gatedSession?.archived
+                    ? "This workspace is archived. Restore it before sending a message."
+                    : lifecycleStatus === "setup-failed"
+                      ? "Workspace setup failed. Retry or explicitly skip setup before sending a message."
+                      : "Workspace setup or cleanup is still in progress."
+                }])
+              }
+              const checkpointPaths = yield* AppPaths
+              let runOwnsLease = false
+              const workspaceLease = yield* (gatedSession
+                ? acquireCheckpointedTurnScoped(gatedSession, join(checkpointPaths.root, "checkpoints"), chatId, (lease) => {
+                  if (!runOwnsLease) lease.release()
+                })
+                : Effect.fail(new Error("Workspace session not found."))
+              ).pipe(Effect.either)
+              if (workspaceLease._tag === "Left") {
+                return Stream.fromIterable<StreamEvent>([{
+                  _tag: "Failed",
+                  message: workspaceLease.left instanceof Error ? workspaceLease.left.message : "Workspace is unavailable."
+                }])
+              }
+              if (gatedSession?.checkpointSafeMode !== true) yield* SessionStore.markCheckpointExecutionUnprovable(sessionId)
+
               // Concurrent chats in one session are allowed, but a single chat is
               // single-flight: two runs on ONE chatId would race the `fibers`
               // slot (line ~1503) — run A's fiber orphaned and unstoppable since
@@ -1298,7 +1338,11 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 reasoning,
                 planExecutionId,
                 externalInstruction,
-                displayText
+                displayText,
+                {
+                  release: () => workspaceLease.right.release(),
+                  transfer: () => { runOwnsLease = true }
+                }
               ).pipe(
                 Effect.onError(() => expectedModel === null
                   ? Effect.void
@@ -1326,7 +1370,10 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               )
             })
           )
-        })
+        }).pipe(Effect.catchAll((error) => Effect.succeed(Stream.fromIterable<StreamEvent>([{
+          _tag: "Failed",
+          message: error.message
+        }]))))
       )
     }
 
@@ -1479,6 +1526,7 @@ function prepareTurnSpec(
   const mcp = { browser: browserAttachment }
 
   const spec: AgentTurnSpec = {
+    workspaceEnvironment: workspaceEnvironment(session),
     sessionId,
     chatId,
     runtimeId: chat.runtimeId ?? "pi",

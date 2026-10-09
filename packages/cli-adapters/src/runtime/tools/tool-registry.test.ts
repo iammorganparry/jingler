@@ -155,3 +155,32 @@ describe("ToolRegistry", () => {
     expect(execute).not.toHaveBeenCalled()
   })
 })
+
+it("denies shell, delegation and external tools before execution in safe mode", async () => {
+  const { setWorkspaceCheckpointMode, resetWorkspaceAdmissions } = await import("../../workspace-admission.js")
+  setWorkspaceCheckpointMode("safe", true)
+  try {
+    for (const id of ["command_execute", "subagent", "mcp_external", "offload"]) {
+      const execute = vi.fn(async () => "never")
+      const registry = new ToolRegistry({ checkpointSessionId: "safe" })
+      registry.register(definition({ id, execute }))
+      const result = await Effect.runPromise(registry.execute({ id, arguments: { path: "file" }, role: "conversation", mode: "ask" }))
+      expect(result.error?.code).toBe("forbidden"); expect(execute).not.toHaveBeenCalled()
+    }
+  } finally { resetWorkspaceAdmissions() }
+})
+
+it("owner tools share the admitted turn without closing admission or deadlocking", async () => {
+  const { setWorkspaceCheckpointMode, closeWorkspaceAdmission, acquireCheckpointTurnOwner, checkpointTurnOwner, workspaceActivityCount, resetWorkspaceAdmissions } = await import("../../workspace-admission.js")
+  setWorkspaceCheckpointMode("safe", true)
+  const turn = acquireCheckpointTurnOwner("safe", closeWorkspaceAdmission("safe", "capture"))
+  try {
+    const registry = new ToolRegistry({ checkpointSessionId: "safe", checkpointOwner: checkpointTurnOwner("safe") })
+    registry.register(definition({ id: "workspace_read_file", execute: async () => { expect(workspaceActivityCount("safe")).toBe(2); return "read" } }))
+    const result = await Effect.runPromise(registry.execute({ id: "workspace_read_file", arguments: { path: "file" }, role: "conversation", mode: "ask" }))
+    expect(result.status).toBe("success"); expect(workspaceActivityCount("safe")).toBe(1)
+    turn.release()
+    const stale = await Effect.runPromise(registry.execute({ id: "workspace_read_file", arguments: { path: "file" }, role: "conversation", mode: "ask" }))
+    expect(stale.status).toBe("error")
+  } finally { turn.release(); resetWorkspaceAdmissions() }
+})

@@ -1,5 +1,73 @@
 # @jingler/desktop
 
+## 0.7.3
+
+### Patch Changes
+
+- b557d94: Claude subagents started in the background now do their work. They used to stop on their first turn with a 401, because the Claude CLI provider failed to load in background children.
+  - @jingler/plannotator-ext@0.7.3
+
+## 0.7.2
+
+### Patch Changes
+
+- 364b0aa: Flatten indentation in the file browser so deeply nested folders (like Java packages) stay readable.
+  - @jingler/plannotator-ext@0.7.2
+
+## 0.7.1
+
+### Patch Changes
+
+- c720f72: Sessions now load your Claude Code instruction files (`~/.claude/CLAUDE.md`, `~/.claude/rules/**`, the repo's `AGENTS.md`/`CLAUDE.md` and `.claude/rules/**`) for every harness, and list which ones loaded. Stdio MCP servers start with your login-shell environment, and connection errors now include the server's stderr.
+
+  Claude subagents launched from a Pi session no longer fail with `model_verification_failed`: child sessions now register the same `sonnet`/`opus`/`haiku` aliases as the parent.
+  - @jingler/plannotator-ext@0.7.1
+
+## 0.7.0
+
+### Minor Changes
+
+- ba35fb9: Plan review now reads like a technical document: proper heading sizes, stages laid out in review order with a contents rail, technical details shown inline, task descriptions, file rows that open in Files, and finished stages folded away.
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.7.0
+
+## 0.6.0
+
+### Minor Changes
+
+- e6e6777: Add approved per-project workspace setup, run, stop, copied-file, and cleanup workflows with setup admission gates and recoverable failures.
+- 4ccfa48: Add an Obsidian plugin with per-session local vault configuration, read-only Markdown previews, and agent tools for reading and updating notes with revision checks.
+- e6e6777: Add opt-in local Pi workspace checkpoints with staged-file recovery, restore previews and pinned safety backups. Safe mode supports structured edits and read-only inspection, and blocks unsupported shell and terminal execution. Require current approval before opening configured previews and preserve additional port drafts while typing.
+- e6e6777: Save local desktop routines with one-time or fixed-interval schedules, fresh checkpoint-safe workspaces, run history and cancellation. Explicitly archive terminal workspaces without cleanup while preserving files and running jobs.
+- bad21c3: Review team work from the Pull requests inbox using your GitHub CLI account. Switch between team review requests, PRs authored by team members, and team-repository PRs, then open the existing local session actions. Team queues show access failures and partial results explicitly and never require a GitHub App connection.
+- e6e6777: Assign isolated local workspaces their own app and service ports, pass workspace variables to commands and terminals, and open configured server previews with readiness feedback. Ports persist across archive and restart and can be explicitly reassigned while stopped.
+
+### Patch Changes
+
+- e6e6777: Fix metadata-only archive restoration, shell descendant shutdown, persistent named Run commands, port-aware offload, live lifecycle reconciliation, stable workflow command identities and visible diagnostics. Refused safe-mode shell commands no longer taint history, and deleted workspace run state is reclaimed.
+- f80f1c2: Fix PI subagents using OAuth-backed models in the bundled process worker.
+- e6e6777: Fix deleting completed direct sessions while preserving their repository checkout and stopping owned workspace activity before deletion.
+- d9f2d8d: Show sessions as running while Fleet subagents are queued or running, preserving operator attention and clearing activity when children finish.
+- 789b3a2: Keep followed files visible while the agent thinks or streams. Repeated notifications no longer reload the file or redraw the same diff; actual edits, renames and file switches still update the view.
+- 5c862cd: Pick up current models from compatible Codex CLI updates, prevent duplicate PI provider connections on the same target, and allow adversarial reviews to run beside an active conversation.
+- fc02384: Choose a known local Obsidian vault or enter its path, with a refreshed note browser and preview.
+- 99be166: Show and run models advertised by the installed Codex CLI through PI ChatGPT subscription connections.
+- 664a2ea: Remove project port allocation and workflow preview controls. Project setup, cleanup, run commands, copied files, and the browser preview dock remain available.
+- 7d9b598: Show sessions as running while the review agent works, instead of falling back to Settled.
+- e6e6777: Revalidate sign-in before unattended routines, preserve disabled schedules when saving, and keep routine history and recovery guidance accessible after scheduler failures.
+- e6e6777: Checkpoint-safe workspaces now refuse file rename without changing either file. Safe mode cannot guarantee an atomic move without overwriting another writer's destination; ordinary workspaces retain rename support. Creation, safe-mode consent and routine settings disclose this restriction.
+
+  Workspace setup and cleanup recovery now show failures reliably, and Retry, Skip, Archive and Restore keep the desktop in sync without replaying hooks.
+
+- bd1cc30: Add native right-click menus for copying selected text and external link addresses, plus standard text-field editing actions. Worktree file links omit the misleading app-local Copy Link Address action. Chat links and file paths remain selectable without opening accidentally.
+- 664a2ea: Show session creation progress in the send button and retain drafts when creation fails. Load shared project commands and routine templates from .jingler/project.json into review drafts, with explicit local saving and approval.
+- 5228c77: Configure project commands, preview ports and routines together with one project picker, editable rows and clear approval feedback.
+
+  Move workspace checkpoints into conversation actions and hide empty workspace command bars.
+  - @jingler/plannotator-ext@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes

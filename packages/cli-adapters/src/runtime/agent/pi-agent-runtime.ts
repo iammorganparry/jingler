@@ -1,3 +1,4 @@
+import { workspaceCheckpointMode, checkpointTurnOwner } from "../../workspace-admission.js"
 import type { ToolRegistry } from "../tools/tool-registry.js"
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent"
 import type {
@@ -224,6 +225,7 @@ const runSession = (
 ): Stream.Stream<StreamEvent, AgentRuntimeError> =>
   Stream.unwrap(
     Effect.gen(function* () {
+      if (workspaceCheckpointMode(spec.sessionId) && !checkpointTurnOwner(spec.sessionId)) return yield* Effect.fail(new AgentRuntimeError({ reason: "runtime", message: "Checkpoint-safe Pi execution requires the automatic capture gate." }))
       const queue = yield* Queue.unbounded<StreamEvent>()
       const record = yield* sessions.acquire(spec, context)
       const handle = record.handle

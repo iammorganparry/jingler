@@ -335,7 +335,7 @@ const fileBrowserResponse = (
     }
     return fauxAssistantMessage("Updated and created the configuration files.")
   }
-  return followedFileResponse(context, prompt, writes)
+  return stabilityFileResponse(prompt, writes) ?? followedFileResponse(context, prompt, writes)
 }
 
 const mutationResponse = (
@@ -518,6 +518,7 @@ const STRUCTURED_REVIEW_PLAN = [
   "- Focused tests and typecheck pass",
   "### Files",
   "- `src/auth.test.ts` — M",
+  "- `README.md` — M",
   "> complexity: low",
   "> depends: implement-auth",
   "",
@@ -749,8 +750,51 @@ const contextCompactionResponse = (context: PiContext): ReturnType<typeof fauxAs
   return defaultResponse(context)
 }
 
+const routineProofResponse = async (context: PiContext): Promise<ReturnType<typeof fauxAssistantMessage>> => {
+  const prompt = latestOperatorText(context)
+  if (!prompt.includes("routine proof")) return defaultResponse(context)
+  const write = prompt.includes("WRITE")
+  const tool = write ? WRITE_TOOL : READ_TOOL
+  if (recentToolResultCount(context, tool) === 0) {
+    return callTool(tool, write ? { path: "routine-proof.txt", content: "unsafe" } : { path: "README.md" }, "routine-inspect")
+  }
+  await new Promise((resolve) => setTimeout(resolve, 10000))
+  return fauxAssistantMessage("Routine proof inspection complete.")
+}
+
 const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> => {
   switch (fixture.scenarioId) {
+    case "send-progress":
+      // The real title role waits on the scripted transport, so creation stays
+      // pending after the workspace exists. No provider/network request occurs.
+      return Array.from({ length: 16 }, () => async () => {
+        await new Promise(resolve => setTimeout(resolve, 5000))
+        return fauxAssistantMessage(JSON.stringify({ title: "Delayed naming proof", branch: { type: "chore", slug: "delayed-naming-proof" } }))
+      })
+    case "workspace-workflow":
+      return Array.from({ length: 32 }, () => () => fauxAssistantMessage("Workflow turn admitted."))
+    case "workspace-safe-refusals":
+      return Array.from({ length: 32 }, () => (context: PiContext) => {
+        if (recentToolResultCount(context, RENAME_TOOL) === 0) {
+          return callTool(RENAME_TOOL, { from: "rename-source.txt", to: "rename-destination.txt" }, "safe-rename-refusal")
+        }
+        if (recentToolResultCount(context, COMMAND_TOOL) === 0) {
+          return callTool(COMMAND_TOOL, { command: "node -e \"require('node:fs').writeFileSync('shell-sentinel.txt','changed')\"" }, "safe-shell-refusal")
+        }
+        const diagnostics = context.messages.filter(message => message.role === "toolResult").map(message => toolResultText(message)).join("\n")
+        return fauxAssistantMessage(`Safe refusal diagnostics: ${diagnostics}`)
+      })
+    case "workspace-routines":
+      return Array.from({ length: 64 }, () => routineProofResponse)
+    case "workspace-checkpoints":
+      return Array.from({ length: 12 }, () => async (context: PiContext) => {
+        if (!latestOperatorText(context).includes("checkpoint")) return defaultResponse(context)
+        if (recentToolResultCount(context, WRITE_TOOL) === 0) {
+          return callTool(WRITE_TOOL, { path: "checkpoint-proof.txt", content: "changed" }, "checkpoint-write")
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10000))
+        return fauxAssistantMessage("Checkpoint edit complete.")
+      })
     case "plan-mode":
       return Array.from({ length: 12 }, () => planModeResponse)
     case "plan-scratchpad":
@@ -819,7 +863,7 @@ export const configureE2ePiProvider = (fixture: E2ePiFixture) => {
     provider: PROVIDER_ID,
     api: "jingler-e2e-api",
     models: [{ id: "eval-model", contextWindow: E2E_CONTEXT_WINDOW }],
-    tokensPerSecond: 0,
+    tokensPerSecond: fixture.scenarioId === "follow-stability" ? 60 : 0,
     ...(tokenSize === null ? {} : { tokenSize })
   })
   provider.setResponses([...responsesFor(fixture)])
@@ -919,6 +963,21 @@ function scenarioFixtureResponse(context: PiContext) {
       : fauxAssistantMessage("Inspected the GitHub feedback through pi.")
   }
   return offloadFixtureResponse(context)
+}
+
+function stabilityFileResponse(prompt: string, writes: number) {
+  const operation = /\[\[follow-stability\]\] (first|second|other)/u.exec(prompt)?.[1]
+  if (operation === undefined) return null
+  if (writes > 0) return fauxAssistantMessage(fauxText([
+    `${operation}: Settled file operation. `,
+    `${operation}: Still streaming the same completed operation. `.repeat(60),
+    `${operation}: Stability stream finished.`
+  ].join("")))
+  return callTool(WRITE_TOOL, {
+    path: operation === "other" ? "src/other.ts" : "src/config.ts",
+    content: operation === "other" ? "export const other = 'changed'\n"
+      : operation === "second" ? "export const mode = 'second'\n" : MODERN_CONFIG
+  }, `stability-${operation}`)
 }
 
 function followedFileResponse(context: PiContext, prompt: string, writes: number) {

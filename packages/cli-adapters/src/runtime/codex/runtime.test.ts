@@ -16,7 +16,7 @@ import { inactiveRuntimeActivity } from "../agent/agent-runtime.js"
 import { CodexClient, codexEnvironment, readCodexVersion } from "./client.js"
 import { probeCodexEndpoint, startCodexEndpointLogin } from "./endpoint.js"
 import { CodexEvents } from "./events.js"
-import { codexMcpConfig, makeCodexAgentRuntime } from "./runtime.js"
+import { codexWorkspaceConfig, codexMcpConfig, makeCodexAgentRuntime } from "./runtime.js"
 
 const binary = fileURLToPath(new URL("./fixtures/app-server.mjs", import.meta.url))
 const endpointId = nativeCliEndpointId("desktop", "codex")
@@ -346,3 +346,22 @@ it("keeps one completion when interrupt arrives at the terminal event", async ()
   expect(events.some(event => event._tag === "Failed")).toBe(false)
   expect(liveChildCount()).toBe(0)
 })
+
+ it("passes distinct trusted environments to actual concurrent Codex child shell commands", async () => {
+   const before = process.env.JINGLER_ROOT_PATH
+   const clients = ["one", "two"].map((name) => new CodexClient({ binary, workspaceEnvironment: { JINGLER_ROOT_PATH: `/root-${name}`, JINGLER_WORKSPACE_PATH: `/tmp/work-${name}`, ANTHROPIC_API_KEY: "never" }, environment: { ...process.env, JINGLER_ROOT_PATH: "/other-root" } }))
+   try {
+     await Promise.all(clients.map((client) => client.initialize()))
+     const results = await Promise.all(clients.map((client) => client.request<{ output: string }>("workspace/environment", {})))
+     expect(results.map((result) => result.output)).toEqual(["/root-one:/tmp/work-one", "/root-two:/tmp/work-two"])
+     expect(process.env.JINGLER_ROOT_PATH).toBe(before)
+   } finally { await Promise.all(clients.map((client) => client.close())) }
+ })
+
+ it("keeps Codex operator shell policy and credentials outside workspace overrides", () => {
+   const policy = { inherit: "none", include_only: ["PATH"], set: { OPERATOR_VALUE: "kept" } }
+   const config = codexWorkspaceConfig({ shell_environment_policy: policy }, { JINGLER_ROOT_PATH: "/root", OPENAI_API_KEY: "not-a-workspace-variable" })
+   expect(config.shell_environment_policy).toEqual(policy)
+   expect(config["shell_environment_policy.set.JINGLER_ROOT_PATH"]).toBe("/root")
+   expect(config["shell_environment_policy.set.OPENAI_API_KEY"]).toBeUndefined()
+ })

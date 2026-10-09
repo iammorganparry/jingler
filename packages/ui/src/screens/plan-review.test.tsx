@@ -112,7 +112,7 @@ const addComment = (quote: string, body: string) => {
 }
 
 describe("PlanReview", () => {
-  it("renders a compact stage summary and discloses technical detail on demand", async () => {
+  it("renders each stage as a document section with technical detail inline", async () => {
     const open = vi.fn()
     renderReview({}, open)
 
@@ -126,15 +126,13 @@ describe("PlanReview", () => {
     expect(screen.getByRole("region", { name: "Implement auth definition of done" }).textContent)
       .toContain("Focused tests and typecheck pass")
     expect(screen.getByRole("region", { name: "Implement auth tasks" }).textContent).toContain("Implement the auth change")
-    expect(screen.getByRole("region", { name: "Implement auth files" }).textContent).toContain("src/auth.ts")
+    const files = screen.getByRole("region", { name: "Implement auth files" })
+    expect(files.querySelector('[data-change="M"]')?.textContent).toBe("Mauth.tssrc")
     expect(screen.getByRole("region", { name: "Implement auth acceptance criteria" }).textContent).toContain("e2e · src/auth.test.ts::implements auth")
     expect(screen.getByText("medium", { exact: false })).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId("stage-diagram")).toBeTruthy())
 
-    const disclosure = screen.getByText("Technical details").closest("details")
-    expect(disclosure?.hasAttribute("open")).toBe(false)
-    fireEvent.click(screen.getByText("Technical details"))
-    expect(disclosure?.hasAttribute("open")).toBe(true)
+    expect(screen.getByRole("region", { name: "Implement auth technical details" })).toBeTruthy()
     expect(screen.getByRole("region", { name: "Proposed change to src/auth.ts" })).toBeTruthy()
     fireEvent.click(screen.getAllByRole("button", { name: "Open src/auth.ts" })[0]!)
     expect(open).toHaveBeenCalledWith("src/auth.ts")
@@ -271,6 +269,41 @@ describe("PlanReview", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Hide changes" }))
     expect(screen.queryByRole("region", { name: "Changes since the previous revision" })).toBeNull()
+  })
+
+  it("folds a completed stage until the reviewer expands it", () => {
+    const stage = document.plan.stages[0]!
+    renderReview({ document: { ...document, plan: { ...document.plan, stages: [{
+      ...stage,
+      tasks: (stage.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+      acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
+    }] } } })
+    expect(screen.getByRole("heading", { name: "Implement auth" })).toBeTruthy()
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Show stage details" }))
+    expect(screen.getByRole("region", { name: "Implement auth files" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Hide stage details" }))
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+  })
+
+  it("shows a reopened stage's body even after it was folded as done", () => {
+    const stage = document.plan.stages[0]!
+    const withStage = (next: typeof stage) => ({ ...document, plan: { ...document.plan, stages: [next] } })
+    const done = {
+      ...stage,
+      tasks: (stage.tasks ?? []).map((task) => ({ ...task, status: "completed" as const })),
+      acceptance: stage.acceptance.map((criterion) => ({ ...criterion, status: "passed" as const }))
+    }
+    const view = renderReview({ document: withStage(done) })
+    expect(screen.queryByRole("region", { name: "Implement auth files" })).toBeNull()
+    view.rerender(
+      <ThemeProvider tokens={toTokens(jinglerDark)}>
+        <OpenAssetProvider open={vi.fn()} knownFiles={new Set(["src/auth.ts"])}>
+          <PlanReview document={withStage({ ...done, tasks: [{ id: "task-1", text: "Redo", status: "pending" }] })} />
+        </OpenAssetProvider>
+      </ThemeProvider>
+    )
+    expect(screen.getByRole("region", { name: "Implement auth files" })).toBeTruthy()
   })
 
   it("is read-only once the plan is approved", () => {

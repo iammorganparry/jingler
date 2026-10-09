@@ -1,6 +1,12 @@
-import { useMemo } from "react"
+import { useMemo, type CSSProperties } from "react"
 import type { AssetFileEntry } from "@jingler/core"
 import { PierreFileTree } from "../components/pierre-file-tree.js"
+
+// Deep Java-style package paths ran names off the edge; stack every level flush.
+const FLAT_TREE_STYLE = {
+  "--trees-level-gap-override": "0px",
+  "--trees-indent-guide-bg-override": "transparent"
+} as CSSProperties
 
 export interface AssetFileTreeProps {
   readonly entries: readonly AssetFileEntry[]
@@ -33,6 +39,7 @@ export function AssetFileTree({
       stickyFolders={false}
       ariaLabel="Repository files"
       className={className}
+      style={FLAT_TREE_STYLE}
       onSelectionChange={(paths) => {
         const selected = paths.findLast((path) => files.has(path))
         if (selected !== undefined && selected !== selectedPath) onSelectPath(selected)

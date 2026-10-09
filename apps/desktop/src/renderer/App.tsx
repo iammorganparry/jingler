@@ -1,3 +1,5 @@
+import { RoutinesSettings } from "./routines-settings.js"
+import { sessionArchiveMachine } from "./session-archive-machine.js"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMachine } from "@xstate/react";
 import {
@@ -118,6 +120,8 @@ import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
+import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js";
+import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
 import { useAutoUpdate } from "./use-auto-update.js";
 import { useReleaseNotes } from "./use-release-notes.js";
 import {
@@ -647,25 +651,22 @@ function AuthedApp({
   };
   // Delete is destructive (removes the worktree) — confirm first. Holds the
   // session pending confirmation; the ConfirmDialog fires `deleteSession`.
+  // Capture once: navigation must not retarget an open restore preview or operation.
+  const [checkpointOwner, setCheckpointOwner] = useState<{ session: Session; trigger: HTMLButtonElement | null } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const [sessionMutationError, setSessionMutationError] = useState<
     string | null
   >(null);
   // Manual archive from the sidebar quick-actions. The store only models a
   // merged/closed reason, so a hand-archived session records "closed".
+  const [archiveState, sendArchive] = useMachine(sessionArchiveMachine, { input: {
+    load: rpc.sessionsGet,
+    archive: (id, acknowledged) => rpc.sessionsArchive(id, "closed", false, acknowledged),
+    onSession: session => send({ type: "SESSION_UPDATED", session })
+  } });
   const archiveSession = async (sessionId: string) => {
-    setSessionMutationError(null);
-    try {
-      const session = await rpc.sessionsArchive(sessionId, "closed");
-      send({ type: "SESSION_UPDATED", session });
-    } catch (error) {
-      setSessionMutationError(
-        error instanceof Error
-          ? error.message
-          : "Could not archive the session.",
-      );
-      throw error;
-    }
+    const session = sessions.find(item => item.id === sessionId);
+    if (session) sendArchive({ type: "ARCHIVE", session });
   };
   const renameSession = (sessionId: string, title: string) => {
     void rpc
@@ -1361,7 +1362,9 @@ function AuthedApp({
           GitHub feedback is reconnecting. {relayError}
         </div>
       )}
+      {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <JinglerApp
+        onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
         tabContributions={pluginTabs}
         onSelectIssue={selectIssue}
         paneContributions={pluginPanes}
@@ -1391,6 +1394,9 @@ function AuthedApp({
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
         onEnsureProjectOnEnvironment={rpc.projectsEnsureOnEnvironment}
+        onReadProjectConfig={rpc.projectsReadConfig}
+        routines={(projectId, templates) => <RoutinesSettings key={projectId} templates={templates} projectId={projectId} projects={projectController.projects} catalog={providerCatalog.catalog} onSession={id => rpc.sessionsGet(id).then(session => { send({ type: "SESSION_UPDATED", session }); setSelectRequest({ sessionId: id, nonce: Date.now() }); })} />}
+        onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
         collapsedRepos={collapsedRepos}
@@ -1631,9 +1637,15 @@ function AuthedApp({
           <ExplanationPane sessionId={session.id} />
         )}
         renderConversation={(session: Session, view, ctx) => (
-          // The registry keeps each actor alive, but React state must remount per
-          // chat or useSelector can display the previous actor until the new
-          // transcript load emits its first transition.
+          <div className="flex min-h-0 flex-1 flex-col">
+            <WorkspaceWorkflowBar
+              session={session}
+              project={projectController.projects.find((project) => project.id === session.projectId)}
+              onSession={publishSessionUpdate}
+            />
+          {/* The registry keeps each actor alive, but React state must remount per
+              chat or useSelector can display the previous actor until the new
+              transcript load emits its first transition. */}
           <ConversationPane
             key={`${session.id}:${session.activeChatId}`}
             session={session}
@@ -1658,6 +1670,7 @@ function AuthedApp({
             onAuthorizeMcp={mcp.startAuthorization}
             paneFocused={ctx.paneFocused ?? true}
           />
+          </div>
         )}
         renderExplorer={(session, onOpenPath) => (
           <FileBrowserExplorer
@@ -1803,6 +1816,7 @@ function AuthedApp({
         load={mcp.importCandidates}
         apply={mcp.applyImport}
       />
+      <ArchiveConfirmation state={archiveState} send={sendArchive} />
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
@@ -2266,4 +2280,16 @@ function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): bo
 
 function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): boolean {
   return connected && (config?.autoDetectPr ?? true);
+}
+
+function ArchiveConfirmation({ state, send }: { state: import("xstate").SnapshotFrom<typeof sessionArchiveMachine>; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+  return <ConfirmDialog
+    closeOnConfirm={false}
+    open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
+    onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
+    title={state.matches("failed") ? "Archive failed" : "Archive without cleanup?"}
+    description={state.context.error ?? "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked."}
+    confirmLabel={state.matches("failed") ? "Retry" : "Archive without cleanup"}
+    onConfirm={() => { send({ type: "CONFIRM" }); }}
+  />
 }

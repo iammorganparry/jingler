@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useEffect, type ReactNode } from "react"
 import { Plus } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -291,4 +291,18 @@ describe("EditorGroups rendering", () => {
     expect(onResize.mock.calls[0]?.slice(0, 2)).toEqual(["root", 0])
     expect(onResize.mock.calls[0]?.[2]).toBeCloseTo(0.1)
   })
+})
+
+it("offers checkpoints only on conversation surfaces and hands off the surviving trigger", async () => {
+  const onOpenCheckpoints = vi.fn()
+  const rendered = render(<EditorGroups {...props(() => null)} layout={layout} onOpenCheckpoints={onOpenCheckpoints} />)
+  const trigger = screen.getByRole("button", { name: "More conversation actions" })
+  expect(screen.queryByRole("button", { name: "Checkpoints" })).toBeNull()
+  fireEvent.keyDown(trigger, { key: "ArrowDown" })
+  const item = await screen.findByRole("menuitem", { name: "Checkpoints" })
+  fireEvent.click(item)
+  expect(onOpenCheckpoints).toHaveBeenCalledWith(trigger)
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Checkpoints" })).toBeNull())
+  rendered.rerender(<EditorGroups {...props(() => null)} layout={{ focusedGroupId: "right", root: { type: "group", id: "right", tabs: [source], active: sessionSurfaceKey(source) } }} onOpenCheckpoints={onOpenCheckpoints} />)
+  expect(screen.queryByRole("button", { name: "More conversation actions" })).toBeNull()
 })

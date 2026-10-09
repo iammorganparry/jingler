@@ -139,12 +139,17 @@ export const openSessionFileDiff = (
   target?: Omit<Extract<FileBrowserEvent, { type: "AGENT_TARGET" }>, "type" | "path">
 ): void => {
   const actor = getFileBrowserActor(sessionId, worktreePath, `file:${path}`)
-  actor.send({ type: "OPEN", path })
-  actor.send({ type: "SHOW_DIFF" })
-  actor.send({ type: "REFRESH_DIFF" })
   if (target !== undefined) {
+    if (actor.getSnapshot().context.selectedPath === null) {
+      actor.send({ type: "OPEN", path })
+      actor.send({ type: "SHOW_DIFF" })
+    }
     actor.send({ type: "ENABLE_FOLLOW" })
     actor.send({ type: "AGENT_TARGET", path, ...target })
+  } else {
+    actor.send({ type: "OPEN", path })
+    actor.send({ type: "SHOW_DIFF" })
+    actor.send({ type: "REFRESH_DIFF" })
   }
 }
 

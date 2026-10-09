@@ -8,6 +8,7 @@ import { isAbsolute, resolve } from "node:path"
 import { Duration, Effect } from "effect"
 import type { McpLaunch, ParsedMcpServer } from "./runtime/mcp/attachment.js"
 import { neutralCwd } from "./cwd.js"
+import { loginShellEnvironment } from "./login-shell-env.js"
 
 /**
  * Live probing: does a configured MCP server actually answer?
@@ -38,7 +39,7 @@ const UNAUTHORIZED = /\b(401|unauthori[sz]ed|invalid[_ -]token)\b/iu
 
 const clientInfo = { name: "jingler", version: "0.0.0" } as const
 
-const makeTransport = (launch: McpLaunch, cwd: string | null) => {
+const makeTransport = (launch: McpLaunch, cwd: string | null, shellEnv: Readonly<Record<string, string>>) => {
   if (launch.transport === "stdio") {
     if (launch.command === undefined) throw new Error("stdio server has no command")
     return new StdioClientTransport({
@@ -49,7 +50,7 @@ const makeTransport = (launch: McpLaunch, cwd: string | null) => {
        * `env` alone would drop PATH/HOME and make almost every server fail to spawn,
        * which would look like a broken server rather than a broken probe.
        */
-      env: { ...getDefaultEnvironment(), ...launch.env },
+      env: { ...getDefaultEnvironment(), ...shellEnv, ...launch.env },
       /**
        * Project servers may use relative paths, so probe from the session's
        * worktree — and when there ISN'T one (a user-scope server probed from
@@ -95,7 +96,10 @@ const makeTransport = (launch: McpLaunch, cwd: string | null) => {
  */
 const connectAndCount = async (launch: McpLaunch, cwd: string | null, signal: AbortSignal): Promise<number> => {
   const client = new Client(clientInfo, { capabilities: {} })
-  const transport = makeTransport(launch, cwd)
+  const shellEnv = launch.transport === "stdio" ? await loginShellEnvironment() : {}
+  // The env lookup can outlast a probe timeout; never spawn a server after cancellation.
+  signal.throwIfAborted()
+  const transport = makeTransport(launch, cwd, shellEnv)
   const abort = () => void client.close().catch(() => {})
   signal.addEventListener("abort", abort, { once: true })
   try {

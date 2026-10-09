@@ -1,4 +1,4 @@
-import type { Project } from "@jingler/core"
+import type { Project, ProjectRunCommand } from "@jingler/core"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { rpc } from "./rpc-client.js"
 
@@ -39,6 +39,14 @@ export function useProjects(environmentId?: string) {
       destination: string
       name?: string
     }) => rpc.projectsCloneFromGitHub(input).then(publish),
+    setWorkflow: (input: {
+      projectId: string
+      setup?: string
+      cleanup?: string
+      runs: ReadonlyArray<ProjectRunCommand>
+    copyFiles: ReadonlyArray<string>
+      approve: boolean
+    }) => rpc.projectsSetWorkflow(input).then(publish),
     remove: (project: Project) =>
       rpc.projectsRemove(project.id, project.environmentId).then(() =>
         queryClient.setQueryData<ReadonlyArray<Project>>(

@@ -45,3 +45,7 @@ export * from "./offload-compute.js"
 export * from "./web-search.js"
 
 export { EndpointControlInput, NativeEndpointLogin } from "./remote.js"
+export * from "./workspace-checkpoint.js"
+
+export * from "./routines.js"
+export * from "./project-config.js"

@@ -1,5 +1,60 @@
 # @jingler/cli-adapters
 
+## 0.7.3
+
+### Patch Changes
+
+- b557d94: Claude subagents started in the background now do their work. They used to stop on their first turn with a 401, because the Claude CLI provider failed to load in background children.
+  - @jingler/core@0.7.3
+  - @jingler/plannotator-ext@0.7.3
+  - @jingler/themes@0.7.3
+
+## 0.7.2
+
+### Patch Changes
+
+- @jingler/core@0.7.2
+- @jingler/plannotator-ext@0.7.2
+- @jingler/themes@0.7.2
+
+## 0.7.1
+
+### Patch Changes
+
+- c720f72: Sessions now load your Claude Code instruction files (`~/.claude/CLAUDE.md`, `~/.claude/rules/**`, the repo's `AGENTS.md`/`CLAUDE.md` and `.claude/rules/**`) for every harness, and list which ones loaded. Stdio MCP servers start with your login-shell environment, and connection errors now include the server's stderr.
+
+  Claude subagents launched from a Pi session no longer fail with `model_verification_failed`: child sessions now register the same `sonnet`/`opus`/`haiku` aliases as the parent.
+  - @jingler/core@0.7.1
+  - @jingler/plannotator-ext@0.7.1
+  - @jingler/themes@0.7.1
+
+## 0.7.0
+
+### Patch Changes
+
+- @jingler/core@0.7.0
+- @jingler/plannotator-ext@0.7.0
+- @jingler/themes@0.7.0
+
+## 0.6.0
+
+### Minor Changes
+
+- e6e6777: Add approved per-project workspace setup, run, stop, copied-file, and cleanup workflows with setup admission gates and recoverable failures.
+- bad21c3: Review team work from the Pull requests inbox using your GitHub CLI account. Switch between team review requests, PRs authored by team members, and team-repository PRs, then open the existing local session actions. Team queues show access failures and partial results explicitly and never require a GitHub App connection.
+
+### Patch Changes
+
+- e6e6777: Fix metadata-only archive restoration, shell descendant shutdown, persistent named Run commands, port-aware offload, live lifecycle reconciliation, stable workflow command identities and visible diagnostics. Refused safe-mode shell commands no longer taint history, and deleted workspace run state is reclaimed.
+- e6e6777: Fix deleting completed direct sessions while preserving their repository checkout and stopping owned workspace activity before deletion.
+- 5c862cd: Pick up current models from compatible Codex CLI updates, prevent duplicate PI provider connections on the same target, and allow adversarial reviews to run beside an active conversation.
+- 99be166: Show and run models advertised by the installed Codex CLI through PI ChatGPT subscription connections.
+- Updated dependencies [e6e6777]
+- Updated dependencies [bad21c3]
+  - @jingler/core@0.6.0
+  - @jingler/themes@0.6.0
+  - @jingler/plannotator-ext@0.6.0
+
 ## 0.5.0
 
 ### Patch Changes

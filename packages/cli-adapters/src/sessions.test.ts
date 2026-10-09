@@ -1,3 +1,5 @@
+import { acquireWorkspaceActivity, setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
+import { ProjectService } from "./projects.js"
 import { execFileSync } from "node:child_process"
 import {
   existsSync,
@@ -43,6 +45,7 @@ import {
   withTempRoot
 } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
+
 
 const activeChat = (session: Session) =>
   session.chats.find((chat) => chat.id === session.activeChatId)!
@@ -126,6 +129,71 @@ describe("SessionStore", () => {
     modelId,
     baseBranch: "main",
     ...over
+  })
+
+  it("reads legacy port assignments without losing session metadata or sibling sessions", async () => {
+    const original = await Effect.runPromise(SessionStore.create(input({ title: "Legacy ports" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const file = join(temp.root, "sessions.json")
+    const sibling = { ...original, id: "s_legacy_sibling", title: "Sibling", archived: true }
+    writeFileSync(file, JSON.stringify([{ ...original, workspacePorts: { primary: 3100, extras: { API: 4100 } } }, sibling]))
+    const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restored).toMatchObject(original)
+    expect(restored).not.toHaveProperty("workspacePorts")
+    await Effect.runPromise(SessionStore.setStatus(original.id, "idle").pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const persisted = JSON.parse(readFileSync(file, "utf8"))
+    expect(persisted.find((item: { id: string }) => item.id === sibling.id)).toMatchObject(sibling)
+    expect(persisted.find((item: { id: string }) => item.id === original.id)).not.toHaveProperty("workspacePorts")
+  })
+
+  it.each([true, false])("checkpoint-safe creation rejects configured setup (approved=%s) without allocating ports", async (approve) => {
+    const layer = Layer.mergeAll(services, ProjectService.Default)
+    const project = await Effect.runPromise(ProjectService.register({ path: repoPath }).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    await Effect.runPromise(ProjectService.setWorkflow(project.id, { setup: "touch forbidden", runs: [], copyFiles: [] }, approve).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    await expect(Effect.runPromise(SessionStore.create(input({ title: "Safe setup denied", projectId: project.id, runtimeId: "pi", checkpointSafeMode: true })).pipe(Effect.provide(layer), Effect.provide(temp.layer)))).rejects.toThrow("cannot execute project setup")
+    const sessions = await Effect.runPromise(SessionStore.list().pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    expect(sessions).toEqual([])
+    await Effect.runPromise(ProjectService.setWorkflow(project.id, { runs: [], copyFiles: [] }, true).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    const safe = await Effect.runPromise(SessionStore.create(input({ title: "Safe without setup", projectId: project.id, runtimeId: "pi", checkpointSafeMode: true })).pipe(Effect.provide(layer), Effect.provide(temp.layer)))
+    expect(safe.checkpointExecutionHistory).toBe("clean")
+    expect(safe).not.toHaveProperty("workspacePorts")
+  })
+
+  it("persists fresh safe creation and taint before any terminal launch", async () => {
+    const session = await Effect.runPromise(Effect.gen(function* () {
+      const created = yield* SessionStore.create(input({ checkpointSafeMode: true, runtimeId: "pi", projectId: "safe-project" }))
+      expect(created.checkpointExecutionHistory).toBe("clean")
+      expect(created.checkpointSafeMode).toBe(true)
+      expect(created.workspaceLifecycle?.status).toBe("setup-skipped")
+      yield* SessionStore.markCheckpointTerminalExecutionUnprovable(created.id)
+      return yield* SessionStore.get(created.id)
+    }).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const restarted = await Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restarted.checkpointExecutionHistory).toBe("unprovable")
+    expect(restarted.checkpointPtyHistory).toBe(true)
+    await expect(Effect.runPromise(SessionStore.archive(session.id, "closed").pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+    await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+    await Effect.runPromise(SessionStore.archive(session.id, "closed", true).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const archived = await Effect.runPromise(SessionStore.get(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(archived.archived).toBe(true)
+    expect(archived.worktreePath).toBe(session.worktreePath)
+    expect(existsSync(session.worktreePath!)).toBe(true)
+    await expect(Effect.runPromise(SessionStore.remove(session.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))).rejects.toThrow("cannot be proven")
+  })
+
+  it.each(["setup-running", "cleanup-running"] as const)("recovers interrupted %s without admitting work or redispatching commands", async (status) => {
+    const result = await runExit(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input({ title: `Interrupted ${status}`, projectId: "recovery-project" }))
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { status, updatedAt: new Date().toISOString() })
+      yield* SessionStore.reconcileInterruptedWorkspaceLifecycles()
+      const recovered = yield* SessionStore.get(session.id)
+      expect(recovered.workspaceLifecycle?.status).toBe(status === "setup-running" ? "setup-failed" : "cleanup-failed")
+      expect(recovered.workspaceLifecycle?.error).toContain("interrupted")
+      expect(() => acquireWorkspaceActivity(session.id, "native-child")).toThrow()
+      setWorkspaceAdmissionReadiness(session.id)
+      return recovered
+
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
   })
 
   it("persists canonical provider identity on a new session and chat", async () => {
@@ -1652,6 +1720,53 @@ describe("SessionStore", () => {
     if (exit._tag === "Success") expect(exit.value.branch).toBe("chore/bump")
     // The explicit preference selects the guarded ignore-other-worktrees path.
     expect(calls.some((c) => c.includes("checkout --ignore-other-worktrees chore/bump"))).toBe(true)
+  })
+
+  it("orders lifecycle writes through tied and rolled back clocks, preserving archive history", async () => {
+    const result = await runExit(Effect.gen(function* () {
+      const session = yield* SessionStore.create(input())
+      const read = () => SessionStore.get(session.id)
+      const future = "2099-01-01T00:00:00.000Z"
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { status: "cleanup-failed", updatedAt: future, error: "cleanup failed", output: "retained output" })
+      const failed = yield* read()
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { ...failed.workspaceLifecycle!, updatedAt: future })
+      const tied = yield* read()
+      yield* SessionStore.setWorkspaceLifecycle(session.id, { ...failed.workspaceLifecycle!, updatedAt: "2000-01-01T00:00:00.000Z" })
+      const rollback = yield* read()
+      yield* SessionStore.archive(session.id, "closed", true)
+      const archived = yield* read()
+      yield* SessionStore.restore(session.id)
+      const restored = yield* read()
+      return [failed, tied, rollback, archived, restored]
+    }).pipe(Effect.provide(services)), temp.layer)
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    const times = result.value.map(session => Date.parse(session.workspaceLifecycle!.updatedAt))
+    for (let i = 1; i < times.length; i++) expect(times[i]).toBe(times[i - 1]! + 1)
+    for (const session of result.value) expect(session.workspaceLifecycle).toMatchObject({ status: "cleanup-failed", error: "cleanup failed", output: "retained output" })
+    expect(result.value[3]?.archived).toBe(true)
+    expect(result.value[4]?.archived).toBe(false)
+  })
+
+  it("archives and restores legacy records without lifecycle", async () => {
+    const created = await runExit(SessionStore.create(input()).pipe(Effect.provide(services)), temp.layer)
+    expect(created._tag).toBe("Success")
+    if (created._tag !== "Success") return
+    const path = join(temp.root, "sessions.json")
+    const records = JSON.parse(readFileSync(path, "utf-8"))
+    for (const record of records) delete record.workspaceLifecycle
+    writeFileSync(path, JSON.stringify(records))
+    const result = await runExit(Effect.gen(function* () {
+      yield* SessionStore.archive(created.value.id, "closed")
+      const archived = yield* SessionStore.get(created.value.id)
+      yield* SessionStore.restore(created.value.id)
+      return [archived, yield* SessionStore.get(created.value.id)]
+    }).pipe(Effect.provide(SessionStore.Default)), temp.layer)
+    expect(result._tag).toBe("Success")
+    if (result._tag !== "Success") return
+    expect(result.value[0]?.archived).toBe(true)
+    expect(result.value[1]?.archived).toBe(false)
+    expect(Date.parse(result.value[1]!.workspaceLifecycle!.updatedAt)).toBeGreaterThan(Date.parse(result.value[0]!.workspaceLifecycle!.updatedAt))
   })
 
   it("archive sets archived + reason + archivedAt; restore clears them", async () => {

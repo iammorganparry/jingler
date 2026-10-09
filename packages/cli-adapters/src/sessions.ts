@@ -1,3 +1,6 @@
+import { workspaceAdmissionClosed, workspaceHasUnprovenProcesses, setWorkspaceCheckpointMode } from "./workspace-admission.js"
+import { setWorkspaceAdmissionReadiness } from "./workspace-admission.js"
+import { ProjectService } from "./projects.js"
 import { createHash } from "node:crypto"
 import type {
   AgentEndpointId,
@@ -19,6 +22,7 @@ import type {
   RuntimeContinuation,
   Session,
   SettledSessionStatus,
+  WorkspaceLifecycle,
   WorkspaceMode
 } from "@jingler/core"
 import {
@@ -45,6 +49,14 @@ import { displayNameFromCreativeSlug, freeCreativeName } from "./creative-name.j
 import { GitHubApi } from "./github-api.js"
 import { GitService } from "./git.js"
 import { migrateLegacyRuntimeIdentity } from "./runtime/migration/legacy-runtime-identity.js"
+
+const updateWorkspaceReadiness = (session: Session): void => {
+  setWorkspaceCheckpointMode(session.id, session.checkpointSafeMode === true)
+  const status = session.workspaceLifecycle?.status
+  const reason = session.archived ? "the workspace is archived" :
+    status && status !== "ready" && status !== "setup-skipped" ? `workspace ${status}` : undefined
+  setWorkspaceAdmissionReadiness(session.id, reason)
+}
 
 const SessionArray = Schema.Array(SessionSchema)
 const GitHubFeedbackOutbox = Schema.Array(GitHubFeedbackOutboxEntrySchema)
@@ -471,6 +483,24 @@ const nextOpId = (): number => ++opSeq
  * Reads are best-effort: a missing or malformed file yields an empty list so
  * the app still boots.
  */
+const checkpointCreationFields = (input: CreateSessionInput) => ({ ...(input.checkpointSafeMode ? { checkpointSafeMode: true } : {}), ...(input.routineOccurrence ? { routineOccurrence: input.routineOccurrence } : {}) })
+const checkpointCreationSupported = (input: CreateSessionInput): boolean => !input.checkpointSafeMode || (!input.environmentId && input.useWorktree !== false && (input.runtimeId ?? "pi") === "pi" && process.platform !== "win32")
+
+const validateCheckpointCreation = (input: CreateSessionInput) => checkpointCreationSupported(input) ? Effect.void : Effect.fail(new GitError({ message: "Checkpoint-safe mode requires a fresh isolated local managed Pi workspace." }))
+
+// Called inside update's SessionStore lock: wall clocks can tie or move backwards.
+const nextLifecycleTimestamp = (session: Session, requested = new Date().toISOString()) => {
+  const previous = Date.parse(session.workspaceLifecycle?.updatedAt ?? "")
+  return new Date(Math.max(Date.parse(requested), Number.isFinite(previous) ? previous + 1 : 0)).toISOString()
+}
+
+const advanceLifecycle = (session: Session) => ({
+  ...(session.workspaceLifecycle ?? { status: "ready" as const }),
+  updatedAt: nextLifecycleTimestamp(session)
+})
+
+const initialWorkspaceLifecycle = (input: CreateSessionInput, updatedAt: string) => ({ status: input.checkpointSafeMode ? "setup-skipped" as const : "setup-running" as const, updatedAt })
+
 export class SessionStore extends Effect.Service<SessionStore>()(
   "@jingler/SessionStore",
   {
@@ -504,6 +534,13 @@ export class SessionStore extends Effect.Service<SessionStore>()(
       const atomically = <A, E, R>(
         effect: Effect.Effect<A, E, R>
       ): Effect.Effect<A, E, R> => lock.withPermits(1)(effect)
+      const checkWorkspaceSetup = (session: Session) => Effect.gen(function* () {
+        if (!session.checkpointSafeMode || session.environmentId || session.workspaceMode === "direct" || !session.worktreePath) return session
+        const projectService = yield* Effect.serviceOption(ProjectService)
+        const project = session.projectId && projectService._tag === "Some" ? yield* projectService.value.get(session.projectId).pipe(Effect.mapError((cause) => new GitError({ message: "Could not read project workflow", cause }))) : undefined
+        if (project?.workflow?.setup) return yield* Effect.fail(new GitError({ message: "Checkpoint-safe creation cannot execute project setup shell commands." }))
+        return session
+      })
       const repositoryLocks = new Map<string, Effect.Semaphore>()
       const repositoryLock = (identity: string): Effect.Semaphore => {
         const existing = repositoryLocks.get(identity)
@@ -647,6 +684,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         | AppPaths
       > =>
         Effect.gen(function* () {
+          yield* validateCheckpointCreation(input)
           const now = yield* Effect.sync(() => new Date().toISOString())
           const stamp = yield* Effect.sync(() => Date.now().toString(36))
           // Title is optional now: blank → the agent auto-names it (provisional
@@ -700,6 +738,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             workspaceMode: WorkspaceMode
           ): Session => ({
             id,
+            checkpointExecutionHistory: "clean",
+            ...checkpointCreationFields(input),
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -723,7 +763,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: workspace.path,
             workspaceMode,
             repoPath: workspace.repoPath,
-            baseBranch: input.baseBranch
+            baseBranch: input.baseBranch,
+            ...propertiesWhen(
+              workspaceMode === "worktree" && input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: initialWorkspaceLifecycle(input, now) }
+            )
           })
 
           if (input.useWorktree === false) {
@@ -815,7 +859,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           atomically,
           readAll,
           ensureSessionIdAvailable,
-          writeAll
+          writeAll,
+          checkWorkspaceSetup
         )
             })
 
@@ -892,8 +937,9 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(opts.defaultReasoning !== undefined, { reasoning: opts.defaultReasoning })
           })
-          const session: Session = {
+          let session: Session = {
             id,
+            checkpointExecutionHistory: "clean",
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -919,7 +965,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.pr.baseRefName
+            baseBranch: input.pr.baseRefName,
+            ...propertiesWhen(
+              input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+            )
           }
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -929,6 +979,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
+              session = yield* checkWorkspaceSetup(session)
               yield* writeAll([session, ...current])
             })
           )
@@ -1007,11 +1058,12 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             ...selection,
             ...propertiesWhen(options.defaultReasoning !== undefined, { reasoning: options.defaultReasoning })
           })
-          const session: Session = {
+          let session: Session = {
             // Stamp the id (like `createFromPr`) so a delete-then-recreate of the
             // same issue can't collide with the old session's persisted data; the
             // worktree slug stays deterministic for the one-session-per-issue guard.
             id,
+            checkpointExecutionHistory: "clean",
             ...propertiesWhen(input.projectId !== undefined, { projectId: input.projectId }),
             ...propertiesWhen(input.environmentId !== undefined, { environmentId: input.environmentId }),
             repo: input.repoName,
@@ -1048,7 +1100,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             worktreePath: worktree.path,
             workspaceMode: "worktree",
             repoPath: worktree.repoPath,
-            baseBranch: input.baseBranch
+            baseBranch: input.baseBranch,
+            ...propertiesWhen(
+              input.projectId !== undefined && input.environmentId === undefined,
+              { workspaceLifecycle: { status: "setup-running" as const, updatedAt: now } }
+            )
           }
           // Re-read INSIDE the lock rather than reusing the list read before
           // the worktree fork: that read is now seconds stale, and appending to
@@ -1058,6 +1114,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             Effect.gen(function* () {
               const current = yield* readAll()
               yield* ensureSessionIdAvailable(current, session.id)
+              session = yield* checkWorkspaceSetup(session)
               yield* writeAll([session, ...current])
             })
           )
@@ -1783,6 +1840,36 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      const setCheckpointSafeMode = (id: string, enabled: boolean) =>
+        update(id, (session) => ({ ...session, checkpointSafeMode: enabled })).pipe(Effect.tap(() => Effect.sync(() => setWorkspaceCheckpointMode(id, enabled))))
+      const markCheckpointTerminalExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable", checkpointPtyHistory: true }))
+      const markCheckpointExecutionUnprovable = (id: string) => update(id, (session) => ({ ...session, checkpointExecutionHistory: "unprovable" }))
+
+      const setWorkspaceLifecycle = (id: string, lifecycle: WorkspaceLifecycle) =>
+        update(id, (session) => ({ ...session, workspaceLifecycle: { ...lifecycle, updatedAt: nextLifecycleTimestamp(session, lifecycle.updatedAt) } })).pipe(Effect.andThen(get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Could not reload workspace lifecycle", cause })), Effect.tap((session) => Effect.sync(() => updateWorkspaceReadiness(session))), Effect.asVoid)))
+
+      const reconcileInterruptedWorkspaceLifecycles = (): Effect.Effect<void, GitError, PersistEnv> =>
+        atomically(Effect.gen(function* () {
+          const sessions = yield* readAll()
+          const now = new Date().toISOString()
+          let changed = false
+          const reconciled = sessions.map((session) => {
+            const status = session.workspaceLifecycle?.status
+            // Current-process closures own live work; only stale running records are interrupted.
+            if (!["setup-running", "cleanup-running"].includes(status ?? "") || workspaceAdmissionClosed(session.id)) return session
+            changed = true
+            return {
+              ...session,
+              workspaceLifecycle: {
+                status: status === "setup-running" ? "setup-failed" as const : "cleanup-failed" as const,
+                updatedAt: nextLifecycleTimestamp(session, now),
+                error: `${status === "setup-running" ? "Setup" : "Cleanup"} was interrupted when Jingler stopped. Retry explicitly.`
+              }
+            }
+          })
+          if (changed) yield* writeAll(reconciled)
+        }))
+
       /** Persist an authoritative publication checkpoint for restart-safe retries. */
       const setPublishCheckpoint = (id: string, publish: Session["publish"]) =>
         update(id, (s) => ({ ...s, publish }))
@@ -1860,14 +1947,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         update(id, (s) => ({ ...s, initialPrompt: undefined }))
 
       /** Archive a session (its linked PR was merged/closed) — read-only, kept. */
-      const archive = (id: string, reason: "merged" | "closed") =>
+      const archive = (id: string, reason: "merged" | "closed", metadataOnlyAcknowledged = false) =>
         Effect.gen(function* () {
+          const session = yield* get(id).pipe(Effect.mapError((cause) => new GitError({ message: "Session not found for archive", cause })))
+          if (session.checkpointPtyHistory && !metadataOnlyAcknowledged) return yield* Effect.fail(new GitError({ message: "Terminal descendants cannot be proven stopped. Explicitly confirm archive without cleanup; files and running jobs will be preserved." }))
           const now = yield* Effect.sync(() => new Date().toISOString())
           yield* update(id, (s) => ({
             ...s,
             archived: true,
             archiveReason: reason,
-            archivedAt: now
+            archivedAt: now,
+            workspaceLifecycle: advanceLifecycle(s)
           }))
         })
 
@@ -1877,7 +1967,8 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           ...s,
           archived: false,
           archiveReason: undefined,
-          archivedAt: undefined
+          archivedAt: undefined,
+          workspaceLifecycle: advanceLifecycle(s)
         }))
 
     /**
@@ -1899,6 +1990,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         Effect.gen(function* () {
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
+          if (workspaceHasUnprovenProcesses(target)) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
           if (
             target.worktreePath &&
             workspaceModeOf(target) === "worktree"
@@ -2003,6 +2095,11 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         markGitHubFeedbackDispatched,
         recoverGitHubFeedbackOutbox,
         setPublishCheckpoint,
+        setWorkspaceLifecycle,
+        setCheckpointSafeMode,
+        markCheckpointExecutionUnprovable,
+        markCheckpointTerminalExecutionUnprovable,
+        reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
         setProject,
         setIssue,
@@ -2142,7 +2239,8 @@ function* createIsolatedSession(
     sessions: readonly Session[],
     sessionId: string
   ) => Effect.Effect<void, GitError>,
-  writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>
+  writeAll: (sessions: ReadonlyArray<Session>) => Effect.Effect<void, GitError, PersistEnv>,
+  checkWorkspaceSetup: (session: Session) => Effect.Effect<Session, GitError, PersistEnv | Path.Path>
 ) {
   const worktreePath = yield* GitService.worktreePathFor(input.repoName, slug)
   if (existing.some((s) => s.worktreePath === worktreePath)) {
@@ -2164,7 +2262,7 @@ function* createIsolatedSession(
   if (input.continueBranch === true) {
     yield* GitService.checkoutBranch(worktree.path, input.baseBranch)
   }
-  const session = makeSession(
+  let session = makeSession(
     input.continueBranch === true ? { ...worktree, branch: input.baseBranch } : worktree,
     "worktree"
   )
@@ -2177,7 +2275,8 @@ function* createIsolatedSession(
     Effect.gen(function* () {
       const current = yield* readAll()
       yield* ensureSessionIdAvailable(current, session.id)
-      yield* writeAll([session, ...current])
+      session = yield* checkWorkspaceSetup(session)
+              yield* writeAll([session, ...current])
     })
   )
   // AFTER the write: the fibre patches this session by id, so the record
@@ -2200,7 +2299,7 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
     const decoded = Schema.decodeUnknownEither(SessionSchema)(
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
-    if (Either.isRight(decoded)) sessions.push(decoded.right)
+    if (Either.isRight(decoded)) { updateWorkspaceReadiness(decoded.right); sessions.push(decoded.right) }
   }
   return sessions
 }

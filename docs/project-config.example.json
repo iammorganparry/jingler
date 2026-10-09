@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workflow": {
+    "setup": "pnpm install --frozen-lockfile",
+    "cleanup": "",
+    "runs": [{ "id": "dev", "label": "Development", "command": "pnpm dev" }],
+    "copyFiles": [".env.local"]
+  },
+  "routines": [{
+    "id": "inspect-readme",
+    "name": "Inspect README",
+    "prompt": "Inspect README.md and report documentation gaps. Use read-only inspection.",
+    "baseBranch": "main",
+    "schedule": { "kind": "interval", "at": 1800000000000, "everyMs": 86400000 },
+    "reasoning": null,
+    "maxDurationMs": 600000
+  }]
+}

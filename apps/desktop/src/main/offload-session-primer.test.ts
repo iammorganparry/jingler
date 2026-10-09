@@ -28,4 +28,9 @@ describe("Offload session priming", () => {
     expect(attempted).toHaveLength(8)
     expect(maximum).toBeLessThanOrEqual(3)
   })
+  it("never primes safe or archived workspaces when enabling offload", async () => {
+    const attempted: string[] = []
+    await Effect.runPromise(primeOffloadSessions([{ id: "safe", worktreePath: "/safe", checkpointSafeMode: true }, { id: "archived", worktreePath: "/archived", archived: true }, { id: "normal", worktreePath: "/normal" }], (_cwd, id) => Effect.sync(() => attempted.push(id))))
+    expect(attempted).toEqual(["normal"])
+  })
 })

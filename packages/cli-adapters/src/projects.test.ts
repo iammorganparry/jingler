@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+import { approvedWorkflow, workflowDigest } from "./project-workflow.js"
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { delimiter, join } from "node:path"
 import { Effect } from "effect"
@@ -44,6 +46,73 @@ describe("ProjectService", () => {
       availability: "available"
     })
   })
+
+  it("binds workflow consent to exact content and preserves it on re-registration", async () => {
+    const repoPath = initGitRepo(join(repos.dir, "workflow"))
+    const registered = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    if (registered._tag !== "Success") throw new Error("Registration failed")
+    const configured = await runExit(ProjectService.setWorkflow(registered.value.id, {
+      setup: "pnpm install",
+      runs: [{ id: "dev", label: "Dev", command: "pnpm dev" }],
+      copyFiles: [".env.local"]
+    }, true).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(configured._tag).toBe("Success")
+    if (configured._tag !== "Success") return
+    expect(configured.value.workflow?.approvedDigest).toMatch(/^[a-f0-9]{64}$/)
+
+    const restored = await runExit(ProjectService.register({ path: repoPath, name: "Renamed" }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(restored).toMatchObject({ _tag: "Success", value: { name: "Renamed", workflow: configured.value.workflow } })
+
+    const changed = await runExit(ProjectService.setWorkflow(registered.value.id, {
+      setup: "pnpm install --frozen-lockfile",
+      runs: [],
+      copyFiles: []
+    }, false).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+    expect(changed).toMatchObject({ _tag: "Success", value: { workflow: { setup: "pnpm install --frozen-lockfile", runs: [], copyFiles: [] } } })
+    if (changed._tag === "Success") expect(changed.value.workflow?.approvedDigest).toBeUndefined()
+  })
+
+  it.each(["approved", "unapproved", "modified-command", "modified-ports", "modified-primary", "modified-extras", "new-digest-forgery"])(
+    "migrates legacy %s workflows before schema decode without granting consent",
+    async (variant) => {
+      const repoPath = initGitRepo(join(repos.dir, "legacy-workflow"))
+      const registered = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+      if (registered._tag !== "Success") throw new Error("Registration failed")
+      const payload = {
+        ports: { primary: 3100, extras: [{ name: "API", start: 4100 }], previewUrl: "http://localhost:{API_port}" },
+        setup: "pnpm install",
+        cleanup: "pnpm clean",
+        runs: [{ id: "dev", label: "Dev", command: "pnpm dev" }],
+        copyFiles: [".env.local"],
+      }
+      const oldDigest = createHash("sha256").update(JSON.stringify(payload)).digest("hex")
+      const workflow = { ...payload, approvedDigest: variant === "unapproved" ? undefined : oldDigest }
+      switch (variant) {
+        case "modified-command": workflow.setup = "curl attacker"; break
+        case "modified-ports": workflow.ports.previewUrl = "http://attacker:{port}"; break
+        case "modified-primary": workflow.ports.primary = 3101; break
+        case "modified-extras": workflow.ports.extras[0]!.start = 4101; break
+        case "new-digest-forgery": workflow.approvedDigest = workflowDigest(payload); break
+      }
+      const untouched = { ...registered.value, id: "unrelated", name: "Unrelated" }
+      const file = join(temp.root, "projects.json")
+      writeFileSync(file, JSON.stringify([{ ...registered.value, workflow }, untouched]))
+      const loaded = await runExit(ProjectService.get(registered.value.id).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+      if (loaded._tag !== "Success") throw new Error("Legacy project unreadable")
+      expect(loaded.value).toMatchObject({ id: registered.value.id, path: repoPath, createdAt: registered.value.createdAt })
+      expect(loaded.value.workflow).not.toHaveProperty("ports")
+      expect(loaded.value.workflow).toMatchObject({ setup: workflow.setup, cleanup: payload.cleanup, runs: payload.runs, copyFiles: payload.copyFiles })
+      expect(Boolean(approvedWorkflow(loaded.value.workflow))).toBe(variant === "approved")
+      expect(loaded.value.workflow?.approvedDigest).toBe(variant === "approved" ? workflowDigest(payload) : undefined)
+      expect(loaded.value.workflow?.approvedDigest).not.toBe(oldDigest)
+      // Re-registration writes the migration and must preserve unrelated records.
+      const saved = await runExit(ProjectService.register({ path: repoPath }).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+      expect(saved._tag).toBe("Success")
+      expect(JSON.parse(readFileSync(file, "utf8")).find((item: { id: string }) => item.id === "unrelated")).toEqual(untouched)
+      const restarted = await runExit(ProjectService.get(registered.value.id).pipe(Effect.provide(ProjectService.Default)), temp.layer)
+      expect(restarted).toMatchObject({ _tag: "Success", value: { workflow: loaded.value.workflow } })
+    },
+  )
 
   it("hides unmarked legacy registrations without deleting them and restores an explicit re-import", async () => {
     const repoPath = initGitRepo(join(repos.dir, "legacy"))

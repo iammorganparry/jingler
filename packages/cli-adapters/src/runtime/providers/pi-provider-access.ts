@@ -26,6 +26,7 @@ import {
   verifyLocalClaudeSubscription,
   type ClaudeCliProviderOptions
 } from "./claude-cli-provider.js"
+import { claudeCliModels } from "./claude-cli-models.js"
 import {
   readCodexModelCatalog,
   type CodexModelCatalogEntry,
@@ -165,28 +166,11 @@ export const registerClaudeCliProvider = (
 ): void => {
   const anthropic = runtime.getProvider("anthropic")
   if (!anthropic?.getModels().every(({ api }) => api === "anthropic-messages")) return
-  const models = anthropic.getModels()
-  // Claude CLI accepts documented aliases that pi's static model catalog omits.
-  const aliases = ([
-    ["opus", "claude-opus", "Claude Opus (latest)"],
-    ["sonnet", "claude-sonnet", "Claude Sonnet (latest)"],
-    ["haiku", "claude-haiku", "Claude Haiku (latest)"]
-  ] as const).flatMap(([id, prefix, name]) => {
-    const base = models.find((model) => model.id.startsWith(prefix))
-    return base === undefined || models.some((model) => model.id === id)
-      ? []
-      : [{ ...base, id, name }]
-  })
-  // Claude CLI ships this id before pi's catalogue; inherit metadata until pi catches up.
-  const opus5 = runtime.getModel("anthropic", "claude-opus-5")
-  const opus55 = opus5 === undefined || models.some(({ id }) => id === "claude-opus-5-5")
-    ? []
-    : [{ ...opus5, id: "claude-opus-5-5", name: "Claude Opus 5.5" }]
   runtime.registerProvider("anthropic", {
     ...runtime.getRegisteredProviderConfig("anthropic"),
     api: "anthropic-messages",
     streamSimple: createClaudeCliStreamSimple(options),
-    models: [...models, ...aliases, ...opus55]
+    models: [...claudeCliModels(anthropic.getModels())]
   })
 }
 

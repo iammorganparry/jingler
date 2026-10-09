@@ -1,5 +1,9 @@
 import { NativeEndpointLogin } from "@jingler/core"
 import {
+  ProjectConfig,
+  RoutineInput,
+  RoutineDocument,
+  RoutineRun,
   AdversarialReview,
   ArchiveReason,
   AssetFileEntry,
@@ -67,6 +71,10 @@ import {
   PrSummary,
   Project,
   ProjectDirectoryListing,
+  ProjectRunCommand,
+  WorkspaceRunState,
+  WorkspaceCheckpoint,
+  WorkspaceCheckpointPreview,
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
@@ -248,6 +256,12 @@ export const AssetHover = Schema.Union(
 export type AssetHover = Schema.Schema.Type<typeof AssetHover>
 
 export class JinglerCoreRpcs extends RpcGroup.make(
+  Rpc.make("Routines.list", { success: RoutineDocument, error: GitError }),
+  Rpc.make("Routines.save", { success: RoutineDocument, error: GitError, payload: { id: Schema.optional(Schema.String), input: RoutineInput } }),
+  Rpc.make("Routines.enable", { success: RoutineDocument, error: GitError, payload: { id: Schema.String, enabled: Schema.Boolean } }),
+  Rpc.make("Routines.delete", { success: RoutineDocument, error: GitError, payload: { id: Schema.String } }),
+  Rpc.make("Routines.runNow", { success: RoutineRun, error: GitError, payload: { id: Schema.String } }),
+  Rpc.make("Routines.cancel", { success: RoutineDocument, error: GitError, payload: { runId: Schema.String } }),
   Rpc.make("RuntimeDiagnostics.get", {
     success: Schema.NullOr(RuntimeDiagnosticSnapshot),
     payload: { runId: Schema.String }
@@ -549,6 +563,75 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { id: Schema.String, environmentId: Schema.optional(Schema.String) }
   }),
 
+  /** Save machine-local workflow commands. Approval is bound to this exact content. */
+  Rpc.make("Projects.readConfig", {
+    success: ProjectConfig,
+    error: GitError,
+    payload: { projectId: Schema.String }
+  }),
+
+  Rpc.make("Projects.setWorkflow", {
+    success: Project,
+    error: GitError,
+    payload: {
+      projectId: Schema.String,
+      setup: Schema.optional(Schema.String),
+      cleanup: Schema.optional(Schema.String),
+      runs: Schema.Array(ProjectRunCommand),
+      copyFiles: Schema.Array(Schema.String),
+      approve: Schema.Boolean
+    }
+  }),
+
+  Rpc.make("WorkspaceCheckpoints.setMode", {
+    success: Session, error: GitError,
+    payload: { sessionId: Schema.String, enabled: Schema.Boolean }
+  }),
+  Rpc.make("WorkspaceCheckpoints.list", {
+    success: Schema.Array(WorkspaceCheckpoint), error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.capture", {
+    success: WorkspaceCheckpoint, error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.preview", {
+    success: WorkspaceCheckpointPreview, error: GitError,
+    payload: { sessionId: Schema.String, checkpointId: Schema.String }
+  }),
+  Rpc.make("WorkspaceCheckpoints.restore", {
+    success: WorkspaceCheckpoint, error: GitError,
+    payload: { sessionId: Schema.String, checkpointId: Schema.String, token: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.retrySetup", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.skipSetup", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.startRun", {
+    success: WorkspaceRunState,
+    error: GitError,
+    payload: { sessionId: Schema.String, runId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.stopRun", {
+    error: GitError,
+    payload: { sessionId: Schema.String, runId: Schema.String }
+  }),
+
+  Rpc.make("WorkspaceWorkflow.listRuns", {
+    success: Schema.Array(WorkspaceRunState),
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Scan the configured repos directory for git repositories. */
   Rpc.make("Workspace.repos", {
     success: Schema.Array(Repo),
@@ -704,7 +787,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.archive", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, reason: ArchiveReason }
+    payload: {
+      sessionId: Schema.String,
+      reason: ArchiveReason,
+      skipCleanup: Schema.optional(Schema.Boolean),
+      metadataOnlyAcknowledged: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Restore an archived session back to an editable state. */
@@ -805,7 +893,10 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** Permanently delete a session and remove its worktree. Irreversible. */
   Rpc.make("Sessions.delete", {
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      skipCleanup: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Create and activate a fresh chat inside a session. */

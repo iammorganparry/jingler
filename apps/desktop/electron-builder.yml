@@ -84,6 +84,12 @@ extraResources:
       - jingler.plugin.json
       - dist/**
       - "!dist/**/*.map"
+  - from: ../../plugins/obsidian
+    to: plugins/obsidian
+    filter:
+      - jingler.plugin.json
+      - dist/**
+      - "!dist/**/*.map"
   - from: ../../plugins/expo
     to: plugins/expo
     filter:

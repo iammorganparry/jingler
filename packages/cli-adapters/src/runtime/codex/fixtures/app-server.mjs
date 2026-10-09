@@ -2,6 +2,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import { existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 if (process.argv.includes('--version')) { console.log('codex-cli ' + (/^\d+\.\d+\.\d+$/.test(process.env.CODEX_HOME ?? '') ? process.env.CODEX_HOME : '0.153.2')); process.exit(0) }
@@ -125,7 +126,8 @@ const handleTurn = (method, id, p) => {
   if (method === 'turn/interrupt') { reply(id, {}); done('interrupted'); return true }
   return false
 }
-const handleFailure = (method) => {
+const handleFailure = (method, id) => {
+  if (method === 'workspace/environment') { reply(id, { output: execFileSync('/bin/sh', ['-c', 'printf "%s:%s" "$JINGLER_ROOT_PATH" "$JINGLER_WORKSPACE_PATH"'], { encoding: 'utf8' }) }); return true }
   if (method === 'malformed') process.stdout.write('{broken\n')
   else if (method === 'oversized') process.stdout.write('x'.repeat(10000))
   else if (method === 'exit') process.exit(1)
@@ -140,7 +142,7 @@ const handleMessage = (message) => {
   if (method === 'initialized') { initialized = true; return }
   if (!initialized) { send({ id, error: { code: -1, message: 'Not initialized' } }); return }
   if (!method && pending) { note('item/agentMessage/delta', { itemId: 'answer', delta: JSON.stringify(message.result) }); pending = false; done(); return }
-  if (handleAccount(method, id) || handleModel(method, id, p) || handleThread(method, id, p) || handleTurn(method, id, p) || handleFailure(method)) return
+  if (handleAccount(method, id) || handleModel(method, id, p) || handleThread(method, id, p) || handleTurn(method, id, p) || handleFailure(method, id)) return
   reply(id, {})
 }
 createInterface({ input: process.stdin }).on('line', line => handleMessage(JSON.parse(line)))

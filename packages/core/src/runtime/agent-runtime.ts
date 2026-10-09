@@ -51,6 +51,7 @@ export const TranscriptSeed = Schema.Struct({
 export type TranscriptSeed = Schema.Schema.Type<typeof TranscriptSeed>
 
 export const AgentRunSpec = Schema.Struct({
+  workspaceEnvironment: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   /** One runtime attempt; stable across its journal, diagnostics, and normalized events. */
   runId: Schema.String,
   /** Jingler-owned identity used for journals and restart recovery. */

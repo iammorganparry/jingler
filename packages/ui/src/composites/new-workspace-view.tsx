@@ -1,3 +1,4 @@
+import { Tooltip } from "../components/tooltip.js"
 import { Spin } from "../components/spin.js"
 import * as React from "react";
 import type {
@@ -366,8 +367,7 @@ const selectedBranchOption = (source: NewSessionSource, prBranch: string | undef
 const remoteEnvironmentId = (environmentId: string) => environmentId === "local" ? undefined : environmentId
 const branchPlaceholder = (loading: boolean, local: boolean) => loading ? (local ? "Loading branches…" : "Preparing on host…") : "Choose branch"
 
-const workspaceUnavailableReason = (submitting: boolean, loading: boolean, localOrManaged: boolean, hasProjects: boolean, modelReason: string | undefined, contentReason: () => string | undefined) => {
-  if (submitting) return "Creating session…"
+const workspaceUnavailableReason = (loading: boolean, localOrManaged: boolean, hasProjects: boolean, modelReason: string | undefined, contentReason: () => string | undefined) => {
   if (loading) return localOrManaged ? "Loading branches…" : "Preparing project on host…"
   if (!hasProjects) return "Add a project before starting a session."
   return modelReason ?? contentReason()
@@ -386,12 +386,12 @@ function ProjectControls({ context, projectOptions, sourceOptions, checkoutOptio
     <div className="min-w-[130px] flex-1"><SearchPicker value={selectedBranchOption(source, selectedPr?.headRefName, baseBranch)} options={branchOptions} onValueChange={(value) => send({ type: "SET_BASE", baseBranch: value })} ariaLabel="Base branch" placeholder={branchPlaceholder(loading, environmentId === "local")} searchPlaceholder="Search branches…" emptyLabel="No branches match." disabled={loading || source === "pr"} triggerClassName="h-8 w-full px-2 text-[11.5px]" contentClassName="w-[320px]" /></div>
   </div>
 }
-function WorkspaceComposer({ context, props, catalog, unavailableReason, controls, selectedProject, send }: {
-  context: NewWorkspaceContext; props: NewWorkspaceViewProps; catalog: AgentEndpointCatalog | null | undefined
+function WorkspaceComposer({ submitting, context, props, catalog, unavailableReason, controls, selectedProject, send }: {
+  submitting: boolean; context: NewWorkspaceContext; props: NewWorkspaceViewProps; catalog: AgentEndpointCatalog | null | undefined
   unavailableReason: string | undefined; controls: React.ReactNode; selectedProject: Project | undefined; send: WorkspaceSend
 }) {
   const { draft, attachments, source, selectedPr, baseBranch, environmentId, connectionId, providerId, modelId, mode, reasoning } = context
-  return <Composer autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} allowPlan disabledReason={unavailableReason} contextControls={controls} />
+  return <Composer submitting={submitting} preserveDraftOnSend autoFocus focusKey="new-session" value={draft} onValueChange={(value) => send({ type: "SET_DRAFT", draft: value })} attachments={attachments} onAttachmentsChange={(next) => send({ type: "SET_ATTACHMENTS", attachments: next })} onSend={() => send({ type: "SUBMIT" })} placeholder={workspacePrompt(source)} repo={selectedProject?.name} branch={selectedBranch(source, selectedPr?.headRefName, baseBranch)} environments={props.environments} environmentId={remoteEnvironmentId(environmentId)} onSetEnvironment={(value) => send({ type: "SET_ENVIRONMENT", environmentId: value ?? "local" })} providerCatalog={props.providerCatalog} agentEndpointCatalog={catalog} endpointId={context.endpointId} connectionId={connectionId} providerId={providerId} modelId={modelId} onSetModel={(selection) => send({ type: "SET_MODEL", ...selection })} mode={mode} onSetMode={(value) => send({ type: "SET_MODE", mode: value })} reasoningEffort={reasoning?.effort} thinkingEnabled={reasoning?.enabled} onSetReasoning={(value) => send({ type: "SET_REASONING", reasoning: value })} allowPlan disabledReason={unavailableReason} contextControls={controls} />
 }
 
 function NewWorkspaceContent({ props, context, send, submitting, loading, sourceLoading, selectedEnvironment, selectedSource, sourceLabel, catalog, unavailableReason, selectedProject, projectOptions, sourceOptions, checkoutOptions, branchOptions }: {
@@ -411,7 +411,16 @@ function NewWorkspaceContent({ props, context, send, submitting, loading, source
           <div className="flex items-center gap-3"><div><h2 className="text-[20px] font-semibold tracking-[-0.2px] text-text-bright">What are we working on?</h2><p className="mt-1 max-w-[62ch] text-pretty text-[12px] leading-relaxed text-muted-foreground">Choose where the work starts, configure its checkout, then send the first message.</p></div><span className="flex-1" />{props.onAddProject && <Button variant="secondary" onClick={props.onAddProject}><FolderGit2 size={14} /> Add project</Button>}</div>
           <SourcePicker source={source} icon={selectedSource?.icon} label={sourceLabel} search={search} mine={mine} pullRequests={pullRequests} issues={issues} selectedPr={selectedPr?.number ?? null} selectedIssue={selectedIssue?.id ?? null} loading={sourceLoading} onSearch={(value) => send({ type: "SET_SEARCH", search: value })} onMine={() => send({ type: "SET_MINE", mine: !mine })} onPr={(pr) => send({ type: "SELECT_PR", pr })} onIssue={(issue) => send({ type: "SELECT_ISSUE", issue })} />
           {source === "branch" && <p className="rounded-lg border border-line bg-sunken px-3 py-2 text-[11px] text-muted-foreground">The selected branch will be checked out directly in the session worktree; Jingler will not create a replacement task branch.</p>}
-          <WorkspaceComposer context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} projectOptions={projectOptions} sourceOptions={sourceOptions} checkoutOptions={checkoutOptions} branchOptions={branchOptions} loading={loading} send={send} />} />
+          <label className="text-xs text-text-bright">
+            <Tooltip
+              label="Enable checkpoint-safe mode before the first turn. Local isolated managed Pi only; structured edits and read-only inspection. File rename is unsupported in safe mode; no files are changed. Shell/build/test, setup commands, terminals, delegation and offload are blocked."
+              className="max-w-sm whitespace-normal"
+            >
+              <input type="checkbox" aria-label="Checkpoint-safe mode" disabled={loading || submitting} checked={context.checkpointSafeMode} onChange={(event) => send({ type: "SET_CHECKPOINT_SAFE_MODE", enabled: event.currentTarget.checked })} />
+            </Tooltip>{" "}
+            Checkpoint-safe mode
+          </label>
+          <WorkspaceComposer submitting={submitting} context={context} props={props} catalog={catalog} unavailableReason={unavailableReason} selectedProject={selectedProject} send={send} controls={<ProjectControls context={context} projectOptions={projectOptions} sourceOptions={sourceOptions} checkoutOptions={checkoutOptions} branchOptions={branchOptions} loading={loading} send={send} />} />
           {draft.trim().length === 0 && unavailableReason === undefined && <div className="flex justify-end"><Button variant="secondary" aria-label="Create workspace" onClick={() => send({ type: "SUBMIT" })}><MessageCircle size={14} /> Create without a first message</Button></div>}
           {error && <p role="alert" className="text-[11px] text-red">{error}</p>}
         </div>}
@@ -555,7 +564,6 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
     hasSelectableModel,
   );
   const unavailableReason = workspaceUnavailableReason(
-    submitting,
     loading,
     environmentId === "local" || selectedEnvironment?.kind === "managed",
     props.projects.length > 0,

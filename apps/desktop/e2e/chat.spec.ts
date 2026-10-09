@@ -460,7 +460,7 @@ test("renaming a session keeps the open tab and the breadcrumb follows it", asyn
 
   // Tabs live in the editor group, not the window title bar.
   await expect(window.getByTestId("title-bar").getByRole("tab")).toHaveCount(0)
-  await expect(window.getByRole("button", { name: "Conversation" })).toHaveCount(0)
+  await expect(window.getByRole("button", { name: "Conversation", exact: true })).toHaveCount(0)
   await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })

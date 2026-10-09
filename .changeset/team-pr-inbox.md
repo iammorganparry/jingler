@@ -1,9 +1,7 @@
 ---
 "@jingler/desktop": minor
-"@jingler/cli-adapters": minor
-"@jingler/core": minor
-"@jingler/contracts": minor
+"@jingler/cli-adapters": patch
 "@jingler/ui": minor
 ---
 
-Review team work from the Pull requests inbox using your GitHub CLI account. Switch between team review requests, PRs authored by team members, and team-repository PRs, then open the existing local session actions. Team queues show access failures and partial results explicitly and never require a GitHub App connection. Refresh preserves unsent comments, updates PR details, and resumes quota-limited retrieval; large organization queues are partitioned by repository. Filter loaded PRs by repository, author, label, and draft status; tab labels stay readable with horizontal scrolling.
+Filter loaded pull requests by repository, author, label, and Draft/Ready status. Shared tabs keep full labels and scroll horizontally. Refresh preserves unsent comments while updating details and revalidating completed team searches without restarting unfinished pages. Recovery counts only current-attempt results and releases completed queue progress. Confirmed GitHub CLI account changes clear Personal selections and isolate cached or late detail responses; first-time identity discovery keeps the existing draft.

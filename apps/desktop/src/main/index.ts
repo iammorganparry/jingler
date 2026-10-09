@@ -1,3 +1,5 @@
+import { stopRoutinesBeforeQuit } from "./routine-shutdown.js"
+import { RoutinesService } from "./routines.js"
 /**
  * Electron main entry — standard electron-vite lifecycle. On ready it forces the
  * Effect runtime to build (which forks the RPC server and registers the IPC
@@ -18,9 +20,10 @@ import {
   PluginHost,
   SecretStore,
   SessionStore,
-  RuntimeRecoveryService
+  RuntimeRecoveryService,
+  configureAnchoredFsProcess
 } from "@jingler/cli-adapters"
-import { app, BrowserWindow, ipcMain, shell } from "electron"
+import { app, BrowserWindow, ipcMain, shell, utilityProcess, powerMonitor } from "electron"
 import { Effect } from "effect"
 import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
@@ -44,6 +47,12 @@ import { runtime } from "./runtime.js"
 import { initAutoUpdater } from "./updater.js"
 import { resolveDeviceAgentBundlePath } from "./device-agent-bundle.js"
 import { registerAppVersionChannel } from "./app-version.js"
+import { registerTextContextMenu } from "./context-menu.js"
+
+configureAnchoredFsProcess(() => {
+  const child = utilityProcess.fork(join(import.meta.dirname, "anchored-fs-worker.js"), [], { cwd: "/", serviceName: "jingler-anchored-filesystem", stdio: "ignore" })
+  return { post: (message) => child.postMessage(message), onMessage: (handler) => { child.on("message", handler) }, onExit: (handler) => { child.on("exit", handler) }, kill: () => { child.kill() } }
+})
 
 app.setName("Jingler")
 registerAppVersionChannel()
@@ -288,6 +297,7 @@ if (!gotPrimaryLock) {
       }
     })
     mainWindow = window
+    registerTextContextMenu(window)
     let allowClose = false
     let flushInFlight = false
 
@@ -502,11 +512,28 @@ if (!gotPrimaryLock) {
     if (process.platform !== "darwin") app.quit()
   })
 
+  let routinesShutdownAttempted = false
+  let routinesShutdownPending = false
+  powerMonitor.on("suspend", () => { void runtime.runPromise(RoutinesService.pipe(Effect.map(service => service.scheduler.suspend()))) })
+  powerMonitor.on("resume", () => { void runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.resume))).catch(() => {}) })
   app.on("before-quit", (event) => {
     if (!readyToQuit && mainWindow !== null) {
       event.preventDefault()
       quitPending = true
       mainWindow.close()
+      return
+    }
+    if (!routinesShutdownAttempted) {
+      event.preventDefault()
+      if (!routinesShutdownPending) {
+        routinesShutdownPending = true
+        stopRoutinesBeforeQuit(
+          () => runtime.runPromise(RoutinesService.pipe(Effect.flatMap(service => service.stop))),
+          () => { routinesShutdownAttempted = true; app.quit() },
+          () => console.error("Routine shutdown remains unresolved at quit deadline"),
+          error => console.error("Routine shutdown failed", error)
+        )
+      }
       return
     }
     // The extension host is a utilityProcess; Electron reaps it with the app,

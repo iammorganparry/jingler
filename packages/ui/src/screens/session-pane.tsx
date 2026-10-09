@@ -85,6 +85,8 @@ export interface ConversationPaneCtx {
   onOpenFile: (path: string) => void
   /** Present the Files workspace without requiring a path to be selected. */
   onSelectFiles: () => void
+  /** Reveal and focus the session browser for an operator-requested preview. */
+  onSelectBrowser?: () => void
   /** Present canonical worktree changes for mutation recovery inspection. */
   onSelectChanges: () => void
   /** Open provider settings for authentication or certification recovery. */
@@ -105,6 +107,7 @@ export interface ConversationPaneCtx {
 }
 
 export interface SessionPaneProps {
+  onOpenCheckpoints?: (sessionId: string, trigger: HTMLButtonElement | null) => void
   /** The session this pane shows. A pane only exists for a filled grid slot. */
   session: Session
   /** Restore the view this session last owned when its pane is mounted again. */
@@ -720,6 +723,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             openSurface({ kind: "file", id: path })
           },
           onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
+          onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
           onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),
@@ -897,6 +901,7 @@ function SessionPaneBody(props: SessionPaneProps) {
       {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-row">
         <EditorGroups
+          onOpenCheckpoints={props.onOpenCheckpoints ? (trigger) => props.onOpenCheckpoints?.(sessionId, trigger) : undefined}
           sessionId={sessionId}
           layout={layout}
           // Layout-only updates keep this token, while render dependencies replace it.

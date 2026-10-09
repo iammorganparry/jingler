@@ -393,6 +393,12 @@ if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", wakeFleetReconcilers)
 }
 
+/** Turn sub-agents plus the session reviewer, which lives outside any turn. */
+const legacyAgentsOf = (snap: ConversationSnapshot) =>
+  snap.context.reviewer === null
+    ? snap.context.subagents
+    : [...snap.context.subagents, snap.context.reviewer]
+
 /** Where the machine is, in the terms `activityOf` reasons about. */
 const phaseOf = (snap: ConversationSnapshot): ActivityPhase => {
   if (snap.matches("running")) return "running"
@@ -421,10 +427,28 @@ const agentFileActivityFor = (snap: ConversationSnapshot): AgentFileActivity | n
 /**
  * Derive the live activity the sidebar/tab bar show from a machine snapshot.
  * The interesting part lives in `activityOf` (pure, and tested in core) — this
- * only translates machine states into a phase.
+ * translates machine states into a phase and includes durable Fleet activity.
  */
 const activityFor = (snap: ConversationSnapshot): SessionActivity | null => {
-  const activity = activityOf(snap.context.messages, phaseOf(snap), snap.context.subagents)
+  let activity = activityOf(snap.context.messages, phaseOf(snap), legacyAgentsOf(snap))
+  // Operator decisions retain priority over independently running children.
+  if (activity?.kind === "needs-input" || activity?.kind === "needs-approval") {
+    return { ...activity, startedAt: snap.context.runStartedAt ?? undefined }
+  }
+  const fleet = fleetProjection(snap)
+  const working = fleet?.active.filter((node) =>
+    node.nodeKind !== "workflow" && (node.status === "queued" || node.status === "running")
+  ) ?? []
+  if (fleet?.active.some((node) => node.status === "needs-attention")) {
+    activity = { kind: "needs-input", verb: "Needs input", target: null }
+  } else if (working.length > 0) {
+    const only = working.length === 1 ? working[0] : null
+    activity = {
+      kind: "delegating",
+      verb: "Delegating",
+      target: only ? only.task.trim() || only.agent : `${working.length} agents`
+    }
+  }
   return activity === null
     ? null
     : { ...activity, startedAt: snap.context.runStartedAt ?? undefined }
@@ -500,9 +524,7 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   const chatId = snap.context.chatId
   const fleet = fleetProjection(snap)
   ensureFleetReconciliation(key, snap, fleet)
-  const legacyAgents = snap.context.reviewer === null
-    ? snap.context.subagents
-    : [...snap.context.subagents, snap.context.reviewer]
+  const legacyAgents = legacyAgentsOf(snap)
   publishActorSubagentTabs(
     session.id,
     projectSubagentTabs({
