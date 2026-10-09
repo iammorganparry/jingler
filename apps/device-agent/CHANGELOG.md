@@ -1,5 +1,13 @@
 # @jingler/device-agent
 
+## 0.7.1
+
+### Patch Changes
+
+- Updated dependencies [c720f72]
+  - @jingler/cli-adapters@0.7.1
+  - @jingler/core@0.7.1
+
 ## 0.7.0
 
 ### Patch Changes
