@@ -186,7 +186,7 @@ export const makeMcpToolClientFactory = (identity: McpClientIdentity): McpToolCl
   Effect.tryPromise({
       try: async () => {
         const client = new Client({ ...identity, version: "1.0.0" })
-        const transport = transportFor(server, await loginShellEnvironment())
+        const transport = transportFor(server, server.transport === "stdio" ? await loginShellEnvironment() : {})
         // Always drain stderr: an unread pipe fills and stalls a chatty server.
         let stderr = ""
         transport instanceof StdioClientTransport && transport.stderr?.on("data", (chunk: Buffer) => {

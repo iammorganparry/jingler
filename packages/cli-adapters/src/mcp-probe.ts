@@ -96,7 +96,10 @@ const makeTransport = (launch: McpLaunch, cwd: string | null, shellEnv: Readonly
  */
 const connectAndCount = async (launch: McpLaunch, cwd: string | null, signal: AbortSignal): Promise<number> => {
   const client = new Client(clientInfo, { capabilities: {} })
-  const transport = makeTransport(launch, cwd, await loginShellEnvironment())
+  const shellEnv = launch.transport === "stdio" ? await loginShellEnvironment() : {}
+  // The env lookup can outlast a probe timeout; never spawn a server after cancellation.
+  signal.throwIfAborted()
+  const transport = makeTransport(launch, cwd, shellEnv)
   const abort = () => void client.close().catch(() => {})
   signal.addEventListener("abort", abort, { once: true })
   try {

@@ -1,7 +1,7 @@
 import type { AgentRunSpec } from "@jingler/core"
 import { Effect, type Scope } from "effect"
 import { ponytailPromptLayers } from "../resources/ponytail-resources.js"
-import { projectInstructionsLayer } from "../prompt/project-instructions.js"
+import { instructionLayers } from "../prompt/project-instructions.js"
 import { PromptCompiler } from "../prompt/prompt-compiler.js"
 import {
   DELEGATION_DEFAULT_PROMPT_LAYER,
@@ -40,7 +40,7 @@ export const prepareNativeRuntimeTools = (
 ) => Effect.gen(function* () {
   const registry = yield* (options.createToolRegistry?.(spec, context) ??
     createJinglerTools({ context, cwd: spec.cwd, mcp: context.mcp }).pipe(Effect.mapError(failure)))
-  const instructions = yield* Effect.tryPromise({ try: () => projectInstructionsLayer(spec.cwd), catch: failure })
+  const instructions = yield* Effect.tryPromise({ try: () => instructionLayers(spec.cwd), catch: failure })
   const systemPrompt = yield* Effect.try({
     try: () => new PromptCompiler().compile({
       layers: [
@@ -53,7 +53,7 @@ export const prepareNativeRuntimeTools = (
         ...(registry.capabilitiesFor(spec.role, spec.mode).some(({ id }) => id === "subagent")
           ? [DELEGATION_DEFAULT_PROMPT_LAYER]
           : []),
-        ...(instructions === null ? [] : [instructions])
+        ...instructions
       ],
       tools: registry.capabilitiesFor(spec.role, spec.mode),
       tokenBudget: 8_000
