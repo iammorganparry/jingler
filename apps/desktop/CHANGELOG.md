@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.7.3
+
+### Patch Changes
+
+- b557d94: Claude subagents started in the background now do their work. They used to stop on their first turn with a 401, because the Claude CLI provider failed to load in background children.
+  - @jingler/plannotator-ext@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes
