@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
 import type { IssueDetail, IssueListItem } from "@jingler/core"
 import { ArrowLeft, CircleDot, MessageSquare } from "lucide-react"
@@ -12,6 +12,7 @@ import { Spinner } from "../components/loading.js"
 import { SearchInput } from "../components/search-input.js"
 import { MotionTabs } from "../components/beui/controls.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
+import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
@@ -85,6 +86,9 @@ export interface IssueInboxProps {
   error?: string | null
 }
 
+const hasActiveIssueFilters = (f: typeof initialIssueInboxFilters) =>
+  Boolean(f.query || f.filter !== "all" || f.repository || f.author || f.assignee || f.label)
+
 /** Global GitHub issue list with a responsive detail pane, modelled on PullRequestInbox. */
 export function IssueInbox({
   issues, viewerLogin, warnings = [], onActivate, onRefresh, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
@@ -105,20 +109,10 @@ export function IssueInbox({
     () => filterIssues(issues, filter, query, viewerLogin, facets),
     [issues, filter, query, viewerLogin, facets]
   )
-  useEffect(() => {
-    onActivate?.()
-    const onVisible = () => { if (document.visibilityState === "visible") onActivate?.() }
-    const onFocus = () => onActivate?.()
-    window.addEventListener("focus", onFocus)
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [onActivate])
+  useActivateOnFocus(onActivate)
   const selectedKey = selected ? keyOf(selected) : null
   const showList = !(compact && mobileDetail && selected !== null)
-  const filtered = Boolean(query || filter !== "all" || facets.repository || facets.author || facets.assignee || facets.label)
+  const filtered = hasActiveIssueFilters(facets)
   const change = (fields: Partial<typeof facets>) => sendFilters({ type: "CHANGE", fields })
 
   function renderList() {
