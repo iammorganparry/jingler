@@ -1771,6 +1771,15 @@ const IssueSummaryFields = {
 export const IssueSummary = Schema.Struct(IssueSummaryFields);
 export type IssueSummary = Schema.Schema.Type<typeof IssueSummary>;
 
+/** One row in the global issue inbox. */
+export const IssueListItem = Schema.Struct({
+  ...IssueSummaryFields,
+  number: Schema.Number,
+  repository: Schema.String,
+  comments: Schema.Number,
+});
+export type IssueListItem = Schema.Schema.Type<typeof IssueListItem>;
+
 /** A normalized comment on an issue. */
 export const IssueComment = Schema.Struct({
   /** Provider-owned opaque id. */

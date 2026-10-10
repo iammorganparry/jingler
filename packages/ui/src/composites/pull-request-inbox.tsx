@@ -328,11 +328,11 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
   </>
 }
 
-const filterOptions = (values: ReadonlyArray<string>) =>
+export const filterOptions = (values: ReadonlyArray<string>) =>
   [...new Map(values.map((label) => [label.toLowerCase(), { value: label.toLowerCase(), label }])).values()]
     .sort((a, b) => a.label.localeCompare(b.label))
 
-function InboxFilterSelect({ label, value, options, onChange, searchable = true }: {
+export function InboxFilterSelect({ label, value, options, onChange, searchable = true }: {
   label: string
   value: string
   options: ReadonlyArray<{ value: string; label: string }>
@@ -351,6 +351,6 @@ function InboxFilterSelect({ label, value, options, onChange, searchable = true 
   </Select>
 }
 
-function InboxMessage({ children }: { children: ReactNode }) {
+export function InboxMessage({ children }: { children: ReactNode }) {
   return <div className="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-[12px] text-muted-foreground">{children}</div>
 }

@@ -2,6 +2,7 @@ import type {
   GitHubCloneRepository,
   GitHubRateLimit,
   Issue,
+  IssueListItem,
   IssueSummary,
   PrCheck,
   PrFileChange,
@@ -106,6 +107,7 @@ export interface GitHubApiClient {
     options: { readonly mine: boolean; readonly search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
   readonly issueView: (cwd: string, number: number) => Promise<Issue | null>
+  readonly issueViewBySlug: (slug: string, number: number) => Promise<Issue | null>
   readonly prState: (cwd: string, number: number) => Promise<SessionPrStatus | null>
   readonly prHeadSha: (cwd: string, number: number) => Promise<string | null>
   readonly prView: (cwd: string, number: number) => Promise<PullRequest | null>
@@ -160,6 +162,8 @@ export interface GitHubApiClient {
   readonly prReady: (cwd: string, number: number) => Promise<void>
   readonly issueComment: (cwd: string, number: number, body: string) => Promise<void>
   readonly closeIssue: (cwd: string, number: number) => Promise<void>
+  readonly issueCommentBySlug: (slug: string, number: number, body: string) => Promise<void>
+  readonly issueCloseBySlug: (slug: string, number: number) => Promise<void>
 }
 
 export interface GitHubApiClientOptions {
@@ -754,6 +758,7 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     },
     listIssuesBySlug: (slug, listOptions) =>
       client.listIssues(`github-slug:${slug}`, listOptions),
+    issueViewBySlug: (slug, issueNumber) => client.issueView(`github-slug:${slug}`, issueNumber),
     issueView: async (cwd, issueNumber) => {
       try {
         const [issue, comments] = await Promise.all([
@@ -1098,7 +1103,11 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         { issue_number: issueNumber, state: "closed" },
         ["issues:write"]
       )
-    }
+    },
+    issueCommentBySlug: (slug, issueNumber, body) =>
+      client.issueComment(`github-slug:${slug}`, issueNumber, body),
+    issueCloseBySlug: (slug, issueNumber) =>
+      client.closeIssue(`github-slug:${slug}`, issueNumber)
   }
   return client
 }
@@ -1232,6 +1241,19 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         const groups = await Promise.all(repositories.map((repository) => client.listInboxPrsBySlug(repository.fullName)))
         return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       }),
+      issueInbox: () => preferCli(cli.issueInbox(), async (): Promise<ReadonlyArray<IssueListItem>> => {
+        const repositories = await run(auth.repositories())
+        const groups = await Promise.all(repositories.map(async (repository) =>
+          (await client.listIssuesBySlug(repository.fullName, { mine: false, search: "" }))
+            .map((issue): IssueListItem => ({ ...issue, number: Number(issue.id), repository: repository.fullName, comments: 0 }))))
+        return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      }),
+      issueViewBySlug: (slug: string, number: number) =>
+        cliSource(cli.issueViewBySlug(slug, number), () => client.issueViewBySlug(slug, number)),
+      issueCommentBySlug: (slug: string, number: number, body: string) =>
+        mutate(`github-slug:${slug}`, cli.issueCommentBySlug(slug, number, body), () => client.issueCommentBySlug(slug, number, body)),
+      issueCloseBySlug: (slug: string, number: number) =>
+        mutate(`github-slug:${slug}`, cli.issueCloseBySlug(slug, number), () => client.issueCloseBySlug(slug, number)),
       repository: (cwd: string) =>
         preferCli(cli.repository(cwd), () => client.repository(cwd)),
       rateLimit: () => Effect.sync(client.rateLimit),

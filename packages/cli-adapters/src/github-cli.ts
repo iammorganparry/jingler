@@ -1,5 +1,6 @@
 import type {
   Issue,
+  IssueListItem,
   PrFileChange,
   PrMergeMethod,
   PullRequest,
@@ -19,6 +20,7 @@ import {
   jsonRecord,
   mapApiFiles,
   mapIssue,
+  mapIssueListItem,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
@@ -43,6 +45,17 @@ const INBOX_QUERY = `query($endCursor:String){
       assignees(first:100){nodes{login}} author{login avatarUrl} comments{totalCount} isDraft
       labels(first:100){nodes{name color}} number repository{nameWithOwner}
       reviewRequests(first:100){nodes{requestedReviewer{... on User{login}}}}
+      state title updatedAt url
+    }}
+    pageInfo{hasNextPage endCursor}
+  }
+}`
+
+const ISSUE_INBOX_QUERY = `query($endCursor:String){
+  search(query:"is:issue is:open involves:@me sort:updated-desc",type:ISSUE,first:100,after:$endCursor){
+    nodes{... on Issue{
+      assignees(first:100){nodes{login avatarUrl}} author{login avatarUrl} body comments{totalCount}
+      labels(first:100){nodes{name color}} number repository{nameWithOwner}
       state title updatedAt url
     }}
     pageInfo{hasNextPage endCursor}
@@ -905,6 +918,7 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
     listIssuesBySlug: (repository: string, options: { readonly mine: boolean; readonly search: string }) =>
       list(null, "issue", repository, ISSUE_LIST_FIELDS, options, mapIssueSummary),
     issueView: (cwd: string, number: number) => issueView(cwd, null, number),
+    issueViewBySlug: (repository: string, number: number) => issueView(null, repository, number),
     prState: (cwd: string, number: number): Effect.Effect<SessionPrStatus | null, GitHubApiError, CommandExecutor.CommandExecutor> =>
       json(cwd, [
         "pr", "view", String(number), "--json", "state,isDraft,mergedAt,statusCheckRollup"
@@ -982,6 +996,32 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
       execute(cwd, ["issue", "comment", String(number), "--body-file", "-"], body).pipe(Effect.asVoid),
     closeIssue: (cwd: string, number: number) =>
       execute(cwd, ["issue", "close", String(number)]).pipe(Effect.asVoid),
+    issueCommentBySlug: (repository: string, number: number, body: string) =>
+      execute(null, ["issue", "comment", String(number), "--repo", repository, "--body-file", "-"], body).pipe(Effect.asVoid),
+    issueCloseBySlug: (repository: string, number: number) =>
+      execute(null, ["issue", "close", String(number), "--repo", repository]).pipe(Effect.asVoid),
+    issueInbox: () =>
+      Effect.gen(function* () {
+        const raw = yield* json(null, [
+          "api", "graphql", "--paginate", "--slurp", "-f", `query=${ISSUE_INBOX_QUERY}`
+        ])
+        if (!Array.isArray(raw)) return []
+        return raw.flatMap((page): ReadonlyArray<IssueListItem> => {
+          const nodes = jsonRecord(jsonRecord(jsonRecord(page).data).search).nodes
+          if (!Array.isArray(nodes)) return []
+          return nodes.flatMap((value): ReadonlyArray<IssueListItem> => {
+            const row = jsonRecord(value)
+            const repository = jsonRecord(row.repository).nameWithOwner
+            if (typeof repository !== "string") return []
+            const comments = jsonRecord(row.comments).totalCount
+            return [mapIssueListItem({
+              ...row,
+              assignees: jsonRecord(row.assignees).nodes,
+              labels: jsonRecord(row.labels).nodes,
+            }, repository, typeof comments === "number" ? comments : 0)]
+          })
+        })
+      }),
     inbox: () =>
       Effect.gen(function* () {
         const raw = yield* json(null, [

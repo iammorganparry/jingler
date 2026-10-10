@@ -397,7 +397,7 @@ return (evidence === "checks" ? (
                 </span>
               </div>
               <div className="px-[14px] py-[11px]">
-                <Markdown className="text-[13.5px]">{pr.body}</Markdown>
+                <Markdown className="text-[13.5px]" repository={/github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]}>{pr.body}</Markdown>
               </div>
             </Card>
           )}

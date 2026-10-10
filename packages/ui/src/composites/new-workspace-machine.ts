@@ -76,7 +76,7 @@ export interface NewWorkspaceContext {
 
 export type NewWorkspaceEvent =
   | { type: "SET_CHECKPOINT_SAFE_MODE"; enabled: boolean }
-  | { type: "OPEN"; projectId?: string; pr?: PrSummary }
+  | { type: "OPEN"; projectId?: string; pr?: PrSummary; issue?: IssueSummary }
   | { type: "CLOSE" }
   | { type: "SET_PROJECT"; projectId: string }
   | { type: "SET_ENVIRONMENT"; environmentId: string }
@@ -345,6 +345,7 @@ export const newWorkspaceMachine = setup({
       const deps = context.getDeps()
       const requested = event.type === "OPEN" ? event.projectId : undefined
       const requestedPr = event.type === "OPEN" ? event.pr : undefined
+      const requestedIssue = event.type === "OPEN" ? event.issue : undefined
       const selected = deps.projects.find((project) => project.id === requested) ??
         deps.projects.find((project) => project.id === deps.defaultProjectId) ??
         deps.projects.find((project) => project.availability === "available")
@@ -366,7 +367,10 @@ export const newWorkspaceMachine = setup({
               baseBranch: requestedPr.baseRefName
             }
           : {}),
-        draft: "",
+        ...(requestedIssue
+          ? { source: "github" as const, issues: [requestedIssue], selectedIssue: requestedIssue }
+          : {}),
+        draft: requestedIssue ? [requestedIssue.title, requestedIssue.body].filter(Boolean).join("\n\n") : "",
         attachments: [] as ReadonlyArray<Attachment>,
         ...provider,
         mode: deps.defaultMode ?? "auto",

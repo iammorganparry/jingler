@@ -7,16 +7,13 @@ import {
   useEffect,
   useState,
 } from "react";
-import { createHighlighter, type Highlighter } from "shiki";
+import { bundledLanguages, createHighlighter, type BundledLanguage, type Highlighter } from "shiki";
 import { cn } from "../../lib/cn.js";
 
-export type AgentCodeLanguage =
-  | "bash"
-  | "diff"
-  | "json"
-  | "text"
-  | "tsx"
-  | "typescript";
+export type AgentCodeLanguage = BundledLanguage | "text";
+
+export const isAgentCodeLanguage = (lang: string): lang is AgentCodeLanguage =>
+  lang === "text" || lang in bundledLanguages;
 
 export interface AgentCodeToken {
   content: string;
@@ -80,8 +77,13 @@ export function useAgentCodeTokens(
     }
 
     let cancelled = false;
-    getAgentCodeHighlighter().then((highlighter) => {
+    getAgentCodeHighlighter().then(async (highlighter) => {
       if (cancelled || !highlighter) return;
+      // Only the common five are preloaded; any other grammar loads on first use.
+      if (language !== "text" && !highlighter.getLoadedLanguages().includes(language)) {
+        await highlighter.loadLanguage(language).catch(() => {});
+        if (cancelled) return;
+      }
       const lines = highlighter
         .codeToTokensWithThemes(code, {
           lang: language,

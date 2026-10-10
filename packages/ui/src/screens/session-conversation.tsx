@@ -174,6 +174,9 @@ export interface SessionConversationProps {
   pullRequestsView?: ReactNode
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
+  issuesView?: ReactNode
+  issuesActive?: boolean
+  onOpenIssues?: () => void
   /** Whether GitHub is connected (drives the sidebar cog's status dot). */
   ghConnected?: boolean
   /** Repo names (sidebar group keys) that are starred — pinned to the top. */
@@ -284,6 +287,7 @@ export function SessionConversation(props: SessionConversationProps) {
 
          function getProps() {
            if (props.pullRequestsView) return (props.pullRequestsView)
+           if (props.issuesView) return (props.issuesView)
            if (props.settingsView) return (props.settingsView)
            if (props.showEmpty || activeSessionProjectId !== selectedProjectId) return (<EmptyConversation
             version={props.version}
@@ -409,6 +413,8 @@ export function SessionConversation(props: SessionConversationProps) {
         releaseNotes={props.releaseNotes}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
+        issuesActive={props.issuesActive}
+        onOpenIssues={props.onOpenIssues}
         pendingEnvironmentSession={props.pendingEnvironmentSession}
         pendingEnvironmentSessionActive={props.newSessionViewActive}
         onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}

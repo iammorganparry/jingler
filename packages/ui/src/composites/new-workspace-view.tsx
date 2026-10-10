@@ -4,6 +4,7 @@ import * as React from "react";
 import type {
   AgentEndpointCatalog,
   Environment,
+  IssueSummary,
   PermissionMode,
   ProviderCatalog,
   ProviderConnectionId,
@@ -313,6 +314,7 @@ export interface NewWorkspaceViewProps {
   defaultProjectId?: string | null;
   requestedProjectId?: string | null;
   requestedPr?: PrSummary | null;
+  requestedIssue?: IssueSummary | null;
   prepareProject: NewWorkspaceDeps["prepareProject"];
   loadBranches: NewWorkspaceDeps["loadBranches"];
   issueProviders?: NewWorkspaceDeps["issueProviders"];
@@ -500,9 +502,10 @@ export function NewWorkspaceView(props: NewWorkspaceViewProps) {
           ? { projectId: props.requestedProjectId }
           : {}),
         ...(props.requestedPr ? { pr: props.requestedPr } : {}),
+        ...(props.requestedIssue ? { issue: props.requestedIssue } : {}),
       });
     else send({ type: "CLOSE" });
-  }, [props.open, props.requestedPr, props.requestedProjectId, send]);
+  }, [props.open, props.requestedPr, props.requestedIssue, props.requestedProjectId, send]);
 
   const projectRequest = props.requestedProjectId ?? props.defaultProjectId;
   const previousProjectRequest = React.useRef(projectRequest);

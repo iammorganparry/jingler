@@ -788,6 +788,28 @@
   border-left: 2px solid var(--sb-line-strong);
   color: var(--sb-muted);
 }
+.sb-md .markdown-alert {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--alert, var(--sb-line-strong));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--alert, var(--sb-line-strong)) 8%, transparent);
+}
+.sb-md .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: var(--alert);
+  text-transform: capitalize;
+}
+.sb-md .markdown-alert .octicon { fill: currentColor; flex: none; }
+.sb-md .markdown-alert-note { --alert: var(--sb-blue); }
+.sb-md .markdown-alert-tip { --alert: var(--sb-green); }
+.sb-md .markdown-alert-important { --alert: var(--sb-purple); }
+.sb-md .markdown-alert-warning { --alert: var(--sb-yellow); }
+.sb-md .markdown-alert-caution { --alert: var(--sb-red); }
 .sb-md hr {
   margin: 16px 0;
   border: none;
