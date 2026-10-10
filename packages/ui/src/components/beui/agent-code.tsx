@@ -81,7 +81,7 @@ export function useAgentCodeTokens(
       if (cancelled || !highlighter) return;
       // Only the common five are preloaded; any other grammar loads on first use.
       if (language !== "text" && !highlighter.getLoadedLanguages().includes(language)) {
-        await highlighter.loadLanguage(language).catch(() => {});
+        await highlighter.loadLanguage(language);
         if (cancelled) return;
       }
       const lines = highlighter
@@ -103,6 +103,8 @@ export function useAgentCodeTokens(
       if (tokenCache.size >= 64) tokenCache.delete(tokenCache.keys().next().value!);
       tokenCache.set(key, lines);
       setResult({ key, code, language, lines });
+    }).catch(() => {
+      // An unloadable grammar or failed tokenization keeps the plain-text render.
     });
     return () => {
       cancelled = true;

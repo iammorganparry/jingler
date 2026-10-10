@@ -10,7 +10,7 @@ const row = (number: number, repository: string, title: string) => ({
   labels: { nodes: [{ name: "bug", color: "ff0000" }] }, assignees: { nodes: [] }
 })
 
-const inbox = [{ data: { search: {
+const inbox = [{ data: { viewer: { login: "octocat" }, search: {
   nodes: [row(1, "acme/widget", "Widget crashes"), row(2, "acme/api", "API times out")],
   pageInfo: { hasNextPage: false, endCursor: null }
 } } }]

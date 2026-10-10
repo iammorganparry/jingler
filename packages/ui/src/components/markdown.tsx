@@ -257,12 +257,13 @@ function MarkdownAnchor({
     // on github.com), so try the fragment with and without that prefix.
     const jump = (event: MouseEvent<HTMLAnchorElement>) => {
       event.preventDefault()
-      const fragment = decodeURIComponent(href.slice(1))
+      // Malformed escapes (`#a%`) make decodeURIComponent throw; use the raw fragment then.
+      const raw = href.slice(1)
+      const fragment = (() => { try { return decodeURIComponent(raw) } catch { return raw } })()
       const root = event.currentTarget.closest(".sb-md")
-      const target = [fragment, `user-content-${fragment}`]
-        .map((id) => root?.querySelector(`[id="${CSS.escape(id)}"]`))
-        .find(Boolean)
-      target?.scrollIntoView({ block: "start" })
+      const ids = [fragment, `user-content-${fragment}`]
+      const target = [...(root?.querySelectorAll("[id]") ?? [])].find((element) => ids.includes(element.id))
+      target?.scrollIntoView?.({ block: "start" })
     }
     return <a {...rest} href={href} className={cn("font-medium underline", className)} data-streamdown="link" onClick={jump} target={undefined} rel={undefined}>{children}</a>
   }

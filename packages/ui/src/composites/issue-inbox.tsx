@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
 import type { IssueDetail, IssueListItem } from "@jingler/core"
 import { ArrowLeft, CircleDot, MessageSquare } from "lucide-react"
@@ -15,6 +15,7 @@ import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
+import { PrReviewComposer } from "./pr-review-composer.js"
 import { InboxFilterSelect, InboxMessage, filterOptions } from "./pull-request-inbox.js"
 import {
   initialIssueInboxFilters, issueInboxFilterMachine, type IssueInboxFacets, type IssueInboxFilter
@@ -62,6 +63,10 @@ export function filterIssues(
 export interface IssueInboxProps {
   issues: ReadonlyArray<IssueListItem>
   viewerLogin: string
+  warnings?: ReadonlyArray<string>
+  onActivate?: () => void
+  onRefresh?: () => void
+  refreshing?: boolean
   selected: { repository: string; number: number } | null
   detail: IssueDetail | null
   onSelect: (issue: IssueListItem) => void
@@ -82,7 +87,7 @@ export interface IssueInboxProps {
 
 /** Global GitHub issue list with a responsive detail pane, modelled on PullRequestInbox. */
 export function IssueInbox({
-  issues, viewerLogin, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
+  issues, viewerLogin, warnings = [], onActivate, onRefresh, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
   sessionAction, loading = false, detailLoading = false, detailError = null, error = null
 }: IssueInboxProps) {
   const [filterState, sendFilters] = useMachine(issueInboxFilterMachine)
@@ -100,6 +105,17 @@ export function IssueInbox({
     () => filterIssues(issues, filter, query, viewerLogin, facets),
     [issues, filter, query, viewerLogin, facets]
   )
+  useEffect(() => {
+    onActivate?.()
+    const onVisible = () => { if (document.visibilityState === "visible") onActivate?.() }
+    const onFocus = () => onActivate?.()
+    window.addEventListener("focus", onFocus)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("focus", onFocus)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [onActivate])
   const selectedKey = selected ? keyOf(selected) : null
   const showList = !(compact && mobileDetail && selected !== null)
   const filtered = Boolean(query || filter !== "all" || facets.repository || facets.author || facets.assignee || facets.label)
@@ -175,6 +191,12 @@ export function IssueInbox({
               <CircleDot className="size-4 text-green" />
               <h1 className="text-[14px] font-semibold text-text-bright">Issues</h1>
               <Badge tone="count" size="xs">{visible.length}</Badge>
+              <div className="flex-1" />
+              {onRefresh && (
+                <button type="button" onClick={onRefresh} disabled={refreshing} className="rounded border border-line px-2 py-1 text-xs text-text hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring">
+                  {refreshing ? "Refreshing…" : "Refresh"}
+                </button>
+              )}
             </div>
             <SearchInput value={query} onChange={(next) => change({ query: next })} placeholder="Search issues" />
             <MotionTabs items={FILTERS} value={filter} onChange={(next) => change({ filter: next })} variant="segment" />
@@ -189,6 +211,11 @@ export function IssueInbox({
               <span>{visible.length} of {issues.length} loaded issues</span>
               {filtered && <button type="button" className="shrink-0 text-brand hover:underline" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</button>}
             </div>
+            {warnings.length > 0 && <div role="status" className="text-xs text-yellow">
+              <strong>Partial results</strong>
+              {warnings.map((warning) => <p key={warning}>{warning}</p>)}
+              <p>Use Refresh to retry missing results.</p>
+            </div>}
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">{renderList()}</div>
         </section>
@@ -218,18 +245,6 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
   onComment?: (body: string) => Promise<void> | void
   onCloseIssue?: () => Promise<void> | void
 }) {
-  const [body, setBody] = useState("")
-  const [commentError, setCommentError] = useState<string | null>(null)
-  const submit = async () => {
-    setCommentError(null)
-    try {
-      await onComment?.(body.trim())
-      setBody("")
-    } catch (e) {
-      setCommentError(e instanceof Error ? e.message : "Failed to post comment.")
-      throw e
-    }
-  }
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5" aria-busy={busy}>
       <div className="flex flex-col gap-2">
@@ -287,21 +302,8 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
         </Card>
       ))}
       {onComment && (
-        <div className="sticky bottom-0 mt-auto overflow-hidden rounded-xl border border-line bg-panel">
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Leave a comment…"
-            aria-label="Issue comment"
-            rows={2}
-            className="w-full resize-none bg-transparent px-[14px] py-[11px] text-[13.5px] text-text-body outline-none placeholder:text-dim"
-          />
-          {commentError && <div className="px-[14px] pb-[11px]"><Callout tone="red">{commentError}</Callout></div>}
-          <div className="flex items-center justify-end border-t border-hairline px-[14px] py-[11px]">
-            <AsyncButton variant="secondary" disabled={body.trim().length === 0} pendingLabel="Posting…" successLabel="Commented" onClick={submit}>
-              Comment
-            </AsyncButton>
-          </div>
+        <div className="sticky bottom-0 mt-auto pt-2">
+          <PrReviewComposer connected commentOnly ariaLabel="Issue comment" onSubmit={({ body }) => onComment(body)} />
         </div>
       )}
     </div>

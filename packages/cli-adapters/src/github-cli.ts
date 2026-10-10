@@ -52,6 +52,7 @@ const INBOX_QUERY = `query($endCursor:String){
 }`
 
 const ISSUE_INBOX_QUERY = `query($endCursor:String){
+  viewer{login}
   search(query:"is:issue is:open involves:@me sort:updated-desc",type:ISSUE,first:100,after:$endCursor){
     nodes{... on Issue{
       assignees(first:100){nodes{login avatarUrl}} author{login avatarUrl} body comments{totalCount}
@@ -1005,9 +1006,10 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
         const raw = yield* json(null, [
           "api", "graphql", "--paginate", "--slurp", "-f", `query=${ISSUE_INBOX_QUERY}`
         ])
-        if (!Array.isArray(raw)) return []
-        return raw.flatMap((page): ReadonlyArray<IssueListItem> => {
-          const nodes = jsonRecord(jsonRecord(jsonRecord(page).data).search).nodes
+        const pages = Array.isArray(raw) ? raw.map(jsonRecord) : []
+        const viewer = jsonRecord(jsonRecord(pages[0]?.data).viewer).login
+        const issues = pages.flatMap((page): ReadonlyArray<IssueListItem> => {
+          const nodes = jsonRecord(jsonRecord(page.data).search).nodes
           if (!Array.isArray(nodes)) return []
           return nodes.flatMap((value): ReadonlyArray<IssueListItem> => {
             const row = jsonRecord(value)
@@ -1021,6 +1023,7 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
             }, repository, typeof comments === "number" ? comments : 0)]
           })
         })
+        return { issues, viewerLogin: typeof viewer === "string" ? viewer : null, warnings: [] as ReadonlyArray<string> }
       }),
     inbox: () =>
       Effect.gen(function* () {

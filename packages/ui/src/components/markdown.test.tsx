@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { Markdown } from "./markdown.js"
 
@@ -169,5 +169,20 @@ describe("Markdown GitHub flavour", () => {
     expect(root.querySelector("script")).toBeNull()
     expect(root.querySelector("[onerror]")).toBeNull()
     expect(root.querySelector("a[href^='javascript']")).toBeNull()
+  })
+
+  it("does not throw when a fragment link has a malformed escape", async () => {
+    const root = await renderMd("[x](#section%)")
+    const errors: unknown[] = []
+    const onError = (event: ErrorEvent) => { errors.push(event.error); event.preventDefault() }
+    window.addEventListener("error", onError)
+    try {
+      const link = root.querySelector("a[href^='#']")
+      expect(link).not.toBeNull()
+      fireEvent.click(link!)
+    } finally {
+      window.removeEventListener("error", onError)
+    }
+    expect(errors).toEqual([])
   })
 })

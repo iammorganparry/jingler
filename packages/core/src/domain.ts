@@ -1780,6 +1780,16 @@ export const IssueListItem = Schema.Struct({
 });
 export type IssueListItem = Schema.Schema.Type<typeof IssueListItem>;
 
+/** The issue inbox read, plus the identity of the source that performed it. */
+export const IssueInboxResult = Schema.Struct({
+  issues: Schema.Array(IssueListItem),
+  /** Verified login of the account that read these rows; null when unresolved. */
+  viewerLogin: Schema.NullOr(Schema.String),
+  /** Nonempty when any repository could not be read. */
+  warnings: Schema.Array(Schema.String),
+});
+export type IssueInboxResult = Schema.Schema.Type<typeof IssueInboxResult>;
+
 /** A normalized comment on an issue. */
 export const IssueComment = Schema.Struct({
   /** Provider-owned opaque id. */

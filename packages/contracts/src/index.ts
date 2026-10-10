@@ -32,7 +32,7 @@ import {
   IssueDetail,
   IssueIdentity,
   IssueReference,
-  IssueListItem,
+  IssueInboxResult,
   IssueProviderDescriptor,
   IssueSummary,
   ContextConfig,
@@ -1734,7 +1734,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** Open issues involving the viewer across every repository GitHub can see. */
   Rpc.make("Github.issueInbox", {
-    success: Schema.Array(IssueListItem),
+    success: IssueInboxResult,
     error: GitHubApiError
   }),
 

@@ -88,15 +88,17 @@ describe("GitHubCli", () => {
         labels: { nodes: [{ name: "bug", color: "ff0000" }] }, assignees: { nodes: [{ login: "lee" }] }
       })
       return { stdout: JSON.stringify([
-        { data: { search: { nodes: [issue(1, "acme/widget"), {}] } } },
-        { data: { search: { nodes: [issue(2, "acme/api")] } } }
+        { data: { viewer: { login: "octocat" }, search: { nodes: [issue(1, "acme/widget"), {}] } } },
+        { data: { viewer: { login: "octocat" }, search: { nodes: [issue(2, "acme/api")] } } }
       ]) }
     })
 
-    expect(result.map((row) => [row.repository, row.number, row.comments])).toEqual([
+    expect(result.viewerLogin).toBe("octocat")
+    expect(result.warnings).toEqual([])
+    expect(result.issues.map((row) => [row.repository, row.number, row.comments])).toEqual([
       ["acme/widget", 1, 1], ["acme/api", 2, 2]
     ])
-    expect(result[0]).toMatchObject({ title: "Issue 1", state: "open", labels: [{ name: "bug", color: "ff0000" }], assignees: [{ name: "lee" }] })
+    expect(result.issues[0]).toMatchObject({ title: "Issue 1", state: "open", labels: [{ name: "bug", color: "ff0000" }], assignees: [{ name: "lee" }] })
   })
 
   it("loads a PR and inline review threads through gh", async () => {

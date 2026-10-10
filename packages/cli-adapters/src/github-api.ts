@@ -2,6 +2,7 @@ import type {
   GitHubCloneRepository,
   GitHubRateLimit,
   Issue,
+  IssueInboxResult,
   IssueListItem,
   IssueSummary,
   PrCheck,
@@ -28,6 +29,7 @@ import {
   mapApiFiles,
   mapCheck,
   mapIssue,
+  mapIssueListItem,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
@@ -38,6 +40,28 @@ import {
   unifiedDiffFromApiFiles
 } from "./github-mappers.js"
 import { runGit, runString } from "./command.js"
+
+const ISSUE_INBOX_CONCURRENCY = 4
+
+/** Run `read` over `items` with at most `limit` in flight, settling each independently. */
+const settleBounded = async <T, R>(
+  items: ReadonlyArray<T>,
+  limit: number,
+  read: (item: T) => Promise<R>
+): Promise<ReadonlyArray<PromiseSettledResult<R>>> => {
+  const results: Array<PromiseSettledResult<R>> = []
+  let next = 0
+  const worker = async () => {
+    for (let index = next++; index < items.length; index = next++) {
+      results[index] = await read(items[index]!).then(
+        (value) => ({ status: "fulfilled", value }) as const,
+        (reason) => ({ status: "rejected", reason }) as const
+      )
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
 
 const API_VERSION = "2022-11-28"
 const JSON_ACCEPT = "application/vnd.github+json"
@@ -106,6 +130,7 @@ export interface GitHubApiClient {
     slug: string,
     options: { readonly mine: boolean; readonly search: string }
   ) => Promise<ReadonlyArray<IssueSummary>>
+  readonly listInvolvedIssuesBySlug: (slug: string, viewer: string) => Promise<ReadonlyArray<IssueListItem>>
   readonly issueView: (cwd: string, number: number) => Promise<Issue | null>
   readonly issueViewBySlug: (slug: string, number: number) => Promise<Issue | null>
   readonly prState: (cwd: string, number: number) => Promise<SessionPrStatus | null>
@@ -758,6 +783,18 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
     },
     listIssuesBySlug: (slug, listOptions) =>
       client.listIssues(`github-slug:${slug}`, listOptions),
+    // ponytail: REST cannot express `involves:` (mentions, commenters), so this is
+    // author + assignee only. Upgrade path: the search API with the installation token.
+    listInvolvedIssuesBySlug: async (slug, viewer) => {
+      const me = viewer.toLowerCase()
+      const issues = await paginate(`github-slug:${slug}`, "/repos/{owner}/{repo}/issues", { state: "open" }, ["issues:read"])
+      return issues
+        .filter((candidate) =>
+          candidate.pull_request === undefined &&
+          (text(record(candidate.user).login)?.toLowerCase() === me ||
+            records(candidate.assignees).some((assignee) => text(assignee.login)?.toLowerCase() === me)))
+        .map((candidate) => mapIssueListItem(candidate, slug, number(candidate.comments) ?? 0))
+    },
     issueViewBySlug: (slug, issueNumber) => client.issueView(`github-slug:${slug}`, issueNumber),
     issueView: async (cwd, issueNumber) => {
       try {
@@ -1241,12 +1278,19 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         const groups = await Promise.all(repositories.map((repository) => client.listInboxPrsBySlug(repository.fullName)))
         return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       }),
-      issueInbox: () => preferCli(cli.issueInbox(), async (): Promise<ReadonlyArray<IssueListItem>> => {
+      issueInbox: () => preferCli(cli.issueInbox(), async (): Promise<IssueInboxResult> => {
+        const viewerLogin = await run(auth.viewerLogin())
+        if (viewerLogin === null) {
+          return { issues: [], viewerLogin: null, warnings: ["Could not resolve your GitHub login. Connect GitHub, then refresh."] }
+        }
         const repositories = await run(auth.repositories())
-        const groups = await Promise.all(repositories.map(async (repository) =>
-          (await client.listIssuesBySlug(repository.fullName, { mine: false, search: "" }))
-            .map((issue): IssueListItem => ({ ...issue, number: Number(issue.id), repository: repository.fullName, comments: 0 }))))
-        return groups.flat().sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+        const settled = await settleBounded(repositories, ISSUE_INBOX_CONCURRENCY, (repository) =>
+          client.listInvolvedIssuesBySlug(repository.fullName, viewerLogin))
+        const issues = settled.flatMap((result) => result.status === "fulfilled" ? result.value : [])
+        const warnings = settled.flatMap((result, index) => result.status === "rejected"
+          ? [`${repositories[index]!.fullName}: ${githubError(result.reason).message}`]
+          : [])
+        return { issues: issues.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)), viewerLogin, warnings }
       }),
       issueViewBySlug: (slug: string, number: number) =>
         cliSource(cli.issueViewBySlug(slug, number), () => client.issueViewBySlug(slug, number)),

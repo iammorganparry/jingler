@@ -1393,7 +1393,7 @@ function AuthedApp({
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
-        issuesView={renderIssueInbox(issueInbox, github, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
+        issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
         repos={repos}
@@ -1953,12 +1953,15 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
 
 function renderIssueInbox(
   issueInbox: ReturnType<typeof useIssueInbox>,
-  github: ReturnType<typeof useGitHubConnection>,
   sessionAction: ReturnType<typeof issueSessionAction>,
 ) {
   return <IssueInbox
     issues={issueInbox.issues}
-    viewerLogin={github.connection.user?.login ?? ""}
+    viewerLogin={issueInbox.viewerLogin ?? ""}
+    warnings={issueInbox.warnings}
+    onActivate={issueInbox.activate}
+    onRefresh={issueInbox.refresh}
+    refreshing={issueInbox.refreshing}
     selected={issueInbox.selected ? { repository: issueInbox.selected.repository, number: issueInbox.selected.number } : null}
     detail={issueInbox.detail}
     onSelect={issueInbox.select}

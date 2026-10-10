@@ -397,7 +397,7 @@ return (evidence === "checks" ? (
                 </span>
               </div>
               <div className="px-[14px] py-[11px]">
-                <Markdown className="text-[13.5px]" repository={/github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]}>{pr.body}</Markdown>
+                <Markdown className="text-[13.5px]" repository={repository}>{pr.body}</Markdown>
               </div>
             </Card>
           )}
@@ -413,6 +413,7 @@ return (evidence === "checks" ? (
                 <PrTimelineEntry
                   key={entry.item.id}
                   item={entry.item}
+                  repository={repository}
                   sent={sentEntryIds?.has(entry.item.id)}
                   onSendToAgent={onSendEntryToAgent}
                 />
@@ -421,6 +422,7 @@ return (evidence === "checks" ? (
                   key={entry.id}
                   threads={entry.threads}
                   prAuthor={pr.author.login}
+                  repository={repository}
                   sentEntryIds={sentEntryIds}
                   onSendToAgent={onSendEntryToAgent}
                   onResolve={onResolveThread}
@@ -580,6 +582,7 @@ return (evidence === "checks" ? (
   // Not memoized: the early returns above rule out a hook here, and this is a
   // map + sort over a handful of entries.
   const feed = buildFeed(pr)
+  const repository = /github\.com\/([^/]+\/[^/]+)\//.exec(pr.url)?.[1]
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1">

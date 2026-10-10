@@ -14,6 +14,7 @@ import { PrReviewThreadView } from "./pr-review-thread.js"
 export function PrReviewGroup({
   threads,
   prAuthor,
+  repository,
   sentEntryIds,
   onSendToAgent,
   onResolve,
@@ -22,6 +23,7 @@ export function PrReviewGroup({
   /** Threads sharing a `reviewId`; never empty. */
   threads: ReadonlyArray<PrReviewThread>
   prAuthor?: string
+  repository?: string
   sentEntryIds?: ReadonlySet<string>
   onSendToAgent?: (id: string) => Promise<void> | void
   onResolve?: (threadId: string, resolved: boolean) => Promise<void> | void
@@ -57,6 +59,7 @@ export function PrReviewGroup({
             key={thread.id}
             thread={thread}
             prAuthor={prAuthor}
+            repository={repository}
             sentEntryIds={sentEntryIds}
             onSendToAgent={onSendToAgent}
             onResolve={onResolve}

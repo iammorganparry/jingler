@@ -67,7 +67,7 @@ import type {
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
-  IssueListItem,
+  IssueInboxResult,
   GitHubTeamDiscovery,
   GitHubTeamQueue,
   GitHubTeamPrResult,
@@ -957,7 +957,7 @@ export const rpc = {
     run((c) => c.Github.inbox()),
   githubPrBySlug: (repository: string, number: number): Promise<PullRequest | null> =>
     run((c) => c.Github.prBySlug({ repository, number })),
-  githubIssueInbox: (): Promise<ReadonlyArray<IssueListItem>> =>
+  githubIssueInbox: (): Promise<IssueInboxResult> =>
     run((c) => c.Github.issueInbox()),
   githubIssueBySlug: (repository: string, number: number): Promise<IssueDetail> =>
     run((c) => c.Github.issueBySlug({ repository, number })),
