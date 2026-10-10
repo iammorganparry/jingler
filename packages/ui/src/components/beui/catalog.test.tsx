@@ -19,21 +19,35 @@ describe("BeUI motion catalog", () => {
     expect(onChange).toHaveBeenCalledWith("two")
   })
 
-  it("lets segmented tabs shrink inside narrow panels", () => {
-    const view = render(<MotionTabs
-      variant="segment"
-      value="all"
-      items={[
-        { value: "all", label: "All files" },
-        { value: "local", label: "Uncommitted" },
-        { value: "pr", label: "Pull request" }
-      ]}
-    />)
-
-    expect(view.container.querySelector("[role='tablist']")?.className).toContain("min-w-0")
-    const tab = screen.getByRole("tab", { name: "Pull request" })
-    expect(tab.parentElement?.className).toContain("flex-1")
-    expect(tab.className).toContain("overflow-hidden")
+  it.each(["segment", "pill", "underline"] as const)("reveals offscreen %s tabs and skips disabled choices with keyboard navigation", (variant) => {
+    const onChange = vi.fn()
+    const view = render(<MotionTabs variant={variant} value="all" onChange={onChange} items={[
+      { value: "all", label: "All files" },
+      { value: "disabled", label: "Disabled", disabled: true },
+      { value: "local", label: "Uncommitted" },
+      { value: "pr", label: "Pull request" },
+    ]} />)
+    const viewport = view.container.querySelector('[role="tablist"]')!.parentElement!
+    const scrollBy = vi.fn()
+    Object.defineProperty(viewport, "scrollBy", { value: scrollBy, configurable: true })
+    vi.spyOn(viewport, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 40))
+    const last = screen.getByRole("tab", { name: "Pull request" })
+    vi.spyOn(last, "getBoundingClientRect").mockReturnValue(new DOMRect(200, 0, 80, 40))
+    const first = screen.getByRole("tab", { name: "All files" })
+    first.focus()
+    fireEvent.keyDown(first, { key: "ArrowRight" })
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Uncommitted" }))
+    expect(onChange).toHaveBeenLastCalledWith("local")
+    fireEvent.keyDown(document.activeElement!, { key: "End" })
+    expect(document.activeElement).toBe(last)
+    expect(onChange).toHaveBeenLastCalledWith("pr")
+    expect(scrollBy).toHaveBeenCalledWith({ left: 180, behavior: "smooth" })
+    fireEvent.keyDown(last, { key: "Home" })
+    expect(document.activeElement).toBe(first)
+    expect(onChange).toHaveBeenLastCalledWith("all")
+    expect(first.tabIndex).toBe(0)
+    expect(last.tabIndex).toBe(-1)
+    view.unmount()
   })
 
   it("keeps the official BeUI control geometry and behavior", () => {

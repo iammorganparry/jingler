@@ -1,10 +1,11 @@
-import { useCallback } from "react"
+import { useCallback, useRef } from "react"
 import { useMachine } from "@xstate/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type {
   PrMergeMethod,
   Project,
   PullRequestListItem,
+  PullRequest,
   Repo,
   Session,
   GitHubTeamQueue
@@ -49,6 +50,30 @@ export const pullRequestInboxViewerLogin = (teamMode: boolean, ready: boolean, l
 const teamPrTarget = (selected: PullRequestListItem | null, account: { id: string } | null) =>
   selected && account ? { accountId: account.id, repository: selected.repository, number: selected.number } : null
 
+const samePullRequest = (a: PullRequestListItem | null, b: PullRequestListItem | null) =>
+  a?.repository === b?.repository && a?.number === b?.number
+
+type PersonalIdentityPlaceholder = { accountId: string; selected: PullRequestListItem | null; data: PullRequest | null | undefined }
+
+const preparePersonalIdentityPlaceholder = (
+  current: PersonalIdentityPlaceholder | null, accountId: string | undefined,
+  teamMode: boolean, selected: PullRequestListItem | null
+): PersonalIdentityPlaceholder | null => {
+  const placeholder = current ?? (accountId !== undefined ? { accountId, selected: teamMode ? null : selected, data: undefined } : null)
+  // Only the selection mounted before first identity may bridge unknown/App data.
+  if (placeholder && (teamMode || !samePullRequest(selected, placeholder.selected) || accountId !== placeholder.accountId)) {
+    placeholder.selected = null
+    placeholder.data = undefined
+  }
+  return placeholder
+}
+
+const personalDetailData = (placeholder: PersonalIdentityPlaceholder | null, data: PullRequest | null | undefined, isPlaceholder: boolean) => {
+  // Query drops placeholderData on error; keep the display-only bridge until a verified read.
+  if (placeholder && data !== undefined && !isPlaceholder) placeholder.data = undefined
+  return data ?? placeholder?.data ?? null
+}
+
 export function usePullRequestInbox(_connected: boolean) {
   const [state, send] = useMachine(pullRequestInboxMachine, { input: { discover: rpc.githubTeams } })
   const { account, teams, teamId, queue, selected, revision, discoveryError } = state.context
@@ -73,6 +98,9 @@ export function usePullRequestInbox(_connected: boolean) {
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   })
+  const personalIdentityPlaceholder = useRef<PersonalIdentityPlaceholder | null>(null)
+  const placeholder = preparePersonalIdentityPlaceholder(personalIdentityPlaceholder.current, identity.accountId, teamMode, selected)
+  personalIdentityPlaceholder.current = placeholder
   const detail = useQuery({
     queryKey: ["github", "pr-inbox", "detail", teamMode ? "team-cli" : "personal", identity.accountId, identity.repository, identity.number],
     queryFn: () => selected
@@ -80,12 +108,29 @@ export function usePullRequestInbox(_connected: boolean) {
         ? rpc.githubTeamPr({ accountId: account.id, repository: selected.repository, number: selected.number })
         : rpc.githubPrBySlug(selected.repository, selected.number)
       : null,
+    // First CLI identity may arrive after a Personal/App detail read. Keep its mounted
+    // composer while re-reading, without copying unverified data into the known cache.
+    placeholderData: (previous, previousQuery) => {
+      if (previous !== undefined && !teamMode && account !== null && selected !== null &&
+          placeholder?.accountId === account.id && samePullRequest(placeholder.selected, selected) &&
+          previousQuery?.queryKey[3] === "personal" && previousQuery.queryKey[4] === undefined &&
+          previousQuery.queryKey[5] === selected.repository && previousQuery.queryKey[6] === selected.number) {
+        placeholder.data = previous
+        return previous
+      }
+      return undefined
+    },
     enabled: selected !== null && (!teamMode || ready),
     retry: teamMode ? false : undefined,
   })
+  const detailData = personalDetailData(placeholder, detail.data, detail.isPlaceholderData)
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox"] })
-  const discover = useCallback(() => send({ type: "DISCOVER" }), [send])
-  const target = teamPrTarget(selected, account)
+  // Focus/visibility share their read; an explicit refresh supersedes an older one.
+  const discover = useCallback((cancelRefetch = false) => {
+    void queryClient.invalidateQueries({ queryKey: ["github", "pr-inbox", "detail"] }, { cancelRefetch })
+    send({ type: "DISCOVER" })
+  }, [queryClient, send])
+  const target = teamPrTarget(selected, ready ? account : null)
   const commentMutation = useMutation({
     mutationFn: (body: string) => selected
       ? teamMode
@@ -138,12 +183,13 @@ export function usePullRequestInbox(_connected: boolean) {
     selectTeam: (id: string | null) => { resetActionErrors(); send({ type: "TEAM", teamId: id }) },
     selectQueue: (next: GitHubTeamQueue) => { resetActionErrors(); send({ type: "QUEUE", queue: next }) },
     discover,
+    refreshInbox: () => discover(true),
     discovering: state.matches("discovering"),
     discoveryError,
     warnings: teamData?.warnings ?? [],
     selected,
     select: (pr: PullRequestListItem) => { resetActionErrors(); send({ type: "SELECT", pr }) },
-    detail: detail.data ?? null,
+    detail: detailData,
     loading: listLoading(),
     detailLoading: detail.isPending && selected !== null,
     detailError: message(detail.error),

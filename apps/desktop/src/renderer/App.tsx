@@ -1953,7 +1953,7 @@ function renderPullRequestInbox(
       queue: pullRequestInbox.queue,
       onTeam: pullRequestInbox.selectTeam,
       onQueue: pullRequestInbox.selectQueue,
-      onRefresh: pullRequestInbox.discover,
+      onRefresh: pullRequestInbox.refreshInbox,
       discovering: pullRequestInbox.discovering,
       error: pullRequestInbox.discoveryError,
     }}
