@@ -52,9 +52,11 @@ function ThreadComment({
   comment,
   isAuthor,
   sent,
+  repository,
   onSendToAgent
 }: {
   comment: PrThreadComment
+  repository?: string
   /** This commenter opened the PR — GitHub adds an "Author" chip. */
   isAuthor: boolean
   sent?: boolean
@@ -90,7 +92,7 @@ function ThreadComment({
         )}
       </div>
 
-      {comment.body && <Markdown className="text-[13.5px]">{comment.body}</Markdown>}
+      {comment.body && <Markdown className="text-[13.5px]" repository={repository}>{comment.body}</Markdown>}
 
       {(comment.reactions.length > 0 || onSendToAgent) && (
         <div className="flex flex-wrap items-center gap-2">
@@ -134,6 +136,7 @@ function ThreadComment({
 export function PrReviewThreadView({
   thread,
   prAuthor,
+  repository,
   sentEntryIds,
   onSendToAgent,
   onResolve,
@@ -141,6 +144,8 @@ export function PrReviewThreadView({
   inline = false
 }: {
   thread: PrReviewThread
+  /** `owner/repo` that bare `#123` and SHAs link against. */
+  repository?: string
   /** The PR's author login, for the "Author" chip. */
   prAuthor?: string
   sentEntryIds?: ReadonlySet<string>
@@ -171,6 +176,7 @@ export function PrReviewThreadView({
               comment={c}
               isAuthor={prAuthor !== undefined && c.author === prAuthor}
               sent={sentEntryIds?.has(c.id)}
+              repository={repository}
               onSendToAgent={onSendToAgent}
             />
           ))}

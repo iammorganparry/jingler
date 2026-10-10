@@ -67,6 +67,7 @@ import type {
   PublishCheckpoint,
   PullRequest,
   PullRequestListItem,
+  IssueInboxResult,
   GitHubTeamDiscovery,
   GitHubTeamQueue,
   GitHubTeamPrResult,
@@ -956,6 +957,14 @@ export const rpc = {
     run((c) => c.Github.inbox()),
   githubPrBySlug: (repository: string, number: number): Promise<PullRequest | null> =>
     run((c) => c.Github.prBySlug({ repository, number })),
+  githubIssueInbox: (): Promise<IssueInboxResult> =>
+    run((c) => c.Github.issueInbox()),
+  githubIssueBySlug: (repository: string, number: number): Promise<IssueDetail> =>
+    run((c) => c.Github.issueBySlug({ repository, number })),
+  githubIssueCommentBySlug: (repository: string, number: number, body: string): Promise<void> =>
+    run((c) => c.Github.issueCommentBySlug({ repository, number, body })),
+  githubIssueCloseBySlug: (repository: string, number: number): Promise<void> =>
+    run((c) => c.Github.issueCloseBySlug({ repository, number })),
   githubListPrs: (
     repoPath: string,
     opts: { mine: boolean; search: string; githubSlug?: string }

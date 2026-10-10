@@ -32,6 +32,7 @@ import {
   IssueDetail,
   IssueIdentity,
   IssueReference,
+  IssueInboxResult,
   IssueProviderDescriptor,
   IssueSummary,
   ContextConfig,
@@ -1729,6 +1730,31 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Void,
     error: GitHubApiError,
     payload: { accountId: Schema.String, repository: Schema.String, number: Schema.Number, method: PrMergeMethod },
+  }),
+
+  /** Open issues involving the viewer across every repository GitHub can see. */
+  Rpc.make("Github.issueInbox", {
+    success: IssueInboxResult,
+    error: GitHubApiError
+  }),
+
+  /** Read one issue without requiring a linked Jingler session. */
+  Rpc.make("Github.issueBySlug", {
+    success: Issue,
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number }
+  }),
+
+  /** Post a comment on a global issue. */
+  Rpc.make("Github.issueCommentBySlug", {
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number, body: Schema.String }
+  }),
+
+  /** Close a global issue. */
+  Rpc.make("Github.issueCloseBySlug", {
+    error: GitHubApiError,
+    payload: { repository: Schema.String, number: Schema.Number }
   }),
 
   /** Read one PR without requiring a linked Jingler session. */

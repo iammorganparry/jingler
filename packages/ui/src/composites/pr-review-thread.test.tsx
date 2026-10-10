@@ -1,5 +1,5 @@
 import type { PrReviewThread } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PrReviewThreadView } from "./pr-review-thread.js"
 
@@ -138,5 +138,15 @@ describe("PrReviewThreadView state", () => {
     )
     // Collapsed, so the footer is hidden until expanded.
     expect(screen.queryByText("Unresolve conversation")).toBeNull()
+  })
+})
+
+describe("PrReviewThreadView repository context", () => {
+  it("links a bare #12 in a comment to the given repository", async () => {
+    const base = thread()
+    const withRef = thread({ comments: [{ ...base.comments[0]!, body: "see #12" }] })
+    render(<PrReviewThreadView thread={withRef} repository="acme/widget" />)
+    await waitFor(() =>
+      expect(screen.getByText("#12").closest("a")?.getAttribute("href")).toBe("https://github.com/acme/widget/issues/12"))
   })
 })

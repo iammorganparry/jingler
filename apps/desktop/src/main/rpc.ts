@@ -1583,6 +1583,30 @@ export const githubPrInbox = () => GitHubApi.inbox();
 export const githubPrBySlug = (repository: string, number: number) =>
   GitHubApi.prViewBySlug(repository, number);
 
+export const githubIssueBySlug = (repository: string, number: number) =>
+  GitHubApi.issueViewBySlug(repository, number).pipe(
+    Effect.flatMap((issue) =>
+      issue === null
+        ? Effect.fail(new GitHubApiError({ reason: "not-found", message: "Issue not found", repository }))
+        : Effect.succeed(issue),
+    ),
+  );
+
+export const githubIssueCommentBySlug = (input: {
+  repository: string;
+  number: number;
+  body: string;
+}) =>
+  input.body.trim()
+    ? GitHubApi.issueCommentBySlug(input.repository, input.number, input.body.trim())
+    : Effect.fail(
+        new GitHubApiError({
+          reason: "validation",
+          message: "Write a comment before posting.",
+          repository: input.repository,
+        }),
+      );
+
 export const githubPr = (sessionId: string) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
@@ -5579,6 +5603,10 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.teamClose": (input) => GitHubApi.teamClose(input),
   "Github.teamMerge": (input) => GitHubApi.teamMerge(input),
   "Github.prBySlug": ({ repository, number }) => githubPrBySlug(repository, number),
+  "Github.issueInbox": () => GitHubApi.issueInbox(),
+  "Github.issueBySlug": ({ repository, number }) => githubIssueBySlug(repository, number),
+  "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
+  "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
   "Github.prState": ({ sessionId }) => githubPrState(sessionId),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>

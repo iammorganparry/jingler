@@ -13,6 +13,7 @@ export function PrReviewComposer({
   connected,
   selfAuthored = false,
   commentOnly = false,
+  ariaLabel,
   onSubmit
 }: {
   connected: boolean
@@ -23,6 +24,8 @@ export function PrReviewComposer({
   selfAuthored?: boolean
   /** Global PR comments do not expose review verdicts or agent routing. */
   commentOnly?: boolean
+  /** Accessible name for the draft textarea. */
+  ariaLabel?: string
   onSubmit: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
 }) {
   const [body, setBody] = React.useState("")
@@ -32,9 +35,11 @@ export function PrReviewComposer({
   const submit = async (kind: ReviewSubmitKind) => {
     if (!connected) return
     setError(null)
+    const submitted = body
     try {
-      await onSubmit({ body: body.trim(), kind, routeToAgent })
-      setBody("")
+      await onSubmit({ body: submitted.trim(), kind, routeToAgent })
+      // Text typed while the request was pending is unsent; keep it.
+      setBody((current) => (current === submitted ? "" : current))
     } catch (e) {
       // Surface the real reason (e.g. "Can not approve your own pull request")
       // instead of the button's silent shake.
@@ -49,6 +54,7 @@ export function PrReviewComposer({
         value={body}
         onChange={(e) => setBody(e.target.value)}
         placeholder={commentOnly ? "Leave a comment…" : "Leave a review comment…"}
+        aria-label={ariaLabel}
         rows={2}
         className="w-full resize-none bg-transparent px-[14px] py-[11px] text-[13.5px] text-text-body outline-none placeholder:text-dim"
       />

@@ -352,7 +352,7 @@ export function SelectSearch({
   return (
     <div
       className={cn(
-        "mx-1 mt-1 flex h-8 items-center gap-2 rounded-lg border border-line bg-surface px-2",
+        "mb-1 flex h-8 items-center gap-2 rounded-lg border border-line bg-surface px-2.5",
         wrapperClassName,
       )}
     >

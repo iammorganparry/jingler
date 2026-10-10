@@ -1,6 +1,7 @@
 import type {
   GitHubRateLimit,
   Issue,
+  IssueListItem,
   IssueSummary,
   PrCheck,
   PrCheckStatus,
@@ -466,6 +467,11 @@ export const mapIssueSummary = (raw: unknown): IssueSummary => {
     })),
     updatedAt: text(field(issue, "updatedAt", "updated_at")) ?? ""
   }
+}
+
+export const mapIssueListItem = (raw: unknown, repository: string, comments: number): IssueListItem => {
+  const summary = mapIssueSummary(raw)
+  return { ...summary, number: Number(summary.id), repository, comments }
 }
 
 export const mapIssue = (raw: unknown): Issue => {

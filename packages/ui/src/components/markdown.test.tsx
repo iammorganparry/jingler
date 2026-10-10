@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { Markdown } from "./markdown.js"
 
@@ -117,5 +117,72 @@ describe("Markdown math (the plugin we rewired onto plugins.math)", () => {
   it("still renders KaTeX", async () => {
     render(<Markdown>{`$x^2$`}</Markdown>)
     await waitFor(() => expect(md().querySelector(".katex")).not.toBeNull())
+  })
+})
+
+describe("Markdown GitHub flavour", () => {
+  const renderMd = async (source: string, repository?: string) => {
+    render(<Markdown repository={repository}>{source}</Markdown>)
+    await settled()
+    return md()
+  }
+
+  it("renders [!NOTE]-style alerts as styled callouts, not literal text", async () => {
+    const root = await renderMd("> [!WARNING]\n> Careful")
+    const alert = root.querySelector(".markdown-alert-warning")
+    expect(alert).not.toBeNull()
+    expect(alert?.querySelector(".markdown-alert-title svg.octicon path")?.getAttribute("d")).toBeTruthy()
+    expect(root.textContent).not.toContain("[!WARNING]")
+  })
+
+  it("links mentions, bare issue refs and SHAs against the given repository", async () => {
+    const root = await renderMd("@rachel fixes #12 in a5c3785ed8d6a35868bc169f07e40e889087fd2e", "acme/api")
+    const hrefs = [...root.querySelectorAll("a")].map((a) => a.getAttribute("href"))
+    expect(hrefs).toEqual([
+      "https://github.com/rachel",
+      "https://github.com/acme/api/issues/12",
+      "https://github.com/acme/api/commit/a5c3785ed8d6a35868bc169f07e40e889087fd2e",
+    ])
+  })
+
+  it("leaves bare #refs unlinked without a repository but still links qualified ones", async () => {
+    const root = await renderMd("fixes #12 and acme/api#9")
+    expect([...root.querySelectorAll("a")].map((a) => a.getAttribute("href")))
+      .toEqual(["https://github.com/acme/api/issues/9"])
+  })
+
+  it("expands emoji shortcodes and turns single newlines into line breaks", async () => {
+    const root = await renderMd("ship it :tada:\nnext line")
+    expect(root.textContent).toContain("🎉")
+    expect(root.querySelector("p br")).not.toBeNull()
+  })
+
+  it("gives headings GitHub ids and keeps fragment links in the pane", async () => {
+    const root = await renderMd("## Hello World\n\ntext[^1]\n\n[^1]: note")
+    expect(root.querySelector("h2#user-content-hello-world")).not.toBeNull()
+    const ref = root.querySelector("a[data-footnote-ref]")
+    expect(ref?.getAttribute("target")).toBeNull()
+  })
+
+  it("still blocks script, event handlers and javascript: links", async () => {
+    const root = await renderMd("<script>alert(1)</script><img src=x onerror=alert(1)> [x](javascript:alert(1))")
+    expect(root.querySelector("script")).toBeNull()
+    expect(root.querySelector("[onerror]")).toBeNull()
+    expect(root.querySelector("a[href^='javascript']")).toBeNull()
+  })
+
+  it("does not throw when a fragment link has a malformed escape", async () => {
+    const root = await renderMd("[x](#section%)")
+    const errors: unknown[] = []
+    const onError = (event: ErrorEvent) => { errors.push(event.error); event.preventDefault() }
+    window.addEventListener("error", onError)
+    try {
+      const link = root.querySelector("a[href^='#']")
+      expect(link).not.toBeNull()
+      fireEvent.click(link!)
+    } finally {
+      window.removeEventListener("error", onError)
+    }
+    expect(errors).toEqual([])
   })
 })

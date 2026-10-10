@@ -249,6 +249,67 @@ describe("GitHubApi backend selection", () => {
   )
 })
 
+describe("GitHubApi issue inbox App fallback", () => {
+  const issueRow = (number: number, user: string, assignees: string[], comments: number) => ({
+    number, title: `Issue ${number}`, state: "open", user: { login: user },
+    assignees: assignees.map((login) => ({ login })), comments, updated_at: `2026-08-0${number}T00:00:00Z`
+  })
+
+  it("keeps comment counts, filters to the viewer, and reports a failing repository without losing the rest", async () => {
+    const routes: Record<string, () => Response> = {
+      "/repos/acme/widget": () => json({ ...repository, full_name: "acme/widget" }),
+      "/repos/acme/widget/issues": () => json([
+        issueRow(1, "octocat", [], 5),
+        issueRow(2, "other", ["Octocat"], 0),
+        issueRow(3, "other", ["someone"], 9),
+        { ...issueRow(4, "octocat", [], 1), pull_request: {} }
+      ]),
+      "/repos/acme/broken": () => json({ message: "Not Found" }, 404),
+      "/repos/acme/api": () => json({ ...repository, full_name: "acme/api" }),
+      "/repos/acme/api/issues": () => json([issueRow(7, "octocat", [], 2)])
+    }
+    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : String(input))
+      const route = routes[url.pathname]
+      if (!route) throw new Error(`unexpected ${url.pathname}`)
+      return route()
+    })
+    try {
+      const result = await runApi(GitHubApi.issueInbox(), {
+        available: () => Effect.succeed(false),
+        issueInbox: () => Effect.die("CLI must not run")
+      }, {
+        viewerLogin: () => Effect.succeed("octocat"),
+        repositories: () => Effect.succeed([
+          { installationId: "77", repositoryId: "1", fullName: "acme/widget" },
+          { installationId: "77", repositoryId: "2", fullName: "acme/broken" },
+          { installationId: "77", repositoryId: "3", fullName: "acme/api" }
+        ]),
+        credentialsForOwner: () => Effect.succeed({ token: "t", installationId: "77", expiresAt: "2030-01-01T00:00:00.000Z" }),
+        invalidate: () => Effect.void
+      })
+
+      expect(result.viewerLogin).toBe("octocat")
+      expect(result.issues.map((row) => [row.repository, row.number, row.comments])).toEqual([
+        ["acme/api", 7, 2], ["acme/widget", 2, 0], ["acme/widget", 1, 5]
+      ])
+      expect(result.warnings).toHaveLength(1)
+      expect(result.warnings[0]).toContain("acme/broken")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("returns no rows and a warning when the viewer cannot be resolved", async () => {
+    const result = await runApi(GitHubApi.issueInbox(), { available: () => Effect.succeed(false), issueInbox: () => Effect.die("CLI must not run") }, {
+      viewerLogin: () => Effect.succeed(null),
+      repositories: () => Effect.die("repositories must not be read without an identity")
+    })
+    expect(result).toMatchObject({ issues: [], viewerLogin: null })
+    expect(result.warnings).toHaveLength(1)
+  })
+})
+
 describe("GitHubApi remote and repository identity", () => {
   it.each([
     ["git@github.com:acme/widget.git", { owner: "acme", repo: "widget" }],

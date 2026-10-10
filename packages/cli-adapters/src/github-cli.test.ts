@@ -75,6 +75,32 @@ describe("GitHubCli", () => {
     expect(result[100]).toMatchObject({ assignedToViewer: true, reviewRequestedFromViewer: true })
   })
 
+  it("paginates the issue inbox and tags rows with repository and comment count", async () => {
+    const result = await run(GitHubCli.issueInbox(), (command, args) => {
+      if (command !== "gh" || args[0] !== "api") return
+      expect(args).toEqual(expect.arrayContaining(["--paginate", "--slurp"]))
+      expect(args.join(" ")).toContain("is:issue is:open involves:@me")
+      expect(args.join(" ")).toContain("after:$endCursor")
+      const issue = (number: number, repository: string) => ({
+        number, repository: { nameWithOwner: repository }, title: `Issue ${number}`, state: "OPEN",
+        url: `https://github.com/${repository}/issues/${number}`, updatedAt: "2026-08-01T10:00:00Z",
+        author: { login: "octocat" }, comments: { totalCount: number },
+        labels: { nodes: [{ name: "bug", color: "ff0000" }] }, assignees: { nodes: [{ login: "lee" }] }
+      })
+      return { stdout: JSON.stringify([
+        { data: { viewer: { login: "octocat" }, search: { nodes: [issue(1, "acme/widget"), {}] } } },
+        { data: { viewer: { login: "octocat" }, search: { nodes: [issue(2, "acme/api")] } } }
+      ]) }
+    })
+
+    expect(result.viewerLogin).toBe("octocat")
+    expect(result.warnings).toEqual([])
+    expect(result.issues.map((row) => [row.repository, row.number, row.comments])).toEqual([
+      ["acme/widget", 1, 1], ["acme/api", 2, 2]
+    ])
+    expect(result.issues[0]).toMatchObject({ title: "Issue 1", state: "open", labels: [{ name: "bug", color: "ff0000" }], assignees: [{ name: "lee" }] })
+  })
+
   it("loads a PR and inline review threads through gh", async () => {
     const commands: Array<ReadonlyArray<string>> = []
     // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: one fixture handles each gh subprocess in the PR read.

@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
 import { Select, SelectContent, SelectItem, SelectSearch, SelectTrigger } from "../components/beui/select.js"
 import { initialInboxFilters, pullRequestInboxFilterMachine, type PullRequestInboxFacets, type PullRequestInboxFilter } from "./pull-request-inbox-filter-machine.js"
@@ -11,6 +11,7 @@ import { Spinner } from "../components/loading.js"
 import { SearchInput } from "../components/search-input.js"
 import { MotionTabs } from "../components/beui/controls.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
+import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
@@ -215,17 +216,7 @@ export function PullRequestInbox({
     () => filterPullRequests(prs, isTeam ? "all" : filter, query, viewerLogin, facets),
     [filter, prs, query, viewerLogin, isTeam, facets]
   )
-  useEffect(() => {
-    onActivate?.()
-    const onVisible = () => { if (document.visibilityState === "visible") onActivate?.() }
-    const onFocus = () => onActivate?.()
-    window.addEventListener("focus", onFocus)
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [onActivate])
+  useActivateOnFocus(onActivate)
   const selectedKey = selected ? `${selected.repository}#${selected.number}` : null
   const showList = !(compact && mobileDetail && selected !== null)
 
@@ -328,11 +319,11 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
   </>
 }
 
-const filterOptions = (values: ReadonlyArray<string>) =>
+export const filterOptions = (values: ReadonlyArray<string>) =>
   [...new Map(values.map((label) => [label.toLowerCase(), { value: label.toLowerCase(), label }])).values()]
     .sort((a, b) => a.label.localeCompare(b.label))
 
-function InboxFilterSelect({ label, value, options, onChange, searchable = true }: {
+export function InboxFilterSelect({ label, value, options, onChange, searchable = true }: {
   label: string
   value: string
   options: ReadonlyArray<{ value: string; label: string }>
@@ -351,6 +342,6 @@ function InboxFilterSelect({ label, value, options, onChange, searchable = true 
   </Select>
 }
 
-function InboxMessage({ children }: { children: ReactNode }) {
+export function InboxMessage({ children }: { children: ReactNode }) {
   return <div className="flex min-h-48 flex-1 flex-col items-center justify-center gap-2 px-6 text-center text-[12px] text-muted-foreground">{children}</div>
 }

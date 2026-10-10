@@ -1,12 +1,17 @@
 import { createContext, isValidElement, useContext, useMemo, type MouseEvent, type ReactNode } from "react"
-import { Streamdown, defaultUrlTransform, type AllowedTags, type MathPlugin, type UrlTransform } from "streamdown"
+import { Streamdown, defaultRehypePlugins, defaultRemarkPlugins, defaultUrlTransform, type MathPlugin, type UrlTransform } from "streamdown"
 import rehypeKatex from "rehype-katex"
+import rehypeSlug from "rehype-slug"
+import remarkBreaks from "remark-breaks"
+import remarkGemoji from "remark-gemoji"
+import remarkGithub, { defaultBuildUrl } from "remark-github"
+import { remarkAlert } from "remark-github-blockquote-alert"
 import remarkMath from "remark-math"
 import { cn } from "../lib/cn.js"
 import { DiffPeek } from "./diff-peek.js"
 import { CodeBlock } from "./beui/code-block.js"
 import { FileIcon } from "./file-icon.js"
-import type { AgentCodeLanguage } from "./beui/agent-code.js"
+import { isAgentCodeLanguage } from "./beui/agent-code.js"
 import { HtmlPreview } from "./html-preview.js"
 import { MermaidDiagram } from "./mermaid-diagram.js"
 import { useOpenAsset, useOpenPath } from "../asset/open-asset-context.js"
@@ -40,25 +45,74 @@ const MATH_PLUGIN = {
 
 const PLUGINS = { math: MATH_PLUGIN }
 
+type Pluggable = (typeof defaultRehypePlugins)[string]
+type PluginFn = Extract<Pluggable, (...args: never[]) => unknown>
+type SanitizeAttribute = string | [string, ...Array<string | RegExp>]
+interface SanitizeSchema { tagNames?: string[]; attributes?: Record<string, SanitizeAttribute[]> }
+
 /**
- * Tags GitHub review bots rely on that rehype-sanitize's default schema strips.
- * Greptile folds its "Prompt To Fix With AI" into a `<details>` and ships its
- * P1/severity and "Fix in …" badges as `<picture><source>` + `<img>`.
+ * GitHub-flavoured rehype pipeline: Streamdown's raw → sanitize → harden, plus
+ * heading anchors.
  *
- * Streamdown merges this into the sanitize schema with a SHALLOW spread
- * (`attributes: { ...defaultSchema.attributes, ...allowedTags }`), so an entry
- * here REPLACES that tag's default attribute list rather than adding to it.
- * Never list a tag the default schema already handles: `img: ["align"]` would
- * drop `src` from `img`'s defaults, and rehype-harden then renders the
- * src-less image as "[Image blocked]". `align`/`alt` need no entry anyway —
- * they're already in the schema's global `"*"` attribute list.
+ * Streamdown only merges its `allowedTags` prop into the sanitize schema when
+ * `rehypePlugins` IS its default array, so adding any rehype plugin means
+ * building that schema here. The defaults' own entries are reused by identity:
+ * Streamdown checks for its `rehype-raw` entry and, if missing, rewrites raw
+ * HTML into literal text.
+ *
+ * Extra tags: Greptile's `<details>` and `<picture><source>` badges, and the
+ * `<svg><path>` octicons GitHub alerts render with. An attribute entry REPLACES
+ * the default list for that tag, so `div`/`p` spread their defaults back in.
+ *
+ * `rehype-slug` runs AFTER sanitize with GitHub's `user-content-` prefix:
+ * sanitize clobbers ids with that prefix, and `MarkdownAnchor` resolves `#x`
+ * against it the same way github.com does.
  */
-const ALLOWED_TAGS: AllowedTags = {
-  details: [],
-  summary: [],
-  picture: [],
-  // `srcSet` is the one attribute here that the global `"*"` list lacks.
-  source: ["srcSet", "srcset", "type"]
+const [sanitizePlugin, baseSchema] = defaultRehypePlugins.sanitize as [PluginFn, SanitizeSchema]
+const baseAttributes = baseSchema.attributes ?? {}
+const REHYPE_PLUGINS: Pluggable[] = [
+  defaultRehypePlugins.raw!,
+  [sanitizePlugin, {
+    ...baseSchema,
+    tagNames: [...(baseSchema.tagNames ?? []), "details", "summary", "picture", "source", "svg", "path"],
+    attributes: {
+      ...baseAttributes,
+      // `srcSet` is the one attribute here that the global `"*"` list lacks.
+      source: ["srcSet", "srcset", "type"],
+      svg: [["className", "octicon"], "viewBox", "width", "height", "ariaHidden"],
+      path: ["d"],
+      div: [...(baseAttributes.div ?? []), ["className", /^markdown-alert(-\w+)?$/]],
+      p: [...(baseAttributes.p ?? []), ["className", "markdown-alert-title"]],
+    },
+  }],
+  [rehypeSlug, { prefix: "user-content-" }],
+  defaultRehypePlugins.harden!,
+]
+
+/**
+ * remark-github needs a repository and throws without one. Agent transcripts
+ * have none, so a sentinel stands in and bare `#123` / SHAs stay unlinked while
+ * `@mentions` and fully qualified `owner/repo#9` refs still link.
+ */
+const NO_REPOSITORY = "jingler-none/jingler-none"
+const remarkPluginsCache = new Map<string, Pluggable[]>()
+const remarkPluginsFor = (repository = NO_REPOSITORY): Pluggable[] => {
+  let plugins = remarkPluginsCache.get(repository)
+  if (!plugins) {
+    plugins = [
+      ...Object.values(defaultRemarkPlugins),
+      remarkBreaks,
+      remarkGemoji,
+      remarkAlert,
+      [remarkGithub, {
+        repository,
+        buildUrl: (values: Parameters<typeof defaultBuildUrl>[0]) =>
+          values.type !== "mention" && `${values.user}/${values.project}` === NO_REPOSITORY ? false : defaultBuildUrl(values),
+      }],
+    ]
+    remarkPluginsCache.set(repository, plugins)
+  }
+  return plugins
 }
 
 /**
@@ -81,16 +135,15 @@ const ALLOWED_TAGS: AllowedTags = {
  */
 const InsideFence = createContext(false)
 const MarkdownStreaming = createContext(false)
-const CODE_LANGUAGES = new Set<AgentCodeLanguage>(["bash", "diff", "json", "text", "tsx", "typescript"])
 
 function MarkdownPre({ children }: { children?: ReactNode }) {
   const streaming = useContext(MarkdownStreaming)
   const code = isValidElement<{ className?: string; children?: unknown }>(children) ? children : null
-  const lang = /language-(\w+)/.exec(code?.props.className ?? "")?.[1]
+  const lang = /language-([\w+#-]+)/.exec(code?.props.className ?? "")?.[1]?.toLowerCase()
   const text = String(code?.props.children ?? "").replace(/\n$/, "")
   if (lang === "diff") {
     return (
-      <div className="my-3 overflow-hidden rounded-md border border-line">
+      <div className="my-3 overflow-hidden rounded-md border border-line px-3 pb-1 pt-1.5">
         <DiffPeek preview={text} />
       </div>
     )
@@ -104,7 +157,7 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
     // A ```mermaid fence renders as an actual (themed, sandboxed) diagram.
     return <MermaidDiagram source={text} />
   }
-  const language = CODE_LANGUAGES.has(lang as AgentCodeLanguage) ? lang as AgentCodeLanguage : "text"
+  const language = lang && isAgentCodeLanguage(lang) ? lang : "text"
   if (text.split("\n").length > 200) return <InsideFence.Provider value={true}><pre>{children}</pre></InsideFence.Provider>
   const iconPath = `code.${language === "typescript" ? "ts" : language === "bash" ? "sh" : language}`
   return <CodeBlock code={text} language={language} fileIcon={<FileIcon path={iconPath} size={14} />} status={streaming ? "streaming" : "complete"} />
@@ -199,6 +252,21 @@ function MarkdownAnchor({
   node?: unknown
 }) {
   const open = useOpenPath(href)
+  if (href?.startsWith("#")) {
+    // Sanitize prefixes every id with `user-content-` (footnotes get it twice, as
+    // on github.com), so try the fragment with and without that prefix.
+    const jump = (event: MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault()
+      // Malformed escapes (`#a%`) make decodeURIComponent throw; use the raw fragment then.
+      const raw = href.slice(1)
+      const fragment = (() => { try { return decodeURIComponent(raw) } catch { return raw } })()
+      const root = event.currentTarget.closest(".sb-md")
+      const ids = [fragment, `user-content-${fragment}`]
+      const target = [...(root?.querySelectorAll("[id]") ?? [])].find((element) => ids.includes(element.id))
+      target?.scrollIntoView?.({ block: "start" })
+    }
+    return <a {...rest} href={href} className={cn("font-medium underline", className)} data-streamdown="link" onClick={jump} target={undefined} rel={undefined}>{children}</a>
+  }
   if (open) {
     return (
       <a href={href} draggable={false} onClick={handleLinkClick(open)} onAuxClick={event => event.preventDefault()} title={`Open ${href}`} className="sb-md-path">
@@ -277,7 +345,13 @@ const useAssetUrlTransform = (): UrlTransform => {
  * A ```diff fenced block is rendered with our own `DiffPeek` (the same red/green
  * line view used elsewhere) instead of Streamdown's generic code-block chrome.
  */
-export function Markdown({ children, className, streaming = false }: { children: string; className?: string; streaming?: boolean }) {
+export function Markdown({ children, className, streaming = false, repository }: {
+  children: string
+  className?: string
+  streaming?: boolean
+  /** `owner/repo` that bare `#123` and commit SHAs link against, as on GitHub. */
+  repository?: string
+}) {
   const source = useMemo(() => unwrapNoOpAnchors(children), [children])
   const urlTransform = useAssetUrlTransform()
   return (
@@ -291,7 +365,8 @@ export function Markdown({ children, className, streaming = false }: { children:
       <Streamdown
         parseIncompleteMarkdown
         plugins={PLUGINS}
-        allowedTags={ALLOWED_TAGS}
+        remarkPlugins={remarkPluginsFor(repository)}
+        rehypePlugins={REHYPE_PLUGINS}
         shikiTheme={["one-dark-pro", "one-dark-pro"]}
         urlTransform={urlTransform}
         components={COMPONENTS}

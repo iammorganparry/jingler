@@ -28,9 +28,12 @@ const kindMeta = {
 export function PrTimelineEntry({
   item,
   sent = false,
+  repository,
   onSendToAgent
 }: {
   item: PrTimelineItem
+  /** `owner/repo` that bare `#123` and SHAs link against. */
+  repository?: string
   /** This entry has already been routed to the agent — the action stays "Sent". */
   sent?: boolean
   onSendToAgent?: (id: string) => Promise<void> | void
@@ -62,7 +65,7 @@ export function PrTimelineEntry({
           <span className="font-mono text-[11px] text-dim">{relativeTime(item.createdAt)}</span>
         </div>
         <div className="flex flex-col gap-[11px] px-[14px] py-[11px]">
-          {item.body && <Markdown className="text-[13.5px]">{item.body}</Markdown>}
+          {item.body && <Markdown className="text-[13.5px]" repository={repository}>{item.body}</Markdown>}
           {hasRef && (
             <CodeChip path={item.path as string} line={item.line as number} className="self-start" />
           )}

@@ -8,6 +8,7 @@ import {
   Cloud,
   Download,
   GitBranch,
+  CircleDot,
   GitPullRequest,
   Layers,
   LoaderCircle,
@@ -143,6 +144,8 @@ export interface SessionSidebarProps {
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
+  issuesActive?: boolean
+  onOpenIssues?: () => void
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   pendingEnvironmentSessionActive?: boolean
   onSelectPendingEnvironmentSession?: () => void
@@ -356,6 +359,8 @@ function SidebarBody({
   defaultFilters,
   pullRequestsActive = false,
   onOpenPullRequests,
+  issuesActive = false,
+  onOpenIssues,
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive = false,
   onSelectPendingEnvironmentSession,
@@ -538,6 +543,29 @@ return (renderExpandedGroupHeading())
             </div>
             )
           }) satisfies  Parameters<typeof groups.map>[0]
+
+  function renderIssuesLink() {
+    return (onOpenIssues && (
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            data-testid="issues-sidebar-item"
+            aria-current={issuesActive ? "page" : undefined}
+            onClick={onOpenIssues}
+            className={cn(
+              "flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              issuesActive
+                ? "bg-surface text-text-bright"
+                : "text-muted-foreground hover:bg-surface/60 hover:text-text"
+            )}
+          >
+            <CircleDot size={15} className={issuesActive ? "text-green" : undefined} />
+            <span className="flex-1">Issues</span>
+            {issuesActive && <span className="text-[10px] text-blue">Open</span>}
+          </button>
+        </div>
+      ))
+  }
 
   function renderPullRequestsLink() {
     return (onOpenPullRequests && (
@@ -827,6 +855,7 @@ return (renderExpandedGroupHeading())
       ) : (
         <>
       {renderPullRequestsLink()}
+      {renderIssuesLink()}
 
       {renderPendingEnvironment()}
 
@@ -922,6 +951,8 @@ function SessionRail({
   onNewSession,
   pullRequestsActive,
   onOpenPullRequests,
+  issuesActive,
+  onOpenIssues,
   pendingEnvironmentSession,
   pendingEnvironmentSessionActive,
   onSelectPendingEnvironmentSession,
@@ -936,6 +967,8 @@ function SessionRail({
   onNewSession?: () => void
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
+  issuesActive?: boolean
+  onOpenIssues?: () => void
   pendingEnvironmentSession?: PendingEnvironmentSession | null
   pendingEnvironmentSessionActive?: boolean
   onSelectPendingEnvironmentSession?: () => void
@@ -1062,6 +1095,24 @@ function SessionRail({
           <GitPullRequest size={16} />
         </button>
       )}
+      {onOpenIssues && (
+        <button
+          type="button"
+          data-testid="issues-rail-item"
+          onClick={onOpenIssues}
+          aria-current={issuesActive ? "page" : undefined}
+          aria-label="Issues"
+          title="Issues"
+          className={cn(
+            "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+            issuesActive
+              ? "bg-surface text-green"
+              : "text-dim hover:bg-surface hover:text-text"
+          )}
+        >
+          <CircleDot size={16} />
+        </button>
+      )}
       <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
         {pendingEnvironmentSession && (
           <button
@@ -1181,6 +1232,8 @@ export function SessionSidebar(props: SessionSidebarProps) {
       onNewSession={props.onNewSession}
       pullRequestsActive={props.pullRequestsActive}
       onOpenPullRequests={props.onOpenPullRequests}
+      issuesActive={props.issuesActive}
+      onOpenIssues={props.onOpenIssues}
       pendingEnvironmentSession={props.pendingEnvironmentSession}
       pendingEnvironmentSessionActive={props.pendingEnvironmentSessionActive}
       onSelectPendingEnvironmentSession={props.onSelectPendingEnvironmentSession}

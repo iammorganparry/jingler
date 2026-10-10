@@ -19,6 +19,7 @@ import type {
   ExecutionMode,
   GitConfig,
   IssueIdentity,
+  IssueSummary,
   GithubConfig,
   JinglerSubagentName,
   ProviderCatalog,
@@ -49,6 +50,7 @@ import {
   SetupScreen,
   JinglerApp,
   PullRequestInbox,
+  IssueInbox,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -74,6 +76,7 @@ import {
   pullRequestSessionTarget,
   usePullRequestInbox,
 } from "./use-pull-request-inbox.js";
+import { issueSessionAction, issueSessionOpener, issueSessionTarget, useIssueInbox } from "./use-issue-inbox.js";
 import { ReviewTrayDock, revealSessionChanges } from "./changes-review.js";
 import { setReviewFocused, useReviewFocused } from "./review-store.js";
 import { FileBrowserExplorer, FileBrowserQuickOpen, FileBrowserView } from "./file-browser-view.js";
@@ -211,6 +214,7 @@ function AuthedApp({
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
   );
+  const issueInbox = useIssueInbox();
   const [relayError, setRelayError] = useState<string | null>(null);
   const relayStatuses = useRef(
     new Map<string, { mode: string; error: string | null }>(),
@@ -273,7 +277,8 @@ function AuthedApp({
   } | null>(null);
   const [newSessionRequest, setNewSessionRequest] = useState<{
     projectId: string;
-    pr: PrSummary;
+    pr?: PrSummary;
+    issue?: IssueSummary;
     githubCliAccountId?: string;
     githubSlug?: string;
     tabId?: string;
@@ -1349,6 +1354,14 @@ function AuthedApp({
       }));
     }
   };
+  const selectedIssue = issueInbox.selected;
+  const selectedIssueTarget = issueSessionTarget(selectedIssue, repos, projectController.projects, sessions);
+  const openSelectedIssueSession = issueSessionOpener(
+    selectedIssue,
+    selectedIssueTarget,
+    (sessionId) => setSelectRequest((previous) => ({ sessionId, nonce: (previous?.nonce ?? 0) + 1 })),
+    (projectId, issue) => setNewSessionRequest((previous) => ({ projectId, issue, nonce: (previous?.nonce ?? 0) + 1 })),
+  );
   const openSelectedPullRequestSession = () => openSelectedPullRequestTarget();
   const openSelectedPullRequestFiles = () => openSelectedPullRequestTarget("files");
 
@@ -1380,6 +1393,7 @@ function AuthedApp({
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
+        issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
         repos={repos}
@@ -1935,6 +1949,31 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
   return { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
+}
+
+function renderIssueInbox(
+  issueInbox: ReturnType<typeof useIssueInbox>,
+  sessionAction: ReturnType<typeof issueSessionAction>,
+) {
+  return <IssueInbox
+    issues={issueInbox.issues}
+    viewerLogin={issueInbox.viewerLogin ?? ""}
+    warnings={issueInbox.warnings}
+    onActivate={issueInbox.activate}
+    onRefresh={issueInbox.refresh}
+    refreshing={issueInbox.refreshing}
+    selected={issueInbox.selected ? { repository: issueInbox.selected.repository, number: issueInbox.selected.number } : null}
+    detail={issueInbox.detail}
+    onSelect={issueInbox.select}
+    onOpenOnGithub={(url) => void window.jingler.openExternal(url)}
+    onComment={issueInbox.comment}
+    onCloseIssue={issueInbox.close}
+    closeError={issueInbox.closeError}
+    sessionAction={sessionAction}
+    loading={issueInbox.loading}
+    detailLoading={issueInbox.detailLoading}
+    detailError={issueInbox.detailError}
+    error={issueInbox.error} />;
 }
 
 function renderPullRequestInbox(
