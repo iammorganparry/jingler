@@ -1,5 +1,14 @@
 # @jingler/cli-adapters
 
+## 0.8.0
+
+### Patch Changes
+
+- 393eafc: Filter loaded pull requests by repository, author, label, and Draft/Ready status. Shared tabs keep full labels and scroll horizontally. Refresh preserves unsent comments while updating details and revalidating completed team searches without restarting unfinished pages. Recovery counts only current-attempt results and releases completed queue progress. Confirmed GitHub CLI account changes clear Personal selections and isolate cached or late detail responses; first-time identity discovery keeps the existing draft.
+  - @jingler/core@0.8.0
+  - @jingler/plannotator-ext@0.8.0
+  - @jingler/themes@0.8.0
+
 ## 0.7.3
 
 ### Patch Changes

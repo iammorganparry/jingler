@@ -1,5 +1,17 @@
 # @jingler/desktop
 
+## 0.8.0
+
+### Minor Changes
+
+- 393eafc: Filter loaded pull requests by repository, author, label, and Draft/Ready status. Shared tabs keep full labels and scroll horizontally. Refresh preserves unsent comments while updating details and revalidating completed team searches without restarting unfinished pages. Recovery counts only current-attempt results and releases completed queue progress. Confirmed GitHub CLI account changes clear Personal selections and isolate cached or late detail responses; first-time identity discovery keeps the existing draft.
+
+### Patch Changes
+
+- 9760523: Add a GitHub Issues view to browse and filter issues across repositories.
+- 9760523: Render markdown the way GitHub does: alerts, @mentions, issue and commit links, emoji shortcodes, line breaks, heading anchors, and syntax highlighting for every language.
+  - @jingler/plannotator-ext@0.8.0
+
 ## 0.7.3
 
 ### Patch Changes
