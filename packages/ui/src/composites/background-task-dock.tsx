@@ -17,10 +17,10 @@ const duration = (ms: number): string => {
 
 const tokens = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
-const TONE: Record<BackgroundTask["status"], { label: string; tone: "blue" | "purple" | "red" | "neutral" }> = {
-  running: { label: "Running", tone: "blue" },
+const TONE: Record<BackgroundTask["status"], { label: string; tone: "red" | "neutral" }> = {
+  running: { label: "Running", tone: "neutral" },
   stopping: { label: "Stopping", tone: "neutral" },
-  completed: { label: "Done", tone: "purple" },
+  completed: { label: "Done", tone: "neutral" },
   stopped: { label: "Stopped", tone: "neutral" },
   failed: { label: "Failed", tone: "red" }
 }
@@ -51,9 +51,9 @@ function TaskRow({
       className="flex items-center gap-2.5 rounded-lg border border-transparent px-2.5 py-2 hover:bg-surface/40"
     >
       {live ? (
-        <Spin className="flex-none text-blue"><Loader2 size={13} /></Spin>
+        <Spin className="flex-none text-muted-foreground"><Loader2 size={13} /></Spin>
       ) : (
-        <span className={cn("size-[7px] flex-none rounded-full", task.status === "failed" ? "bg-red" : "bg-purple")} />
+        <span className={cn("size-[7px] flex-none rounded-full", task.status === "failed" ? "bg-state-failed" : "bg-line-strong")} />
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
@@ -96,7 +96,7 @@ function TaskRow({
       )}
       {live && onStop && (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           className="flex-none gap-1.5"
           // Disabled while stopping — the request is already in flight and the
@@ -197,7 +197,7 @@ export function BackgroundTaskDock({
         <ChevronRight size={13} className={cn("flex-none transition-transform", open && "rotate-90")} />
         <span className="flex-1 text-[11.5px] font-semibold text-text">Background tasks</span>
         {live.length > 0 && (
-          <Badge tone="blue" size="xs">
+          <Badge tone="neutral" size="xs">
             {live.length} running
           </Badge>
         )}
