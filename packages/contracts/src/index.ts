@@ -1278,6 +1278,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { source: McpImportSourceId, names: Schema.Array(Schema.String) }
   }),
 
+  /** Open the app's log folder in the file manager (crash screen "Open logs"). */
+  Rpc.make("App.revealLogs", {}),
+
   /** Reveal mcp.json in the file manager, creating an empty file if absent. */
   Rpc.make("Mcp.reveal", {
     success: Schema.Void,

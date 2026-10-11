@@ -216,7 +216,7 @@ import {
   Stream,
 } from "effect";
 import type { WebContents } from "electron";
-import { BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { showNotification, shouldNotify } from "./notifications.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
@@ -5415,6 +5415,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
+  "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
   "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via

@@ -412,6 +412,7 @@ export const rpc = {
     names: ReadonlyArray<string>
   ): Promise<ReadonlyArray<string>> =>
     run((c) => c.Mcp.applyImport({ source, names })),
+  appRevealLogs: (): Promise<void> => run((c) => c.App.revealLogs()),
   mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
     run((c) => c.AgentResources.remove(selector)),
