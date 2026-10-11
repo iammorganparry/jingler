@@ -89,6 +89,11 @@ describe("prNotification", () => {
     expect(prNotification("add auth", "merged").body).toContain("merged")
     expect(prNotification("add auth", "closed").body).toContain("closed")
   })
+
+  it("names the PR and the layer it was stacked under", () => {
+    expect(prNotification("add auth", "merged", 480, 481).body).toBe("#480 merged (stacked under #481)")
+    expect(prNotification("add auth", "merged", 482).body).toBe("#482 merged")
+  })
 })
 
 describe("baseline discipline", () => {

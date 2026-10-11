@@ -108,12 +108,17 @@ export const blockedPromptOf = (messages: ReadonlyArray<Message>): string | null
 const isBlocked = (activity: SessionActivity | null): boolean =>
   activity?.kind === "needs-input" || activity?.kind === "needs-approval"
 
-/** What to say when a session's PR is resolved on GitHub. */
+/** What to say when a session's PR is resolved on GitHub. With a number: "#480 merged (stacked under #481)". */
 export const prNotification = (
   sessionTitle: string,
-  state: "merged" | "closed"
+  state: "merged" | "closed",
+  prNumber?: number,
+  stackedUnder?: number
 ): NotificationPlan => ({
   kind: "pr",
   title: sessionTitle,
-  body: state === "merged" ? "Its pull request was merged." : "Its pull request was closed."
+  body:
+    prNumber === undefined
+      ? state === "merged" ? "Its pull request was merged." : "Its pull request was closed."
+      : `#${prNumber} ${state}${stackedUnder === undefined ? "" : ` (stacked under #${stackedUnder})`}`
 })

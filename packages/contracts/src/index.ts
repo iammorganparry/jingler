@@ -1881,7 +1881,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.prState", {
     success: Schema.NullOr(SessionPrStatus),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    /** `number` picks one layer of a stack; omitted reads the session's top PR. */
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number) }
   }),
 
   /** The changed files of a session's PR, for the Code Review file list. */
