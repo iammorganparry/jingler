@@ -30,7 +30,9 @@ for the full architecture guide; this file is the short list of standing rules.
   coverage is welcome too, but it does not replace the e2e.
 
 - **Keep `pnpm lint`, `pnpm typecheck`, and `pnpm test` green** before opening a
-  PR — CI runs all three.
+  PR — CI runs all three. Root `pnpm typecheck` builds `@jingler/server`, whose
+  production env check needs the same placeholders CI sets (`ci.yml`):
+  `BETTER_AUTH_SECRET=ci-only-better-auth-placeholder-at-least-32-bytes BETTER_AUTH_URL=https://ci.invalid CRON_SECRET=ci-only-cron-placeholder-at-least-32-bytes pnpm typecheck`.
 
 - **Never hardcode a colour in a component** — use the `--sb-*` theme tokens
   (see the Theming section of `CLAUDE.md`).
