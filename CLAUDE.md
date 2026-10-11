@@ -60,7 +60,7 @@ Copy `apps/server/.env.example` → `apps/server/.env` for local dev; the server
 - `apps/device-agent` — the bundled headless runtime installed or started on a paired machine; it owns device keys and executes typed operations using that host's Git/harness setup.
 - `packages/cli-adapters` — the desktop **backend logic** as **Effect services** (`Effect.Service`): `SessionStore`, `AgentRunner`, `WorkspaceService` (git/worktrees), `TerminalService`, `GitHubApi`, `GitHubAuth`, `AuthService`, `DiscoveryService`, etc. These run in the Electron **main** process.
 - `packages/themes` — the **theme engine**: nine vendored VS Code themes, the fold from a VS Code theme JSON to Jingler's `ThemeTokens`, and the colour maths. Pure — no Effect, no filesystem, no React — because main, `cli-adapters` and the renderer all import it.
-- `packages/ui` — React component library (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
+- `packages/ui` — React component library, catalogued in `packages/ui/COMPONENTS.md` (views compose only cataloged atoms/molecules; see `AGENTS.md`) (Tailwind, **themeable** — One Dark Pro is the default and the fallback, Storybook). Consumed by the renderer.
 - `packages/tsconfig` — shared tsconfig presets: `base.json`, `node.json`, `react.json` (the last adds `jsx` + DOM/React types).
 
 ### Workspace packages ship raw TypeScript (important)
