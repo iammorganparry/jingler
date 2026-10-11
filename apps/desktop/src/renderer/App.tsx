@@ -43,6 +43,7 @@ import {
   workspaceModeOf,
 } from "@jingler/core";
 import {
+  Button,
   ConfirmDialog,
   ExplanationView,
   LoadingScreen,
@@ -2168,8 +2169,11 @@ function renderAuthedAppGate(
   if (state.matches("failure")) {
     return (
       <div className="flex h-screen items-center justify-center bg-canvas p-8">
-        <div className="max-w-md rounded-lg border border-red/50 bg-sunken px-4 py-3 font-mono text-[13px] text-red">
-          Failed to load: {state.context.error}
+        <div className="flex max-w-md flex-col items-start gap-3 rounded-lg border border-red/50 bg-sunken px-4 py-3">
+          <p className="font-mono text-[13px] text-red">Failed to load: {state.context.error}</p>
+          <Button variant="secondary" size="sm" onClick={() => send({ type: "RETRY" })}>
+            Retry
+          </Button>
         </div>
       </div>
     );

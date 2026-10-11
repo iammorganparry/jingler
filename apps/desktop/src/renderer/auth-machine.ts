@@ -9,8 +9,9 @@
  *     idle          — nothing in flight
  *     sending       — magic-link request in flight
  *     magicLinkSent — "check your email" confirmation
- *     oauthPending  — browser opened, awaiting the `jingler://` callback
- *     error         — a send/OAuth attempt failed
+ *     oauthPending  — browser opened, awaiting the `jingler://` callback;
+ *                     CANCEL/RESET return to idle, and it times out into `error`
+ *     error         — a send/OAuth attempt failed; RETRY re-runs it, RESET clears it
  *   signedIn      — authenticated; `SIGN_OUT` revokes and returns to the wall
  *   signingOut    — sign-out request in flight
  *
@@ -24,6 +25,12 @@ import { assign, fromPromise, setup } from "xstate"
 import { rpcFailureMessage } from "./rpc-failure.js"
 import { rpc } from "./rpc-client.js"
 
+/** How long the browser hand-off may stay unanswered before the wall offers a way out. */
+export const OAUTH_TIMEOUT_MS = 120_000
+
+/** The last send/OAuth attempt, so `error` can RETRY it. */
+export type AuthAttempt = { readonly kind: "oauth"; readonly provider: AuthProvider } | { readonly kind: "magicLink" }
+
 export interface AuthContext {
   /** Controlled email input (lifted so `sent`/`error` survive re-renders). */
   readonly email: string
@@ -35,6 +42,8 @@ export interface AuthContext {
   readonly error: string | null
   /** The live session once signed in (so the app can read the user). */
   readonly session: AuthSession | null
+  /** What `RETRY` re-runs from `error`. */
+  readonly lastAttempt: AuthAttempt | null
 }
 
 export type AuthEvent =
@@ -42,6 +51,8 @@ export type AuthEvent =
   | { type: "MAGIC_LINK"; email: string; name?: string }
   | { type: "CALLBACK" }
   | { type: "RESET" }
+  | { type: "CANCEL" }
+  | { type: "RETRY" }
   | { type: "SIGN_OUT" }
 
 const checkAuth = fromPromise<AuthSession | null>(() => rpc.authGetSession())
@@ -64,12 +75,14 @@ export const authMachine = setup({
   },
   actors: { checkAuth, sendMagicLink, startOAuth, signOut },
   guards: {
-    hasSession: ({ event }) => "output" in event && event.output !== null
+    hasSession: ({ event }) => "output" in event && event.output !== null,
+    retriesOAuth: ({ context }) => context.lastAttempt?.kind === "oauth",
+    retriesMagicLink: ({ context }) => context.lastAttempt?.kind === "magicLink"
   }
 }).createMachine({
   id: "auth",
   initial: "checking",
-  context: { email: "", name: null, sentEmail: null, error: null, session: null },
+  context: { email: "", name: null, sentEmail: null, error: null, session: null, lastAttempt: null },
   states: {
     checking: {
       invoke: {
@@ -90,13 +103,20 @@ export const authMachine = setup({
       // OAuth / magic-link kick off from any substate; a deep-link callback
       // re-validates via `checking`.
       on: {
-        OAUTH: { target: ".oauthPending", actions: assign({ error: () => null }) },
+        OAUTH: {
+          target: ".oauthPending",
+          actions: assign({
+            error: () => null,
+            lastAttempt: ({ event }): AuthAttempt => ({ kind: "oauth", provider: event.provider })
+          })
+        },
         MAGIC_LINK: {
           target: ".sending",
           actions: assign({
             email: ({ event }) => event.email,
             name: ({ event }) => event.name ?? null,
-            error: () => null
+            error: () => null,
+            lastAttempt: (): AuthAttempt => ({ kind: "magicLink" })
           })
         },
         CALLBACK: "checking"
@@ -130,8 +150,8 @@ export const authMachine = setup({
         oauthPending: {
           invoke: {
             src: "startOAuth",
-            input: ({ event }) => ({
-              provider: event.type === "OAUTH" ? event.provider : "github"
+            input: ({ context }) => ({
+              provider: context.lastAttempt?.kind === "oauth" ? context.lastAttempt.provider : "github"
             }),
             onError: {
               target: "error",
@@ -140,10 +160,24 @@ export const authMachine = setup({
                   rpcFailureMessage(event.error, "Couldn't start sign-in. Please try again.")
               })
             }
+          },
+          // The browser may be closed without ever calling back; never strand the wall.
+          on: { CANCEL: "idle", RESET: "idle" },
+          after: {
+            [OAUTH_TIMEOUT_MS]: {
+              target: "error",
+              actions: assign({ error: () => "Sign-in didn't finish in your browser. Try again." })
+            }
           }
         },
         error: {
-          on: { RESET: "idle" }
+          on: {
+            RESET: "idle",
+            RETRY: [
+              { guard: "retriesOAuth", target: "oauthPending", actions: assign({ error: () => null }) },
+              { guard: "retriesMagicLink", target: "sending", actions: assign({ error: () => null }) }
+            ]
+          }
         }
       }
     },
