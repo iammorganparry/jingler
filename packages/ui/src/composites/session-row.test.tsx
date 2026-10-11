@@ -58,3 +58,41 @@ describe("SessionRow linked issue badge", () => {
     expect(badge.getAttribute("title")).toBe("ENG-123: Provider-neutral badges")
   })
 })
+
+describe("SessionRow metadata line (no wrapping)", () => {
+  const longBranch = "feat/a-very-long-branch-name-that-must-truncate-instead-of-pushing-the-row-wide"
+
+  it("keeps the PR number and diff stat on one line and only truncates the branch", () => {
+    render(
+      <SessionRow
+        session={testSession({
+          id: "nowrap",
+          branch: longBranch,
+          prNumber: 482,
+          diff: { added: 1204, removed: 311 }
+        })}
+      />
+    )
+
+    const branch = screen.getByText(longBranch)
+    expect(branch.className).toContain("truncate")
+    expect(branch.className).toContain("min-w-0")
+    expect(branch.parentElement?.className).toContain("min-w-0")
+
+    const pr = screen.getByTitle("Pull request #482")
+    expect(pr.className).toContain("shrink-0")
+    expect(pr.className).toContain("whitespace-nowrap")
+
+    const stat = screen.getByText("+1204").parentElement as HTMLElement
+    expect(stat.className).toContain("shrink-0")
+    expect(stat.className).toContain("whitespace-nowrap")
+  })
+
+  it("never lets the status word wrap or shrink", () => {
+    render(<SessionRow session={testSession({ id: "status", status: "idle" })} />)
+
+    const status = screen.getByTitle("Idle")
+    expect(status.className).toContain("shrink-0")
+    expect(status.className).toContain("whitespace-nowrap")
+  })
+})
