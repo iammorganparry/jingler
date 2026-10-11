@@ -224,7 +224,11 @@ import {
 } from "effect";
 import type { WebContents } from "electron";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { showNotification, shouldNotify } from "./notifications.js";
+import {
+  notificationPermission,
+  showNotification,
+  shouldNotify,
+} from "./notifications.js";
 import { PreviewViewService } from "./preview-view.js";
 import { DialogService } from "./dialog.js";
 import { primeOffloadSessions } from "./offload-session-primer.js";
@@ -5679,6 +5683,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         }),
       ),
     ),
+  "Notify.permission": () => Effect.sync(() => notificationPermission()),
   "Config.setStarredRepos": ({ paths }) => ConfigService.setStarredRepos(paths),
   "Config.setCollapsedRepos": ({ paths }) =>
     ConfigService.setCollapsedRepos(paths),

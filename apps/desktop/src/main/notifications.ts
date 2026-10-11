@@ -18,7 +18,11 @@
  * `shouldNotify` is pure so the suppression rules can be tested without
  * Electron, which is most of the behaviour worth defending.
  */
-import type { NotificationKind, NotificationsConfig } from "@jingler/core"
+import type {
+  NotificationKind,
+  NotificationPermission,
+  NotificationsConfig
+} from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { BrowserWindow, Notification } from "electron"
 
@@ -68,6 +72,25 @@ export const shouldNotify = ({
   // what they can already see.
   if (windowFocused && isActiveSession) return false
   return true
+}
+
+/**
+ * Can the OS show notifications at all?
+ *
+ * Electron's `Notification` offers only `isSupported()` — no permission or
+ * authorization status on macOS, Windows or Linux — so a supported platform is
+ * `unknown`, not `granted`: the operator may still have blocked Jingler in
+ * System Settings and we cannot tell. Claiming otherwise would hide that.
+ * `isSupported` is injected so tests need no Electron.
+ */
+export const notificationPermission = (
+  isSupported: () => boolean = () => Notification.isSupported()
+): NotificationPermission => {
+  try {
+    return isSupported() ? "unknown" : "unsupported"
+  } catch {
+    return "unknown"
+  }
 }
 
 /**
