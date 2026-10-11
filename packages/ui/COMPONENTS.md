@@ -17,14 +17,14 @@ Primitives in `components/`. Prefer these over raw elements.
 | AttachmentThumb | `components/attachment-thumb.tsx` | Image attachment thumbnail with filename. | — | yes | — |
 | AuthDivider | `components/auth-divider.tsx` | Labelled hairline divider ("or with email"). | — | no | — |
 | Avatar | `components/avatar.tsx` | User avatar image from a GitHub login. | — | yes | #378 (2.13) |
-| Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). | children, tone, size, className, title | yes | #361 (1.3) |
+| Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). One line by construction (nowrap, shrink-0). | children, tone, size, className, title | yes | #361 (1.3) |
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
 | ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | #366 (2.1) |
 | Callout | `components/callout.tsx` | Inline notice with a leading glyph and tone. | children, glyph, className | no | #376 (2.11) |
 | Card, CardHeader | `components/card.tsx` | Bordered panel surface (Card, CardHeader). | — | no | — |
 | Checkbox | `components/checkbox.tsx` | Checkbox. | checked, onCheckedChange, indeterminate, label, tone | yes | — |
 | ChipMenu | `components/chip-menu.tsx` | Compact Command picker anchored to a composer control. | — | no | — |
-| CodeChip | `components/code-chip.tsx` | Rendered code reference chip (file, range). | — | no | — |
+| CodeChip | `components/code-chip.tsx` | Rendered code reference chip (file, range). One line; label truncates. | — | no | — |
 | Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut | `components/command.tsx` | cmdk primitives: Command, CommandDialog, Input, List, Item… | — | yes | — |
 | ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal for destructive or irreversible actions. | — | no | #375 (2.10) |
 | ContextMenu | `components/context-menu.tsx` | Right-click menu. | — | yes | — |
@@ -41,7 +41,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | HoverCard | `components/hover-card.tsx` | Detail popover opening on hover intent and focus. | — | no | #374 (2.9) |
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
-| Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. | — | yes | #361 (1.3), #374 (2.9) |
+| Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). | — | yes | #361 (1.3), #374 (2.9) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
 | ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | List loading rows at real height, empty state with next action, load error with Retry. | rows, rowHeight, title, action, message, onRetry | yes | #371 (2.6) |
@@ -49,7 +49,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | MermaidDiagram | `components/mermaid-diagram.tsx` | Mermaid diagram renderer. | — | no | — |
 | OAuthButton | `components/oauth-button.tsx` | OAuth provider button (GitHub octocat etc.). | provider, mode, onClick, disabled, className | no | — |
 | PierreFileTree | `components/pierre-file-tree.tsx` | Large repository file tree (Pierre). | paths, gitStatus, path, status, selectedPaths, focusedPath | no | — |
-| Pill | `components/pill.tsx` | Status lozenge with optional leading dot. | children, dot, pulse, className, title | yes | #361 (1.3) |
+| Pill | `components/pill.tsx` | Status lozenge with optional leading dot. One line by construction (nowrap, shrink-0). | children, dot, pulse, className, title | yes | #361 (1.3) |
 | ProviderIcon | `components/provider-icon.tsx` | Brand marks for agent providers (Claude, Codex…); providerLabel/providerColor helpers. | — | no | — |
 | ResizeHandle | `components/resizable.tsx` | ResizeHandle for persisted drag-resizable widths. | — | no | — |
 | SearchInput | `components/search-input.tsx` | Search / filter input with leading magnifier. | — | no | #367 (2.2) |

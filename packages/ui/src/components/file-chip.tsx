@@ -45,7 +45,7 @@ export function FileChip({
     </>
   )
   const classes = cn(
-    "inline-flex h-[22px] max-w-full min-w-0 items-center gap-1.5 rounded-[5px] border border-line/70 bg-surface/40 px-1.5 font-mono text-[10.5px] leading-none text-text-bright align-middle",
+    "inline-flex h-[22px] max-w-full min-w-0 items-center whitespace-nowrap gap-1.5 rounded-[5px] border border-line/70 bg-surface/40 px-1.5 font-mono text-[10.5px] leading-none text-text-bright align-middle",
     className
   )
 
