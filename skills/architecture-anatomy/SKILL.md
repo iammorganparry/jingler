@@ -50,7 +50,7 @@ Put the block in a section of `jingler_publish_explanation`, with a short prose 
 
 ## Plan view
 
-In a plan Markdown file, write the same object without `kind` and `id` inside an `architecture` fence at section level (in the overview or under a plain `##` section, not inside a stage):
+In a plan Markdown file, write the same object without `kind` and `id` inside an `architecture` fence in the plan overview, before the first `##` heading. In plans without `<!-- id: -->` tagged stages every `##` heading is a stage, and fences inside stages are dropped:
 
 ````markdown
 ```architecture
@@ -62,4 +62,4 @@ If the fence holds invalid JSON or references unknown ids, it shows as a plain c
 
 ## Limits
 
-Each figure can have up to 6 layers, 24 components and 40 links. Ids must be unique, and every `layer`, `from`, `to` and `lit` must point at a declared id. There's no explode view, drag, or before/after diff yet; for a before/after comparison, publish two figures.
+Each figure can have up to 6 layers, 24 components and 40 links. Ids must be unique, every `layer`, `from`, `to` and `lit` must point at a declared id, and a link can't point at its own source. A layer wraps onto extra rows after 6 parts. There's no explode view, drag, or before/after diff yet; for a before/after comparison, publish two figures.

@@ -250,6 +250,8 @@ const architectureIssues = (block: {
   if (badLayer) return `component "${badLayer.id}" is on unknown layer "${badLayer.layer}"`
   const badLink = block.links.find(({ from, to }) => !components.has(from) || !components.has(to))
   if (badLink) return `link ${badLink.from} -> ${badLink.to} points at an unknown component`
+  const selfLink = block.links.find(({ from, to }) => from === to)
+  if (selfLink) return `link ${selfLink.from} -> ${selfLink.to} points at itself`
   if (block.lit !== undefined && !components.has(block.lit)) return `lit "${block.lit}" is not a component`
   return true
 }

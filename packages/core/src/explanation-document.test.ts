@@ -67,6 +67,7 @@ describe("explanation document schemas", () => {
     it.each([
       ["a link to an unknown component", { links: [{ from: "api", to: "cache" }] }],
       ["a lit part that does not exist", { lit: "cache" }],
+      ["a self-link", { links: [{ from: "api", to: "api" }] }],
       ["a component on an unknown layer", {
         components: [{ id: "api", label: "api", layer: "edge", shape: "service" }]
       }],

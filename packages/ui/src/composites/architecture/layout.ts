@@ -18,7 +18,8 @@ export const iso = ([x, y, z]: Point3): Flat => [x * SIN_A - y * COS_A, (x * COS
 export const depthOf = ([x, y, z]: Point3): number => (x * COS_A + y * SIN_A) * COS_E + z * SIN_E
 
 export const CELL = 96
-export const PLINTH = { depth: 104, height: 16, margin: 28, pitch: 150 } as const
+export const PLINTH = { depth: 104, height: 16, margin: 28, gap: 46 } as const
+export const MAX_COLUMNS = 6
 export const PEDESTAL = { width: 80, depth: 72, height: 12 } as const
 
 /** Bounding size [width, depth, height] of each part recipe. */
@@ -61,21 +62,29 @@ export interface ArchitectureLayout {
 }
 
 export function layoutArchitecture(block: PlanArchitectureBlock): ArchitectureLayout {
-  const rows = block.layers.map((layer) => block.components.filter((c) => c.layer === layer.id))
-  const columns = Math.max(...rows.map((row) => row.length), 1)
+  const members = block.layers.map((layer) => block.components.filter((c) => c.layer === layer.id))
+  // Wrap each layer into rows of at most MAX_COLUMNS so dense layers grow deeper, not wider.
+  const rowCounts = members.map((row) => Math.max(Math.ceil(row.length / MAX_COLUMNS), 1))
+  const columns = Math.min(Math.max(...members.map((row) => row.length), 1), MAX_COLUMNS)
   const width = columns * CELL + PLINTH.margin * 2
+  const layerY = rowCounts.map((_, index) =>
+    rowCounts.slice(0, index).reduce((sum, rows) => sum + rows * PLINTH.depth + PLINTH.gap, 0)
+  )
 
   const layers = block.layers.map((layer, index): PlacedLayer => ({
     layer,
-    origin: [0, index * PLINTH.pitch, -PLINTH.height],
-    size: [width, PLINTH.depth, PLINTH.height]
+    origin: [0, layerY[index]!, -PLINTH.height],
+    size: [width, rowCounts[index]! * PLINTH.depth, PLINTH.height]
   }))
 
-  const parts = rows
-    .flatMap((row, layerIndex) => {
-      const start = PLINTH.margin + ((columns - row.length) * CELL) / 2
-      const y = layerIndex * PLINTH.pitch + (PLINTH.depth - PEDESTAL.depth) / 2
-      return row.map((component, column): PlacedPart => {
+  const parts = members
+    .flatMap((members, layerIndex) =>
+      members.map((component, position): PlacedPart => {
+        const row = Math.floor(position / MAX_COLUMNS)
+        const column = position % MAX_COLUMNS
+        const inRow = Math.min(members.length - row * MAX_COLUMNS, MAX_COLUMNS)
+        const start = PLINTH.margin + ((columns - inRow) * CELL) / 2
+        const y = layerY[layerIndex]! + row * PLINTH.depth + (PLINTH.depth - PEDESTAL.depth) / 2
         const cx = start + column * CELL + CELL / 2
         const cy = y + PEDESTAL.depth / 2
         const size = PART_SIZE[component.shape]
@@ -89,7 +98,7 @@ export function layoutArchitecture(block: PlanArchitectureBlock): ArchitectureLa
           depth: depthOf([cx, cy, 0])
         }
       })
-    })
+    )
     .sort((a, b) => a.depth - b.depth)
 
   const byId = new Map(parts.map((part) => [part.component.id, part]))

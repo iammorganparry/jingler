@@ -76,9 +76,12 @@ export interface ArchitectureFigureProps {
 /** A system drawn as an isometric bench of parts on layer plinths; the lit part is the subject. */
 export function ArchitectureFigure({ block }: ArchitectureFigureProps) {
   const layout = layoutArchitecture(block)
-  const [active, setActive] = useState<string | null>(null)
-  const focus = active ?? block.lit ?? block.components[0]?.id
-  const subject = block.components.find(({ id }) => id === focus)
+  const [hovered, setHovered] = useState<string | null>(null)
+  const [focused, setFocused] = useState<string | null>(null)
+  // Hover wins over keyboard focus; ids dropped by a newer block revision are ignored.
+  const known = (id: string | null | undefined) => block.components.find((c) => c.id === id)
+  const subject = known(hovered) ?? known(focused) ?? known(block.lit) ?? block.components[0]
+  const focus = subject?.id
   const touches = (link: PlanArchitectureBlock["links"][number]) => link.from === focus || link.to === focus
   const outgoing = block.links.filter(({ from }) => from === focus)
   const incoming = block.links.filter(({ to }) => to === focus)
@@ -89,7 +92,7 @@ export function ArchitectureFigure({ block }: ArchitectureFigureProps) {
         <span className="sb-arch-title">{block.title ?? "System"}</span>
         <span className="sb-arch-hint">Hover or tab through the parts</span>
       </header>
-      <svg viewBox={layout.viewBox} role="img" aria-label={`${block.title ?? "System"}: ${block.components.map(({ label }) => label).join(", ")}`}>
+      <svg viewBox={layout.viewBox} role="group" aria-label={`${block.title ?? "System"}: ${block.components.map(({ label }) => label).join(", ")}`}>
         {layout.layers.map(({ layer, origin, size }) => (
           <g key={layer.id} data-architecture-layer={layer.id}>
             <Box at={origin} size={size} />
@@ -108,10 +111,11 @@ export function ArchitectureFigure({ block }: ArchitectureFigureProps) {
               data-architecture-part={component.id}
               data-lit={component.id === block.lit ? "true" : undefined}
               className={cn("sb-arch-part", component.id === block.lit && "is-lit", component.id === focus && "is-focus")}
-              onPointerEnter={() => setActive(component.id)}
-              onPointerLeave={() => setActive(null)}
-              onFocus={() => setActive(component.id)}
-              onBlur={() => setActive(null)}
+              role="group"
+              onPointerEnter={() => setHovered(component.id)}
+              onPointerLeave={() => setHovered((id) => (id === component.id ? null : id))}
+              onFocus={() => setFocused(component.id)}
+              onBlur={() => setFocused((id) => (id === component.id ? null : id))}
             >
               <Box at={pedestal} size={[PEDESTAL.width, PEDESTAL.depth, PEDESTAL.height]} />
               <text className="sb-arch-label sb-arch-label--part" transform={frontFaceText([pedestal[0] + 5, pedestal[1] + PEDESTAL.depth, 3])}>
@@ -125,9 +129,9 @@ export function ArchitectureFigure({ block }: ArchitectureFigureProps) {
           <g key={`${index}:${link.from}:${link.to}`} className={cn("sb-arch-wire", `is-${link.mode ?? "sync"}`, touches(link) && "is-hot")}>
             <path d={path(points, false)} />
             <path className="sb-arch-pulse" d={path(points, false)} />
-            {[points[0]!, points.at(-1)!].map((p) => {
+            {[points[0]!, points.at(-1)!].map((p, end) => {
               const [cx, cy] = iso(p)
-              return <circle key={p.join()} className="sb-arch-terminal" cx={cx} cy={cy} r={2.5} />
+              return <circle key={end} className="sb-arch-terminal" cx={cx} cy={cy} r={2.5} />
             })}
           </g>
         ))}

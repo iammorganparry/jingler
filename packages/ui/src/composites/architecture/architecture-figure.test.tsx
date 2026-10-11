@@ -1,5 +1,5 @@
 import type { PlanArchitectureBlock } from "@jingler/core"
-import { cleanup, fireEvent, render } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { VisualBlocks } from "../visual-blocks.js"
 
@@ -38,6 +38,29 @@ describe("ArchitectureFigure", () => {
     expect(db.classList.contains("is-focus")).toBe(true)
     fireEvent.blur(db)
     expect(readout()).toContain("Hono, 3 replicas")
+  })
+
+  it("keeps keyboard focus in the readout after the pointer leaves another part", () => {
+    render(<VisualBlocks blocks={[block]} />)
+    const part = (id: string) => document.querySelector<SVGGElement>(`[data-architecture-part="${id}"]`)!
+    fireEvent.focus(part("db"))
+    fireEvent.pointerEnter(part("api"))
+    expect(readout()).toContain("Hono, 3 replicas")
+    fireEvent.pointerLeave(part("api"))
+    expect(readout()).toContain("primary + replica")
+  })
+
+  it("falls back to the lit part when a revision removes the focused part", () => {
+    const { rerender } = render(<VisualBlocks blocks={[block]} />)
+    fireEvent.focus(document.querySelector('[data-architecture-part="db"]')!)
+    rerender(<VisualBlocks blocks={[{ ...block, components: [block.components[0]!], links: [] }]} />)
+    expect(readout()).toContain("orders-api")
+  })
+
+  it("exposes each part as a labelled group, not one flat image", () => {
+    render(<VisualBlocks blocks={[block]} />)
+    expect(screen.queryByRole("img")).toBeNull()
+    expect(screen.getByRole("group", { name: "Postgres, store, primary + replica" })).toBeTruthy()
   })
 
   it("lights only the wires touching the focused part", () => {

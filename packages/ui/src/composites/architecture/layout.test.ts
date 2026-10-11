@@ -65,6 +65,29 @@ describe("layoutArchitecture", () => {
     }
   })
 
+  it("wraps a dense layer into bounded rows instead of one wide plinth", () => {
+    const dense: PlanArchitectureBlock = {
+      kind: "architecture",
+      id: "dense",
+      layers: [{ id: "app", label: "App" }, { id: "data", label: "Data" }],
+      components: [
+        ...Array.from({ length: 23 }, (_, i) => ({ id: `s${i}`, label: `svc-${i}`, layer: "app", shape: "service" as const })),
+        { id: "db", label: "Postgres", layer: "data", shape: "store" }
+      ],
+      links: [],
+      lit: undefined
+    }
+    const { layers, parts } = layoutArchitecture(dense)
+    const [app, data] = layers
+    expect(app!.size[0]).toBe(6 * 96 + 2 * 28)
+    expect(app!.size[1]).toBe(4 * 104)
+    expect(data!.origin[1]).toBeGreaterThan(app!.origin[1] + app!.size[1])
+    const db = parts.find(({ component }) => component.id === "db")!
+    expect(db.pedestal[1]).toBeGreaterThanOrEqual(data!.origin[1])
+    const keys = new Set(parts.map(({ pedestal }) => pedestal.join()))
+    expect(keys.size).toBe(parts.length)
+  })
+
   it("fits everything in the viewBox", () => {
     const [, , w, h] = layoutArchitecture(block).viewBox.split(" ").map(Number)
     expect(w).toBeGreaterThan(0)
