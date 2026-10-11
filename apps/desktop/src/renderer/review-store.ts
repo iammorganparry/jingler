@@ -8,6 +8,7 @@
  * Explorer decides which diff the Files view shows.
  */
 import { useSyncExternalStore } from "react"
+import { readDismissedFindings, writeDismissedFindings } from "./dismissed-findings-store.js"
 import { readViewedPaths, viewedStorageKey } from "./viewed-store.js"
 
 /** Which files the Explorer lists: everything, or one diff source's changes. */
@@ -26,6 +27,8 @@ export interface SessionReviewState {
   readonly filter: ReviewFilter
   readonly drafts: ReadonlyArray<ReviewDraft>
   readonly viewed: ReadonlySet<string>
+  /** Fingerprints (see `findingFingerprint`) of adversarial-review findings the reviewer dismissed. */
+  readonly dismissedFindings: ReadonlySet<string>
 }
 
 const states = new Map<string, SessionReviewState>()
@@ -43,7 +46,8 @@ const read = (sessionId: string, prNumber: number | null): SessionReviewState =>
   const initial: SessionReviewState = {
     filter: "all",
     drafts: [],
-    viewed: readViewedPaths(sessionId, prNumber)
+    viewed: readViewedPaths(sessionId, prNumber),
+    dismissedFindings: readDismissedFindings(sessionId, prNumber)
   }
   states.set(key, initial)
   return initial
@@ -142,6 +146,22 @@ export const setReviewViewed = (
       /* storage unavailable: the marker still holds for this run */
     }
     return { ...state, viewed: next }
+  })
+
+/** Dismissal is reviewer-local too, so it persists per session and PR like "viewed". */
+export const setFindingDismissed = (
+  sessionId: string,
+  prNumber: number | null,
+  fingerprint: string,
+  dismissed: boolean
+): void =>
+  update(sessionId, prNumber, (state) => {
+    if (state.dismissedFindings.has(fingerprint) === dismissed) return state
+    const next = new Set(state.dismissedFindings)
+    if (dismissed) next.add(fingerprint)
+    else next.delete(fingerprint)
+    writeDismissedFindings(sessionId, prNumber, next)
+    return { ...state, dismissedFindings: next }
   })
 
 /** Test seam: forget every session's review state. */
