@@ -53,7 +53,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | ProviderIcon | `components/provider-icon.tsx` | Brand marks for agent providers (Claude, Codex…); providerLabel/providerColor helpers. | — | no | — |
 | ResizeHandle | `components/resizable.tsx` | ResizeHandle for persisted drag-resizable widths. | — | no | — |
 | SearchInput | `components/search-input.tsx` | Search / filter input with leading magnifier. | — | no | #367 (2.2) |
-| SegmentedControl | `components/segmented-control.tsx` | Segmented control (BeUI segment Tabs). | — | no | #368 (2.3) |
+| SegmentedControl | `components/segmented-control.tsx` | 28px segmented control (24px at size sm); active segment on the surface token; arrow keys move selection. | items, value, onChange, size, fullWidth, aria-label | yes | #368 (2.3) |
 | SelectGroup, SelectLabel | `components/select.tsx` | SelectGroup / SelectLabel re-exports over the BeUI Select. | — | no | — |
 | SignalBars | `components/signal-bars.tsx` | Ascending signal-strength bars. | — | no | — |
 | Spin | `components/spin.tsx` | Box carrying a looping keyframe spin for icons. | active, animation, className, children | no | — |
@@ -198,7 +198,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 |---|---|---|
 | IconButtonGroup | `ButtonGroup` | #366 (2.1) |
 | SearchField, FilterChips | `SearchInput` | #367 (2.2) |
-| SegmentedControl 28px | `SegmentedControl` | #368 (2.3) |
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
 | StatusRow, Stepper | ad-hoc status lists | #370 (2.5) |
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |

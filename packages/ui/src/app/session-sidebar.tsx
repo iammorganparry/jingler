@@ -1,4 +1,5 @@
 import { Spin } from "../components/spin.js"
+import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
 import type { DiffStat, Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
@@ -831,22 +832,17 @@ return (renderExpandedGroupHeading())
       {search ? <div className="px-3 pb-2">{search}</div> : null}
 
       {onWorkspaceViewChange ? (
-        <div className="mx-3 mb-2 grid grid-cols-2 rounded-lg bg-sunken p-0.5" role="tablist" aria-label="Workspace">
-          {(["sessions", "explorer"] as const).map((view) => (
-            <button
-              key={view}
-              type="button"
-              role="tab"
-              aria-selected={workspaceView === view}
-              onClick={() => onWorkspaceViewChange(view)}
-              className={cn(
-                "h-7 rounded-md text-[11.5px] font-semibold capitalize outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                workspaceView === view ? "bg-surface text-text-bright" : "text-dim hover:text-text"
-              )}
-            >
-              {view === "sessions" ? "Sessions" : "Explorer"}
-            </button>
-          ))}
+        <div className="mx-3 mb-2">
+          <SegmentedControl
+            aria-label="Workspace"
+            fullWidth
+            items={[
+              { value: "sessions", label: "Sessions" },
+              { value: "explorer", label: "Explorer" }
+            ]}
+            value={workspaceView}
+            onChange={onWorkspaceViewChange}
+          />
         </div>
       ) : null}
 
