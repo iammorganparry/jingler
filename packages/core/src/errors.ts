@@ -164,6 +164,20 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>()(
 ) {}
 
 /**
+ * A stacked-PR layer could not be rebased onto its new base because git hit
+ * merge conflicts. The rebase is aborted, so the layer's branch is untouched;
+ * `paths` are the conflicting files.
+ */
+export class RestackConflictError extends Schema.TaggedError<RestackConflictError>()(
+  "RestackConflictError",
+  {
+    message: Schema.String,
+    branch: Schema.String,
+    paths: Schema.Array(Schema.String)
+  }
+) {}
+
+/**
  * Raised when an adversarial review cannot run — no linked PR, no worktree, an
  * unresolvable PR head, or the reviewer harness failing to start. A
  * `Schema.TaggedError` so it crosses the RPC boundary as the `Review.run` error

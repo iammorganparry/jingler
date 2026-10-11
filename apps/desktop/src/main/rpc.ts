@@ -177,6 +177,8 @@ import type {
   SettingContribution,
   PrMergeMethod,
   PublishCheckpoint,
+  RestackedLayer,
+  SessionPr,
   Project,
   ReviewComment,
   ReviewSubmitKind,
@@ -2713,11 +2715,78 @@ export const resolvePublishSessionBranch = async (
 };
 
 /**
+ * Append a freshly created PR on top of the session's stack when its `base` is the
+ * head branch of a PR already in the stack. Returns false (and writes nothing) when
+ * `base` is not a stack layer, so the caller falls back to the single-PR link.
+ */
+export const appendStackedPr = (
+  sessionId: string,
+  pr: { readonly number: number; readonly branch: string; readonly base: string },
+) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(sessionId);
+    if (!(session.prs ?? []).some((layer) => layer.branch === pr.base)) return false;
+    yield* SessionStore.appendPr(sessionId, pr);
+    return true;
+  });
+
+/** Upsert the GitHub relay route for a PR when the repository is App-installed. */
+const upsertPrRoute = (
+  sessionId: string,
+  repository: { readonly id: string; readonly installationId?: string },
+  number: number,
+) =>
+  repository.installationId === undefined
+    ? Effect.void
+    : GitHubAuth.upsertSessionRoute({
+        sessionId,
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        pullRequestNumber: number,
+      });
+
+/**
+ * Link a just-published PR to its session. A PR whose `base` is another stack
+ * layer's head branch is appended to the stack; any other PR replaces the single
+ * link and is recorded as the stack's first layer.
+ */
+export const linkPublishedPr = (input: {
+  readonly sessionId: string;
+  readonly number: number;
+  readonly repository: { readonly id: string; readonly installationId?: string };
+  readonly base: string | undefined;
+  readonly branch: string | null;
+  readonly defaultBase: string;
+}) =>
+  Effect.gen(function* () {
+    const { sessionId, number, repository, branch } = input;
+    if (input.base !== undefined && branch !== null) {
+      const stacked = yield* appendStackedPr(sessionId, { number, branch, base: input.base });
+      if (stacked) {
+        yield* upsertPrRoute(sessionId, repository, number);
+        return;
+      }
+    }
+    yield* SessionStore.setPrNumber(sessionId, number);
+    if (repository.installationId !== undefined) {
+      yield* SessionStore.setGitHubLink(sessionId, {
+        installationId: repository.installationId,
+        repositoryId: repository.id,
+        prNumber: number,
+      });
+      yield* upsertPrRoute(sessionId, repository, number);
+    }
+    if (branch !== null) {
+      yield* SessionStore.appendPr(sessionId, { number, branch, base: input.base ?? input.defaultBase });
+    }
+  });
+
+/**
  * `Github.publish` is the sole mutation owner for publishing session work.
  * Installation credentials are captured only in this main-process scope and
  * cleared immediately after the authenticated push.
  */
-export const githubPublish = (sessionId: string) =>
+export const githubPublish = (sessionId: string, base?: string) =>
   Stream.unwrapScoped(
     Effect.gen(function* () {
       const mailbox = yield* Mailbox.make<PublishCheckpoint>();
@@ -2760,6 +2829,7 @@ export const githubPublish = (sessionId: string) =>
               readonly fullName: string;
             } | null = null;
             let pushCredential: { readonly token: string } | null = null;
+            let publishedBranch: string | null = null;
             let pushPermissions: ReadonlyArray<string> = ["contents:write"];
             const messages = await run(
               TranscriptStore.list(session.activeChatId),
@@ -2769,12 +2839,13 @@ export const githubPublish = (sessionId: string) =>
                 session.id,
                 session.publish,
                 {
-                  knownPrNumber: session.prNumber,
+                  // A stacked layer is a new PR on a new branch: never adopt the lower layer's PR.
+                  knownPrNumber: base === undefined ? session.prNumber : null,
                   inspect: async () => {
                     const inspection = await run(
                       GitService.publishInspection(
                         cwd,
-                        session.baseBranch ?? "main",
+                        base ?? session.baseBranch ?? "main",
                       ),
                     );
                     pushPermissions = githubPushPermissions(
@@ -2789,6 +2860,7 @@ export const githubPublish = (sessionId: string) =>
                       () => run(SessionStore.get(sessionId)),
                     );
                     session = resolved.session;
+                    publishedBranch = resolved.branch;
                     return resolved.branch;
                   },
                   generateMetadata: (inspection) =>
@@ -2859,7 +2931,7 @@ export const githubPublish = (sessionId: string) =>
                       GitHubApi.prCreate(cwd, {
                         title: metadata.prTitle,
                         body: metadata.prBody,
-                        base: session.baseBranch ?? "main",
+                        base: base ?? session.baseBranch ?? "main",
                         draft: false,
                       }),
                     );
@@ -2871,29 +2943,19 @@ export const githubPublish = (sessionId: string) =>
                         body: metadata.prBody,
                       }),
                     ),
-                  link: async (number) => {
-                    const repository =
-                      repositoryIdentity ??
-                      (await run(GitHubApi.repository(cwd)));
-                    await run(SessionStore.setPrNumber(session.id, number));
-                    if (repository.installationId !== undefined) {
-                      await run(
-                        SessionStore.setGitHubLink(session.id, {
-                          installationId: repository.installationId,
-                          repositoryId: repository.id,
-                          prNumber: number,
-                        }),
-                      );
-                      await run(
-                        GitHubAuth.upsertSessionRoute({
-                          sessionId: session.id,
-                          installationId: repository.installationId,
-                          repositoryId: repository.id,
-                          pullRequestNumber: number,
-                        }),
-                      );
-                    }
-                  },
+                  link: async (number) =>
+                    run(
+                      linkPublishedPr({
+                        sessionId: session.id,
+                        number,
+                        repository:
+                          repositoryIdentity ??
+                          (await run(GitHubApi.repository(cwd))),
+                        base,
+                        branch: publishedBranch,
+                        defaultBase: session.baseBranch ?? "main",
+                      }),
+                    ),
                 },
                 async (checkpoint) => {
                   await run(
@@ -2924,7 +2986,7 @@ export const githubPublish = (sessionId: string) =>
     }),
   );
 
-export const githubPublishRouted = (sessionId: string) =>
+export const githubPublishRouted = (sessionId: string, base?: string) =>
   Stream.unwrap(
     Effect.gen(function* () {
       const session = yield* SessionStore.get(sessionId);
@@ -2933,7 +2995,7 @@ export const githubPublishRouted = (sessionId: string) =>
         session,
         "Github.createPr",
         {},
-        { execute: () => Effect.succeed(githubPublish(sessionId)) },
+        { execute: () => Effect.succeed(githubPublish(sessionId, base)) },
         {
           execute: () =>
             Effect.succeed(
@@ -3349,6 +3411,100 @@ export const githubUpdateBranch = (input: { sessionId: string }) =>
       );
     }
     yield* GitHubApi.prUpdateBranch(session.worktreePath, session.prNumber);
+  });
+
+/** Pick the merged layer and the layers above it, or fail when the stack cannot be restacked. */
+const restackSelection = (
+  session: Session,
+  mergedPr: number,
+): Effect.Effect<{ merged: SessionPr; above: ReadonlyArray<SessionPr> }, GitHubApiError> => {
+  const prs = session.prs ?? [];
+  const at = prs.findIndex((layer) => layer.number === mergedPr);
+  const merged = prs[at];
+  const invalid = (message: string) =>
+    Effect.fail(new GitHubApiError({ reason: "validation", message }));
+  if (!session.worktreePath) return invalid("This session has no worktree to restack from.");
+  if (merged === undefined) return invalid(`PR #${mergedPr} is not in this session's stack.`);
+  const above = prs.slice(at + 1);
+  const unrecorded = above.length === 0 ? undefined : [merged, ...above].find((layer) => !layer.branch);
+  if (unrecorded) return invalid(`PR #${unrecorded.number} has no recorded branch to restack.`);
+  return Effect.succeed({ merged, above });
+};
+
+/**
+ * Rebase one stack layer onto `onto`, retarget its PR when it now sits directly on
+ * the merged layer's base, and force-push it with a lease on the old tip.
+ */
+const restackLayer = (
+  ctx: {
+    readonly sessionId: string;
+    readonly cwd: string;
+    readonly repository: { readonly fullName: string };
+    readonly token: string | null;
+  },
+  step: {
+    readonly layer: SessionPr;
+    readonly base: string;
+    readonly retarget: boolean;
+    readonly upstream: string;
+    readonly onto: string;
+  },
+) =>
+  Effect.gen(function* () {
+    const branch = step.layer.branch!;
+    const rebased = yield* GitService.rebaseRemoteBranchOnto(ctx.cwd, {
+      branch,
+      onto: step.onto,
+      upstream: step.upstream,
+    });
+    if (step.retarget) yield* GitHubApi.prSetBase(ctx.cwd, step.layer.number, step.base);
+    const options = { source: rebased.newSha, leaseSha: rebased.oldSha };
+    yield* ctx.token === null
+      ? GitService.pushConfigured(ctx.cwd, branch, options)
+      : GitService.pushWithInstallationToken(ctx.cwd, branch, ctx.repository.fullName, ctx.token, options);
+    yield* SessionStore.appendPr(ctx.sessionId, { number: step.layer.number, base: step.base });
+    return rebased;
+  });
+
+/**
+ * `Github.restack` handler. After the stack layer `mergedPr` merged, rebase each
+ * layer above it onto the merged layer's base, retarget the first one's PR base on
+ * GitHub, force-push with `--force-with-lease`, and record the new bases. The
+ * rebase runs against `origin/*` refs in a throwaway worktree, so the session's
+ * own worktree (the agent may be mid-turn) is never touched. A conflict fails the
+ * call before any remote write for that layer.
+ */
+export const githubRestack = (input: { sessionId: string; mergedPr: number }) =>
+  Effect.gen(function* () {
+    const session = yield* SessionStore.get(input.sessionId);
+    const { merged, above } = yield* restackSelection(session, input.mergedPr);
+    if (above.length === 0) return [];
+    const cwd = session.worktreePath!;
+    const mergedBase = merged.base ?? session.baseBranch ?? "main";
+    const repository = yield* GitHubApi.repository(cwd);
+    const credential =
+      repository.installationId === undefined
+        ? null
+        : yield* GitHubAuth.credentialsForInstallation(repository.installationId, repository.fullName, ["contents:write"]);
+    yield* GitService.fetchRemoteBranches(
+      cwd,
+      [mergedBase, merged.branch!, ...above.map((layer) => layer.branch!)],
+      credential ? { fullName: repository.fullName, token: credential.token } : undefined,
+    );
+    const ctx = { sessionId: session.id, cwd, repository, token: credential?.token ?? null };
+    let upstream = `refs/remotes/origin/${merged.branch}`;
+    let onto = `refs/remotes/origin/${mergedBase}`;
+    const restacked: Array<RestackedLayer> = [];
+    for (const [index, layer] of above.entries()) {
+      // Only the layer directly above the merged one changes base; the rest still sit on their parent branch.
+      const base = index === 0 ? mergedBase : (layer.base ?? above[index - 1]!.branch!);
+      const rebased = yield* restackLayer(ctx, { layer, base, retarget: index === 0, upstream, onto });
+      restacked.push({ number: layer.number, branch: layer.branch!, base });
+      upstream = rebased.oldSha;
+      onto = rebased.newSha;
+    }
+    yield* SessionStore.appendPr(session.id, { number: merged.number, state: "merged" });
+    return restacked;
   });
 
 /**
@@ -5772,7 +5928,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Review.get": ({ sessionId }) => reviewGet(sessionId),
   "Review.markRouted": ({ sessionId }) => reviewMarkRouted(sessionId),
   "Review.reconcile": ({ sessionId }) => reviewReconcile(sessionId),
-  "Github.createPr": ({ sessionId }) => githubPublishRouted(sessionId),
+  "Github.createPr": ({ sessionId, base }) => githubPublishRouted(sessionId, base),
   "Github.comment": (input) => githubComment(input),
   "Github.commentBySlug": (input) => githubCommentBySlug(input),
   "Github.closeBySlug": (input) => githubCloseBySlug(input),
@@ -5784,6 +5940,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.merge": (input) => githubMerge(input),
   "Github.markReady": (input) => githubMarkReady(input),
   "Github.updateBranch": (input) => githubUpdateBranch(input),
+  "Github.restack": (input) => githubRestack(input),
 
   // Terminal — PTY lifecycle is unary; the coalesced output path is a stream,
   // unwrapped from the service like `Agent.run`.

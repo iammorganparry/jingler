@@ -66,6 +66,7 @@ import type {
   SessionPrStatus,
   PrSummary,
   PublishCheckpoint,
+  RestackedLayer,
   PullRequest,
   PullRequestListItem,
   IssueInboxResult,
@@ -1062,14 +1063,16 @@ export const rpc = {
     run((c) => c.Review.reconcile({ sessionId })),
   githubPublish: (
     sessionId: string,
-    onCheckpoint: (checkpoint: PublishCheckpoint) => void
+    onCheckpoint: (checkpoint: PublishCheckpoint) => void,
+    /** Stack the new PR on this branch (the head of a PR already in the stack). */
+    base?: string
   ): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
       if (cancelled) return
       fiber = coreRuntime.runFork(
-        client.Github.createPr({ sessionId }).pipe(
+        client.Github.createPr({ sessionId, ...(base === undefined ? {} : { base }) }).pipe(
           Stream.runForEach((checkpoint) =>
             Effect.sync(() => onCheckpoint(checkpoint))
           )
@@ -1135,6 +1138,9 @@ export const rpc = {
   /** Merge the base into the PR's head on GitHub (clears a `BEHIND` merge state). */
   githubUpdateBranch: (sessionId: string): Promise<void> =>
     run((c) => c.Github.updateBranch({ sessionId })),
+  /** After `mergedPr` merged, rebase and retarget the stack layers above it. */
+  githubRestack: (sessionId: string, mergedPr: number): Promise<ReadonlyArray<RestackedLayer>> =>
+    run((c) => c.Github.restack({ sessionId, mergedPr })),
 
   /**
    * Subscribe to a prompt's normalized event stream. Forks the RPC stream on the

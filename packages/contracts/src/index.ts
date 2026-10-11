@@ -79,6 +79,7 @@ import {
   WorkspaceCheckpoint,
   WorkspaceCheckpointPreview,
   PublishCheckpoint,
+  RestackedLayer,
   PullRequest,
   PullRequestListItem,
   GitHubTeamDiscovery,
@@ -154,6 +155,7 @@ import {
   GitHubApiError,
   GitError,
   PluginError,
+  RestackConflictError,
   ReviewError,
   SessionNotFoundError,
   TerminalError,
@@ -1914,7 +1916,15 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.createPr", {
     success: PublishCheckpoint,
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      /**
+       * Target base branch. When it is the head branch of a PR already in the
+       * session's stack, the new PR is appended to the stack instead of
+       * replacing the session's single PR. Defaults to the session's base.
+       */
+      base: Schema.optional(Schema.String)
+    }
   }),
 
   /**
@@ -2046,6 +2056,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.updateBranch", {
     error: GitHubApiError,
     payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * After the stack layer `mergedPr` merged, rebase every layer above it onto
+   * the merged layer's base, force-push each with `--force-with-lease`,
+   * retarget its PR base on GitHub, and update the stored stack. Returns one
+   * entry per restacked layer (empty when nothing sits above `mergedPr`). A
+   * rebase conflict fails with `RestackConflictError` carrying the paths; that
+   * layer's branch is left untouched.
+   */
+  Rpc.make("Github.restack", {
+    success: Schema.Array(RestackedLayer),
+    error: Schema.Union(GitHubApiError, GitError, SessionNotFoundError, RestackConflictError),
+    payload: { sessionId: Schema.String, mergedPr: Schema.Number }
   }),
 
   // ── Terminal ───────────────────────────────────────────────────────────────
