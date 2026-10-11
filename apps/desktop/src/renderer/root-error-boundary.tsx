@@ -40,7 +40,7 @@ export class RootErrorBoundary extends Component<{ children: ReactNode }, RootEr
           minHeight: "100vh",
           alignItems: "center",
           justifyContent: "center",
-          background: "var(--sb-canvas, #141414)",
+          background: "var(--sb-canvas, #0b0b0c)",
           color: "var(--sb-text-body, #dedada)",
           fontFamily: "system-ui, sans-serif"
         }}

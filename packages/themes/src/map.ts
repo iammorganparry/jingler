@@ -241,6 +241,18 @@ const resolveText = (colors: Colors, kind: ThemeKind, panel: Rgba) => {
   return { textBright, textBody, text, muted, dim }
 }
 
+/**
+ * Neutral primary action: the loudest text tone as the fill, the app ground as
+ * the label. Derived from the ramp rather than read from a theme, so an imported
+ * VS Code theme always gets a legible button whatever its own `button.background`.
+ */
+const resolvePrimary = (t: { textBright: Rgba; canvas: Rgba; panel: Rgba; surface: Rgba; text: Rgba }) => ({
+  fill: t.textBright,
+  fg: ensureContrast(t.canvas, t.textBright, TEXT_MIN_CONTRAST),
+  hover: isDark(t.panel) ? WHITE : BLACK,
+  disabled: mix(t.surface, t.text, 0.04)
+})
+
 const resolveEffects = (kind: ThemeKind, editor: Rgba) => {
   const dark = isDark(editor)
   const overlay = kind === "high-contrast"
@@ -340,6 +352,8 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
     pickOpaque(colors, panel, "button.hoverBackground", "textLink.activeForeground") ??
     mix(brand, isDark(panel) ? WHITE : BLACK, 0.22)
 
+  const primary = resolvePrimary({ textBright, canvas, panel, surface, text })
+
   // ── Effects ────────────────────────────────────────────────────────────────
   // Derived from the ground, never read from the theme. A scrim's job is to
   // kill the contrast of what is behind it, and no theme states a colour whose
@@ -409,6 +423,10 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
     orange: toHex(orange),
     brand: toHex(brand),
     brandHover: toHex(brandHover),
+    primaryFill: toHex(primary.fill),
+    primaryFg: toHex(primary.fg),
+    primaryHover: toHex(primary.hover),
+    primaryDisabled: toHex(primary.disabled),
 
     overlay,
     shadow,

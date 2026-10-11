@@ -124,7 +124,7 @@ describe("toTokens — every built-in theme", () => {
 })
 
 /**
- * Jingler Dark is `DEFAULT_THEME_ID`: a fresh install runs it, every config
+ * Jingler Dark (the Graphite palette) is `DEFAULT_THEME_ID`: a fresh install runs it, every config
  * without a saved theme resolves to it, and every failure falls back to it. If
  * the fold moved a single value, then "theming shipped" and "the theme failed
  * to load" would both look like the app quietly changing colour — and every
@@ -141,19 +141,19 @@ describe("toTokens — Jingler Dark is a visual no-op", () => {
   const t = toTokens(BUILTIN_THEMES.find((b) => b.id === "jingler-dark")!.theme)
 
   it.each([
-    ["canvas", "#141414"],
-    ["panel", "#1b1b1b"],
-    ["sunken", "#171717"],
-    ["editor", "#212121"],
-    ["surface", "#2b2b2b"],
-    ["hairline", "#0f0f0f"],
-    ["line", "#333333"],
-    ["lineStrong", "#454545"],
-    ["textBright", "#f4f1f1"],
-    ["textBody", "#dedada"],
-    ["text", "#c6c1c1"],
-    ["muted", "#8d8686"],
-    ["dim", "#6a6363"],
+    ["canvas", "#0b0b0c"],
+    ["panel", "#131315"],
+    ["sunken", "#0e0e0f"],
+    ["editor", "#1a1a1d"],
+    ["surface", "#202024"],
+    ["hairline", "#232327"],
+    ["line", "#303036"],
+    ["lineStrong", "#44444c"],
+    ["textBright", "#ededef"],
+    ["textBody", "#dcdce0"],
+    ["text", "#c4c4cb"],
+    ["muted", "#a1a1aa"],
+    ["dim", "#7c7c86"],
     ["blue", "#6faef6"],
     ["green", "#70d294"],
     ["yellow", "#ebcb60"],
@@ -165,7 +165,12 @@ describe("toTokens — Jingler Dark is a visual no-op", () => {
     // ever fold to the same value, `--primary` and `--destructive` have
     // collapsed and a delete button is indistinguishable from a create one.
     ["brand", "#ef3f57"],
-    ["brandHover", "#f5687b"]
+    ["brandHover", "#f5687b"],
+    // Neutral primary action: text-1 fill, app-ground label. Never the brand.
+    ["primaryFill", "#ededef"],
+    ["primaryFg", "#0b0b0c"],
+    ["primaryHover", "#ffffff"],
+    ["primaryDisabled", "#27272b"]
   ] as const)("%s is exactly %s", (token, expected) => {
     expect(t[token].toLowerCase()).toBe(expected)
   })
@@ -376,6 +381,18 @@ describe("toTokens — colour customizations", () => {
     // be readable rather than the theme's original light-on-dark grey.
     expect(ratio(t.text, t.panel)).toBeGreaterThanOrEqual(4.5)
   })
+})
+
+describe("toTokens — neutral primary action", () => {
+  /** Every theme, imported or bundled, must yield a legible filled button. */
+  it.each(BUILTIN_THEMES.map((b) => [b.id, b.theme] as const))(
+    "%s has a primary label that clears 4.5:1 on its fill and is not the brand",
+    (_id, theme) => {
+      const t = toTokens(theme)
+      expect(ratio(t.primaryFg, t.primaryFill)).toBeGreaterThanOrEqual(4.5)
+      expect(t.primaryFill.toLowerCase()).not.toBe(t.brand.toLowerCase())
+    }
+  )
 })
 
 describe("toTokens — terminal palette", () => {

@@ -55,7 +55,7 @@ describe("ThemeService", () => {
       expect(exit._tag).toBe("Success")
       if (exit._tag !== "Success") return
       const fallback = exit.value.themes.find((t) => t.id === DEFAULT_THEME_ID)!
-      expect(fallback.tokens.editor.toLowerCase()).toBe("#212121")
+      expect(fallback.tokens.editor.toLowerCase()).toBe("#1a1a1d")
       expect(fallback.kind).toBe("dark")
       expect(fallback.source).toBe("builtin")
     })

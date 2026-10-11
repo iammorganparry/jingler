@@ -212,7 +212,7 @@ if (!gotPrimaryLock) {
    * Must stay equal to `--sb-canvas` in globals.css — they are the same frame
    * of the same launch, painted by two different processes.
    */
-  let themeBackgroundColor = "#141414"
+  let themeBackgroundColor = "#0b0b0c"
 
   /**
    * The window icon, on the one platform that reads it.

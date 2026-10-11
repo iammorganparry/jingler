@@ -260,6 +260,18 @@ export const ThemeTokens = Schema.Struct({
   /** `brand` under a pointer — lifted toward the ground's opposite pole. */
   brandHover: HexColor,
 
+  /**
+   * The NEUTRAL primary action: a filled button is the loudest text tone on the
+   * darkest ground, never the brand (red reads as destructive; brand is reserved
+   * for the mark, focus ring, selection and drop zone).
+   */
+  primaryFill: HexColor,
+  /** Label on `primaryFill` — the app ground, contrast-checked against the fill. */
+  primaryFg: HexColor,
+  primaryHover: HexColor,
+  /** A disabled primary: a raised surface with quiet text, not a faded fill. */
+  primaryDisabled: HexColor,
+
   // Effects — derived from `kind`, never read straight from a theme file.
   /** Modal scrim. Dark themes darken; light themes darken LESS, not lighten. */
   overlay: CssColor,
@@ -323,6 +335,10 @@ export const CSS_VAR_BY_TOKEN: Readonly<Record<Exclude<keyof ThemeTokens, "kind"
   orange: "--sb-orange",
   brand: "--sb-brand",
   brandHover: "--sb-brand-hover",
+  primaryFill: "--sb-primary-fill",
+  primaryFg: "--sb-primary-fg",
+  primaryHover: "--sb-primary-hover",
+  primaryDisabled: "--sb-primary-disabled",
   overlay: "--sb-overlay",
   shadow: "--sb-shadow",
   shadowStrong: "--sb-shadow-strong",
@@ -431,7 +447,8 @@ export type ThemeConfig = Schema.Schema.Type<typeof ThemeConfig>
 /**
  * The theme a fresh install starts on, and the one every failure falls back to.
  *
- * Jingler Dark, because a fresh install should look like Jingler. It is also the
+ * Jingler Dark (the id is persisted config, so it stays; its values are the
+ * neutral "Graphite" palette), because a fresh install should look like Jingler. It is also the
  * palette `globals.css`'s fallback block is pinned to, so applying it is a
  * pixel-exact no-op — which is the property that keeps "the theme failed to
  * load" from being indistinguishable from "the theme loaded".

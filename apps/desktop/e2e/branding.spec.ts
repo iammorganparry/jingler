@@ -47,8 +47,8 @@ test("a fresh install boots into the brand palette", async ({ launchApp }) => {
 
   expect(applied.kind).toBe("dark")
   expect(applied.brand.toLowerCase()).toBe("#ef3f57")
-  expect(applied.editor.toLowerCase()).toBe("#212121")
-  expect(applied.canvas.toLowerCase()).toBe("#141414")
+  expect(applied.editor.toLowerCase()).toBe("#1a1a1d")
+  expect(applied.canvas.toLowerCase()).toBe("#0b0b0c")
   expect(applied.primary.toLowerCase()).toBe("#ef3f57")
   expect(applied.ring.toLowerCase()).toBe("#ef3f57")
 })
