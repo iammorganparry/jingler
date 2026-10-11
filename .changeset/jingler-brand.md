@@ -17,7 +17,7 @@ Rebrand: the app now ships Jingler's own identity end to end.
   destructive action are not the same swatch. `--primary`, `--ring` and links now
   resolve through it.
 - **A retuned accent ramp.** All seven accents were rebuilt inside the brand's
-  saturation/lightness envelope (S 52-88% / L 60-75% on dark) with warm-leaning
+  saturation/lightness envelope (S 52-89% / L 60-75% on dark) with warm-leaning
   hues, so they read as one family instead of a stock VS Code spectrum. Every one
   clears 4.5:1 against its theme's editor background, and a test pins the envelope.
 - **`Kbd`'s `onFill` chip is a white scrim,** not `bg-blue` — it was invisible while

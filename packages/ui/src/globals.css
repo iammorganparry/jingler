@@ -104,7 +104,7 @@
    * palette. Brand red appears in the CHROME (below), not in the code.
    *
    * What they DO share with the brand is an envelope. Every one sits at
-   * S 52-88% / L 60-75%, against the brand's S 85% / L 59%, so they read as one
+   * S 52-89% / L 60-75%, against the brand's S 85% / L 59%, so they read as one
    * family rather than as seven colours that happened to be picked separately.
    * The hues are warm-leaning for the same reason: purple sits at 288 (magenta
    * side) rather than 275, and cyan at 184 rather than a flat 180.
@@ -136,6 +136,7 @@
    */
   --sb-brand: #ef3f57;
   --sb-brand-hover: #f5687b;
+  --sb-brand-fg: #ffffff;
 
   /*
    * Effects — translucent ON PURPOSE.
@@ -201,10 +202,11 @@
   --popover-foreground: var(--sb-text-bright);
   /* Primary is the BRAND, not `blue` — see the `--sb-brand` note above. */
   --primary: var(--sb-brand);
-  /* White, not `--sb-editor`: a filled brand button is a saturated mid-tone, and
-     the near-black editor colour on it clears 4.5:1 in dark themes and fails it
-     in light ones. `#fff` is what the theme's own `button.foreground` states. */
-  --primary-foreground: #ffffff;
+  /* Per-theme, NOT a fixed white: `--sb-brand-fg` is black or white chosen by
+     contrast against the resolved brand (see the `brandFg` block in map.ts), so
+     a pale imported accent (Solarized Light's mustard) gets legible text instead
+     of a washed-out white. Jingler's own brand still resolves to white. */
+  --primary-foreground: var(--sb-brand-fg);
   --secondary: var(--sb-surface);
   --secondary-foreground: var(--sb-text);
   --muted: var(--sb-panel);
@@ -319,18 +321,6 @@
   --animate-slide-in: sb-slide-in 0.3s ease;
   --animate-bar: sb-bar 1.3s ease-in-out infinite;
   --animate-check: sb-check 0.4s ease forwards;
-  /* Sign-in wall: twinkling starfield + breathing logo (see LoginScreen). */
-  --animate-twinkle: sb-twinkle 3s ease-in-out infinite;
-}
-
-@keyframes sb-twinkle {
-  0%,
-  100% {
-    opacity: 0.22;
-  }
-  50% {
-    opacity: 0.9;
-  }
 }
 
 @keyframes sb-breathe {
@@ -423,40 +413,6 @@
   }
 }
 
-/* Loading splash (rocket launch) — see screens/loading-screen.tsx */
-@keyframes sb-streak {
-  0% {
-    transform: translateY(-14vh);
-    opacity: 0;
-  }
-  10%,
-  90% {
-    opacity: 1;
-  }
-  100% {
-    transform: translateY(112vh);
-    opacity: 0;
-  }
-}
-@keyframes sb-twinkle {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 0.9;
-  }
-}
-@keyframes sb-dot {
-  0%,
-  80%,
-  100% {
-    opacity: 0.25;
-  }
-  40% {
-    opacity: 1;
-  }
-}
 
 @layer base {
   * {

@@ -151,15 +151,18 @@ const resolve = async (extPath, seen = new Set()) => {
  * diff being themed by one One Dark Pro while the panel behind it is themed by
  * a subtly different one.
  *
- * `PIN` then overrides the surfaces, text ramp and accents with the exact
- * values already in `packages/ui/src/globals.css`.
+ * `PIN` then overrides the surfaces, text ramp and accents so One Dark Pro
+ * renders in Jingler with the exact appearance it had when it WAS the default —
+ * the values it once contributed to `packages/ui/src/globals.css`.
  *
- * This pinning is not cosmetic. One Dark Pro is `DEFAULT_THEME_ID`: it is what
- * a fresh install runs, what every existing config resolves to, and what every
- * failure falls back to. If applying it changed a single pixel, then "the theme
- * system shipped" and "the theme failed to load" would both look like the app
- * quietly changing colour, and every Storybook snapshot would need rebaselining
- * for a feature that is supposed to be a no-op by default.
+ * This pinning is still not cosmetic, but its reason moved with the default.
+ * One Dark Pro is NO LONGER `DEFAULT_THEME_ID` — Jingler Dark is, and globals.css
+ * now holds Jingler Dark's values — so the pin is tied to neither any more. What
+ * it protects now is every operator who selected One Dark Pro and has its id
+ * saved as `activeId`: the pin keeps that theme pixel-stable across this rebrand,
+ * so an app update does not silently reskin the theme they chose. Do NOT "fix"
+ * these values to match the current globals.css, and do NOT drop the pin — either
+ * would change colour under those users.
  *
  * Keys chosen to match the mapper's FIRST fallback for each token, so the fold
  * is exact rather than approximately right.

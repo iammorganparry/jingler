@@ -259,6 +259,12 @@ export const ThemeTokens = Schema.Struct({
   brand: HexColor,
   /** `brand` under a pointer — lifted toward the ground's opposite pole. */
   brandHover: HexColor,
+  /**
+   * Text painted ON `brand` — primary button labels, badge text. Black or white
+   * per contrast against the resolved `brand`, so a pale imported accent gets
+   * legible text rather than a fixed white that only suits a dark-red brand.
+   */
+  brandFg: HexColor,
 
   // Effects — derived from `kind`, never read straight from a theme file.
   /** Modal scrim. Dark themes darken; light themes darken LESS, not lighten. */
@@ -323,6 +329,7 @@ export const CSS_VAR_BY_TOKEN: Readonly<Record<Exclude<keyof ThemeTokens, "kind"
   orange: "--sb-orange",
   brand: "--sb-brand",
   brandHover: "--sb-brand-hover",
+  brandFg: "--sb-brand-fg",
   overlay: "--sb-overlay",
   shadow: "--sb-shadow",
   shadowStrong: "--sb-shadow-strong",

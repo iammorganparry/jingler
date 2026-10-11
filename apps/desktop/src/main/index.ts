@@ -306,15 +306,15 @@ if (!gotPrimaryLock) {
     // Themes, before the window. Both of these have to happen ahead of
     // `createWindow` or the first frame is painted in the wrong theme: the
     // background colour is read by `BrowserWindow` at construction, and the
-    // preload pulls the stylesheet synchronously as the document starts. Never
-    // normally resolves failures to One Dark Pro. Keep the await behind one
-    // final launch-boundary catch too: a defect in the fallback path must not
-    // prevent the window from being created.
+    // preload pulls the stylesheet synchronously as the document starts.
+    // `resolveBootTheme` already resolves its own failures to Jingler Dark; this
+    // catch is the final launch-boundary net, so a defect in the fallback path
+    // still cannot prevent the window from being created.
     registerBootThemeChannel()
     try {
       themeBackgroundColor = bootBackgroundColor(await resolveBootTheme())
     } catch (cause) {
-      console.error("Could not prepare the boot theme; using One Dark Pro.", cause)
+      console.error("Could not prepare the boot theme; using Jingler Dark.", cause)
     }
 
     createWindow()

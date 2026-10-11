@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useReducedMotion } from "motion/react"
 import { BRAND_SHADER_BACKGROUND, BrandShader } from "../brand/brand-shader.js"
 import { useOptionalThemeTokens } from "../theme-provider.js"
 
@@ -41,7 +42,10 @@ const CEILING = 90
 export function LoadingScreen() {
   const bar = useRef<HTMLDivElement>(null)
   const [phase, setPhase] = useState(0)
-  const [reduced, setReduced] = useState(false)
+  // Same subscribed source as `BrandShader` (motion/react, mirroring AppShell's
+  // `MotionConfig`), so the bar and the shader inside this splash never disagree
+  // about whether motion is reduced — even if the OS setting flips mid-boot.
+  const reduced = useReducedMotion() ?? false
 
   // Resolved here rather than left to `BrandShader` because the PAGE has to be
   // painted the same colour as the tile, and both have to agree on which ground
@@ -50,12 +54,7 @@ export function LoadingScreen() {
   const ground = tokens?.kind === "light" ? "light" : "dark"
 
   useEffect(() => {
-    const still =
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    setReduced(still)
-
-    if (still) {
+    if (reduced) {
       if (bar.current) bar.current.style.width = "40%"
       return
     }
@@ -73,7 +72,7 @@ export function LoadingScreen() {
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [])
+  }, [reduced])
 
   return (
     <div

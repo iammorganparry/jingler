@@ -104,7 +104,7 @@ a worse outcome than a slightly less unified palette. **Brand red lives in the
 chrome, not in the code.**
 
 What makes them *feel* like Jingler's is not the hue, it is the **envelope**.
-Every accent sits at `S 52–88% / L 60–75%` on dark, against the brand's
+Every accent sits at `S 52–89% / L 60–75%` on dark, against the brand's
 `S 85% / L 59%` — so they read as one family rather than seven colours picked
 separately. The hues lean warm for the same reason: purple is `288°` (magenta
 side) rather than a violet `275°`, and cyan is `184°` rather than a flat `180°`.

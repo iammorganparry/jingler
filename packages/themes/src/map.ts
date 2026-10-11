@@ -141,6 +141,28 @@ const pickOpaque = (colors: Colors, base: Rgba, ...keys: ReadonlyArray<string>):
   return found ? over(found, base) : null
 }
 
+/** HSL saturation, 0–1. Used to reject grey candidates for the brand. */
+const saturation = ({ r, g, b }: Rgba): number => {
+  const mx = Math.max(r, g, b) / 255
+  const mn = Math.min(r, g, b) / 255
+  if (mx === mn) return 0
+  const l = (mx + mn) / 2
+  return (mx - mn) / (1 - Math.abs(2 * l - 1))
+}
+
+/** First key present, parseable AND at least `minSat` saturated. */
+const pickSaturated = (
+  colors: Colors,
+  minSat: number,
+  ...keys: ReadonlyArray<string>
+): Rgba | null => {
+  for (const key of keys) {
+    const parsed = parseHex(colors[key])
+    if (parsed && saturation(parsed) >= minSat) return parsed
+  }
+  return null
+}
+
 /**
  * A translucent value, taken from the theme when it parses and derived when it
  * does not — and NEVER passed through as the theme's raw string.
@@ -177,6 +199,18 @@ const wash = (raw: string | undefined, fallback: Rgba): string => {
  */
 const ACCENT_MIN_CONTRAST = 3
 const TEXT_MIN_CONTRAST = 4.5
+
+/**
+ * Chroma floor for a brand candidate, 0–1.
+ *
+ * The `brand` chain below assumes a saturated `progressBar.background` — "a grey
+ * progress bar reads as broken, so authors do not ship one." Monokai does:
+ * `progressBar.background: #75715E`, an olive grey at ~0.11 saturation. Taking
+ * it would give Monokai the exact grey focus ring the chain exists to avoid, so
+ * a candidate below this is treated as chrome, skipped, and the next key tried —
+ * ending at `blue`, which is already a real accent.
+ */
+const BRAND_MIN_SATURATION = 0.25
 
 /**
  * Fold a VS Code theme down to the values `:root` needs.
@@ -278,9 +312,11 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
    *
    * The chain is ordered by how close a key is to meaning "the one colour this
    * theme uses to say THIS IS THE ACTION". `progressBar.background` and
-   * `activityBarBadge.background` are both saturated accents by convention —
-   * a grey progress bar reads as broken, so authors do not ship one.
-   * `textLink.foreground` is next because a link is the other place a theme
+   * `activityBarBadge.background` are USUALLY saturated accents — a grey
+   * progress bar reads as broken, so most authors do not ship one. Monokai does
+   * (`#75715E`), which is why the pick is gated on `BRAND_MIN_SATURATION`: a grey
+   * candidate is skipped rather than trusted, so the premise's exceptions do not
+   * become grey focus rings. `textLink.foreground` is next because a link is the other place a theme
    * commits to its primary hue.
    *
    * `button.background` is deliberately ABSENT. It looks like the obvious first
@@ -292,17 +328,60 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
    * reason the token exists at all: an operator running Solarized should get
    * Solarized's accent on their focus rings, not ours bleeding through.
    */
-  const brand = accent(
-    toHex(blue),
+  const brandSource = pickSaturated(
+    colors,
+    BRAND_MIN_SATURATION,
     "progressBar.background",
     "activityBarBadge.background",
     "textLink.foreground"
   )
-  // `button.hoverBackground` when the theme names one, else lift toward the
-  // ground's opposite pole — the same move `linkHover` makes on `blue`.
+  const brand = brandSource
+    ? ensureContrast(over(brandSource, panel), panel, ACCENT_MIN_CONTRAST)
+    : blue
+
+  /**
+   * `brand` under a pointer. It must track brand's HUE, so it is DERIVED from
+   * brand by default — the same lift `linkHover` makes on `blue`.
+   *
+   * A theme-stated hover is taken only when it belongs to the key `brand` itself
+   * resolved from: `textLink.activeForeground` when brand is the link colour, or
+   * `button.hoverBackground` when the theme's button genuinely IS the accent.
+   * Leading with `button.hoverBackground` unconditionally reintroduces the exact
+   * chrome-button trap `brand` refuses `button.background` to avoid — a theme
+   * with a grey button (One Dark Pro #404754, Monokai #75715E) would hover its
+   * saturated primary to that unrelated grey.
+   */
+  const resolvesToBrand = (key: string): boolean => {
+    const c = pick(colors, key)
+    return c !== null && toHex(over(c, panel)) === toHex(brand)
+  }
   const brandHover =
-    pickOpaque(colors, panel, "button.hoverBackground", "textLink.activeForeground") ??
+    (resolvesToBrand("textLink.foreground")
+      ? pickOpaque(colors, panel, "textLink.activeForeground")
+      : null) ??
+    (resolvesToBrand("button.background")
+      ? pickOpaque(colors, panel, "button.hoverBackground")
+      : null) ??
     mix(brand, isDark(panel) ? WHITE : BLACK, 0.22)
+
+  /**
+   * The text painted ON `brand` — primary button labels, badge text.
+   *
+   * A fixed white only suits a dark-red brand. On a pale or mustard accent
+   * (Solarized Light derives `brand` from `progressBar.background: #B58900`)
+   * white text drops below legibility. So honour the theme's own
+   * `button.foreground` when it clears the UI-contrast bar on `brand`, else take
+   * whichever pole reads better. Jingler's own `#fff`-on-`#ef3f57` (3.8:1) is a
+   * deliberate brand choice that clears the 3:1 bar, so it is preserved rather
+   * than "corrected" to the higher-contrast black.
+   */
+  const brandFgStated = pickOpaque(colors, brand, "button.foreground")
+  const brandFg =
+    brandFgStated && contrast(brandFgStated, brand) >= ACCENT_MIN_CONTRAST
+      ? brandFgStated
+      : contrast(WHITE, brand) >= contrast(BLACK, brand)
+        ? WHITE
+        : BLACK
 
   // ── Effects ────────────────────────────────────────────────────────────────
   // Derived from the ground, never read from the theme. A scrim's job is to
@@ -384,6 +463,7 @@ export const toTokens = (theme: VsCodeTheme, overrides?: Colors): ThemeTokens =>
     orange: toHex(orange),
     brand: toHex(brand),
     brandHover: toHex(brandHover),
+    brandFg: toHex(brandFg),
 
     overlay,
     shadow,

@@ -165,7 +165,12 @@ describe("toTokens — Jingler Dark is a visual no-op", () => {
     // ever fold to the same value, `--primary` and `--destructive` have
     // collapsed and a delete button is indistinguishable from a create one.
     ["brand", "#ef3f57"],
-    ["brandHover", "#f5687b"]
+    ["brandHover", "#f5687b"],
+    // Text on the brand button. White here because Jingler's `button.foreground`
+    // states it and #fff-on-#ef3f57 clears the 3:1 UI bar; a pale imported accent
+    // resolves this to black instead. Pinned so a mapper change cannot silently
+    // flip Jingler's primary label to black.
+    ["brandFg", "#ffffff"]
   ] as const)("%s is exactly %s", (token, expected) => {
     expect(t[token].toLowerCase()).toBe(expected)
   })
@@ -221,10 +226,15 @@ describe("toTokens — Jingler Dark is a visual no-op", () => {
 
     for (const token of ["blue", "green", "yellow", "red", "purple", "cyan", "orange"] as const) {
       const { s, l } = hsl(t[token])
-      expect.soft(s, `${token} saturation`).toBeGreaterThanOrEqual(50)
-      expect.soft(s, `${token} saturation`).toBeLessThanOrEqual(90)
-      expect.soft(l, `${token} lightness`).toBeGreaterThanOrEqual(58)
-      expect.soft(l, `${token} lightness`).toBeLessThanOrEqual(78)
+      // The documented envelope (docs/brand.md, globals.css, the changeset):
+      // S 52–89% / L 60–75%. Kept in lockstep so a retune that drifts an accent
+      // outside the published brand range fails here rather than silently. The
+      // 89 upper is real, not slack: blue sits at S 88.24, the top edge of the
+      // family — tightening to 88 would fail the very accent it is meant to pin.
+      expect.soft(s, `${token} saturation`).toBeGreaterThanOrEqual(52)
+      expect.soft(s, `${token} saturation`).toBeLessThanOrEqual(89)
+      expect.soft(l, `${token} lightness`).toBeGreaterThanOrEqual(60)
+      expect.soft(l, `${token} lightness`).toBeLessThanOrEqual(75)
     }
   })
 })

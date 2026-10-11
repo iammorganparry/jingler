@@ -1,6 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
-import { ThemeProvider } from "../theme-provider.js"
 import { BrandShader } from "../brand/brand-shader.js"
 import { LoadingScreen } from "./loading-screen.js"
 
@@ -12,9 +10,6 @@ const meta: Meta<typeof LoadingScreen> = {
 export default meta
 type Story = StoryObj<typeof LoadingScreen>
 
-const DARK = toTokens(jinglerDark)
-const LIGHT = toTokens(jinglerLight)
-
 /**
  * The boot splash on the default ground.
  *
@@ -22,25 +17,30 @@ const LIGHT = toTokens(jinglerLight)
  * so the 360px tile has no visible edge. What you should see is ONE field of
  * colour with the mark burning in the middle of it — not a square sitting on a
  * backdrop.
+ *
+ * Pinned with `globals.theme`, NOT a `ThemeProvider` inside the story: the
+ * preview decorator already mounts one, both write the same `<style
+ * id="jingler-theme">`, and React runs the child's layout effect first — so a
+ * nested provider's sheet is written then overwritten by the toolbar theme, and
+ * `LoadingScreen`'s status text and bar (which read `--sb-*`) would render in
+ * the wrong ground. `app.stories.tsx` documents the same trap at length.
  */
 export const Boot: Story = {
+  globals: { theme: "jingler-dark" },
   render: () => (
-    <ThemeProvider tokens={DARK} activeId="jingler-dark">
-      <div className="h-screen w-full">
-        <LoadingScreen />
-      </div>
-    </ThemeProvider>
+    <div className="h-screen w-full">
+      <LoadingScreen />
+    </div>
   )
 }
 
 /** The same splash on Jingler Light — near-white page, near-white tile. */
 export const BootLight: Story = {
+  globals: { theme: "jingler-light" },
   render: () => (
-    <ThemeProvider tokens={LIGHT} activeId="jingler-light">
-      <div className="h-screen w-full">
-        <LoadingScreen />
-      </div>
-    </ThemeProvider>
+    <div className="h-screen w-full">
+      <LoadingScreen />
+    </div>
   )
 }
 

@@ -113,7 +113,12 @@ export function ComponentLibrary() {
         </Spec>
         <Spec title="Kbd">
           <div className="flex flex-wrap gap-1.5">
-            <Kbd>⌘K</Kbd> <Kbd>↵</Kbd> <Kbd>esc</Kbd> <Kbd>⌥↵</Kbd> <Kbd onFill>↵ on fill</Kbd>
+            <Kbd>⌘K</Kbd> <Kbd>↵</Kbd> <Kbd>esc</Kbd> <Kbd>⌥↵</Kbd>{" "}
+            {/* onFill sits ON a primary fill — demo it on one, or it is a white
+                chip on the panel and vanishes on light themes. */}
+            <span className="inline-flex items-center rounded bg-brand px-1.5 py-0.5">
+              <Kbd onFill>↵ on fill</Kbd>
+            </span>
           </div>
         </Spec>
         <Spec title="Tag / Chip">

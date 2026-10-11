@@ -1,5 +1,6 @@
 /// <reference path="../css.d.ts" />
 import { useEffect, useState } from "react"
+import { useReducedMotion } from "motion/react"
 import { Heatmap } from "@paper-design/shaders-react"
 import { useOptionalThemeTokens } from "../theme-provider.js"
 import { cn } from "../lib/cn.js"
@@ -98,25 +99,6 @@ const LIGHT = {
   scale: 0.59,
   colors: ["#EF3F57", "#b80f26"],
   colorBack: BRAND_SHADER_BACKGROUND.light
-}
-
-/**
- * Whether the operator has asked for less motion.
- *
- * Subscribed rather than read once: the OS setting can change while the app is
- * open, and the splash can be on screen for the whole of a slow boot.
- */
-const useReducedMotion = (): boolean => {
-  const [reduced, setReduced] = useState(false)
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)")
-    setReduced(query.matches)
-    const onChange = (event: MediaQueryListEvent) => setReduced(event.matches)
-    query.addEventListener("change", onChange)
-    return () => query.removeEventListener("change", onChange)
-  }, [])
-  return reduced
 }
 
 /**
