@@ -133,7 +133,8 @@ import {
   ManagedResourceScope,
   ResourceDetectionResult,
   ResourceImportResult,
-  FONT_SCALE_RANGE
+  FONT_SCALE_RANGE,
+  HEADER_VIEWS_MAX
 } from "@jingler/core"
 import {
   AssetOutsideWorktreeError,
@@ -1559,6 +1560,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: { paths: Schema.Array(Schema.String) }
+  }),
+
+  /**
+   * Persist the ordered list of views pinned to the workspace header. The bound
+   * lives in the contract (like `Config.setFontScale`), so a sixth view is
+   * rejected before main runs; unknown ids are dropped by the service.
+   */
+  Rpc.make("Config.setHeaderViews", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: { views: Schema.Array(Schema.String).pipe(Schema.maxItems(HEADER_VIEWS_MAX)) }
   }),
 
   /** Persist the full set of collapsed repo paths (replaces the stored list). */
