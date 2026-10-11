@@ -336,6 +336,22 @@
   --radius-lg: 5px;
   --radius-xl: 7px;
 
+  /* Redesign radii (spec §2): 6 chips/buttons/rows, 8 inputs/menus, 12 cards/composer/dialogs.
+     New names so the legacy --radius-sm..xl above keep their values for existing components. */
+  --radius-chip: 6px;
+  --radius-input: 8px;
+  --radius-card: 12px;
+
+  /* Redesign type scale (spec §2): 11 meta/kbd, 12 secondary rows, 13 body UI, 15 section titles,
+     20 page titles. Utilities: text-scale-11 ... text-scale-20. Each multiplies --sb-font-scale, so
+     the Settings text-size preset scales them like the conversation sizes. (Named scale-N because
+     text-secondary etc. already mean colours.) */
+  --text-scale-11: calc(11px * var(--sb-font-scale, 1));
+  --text-scale-12: calc(12px * var(--sb-font-scale, 1));
+  --text-scale-13: calc(13px * var(--sb-font-scale, 1));
+  --text-scale-15: calc(15px * var(--sb-font-scale, 1));
+  --text-scale-20: calc(20px * var(--sb-font-scale, 1));
+
   --animate-pulse-dot: sb-pulse 1.4s ease-in-out infinite;
   --animate-shine: sb-shine 1.3s linear infinite;
   --animate-spin-fast: sb-spin 0.8s linear infinite;
