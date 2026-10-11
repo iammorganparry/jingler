@@ -35,7 +35,7 @@ function ProjectAvatar({
           ) : null}
           <div className="mt-2 flex gap-3 text-[11px] text-muted-foreground">
             <span>{sessionCount} open session{sessionCount === 1 ? "" : "s"}</span>
-            {activeSessionCount > 0 ? <span className="text-green">{activeSessionCount} active</span> : null}
+            {activeSessionCount > 0 ? <span className="text-text-bright">{activeSessionCount} active</span> : null}
           </div>
         </div>
       }
@@ -47,31 +47,31 @@ function ProjectAvatar({
         aria-current={active ? "page" : undefined}
         onClick={onSelect}
         className={cn(
-          "group relative flex size-10 flex-none items-center justify-center rounded-xl outline-none transition-all focus-visible:ring-2 focus-visible:ring-ring",
-          active ? "rounded-[14px] bg-surface" : "hover:rounded-[14px] hover:bg-surface/60"
+          "group relative flex size-9 flex-none items-center justify-center rounded-[8px] border outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "border-transparent bg-surface" : "border-hairline bg-editor hover:bg-surface/60"
         )}
       >
-        {active ? <span aria-hidden className="absolute -left-2 h-5 w-[3px] rounded-r-full bg-blue" /> : null}
+        {active ? <span aria-hidden className="absolute -left-[10px] h-5 w-[2px] bg-text-bright" /> : null}
         <Avatar
           initial={project.name.slice(0, 1).toUpperCase()}
           src={owner ? githubAvatarUrl(owner, 40) : null}
           tone="dim"
-          size={32}
-          className="rounded-[10px]"
+          size={28}
+          className="rounded-[6px]"
         />
         <span
           aria-hidden
-          className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-panel"
+          className="absolute -right-[5px] -top-[5px] flex h-4 min-w-4 items-center justify-center rounded-full whitespace-nowrap bg-line-strong px-1 text-[10px] font-semibold leading-none text-text-bright ring-2 ring-canvas"
         >
           {sessionCount}
         </span>
         {activeSessionCount > 0 ? (
-          <span role="status" aria-label={`${project.name}: sessions in progress`} className="absolute bottom-0 left-0 flex rounded-full ring-2 ring-panel">
-            <StatusDot status="running" size={8} />
+          <span role="status" aria-label={`${project.name}: sessions in progress`} className="absolute -bottom-[3px] -right-[3px] flex rounded-full ring-2 ring-canvas">
+            <StatusDot tone="bg-state-working" pulse size={8} />
           </span>
         ) : null}
         {project.availability !== "available" ? (
-          <span className="absolute bottom-0 right-0 size-2 rounded-full bg-yellow ring-2 ring-panel" />
+          <span className="absolute -bottom-[3px] -left-[3px] size-2 rounded-full bg-state-needs ring-2 ring-canvas" />
         ) : null}
       </button>
     </HoverCard>
@@ -118,16 +118,16 @@ export function ProjectSidebar({
       aria-label="Projects"
       data-testid="project-sidebar"
       aria-busy={loading}
-      className="flex w-[60px] flex-none flex-col items-center border-r border-hairline bg-panel py-2"
+      className="flex w-14 flex-none flex-col items-center border-r border-hairline bg-canvas py-2"
     >
-      <JinglerMark className="mb-2 h-5 w-auto flex-none text-brand" />
-      <div className="sb-no-scrollbar flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto px-2 pt-1">
+      <JinglerMark className="mb-2 h-4 w-auto flex-none text-muted-foreground" />
+      <div className="sb-no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto px-2 pt-1">
         {loading
           ? [0, 1, 2].map((index) => (
               <span
                 key={index}
                 data-testid="project-skeleton"
-                className="size-10 flex-none animate-pulse rounded-xl bg-surface"
+                className="size-9 flex-none animate-pulse rounded-[8px] bg-surface"
               />
             ))
           : items.map(({ project, sessions: projectSessions }) => (
@@ -150,9 +150,9 @@ export function ProjectSidebar({
           aria-label="Add project"
           title="Add project"
           onClick={onAddProject}
-          className="mt-2 flex size-10 flex-none items-center justify-center rounded-xl border border-dashed border-line text-dim hover:border-blue hover:bg-surface hover:text-text"
+          className="mt-2 flex size-9 flex-none items-center justify-center rounded-[8px] border border-dashed border-line text-dim outline-none hover:border-line-strong hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <Plus size={17} />
+          <Plus size={16} />
         </button>
       ) : null}
     </nav>
