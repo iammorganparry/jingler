@@ -58,11 +58,11 @@ flowchart LR
 
 - [x] Trace the desktop classifier/selector, relay topic implementation, snapshot path, executor operations, and every caller of the resource check.
 - [x] Define the exact supported heavy-command set and session subscriber semantics from code plus operator decisions.
-- [ ] Remove the resource-pressure veto while retaining classification safety, online, authorization, and runtime compatibility checks; delete the sampler if it becomes dead code.
+- [x] Remove the resource-pressure veto while retaining classification safety, online, authorization, and runtime compatibility checks; delete the sampler if it becomes dead code.
 - [x] Remove same-endpoint socket replacement for desktop subscribers only; keep one device socket, session-wide acknowledgements, current bounded replay, and the existing encrypted envelope contract.
 - [x] Add focused tests for unconditional dispatch, fresh edited bytes, multi-subscriber delivery, shared acknowledgement pruning, disconnect behavior, and stale-controller safety.
 - [x] Extend `apps/desktop/e2e/offload-compute.spec.ts` using its existing owned-device fixture and bundled device agent; do not add another fixture layer.
-- [ ] Run focused package tests, root lint/typecheck/tests, the focused Electron E2E, then start the server and Electron app for a manual edit → handoff proof.
+- [x] Run focused package tests, root lint/typecheck/tests, the focused Electron E2E, then start the server and Electron app for a manual edit → handoff proof.
 
 ## Verification
 

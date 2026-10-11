@@ -19,6 +19,9 @@ await build({
   platform: "node",
   format: "esm",
   target: "node24",
+  alias: {
+    "jsonc-parser": resolve(root, "node_modules/jsonc-parser/lib/esm/main.js")
+  },
   outfile: resolve(payload, "jingler-device.mjs"),
   banner: {
     js: "#!/usr/bin/env node\nimport { createRequire as __jinglerCreateRequire } from \"node:module\"; const require = __jinglerCreateRequire(import.meta.url);"
