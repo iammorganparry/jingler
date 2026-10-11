@@ -54,3 +54,31 @@ test("an MCP reconnect card is labelled as MCP and can be dismissed", async ({ l
   await openSessionByTitle(window, "First session")
   await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
 })
+
+test("a dismissed MCP reconnect card stays hidden after the window reloads", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_1", "First session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.example/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await openSessionByTitle(window, "First session")
+  const card = window.getByRole("region", { name: "MCP server recovery" })
+  await expect(card).toBeVisible()
+  await card.getByRole("button", { name: "Dismiss: Reconnect runpod" }).click()
+  await expect(card).toHaveCount(0)
+
+  await window.reload()
+  await openSessionByTitle(window, "First session")
+  await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
+  await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
+})
