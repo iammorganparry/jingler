@@ -156,3 +156,13 @@ export const usageReportFromFacts = (
   }))
   return { generatedAt, facts: [...facts], groups }
 }
+
+/** The longest runs, each mapped to the parent turn it belongs to (a child maps to its parent run). */
+export const slowestRuns = (
+  facts: ReadonlyArray<UsageFact>,
+  limit = 5
+): ReadonlyArray<UsageFact & { readonly turnRunId: string }> =>
+  [...facts]
+    .sort((a, b) => b.durationMs - a.durationMs)
+    .slice(0, limit)
+    .map((fact) => ({ ...fact, turnRunId: fact.parentRunId ?? fact.runId }))

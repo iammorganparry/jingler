@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { makeUsageFact, usageReportFromFacts, type UsageFact } from "./usage-facts.js"
+import { makeUsageFact, slowestRuns, usageReportFromFacts, type UsageFact } from "./usage-facts.js"
 
 const fact = (over: Partial<UsageFact> = {}): UsageFact => ({
   id: "run-1",
@@ -68,5 +68,24 @@ describe("usage facts", () => {
       costCoverage: 0.5
     })])
     expect(report.facts[0]?.costUsd).toBeNull()
+  })
+
+  it("ranks the slowest runs and maps each to its parent turn", () => {
+    const facts = [
+      fact({ id: "a", runId: "turn-a", durationMs: 500 }),
+      fact({ id: "b", runId: "child-b", parentRunId: "turn-a", kind: "child", durationMs: 3000 }),
+      fact({ id: "c", runId: "turn-c", durationMs: 2000 })
+    ]
+    expect(slowestRuns(facts, 2).map((run) => [run.runId, run.turnRunId])).toEqual([
+      ["child-b", "turn-a"],
+      ["turn-c", "turn-c"]
+    ])
+  })
+
+  it("keeps filtered group totals equal to the sum over the same facts", () => {
+    const facts = [fact({ id: "a", durationMs: 100 }), fact({ id: "b", runId: "r2", durationMs: 250, modelId: "other" })]
+    const report = usageReportFromFacts(facts)
+    const sum = report.groups.reduce((total, group) => total + group.durationMs, 0)
+    expect(sum).toBe(facts.reduce((total, f) => total + f.durationMs, 0))
   })
 })
