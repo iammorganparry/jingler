@@ -11,6 +11,7 @@ import {
   type MemoryGraphEvidence,
   type MemoryGraphNode,
   type MemoryPage,
+  type MemoryRelationshipEvidence,
   type MemorySource
 } from "@jingler/memory"
 
@@ -196,6 +197,7 @@ const clustersFor = (pages: ReadonlyArray<MemoryPage>): ReadonlyArray<VaultTopic
 const graphContext = (
   pages: ReadonlyArray<MemoryPage>,
   sources: ReadonlyArray<MemorySource>,
+  relationships: ReadonlyArray<MemoryRelationshipEvidence>,
   context: GraphBuildContext
 ): {
   readonly graph: MemoryGraph
@@ -204,7 +206,7 @@ const graphContext = (
   readonly brokenWikiLinksByPage: ReadonlyMap<string, number>
   readonly context: GraphBuildContext
 } => {
-  const { graph, brokenWikiLinksByPage } = buildMemoryGraphView(pages, sources)
+  const { graph, brokenWikiLinksByPage } = buildMemoryGraphView(pages, sources, relationships)
   return {
     graph,
     pages: new Map(pages.map((page) => [page.id, page])),
@@ -218,9 +220,10 @@ export const buildBoundedGraphView = (
   pages: ReadonlyArray<MemoryPage>,
   sources: ReadonlyArray<MemorySource> = [],
   options: { readonly limit?: number; readonly cursor?: number } = {},
-  context: GraphBuildContext = {}
+  context: GraphBuildContext = {},
+  relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): VaultGraphView => {
-  const built = graphContext(pages, sources, context)
+  const built = graphContext(pages, sources, relationships, context)
   const limit = boundedLimit(options.limit, DEFAULT_GRAPH_NODE_LIMIT, MAX_GRAPH_NODE_LIMIT)
   const cursor = Math.max(0, Math.floor(options.cursor ?? 0))
   const selected = built.graph.nodes.slice(cursor, cursor + limit)
@@ -247,9 +250,10 @@ export const buildGraphNeighborhood = (
   sources: ReadonlyArray<MemorySource>,
   nodeId: string,
   requestedLimit?: number,
-  context: GraphBuildContext = {}
+  context: GraphBuildContext = {},
+  relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): VaultGraphView => {
-  const built = graphContext(pages, sources, context)
+  const built = graphContext(pages, sources, relationships, context)
   if (!built.graph.nodes.some((node) => node.id === nodeId)) {
     throw new Error(`graph node ${nodeId} was not found`)
   }
@@ -282,9 +286,10 @@ export const buildGraphNeighborhood = (
 export const findGraphEdgeEvidence = (
   pages: ReadonlyArray<MemoryPage>,
   sources: ReadonlyArray<MemorySource>,
-  requestedEdgeId: string
+  requestedEdgeId: string,
+  relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): VaultGraphEvidenceResponse | undefined => {
-  const edge = buildMemoryGraphView(pages, sources).graph.edges.find(
+  const edge = buildMemoryGraphView(pages, sources, relationships).graph.edges.find(
     (candidate) => edgeId(candidate) === requestedEdgeId
   )
   return edge === undefined ? undefined : { edge: compactEdge(edge), evidence: edge.evidence }

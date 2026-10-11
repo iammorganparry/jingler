@@ -6,6 +6,7 @@ import {
   parseMemoryPage,
   type MemoryPage,
   type MemoryProposal,
+  type MemoryRelationshipCandidate,
   type MemorySource
 } from "@jingler/memory"
 
@@ -31,6 +32,7 @@ export interface CreateProposalSetInput {
   readonly createdAt: string
   readonly changeKind: ProposalChangeKind
   readonly drafts: ReadonlyArray<ProposalSetDraft>
+  readonly relationshipCandidates?: ReadonlyArray<MemoryRelationshipCandidate>
 }
 
 export interface VaultProposalSet {
@@ -41,6 +43,7 @@ export interface VaultProposalSet {
   readonly createdAt: string
   readonly changeKind: ProposalChangeKind
   readonly proposalIds: ReadonlyArray<string>
+  readonly relationshipCandidates: ReadonlyArray<MemoryRelationshipCandidate>
   readonly status: ProposalSetStatus
 }
 
@@ -55,6 +58,7 @@ export interface PreparedProposalSet {
   readonly set: VaultProposalSet
   readonly proposals: ReadonlyArray<MemoryProposal>
   readonly candidatePages: ReadonlyArray<MemoryPage>
+  readonly relationshipCandidates: ReadonlyArray<MemoryRelationshipCandidate>
 }
 
 export class ProposalSetError extends Error {
@@ -187,6 +191,40 @@ export const prepareProposalSet = (
     ...acceptedPages.map((page) => replacements.get(page.id) ?? page),
     ...[...replacements.values()].filter((page) => !acceptedById.has(page.id))
   ]
+  const relationshipCandidates = [...(input.relationshipCandidates ?? [])].sort((left, right) =>
+    compareText(left.id, right.id)
+  )
+  const relationshipIds = new Set<string>()
+  for (const relationship of relationshipCandidates) {
+    if (relationshipIds.has(relationship.id)) {
+      throw new ProposalSetError(`relationship candidate id ${relationship.id} appears more than once`)
+    }
+    relationshipIds.add(relationship.id)
+    if (relationship.status !== "open") {
+      throw new ProposalSetError(`new relationship candidate ${relationship.id} must be open`)
+    }
+    if (relationship.compilerEvidence.sourceId !== input.sourceId) {
+      throw new ProposalSetError(
+        `relationship candidate ${relationship.id} does not cite compiler source ${input.sourceId}`
+      )
+    }
+    if (!acceptedById.has(relationship.sourcePageId) || !acceptedById.has(relationship.targetPageId)) {
+      throw new ProposalSetError(
+        `relationship candidate ${relationship.id} must resolve to two accepted page ids`
+      )
+    }
+    if (!replacements.has(relationship.sourcePageId)) {
+      throw new ProposalSetError(
+        `relationship candidate ${relationship.id} has no factual source-page proposal`
+      )
+    }
+    const sourcePage = candidatePages.find((page) => page.id === relationship.sourcePageId)
+    if (sourcePage === undefined || !sourcePage.body.includes(relationship.claim)) {
+      throw new ProposalSetError(
+        `relationship candidate ${relationship.id} is not supported by its proposed source page`
+      )
+    }
+  }
   assertMemoryValid({ pages: candidatePages, sources }, { requireCitations: true })
   const sortedProposals = [...proposals].sort((left, right) => compareText(left.pageId, right.pageId))
   return {
@@ -198,10 +236,12 @@ export const prepareProposalSet = (
       createdAt: input.createdAt,
       changeKind: input.changeKind,
       proposalIds: sortedProposals.map((proposal) => proposal.id),
+      relationshipCandidates,
       status: "open"
     },
     proposals: sortedProposals,
-    candidatePages
+    candidatePages,
+    relationshipCandidates
   }
 }
 

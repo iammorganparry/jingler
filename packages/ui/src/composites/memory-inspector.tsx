@@ -37,6 +37,11 @@ export function MemoryInspector({
   onPromoteSuggestion
 }: MemoryInspectorProps) {
   if (node === null && evidence === null) return null
+  const isCitation = evidence?.edge.kind === "citation"
+  const isDurablePageEdge =
+    evidence?.edge.kind === "wikilink" ||
+    evidence?.edge.kind === "backlink" ||
+    evidence?.edge.kind === "dependency"
   return (
     <aside className="absolute inset-y-0 right-0 z-20 flex w-[360px] flex-col border-l border-line bg-panel shadow-xl" aria-label="Memory inspector" data-testid="memory-inspector">
       <div className="flex items-center gap-2 border-b border-hairline px-3 py-2.5">
@@ -47,15 +52,17 @@ export function MemoryInspector({
         {loading && <p role="status" className="text-[11px] text-muted-foreground">Loading accepted detail…</p>}
         {evidence && (
           <section aria-labelledby="edge-evidence-title">
-            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-blue">Accepted relationship</p>
+            <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.1em] text-blue">{isCitation ? "Provenance citation" : isDurablePageEdge ? "Accepted relationship" : "Accepted schema reference"}</p>
             <h2 id="edge-evidence-title" className="m-0 mt-1 text-lg font-semibold text-text-bright">{evidence.edge.kind}</h2>
             <dl className="mt-4 grid grid-cols-[80px_1fr] gap-x-3 gap-y-2 text-[11px]">
               <dt className="text-muted-foreground">From</dt><dd className="m-0 break-all font-mono text-text">{evidence.edge.sourceId}</dd>
               <dt className="text-muted-foreground">To</dt><dd className="m-0 break-all font-mono text-text">{evidence.edge.targetId}</dd>
-              <dt className="text-muted-foreground">Location</dt><dd className="m-0 font-mono text-text">{evidence.evidence.path}{evidence.evidence.line ? `:${evidence.evidence.line}` : ""}</dd>
+              <dt className="text-muted-foreground">Location</dt><dd className="m-0 font-mono text-text">{evidence.evidence.path}{evidence.evidence.line !== undefined ? `:${evidence.evidence.line}` : ""}</dd>
+              {evidence.evidence.sourceRevisionId && <><dt className="text-muted-foreground">Revision</dt><dd className="m-0 break-all font-mono text-text">{evidence.evidence.sourceRevisionId}</dd></>}
+              {evidence.evidence.acceptedBy && <><dt className="text-muted-foreground">Accepted by</dt><dd className="m-0 break-all font-mono text-text">{evidence.evidence.acceptedBy}</dd></>}
             </dl>
             <pre className="mt-4 whitespace-pre-wrap rounded-lg border border-line bg-sunken p-3 font-mono text-[10.5px] leading-5 text-text">{evidence.evidence.raw ?? evidence.evidence.label ?? evidence.evidence.target ?? "Structured frontmatter relationship"}</pre>
-            <p className="mt-3 flex items-start gap-2 text-[10.5px] leading-4 text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 flex-none text-green" />This edge resolves to accepted wiki evidence. Inferred and embedding-derived relationships are not displayed.</p>
+            <p className="mt-3 flex items-start gap-2 text-[10.5px] leading-4 text-muted-foreground"><ShieldCheck size={13} className="mt-0.5 flex-none text-green" />{isCitation ? "This citation records provenance only; it does not connect two durable pages." : isDurablePageEdge ? "This edge has independently accepted page evidence. Inferred and embedding-derived relationships are not displayed." : "This schema reference is separate from durable page-to-page relationships."}</p>
           </section>
         )}
         {node && (

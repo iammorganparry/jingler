@@ -1,4 +1,4 @@
-import type { MemoryPage } from "@jingler/memory"
+import type { MemoryPage, MemoryRelationshipEvidence } from "@jingler/memory"
 import { describe, expect, it } from "vitest"
 import {
   MAX_TOPIC_CLUSTERS,
@@ -21,6 +21,30 @@ const fixturePage = (index: number): MemoryPage => ({
   metadata: { citationPolicy: "none" }
 })
 
+const relationshipEvidence = (
+  source: MemoryPage,
+  target: MemoryPage,
+  kind: MemoryRelationshipEvidence["kind"],
+  quote: string
+): MemoryRelationshipEvidence => {
+  const start = source.body.indexOf(quote)
+  if (start < 0) throw new Error("fixture quote is missing")
+  return {
+    id: `evidence:${source.id}:${target.id}:${kind}`,
+    relationshipId: `relationship:${source.id}:${target.id}:${kind}`,
+    kind,
+    sourcePageId: source.id,
+    targetPageId: target.id,
+    sourceRevisionId: `revision:${source.id}:1`,
+    start,
+    end: start + quote.length,
+    quote,
+    compilerEvidence: { sourceId: "compiler-source", start: 0, end: quote.length, quote },
+    acceptedBy: "reviewer-1",
+    acceptedAt: "2026-08-06T12:00:00.000Z"
+  }
+}
+
 describe("bounded vault graph", () => {
   it("bounds a 10,000-page manifest and one-hop expansion without page bodies", () => {
     const pages = Array.from({ length: 10_000 }, (_, index) => fixturePage(index))
@@ -41,23 +65,28 @@ describe("bounded vault graph", () => {
   it("returns typed edge evidence separately by stable edge id", () => {
     const target = fixturePage(1)
     const source = { ...fixturePage(2), body: "# Page 2\n\nSee [[pages/page-1]].\n" }
-    const view = buildBoundedGraphView([source, target], [], { limit: 10 })
+    const accepted = relationshipEvidence(source, target, "wikilink", "See [[pages/page-1]].")
+    const view = buildBoundedGraphView([source, target], [], { limit: 10 }, {}, [accepted])
     const edge = view.edges.find((candidate) => candidate.kind === "wikilink")
     expect(edge).toBeDefined()
-    const evidence = findGraphEdgeEvidence([source, target], [], edge?.id ?? "")
+    const evidence = findGraphEdgeEvidence([source, target], [], edge?.id ?? "", [accepted])
     expect(evidence).toMatchObject({
       edge: { sourceId: "page:page-2", targetId: "page:page-1", kind: "wikilink" },
-      evidence: { kind: "wikilink", pageId: "page-2", raw: "[[pages/page-1]]" }
+      evidence: {
+        kind: "wikilink",
+        pageId: "page-2",
+        relationshipId: accepted.relationshipId,
+        evidenceId: accepted.id,
+        raw: "See [[pages/page-1]]."
+      }
     })
   })
 
   it("marks a page linked only via a dependency as non-orphan on both endpoints", () => {
-    const dependant: MemoryPage = {
-      ...fixturePage(1),
-      relationships: [{ kind: "dependency", target: "pages/page-2" }]
-    }
+    const dependant = fixturePage(1)
     const target = fixturePage(2)
-    const view = buildBoundedGraphView([dependant, target], [], { limit: 10 })
+    const accepted = relationshipEvidence(dependant, target, "dependency", "BODY_SENTINEL_1")
+    const view = buildBoundedGraphView([dependant, target], [], { limit: 10 }, {}, [accepted])
     const dependantNode = view.nodes.find((node) => node.pageId === "page-1")
     const targetNode = view.nodes.find((node) => node.pageId === "page-2")
     // Dependency edge connects both — the same definition the dashboard now uses.

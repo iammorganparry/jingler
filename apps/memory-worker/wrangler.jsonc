@@ -30,7 +30,16 @@
     "TURBOPUFFER_BASE_URL": "https://api.turbopuffer.com",
     // Client-side OpenAI embedding model. Non-secret; text-embedding-3-small emits
     // 1536-dim vectors, stored as explicit vectors in turbopuffer.
-    "OPENAI_EMBED_MODEL": "text-embedding-3-small"
+    "OPENAI_EMBED_MODEL": "text-embedding-3-small",
+    // R2 rollout: 10% of eligible sessions receive silent end-of-turn reflection.
+    // Extraction remains review-only; automatic publication and relationships stay off.
+    "MEMORY_ROLLOUT_REVISION": "r2-reflection-10-2026-08-06",
+    "MEMORY_REFLECTION_ROLLOUT_BPS": "1000",
+    "MEMORY_EXTRACTION_ROLLOUT_BPS": "10000",
+    "MEMORY_EXTRACTION_MODE": "review",
+    "MEMORY_AUTO_PUBLICATION_ROLLOUT_BPS": "0",
+    "MEMORY_RELATIONSHIP_ROLLOUT_BPS": "0",
+    "MEMORY_SOURCE_PUBLICATION_POLICY": "web=review,url=review,file=review,conversation=review,repository=review,manual=auto,other=review"
   },
   "workflows": [
     {

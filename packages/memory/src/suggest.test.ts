@@ -8,7 +8,8 @@ import {
   canonicalJson,
   parseMemoryPage,
   serializeMemoryGraph,
-  type MemoryPage
+  type MemoryPage,
+  type MemoryRelationshipEvidence
 } from "./index.js"
 import {
   SUGGESTION_POLICY_DEFAULT,
@@ -102,7 +103,10 @@ describe("lexical suggestions", () => {
 })
 
 describe("materialize policy", () => {
-  const graphOf = (pages: ReadonlyArray<MemoryPage>) => buildMemoryGraph(pages)
+  const graphOf = (
+    pages: ReadonlyArray<MemoryPage>,
+    relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
+  ) => buildMemoryGraph(pages, [], relationships)
 
   it("08.2 excludes self-pairs and already-wikilinked pairs", () => {
     // a links to b, so an a↔b suggestion must be suppressed when excludeExplicit.
@@ -110,7 +114,25 @@ describe("materialize policy", () => {
       page("alpha", "Shared vocabulary about turbines and rotors and blades.", { links: ["beta"] }),
       page("beta", "Shared vocabulary about turbines and rotors and blades.")
     ]
-    const graph = graphOf(pages)
+    const source = pages[0]!
+    const quote = "See [[beta]]."
+    const start = source.body.indexOf(quote)
+    const graph = graphOf(pages, [
+      {
+        id: "evidence:alpha-beta",
+        relationshipId: "relationship:alpha-beta",
+        kind: "wikilink",
+        sourcePageId: "alpha",
+        targetPageId: "beta",
+        sourceRevisionId: "revision:alpha:1",
+        start,
+        end: start + quote.length,
+        quote,
+        compilerEvidence: { sourceId: "source", start: 0, end: quote.length, quote },
+        acceptedBy: "reviewer",
+        acceptedAt: "2026-08-06T12:00:00.000Z"
+      }
+    ])
     const suggestions = buildLexicalSuggestions(pages, SUGGESTION_POLICY_DEFAULT, graph)
     expect(suggestions).toHaveLength(0)
 

@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import {
   serializeMemoryMarkdown,
+  type MemoryCompilerCandidateResult,
   type MemoryPage,
   type MemorySource
 } from "@jingler/memory"
@@ -22,9 +23,14 @@ import { InMemoryVaultState, TeamVault } from "../team-vault.js"
 import {
   runCompilerWorkflow,
   compilerPageIdentity,
-  type CompilerContext,
-  type CompilerGeneratedProposal,
+  CompilerWorkflowError,
+  extractCompilerClaimEvidenceWithFilters,
+  MAX_COMPILER_MATCH_BODY_CHARACTERS,
+  MAX_COMPILER_RELATIONSHIP_CANDIDATES,
+  relationshipCandidatesForCompiler,
+  selectCompilerCandidates,
   type CompilerModel,
+  type CompilerModelInput,
   type CompilerRepository,
   type CompilerWorkflowInput,
   type WorkflowStepLike
@@ -67,10 +73,7 @@ const compiledPage = (
 ): MemoryPage => ({
   ...accepted,
   revision: accepted.revision + 1,
-  citations: [
-    ...accepted.citations,
-    { id: `${accepted.id}-session`, sourceId: compilerSource.id }
-  ],
+  citations: [...accepted.citations, { id: `${accepted.id}-session`, sourceId: compilerSource.id }],
   relationships,
   body
 })
@@ -81,6 +84,24 @@ class ImmediateStep implements WorkflowStepLike {
   async do<Result>(name: string, callback: () => Promise<Result> | Result): Promise<Result> {
     this.names.push(name)
     return callback()
+  }
+}
+
+class RetryingWorkflowStep extends ImmediateStep {
+  readonly attempts = new Map<string, number>()
+
+  override async do<Result>(name: string, callback: () => Promise<Result> | Result): Promise<Result> {
+    let last: unknown
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      this.attempts.set(name, attempt)
+      try {
+        return await callback()
+      } catch (error) {
+        last = error
+        if (error instanceof Error && error.name === "NonRetryableError") throw error
+      }
+    }
+    throw last
   }
 }
 
@@ -132,35 +153,39 @@ class VaultCompilerRepository implements CompilerRepository {
 class FixtureModel implements CompilerModel {
   calls = 0
 
-  async generate(context: CompilerContext): Promise<CompilerGeneratedProposal> {
+  async generate({ context }: CompilerModelInput): Promise<MemoryCompilerCandidateResult> {
     this.calls += 1
     const byId = new Map(context.candidates.map((candidate) => [candidate.page.id, candidate]))
     const alpha = byId.get("alpha")!
     const beta = byId.get("beta")!
+    const [alphaEvidence, betaEvidence] = context.claimEvidence
+    if (alphaEvidence === undefined || betaEvidence === undefined) throw new Error("fixture evidence missing")
     return {
-      selection: "update",
-      changeKind: "factual",
-      drafts: [
+      status: "candidates",
+      candidates: [
         {
-          pageId: alpha.page.id,
-          baseRevisionId: alpha.revisionId,
-          markdown: serializeMemoryMarkdown(
-            compiledPage(
-              alpha.page,
-              "# Alpha rollout\n\nThe alpha rollout depends on [[Beta runbook]]. [@alpha-session]\n",
-              [{ kind: "dependency", target: "beta" }]
-            )
-          )
+          claim: alphaEvidence.claim,
+          evidence: { ...alphaEvidence, sourceId: context.source.id },
+          durabilityReason: "durable_relationship",
+          sensitivity: "standard",
+          targetIdentity: {
+            action: "update",
+            pageId: alpha.page.id,
+            revisionId: alpha.revisionId
+          },
+          relationshipSuggestions: [{ kind: "dependency", target: beta.page.id }]
         },
         {
-          pageId: beta.page.id,
-          baseRevisionId: beta.revisionId,
-          markdown: serializeMemoryMarkdown(
-            compiledPage(
-              beta.page,
-              "# Beta runbook\n\nThe beta canary uses a reversible rollout. [@beta-session]\n"
-            )
-          )
+          claim: betaEvidence.claim,
+          evidence: { ...betaEvidence, sourceId: context.source.id },
+          durabilityReason: "stable_convention",
+          sensitivity: "standard",
+          targetIdentity: {
+            action: "update",
+            pageId: beta.page.id,
+            revisionId: beta.revisionId
+          },
+          relationshipSuggestions: []
         }
       ]
     }
@@ -182,17 +207,21 @@ const workflowInput: CompilerWorkflowInput = {
 const seedVault = async (bucket = new InMemoryR2Bucket()): Promise<TeamVault> => {
   const vault = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), bucket))
   await run(vault.ingestSource(baseSource, "Base evidence"))
-  await run(vault.ingestSource(
-    compilerSource,
-    "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
-  ))
+  await run(
+    vault.ingestSource(
+      compilerSource,
+      "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
+    )
+  )
   for (const accepted of [page("alpha"), page("beta")]) {
-    await run(vault.ingestAcceptedPage({
-      revisionId: `revision-${accepted.id}-1`,
-      markdown: serializeMemoryMarkdown(accepted),
-      actorId: "seed-author",
-      createdAt: "2026-07-01T00:00:00.000Z"
-    }))
+    await run(
+      vault.ingestAcceptedPage({
+        revisionId: `revision-${accepted.id}-1`,
+        markdown: serializeMemoryMarkdown(accepted),
+        actorId: "seed-author",
+        createdAt: "2026-07-01T00:00:00.000Z"
+      })
+    )
   }
   return vault
 }
@@ -263,7 +292,10 @@ class SharedCompilerBinding implements WorkflowBindingLike<CompilerWorkflowInput
   }): Promise<WorkflowInstanceLike> {
     const existing = this.instances.get(options.id)
     if (existing !== undefined) return existing
-    const instance = new TestWorkflowInstance(options.id, { status: "complete", output: this.output })
+    const instance = new TestWorkflowInstance(options.id, {
+      status: "complete",
+      output: this.output
+    })
     this.instances.set(options.id, instance)
     return instance
   }
@@ -286,6 +318,143 @@ const serviceRequest = (path: string, method = "GET", body?: unknown): Request =
     ...(body === undefined ? {} : { body: JSON.stringify(body) })
   })
 
+describe("compiler claim privacy filter", () => {
+  it("keeps exact durable evidence while dropping digest labels, progress, and ephemeral detail", () => {
+    const content = [
+      "## Session digest",
+      "User: Please investigate retry races.",
+      "I am currently working on the retry tests.",
+      "The refund worker must share one concurrency limiter because independent limits exceed the provider cap.",
+      "The temporary output is in /tmp/jingler/refunds.ts at line 42.",
+      "Tests: 18 tests passed."
+    ].join("\n")
+    const result = extractCompilerClaimEvidenceWithFilters(content)
+
+    expect(result.claims.map(({ claim }) => claim)).toEqual([
+      "The refund worker must share one concurrency limiter because independent limits exceed the provider cap."
+    ])
+    const [claim] = result.claims
+    expect(content.slice(claim!.start, claim!.end)).toBe(claim!.quote)
+    expect(new Set(result.filtered.map(({ reason }) => reason))).toEqual(
+      new Set(["label", "progress", "ephemeral"])
+    )
+  })
+
+  it("drops corrected claims, credentials, personal data, and sensitive categories", () => {
+    const content = [
+      "The queue permits twelve concurrent refunds.",
+      "Correction: the queue permits four concurrent refunds.",
+      // biome-ignore lint/security/noSecrets: deliberately credential-shaped redacted fixture.
+      "api_key = sk-example12345678901234567890",
+      "The account owner is person@example.com.",
+      "The operator has a medical diagnosis recorded in the incident notes.",
+      "Refund jobs preserve the idempotency key across every network retry."
+    ].join("\n")
+    const result = extractCompilerClaimEvidenceWithFilters(content)
+
+    expect(result.claims.map(({ claim }) => claim)).toEqual([
+      "Refund jobs preserve the idempotency key across every network retry."
+    ])
+    expect(new Set(result.filtered.map(({ reason }) => reason))).toEqual(
+      new Set(["correction", "credential", "personal_data", "sensitive_category"])
+    )
+  })
+})
+
+describe("compiler accepted-page matching", () => {
+  it("ranks bounded body evidence ahead of an identity-only lexical match", () => {
+    const identityOnly: MemoryPage = {
+      ...page("alpha"),
+      id: "refund-retries",
+      path: "refund-retries.md",
+      title: "Refund retries",
+      tags: ["refunds"],
+      body: "# Refund retries\n\nThis page only describes the customer-visible retry schedule."
+    }
+    const bodyMatch: MemoryPage = {
+      ...page("beta"),
+      id: "operations",
+      path: "operations.md",
+      title: "Operations",
+      tags: ["operations"],
+      body: "# Operations\n\nRefund retries share one concurrency limiter across workers to preserve the provider cap."
+    }
+    const beyondBound: MemoryPage = {
+      ...page("alpha"),
+      id: "archive",
+      path: "archive.md",
+      title: "Archive",
+      tags: [],
+      body: `${"padding ".repeat(MAX_COMPILER_MATCH_BODY_CHARACTERS / 8 + 2)}Refund retries share one concurrency limiter.`
+    }
+    const selected = selectCompilerCandidates(
+      [identityOnly, bodyMatch, beyondBound].map((candidate) => ({
+        page: candidate,
+        revisionId: `${candidate.id}-r1`
+      })),
+      ["Refund retries share one concurrency limiter across workers."]
+    )
+
+    expect(selected.map(({ page: candidate }) => candidate.id)).toEqual([
+      "operations",
+      "refund-retries"
+    ])
+  })
+
+  it("generates bounded deterministic relationship candidates only for accepted page endpoints", () => {
+    const alpha = { page: page("alpha"), revisionId: "alpha-r1" }
+    const beta = { page: page("beta"), revisionId: "beta-r1" }
+    const evidence = {
+      sourceId: compilerSource.id,
+      start: 0,
+      end: 47,
+      quote: "Alpha rollout depends on the beta runbook."
+    }
+    const acceptedCandidate: MemoryCompilerCandidateResult = {
+      status: "candidates",
+      candidates: [
+        {
+          claim: evidence.quote,
+          evidence,
+          durabilityReason: "durable_relationship",
+          sensitivity: "standard",
+          targetIdentity: { action: "update", pageId: "alpha", revisionId: "alpha-r1" },
+          relationshipSuggestions: [
+            ...Array.from({ length: MAX_COMPILER_RELATIONSHIP_CANDIDATES + 2 }, () => ({
+              kind: "dependency" as const,
+              target: "beta"
+            })),
+            { kind: "dependency", target: "missing" }
+          ]
+        },
+        {
+          claim: "A newly created page cannot form an accepted relationship yet.",
+          evidence: { ...evidence, quote: "A newly created page cannot form an accepted relationship yet." },
+          durabilityReason: "durable_relationship",
+          sensitivity: "standard",
+          targetIdentity: { action: "create", pageId: "new", path: "new.md", title: "New" },
+          relationshipSuggestions: [{ kind: "wikilink", target: "beta" }]
+        }
+      ]
+    }
+    const relationships = relationshipCandidatesForCompiler(
+      acceptedCandidate.candidates,
+      [alpha, beta],
+      "agent-1",
+      workflowInput.createdAt
+    )
+
+    expect(relationships).toHaveLength(1)
+    expect(relationships[0]).toMatchObject({
+      kind: "dependency",
+      sourcePageId: "alpha",
+      targetPageId: "beta",
+      compilerEvidence: evidence,
+      status: "open"
+    })
+  })
+})
+
 describe("durable memory compiler workflow", () => {
   it("compiles a stored source with the bounded deterministic model", async () => {
     const vault = await seedVault()
@@ -295,6 +464,7 @@ describe("durable memory compiler workflow", () => {
       new ImmediateStep()
     )
     expect(result.status).toBe("pending_review")
+    if (!("proposalId" in result)) throw new Error("expected proposal result")
     const proposals = (await run(vault.snapshot())).proposals
     expect(proposals.length).toBeGreaterThan(0)
     expect(proposals.length).toBeLessThanOrEqual(3)
@@ -302,54 +472,235 @@ describe("durable memory compiler workflow", () => {
     expect((await run(vault.listPages())).every((head) => head.revision === 1)).toBe(true)
   })
 
-  it("auto-publishes factual changes by default without waiting for a human review", async () => {
+  it("auto-publishes standard non-session facts while keeping relationship review pending", async () => {
     const vault = await seedVault()
+    const manualSource: MemorySource = { ...compilerSource, id: "source-manual", kind: "manual" }
+    await run(
+      vault.ingestSource(
+        manualSource,
+        "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
+      )
+    )
     const result = await runCompilerWorkflow(
-      // No requireReview: the default trust model publishes straight to the vault.
-      { ...workflowInput, workflowId: "compiler-auto-accept", requireReview: false },
+      {
+        ...workflowInput,
+        workflowId: "compiler-auto-accept",
+        sourceId: manualSource.id,
+        requireReview: false
+      },
       new VaultCompilerRepository(vault),
       new ImmediateStep()
     )
-    expect(result.status).toBe("published")
-    // A factual edit moved an accepted head forward — no proposal is left waiting.
+    expect(result.status).toBe("pending_review")
+    // Factual edits move accepted heads while the first relationship edges stay review-gated.
     expect((await run(vault.listPages())).some((head) => head.revision >= 2)).toBe(true)
   })
 
+  it("keeps conversation sources review-only until the explicit rollout gate is enabled", async () => {
+    const gatedVault = await seedVault()
+    const gated = await runCompilerWorkflow(
+      {
+        ...workflowInput,
+        workflowId: "compiler-session-gated",
+        requireReview: false
+      },
+      new VaultCompilerRepository(gatedVault),
+      new ImmediateStep()
+    )
+    expect(gated.status).toBe("pending_review")
+    expect((await run(gatedVault.listPages())).map((head) => head.revision)).toEqual([1, 1])
+
+    const rolloutVault = await seedVault()
+    const enabled = await runCompilerWorkflow(
+      {
+        ...workflowInput,
+        workflowId: "compiler-session-rollout-enabled",
+        requireReview: false,
+        allowSessionAutoPublish: true
+      },
+      new VaultCompilerRepository(rolloutVault),
+      new ImmediateStep()
+    )
+    expect(enabled.status).toBe("pending_review")
+    expect((await run(rolloutVault.listPages())).some((head) => head.revision === 2)).toBe(true)
+  })
+
+  it("keeps high-risk candidate classes review-only for non-session sources", async () => {
+    const vault = await seedVault()
+    const manualSource: MemorySource = { ...compilerSource, id: "source-preference", kind: "manual" }
+    await run(
+      vault.ingestSource(
+        manualSource,
+        "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
+      )
+    )
+    const preferenceModel: CompilerModel = {
+      generate: async (input) => {
+        const result = await new FixtureModel().generate(input)
+        return result.status === "candidates"
+          ? {
+              ...result,
+              candidates: result.candidates.map((candidate) => ({
+                ...candidate,
+                sensitivity: "preference" as const
+              }))
+            }
+          : result
+      }
+    }
+    const result = await runCompilerWorkflow(
+      {
+        ...workflowInput,
+        workflowId: "compiler-preference-review",
+        sourceId: manualSource.id,
+        requireReview: false
+      },
+      new VaultCompilerRepository(vault),
+      new ImmediateStep(),
+      preferenceModel
+    )
+    expect(result.status).toBe("pending_review")
+    expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([1, 1])
+  })
+
   it("creates a new cited page when the vault is empty", async () => {
-    const vault = await run(TeamVault.create(
-      "org-compiler",
-      new InMemoryVaultState(),
-      new InMemoryR2Bucket()
-    ))
-    await run(vault.ingestSource(
-      compilerSource,
-      "A refund retry must preserve the idempotency key for every network attempt."
-    ))
+    const vault = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), new InMemoryR2Bucket()))
+    await run(
+      vault.ingestSource(compilerSource, "A refund retry must preserve the idempotency key for every network attempt.")
+    )
     const result = await runCompilerWorkflow(
       { ...workflowInput, workflowId: "compiler-new-page" },
       new VaultCompilerRepository(vault),
       new ImmediateStep()
     )
     expect(result.status).toBe("pending_review")
+    if (!("proposalId" in result)) throw new Error("expected proposal result")
     const [proposal] = (await run(vault.snapshot())).proposals
-    expect(proposal).toMatchObject({ baseRevisionId: "new", path: expect.stringMatching(/^learnings\//) })
-    const approval = await run(vault.approveProposalSet(
-      result.proposalId,
-      "reviewer-new-page",
-      "2026-08-01T12:00:00.000Z"
-    ))
+    expect(proposal).toMatchObject({
+      baseRevisionId: "new",
+      path: expect.stringMatching(/^learnings\//)
+    })
+    const approval = await run(
+      vault.approveProposalSet(result.proposalId, "reviewer-new-page", "2026-08-01T12:00:00.000Z")
+    )
     expect(approval.status).toBe("accepted")
     expect(await run(vault.listPages())).toEqual([
-      expect.objectContaining({ pageId: expect.stringMatching(/^learning-/), revision: 1 })
+      expect.objectContaining({
+        pageId: expect.stringMatching(/^learning-/),
+        revision: 1
+      })
     ])
   })
 
+  it("settles empty and already-durable sources as successful no-learning outcomes", async () => {
+    const emptyVault = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), new InMemoryR2Bucket()))
+    const emptySource = { ...compilerSource, id: "source-no-claims" }
+    await run(emptyVault.ingestSource(emptySource, "short"))
+    await expect(
+      runCompilerWorkflow(
+        {
+          ...workflowInput,
+          workflowId: "compiler-no-claims",
+          sourceId: emptySource.id
+        },
+        new VaultCompilerRepository(emptyVault),
+        new ImmediateStep()
+      )
+    ).resolves.toMatchObject({
+      status: "no_durable_learning",
+      reason: "no_bounded_claims",
+      sourceId: emptySource.id
+    })
+
+    const vault = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), new InMemoryR2Bucket()))
+    const replaySource = { ...compilerSource, id: "source-replay" }
+    await run(vault.ingestSource(replaySource, "A webhook retry must preserve its delivery key."))
+    const input = {
+      ...workflowInput,
+      workflowId: "compiler-replay-first",
+      sourceId: replaySource.id
+    }
+    const first = await runCompilerWorkflow(input, new VaultCompilerRepository(vault), new ImmediateStep())
+    if (first.status !== "pending_review") throw new Error("expected pending review")
+    expect(
+      (await run(vault.approveProposalSet(first.proposalId, "reviewer-replay", "2026-08-01T12:00:00.000Z"))).status
+    ).toBe("accepted")
+    await expect(
+      runCompilerWorkflow(
+        { ...input, workflowId: "compiler-replay-second" },
+        new VaultCompilerRepository(vault),
+        new ImmediateStep()
+      )
+    ).resolves.toMatchObject({
+      status: "no_durable_learning",
+      reason: "already_durable"
+    })
+  })
+
+  it("returns safe typed lint failures without workflow retries", async () => {
+    const vault = await seedVault()
+    const base = new VaultCompilerRepository(vault)
+    const repository: CompilerRepository = {
+      readSource: (sourceId) => base.readSource(sourceId),
+      listAcceptedPages: () => base.listAcceptedPages(),
+      readNavigation: () => base.readNavigation(),
+      createProposalSet: async () => {
+        throw new CompilerWorkflowError("proposal validation failed", "lint_validation", [
+          "duplicate-identity",
+          "broken-citation",
+          "duplicate-identity"
+        ])
+      },
+      approveProposalSet: (id, reviewer, at) => base.approveProposalSet(id, reviewer, at)
+    }
+    const step = new RetryingWorkflowStep()
+    await expect(
+      runCompilerWorkflow(
+        { ...workflowInput, workflowId: "compiler-permanent-lint" },
+        repository,
+        step,
+        new FixtureModel()
+      )
+    ).resolves.toEqual({
+      workflowId: "compiler-permanent-lint",
+      sourceId: compilerSource.id,
+      status: "permanent_failure",
+      code: "lint_validation",
+      issueCodes: ["broken-citation", "duplicate-identity"]
+    })
+    expect(step.attempts.get("05-lint-and-persist-proposal")).toBe(1)
+  })
+
+  it("rejects model-authored page drafts as a permanent invalid structured result", async () => {
+    const vault = await seedVault()
+    const step = new RetryingWorkflowStep()
+    const pageShapedModel: CompilerModel = {
+      generate: async () => ({
+        selection: "create",
+        drafts: [{ markdown: "# Unconstrained model output" }]
+      })
+    }
+
+    await expect(
+      runCompilerWorkflow(
+        { ...workflowInput, workflowId: "compiler-page-shaped-model" },
+        new VaultCompilerRepository(vault),
+        step,
+        pageShapedModel
+      )
+    ).resolves.toEqual({
+      workflowId: "compiler-page-shaped-model",
+      sourceId: compilerSource.id,
+      status: "permanent_failure",
+      code: "invalid_proposal",
+      issueCodes: []
+    })
+    expect(step.attempts.get("04b-validate-and-materialize-candidates")).toBe(1)
+    expect((await run(vault.snapshot())).proposals).toEqual([])
+  })
+
   it("uses organization-and-source identity for generic titles and updates its owned page", async () => {
-    const vault = await run(TeamVault.create(
-      "org-compiler",
-      new InMemoryVaultState(),
-      new InMemoryR2Bucket()
-    ))
+    const vault = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), new InMemoryR2Bucket()))
     const first: MemorySource = {
       ...compilerSource,
       id: "source-generic-one",
@@ -362,19 +713,29 @@ describe("durable memory compiler workflow", () => {
     }
     await run(vault.ingestSource(first, "A webhook retry must preserve its delivery key."))
     await run(vault.ingestSource(second, "A queue retry must preserve its ordering key."))
-    const firstInput = { ...workflowInput, workflowId: "compiler-generic-one", sourceId: first.id }
-    const secondInput = { ...workflowInput, workflowId: "compiler-generic-two", sourceId: second.id }
+    const firstInput = {
+      ...workflowInput,
+      workflowId: "compiler-generic-one",
+      sourceId: first.id
+    }
+    const secondInput = {
+      ...workflowInput,
+      workflowId: "compiler-generic-two",
+      sourceId: second.id
+    }
     const firstResult = await runCompilerWorkflow(firstInput, new VaultCompilerRepository(vault), new ImmediateStep())
     const secondResult = await runCompilerWorkflow(secondInput, new VaultCompilerRepository(vault), new ImmediateStep())
+    const replayedFirst = await runCompilerWorkflow(firstInput, new VaultCompilerRepository(vault), new ImmediateStep())
     expect(firstResult.status).toBe("pending_review")
     expect(secondResult.status).toBe("pending_review")
-    const identities = [first, second].map((source) =>
-      compilerPageIdentity("org-compiler", source.id, source.title).pageId
+    expect(replayedFirst).toEqual(firstResult)
+    const identities = [first, second].map(
+      (source) => compilerPageIdentity("org-compiler", source.id, source.title).pageId
     )
     expect(new Set(identities).size).toBe(2)
-    expect((await run(vault.snapshot())).proposals.map((proposal) => proposal.pageId).sort())
-      .toEqual([...identities].sort())
-
+    expect((await run(vault.snapshot())).proposals.map((proposal) => proposal.pageId).sort()).toEqual(
+      [...identities].sort()
+    )
   })
 
   it("creates a cited multi-page pending proposal without moving accepted heads and retries idempotently", async () => {
@@ -408,12 +769,200 @@ describe("durable memory compiler workflow", () => {
       proposalId: `proposal:${workflowInput.workflowId}`
     })
     expect((await run(vault.snapshot())).proposalSets).toHaveLength(1)
+    const [storedSet] = (await run(vault.snapshot())).proposalSets
+    expect(storedSet?.relationshipCandidates).toHaveLength(1)
+    expect(storedSet?.relationshipCandidates[0]).toMatchObject({
+      sourcePageId: "alpha",
+      targetPageId: "beta",
+      kind: "dependency",
+      status: "open"
+    })
     expect((await run(vault.snapshot())).proposals).toHaveLength(2)
     expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([1, 1])
     for (const proposal of (await run(vault.snapshot())).proposals) {
       expect(proposal.status).toBe("open")
       expect(proposal.markdown).toContain(`"sourceId":"${compilerSource.id}"`)
+      expect(proposal.markdown).not.toContain('"kind":"dependency","target":"beta"')
     }
+  })
+
+  it("rejects unresolved and unsupported relationship candidates before persistence", async () => {
+    const unresolvedVault = await seedVault()
+    const unresolvedModel: CompilerModel = {
+      generate: async (input) => {
+        const generated = await new FixtureModel().generate(input)
+        if (generated.status !== "candidates") return generated
+        return {
+          ...generated,
+          candidates: generated.candidates.map((candidate, index) =>
+            index === 0
+              ? {
+                  ...candidate,
+                  relationshipSuggestions: [{ kind: "dependency" as const, target: "missing-page" }]
+                }
+              : candidate
+          )
+        }
+      }
+    }
+    await expect(
+      runCompilerWorkflow(
+        { ...workflowInput, workflowId: "compiler-broken-relationship" },
+        new VaultCompilerRepository(unresolvedVault),
+        new ImmediateStep(),
+        unresolvedModel
+      )
+    ).resolves.toMatchObject({ status: "permanent_failure", code: "invalid_proposal" })
+    expect((await run(unresolvedVault.snapshot())).proposalSets).toEqual([])
+
+    const unsupportedVault = await seedVault()
+    const alpha = await run(unsupportedVault.readPage("alpha"))
+    const proposalPage = compiledPage(
+      alpha.page,
+      `${alpha.page.body}\n\n## Durable learnings\n\n- A different supported claim. [@alpha-session]\n`
+    )
+    await expect(
+      run(
+        unsupportedVault.createProposalSet({
+          id: "proposal:unsupported-relationship",
+          workflowId: "unsupported-relationship",
+          sourceId: compilerSource.id,
+          proposedBy: "agent-1",
+          createdAt: workflowInput.createdAt,
+          changeKind: "factual",
+          drafts: [
+            {
+              pageId: "alpha",
+              baseRevisionId: alpha.revision.id,
+              markdown: serializeMemoryMarkdown(proposalPage)
+            }
+          ],
+          relationshipCandidates: [
+            {
+              id: "relationship:unsupported",
+              kind: "dependency",
+              sourcePageId: "alpha",
+              targetPageId: "beta",
+              claim: "Alpha depends on unsupported evidence.",
+              compilerEvidence: {
+                sourceId: compilerSource.id,
+                start: 0,
+                end: 44,
+                quote: "Alpha rollout depends on the beta runbook."
+              },
+              proposedBy: "agent-1",
+              createdAt: workflowInput.createdAt,
+              status: "open"
+            }
+          ]
+        })
+      )
+    ).rejects.toThrow(/not supported by its proposed source page/)
+    expect((await run(unsupportedVault.snapshot())).proposalSets).toEqual([])
+  })
+
+  it("reviews relationship candidates independently without changing factual page review state", async () => {
+    const vault = await seedVault()
+    const result = await runCompilerWorkflow(
+      { ...workflowInput, workflowId: "compiler-independent-relationship-review" },
+      new VaultCompilerRepository(vault),
+      new ImmediateStep(),
+      new FixtureModel()
+    )
+    if (!("proposalId" in result)) throw new Error("expected proposal result")
+    const [relationship] = (await run(vault.getProposalSet(result.proposalId))).relationshipCandidates
+    if (relationship === undefined) throw new Error("expected relationship candidate")
+
+    await expect(
+      run(vault.approveRelationshipCandidate(relationship.id, "reviewer-1", "2026-08-01T11:00:00.000Z"))
+    ).resolves.toMatchObject({ status: "conflict", reason: /factual page proposal/ })
+
+    await expect(
+      run(vault.approveProposalSet(result.proposalId, "reviewer-1", "2026-08-01T12:00:00.000Z"))
+    ).resolves.toMatchObject({ status: "accepted" })
+    expect((await run(vault.getProposalSet(result.proposalId))).status).toBe("accepted")
+    expect((await run(vault.getProposalSet(result.proposalId))).relationshipCandidates[0]?.status).toBe("open")
+
+    const accepted = await run(
+      vault.approveRelationshipCandidate(relationship.id, "reviewer-2", "2026-08-01T13:00:00.000Z")
+    )
+    expect(accepted).toMatchObject({
+      status: "accepted",
+      proposalId: relationship.id,
+      evidence: {
+        relationshipId: relationship.id,
+        sourcePageId: "alpha",
+        targetPageId: "beta",
+        sourceRevisionId: `revision:${result.proposalId}:page:alpha`,
+        acceptedBy: "reviewer-2"
+      }
+    })
+    await expect(
+      run(vault.approveRelationshipCandidate(relationship.id, "reviewer-3", "2026-08-01T14:00:00.000Z"))
+    ).resolves.toEqual(accepted)
+    expect((await run(vault.getProposalSet(result.proposalId))).status).toBe("accepted")
+    expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([2, 2])
+
+    const rejectionVault = await seedVault()
+    const rejectionResult = await runCompilerWorkflow(
+      { ...workflowInput, workflowId: "compiler-independent-relationship-rejection" },
+      new VaultCompilerRepository(rejectionVault),
+      new ImmediateStep(),
+      new FixtureModel()
+    )
+    if (!("proposalId" in rejectionResult)) throw new Error("expected proposal result")
+    const [rejectedRelationship] = (await run(rejectionVault.getProposalSet(rejectionResult.proposalId)))
+      .relationshipCandidates
+    if (rejectedRelationship === undefined) throw new Error("expected relationship candidate")
+    await run(
+      rejectionVault.approveProposalSet(
+        rejectionResult.proposalId,
+        "reviewer-1",
+        "2026-08-01T12:00:00.000Z"
+      )
+    )
+    await expect(
+      run(
+        rejectionVault.rejectRelationshipCandidate(
+          rejectedRelationship.id,
+          "reviewer-2",
+          "2026-08-01T13:00:00.000Z"
+        )
+      )
+    ).resolves.toEqual({ status: "rejected", proposalId: rejectedRelationship.id })
+    expect((await run(rejectionVault.getProposalSet(rejectionResult.proposalId))).status).toBe("accepted")
+    expect((await run(rejectionVault.listPages())).map((head) => head.revision)).toEqual([2, 2])
+  })
+
+  it("recovers a transient lost response inside the workflow retry boundary", async () => {
+    const vault = await seedVault()
+    const base = new VaultCompilerRepository(vault)
+    let loseResponse = true
+    const repository: CompilerRepository = {
+      readSource: (sourceId) => base.readSource(sourceId),
+      listAcceptedPages: () => base.listAcceptedPages(),
+      readNavigation: () => base.readNavigation(),
+      approveProposalSet: (id, reviewer, at) => base.approveProposalSet(id, reviewer, at),
+      createProposalSet: async (input) => {
+        const created = await base.createProposalSet(input)
+        if (loseResponse) {
+          loseResponse = false
+          throw new Error("transient response loss")
+        }
+        return created
+      }
+    }
+    const step = new RetryingWorkflowStep()
+    await expect(
+      runCompilerWorkflow(
+        { ...workflowInput, workflowId: "compiler-transient-recovery" },
+        repository,
+        step,
+        new FixtureModel()
+      )
+    ).resolves.toMatchObject({ status: "pending_review" })
+    expect(step.attempts.get("05-lint-and-persist-proposal")).toBe(2)
+    expect((await run(vault.snapshot())).proposalSets).toHaveLength(1)
   })
 
   it("publishes all intended heads together and regenerates every accepted projection", async () => {
@@ -427,35 +976,74 @@ describe("durable memory compiler workflow", () => {
     )
     if (result.status !== "pending_review") throw new Error("expected pending review")
     const before = await run(captureVaultDerivedFingerprints(vault, "2026-08-02T00:00:00.000Z"))
-    const approval = await run(vault.approveProposalSet(
-      result.proposalId,
-      "reviewer-1",
-      "2026-08-01T12:00:00.000Z"
-    ))
+    const approval = await run(vault.approveProposalSet(result.proposalId, "reviewer-1", "2026-08-01T12:00:00.000Z"))
     expect(approval.status).toBe("accepted")
+    expect(
+      (await run(vault.snapshot())).funnelTransitions.find((transition) => transition.outcome === "published")
+    ).toMatchObject({
+      workflowId: workflowInput.workflowId,
+      proposalSetId: result.proposalId,
+      publicationIds: [result.proposalId]
+    })
     expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([2, 2])
     expect(await run(vault.search("reversible rollout", 10, "2026-08-02T00:00:00.000Z"))).toMatchObject({
       total: 1,
       results: [{ pageId: "beta", revision: 2 }]
     })
     const navigation = await run(vault.navigation())
-    expect(navigation.indexMarkdown).toContain("backlinks: alpha")
     expect(navigation.logMarkdown).toContain("alpha@2")
     expect(navigation.logMarkdown).toContain("beta@2")
-    const graph = await run(vault.graph({ limit: 20 }, "2026-08-02T00:00:00.000Z"))
-    expect(graph.edges.some((edge) => edge.kind === "wikilink" && edge.sourceId === "page:alpha")).toBe(
-      true
+    const graphBeforeRelationshipReview = await run(
+      vault.graph({ limit: 20 }, "2026-08-02T00:00:00.000Z")
     )
+    expect(
+      graphBeforeRelationshipReview.edges.some(
+        (edge) =>
+          edge.kind === "dependency" && edge.sourceId === "page:alpha" && edge.targetId === "page:beta"
+      )
+    ).toBe(false)
+    const [relationship] = (await run(vault.getProposalSet(result.proposalId))).relationshipCandidates
+    if (relationship === undefined) throw new Error("expected relationship candidate")
+    await expect(
+      run(vault.approveRelationshipCandidate(relationship.id, "reviewer-2", "2026-08-01T13:00:00.000Z"))
+    ).resolves.toMatchObject({ status: "accepted" })
+    const graph = await run(vault.graph({ limit: 20 }, "2026-08-02T00:00:00.000Z"))
+    const dependency = graph.edges.find(
+      (edge) =>
+        edge.kind === "dependency" && edge.sourceId === "page:alpha" && edge.targetId === "page:beta"
+    )
+    expect(dependency).toBeDefined()
+    const edgeEvidence = await run(vault.edgeEvidence(dependency?.id ?? ""))
+    expect(edgeEvidence).toMatchObject({
+      edge: { kind: "dependency" },
+      evidence: {
+        relationshipId: relationship.id,
+        sourceRevisionId: `revision:${result.proposalId}:page:alpha`,
+        acceptedBy: "reviewer-2"
+      }
+    })
     const dashboard = await run(vault.dashboard("2026-08-02T00:00:00.000Z"))
     expect(dashboard.growth.revisions).toBe(4)
-    expect(dashboard.reviewThroughput).toMatchObject({ proposed: 2, accepted: 2, open: 0 })
+    expect(dashboard.reviewThroughput).toMatchObject({
+      proposed: 2,
+      accepted: 2,
+      open: 0
+    })
+    expect(dashboard.connectivity).toMatchObject({
+      durablePageEdges: 1,
+      connectedPages: 2
+    })
     const after = await run(captureVaultDerivedFingerprints(vault, "2026-08-02T00:00:00.000Z"))
     expect(after).not.toEqual(before)
     const reconciled = await run(reconcileVaultFromR2(vault, "2026-08-02T00:00:00.000Z"))
     expect(reconciled.converged).toBe(true)
 
     const rebuilt = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), bucket))
-    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 2, revisions: 4, sources: 2 })
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({
+      pages: 2,
+      revisions: 4,
+      sources: 2
+    })
     expect((await run(rebuilt.listPages())).map((head) => head.revision)).toEqual([2, 2])
     const rebuiltSnapshot = await run(rebuilt.snapshot())
     expect(rebuiltSnapshot.proposals.every((proposal) => proposal.status === "accepted")).toBe(true)
@@ -467,11 +1055,7 @@ describe("durable memory compiler workflow", () => {
     const vault = await seedVault()
     const step = new AcceptedReviewStep(async () => {
       const proposalId = `proposal:${workflowInput.workflowId}`
-      const approval = await run(vault.approveProposalSet(
-        proposalId,
-        "reviewer-resume",
-        "2026-08-01T12:00:00.000Z"
-      ))
+      const approval = await run(vault.approveProposalSet(proposalId, "reviewer-resume", "2026-08-01T12:00:00.000Z"))
       expect(approval.status).toBe("accepted")
     })
     const result = await runCompilerWorkflow(
@@ -480,44 +1064,37 @@ describe("durable memory compiler workflow", () => {
       step,
       new FixtureModel()
     )
-    expect(result.status).toBe("published")
+    expect(result.status).toBe("pending_review")
     expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([2, 2])
   })
 
   it("supersedes a stale proposal set without partially publishing unaffected pages", async () => {
     const vault = await seedVault()
     const repository = new VaultCompilerRepository(vault)
-    const result = await runCompilerWorkflow(
-      workflowInput,
-      repository,
-      new ImmediateStep(),
-      new FixtureModel()
-    )
+    const result = await runCompilerWorkflow(workflowInput, repository, new ImmediateStep(), new FixtureModel())
     if (result.status !== "pending_review") throw new Error("expected pending review")
     const acceptedAlpha = await run(vault.readPage("alpha"))
-    await run(vault.createProposal({
-      id: "competing-alpha",
-      pageId: "alpha",
-      baseRevisionId: acceptedAlpha.revision.id,
-      markdown: serializeMemoryMarkdown(
-        compiledPage(
-          acceptedAlpha.page,
-          "# Alpha rollout\n\nA newer alpha decision was accepted. [@alpha-session]\n"
-        )
-      ),
-      proposedBy: "other-author",
-      createdAt: "2026-08-01T11:00:00.000Z"
-    }))
-    expect(
-      await run(vault.approveProposal("competing-alpha", "reviewer", "2026-08-01T11:30:00.000Z"))
-    ).toMatchObject({ status: "accepted" })
+    await run(
+      vault.createProposal({
+        id: "competing-alpha",
+        pageId: "alpha",
+        baseRevisionId: acceptedAlpha.revision.id,
+        markdown: serializeMemoryMarkdown(
+          compiledPage(acceptedAlpha.page, "# Alpha rollout\n\nA newer alpha decision was accepted. [@alpha-session]\n")
+        ),
+        proposedBy: "other-author",
+        createdAt: "2026-08-01T11:00:00.000Z"
+      })
+    )
+    expect(await run(vault.approveProposal("competing-alpha", "reviewer", "2026-08-01T11:30:00.000Z"))).toMatchObject({
+      status: "accepted"
+    })
 
-    const stale = await run(vault.approveProposalSet(
-      result.proposalId,
-      "reviewer",
-      "2026-08-01T12:00:00.000Z"
-    ))
-    expect(stale).toMatchObject({ status: "conflict", conflicts: [{ pageId: "alpha" }] })
+    const stale = await run(vault.approveProposalSet(result.proposalId, "reviewer", "2026-08-01T12:00:00.000Z"))
+    expect(stale).toMatchObject({
+      status: "conflict",
+      conflicts: [{ pageId: "alpha" }]
+    })
     expect((await run(vault.readPage("alpha"))).page.body).toContain("newer alpha decision")
     expect((await run(vault.readPage("beta"))).page.revision).toBe(1)
     expect((await run(vault.getProposalSet(result.proposalId))).status).toBe("superseded")
@@ -546,7 +1123,11 @@ describe("durable memory compiler workflow", () => {
       }
     )
     const rebuilt = await run(TeamVault.create("org-compiler", new InMemoryVaultState(), bucket))
-    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 2, revisions: 2, sources: 2 })
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({
+      pages: 2,
+      revisions: 2,
+      sources: 2
+    })
     expect((await run(rebuilt.readPage("alpha"))).page.revision).toBe(1)
   })
 
@@ -555,14 +1136,21 @@ describe("durable memory compiler workflow", () => {
     const namespace = new SharedVaultNamespace(bucket)
     const vault = await namespace.vault("org-compiler")
     await run(vault.ingestSource(baseSource, "Base evidence"))
-    await run(vault.ingestSource(compilerSource, "Alpha and beta have a durable workflow."))
+    await run(
+      vault.ingestSource(
+        compilerSource,
+        "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
+      )
+    )
     for (const accepted of [page("alpha"), page("beta")]) {
-      await run(vault.ingestAcceptedPage({
-        revisionId: `revision-${accepted.id}-1`,
-        markdown: serializeMemoryMarkdown(accepted),
-        actorId: "seed-author",
-        createdAt: "2026-07-01T00:00:00.000Z"
-      }))
+      await run(
+        vault.ingestAcceptedPage({
+          revisionId: `revision-${accepted.id}-1`,
+          markdown: serializeMemoryMarkdown(accepted),
+          actorId: "seed-author",
+          createdAt: "2026-07-01T00:00:00.000Z"
+        })
+      )
     }
     const workflow = await runCompilerWorkflow(
       workflowInput,
@@ -583,7 +1171,7 @@ describe("durable memory compiler workflow", () => {
     const captured = await handleMemoryWorkerRequest(
       serviceRequest("/internal/memory/sources", "POST", {
         source: compilerSource,
-        content: "Alpha and beta have a durable workflow."
+        content: "Alpha rollout depends on the beta runbook. Beta canaries should use a reversible rollout."
       }),
       firstInstance
     )
@@ -612,7 +1200,10 @@ describe("durable memory compiler workflow", () => {
       }),
       firstInstance
     )
-    expect(await started.json()).toEqual({ status: "queued", workflowId: workflowInput.workflowId })
+    expect(await started.json()).toEqual({
+      status: "queued",
+      workflowId: workflowInput.workflowId
+    })
 
     const firstPoll = await handleMemoryWorkerRequest(
       serviceRequest(`/internal/memory/workflows/${workflowInput.workflowId}`),
@@ -630,14 +1221,16 @@ describe("durable memory compiler workflow", () => {
     })
 
     const reviewed = await handleMemoryWorkerRequest(
-      serviceRequest(
-        `/internal/memory/proposals/${encodeURIComponent(workflow.proposalId)}/approve`,
-        "POST",
-        { reviewerId: "reviewer-next-instance", acceptedAt: "2026-08-01T12:00:00.000Z" }
-      ),
+      serviceRequest(`/internal/memory/proposals/${encodeURIComponent(workflow.proposalId)}/approve`, "POST", {
+        reviewerId: "reviewer-next-instance",
+        acceptedAt: "2026-08-01T12:00:00.000Z"
+      }),
       secondInstance
     )
-    expect(await reviewed.json()).toMatchObject({ status: "accepted", proposalSetId: workflow.proposalId })
+    expect(await reviewed.json()).toMatchObject({
+      status: "accepted",
+      proposalSetId: workflow.proposalId
+    })
     expect((await run(vault.listPages())).map((head) => head.revision)).toEqual([2, 2])
     const resumed = await handleMemoryWorkerRequest(
       serviceRequest(`/internal/memory/workflows/${workflowInput.workflowId}`),
@@ -649,54 +1242,26 @@ describe("durable memory compiler workflow", () => {
     })
   })
 
-  it("auto-publishes only configured changes that are mechanically equivalent", async () => {
+  it("does not let a model bypass structured materialization with page or publication controls", async () => {
     const unsafeVault = await seedVault()
     const unsafeModel: CompilerModel = {
-      generate: async (context) => ({
-        ...(await new FixtureModel().generate(context)),
-        changeKind: "mechanical"
+      generate: async (input) => ({
+        ...(await new FixtureModel().generate(input)),
+        changeKind: "mechanical",
+        drafts: [{ markdown: "model-authored Markdown must be ignored" }]
       })
     }
     const unsafe = await runCompilerWorkflow(
-      { ...workflowInput, workflowId: "compiler-unsafe-mechanical", autoPublishFixes: ["canonical-markdown"] },
+      {
+        ...workflowInput,
+        workflowId: "compiler-unsafe-mechanical",
+        autoPublishFixes: ["canonical-markdown"]
+      },
       new VaultCompilerRepository(unsafeVault),
       new ImmediateStep(),
       unsafeModel
     )
     expect(unsafe.status).toBe("pending_review")
     expect((await run(unsafeVault.listPages())).map((head) => head.revision)).toEqual([1, 1])
-
-    const safeVault = await seedVault()
-    const safeModel: CompilerModel = {
-      generate: async (context) => {
-        const accepted = context.candidates.find((candidate) => candidate.page.id === "alpha")!
-        return {
-          selection: "update",
-          changeKind: "mechanical",
-          drafts: [
-            {
-              pageId: accepted.page.id,
-              baseRevisionId: accepted.revisionId,
-              markdown: serializeMemoryMarkdown({
-                ...accepted.page,
-                revision: accepted.page.revision + 1,
-                citations: [
-                  ...accepted.page.citations,
-                  { id: "alpha-session", sourceId: compilerSource.id }
-                ]
-              })
-            }
-          ]
-        }
-      }
-    }
-    const safe = await runCompilerWorkflow(
-      { ...workflowInput, workflowId: "compiler-safe-mechanical", autoPublishFixes: ["canonical-markdown"] },
-      new VaultCompilerRepository(safeVault),
-      new ImmediateStep(),
-      safeModel
-    )
-    expect(safe.status).toBe("published")
-    expect((await run(safeVault.readPage("alpha"))).page.revision).toBe(2)
   })
 })

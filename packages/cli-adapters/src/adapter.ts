@@ -681,10 +681,17 @@ export const scriptedRun =
       const memoryServer = spec.remoteMcpServers?.find(
         ({ name }) => name === "jingler-memory"
       )
-      if (memoryServer !== undefined) {
-        yield* Effect.tryPromise({
-          try: () =>
-            fetch(memoryServer.url, {
+      let scriptedMemoryCall = 0
+      const callMemoryTool = (
+        name: "memory_navigation" | "memory_search" | "memory_read" | "memory_propose" | "memory_workflow_status",
+        args: Readonly<Record<string, unknown>>
+      ): Effect.Effect<unknown> => {
+        if (memoryServer === undefined) return Effect.succeed(null)
+        scriptedMemoryCall += 1
+        const id = `scripted-memory-${sessionId}-${scriptedMemoryCall}`
+        return Effect.tryPromise({
+          try: async () => {
+            const response = await fetch(memoryServer.url, {
               method: "POST",
               headers: {
                 ...memoryServer.headers,
@@ -693,16 +700,96 @@ export const scriptedRun =
               },
               body: JSON.stringify({
                 jsonrpc: "2.0",
-                id: `scripted-memory-${sessionId}`,
+                id,
                 method: "tools/call",
-                params: {
-                  name: "memory_navigation",
-                  arguments: {}
-                }
+                params: { name, arguments: args }
               })
-            }),
+            })
+            const payload: unknown = await response.json()
+            if (typeof payload !== "object" || payload === null) return null
+            const result = "result" in payload ? payload.result : null
+            if (typeof result !== "object" || result === null || !("structuredContent" in result)) return null
+            const structured = result.structuredContent
+            return typeof structured === "object" && structured !== null && "data" in structured
+              ? structured.data
+              : null
+          },
           catch: () => null
-        }).pipe(Effect.ignore)
+        }).pipe(Effect.catchAll(() => Effect.succeed(null)))
+      }
+      if (memoryServer !== undefined) {
+        yield* callMemoryTool("memory_navigation", {})
+      }
+
+      // Natural memory-creation scenario for the built Electron contract test.
+      // The operator asks only for an investigation. The scripted harness stands
+      // in for a real agent applying the always-injected settlement rubric: it
+      // checks accepted memory, reads the plausible hit, proposes one standalone
+      // learning, and polls the compiler without narrating any of those steps.
+      if (spec.prompt.includes("concurrent refund retries bypass the cap")) {
+        const invokeMemoryTool = (name: Parameters<typeof callMemoryTool>[0], args: Readonly<Record<string, unknown>>) =>
+          Effect.gen(function* () {
+            const id = `agent-memory-${name}-${scriptedMemoryCall + 1}`
+            yield* emit({
+              _tag: "ToolStart",
+              id,
+              name: `mcp__jingler-memory__${name}`,
+              target: null
+            })
+            const data = yield* callMemoryTool(name, args)
+            yield* emit({
+              _tag: "ToolEnd",
+              id,
+              status: data === null ? "error" : "success",
+              meta: null,
+              diff: null,
+              preview: null
+            })
+            return data
+          })
+
+        yield* invokeMemoryTool("memory_search", { query: "architecture", limit: 5 })
+        yield* invokeMemoryTool("memory_read", { pageId: "alpha" })
+        const submission = yield* invokeMemoryTool("memory_propose", {
+          pageId: "refund-retry-limiter",
+          baseRevisionId: "new",
+          markdown:
+            "Concurrent refund retries must share the route token bucket; per-attempt buckets permit bursts above the cap."
+        })
+        const workflowId =
+          typeof submission === "object" &&
+          submission !== null &&
+          "workflowId" in submission &&
+          typeof submission.workflowId === "string"
+            ? submission.workflowId
+            : null
+        if (workflowId !== null) {
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const workflow = yield* invokeMemoryTool("memory_workflow_status", { workflowId })
+            const result =
+              typeof workflow === "object" && workflow !== null && "result" in workflow
+                ? workflow.result
+                : null
+            const status =
+              typeof result === "object" && result !== null && "status" in result
+                ? result.status
+                : null
+            if (
+              status === "published" ||
+              status === "pending_review" ||
+              status === "no_durable_learning" ||
+              status === "permanent_failure" ||
+              status === "conflict" ||
+              status === "rejected"
+            ) break
+          }
+        }
+        yield* emit({
+          _tag: "Assistant",
+          text: "The refund retry limiter now shares one route token bucket, so concurrent attempts cannot burst past the cap. The 429 verification passed."
+        })
+        yield* emit({ _tag: "Done", costUsd: 0.01, tokens: 180 })
+        return
       }
 
       // A deterministic busy window for queue E2E. Plan approval used to stand

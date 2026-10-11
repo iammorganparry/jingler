@@ -3,77 +3,84 @@ import {
   MEMORY_MCP_PROTOCOL_VERSION,
   MEMORY_MCP_SERVER_INFO,
   MemoryGrantResponse,
-  type MemoryPrivilege
-} from "@jingler/core"
-import { Effect, Schema } from "effect"
-import { describe, expect, it } from "vitest"
-import { POST as memoryMcpRoute } from "../app/api/mcp/route.js"
-import { checkMemoryHealth } from "./memory-health.js"
-import { handleMemorySourceRequest } from "./memory-sources.js"
-import type { OrganizationAuthorization } from "./db/repositories/organization-repository.js"
-import { isActivePaidOrganizationMetadata } from "./db/repositories/organization-repository.js"
-import { createEnv, env, loadEnv } from "./env.js"
+  type MemoryPrivilege,
+} from "@jingler/core";
+import { Effect, Schema } from "effect";
+import { describe, expect, it } from "vitest";
+import { POST as memoryMcpRoute } from "../app/api/mcp/route.js";
+import { checkMemoryHealth } from "./memory-health.js";
+import { handleMemorySourceRequest } from "./memory-sources.js";
+import type { OrganizationAuthorization } from "./db/repositories/organization-repository.js";
+import { isActivePaidOrganizationMetadata } from "./db/repositories/organization-repository.js";
+import { createEnv, env, loadEnv } from "./env.js";
 import {
   createMemoryClient,
   type JsonValue,
   type MemoryClient,
-  type MemoryClientRequest
-} from "./memory-client.js"
+  type MemoryClientRequest,
+} from "./memory-client.js";
 import {
   handleMemoryMcpRequest,
   MEMORY_MCP_INSTRUCTIONS,
   rejectMemoryMcpGet,
-  type MemoryMcpDependencies
-} from "./mcp-memory.js"
+  type MemoryMcpDependencies,
+} from "./mcp-memory.js";
 import {
   handleMemoryGrantRequest,
   issueMemoryGrant,
   MemoryGrantError,
-  verifyMemoryGrant
-} from "./memory-grant.js"
+  verifyMemoryGrant,
+} from "./memory-grant.js";
 
 const grantConfig = {
   secret: "test-memory-grant-secret",
   audience: "jingler-memory-mcp",
-  ttlSeconds: 300
-}
+  ttlSeconds: 300,
+};
 
 const authorization = (
   organizationId: string,
-  privileges: ReadonlyArray<MemoryPrivilege> = ["read", "propose"]
-): OrganizationAuthorization => ({ organizationId, role: "member", privileges })
+  privileges: ReadonlyArray<MemoryPrivilege> = ["read", "propose"],
+): OrganizationAuthorization => ({
+  organizationId,
+  role: "member",
+  privileges,
+});
 
 const issue = (
   organizationId = "org-paid",
   privileges: ReadonlyArray<MemoryPrivilege> = ["read", "propose"],
-  nowSeconds = 100
+  nowSeconds = 100,
 ) =>
   issueMemoryGrant(
     { subject: "user-1", organizationId, privileges },
     grantConfig,
     nowSeconds,
-    `grant-${organizationId}`
-  )
+    `grant-${organizationId}`,
+  );
 
 const metadata = {
   "io.modelcontextprotocol/protocolVersion": MEMORY_MCP_PROTOCOL_VERSION,
-  "io.modelcontextprotocol/clientInfo": { name: "test-client", version: "1.0.0" },
-  "io.modelcontextprotocol/clientCapabilities": {}
-}
+  "io.modelcontextprotocol/clientInfo": {
+    name: "test-client",
+    version: "1.0.0",
+  },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
 
 const requestFor = (
   method: string,
   grant: string,
   options: {
-    readonly organizationId?: string
-    readonly params?: Record<string, unknown>
-    readonly metadata?: Record<string, unknown>
-    readonly headers?: Record<string, string>
-  } = {}
+    readonly organizationId?: string;
+    readonly params?: Record<string, unknown>;
+    readonly metadata?: Record<string, unknown>;
+    readonly headers?: Record<string, string>;
+  } = {},
 ): Request => {
-  const organizationId = options.organizationId ?? "org-paid"
-  const params = options.params ?? {}
-  const name = typeof params.name === "string" ? params.name : null
+  const organizationId = options.organizationId ?? "org-paid";
+  const params = options.params ?? {};
+  const name = typeof params.name === "string" ? params.name : null;
   return new Request("https://jingler.test/api/mcp", {
     method: "POST",
     headers: {
@@ -83,187 +90,250 @@ const requestFor = (
       "mcp-method": method,
       ...(name ? { "mcp-name": name } : {}),
       "x-jingler-organization-id": organizationId,
-      ...options.headers
+      ...options.headers,
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: `${method}-1`,
       method,
-      params: { ...params, _meta: options.metadata ?? metadata }
-    })
-  })
-}
+      params: { ...params, _meta: options.metadata ?? metadata },
+    }),
+  });
+};
 
 const collectingClient = (): {
-  readonly client: MemoryClient<JsonValue>
-  readonly requests: Array<MemoryClientRequest>
+  readonly client: MemoryClient<JsonValue>;
+  readonly requests: Array<MemoryClientRequest>;
 } => {
-  const requests: Array<MemoryClientRequest> = []
+  const requests: Array<MemoryClientRequest> = [];
   return {
     requests,
     client: {
       request: (input) => {
-        requests.push(input)
+        requests.push(input);
         return Effect.succeed({
           pageId: "page-stable",
           revisionId: "revision-stable",
           sourceId: "source-stable",
-          citationId: "citation-stable"
-        })
-      }
-    }
-  }
-}
+          citationId: "citation-stable",
+        });
+      },
+    },
+  };
+};
 
 const dependenciesFor = (
   client: MemoryClient<JsonValue>,
-  expectedNow = 101
+  expectedNow = 101,
 ): MemoryMcpDependencies => ({
   verifyGrant: (grant, organizationId) =>
     verifyMemoryGrant(grant, {
       secret: grantConfig.secret,
       audience: grantConfig.audience,
       organizationId,
-      nowSeconds: expectedNow
+      nowSeconds: expectedNow,
     }),
   client,
-  requestId: () => "request-stable"
-})
+  requestId: () => "request-stable",
+});
 
 // A native codex/opencode/Claude MCP client: no bespoke Mcp-* headers, no _meta.
 const standardRequest = (
   method: string,
   grant: string,
-  body: Record<string, unknown> = {}
+  body: Record<string, unknown> = {},
 ): Request =>
   new Request("https://jingler.test/api/mcp", {
     method: "POST",
     headers: {
       authorization: `Bearer ${grant}`,
       "content-type": "application/json",
-      "x-jingler-organization-id": "org-paid"
+      "x-jingler-organization-id": "org-paid",
     },
-    body: JSON.stringify({ jsonrpc: "2.0", method, ...body })
-  })
+    body: JSON.stringify({ jsonrpc: "2.0", method, ...body }),
+  });
 
 describe("standard MCP client compatibility", () => {
   it("answers the initialize handshake, echoing the client's protocol version", async () => {
-    const grant = issue().grant
+    const grant = issue().grant;
     const response = await handleMemoryMcpRequest(
       standardRequest("initialize", grant, {
         id: 1,
-        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex", version: "1" } }
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "codex", version: "1" },
+        },
       }),
-      dependenciesFor(collectingClient().client)
-    )
-    expect(response.status).toBe(200)
-    const payload = (await response.json()) as { result: Record<string, unknown> }
-    expect(payload.result.protocolVersion).toBe("2025-06-18")
-    expect(payload.result.capabilities).toEqual({ tools: {} })
-    expect(payload.result.serverInfo).toEqual(MEMORY_MCP_SERVER_INFO)
-    expect(payload.result.instructions).toBe(MEMORY_MCP_INSTRUCTIONS)
-    expect(MEMORY_MCP_INSTRUCTIONS.length).toBeLessThanOrEqual(512)
-    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_read")
-    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_workflow_status")
-  })
+      dependenciesFor(collectingClient().client),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      result: Record<string, unknown>;
+    };
+    expect(payload.result.protocolVersion).toBe("2025-06-18");
+    expect(payload.result.capabilities).toEqual({ tools: {} });
+    expect(payload.result.serverInfo).toEqual(MEMORY_MCP_SERVER_INFO);
+    expect(payload.result.instructions).toBe(MEMORY_MCP_INSTRUCTIONS);
+    expect(MEMORY_MCP_INSTRUCTIONS.length).toBeLessThanOrEqual(512);
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_read");
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("memory_workflow_status");
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("at most three");
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain(
+      "existing-page updates require review",
+    );
+    expect(MEMORY_MCP_INSTRUCTIONS).toContain("non-pollable proposalId");
+  });
 
   it("rejects an invalid grant during initialize instead of appearing connected", async () => {
     const response = await handleMemoryMcpRequest(
       standardRequest("initialize", "not-a-real-grant", {
         id: 9,
-        params: { protocolVersion: "2025-06-18", capabilities: {} }
+        params: { protocolVersion: "2025-06-18", capabilities: {} },
       }),
-      dependenciesFor(collectingClient().client)
-    )
-    expect(response.status).toBe(401)
+      dependenciesFor(collectingClient().client),
+    );
+    expect(response.status).toBe(401);
     await expect(response.json()).resolves.toMatchObject({
-      error: { code: -32000, message: "Invalid memory grant" }
-    })
-  })
+      error: { code: -32000, message: "Invalid memory grant" },
+    });
+  });
 
   it("acks notifications/initialized with 202 and no body", async () => {
-    const grant = issue().grant
+    const grant = issue().grant;
     const response = await handleMemoryMcpRequest(
       standardRequest("notifications/initialized", grant),
-      dependenciesFor(collectingClient().client)
-    )
-    expect(response.status).toBe(202)
-    expect(await response.text()).toBe("")
-  })
+      dependenciesFor(collectingClient().client),
+    );
+    expect(response.status).toBe(202);
+    expect(await response.text()).toBe("");
+  });
 
   it("lists tools for a native client with NO bespoke headers or _meta", async () => {
-    const grant = issue().grant
+    const grant = issue().grant;
     const response = await handleMemoryMcpRequest(
       standardRequest("tools/list", grant, { id: 2 }),
-      dependenciesFor(collectingClient().client)
-    )
-    expect(response.status).toBe(200)
-    const payload = (await response.json()) as { result: { tools: ReadonlyArray<{ name: string }> } }
-    expect(payload.result.tools.length).toBeGreaterThan(0)
-  })
+      dependenciesFor(collectingClient().client),
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as {
+      result: { tools: ReadonlyArray<{ name: string }> };
+    };
+    expect(payload.result.tools.length).toBeGreaterThan(0);
+  });
 
   it("still rejects a tools/list with an invalid grant", async () => {
     const response = await handleMemoryMcpRequest(
       standardRequest("tools/list", "not-a-real-grant", { id: 3 }),
-      dependenciesFor(collectingClient().client)
-    )
-    expect(response.status).toBe(401)
-  })
-})
+      dependenciesFor(collectingClient().client),
+    );
+    expect(response.status).toBe(401);
+  });
+});
 
 describe("memory operations health", () => {
   it("reports disabled without probing Cloudflare", async () => {
-    let calls = 0
+    let calls = 0;
     const response = await checkMemoryHealth({
       enabled: false,
       workerUrl: "https://memory-worker.test",
       timeoutMs: 100,
       fetch: async () => {
-        calls += 1
-        return Response.json({ status: "ok" })
-      }
-    })
-    expect(response.status).toBe(200)
-    expect(await response.json()).toMatchObject({ status: "disabled" })
-    expect(calls).toBe(0)
-  })
+        calls += 1;
+        return Response.json({ status: "ok" });
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: "disabled" });
+    expect(calls).toBe(0);
+  });
 
   it("reports upstream readiness and bounded failure without leaking configuration", async () => {
     const ready = await checkMemoryHealth({
       enabled: true,
       workerUrl: "https://memory-worker.test",
       timeoutMs: 100,
-      fetch: async () => Response.json({ status: "ok" })
-    })
-    expect(ready.status).toBe(200)
-    expect(await ready.json()).toEqual({ status: "ok", service: "jingler-memory", upstream: "ok" })
+      fetch: async () => Response.json({ status: "ok" }),
+    });
+    expect(ready.status).toBe(200);
+    expect(await ready.json()).toEqual({
+      status: "ok",
+      service: "jingler-memory",
+      upstream: "ok",
+      rollout: null,
+    });
+
+    const rolloutReady = await checkMemoryHealth({
+      enabled: true,
+      workerUrl: "https://memory-worker.test",
+      timeoutMs: 100,
+      fetch: async () =>
+        Response.json({
+          status: "ok",
+          configuration: {
+            rollout: {
+              revision: "r1",
+              automaticStops: true,
+              reflectionBasisPoints: 1000,
+              extractionBasisPoints: 10000,
+              autoPublicationBasisPoints: 0,
+              secret: "must-not-pass-through",
+            },
+          },
+        }),
+    });
+    const rolloutBody = await rolloutReady.json();
+    expect(rolloutBody).toMatchObject({
+      rollout: {
+        revision: "r1",
+        automaticStops: true,
+        reflectionBasisPoints: 1000,
+      },
+    });
+    expect(JSON.stringify(rolloutBody)).not.toContain("must-not-pass-through");
 
     const degraded = await checkMemoryHealth({
       enabled: true,
       workerUrl: "https://memory-worker.test",
       timeoutMs: 100,
       fetch: async () => {
-        throw new Error("upstream unavailable with secret-that-must-not-escape")
-      }
-    })
-    expect(degraded.status).toBe(503)
-    expect(JSON.stringify(await degraded.json())).not.toContain("secret-that-must-not-escape")
-  })
-})
+        throw new Error(
+          "upstream unavailable with secret-that-must-not-escape",
+        );
+      },
+    });
+    expect(degraded.status).toBe(503);
+    expect(JSON.stringify(await degraded.json())).not.toContain(
+      "secret-that-must-not-escape",
+    );
+  });
+});
 
 describe("memory production configuration", () => {
   it("requires signing/service secrets and non-localhost URLs in production", () => {
-    const base = { NODE_ENV: "production", CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz" }
-    expect(() => loadEnv(base)).toThrow("BETTER_AUTH_SECRET")
-    expect(() => loadEnv({ ...base, BETTER_AUTH_SECRET: "auth-secret" })).toThrow("BETTER_AUTH_URL")
-    const withAuthUrl = { ...base, BETTER_AUTH_SECRET: "auth-secret", BETTER_AUTH_URL: "https://auth.jingler.app" }
-    expect(() => loadEnv(withAuthUrl)).toThrow("MEMORY_GRANT_SECRET")
-    const withGrant = { ...withAuthUrl, MEMORY_GRANT_SECRET: "grant-secret" }
-    expect(() => loadEnv(withGrant)).toThrow("MEMORY_WORKER_URL")
+    const base = {
+      NODE_ENV: "production",
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz",
+    };
+    expect(() => loadEnv(base)).toThrow("BETTER_AUTH_SECRET");
     expect(() =>
-      loadEnv({ ...withGrant, MEMORY_WORKER_URL: "https://memory.jingler.workers.dev" })
-    ).toThrow("MEMORY_WORKER_SERVICE_SECRET")
-  })
+      loadEnv({ ...base, BETTER_AUTH_SECRET: "auth-secret" }),
+    ).toThrow("BETTER_AUTH_URL");
+    const withAuthUrl = {
+      ...base,
+      BETTER_AUTH_SECRET: "auth-secret",
+      BETTER_AUTH_URL: "https://auth.jingler.app",
+    };
+    expect(() => loadEnv(withAuthUrl)).toThrow("MEMORY_GRANT_SECRET");
+    const withGrant = { ...withAuthUrl, MEMORY_GRANT_SECRET: "grant-secret" };
+    expect(() => loadEnv(withGrant)).toThrow("MEMORY_WORKER_URL");
+    expect(() =>
+      loadEnv({
+        ...withGrant,
+        MEMORY_WORKER_URL: "https://memory.jingler.workers.dev",
+      }),
+    ).toThrow("MEMORY_WORKER_SERVICE_SECRET");
+  });
 
   it("rejects a localhost worker/auth URL in production but allows it when memory is disabled", () => {
     const base = {
@@ -272,44 +342,59 @@ describe("memory production configuration", () => {
       BETTER_AUTH_URL: "https://auth.jingler.app",
       MEMORY_GRANT_SECRET: "g",
       MEMORY_WORKER_SERVICE_SECRET: "w",
-      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
-    }
-    expect(() => loadEnv({ ...base, MEMORY_WORKER_URL: "http://localhost:8787" })).toThrow(
-      "MEMORY_WORKER_URL must not be a localhost URL"
-    )
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz",
+    };
+    expect(() =>
+      loadEnv({ ...base, MEMORY_WORKER_URL: "http://localhost:8787" }),
+    ).toThrow("MEMORY_WORKER_URL must not be a localhost URL");
     // With memory off, the worker URL is unused, so a localhost value is tolerated.
     expect(
-      loadEnv({ ...base, MEMORY_ENABLED: "false", MEMORY_WORKER_URL: "http://localhost:8787" })
-        .memoryWorkerUrl
-    ).toBe("http://localhost:8787")
-  })
+      loadEnv({
+        ...base,
+        MEMORY_ENABLED: "false",
+        MEMORY_WORKER_URL: "http://localhost:8787",
+      }).memoryWorkerUrl,
+    ).toBe("http://localhost:8787");
+  });
 
   it("retains zero-configuration local defaults", () => {
     expect(loadEnv({ NODE_ENV: "test" })).toMatchObject({
       authSecret: "dev-insecure-secret-change-me",
       memoryGrantSecret: "dev-memory-grant-secret-change-me",
-      memoryWorkerServiceSecret: "dev-memory-worker-secret-change-me"
-    })
-  })
+      memoryWorkerServiceSecret: "dev-memory-worker-secret-change-me",
+    });
+  });
 
   it("uses numeric defaults for blanks and rejects invalid positive numbers", () => {
-    expect(loadEnv({ NODE_ENV: "test", PORT: " ", MEMORY_GRANT_TTL_SECONDS: "", MEMORY_REQUEST_TIMEOUT_MS: "  " }))
-      .toMatchObject({ port: 9100, memoryGrantTtlSeconds: 3600, memoryRequestTimeoutMs: 5000 })
-    expect(() => loadEnv({ NODE_ENV: "test", MEMORY_REQUEST_TIMEOUT_MS: "NaN" }))
-      .toThrow("MEMORY_REQUEST_TIMEOUT_MS must be a positive number")
-    expect(() => loadEnv({ NODE_ENV: "test", MEMORY_GRANT_TTL_SECONDS: "0" }))
-      .toThrow("MEMORY_GRANT_TTL_SECONDS must be a positive number")
-  })
+    expect(
+      loadEnv({
+        NODE_ENV: "test",
+        PORT: " ",
+        MEMORY_GRANT_TTL_SECONDS: "",
+        MEMORY_REQUEST_TIMEOUT_MS: "  ",
+      }),
+    ).toMatchObject({
+      port: 9100,
+      memoryGrantTtlSeconds: 3600,
+      memoryRequestTimeoutMs: 5000,
+    });
+    expect(() =>
+      loadEnv({ NODE_ENV: "test", MEMORY_REQUEST_TIMEOUT_MS: "NaN" }),
+    ).toThrow("MEMORY_REQUEST_TIMEOUT_MS must be a positive number");
+    expect(() =>
+      loadEnv({ NODE_ENV: "test", MEMORY_GRANT_TTL_SECONDS: "0" }),
+    ).toThrow("MEMORY_GRANT_TTL_SECONDS must be a positive number");
+  });
 
   it("defers the production secret assertion to first read so imports never throw", () => {
     // Building the accessor over a production environment WITHOUT secrets must
     // not throw — this mirrors importing env.ts during `next build`.
-    let production: ReturnType<typeof createEnv> | undefined
+    let production: ReturnType<typeof createEnv> | undefined;
     expect(() => {
-      production = createEnv({ NODE_ENV: "production" })
-    }).not.toThrow()
+      production = createEnv({ NODE_ENV: "production" });
+    }).not.toThrow();
     // The first read of a required secret still surfaces the misconfiguration.
-    expect(() => production?.memoryGrantSecret).toThrow("BETTER_AUTH_SECRET")
+    expect(() => production?.memoryGrantSecret).toThrow("BETTER_AUTH_SECRET");
     // A fully configured production environment resolves and memoizes cleanly.
     const configured = createEnv({
       NODE_ENV: "production",
@@ -318,57 +403,75 @@ describe("memory production configuration", () => {
       MEMORY_GRANT_SECRET: "grant-secret",
       MEMORY_WORKER_URL: "https://memory.jingler.workers.dev",
       MEMORY_WORKER_SERVICE_SECRET: "worker-secret",
-      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz"
-    })
-    expect(configured.authSecret).toBe("auth-secret")
-    expect(configured.memoryGrantSecret).toBe("grant-secret")
-    expect(configured.memoryWorkerServiceSecret).toBe("worker-secret")
-  })
-})
+      CRON_SECRET: "cron-secret-abcdefghijklmnopqrstuvwxyz",
+    });
+    expect(configured.authSecret).toBe("auth-secret");
+    expect(configured.memoryGrantSecret).toBe("grant-secret");
+    expect(configured.memoryWorkerServiceSecret).toBe("worker-secret");
+  });
+});
 
 describe("memory grants", () => {
   it("issues only for the exact active paid organization membership", async () => {
-    expect(isActivePaidOrganizationMetadata('{"plan":"team","status":"active"}')).toBe(true)
+    expect(
+      isActivePaidOrganizationMetadata('{"plan":"team","status":"active"}'),
+    ).toBe(true);
     expect(
       isActivePaidOrganizationMetadata(
-        '{"subscription":{"plan":"enterprise","subscriptionStatus":"active"}}'
-      )
-    ).toBe(true)
+        '{"subscription":{"plan":"enterprise","subscriptionStatus":"active"}}',
+      ),
+    ).toBe(true);
     expect(
       isActivePaidOrganizationMetadata(
-        '{"subscription":{"plan":"business","status":"active"},"unrelated":true}'
-      )
-    ).toBe(true)
-    expect(isActivePaidOrganizationMetadata('{"plan":"free","status":"active"}')).toBe(false)
-    expect(isActivePaidOrganizationMetadata('{"plan":"team","status":"cancelled"}')).toBe(false)
-    expect(isActivePaidOrganizationMetadata('{"subscription":{"plan":"team"}}')).toBe(false)
-    expect(isActivePaidOrganizationMetadata("not-json")).toBe(false)
-    expect(isActivePaidOrganizationMetadata(null)).toBe(false)
+        '{"subscription":{"plan":"business","status":"active"},"unrelated":true}',
+      ),
+    ).toBe(true);
+    expect(
+      isActivePaidOrganizationMetadata('{"plan":"free","status":"active"}'),
+    ).toBe(false);
+    expect(
+      isActivePaidOrganizationMetadata('{"plan":"team","status":"cancelled"}'),
+    ).toBe(false);
+    expect(
+      isActivePaidOrganizationMetadata('{"subscription":{"plan":"team"}}'),
+    ).toBe(false);
+    expect(isActivePaidOrganizationMetadata("not-json")).toBe(false);
+    expect(isActivePaidOrganizationMetadata(null)).toBe(false);
     // Fail closed: a cancelled `status` must not hide behind an active
     // `subscriptionStatus` sibling (Schema.Struct silently drops excess props,
     // so the old union matched the active member and leaked paid access).
     expect(
       isActivePaidOrganizationMetadata(
-        '{"plan":"team","status":"cancelled","subscriptionStatus":"active"}'
-      )
-    ).toBe(false)
+        '{"plan":"team","status":"cancelled","subscriptionStatus":"active"}',
+      ),
+    ).toBe(false);
     expect(
       isActivePaidOrganizationMetadata(
-        '{"subscription":{"plan":"team","status":"cancelled","subscriptionStatus":"active"}}'
-      )
-    ).toBe(false)
+        '{"subscription":{"plan":"team","status":"cancelled","subscriptionStatus":"active"}}',
+      ),
+    ).toBe(false);
     // A plain active paid subscription still resolves to paid.
-    expect(isActivePaidOrganizationMetadata('{"plan":"pro","status":"active"}')).toBe(true)
+    expect(
+      isActivePaidOrganizationMetadata('{"plan":"pro","status":"active"}'),
+    ).toBe(true);
 
-    const makeRequest = (organizationId: string, bearer = "jingler-user-bearer") =>
+    const makeRequest = (
+      organizationId: string,
+      bearer = "jingler-user-bearer",
+    ) =>
       new Request("https://jingler.test/api/memory/grant", {
         method: "POST",
-        headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
-        body: JSON.stringify({ organizationId })
-      })
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ organizationId }),
+      });
     const handlerDependencies = {
       getUserId: async (headers: Headers) =>
-        headers.get("authorization") === "Bearer jingler-user-bearer" ? "user-1" : null,
+        headers.get("authorization") === "Bearer jingler-user-bearer"
+          ? "user-1"
+          : null,
       authorize: async (userId: string, organizationId: string) =>
         userId === "user-1" && organizationId === "org-paid"
           ? authorization(organizationId)
@@ -378,162 +481,209 @@ describe("memory grants", () => {
           {
             subject: userId,
             organizationId: allowed.organizationId,
-            privileges: allowed.privileges
+            privileges: allowed.privileges,
           },
           grantConfig,
           100,
-          "grant-1"
+          "grant-1",
+        ),
+    };
+
+    const paid = await handleMemoryGrantRequest(
+      makeRequest("org-paid"),
+      handlerDependencies,
+    );
+    const paidBody = Schema.decodeUnknownSync(MemoryGrantResponse)(
+      await paid.json(),
+    );
+    expect(paid.status).toBe(200);
+    expect(paidBody.claims.organizationId).toBe("org-paid");
+    expect(paidBody.claims.privileges).toStrictEqual(["read", "propose"]);
+    expect(JSON.stringify(paidBody.claims)).not.toContain(
+      "jingler-user-bearer",
+    );
+    expect(
+      Buffer.from(paidBody.grant.split(".")[1] ?? "", "base64url").toString(
+        "utf8",
+      ),
+    ).not.toContain("jingler-user-bearer");
+
+    expect(
+      (
+        await handleMemoryGrantRequest(
+          makeRequest("org-free"),
+          handlerDependencies,
         )
-    }
-
-    const paid = await handleMemoryGrantRequest(makeRequest("org-paid"), handlerDependencies)
-    const paidBody = Schema.decodeUnknownSync(MemoryGrantResponse)(await paid.json())
-    expect(paid.status).toBe(200)
-    expect(paidBody.claims.organizationId).toBe("org-paid")
-    expect(paidBody.claims.privileges).toStrictEqual(["read", "propose"])
-    expect(JSON.stringify(paidBody.claims)).not.toContain("jingler-user-bearer")
-    expect(Buffer.from(paidBody.grant.split(".")[1] ?? "", "base64url").toString("utf8")).not.toContain(
-      "jingler-user-bearer"
-    )
-
+      ).status,
+    ).toBe(403);
     expect(
-      (await handleMemoryGrantRequest(makeRequest("org-free"), handlerDependencies)).status
-    ).toBe(403)
+      (
+        await handleMemoryGrantRequest(
+          makeRequest("org-removed"),
+          handlerDependencies,
+        )
+      ).status,
+    ).toBe(403);
     expect(
-      (await handleMemoryGrantRequest(makeRequest("org-removed"), handlerDependencies)).status
-    ).toBe(403)
+      (
+        await handleMemoryGrantRequest(
+          makeRequest("org-arbitrary"),
+          handlerDependencies,
+        )
+      ).status,
+    ).toBe(403);
     expect(
-      (await handleMemoryGrantRequest(makeRequest("org-arbitrary"), handlerDependencies)).status
-    ).toBe(403)
-    expect(
-      (await handleMemoryGrantRequest(makeRequest("org-paid", "wrong"), handlerDependencies)).status
-    ).toBe(401)
-  })
+      (
+        await handleMemoryGrantRequest(
+          makeRequest("org-paid", "wrong"),
+          handlerDependencies,
+        )
+      ).status,
+    ).toBe(401);
+  });
 
   it("rejects altered, expired, wrong-audience, and wrong-organization grants", () => {
-    const valid = issue().grant
-    const last = valid.at(-1)
-    const altered = `${valid.slice(0, -1)}${last === "a" ? "b" : "a"}`
+    const valid = issue().grant;
+    const last = valid.at(-1);
+    const altered = `${valid.slice(0, -1)}${last === "a" ? "b" : "a"}`;
 
     expect(() =>
       verifyMemoryGrant(altered, {
         secret: grantConfig.secret,
         audience: grantConfig.audience,
         organizationId: "org-paid",
-        nowSeconds: 101
-      })
-    ).toThrowError(MemoryGrantError)
+        nowSeconds: 101,
+      }),
+    ).toThrowError(MemoryGrantError);
     expect(() =>
       verifyMemoryGrant(valid, {
         secret: grantConfig.secret,
         audience: "wrong-audience",
         organizationId: "org-paid",
-        nowSeconds: 101
-      })
-    ).toThrow("wrong-audience")
+        nowSeconds: 101,
+      }),
+    ).toThrow("wrong-audience");
     expect(() =>
       verifyMemoryGrant(valid, {
         secret: grantConfig.secret,
         audience: grantConfig.audience,
         organizationId: "org-other",
-        nowSeconds: 101
-      })
-    ).toThrow("wrong-organization")
+        nowSeconds: 101,
+      }),
+    ).toThrow("wrong-organization");
     expect(() =>
       verifyMemoryGrant(valid, {
         secret: grantConfig.secret,
         audience: grantConfig.audience,
         organizationId: "org-paid",
-        nowSeconds: 400
-      })
-    ).toThrow("expired")
-  })
-})
+        nowSeconds: 400,
+      }),
+    ).toThrow("expired");
+  });
+});
 
 describe("stateless MCP 2026-07-28", () => {
   it("runs discovery through the real Next.js Route Handler", async () => {
     const routeGrant = issueMemoryGrant(
-      { subject: "user-route", organizationId: "org-route", privileges: ["read"] },
+      {
+        subject: "user-route",
+        organizationId: "org-route",
+        privileges: ["read"],
+      },
       {
         secret: env.memoryGrantSecret,
         audience: env.memoryGrantAudience,
-        ttlSeconds: env.memoryGrantTtlSeconds
-      }
-    ).grant
+        ttlSeconds: env.memoryGrantTtlSeconds,
+      },
+    ).grant;
     const response = await memoryMcpRoute(
-      requestFor("server/discover", routeGrant, { organizationId: "org-route" })
-    )
+      requestFor("server/discover", routeGrant, {
+        organizationId: "org-route",
+      }),
+    );
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       result: {
         resultType: "complete",
         supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
         serverInfo: MEMORY_MCP_SERVER_INFO,
-        instructions: MEMORY_MCP_INSTRUCTIONS
-      }
-    })
-    expect(response.headers.has("mcp-session-id")).toBe(false)
-  })
+        instructions: MEMORY_MCP_INSTRUCTIONS,
+      },
+    });
+    expect(response.headers.has("mcp-session-id")).toBe(false);
+  });
 
   it("handles independent discovery, list, and call POSTs with no session state", async () => {
-    const { client, requests } = collectingClient()
-    const dependencies = dependenciesFor(client)
-    const grant = issue(
-      "org-paid",
-      ["read", "propose", "review", "schema"]
-    ).grant
+    const { client, requests } = collectingClient();
+    const dependencies = dependenciesFor(client);
+    const grant = issue("org-paid", [
+      "read",
+      "propose",
+      "review",
+      "schema",
+    ]).grant;
 
     const discover = await handleMemoryMcpRequest(
       requestFor("server/discover", grant),
-      dependencies
-    )
-    const listOne = await handleMemoryMcpRequest(requestFor("tools/list", grant), dependencies)
-    const listTwo = await handleMemoryMcpRequest(requestFor("tools/list", grant), dependencies)
+      dependencies,
+    );
+    const listOne = await handleMemoryMcpRequest(
+      requestFor("tools/list", grant),
+      dependencies,
+    );
+    const listTwo = await handleMemoryMcpRequest(
+      requestFor("tools/list", grant),
+      dependencies,
+    );
     const call = await handleMemoryMcpRequest(
       requestFor("tools/call", grant, {
         params: {
           name: "memory_search",
-          arguments: { query: "launch", limit: 10 }
-        }
+          arguments: { query: "launch", limit: 10 },
+        },
       }),
-      dependencies
-    )
+      dependencies,
+    );
 
-    expect(discover.status).toBe(200)
-    expect(listOne.status).toBe(200)
-    expect(call.status).toBe(200)
-    expect(await listTwo.json()).toStrictEqual(await listOne.clone().json())
-    expect(requests).toHaveLength(1)
+    expect(discover.status).toBe(200);
+    expect(listOne.status).toBe(200);
+    expect(call.status).toBe(200);
+    expect(await listTwo.json()).toStrictEqual(await listOne.clone().json());
+    expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       organizationId: "org-paid",
       requestId: "request-stable",
-      path: "/internal/memory/search?q=launch&limit=10"
-    })
-    expect(call.headers.has("mcp-session-id")).toBe(false)
-    expect(call.headers.has("set-cookie")).toBe(false)
+      path: "/internal/memory/search?q=launch&limit=10",
+    });
+    expect(call.headers.has("mcp-session-id")).toBe(false);
+    expect(call.headers.has("set-cookie")).toBe(false);
 
-    const discoverBody = await discover.json()
-    const listBody = await listOne.json()
-    const callBody = await call.json()
+    const discoverBody = await discover.json();
+    const listBody = await listOne.json();
+    const callBody = await call.json();
     for (const body of [discoverBody, listBody, callBody]) {
       expect(body).toMatchObject({
         result: {
           resultType: "complete",
-          _meta: { "io.modelcontextprotocol/serverInfo": MEMORY_MCP_SERVER_INFO }
-        }
-      })
+          _meta: {
+            "io.modelcontextprotocol/serverInfo": MEMORY_MCP_SERVER_INFO,
+          },
+        },
+      });
     }
     expect(discoverBody).toMatchObject({
       result: {
         supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
         ttlMs: 60_000,
-        cacheScope: "private"
-      }
-    })
-    expect(listBody).toMatchObject({ result: { ttlMs: 60_000, cacheScope: "private" } })
-    expect(discover.headers.get("cache-control")).toBe("private, max-age=60")
-    expect(listOne.headers.get("cache-control")).toBe("private, max-age=60")
+        cacheScope: "private",
+      },
+    });
+    expect(listBody).toMatchObject({
+      result: { ttlMs: 60_000, cacheScope: "private" },
+    });
+    expect(discover.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(listOne.headers.get("cache-control")).toBe("private, max-age=60");
     expect(callBody).toMatchObject({
       result: {
         structuredContent: {
@@ -541,279 +691,350 @@ describe("stateless MCP 2026-07-28", () => {
             pageId: "page-stable",
             revisionId: "revision-stable",
             sourceId: "source-stable",
-            citationId: "citation-stable"
-          }
-        }
-      }
-    })
-  })
+            citationId: "citation-stable",
+          },
+        },
+      },
+    });
+  });
+
+  it("preserves typed no-learning workflow outcomes through the MCP proxy", async () => {
+    const client: MemoryClient<JsonValue> = {
+      request: () =>
+        Effect.succeed({
+          workflowId: "compiler-no-learning",
+          state: "complete",
+          result: {
+            workflowId: "compiler-no-learning",
+            sourceId: "source-session",
+            status: "no_durable_learning",
+            reason: "no_bounded_claims",
+          },
+        }),
+    };
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue().grant, {
+        params: {
+          name: "memory_workflow_status",
+          arguments: { workflowId: "compiler-no-learning" },
+        },
+      }),
+      dependenciesFor(client),
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        structuredContent: {
+          data: {
+            result: {
+              status: "no_durable_learning",
+              reason: "no_bounded_claims",
+            },
+          },
+        },
+      },
+    });
+  });
 
   it("filters tools by grant privileges", async () => {
-    const { client } = collectingClient()
+    const { client } = collectingClient();
     const memberResponse = await handleMemoryMcpRequest(
       requestFor("tools/list", issue().grant),
-      dependenciesFor(client)
-    )
-    const memberBody = await memberResponse.json()
-    expect(memberBody.result.tools.map((tool: { name: string }) => tool.name)).not.toContain(
-      "memory_review"
-    )
-    expect(memberBody.result.tools.map((tool: { name: string }) => tool.name)).not.toContain(
-      "memory_schema_publish"
-    )
-  })
+      dependenciesFor(client),
+    );
+    const memberBody = await memberResponse.json();
+    expect(
+      memberBody.result.tools.map((tool: { name: string }) => tool.name),
+    ).not.toContain("memory_review");
+    expect(
+      memberBody.result.tools.map((tool: { name: string }) => tool.name),
+    ).not.toContain("memory_schema_publish");
+  });
 
   it("rejects invalid grants and unsupported or mismatched protocol requests", async () => {
-    const { client } = collectingClient()
-    const dependencies = dependenciesFor(client)
-    const valid = issue().grant
-    const altered = `${valid.slice(0, -1)}${valid.at(-1) === "a" ? "b" : "a"}`
+    const { client } = collectingClient();
+    const dependencies = dependenciesFor(client);
+    const valid = issue().grant;
+    const altered = `${valid.slice(0, -1)}${valid.at(-1) === "a" ? "b" : "a"}`;
 
     const alteredResponse = await handleMemoryMcpRequest(
       requestFor("tools/list", altered),
-      dependencies
-    )
-    expect(alteredResponse.status).toBe(401)
+      dependencies,
+    );
+    expect(alteredResponse.status).toBe(401);
 
     const wrongOrganization = await handleMemoryMcpRequest(
       requestFor("tools/list", valid, { organizationId: "org-other" }),
-      dependencies
-    )
-    expect(wrongOrganization.status).toBe(401)
+      dependencies,
+    );
+    expect(wrongOrganization.status).toBe(401);
 
     const wrongAudienceGrant = issueMemoryGrant(
       { subject: "user-1", organizationId: "org-paid", privileges: ["read"] },
       { ...grantConfig, audience: "another-service" },
       100,
-      "grant-wrong-audience"
-    ).grant
+      "grant-wrong-audience",
+    ).grant;
     const wrongAudience = await handleMemoryMcpRequest(
       requestFor("tools/list", wrongAudienceGrant),
-      dependencies
-    )
-    expect(wrongAudience.status).toBe(401)
+      dependencies,
+    );
+    expect(wrongAudience.status).toBe(401);
 
     const unsupported = await handleMemoryMcpRequest(
       requestFor("tools/list", valid, {
-        headers: { "mcp-protocol-version": "2025-11-25" }
+        headers: { "mcp-protocol-version": "2025-11-25" },
       }),
-      dependencies
-    )
-    expect(unsupported.status).toBe(400)
+      dependencies,
+    );
+    expect(unsupported.status).toBe(400);
     expect(await unsupported.json()).toMatchObject({
-      error: { code: MEMORY_MCP_ERROR.unsupportedProtocolVersion }
-    })
+      error: { code: MEMORY_MCP_ERROR.unsupportedProtocolVersion },
+    });
 
     const mismatch = await handleMemoryMcpRequest(
-      requestFor("tools/list", valid, { headers: { "mcp-method": "tools/call" } }),
-      dependencies
-    )
-    expect(mismatch.status).toBe(400)
-    expect(await mismatch.json()).toMatchObject({ error: { code: MEMORY_MCP_ERROR.headerMismatch } })
+      requestFor("tools/list", valid, {
+        headers: { "mcp-method": "tools/call" },
+      }),
+      dependencies,
+    );
+    expect(mismatch.status).toBe(400);
+    expect(await mismatch.json()).toMatchObject({
+      error: { code: MEMORY_MCP_ERROR.headerMismatch },
+    });
 
     const missingMetadata = await handleMemoryMcpRequest(
       requestFor("tools/list", valid, { metadata: {} }),
-      dependencies
-    )
-    expect(missingMetadata.status).toBe(400)
+      dependencies,
+    );
+    expect(missingMetadata.status).toBe(400);
     expect(await missingMetadata.json()).toMatchObject({
-      error: { code: MEMORY_MCP_ERROR.missingClientCapability }
-    })
+      error: { code: MEMORY_MCP_ERROR.missingClientCapability },
+    });
 
     const missingName = await handleMemoryMcpRequest(
       requestFor("tools/call", valid, {
         params: { name: "memory_search", arguments: { query: "launch" } },
-        headers: { "mcp-name": "" }
+        headers: { "mcp-name": "" },
       }),
-      dependencies
-    )
-    expect(missingName.status).toBe(400)
+      dependencies,
+    );
+    expect(missingName.status).toBe(400);
     expect(await missingName.json()).toMatchObject({
-      error: { code: MEMORY_MCP_ERROR.headerMismatch }
-    })
+      error: { code: MEMORY_MCP_ERROR.headerMismatch },
+    });
 
-    const expiredDependencies = dependenciesFor(client, 401)
+    const expiredDependencies = dependenciesFor(client, 401);
     const expired = await handleMemoryMcpRequest(
       requestFor("tools/list", valid),
-      expiredDependencies
-    )
-    expect(expired.status).toBe(401)
-  })
+      expiredDependencies,
+    );
+    expect(expired.status).toBe(401);
+  });
 
   it("does not implement initialize, GET transport, or a session id", async () => {
-    const { client } = collectingClient()
+    const { client } = collectingClient();
     const initialized = await handleMemoryMcpRequest(
       requestFor("initialize", issue().grant),
-      dependenciesFor(client)
-    )
-    const get = rejectMemoryMcpGet()
+      dependenciesFor(client),
+    );
+    const get = rejectMemoryMcpGet();
 
-    expect(initialized.status).toBe(404)
-    expect(await initialized.json()).toMatchObject({ error: { code: -32601 } })
-    expect(get.status).toBe(405)
-    expect(get.headers.get("allow")).toBe("POST")
-    expect(get.headers.has("mcp-session-id")).toBe(false)
-  })
+    expect(initialized.status).toBe(404);
+    expect(await initialized.json()).toMatchObject({ error: { code: -32601 } });
+    expect(get.status).toBe(405);
+    expect(get.headers.get("allow")).toBe("POST");
+    expect(get.headers.has("mcp-session-id")).toBe(false);
+  });
 
   it("enforces the constraints advertised by tool input schemas", async () => {
-    const { client, requests } = collectingClient()
-    const grant = issue().grant
-    const dependencies = dependenciesFor(client)
-    const responses = await Promise.all([
-      { query: "", limit: 10 },
-      { query: "launch", limit: 101 },
-      { query: "launch", limit: 1.5 },
-      { query: "launch", extra: true }
-    ].map((argumentsValue) =>
-      handleMemoryMcpRequest(
-        requestFor("tools/call", grant, { params: { name: "memory_search", arguments: argumentsValue } }),
-        dependencies
-      )))
-    const bodies = await Promise.all(responses.map((response) => response.json()))
+    const { client, requests } = collectingClient();
+    const grant = issue().grant;
+    const dependencies = dependenciesFor(client);
+    const responses = await Promise.all(
+      [
+        { query: "", limit: 10 },
+        { query: "launch", limit: 101 },
+        { query: "launch", limit: 1.5 },
+        { query: "launch", extra: true },
+      ].map((argumentsValue) =>
+        handleMemoryMcpRequest(
+          requestFor("tools/call", grant, {
+            params: { name: "memory_search", arguments: argumentsValue },
+          }),
+          dependencies,
+        ),
+      ),
+    );
+    const bodies = await Promise.all(
+      responses.map((response) => response.json()),
+    );
     for (const body of bodies) {
-      expect(body).toMatchObject({ error: { code: -32602 } })
+      expect(body).toMatchObject({ error: { code: -32602 } });
     }
-    expect(requests).toHaveLength(0)
-  })
+    expect(requests).toHaveLength(0);
+  });
 
   it("clamps memory_graph_neighborhood limits to the Worker maximum of 100", async () => {
-    const { client, requests } = collectingClient()
-    const grant = issue().grant
-    const dependencies = dependenciesFor(client)
+    const { client, requests } = collectingClient();
+    const grant = issue().grant;
+    const dependencies = dependenciesFor(client);
     // 101 exceeds MAX_NEIGHBORHOOD_LIMIT and must be rejected by the input schema.
     const rejected = await handleMemoryMcpRequest(
       requestFor("tools/call", grant, {
-        params: { name: "memory_graph_neighborhood", arguments: { nodeId: "node-1", limit: 101 } }
+        params: {
+          name: "memory_graph_neighborhood",
+          arguments: { nodeId: "node-1", limit: 101 },
+        },
       }),
-      dependencies
-    )
-    expect(rejected.status).toBe(200)
-    expect(await rejected.json()).toMatchObject({ error: { code: -32602 } })
-    expect(requests).toHaveLength(0)
+      dependencies,
+    );
+    expect(rejected.status).toBe(200);
+    expect(await rejected.json()).toMatchObject({ error: { code: -32602 } });
+    expect(requests).toHaveLength(0);
     // 100 is the maximum honoured value and reaches the Worker unchanged.
     const accepted = await handleMemoryMcpRequest(
       requestFor("tools/call", grant, {
-        params: { name: "memory_graph_neighborhood", arguments: { nodeId: "node-1", limit: 100 } }
+        params: {
+          name: "memory_graph_neighborhood",
+          arguments: { nodeId: "node-1", limit: 100 },
+        },
       }),
-      dependencies
-    )
-    expect(accepted.status).toBe(200)
-    expect(requests).toHaveLength(1)
+      dependencies,
+    );
+    expect(accepted.status).toBe(200);
+    expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      path: "/internal/memory/neighborhood/node-1?limit=100"
-    })
-  })
+      path: "/internal/memory/neighborhood/node-1?limit=100",
+    });
+  });
 
   it("returns a JSON-RPC error, not a raw 500, when a tool request builder throws", async () => {
-    const { client, requests } = collectingClient()
+    const { client, requests } = collectingClient();
     // An empty grant subject makes memory_schema_publish's server-side
     // `Schema.decodeUnknownSync(MemoryAcceptedPageRequest)` throw on the empty
     // actorId AFTER argument decode — the builder-throw path.
     const grant = issueMemoryGrant(
-      { subject: "", organizationId: "org-paid", privileges: ["read", "schema"] },
+      {
+        subject: "",
+        organizationId: "org-paid",
+        privileges: ["read", "schema"],
+      },
       grantConfig,
       100,
-      "grant-empty-subject"
-    ).grant
+      "grant-empty-subject",
+    ).grant;
     const response = await handleMemoryMcpRequest(
       requestFor("tools/call", grant, {
         params: {
           name: "memory_schema_publish",
-          arguments: { revisionId: "revision-1", markdown: "# body" }
-        }
+          arguments: { revisionId: "revision-1", markdown: "# body" },
+        },
       }),
-      dependenciesFor(client)
-    )
+      dependenciesFor(client),
+    );
     // A JSON-RPC error envelope at HTTP 200 with x-request-id, never a bare 500.
-    expect(response.status).toBe(200)
-    expect(response.headers.get("x-request-id")).toBe("request-stable")
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-request-id")).toBe("request-stable");
     expect(await response.json()).toMatchObject({
-      error: { code: -32603, data: { requestId: "request-stable" } }
-    })
-    expect(requests).toHaveLength(0)
-  })
+      error: { code: -32603, data: { requestId: "request-stable" } },
+    });
+    expect(requests).toHaveLength(0);
+  });
 
   it("maps schema publication arguments to the Worker accepted-page contract", async () => {
-    const { client, requests } = collectingClient()
+    const { client, requests } = collectingClient();
     const response = await handleMemoryMcpRequest(
       requestFor("tools/call", issue("org-paid", ["read", "schema"]).grant, {
         params: {
           name: "memory_schema_publish",
-          arguments: { revisionId: "revision-schema-1", markdown: "---\nid: schema\n---\n" }
-        }
+          arguments: {
+            revisionId: "revision-schema-1",
+            markdown: "---\nid: schema\n---\n",
+          },
+        },
       }),
-      dependenciesFor(client)
-    )
-    expect(response.status).toBe(200)
+      dependenciesFor(client),
+    );
+    expect(response.status).toBe(200);
     expect(requests[0]).toMatchObject({
       path: "/internal/memory/pages",
       body: {
         revisionId: "revision-schema-1",
         markdown: "---\nid: schema\n---\n",
-        actorId: "user-1"
-      }
-    })
-    const request = requests[0]
-    expect(request).toBeDefined()
-    if (request === undefined) return
-    expect((request.body as { createdAt?: string }).createdAt).toMatch(/^\d{4}-/)
-  })
+        actorId: "user-1",
+      },
+    });
+    const request = requests[0];
+    expect(request).toBeDefined();
+    if (request === undefined) return;
+    expect((request.body as { createdAt?: string }).createdAt).toMatch(
+      /^\d{4}-/,
+    );
+  });
 
   it("derives the proposal id server-side from the subject and content, never the request id", async () => {
     const proposalArguments = {
       pageId: "page-1",
       baseRevisionId: "revision-1",
-      markdown: "---\nid: page-1\n---\nbody one\n"
-    }
+      markdown: "---\nid: page-1\n---\nbody one\n",
+    };
     const proposalIdFor = async (
       grant: string,
       argumentsValue: Record<string, unknown>,
-      requestIdHeader: string
+      requestIdHeader: string,
     ): Promise<string> => {
-      const { client, requests } = collectingClient()
+      const { client, requests } = collectingClient();
       await handleMemoryMcpRequest(
         requestFor("tools/call", grant, {
           params: { name: "memory_propose", arguments: argumentsValue },
-          headers: { "x-request-id": requestIdHeader }
+          headers: { "x-request-id": requestIdHeader },
         }),
-        dependenciesFor(client)
-      )
-      const request = requests[0]
-      expect(request).toBeDefined()
-      return ((request as MemoryClientRequest).body as { id: string }).id
-    }
+        dependenciesFor(client),
+      );
+      const request = requests[0];
+      expect(request).toBeDefined();
+      return ((request as MemoryClientRequest).body as { id: string }).id;
+    };
 
-    const grant = issue("org-paid", ["read", "propose"]).grant
+    const grant = issue("org-paid", ["read", "propose"]).grant;
     // Same subject + same content but a DIFFERENT x-request-id → same id.
-    const idA = await proposalIdFor(grant, proposalArguments, "req-header-A")
-    const idB = await proposalIdFor(grant, proposalArguments, "req-header-B")
-    expect(idA).toBe(idB)
-    expect(idA).toMatch(/^proposal-[0-9a-f]{64}$/)
+    const idA = await proposalIdFor(grant, proposalArguments, "req-header-A");
+    const idB = await proposalIdFor(grant, proposalArguments, "req-header-B");
+    expect(idA).toBe(idB);
+    expect(idA).toMatch(/^proposal-[0-9a-f]{64}$/);
     // The id is NOT the x-request-id header value.
-    expect(idA).not.toContain("req-header-A")
-    expect(idA).not.toContain("req-header-B")
+    expect(idA).not.toContain("req-header-A");
+    expect(idA).not.toContain("req-header-B");
 
     // DIFFERENT content but the SAME x-request-id → different id.
     const idDifferentContent = await proposalIdFor(
       grant,
       { ...proposalArguments, markdown: "---\nid: page-1\n---\nbody two\n" },
-      "req-header-A"
-    )
-    expect(idDifferentContent).not.toBe(idA)
+      "req-header-A",
+    );
+    expect(idDifferentContent).not.toBe(idA);
 
     // A DIFFERENT grant subject with identical content → different id (subject-namespaced).
     const otherSubjectGrant = issueMemoryGrant(
-      { subject: "user-2", organizationId: "org-paid", privileges: ["read", "propose"] },
+      {
+        subject: "user-2",
+        organizationId: "org-paid",
+        privileges: ["read", "propose"],
+      },
       grantConfig,
       100,
-      "grant-user-2"
-    ).grant
-    const idOtherSubject = await proposalIdFor(otherSubjectGrant, proposalArguments, "req-header-A")
-    expect(idOtherSubject).not.toBe(idA)
-  })
+      "grant-user-2",
+    ).grant;
+    const idOtherSubject = await proposalIdFor(
+      otherSubjectGrant,
+      proposalArguments,
+      "req-header-A",
+    );
+    expect(idOtherSubject).not.toBe(idA);
+  });
 
   it("routes a new memory through cited source compilation instead of a missing page head", async () => {
-    const { client, requests } = collectingClient()
+    const { client, requests } = collectingClient();
     const response = await handleMemoryMcpRequest(
       requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
         params: {
@@ -821,15 +1042,15 @@ describe("stateless MCP 2026-07-28", () => {
           arguments: {
             pageId: "mem-refund-limiter",
             baseRevisionId: "new",
-            markdown: "Refund retries share one limiter to prevent bursts."
-          }
-        }
+            markdown: "Refund retries share one limiter to prevent bursts.",
+          },
+        },
       }),
-      dependenciesFor(client)
-    )
+      dependenciesFor(client),
+    );
 
-    expect(response.status).toBe(200)
-    expect(requests).toHaveLength(1)
+    expect(response.status).toBe(200);
+    expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       organizationId: "org-paid",
       method: "POST",
@@ -837,88 +1058,260 @@ describe("stateless MCP 2026-07-28", () => {
       body: {
         source: {
           kind: "manual",
-          title: "Agent memory proposal: mem-refund-limiter"
+          title: "Agent memory proposal: mem-refund-limiter",
         },
-        content: "Refund retries share one limiter to prevent bursts."
-      }
-    })
-    const serialized = JSON.stringify(requests[0]?.body)
-    expect(serialized).toMatch(/"id":"source:proposal-[0-9a-f]{64}"/)
-    expect(serialized).toMatch(/"contentHash":"[0-9a-f]{64}"/)
-  })
-})
+        content: "Refund retries share one limiter to prevent bursts.",
+      },
+    });
+    const serialized = JSON.stringify(requests[0]?.body);
+    expect(serialized).toMatch(/"id":"source:proposal-[0-9a-f]{64}"/);
+    expect(serialized).toMatch(/"contentHash":"[0-9a-f]{64}"/);
+  });
+
+  it("returns a pollable typed settlement for a new-page proposal", async () => {
+    const client: MemoryClient<JsonValue> = {
+      request: () =>
+        Effect.succeed({
+          source: { id: "source:new-learning" },
+          workflowId: "compiler-new-learning",
+        }),
+    };
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+        params: {
+          name: "memory_propose",
+          arguments: {
+            pageId: "new-learning",
+            baseRevisionId: "new",
+            markdown: "A durable standalone learning.",
+          },
+        },
+      }),
+      dependenciesFor(client),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        structuredContent: {
+          data: {
+            route: "new_page",
+            status: "queued",
+            terminal: false,
+            workflowId: "compiler-new-learning",
+            settlement: {
+              kind: "workflow",
+              status: "queued",
+              workflowId: "compiler-new-learning",
+              pollable: true,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("fails closed when a new-page submission omits its workflow handle", async () => {
+    const client: MemoryClient<JsonValue> = {
+      request: () =>
+        Effect.succeed({ source: { id: "source-without-workflow" } }),
+    };
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+        params: {
+          name: "memory_propose",
+          arguments: {
+            pageId: "new-learning",
+            baseRevisionId: "new",
+            markdown: "A durable standalone learning.",
+          },
+        },
+      }),
+      dependenciesFor(client),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: -32603,
+        message: "Private memory service request failed",
+      },
+    });
+  });
+
+  it("returns an explicit pending-review handle for an existing-page proposal", async () => {
+    const client: MemoryClient<JsonValue> = {
+      request: () =>
+        Effect.succeed({
+          id: "proposal-existing-learning",
+          pageId: "existing-learning",
+          baseRevisionId: "revision-existing-1",
+          markdown: "Updated durable learning.",
+          proposedBy: "user-1",
+          createdAt: "2026-08-06T12:00:00.000Z",
+          status: "open",
+        }),
+    };
+    const response = await handleMemoryMcpRequest(
+      requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+        params: {
+          name: "memory_propose",
+          arguments: {
+            pageId: "existing-learning",
+            baseRevisionId: "revision-existing-1",
+            markdown: "Updated durable learning.",
+          },
+        },
+      }),
+      dependenciesFor(client),
+    );
+
+    await expect(response.json()).resolves.toMatchObject({
+      result: {
+        structuredContent: {
+          data: {
+            route: "existing_page",
+            status: "pending_review",
+            terminal: false,
+            proposalId: "proposal-existing-learning",
+            settlement: {
+              kind: "review",
+              status: "pending_review",
+              proposalId: "proposal-existing-learning",
+              pollable: false,
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["accepted", "published"],
+    ["rejected", "rejected"],
+    ["superseded", "conflict"],
+  ] as const)(
+    "maps an existing-page %s replay to terminal %s",
+    async (workerStatus, status) => {
+      const client: MemoryClient<JsonValue> = {
+        request: () =>
+          Effect.succeed({ id: "proposal-settled", status: workerStatus }),
+      };
+      const response = await handleMemoryMcpRequest(
+        requestFor("tools/call", issue("org-paid", ["read", "propose"]).grant, {
+          params: {
+            name: "memory_propose",
+            arguments: {
+              pageId: "existing-learning",
+              baseRevisionId: "revision-existing-1",
+              markdown: "Updated durable learning.",
+            },
+          },
+        }),
+        dependenciesFor(client),
+      );
+
+      await expect(response.json()).resolves.toMatchObject({
+        result: {
+          structuredContent: {
+            data: {
+              status,
+              terminal: true,
+              proposalId: "proposal-settled",
+            },
+          },
+        },
+      });
+    },
+  );
+});
 
 describe("private Memory Worker client", () => {
   it("adds only the rotating service credential, organization scope, and request id", async () => {
-    const capturedRequests: Array<Request> = []
+    const capturedRequests: Array<Request> = [];
     const fetchImplementation: typeof fetch = async (input, init) => {
-      capturedRequests.push(new Request(input, init))
-      return Response.json({ pageId: "page-1", revisionId: "revision-1" })
-    }
+      capturedRequests.push(new Request(input, init));
+      return Response.json({ pageId: "page-1", revisionId: "revision-1" });
+    };
     const client = createMemoryClient(
       {
         baseUrl: "https://memory-worker.test",
         serviceSecret: "rotating-service-secret",
-        timeoutMs: 100
+        timeoutMs: 100,
       },
       Schema.Struct({ pageId: Schema.String, revisionId: Schema.String }),
-      fetchImplementation
-    )
+      fetchImplementation,
+    );
     const result = await Effect.runPromise(
       client.request({
         organizationId: "org-1",
         requestId: "request-1",
         method: "GET",
-        path: "/internal/memory/pages/page-1"
-      })
-    )
+        path: "/internal/memory/pages/page-1",
+      }),
+    );
 
-    expect(result).toStrictEqual({ pageId: "page-1", revisionId: "revision-1" })
+    expect(result).toStrictEqual({
+      pageId: "page-1",
+      revisionId: "revision-1",
+    });
     expect(capturedRequests[0]?.headers.get("authorization")).toBe(
-      "Bearer rotating-service-secret"
-    )
-    expect(capturedRequests[0]?.headers.get("x-jingler-organization-id")).toBe("org-1")
-    expect(capturedRequests[0]?.headers.get("x-request-id")).toBe("request-1")
-  })
+      "Bearer rotating-service-secret",
+    );
+    expect(capturedRequests[0]?.headers.get("x-jingler-organization-id")).toBe(
+      "org-1",
+    );
+    expect(capturedRequests[0]?.headers.get("x-request-id")).toBe("request-1");
+  });
 
   it("decodes an expected stale-review conflict instead of converting it to transport failure", async () => {
     const client = createMemoryClient(
       {
         baseUrl: "https://memory-worker.test",
         serviceSecret: "rotating-service-secret",
-        timeoutMs: 100
+        timeoutMs: 100,
       },
       Schema.Struct({
         status: Schema.Literal("conflict"),
-        conflicts: Schema.Array(Schema.Struct({ pageId: Schema.String }))
+        conflicts: Schema.Array(Schema.Struct({ pageId: Schema.String })),
       }),
-      async () => Response.json(
-        { status: "conflict", conflicts: [{ pageId: "page-1" }] },
-        { status: 409 }
-      )
-    )
-    await expect(Effect.runPromise(client.request({
-      organizationId: "org-1",
-      requestId: "request-conflict",
-      method: "POST",
-      path: "/internal/memory/proposals/proposal-1/approve",
-      acceptedStatuses: [409]
-    }))).resolves.toEqual({ status: "conflict", conflicts: [{ pageId: "page-1" }] })
-  })
-})
+      async () =>
+        Response.json(
+          { status: "conflict", conflicts: [{ pageId: "page-1" }] },
+          { status: 409 },
+        ),
+    );
+    await expect(
+      Effect.runPromise(
+        client.request({
+          organizationId: "org-1",
+          requestId: "request-conflict",
+          method: "POST",
+          path: "/internal/memory/proposals/proposal-1/approve",
+          acceptedStatuses: [409],
+        }),
+      ),
+    ).resolves.toEqual({
+      status: "conflict",
+      conflicts: [{ pageId: "page-1" }],
+    });
+  });
+});
 
 describe("settled-session source ingestion", () => {
   it("accepts one grant-scoped digest and forwards it with only the service credential", async () => {
-    const { client, requests } = collectingClient()
+    const { client, requests } = collectingClient();
     const grant = issueMemoryGrant(
-      { subject: "user-route", organizationId: "org-route", privileges: ["propose"] },
+      {
+        subject: "user-route",
+        organizationId: "org-route",
+        privileges: ["propose"],
+      },
       {
         secret: env.memoryGrantSecret,
         audience: env.memoryGrantAudience,
-        ttlSeconds: env.memoryGrantTtlSeconds
-      }
-    ).grant
-    const sourceId = "session-digest:stable"
+        ttlSeconds: env.memoryGrantTtlSeconds,
+      },
+    ).grant;
+    const sourceId = "session-digest:stable";
     const response = await handleMemorySourceRequest(
       new Request("https://jingler.test/api/memory/sources", {
         method: "POST",
@@ -926,97 +1319,131 @@ describe("settled-session source ingestion", () => {
           authorization: `Bearer ${grant}`,
           "content-type": "application/json",
           "x-idempotency-key": sourceId,
-          "x-jingler-organization-id": "org-route"
+          "x-jingler-organization-id": "org-route",
         },
         body: JSON.stringify({
           source: {
             id: sourceId,
             kind: "conversation",
-            title: "Settled Jingler agent session"
+            title: "Settled Jingler agent session",
           },
           content: "A bounded redacted result.",
-          retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
-        })
+          retrieval: {
+            searches: 2,
+            reads: 3,
+            navigation: 1,
+            graphReads: 4,
+            proposals: 1,
+          },
+          delivery: {
+            attempt: 2,
+            failedAttempts: 1,
+            firstSeenAt: 1_785_600_000,
+            deliveredAt: "2026-08-01T12:00:00.000Z",
+          },
+        }),
       }),
       {
         verifyGrant: (candidate, organizationId) =>
           verifyMemoryGrant(candidate, {
             secret: env.memoryGrantSecret,
             audience: env.memoryGrantAudience,
-            organizationId
+            organizationId,
           }),
-        client
-      }
-    )
+        client,
+      },
+    );
 
-    expect(response.status).toBe(201)
-    expect(requests).toHaveLength(1)
+    expect(response.status).toBe(201);
+    expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       organizationId: "org-route",
       path: "/internal/memory/sources",
       method: "POST",
       body: {
-        retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
-      }
-    })
-    expect(JSON.stringify(requests[0])).not.toContain(grant)
-    expect(JSON.stringify(requests[0])).not.toContain("query")
-  })
+        retrieval: {
+          searches: 2,
+          reads: 3,
+          navigation: 1,
+          graphReads: 4,
+          proposals: 1,
+        },
+        delivery: { attempt: 2, failedAttempts: 1 },
+      },
+    });
+    expect(JSON.stringify(requests[0])).not.toContain(grant);
+    expect(JSON.stringify(requests[0])).not.toContain("query");
+  });
 
   it("rejects read-only grants and mismatched idempotency keys before Cloudflare", async () => {
-    const { client, requests } = collectingClient()
-    const makeSourceRequest = (privileges: ReadonlyArray<MemoryPrivilege>, key: string) => {
+    const { client, requests } = collectingClient();
+    const makeSourceRequest = (
+      privileges: ReadonlyArray<MemoryPrivilege>,
+      key: string,
+    ) => {
       const grant = issueMemoryGrant(
         { subject: "user-route", organizationId: "org-route", privileges },
         {
           secret: env.memoryGrantSecret,
           audience: env.memoryGrantAudience,
-          ttlSeconds: env.memoryGrantTtlSeconds
-        }
-      ).grant
+          ttlSeconds: env.memoryGrantTtlSeconds,
+        },
+      ).grant;
       return new Request("https://jingler.test/api/memory/sources", {
         method: "POST",
         headers: {
           authorization: `Bearer ${grant}`,
           "content-type": "application/json",
           "x-idempotency-key": key,
-          "x-jingler-organization-id": "org-route"
+          "x-jingler-organization-id": "org-route",
         },
         body: JSON.stringify({
-          source: { id: "session-digest:stable", kind: "conversation", title: "Settled" },
+          source: {
+            id: "session-digest:stable",
+            kind: "conversation",
+            title: "Settled",
+          },
           content: "redacted",
           // A VALID retrieval summary so schema decode succeeds and the only
           // remaining 400 is the idempotency-key mismatch (previously omitted,
           // which made the mismatch assertion pass for the wrong reason).
-          retrieval: { searches: 0, reads: 0, navigation: 0, graphReads: 0, proposals: 0 }
-        })
-      })
-    }
+          retrieval: {
+            searches: 0,
+            reads: 0,
+            navigation: 0,
+            graphReads: 0,
+            proposals: 0,
+          },
+        }),
+      });
+    };
 
     const dependencies = {
       verifyGrant: (candidate: string, organizationId: string) =>
         verifyMemoryGrant(candidate, {
           secret: env.memoryGrantSecret,
           audience: env.memoryGrantAudience,
-          organizationId
+          organizationId,
         }),
-      client
-    }
+      client,
+    };
     expect(
-      (await handleMemorySourceRequest(
-        makeSourceRequest(["read"], "session-digest:stable"),
-        dependencies
-      )).status
-    ).toBe(403)
+      (
+        await handleMemorySourceRequest(
+          makeSourceRequest(["read"], "session-digest:stable"),
+          dependencies,
+        )
+      ).status,
+    ).toBe(403);
     const mismatched = await handleMemorySourceRequest(
       makeSourceRequest(["propose"], "wrong-key"),
-      dependencies
-    )
-    expect(mismatched.status).toBe(400)
+      dependencies,
+    );
+    expect(mismatched.status).toBe(400);
     // Prove the idempotency guard fired, not an incidental schema-decode 400.
     expect(await mismatched.json()).toMatchObject({
-      error: "Invalid settled-session source digest"
-    })
-    expect(requests).toHaveLength(0)
-  })
-})
+      error: "Invalid settled-session source digest",
+    });
+    expect(requests).toHaveLength(0);
+  });
+});

@@ -43,9 +43,11 @@ describe("leadsWithCommand", () => {
     // notes behind a message that never needed to lead.
     expect(leadsWithCommand("codex", "$deploy now")).toBe(true)
     expect(leadsWithCommand("claude", "$deploy now")).toBe(false)
+    expect(leadsWithCommand("opencode", "$deploy now")).toBe(false)
     // Slash commands lead on every harness.
     expect(leadsWithCommand("claude", "/plan")).toBe(true)
     expect(leadsWithCommand("codex", "/plan")).toBe(true)
+    expect(leadsWithCommand("opencode", "/plan")).toBe(true)
   })
 })
 
@@ -63,6 +65,15 @@ describe("composeTurnPrompt", () => {
     expect(composeTurnPrompt("/babysit-pr", notes, { leadWithText: true })).toBe(
       "/babysit-pr\n\nPRIMER\n\nPLAN\n\nADHD\n\nASK"
     )
+  })
+
+  it("keeps the memory policy attached after command-first skill invocations", () => {
+    expect(
+      composeTurnPrompt("/deploy now", { memory: "MEMORY" }, { leadWithText: true })
+    ).toBe("/deploy now\n\nMEMORY")
+    expect(
+      composeTurnPrompt("$deploy now", { memory: "MEMORY" }, { leadWithText: true })
+    ).toBe("$deploy now\n\nMEMORY")
   })
 
   it("leaves no trailing blank line when the message leads", () => {

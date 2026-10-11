@@ -134,7 +134,11 @@ function MemoryReviewsView({
   const selected =
     context.reviews.find((review) => review.id === context.selectedReviewId) ??
     null;
-  const open = context.reviews.filter((review) => review.status === "open");
+  const open = context.reviews.filter(
+    (review) =>
+      review.status === "open" ||
+      review.relationships.some((relationship) => relationship.status === "open"),
+  );
   return (
     <main className="grid min-h-0 flex-1 grid-cols-[minmax(14rem,0.32fr)_minmax(0,1fr)] bg-editor">
       <aside className="min-h-0 overflow-y-auto border-r border-hairline bg-panel p-3">
@@ -159,7 +163,10 @@ function MemoryReviewsView({
                 {review.id}
               </strong>
               <span className="mt-1 block text-[10px] text-muted-foreground">
-                {review.pages.length} page{review.pages.length === 1 ? "" : "s"}{" "}
+                {review.pages.length} page{review.pages.length === 1 ? "" : "s"}
+                {review.relationships.length > 0
+                  ? ` · ${review.relationships.length} relationships`
+                  : ""}{" "}
                 · {review.changeKind} · {review.status}
               </span>
             </button>
@@ -267,6 +274,85 @@ function MemoryReviewsView({
                 </article>
               ))}
             </div>
+            {selected.relationships.length > 0 && (
+              <section
+                className="mt-5 border-t border-hairline pt-4"
+                aria-labelledby="relationship-review-title"
+              >
+                <h3
+                  id="relationship-review-title"
+                  className="text-xs font-semibold text-text-bright"
+                >
+                  Relationship evidence
+                </h3>
+                <p className="mt-1 text-[10.5px] leading-4 text-muted-foreground">
+                  Semantic edges are reviewed separately from factual page content.
+                </p>
+                <div className="mt-3 space-y-3">
+                  {selected.relationships.map((relationship) => (
+                    <article
+                      key={relationship.proposalId}
+                      className="rounded-md border border-line bg-panel p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="m-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-blue">
+                            {relationship.kind}
+                          </p>
+                          <p className="mt-1 font-mono text-[10.5px] text-text">
+                            {relationship.sourcePageId} → {relationship.targetPageId}
+                          </p>
+                        </div>
+                        <span className="rounded border border-line px-2 py-1 text-[9.5px] text-muted-foreground">
+                          {relationship.status}
+                        </span>
+                      </div>
+                      <blockquote className="m-0 mt-3 rounded-md bg-sunken p-3 text-[10.5px] leading-4 text-text">
+                        {relationship.claim}
+                      </blockquote>
+                      <div className="mt-3 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          aria-label={`Reject ${relationship.kind} ${relationship.sourcePageId} to ${relationship.targetPageId}`}
+                          disabled={
+                            !memory.canReview ||
+                            memory.reviewing ||
+                            relationship.status !== "open"
+                          }
+                          onClick={() =>
+                            memory.decideReview(
+                              relationship.proposalId,
+                              "reject",
+                            )
+                          }
+                          className="rounded-md border border-line bg-sunken px-3 py-1.5 text-[10.5px] text-text outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        >
+                          Reject relationship
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Accept ${relationship.kind} ${relationship.sourcePageId} to ${relationship.targetPageId}`}
+                          disabled={
+                            !memory.canReview ||
+                            memory.reviewing ||
+                            relationship.status !== "open"
+                          }
+                          onClick={() =>
+                            memory.decideReview(
+                              relationship.proposalId,
+                              "approve",
+                            )
+                          }
+                          className="rounded-md border border-line bg-brand px-3 py-1.5 text-[10.5px] font-semibold text-text-bright outline-none hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        >
+                          Accept relationship
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
       </section>
@@ -279,7 +365,12 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
   const selectedReview = context.reviews.find(
     (review) => review.id === context.selectedReviewId,
   );
-  const reviewCount = selectedReview?.pages.length ?? 0;
+  const reviewCount = selectedReview
+    ? selectedReview.pages.length +
+      selectedReview.relationships.filter(
+        (relationship) => relationship.status === "open",
+      ).length
+    : 0;
   return (
     <div
       className="relative flex min-h-0 flex-1 flex-col bg-editor"
@@ -372,7 +463,7 @@ function MemoryWorkspace({ memory }: { memory: ReturnType<typeof useMemory> }) {
               >
                 <Icon size={12} />{" "}
                 {id === "reviews"
-                  ? `${label} (${context.reviews.filter((review) => review.status === "open").length})`
+                  ? `${label} (${context.reviews.filter((review) => review.status === "open" || review.relationships.some((relationship) => relationship.status === "open")).length})`
                   : label}
               </button>
             ))}

@@ -60,14 +60,14 @@ Read advisory 'related pages' relatedness suggestions. These are hints only, nev
 ### memory_workflow_status
 Poll a proposal or publication workflow by its explicit handle.
 - Args: `workflowId` (required, string, non-empty).
-- When to use: After proposing, poll the returned handle to see whether it published or is awaiting review.
+- When to use: Poll every new-page compiler workflow to a typed terminal result. Existing-page review handles explicitly say pollable=false and are not workflow ids.
 
 ## Contribution (privilege: propose)
 
 ### memory_propose
-Compile a new memory or create an explicit revision proposal.
+Compile a new memory with a pollable workflow, or create an existing-page revision with an explicit review settlement.
 - Args: `pageId` (required, string, non-empty); `baseRevisionId` (required, string, non-empty); `markdown` (required, string, non-empty).
-- When to use: Publish anything worth remembering (any domain). baseRevisionId is 'new' for a new page, or a memory_read revisionId to update one. Idempotent by identity+content.
+- When to use: After search + accepted-page reads, submit at most three durable learnings per settled turn. baseRevisionId 'new' returns a pollable compiler workflow; an accepted revision returns an explicit existing-page review settlement. Idempotent by identity+content.
 
 ## Maintainer / review (privilege: review)
 

@@ -1,12 +1,11 @@
 import {
   buildBacklinkIndex,
-  buildIdentityIndex,
   buildMemoryIndex,
   compareText,
   extractCitationReferences,
   extractWikiLinks,
-  resolveWikiLink,
-  type MemoryPage
+  type MemoryPage,
+  type MemoryRelationshipEvidence
 } from "@jingler/memory"
 
 export type SearchMatchKind = "fulltext" | "index" | "wikilink" | "backlink"
@@ -93,15 +92,16 @@ const matchKindsFor = (
 
 const backlinkMatchesFor = (
   pages: ReadonlyArray<MemoryPage>,
-  query: string
+  query: string,
+  relationships: ReadonlyArray<MemoryRelationshipEvidence>
 ): ReadonlySet<string> => {
-  const identities = buildIdentityIndex(pages)
+  const matchingSources = new Set(
+    pages.filter((source) => includesQuery(source.title, query)).map((source) => source.id)
+  )
   const matches = new Set<string>()
-  for (const source of pages) {
-    if (!includesQuery(source.title, query)) continue
-    for (const link of extractWikiLinks(source.body)) {
-      const target = link.target === "" ? source : resolveWikiLink(link.target, identities)
-      if (target !== undefined && target.id !== source.id) matches.add(target.id)
+  for (const relationship of relationships) {
+    if (relationship.kind === "wikilink" && matchingSources.has(relationship.sourcePageId)) {
+      matches.add(relationship.targetPageId)
     }
   }
   return matches
@@ -121,11 +121,12 @@ export const searchAcceptedPages = (
   rawQuery: string,
   revisionIdByPageId: ReadonlyMap<string, string>,
   limit = 20,
-  candidatePageIds?: ReadonlySet<string>
+  candidatePageIds?: ReadonlySet<string>,
+  relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): VaultSearchResponse => {
   const query = normalize(rawQuery)
   if (query === "") return { query: rawQuery, results: [], total: 0 }
-  const backlinkMatches = backlinkMatchesFor(pages, query)
+  const backlinkMatches = backlinkMatchesFor(pages, query, relationships)
   const results = pages
     .filter((page) => candidatePageIds === undefined || candidatePageIds.has(page.id))
     .map((page): VaultSearchResult | null => {
@@ -158,10 +159,11 @@ export const searchAcceptedPages = (
 
 export const buildSearchProjection = (
   pages: ReadonlyArray<MemoryPage>,
-  acceptedLog: ReadonlyArray<{ readonly occurredAt: string; readonly pageId: string; readonly revision: number }>
+  acceptedLog: ReadonlyArray<{ readonly occurredAt: string; readonly pageId: string; readonly revision: number }>,
+  relationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): SearchProjection => {
   const index = buildMemoryIndex(pages)
-  const backlinks = buildBacklinkIndex(pages)
+  const backlinks = buildBacklinkIndex(pages, relationships)
   const indexLines = ["# Memory index", ""]
   for (const page of index.pages) {
     const incoming = backlinks[page.id] ?? []

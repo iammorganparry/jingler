@@ -14,12 +14,10 @@ import {
   recordMemoryRetrieval,
   redactMemoryText,
   type MemoryServiceShape,
+  type MemoryCaptureTelemetryEvent,
   type MemorySessionDigestInput
 } from "./memory.js"
-import type {
-  MemoryMcpForwarder,
-  MemoryMcpProxy
-} from "./memory-mcp-proxy.js"
+import type { MemoryMcpForwarder, MemoryMcpProxy } from "./memory-mcp-proxy.js"
 import { MemoryMcpProxyError } from "./memory-mcp-proxy.js"
 import { codexMcpEnvironment, codexMcpOverrides } from "./mcp-config.js"
 import { makeInMemorySecretStore, SecretStore } from "./secret-store.js"
@@ -29,10 +27,7 @@ const NOW_SECONDS = 1_785_600_000
 const ORGANIZATION_ID = "org-paid-team"
 const BASE_URL = "https://memory.jingler.test"
 
-const grantResponse = (
-  suffix: string,
-  expiresAt = NOW_SECONDS + 3600
-): MemoryGrantResponse => ({
+const grantResponse = (suffix: string, expiresAt = NOW_SECONDS + 3600): MemoryGrantResponse => ({
   grant: `grant.${suffix}.signature`,
   claims: {
     version: 1,
@@ -51,11 +46,13 @@ const discoveryResponse = (): Response =>
   Response.json({
     jsonrpc: "2.0",
     id: "discovery",
-    result: { resultType: "complete", serverInfo: { name: "jingler-team-memory", version: "1" } }
+    result: {
+      resultType: "complete",
+      serverInfo: { name: "jingler-team-memory", version: "1" }
+    }
   })
 
-const requestOf = (input: string | URL | Request, init?: RequestInit): Request =>
-  new Request(input, init)
+const requestOf = (input: string | URL | Request, init?: RequestInit): Request => new Request(input, init)
 
 let temp: ReturnType<typeof withTempRoot>
 
@@ -66,30 +63,21 @@ beforeEach(() => {
 afterEach(() => temp.cleanup())
 
 const configuredLayer = (token: string | null = "jingler-user-token") =>
-  Layer.mergeAll(
-    ConfigService.Default,
-    Layer.effect(SecretStore, makeInMemorySecretStore(token)),
-    temp.layer
-  )
+  Layer.mergeAll(ConfigService.Default, Layer.effect(SecretStore, makeInMemorySecretStore(token)), temp.layer)
 
 const withEnabledMemory = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  ConfigService.setMemory({ enabled: true, organizationId: ORGANIZATION_ID }).pipe(
-    Effect.zipRight(effect)
-  )
+  ConfigService.setMemory({
+    enabled: true,
+    organizationId: ORGANIZATION_ID
+  }).pipe(Effect.zipRight(effect))
 
 describe("MemoryServiceLive layer identity", () => {
   it("shares one service when a consumer dependency and the app runtime use the same layer", async () => {
-    const RunnerMemory = Context.GenericTag<MemoryServiceShape>(
-      "@jingler/test/RunnerMemory"
-    )
-    const runnerLayer = Layer.effect(RunnerMemory, MemoryService).pipe(
-      Layer.provide(MemoryServiceLive)
-    )
+    const RunnerMemory = Context.GenericTag<MemoryServiceShape>("@jingler/test/RunnerMemory")
+    const runnerLayer = Layer.effect(RunnerMemory, MemoryService).pipe(Layer.provide(MemoryServiceLive))
 
     const [rpcMemory, runnerMemory] = await Effect.runPromise(
-      Effect.all([MemoryService, RunnerMemory]).pipe(
-        Effect.provide(Layer.mergeAll(MemoryServiceLive, runnerLayer))
-      )
+      Effect.all([MemoryService, RunnerMemory]).pipe(Effect.provide(Layer.mergeAll(MemoryServiceLive, runnerLayer)))
     )
 
     expect(rpcMemory).toBe(runnerMemory)
@@ -102,9 +90,7 @@ describe("MemoryService stateless attachment", () => {
     const fetchImplementation: typeof fetch = async (input, init) => {
       const request = requestOf(input, init)
       requests.push(request)
-      return request.url.endsWith("/api/memory/grant")
-        ? Response.json(grantResponse("shared"))
-        : discoveryResponse()
+      return request.url.endsWith("/api/memory/grant") ? Response.json(grantResponse("shared")) : discoveryResponse()
     }
     const service = makeMemoryService({
       fetch: fetchImplementation,
@@ -114,9 +100,8 @@ describe("MemoryService stateless attachment", () => {
 
     const attachments = await Effect.runPromise(
       withEnabledMemory(
-        Effect.forEach(
-          ["claude", "codex", "opencode"] satisfies ReadonlyArray<CliKind>,
-          (cli) => service.attachment(cli)
+        Effect.forEach(["claude", "codex", "opencode"] satisfies ReadonlyArray<CliKind>, (cli) =>
+          service.attachment(cli)
         )
       ).pipe(Effect.provide(configuredLayer()))
     )
@@ -129,24 +114,18 @@ describe("MemoryService stateless attachment", () => {
     for (const attachment of attachments) {
       expect(attachment?.server.name).toBe("jingler-memory")
       expect(attachment?.server.headers["x-jingler-organization-id"]).toBe(ORGANIZATION_ID)
-      expect(attachment?.server.headers["mcp-protocol-version"]).toBe(
-        MEMORY_MCP_PROTOCOL_VERSION
-      )
+      expect(attachment?.server.headers["mcp-protocol-version"]).toBe(MEMORY_MCP_PROTOCOL_VERSION)
       expect(attachment?.server.headerEnvironment).toStrictEqual({
         authorization: "JINGLER_MEMORY_AUTHORIZATION"
       })
       expect(attachment?.instructions).toContain("memory_navigation")
-      expect(attachment?.instructions).toContain(
-        "page, revision, source, and citation identifiers"
-      )
+      expect(attachment?.instructions).toContain("page, revision, source, and citation identifiers")
       expect(attachment?.instructions).toContain("memory_workflow_status")
     }
     const codexServer = attachments[1]?.server
     expect(codexServer).toBeDefined()
     if (codexServer !== undefined) {
-      expect(JSON.stringify(codexMcpOverrides([codexServer]))).not.toContain(
-        "grant.shared.signature"
-      )
+      expect(JSON.stringify(codexMcpOverrides([codexServer]))).not.toContain("grant.shared.signature")
       expect(codexMcpEnvironment([codexServer])).toStrictEqual({
         JINGLER_MEMORY_AUTHORIZATION: "Bearer grant.shared.signature"
       })
@@ -225,9 +204,7 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("claude")).pipe(
-        Effect.provide(configuredLayer())
-      )
+      withEnabledMemory(service.attachment("claude")).pipe(Effect.provide(configuredLayer()))
     )
     expect(attachment?.server.url).toBe("http://127.0.0.1:32124/mcp/stable")
     expect(attachment?.server.headers).toStrictEqual({
@@ -264,15 +241,16 @@ describe("MemoryService stateless attachment", () => {
 
   it("fails closed when the private loopback proxy cannot register", async () => {
     const proxy: MemoryMcpProxy = {
-      register: () => Effect.fail(new MemoryMcpProxyError({
-        message: "loopback unavailable",
-        cause: null
-      }))
+      register: () =>
+        Effect.fail(
+          new MemoryMcpProxyError({
+            message: "loopback unavailable",
+            cause: null
+          })
+        )
     }
     const fetchImplementation: typeof fetch = async (input) =>
-      String(input).endsWith("/api/memory/grant")
-        ? Response.json(grantResponse("proxy-failed"))
-        : discoveryResponse()
+      String(input).endsWith("/api/memory/grant") ? Response.json(grantResponse("proxy-failed")) : discoveryResponse()
     const service = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
@@ -281,9 +259,7 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("claude")).pipe(
-        Effect.provide(configuredLayer())
-      )
+      withEnabledMemory(service.attachment("claude")).pipe(Effect.provide(configuredLayer()))
     )
 
     expect(attachment).toBeNull()
@@ -337,25 +313,19 @@ describe("MemoryService stateless attachment", () => {
 
     const attachment = await Effect.runPromise(
       withEnabledMemory(
-        service.attachment(
-          "codex",
-          "How do refunds work? api_key=secret-should-not-egress",
-          "session-1:chat-1"
-        )
-      ).pipe(
-        Effect.provide(configuredLayer())
-      )
+        service.attachment("codex", "How do refunds work? api_key=secret-should-not-egress", "session-1:chat-1")
+      ).pipe(Effect.provide(configuredLayer()))
     )
 
     const repeated = await Effect.runPromise(
-      withEnabledMemory(
-        service.attachment("codex", "How do refunds work?", "session-1:chat-1")
-      ).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.attachment("codex", "How do refunds work?", "session-1:chat-1")).pipe(
+        Effect.provide(configuredLayer())
+      )
     )
     const separateConversation = await Effect.runPromise(
-      withEnabledMemory(
-        service.attachment("codex", "How do refunds work?", "session-2:chat-1")
-      ).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.attachment("codex", "How do refunds work?", "session-2:chat-1")).pipe(
+        Effect.provide(configuredLayer())
+      )
     )
 
     expect(attachment?.retrieval).toStrictEqual({
@@ -379,9 +349,7 @@ describe("MemoryService stateless attachment", () => {
     expect(repeated?.instructions).not.toContain("Accepted body for page-one")
     expect(separateConversation?.instructions).toContain("Accepted body for page-one")
 
-    const calls = requests.filter(
-      (request) => request.headers.get("mcp-method") === "tools/call"
-    )
+    const calls = requests.filter((request) => request.headers.get("mcp-method") === "tools/call")
     expect(calls.map((request) => request.headers.get("mcp-name"))).toStrictEqual([
       "memory_search",
       "memory_read",
@@ -411,9 +379,7 @@ describe("MemoryService stateless attachment", () => {
     })
 
     const attachment = await Effect.runPromise(
-      withEnabledMemory(service.attachment("cursor")).pipe(
-        Effect.provide(configuredLayer())
-      )
+      withEnabledMemory(service.attachment("cursor")).pipe(Effect.provide(configuredLayer()))
     )
 
     expect(attachment).toBeNull()
@@ -433,18 +399,18 @@ describe("MemoryService stateless attachment", () => {
       }
       if (request.url.endsWith("/api/memory/organizations")) {
         return Response.json({
-          organizations: [{
-            id: ORGANIZATION_ID,
-            name: "Paid team",
-            role: "admin",
-            privileges: ["read", "propose", "review"]
-          }]
+          organizations: [
+            {
+              id: ORGANIZATION_ID,
+              name: "Paid team",
+              role: "admin",
+              privileges: ["read", "propose", "review"]
+            }
+          ]
         })
       }
       discoveries += 1
-      return discoveries === 1
-        ? Response.json({ error: "expired" }, { status: 401 })
-        : discoveryResponse()
+      return discoveries === 1 ? Response.json({ error: "expired" }, { status: 401 }) : discoveryResponse()
     }
     const service = makeMemoryService({
       fetch: fetchImplementation,
@@ -471,10 +437,11 @@ describe("MemoryService stateless attachment", () => {
         ? Response.json(grantResponse("unsupported"))
         : Response.json({}, { status: 400 })
 
-    const disabled = makeMemoryService({ fetch: ineligible, baseUrl: () => BASE_URL })
-    expect(
-      await Effect.runPromise(disabled.attachment("claude").pipe(Effect.provide(configuredLayer())))
-    ).toBeNull()
+    const disabled = makeMemoryService({
+      fetch: ineligible,
+      baseUrl: () => BASE_URL
+    })
+    expect(await Effect.runPromise(disabled.attachment("claude").pipe(Effect.provide(configuredLayer())))).toBeNull()
 
     for (const fetchImplementation of [ineligible, expired, unsupported, unavailable]) {
       const service = makeMemoryService({
@@ -485,19 +452,18 @@ describe("MemoryService stateless attachment", () => {
       })
       expect(
         await Effect.runPromise(
-          withEnabledMemory(service.attachment("opencode")).pipe(
-            Effect.provide(configuredLayer())
-          )
+          withEnabledMemory(service.attachment("opencode")).pipe(Effect.provide(configuredLayer()))
         )
       ).toBeNull()
     }
 
-    const signedOut = makeMemoryService({ fetch: ineligible, baseUrl: () => BASE_URL })
+    const signedOut = makeMemoryService({
+      fetch: ineligible,
+      baseUrl: () => BASE_URL
+    })
     expect(
       await Effect.runPromise(
-        withEnabledMemory(signedOut.attachment("claude")).pipe(
-          Effect.provide(configuredLayer(null))
-        )
+        withEnabledMemory(signedOut.attachment("claude")).pipe(Effect.provide(configuredLayer(null)))
       )
     ).toBeNull()
   })
@@ -511,23 +477,32 @@ describe("MemoryService stateless attachment", () => {
         const issued = grantResponse("renderer-boundary")
         return Response.json({
           ...issued,
-          claims: { ...issued.claims, privileges: ["read", "propose", "review"] }
+          claims: {
+            ...issued.claims,
+            privileges: ["read", "propose", "review"]
+          }
         })
       }
       if (request.url.endsWith("/api/memory/organizations")) {
-        return Response.json({ organizations: [{
-          id: ORGANIZATION_ID,
-          name: "Paid team",
-          role: "admin",
-          privileges: ["read", "propose", "review"]
-        }] })
+        return Response.json({
+          organizations: [
+            {
+              id: ORGANIZATION_ID,
+              name: "Paid team",
+              role: "admin",
+              privileges: ["read", "propose", "review"]
+            }
+          ]
+        })
       }
       return Response.json({
         jsonrpc: "2.0",
         id: "ui",
         result: {
           resultType: "complete",
-          structuredContent: { data: { acceptedPages: 42, scope: ORGANIZATION_ID } },
+          structuredContent: {
+            data: { acceptedPages: 42, scope: ORGANIZATION_ID }
+          },
           content: []
         }
       })
@@ -555,12 +530,14 @@ describe("MemoryService stateless attachment", () => {
     expect(outcome).toStrictEqual({
       access: {
         selectedOrganizationId: ORGANIZATION_ID,
-        organizations: [{
-          id: ORGANIZATION_ID,
-          name: "Paid team",
-          role: "admin",
-          privileges: ["read", "propose", "review"]
-        }]
+        organizations: [
+          {
+            id: ORGANIZATION_ID,
+            name: "Paid team",
+            role: "admin",
+            privileges: ["read", "propose", "review"]
+          }
+        ]
       },
       data: { acceptedPages: 42, scope: ORGANIZATION_ID }
     })
@@ -570,9 +547,7 @@ describe("MemoryService stateless attachment", () => {
     const toolRequest = requests.find((request) => request.url.endsWith("/api/mcp"))
     expect(toolRequest).toBeDefined()
     if (toolRequest === undefined) return
-    expect(toolRequest.headers.get("authorization")).toBe(
-      "Bearer grant.renderer-boundary.signature"
-    )
+    expect(toolRequest.headers.get("authorization")).toBe("Bearer grant.renderer-boundary.signature")
     expect(toolRequest.headers.get("x-jingler-organization-id")).toBe(ORGANIZATION_ID)
     expect(toolRequest.headers.get("mcp-method")).toBe("tools/call")
     expect(toolRequest.headers.get("mcp-name")).toBe("memory_dashboard")
@@ -593,13 +568,21 @@ describe("MemoryService stateless attachment", () => {
       Response.json({
         jsonrpc: "2.0",
         id: "ui",
-        result: { resultType: "complete", structuredContent: { data: { ok: true } }, content: [] }
+        result: {
+          resultType: "complete",
+          structuredContent: { data: { ok: true } },
+          content: []
+        }
       })
     const grantForOrg = (organizationId: string): MemoryGrantResponse => {
       const base = grantResponse(organizationId)
       return {
         grant: `grant.${organizationId}.signature`,
-        claims: { ...base.claims, organizationId, grantId: `grant-${organizationId}` }
+        claims: {
+          ...base.claims,
+          organizationId,
+          grantId: `grant-${organizationId}`
+        }
       }
     }
     const fetchImplementation: typeof fetch = async (input, init) => {
@@ -621,10 +604,26 @@ describe("MemoryService stateless attachment", () => {
       withEnabledMemory(
         Effect.all(
           [
-            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_dashboard", arguments: {} }),
-            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_graph", arguments: {} }),
-            service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_search", arguments: {} }),
-            service.uiRequest({ organizationId: "org-second", name: "memory_dashboard", arguments: {} })
+            service.uiRequest({
+              organizationId: ORGANIZATION_ID,
+              name: "memory_dashboard",
+              arguments: {}
+            }),
+            service.uiRequest({
+              organizationId: ORGANIZATION_ID,
+              name: "memory_graph",
+              arguments: {}
+            }),
+            service.uiRequest({
+              organizationId: ORGANIZATION_ID,
+              name: "memory_search",
+              arguments: {}
+            }),
+            service.uiRequest({
+              organizationId: "org-second",
+              name: "memory_dashboard",
+              arguments: {}
+            })
           ],
           { concurrency: "unbounded" }
         )
@@ -639,7 +638,7 @@ describe("MemoryService stateless attachment", () => {
   it("re-mints a cached grant once it nears expiry", async () => {
     let now = NOW_SECONDS
     let grants = 0
-    const fetchImplementation: typeof fetch = async (input) => {
+    const fetchImplementation: typeof fetch = async (input, init) => {
       if (String(input).endsWith("/api/memory/grant")) {
         grants += 1
         return Response.json(grantResponse(String(grants), NOW_SECONDS + 300))
@@ -647,7 +646,11 @@ describe("MemoryService stateless attachment", () => {
       return Response.json({
         jsonrpc: "2.0",
         id: "ui",
-        result: { resultType: "complete", structuredContent: { data: {} }, content: [] }
+        result: {
+          resultType: "complete",
+          structuredContent: { data: {} },
+          content: []
+        }
       })
     }
     const service = makeMemoryService({
@@ -658,7 +661,11 @@ describe("MemoryService stateless attachment", () => {
 
     await Effect.runPromise(
       withEnabledMemory(
-        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_dashboard", arguments: {} })
+        service.uiRequest({
+          organizationId: ORGANIZATION_ID,
+          name: "memory_dashboard",
+          arguments: {}
+        })
       ).pipe(Effect.provide(configuredLayer()))
     )
     expect(grants).toBe(1)
@@ -666,7 +673,11 @@ describe("MemoryService stateless attachment", () => {
     // A follow-up while the grant is comfortably valid reuses the cache.
     await Effect.runPromise(
       withEnabledMemory(
-        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_graph", arguments: {} })
+        service.uiRequest({
+          organizationId: ORGANIZATION_ID,
+          name: "memory_graph",
+          arguments: {}
+        })
       ).pipe(Effect.provide(configuredLayer()))
     )
     expect(grants).toBe(1)
@@ -675,7 +686,11 @@ describe("MemoryService stateless attachment", () => {
     now = NOW_SECONDS + 290
     await Effect.runPromise(
       withEnabledMemory(
-        service.uiRequest({ organizationId: ORGANIZATION_ID, name: "memory_search", arguments: {} })
+        service.uiRequest({
+          organizationId: ORGANIZATION_ID,
+          name: "memory_search",
+          arguments: {}
+        })
       ).pipe(Effect.provide(configuredLayer()))
     )
     expect(grants).toBe(2)
@@ -685,6 +700,7 @@ describe("MemoryService stateless attachment", () => {
 describe("MemoryService settled-session capture", () => {
   it("enqueues at most one bounded redacted source digest with aggregate-only retrieval data", async () => {
     const requests: Request[] = []
+    const telemetry: Array<MemoryCaptureTelemetryEvent> = []
     const fetchImplementation: typeof fetch = async (input, init) => {
       const request = requestOf(input, init)
       requests.push(request)
@@ -695,7 +711,8 @@ describe("MemoryService settled-session capture", () => {
     const service = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
+      nowSeconds: () => NOW_SECONDS,
+      onCaptureTelemetry: (event) => telemetry.push(event)
     })
     const input: MemorySessionDigestInput = {
       sessionId: "session-sensitive-local-id",
@@ -704,21 +721,27 @@ describe("MemoryService settled-session capture", () => {
       cli: "claude",
       userText:
         "Email me at person@example.com; Authorization: Bearer live-bearer and api_key=sk-live123456789 from /Users/private/repo.",
-      assistantText:
-        "Done. mcp-session-id=session-private password=hunter2 https://x.test/?token=query-secret",
+      assistantText: "Done. mcp-session-id=session-private password=hunter2 https://x.test/?token=query-secret",
       settledAt: "2026-08-01T12:00:00.000Z",
-      retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
+      retrieval: {
+        searches: 2,
+        reads: 3,
+        navigation: 1,
+        graphReads: 4,
+        proposals: 1
+      }
     }
 
     const outcomes = await Effect.runPromise(
       withEnabledMemory(
-        Effect.all([
-          service.captureSettledSession(input),
-          service.captureSettledSession(input),
-          service.captureSettledSession(input)
-        ], { concurrency: "unbounded" }).pipe(
-          Effect.tap(() => Effect.sleep("20 millis"))
-        )
+        Effect.all(
+          [
+            service.captureSettledSession(input),
+            service.captureSettledSession(input),
+            service.captureSettledSession(input)
+          ],
+          { concurrency: "unbounded" }
+        ).pipe(Effect.tap(() => Effect.sleep("20 millis")))
       ).pipe(Effect.provide(configuredLayer()))
     )
 
@@ -747,11 +770,25 @@ describe("MemoryService settled-session capture", () => {
     }
     expect(body).toMatchObject({
       source: { kind: "conversation", title: "Settled Jingler agent session" },
-      retrieval: { searches: 2, reads: 3, navigation: 1, graphReads: 4, proposals: 1 }
+      retrieval: {
+        searches: 2,
+        reads: 3,
+        navigation: 1,
+        graphReads: 4,
+        proposals: 1
+      },
+      delivery: {
+        attempt: 1,
+        failedAttempts: 0,
+        firstSeenAt: NOW_SECONDS,
+        deliveredAt: new Date(NOW_SECONDS * 1_000).toISOString()
+      }
     })
     expect(serialized).not.toContain("duration")
     expect(serialized).not.toContain("query")
     expect(serialized).not.toContain("resultBody")
+    expect(telemetry.map((event) => event.outcome)).toEqual(["captured", "delivered"])
+    expect(JSON.stringify(telemetry)).not.toContain("Done")
   })
 
   it("serializes concurrent enqueues so no queued capture is lost", async () => {
@@ -782,36 +819,38 @@ describe("MemoryService settled-session capture", () => {
     await Effect.runPromise(
       withEnabledMemory(
         Effect.all(
-          [
-            service.captureSettledSession(inputFor("alpha")),
-            service.captureSettledSession(inputFor("beta"))
-          ],
+          [service.captureSettledSession(inputFor("alpha")), service.captureSettledSession(inputFor("beta"))],
           { concurrency: "unbounded" }
         ).pipe(Effect.tap(() => Effect.sleep("40 millis")))
       ).pipe(Effect.provide(configuredLayer()))
     )
 
-    const outbox: unknown = JSON.parse(
-      readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-    )
+    const outbox: unknown = JSON.parse(readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8"))
     expect(outbox).toHaveLength(2)
   })
 
   it("allows a later retry after a transient capture failure", async () => {
     let sourceAttempts = 0
-    const fetchImplementation: typeof fetch = async (input) => {
+    const telemetry: Array<MemoryCaptureTelemetryEvent> = []
+    const sourceBodies: Array<Record<string, unknown>> = []
+    const fetchImplementation: typeof fetch = async (input, init) => {
       if (String(input).endsWith("/api/memory/grant")) {
         return Response.json(grantResponse("retry"))
       }
       if (String(input).endsWith("/api/memory/organizations")) {
-        return Response.json({ organizations: [{
-          id: ORGANIZATION_ID,
-          name: "Paid team",
-          role: "member",
-          privileges: ["read", "propose"]
-        }] })
+        return Response.json({
+          organizations: [
+            {
+              id: ORGANIZATION_ID,
+              name: "Paid team",
+              role: "member",
+              privileges: ["read", "propose"]
+            }
+          ]
+        })
       }
       sourceAttempts += 1
+      sourceBodies.push((await requestOf(input, init).json()) as Record<string, unknown>)
       return sourceAttempts === 1
         ? Response.json({ error: "offline" }, { status: 503 })
         : Response.json({ accepted: true }, { status: 202 })
@@ -819,7 +858,8 @@ describe("MemoryService settled-session capture", () => {
     const service = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
+      nowSeconds: () => NOW_SECONDS,
+      onCaptureTelemetry: (event) => telemetry.push(event)
     })
     const input: MemorySessionDigestInput = {
       sessionId: "session-retry",
@@ -834,13 +874,14 @@ describe("MemoryService settled-session capture", () => {
 
     const outcomes = await Effect.runPromise(
       withEnabledMemory(
-        Effect.all([
-          service.captureSettledSession(input),
-          service.captureSettledSession(input),
-          service.captureSettledSession(input)
-        ], { concurrency: 1 }).pipe(
-          Effect.tap(() => Effect.sleep("30 millis"))
-        )
+        Effect.all(
+          [
+            service.captureSettledSession(input),
+            service.captureSettledSession(input),
+            service.captureSettledSession(input)
+          ],
+          { concurrency: 1 }
+        ).pipe(Effect.tap(() => Effect.sleep("30 millis")))
       ).pipe(Effect.provide(configuredLayer()))
     )
 
@@ -848,7 +889,8 @@ describe("MemoryService settled-session capture", () => {
     const restarted = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
+      nowSeconds: () => NOW_SECONDS,
+      onCaptureTelemetry: (event) => telemetry.push(event)
     })
     await Effect.runPromise(
       withEnabledMemory(restarted.access()).pipe(
@@ -857,6 +899,10 @@ describe("MemoryService settled-session capture", () => {
       )
     )
     expect(sourceAttempts).toBe(2)
+    expect(telemetry.map((event) => event.outcome)).toEqual(["captured", "delivery_retry", "delivered"])
+    expect(sourceBodies[1]).toMatchObject({
+      delivery: { attempt: 2, failedAttempts: 1, firstSeenAt: NOW_SECONDS }
+    })
   })
 
   it("releases the capture id after a failed enqueue so a later attempt retries", async () => {
@@ -891,9 +937,9 @@ describe("MemoryService settled-session capture", () => {
     mkdirSync(blocker, { recursive: true })
 
     const first = await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))).pipe(
+        Effect.provide(configuredLayer())
+      )
     )
     expect(first).toBe(false)
     // Nothing persisted and nothing delivered on the failed enqueue.
@@ -904,9 +950,9 @@ describe("MemoryService settled-session capture", () => {
     // actually deliver (the released claim no longer blocks it).
     rmSync(blocker, { recursive: true, force: true })
     const second = await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("20 millis")))).pipe(
+        Effect.provide(configuredLayer())
+      )
     )
     expect(second).toBe(true)
     expect(sourcePosts).toBe(1)
@@ -914,6 +960,7 @@ describe("MemoryService settled-session capture", () => {
 
   it("drops a capture whose org membership was revoked instead of retrying forever", async () => {
     let grants = 0
+    const telemetry: Array<MemoryCaptureTelemetryEvent> = []
     const fetchImplementation: typeof fetch = async (input) => {
       if (String(input).endsWith("/api/memory/grant")) {
         grants += 1
@@ -927,7 +974,8 @@ describe("MemoryService settled-session capture", () => {
     const service = makeMemoryService({
       fetch: fetchImplementation,
       baseUrl: () => BASE_URL,
-      nowSeconds: () => NOW_SECONDS
+      nowSeconds: () => NOW_SECONDS,
+      onCaptureTelemetry: (event) => telemetry.push(event)
     })
     const input: MemorySessionDigestInput = {
       sessionId: "session-403",
@@ -941,21 +989,20 @@ describe("MemoryService settled-session capture", () => {
     }
 
     await Effect.runPromise(
-      withEnabledMemory(
-        service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("30 millis")))
-      ).pipe(Effect.provide(configuredLayer()))
+      withEnabledMemory(service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("30 millis")))).pipe(
+        Effect.provide(configuredLayer())
+      )
     )
 
     // The drain is deliberately forked so capture never blocks a terminal
     // event. Poll its observable outbox result instead of assuming a 30ms
     // scheduler window, which is too narrow under the repository-wide suite.
     await vi.waitFor(() => {
-      const outbox: unknown = JSON.parse(
-        readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8")
-      )
+      const outbox: unknown = JSON.parse(readFileSync(join(temp.root, "memory-capture-outbox.json"), "utf8"))
       expect(outbox).toHaveLength(0)
     })
     expect(grants).toBe(1)
+    expect(telemetry.map((event) => event.outcome)).toEqual(["captured", "membership_dropped"])
 
     // A second drain finds nothing to do — no further grant round-trips.
     await Effect.runPromise(
@@ -965,6 +1012,63 @@ describe("MemoryService settled-session capture", () => {
       )
     )
     expect(grants).toBe(1)
+  })
+
+  it("emits content-free expiry telemetry after the bounded retry budget", async () => {
+    const telemetry: Array<MemoryCaptureTelemetryEvent> = []
+    let sourceAttempts = 0
+    const fetchImplementation: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith("/api/memory/grant")) return Response.json(grantResponse("expiry"))
+      if (url.endsWith("/api/memory/organizations")) {
+        return Response.json({
+          organizations: [
+            {
+              id: ORGANIZATION_ID,
+              name: "Paid team",
+              role: "member",
+              privileges: ["read", "propose"]
+            }
+          ]
+        })
+      }
+      sourceAttempts += 1
+      return Response.json({ error: "offline" }, { status: 503 })
+    }
+    const service = makeMemoryService({
+      fetch: fetchImplementation,
+      baseUrl: () => BASE_URL,
+      nowSeconds: () => NOW_SECONDS,
+      onCaptureTelemetry: (event) => telemetry.push(event)
+    })
+    const input: MemorySessionDigestInput = {
+      sessionId: "session-expiry-sensitive",
+      chatId: "chat-expiry-sensitive",
+      turnId: "turn-expiry-sensitive",
+      cli: "codex",
+      userText: "Sensitive transcript body must not enter telemetry.",
+      assistantText: "Sensitive response body must not enter telemetry.",
+      settledAt: "2026-08-01T12:00:00.000Z",
+      retrieval: EMPTY_MEMORY_RETRIEVAL_SUMMARY
+    }
+    await Effect.runPromise(
+      withEnabledMemory(service.captureSettledSession(input).pipe(Effect.tap(() => Effect.sleep("30 millis")))).pipe(
+        Effect.provide(configuredLayer())
+      )
+    )
+    for (let retry = 0; retry < 4; retry += 1) {
+      await Effect.runPromise(
+        withEnabledMemory(service.access()).pipe(
+          Effect.tap(() => Effect.sleep("30 millis")),
+          Effect.provide(configuredLayer())
+        )
+      )
+    }
+    await vi.waitFor(() => expect(sourceAttempts).toBe(5))
+    expect(telemetry.at(-1)?.outcome).toBe("delivery_expired")
+    expect(telemetry.at(-1)?.attempt).toBe(5)
+    expect(JSON.stringify(telemetry)).not.toContain("Sensitive transcript body")
+    expect(JSON.stringify(telemetry)).not.toContain("Sensitive response body")
   })
 
   it("redacts credential shapes, bounds content, and counts only known memory tools", () => {
@@ -1004,15 +1108,17 @@ describe("MemoryService settled-session capture", () => {
   })
 
   it("redacts complete cookie headers, continuation lines, and common token assignments", () => {
-    const redacted = redactMemoryText([
-      "Cookie: theme=light; session_token=supersecret-value",
-      "Set-Cookie: harmless=yes; private_key=private-material",
-      "\tcontinuation-secret=must-not-survive",
-      "  Cookie: theme=light; sid=indented-cookie-secret",
-      "Request Cookie: theme=light; sid=prefixed-cookie-secret",
-      "secret=abcdefghijklmnop",
-      "session_token=qrstuvwxyzabcdef"
-    ].join("\n"))
+    const redacted = redactMemoryText(
+      [
+        "Cookie: theme=light; session_token=supersecret-value",
+        "Set-Cookie: harmless=yes; private_key=private-material",
+        "\tcontinuation-secret=must-not-survive",
+        "  Cookie: theme=light; sid=indented-cookie-secret",
+        "Request Cookie: theme=light; sid=prefixed-cookie-secret",
+        "secret=abcdefghijklmnop",
+        "session_token=qrstuvwxyzabcdef"
+      ].join("\n")
+    )
 
     for (const secret of [
       "supersecret-value",
@@ -1022,6 +1128,7 @@ describe("MemoryService settled-session capture", () => {
       "prefixed-cookie-secret",
       "abcdefghijklmnop",
       "qrstuvwxyzabcdef"
-    ]) expect(redacted).not.toContain(secret)
+    ])
+      expect(redacted).not.toContain(secret)
   })
 })

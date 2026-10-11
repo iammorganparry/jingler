@@ -2,13 +2,23 @@ import { Schema } from "effect"
 import { VAULT_ORGANIZATION_HEADER } from "../auth.js"
 import type { DurableObjectNamespaceLike } from "../env.js"
 
-const VaultErrorResponse = Schema.Struct({ error: Schema.String })
+const VaultErrorResponse = Schema.Struct({
+  error: Schema.String,
+  code: Schema.optional(Schema.String),
+  issueCodes: Schema.optional(Schema.Array(Schema.String))
+})
+
+export interface VaultClientFailure {
+  readonly code?: string
+  readonly issueCodes?: ReadonlyArray<string>
+  readonly status?: number
+}
 
 export class DurableObjectVaultClient {
   constructor(
     private readonly namespace: DurableObjectNamespaceLike,
     private readonly organizationId: string,
-    private readonly makeError: (message: string) => Error
+    private readonly makeError: (message: string, failure?: VaultClientFailure) => Error
   ) {}
 
   async request<A, I>(
@@ -34,12 +44,19 @@ export class DurableObjectVaultClient {
     const body: unknown = await response.json()
     if (!response.ok) {
       let detail = response.statusText
+      let failure: VaultClientFailure = { status: response.status }
       try {
-        detail = Schema.decodeUnknownSync(VaultErrorResponse)(body).error
+        const decoded = Schema.decodeUnknownSync(VaultErrorResponse)(body)
+        detail = decoded.error
+        failure = {
+          status: response.status,
+          ...(decoded.code === undefined ? {} : { code: decoded.code }),
+          ...(decoded.issueCodes === undefined ? {} : { issueCodes: decoded.issueCodes })
+        }
       } catch {
         // Keep the HTTP status when the peer did not return its error contract.
       }
-      throw this.makeError(detail === "" ? options.requestError : `${options.requestError}: ${detail}`)
+      throw this.makeError(detail === "" ? options.requestError : `${options.requestError}: ${detail}`, failure)
     }
     try {
       return Schema.decodeUnknownSync(schema)(body)

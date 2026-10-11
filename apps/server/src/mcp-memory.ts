@@ -3,6 +3,7 @@ import {
   MEMORY_MCP_PROTOCOL_VERSION,
   MEMORY_MCP_SERVER_INFO,
   MemoryAcceptedPageRequest,
+  MemoryWorkflowStatusResponse,
   type MemoryGrantClaims,
   MemoryMcpRequestMetadata,
   type MemoryMcpToolName,
@@ -18,10 +19,7 @@ export interface MemoryMcpDependencies {
   // Awaitable so the route can compose a synchronous HMAC-grant verifier with an
   // asynchronous Personal Access Token verifier (which hits the DB + paid gate).
   // A sync verifier still satisfies this — awaiting a plain value is a no-op.
-  readonly verifyGrant: (
-    grant: string,
-    organizationId: string
-  ) => MemoryGrantClaims | Promise<MemoryGrantClaims>
+  readonly verifyGrant: (grant: string, organizationId: string) => MemoryGrantClaims | Promise<MemoryGrantClaims>
   readonly client: MemoryClient<JsonValue>
   readonly requestId?: () => string
 }
@@ -37,11 +35,7 @@ interface ToolDefinition {
   readonly description: string
   readonly inputSchema: ReturnType<typeof JSONSchema.make>
   readonly privilege: MemoryPrivilege
-  readonly request: (
-    value: unknown,
-    claims: MemoryGrantClaims,
-    requestId: string
-  ) => MemoryClientRequest | null
+  readonly request: (value: unknown, claims: MemoryGrantClaims, requestId: string) => MemoryClientRequest | null
 }
 
 const NonEmptyString = Schema.String.pipe(Schema.minLength(1))
@@ -50,25 +44,19 @@ const EmptyArguments = Schema.Struct({})
 const defineTool = <Arguments, Encoded>(
   definition: Omit<ToolDefinition, "inputSchema" | "request">,
   argumentsSchema: Schema.Schema<Arguments, Encoded>,
-  buildRequest: (
-    args: Arguments,
-    claims: MemoryGrantClaims,
-    requestId: string
-  ) => MemoryClientRequest
+  buildRequest: (args: Arguments, claims: MemoryGrantClaims, requestId: string) => MemoryClientRequest
 ): ToolDefinition => ({
   ...definition,
   inputSchema: JSONSchema.make(argumentsSchema),
   request: (value, claims, requestId) => {
-    const args = Schema.decodeUnknownEither(argumentsSchema)(value, { onExcessProperty: "error" })
+    const args = Schema.decodeUnknownEither(argumentsSchema)(value, {
+      onExcessProperty: "error"
+    })
     return args._tag === "Left" ? null : buildRequest(args.right, claims, requestId)
   }
 })
 
-const getRequest = (
-  claims: MemoryGrantClaims,
-  requestId: string,
-  path: string
-): MemoryClientRequest => ({
+const getRequest = (claims: MemoryGrantClaims, requestId: string, path: string): MemoryClientRequest => ({
   organizationId: claims.organizationId,
   requestId,
   method: "GET",
@@ -76,199 +64,252 @@ const getRequest = (
 })
 
 const tools: ReadonlyArray<ToolDefinition> = [
-  defineTool({
-    name: "memory_dashboard",
-    description: "Read the pre-aggregated private team-memory dashboard.",
-    privilege: "read"
-  }, Schema.Struct({ range: Schema.optional(Schema.String) }), (args, claims, requestId) =>
-    getRequest(
-      claims,
-      requestId,
-      `/internal/memory/analytics${args.range === undefined ? "" : `?range=${encodeURIComponent(args.range)}`}`
-    )),
-  defineTool({
-    name: "memory_graph",
-    description: "Read a bounded team-memory graph manifest without page bodies.",
-    privilege: "read"
-  }, Schema.Struct({ limit: Schema.optional(limit(500)) }), (args, claims, requestId) =>
-    getRequest(claims, requestId, `/internal/memory/graph?limit=${args.limit ?? 200}`)),
-  defineTool({
-    name: "memory_graph_neighborhood",
-    description: "Expand one graph node by one hop without returning the complete graph.",
-    privilege: "read"
-  }, Schema.Struct({ nodeId: NonEmptyString, limit: Schema.optional(limit(100)) }),
-  (args, claims, requestId) => getRequest(
-    claims,
-    requestId,
-    // The Worker (and desktop) clamp neighborhood expansion to
-    // MAX_NEIGHBORHOOD_LIMIT = 100; the published schema bound must match so a
-    // client is never told a 101–500 limit is honoured when it is silently cut.
-    `/internal/memory/neighborhood/${encodeURIComponent(args.nodeId)}?limit=${args.limit ?? 100}`
-  )),
-  defineTool({
-    name: "memory_edge_evidence",
-    description: "Read the exact accepted evidence for one explicit graph edge.",
-    privilege: "read"
-  }, Schema.Struct({ edgeId: NonEmptyString }), (args, claims, requestId) =>
-    getRequest(
-      claims,
-      requestId,
-      `/internal/memory/edges/${encodeURIComponent(args.edgeId)}/evidence`
-    )),
-  defineTool({
-    name: "memory_navigation",
-    description: "Read deterministic index and backlink navigation.",
-    privilege: "read"
-  }, EmptyArguments, (_args, claims, requestId) =>
-    getRequest(claims, requestId, "/internal/memory/navigation")),
-  defineTool({
-    name: "memory_export",
-    description: "Export accepted team-memory pages as an Obsidian-compatible vault.",
-    privilege: "read"
-  }, EmptyArguments, (_args, claims, requestId) =>
-    getRequest(claims, requestId, "/internal/memory/export")),
-  defineTool({
-    name: "memory_propose",
-    description: "Compile a new memory or create an explicit revision proposal.",
-    privilege: "propose"
-  }, Schema.Struct({
-    pageId: NonEmptyString,
-    baseRevisionId: NonEmptyString,
-    markdown: NonEmptyString
-  }), (args, claims, requestId) => {
-    const identity = createHash("sha256")
-      .update([claims.subject, args.pageId, args.baseRevisionId, args.markdown].join("\u0000"))
-      .digest("hex")
+  defineTool(
+    {
+      name: "memory_dashboard",
+      description: "Read the pre-aggregated private team-memory dashboard.",
+      privilege: "read"
+    },
+    Schema.Struct({ range: Schema.optional(Schema.String) }),
+    (args, claims, requestId) =>
+      getRequest(
+        claims,
+        requestId,
+        `/internal/memory/analytics${args.range === undefined ? "" : `?range=${encodeURIComponent(args.range)}`}`
+      )
+  ),
+  defineTool(
+    {
+      name: "memory_graph",
+      description: "Read a bounded team-memory graph manifest without page bodies.",
+      privilege: "read"
+    },
+    Schema.Struct({ limit: Schema.optional(limit(500)) }),
+    (args, claims, requestId) => getRequest(claims, requestId, `/internal/memory/graph?limit=${args.limit ?? 200}`)
+  ),
+  defineTool(
+    {
+      name: "memory_graph_neighborhood",
+      description: "Expand one graph node by one hop without returning the complete graph.",
+      privilege: "read"
+    },
+    Schema.Struct({
+      nodeId: NonEmptyString,
+      limit: Schema.optional(limit(100))
+    }),
+    (args, claims, requestId) =>
+      getRequest(
+        claims,
+        requestId,
+        // The Worker (and desktop) clamp neighborhood expansion to
+        // MAX_NEIGHBORHOOD_LIMIT = 100; the published schema bound must match so a
+        // client is never told a 101–500 limit is honoured when it is silently cut.
+        `/internal/memory/neighborhood/${encodeURIComponent(args.nodeId)}?limit=${args.limit ?? 100}`
+      )
+  ),
+  defineTool(
+    {
+      name: "memory_edge_evidence",
+      description: "Read the exact accepted evidence for one explicit graph edge.",
+      privilege: "read"
+    },
+    Schema.Struct({ edgeId: NonEmptyString }),
+    (args, claims, requestId) =>
+      getRequest(claims, requestId, `/internal/memory/edges/${encodeURIComponent(args.edgeId)}/evidence`)
+  ),
+  defineTool(
+    {
+      name: "memory_navigation",
+      description: "Read deterministic index and backlink navigation.",
+      privilege: "read"
+    },
+    EmptyArguments,
+    (_args, claims, requestId) => getRequest(claims, requestId, "/internal/memory/navigation")
+  ),
+  defineTool(
+    {
+      name: "memory_export",
+      description: "Export accepted team-memory pages as an Obsidian-compatible vault.",
+      privilege: "read"
+    },
+    EmptyArguments,
+    (_args, claims, requestId) => getRequest(claims, requestId, "/internal/memory/export")
+  ),
+  defineTool(
+    {
+      name: "memory_propose",
+      description:
+        "Compile a new memory with a pollable workflow, or create an existing-page revision with an explicit review settlement.",
+      privilege: "propose"
+    },
+    Schema.Struct({
+      pageId: NonEmptyString,
+      baseRevisionId: NonEmptyString,
+      markdown: NonEmptyString
+    }),
+    (args, claims, requestId) => {
+      const identity = createHash("sha256")
+        .update([claims.subject, args.pageId, args.baseRevisionId, args.markdown].join("\u0000"))
+        .digest("hex")
 
-    // Existing-page proposals require a real accepted head. A brand-new memory
-    // has neither a head nor a citation source, so ingest it as a manual source;
-    // the Worker starts the durable compiler and returns its workflow handle.
-    if (args.baseRevisionId === "new") {
-      const sourceId = `source:proposal-${identity}`
+      // Existing-page proposals require a real accepted head. A brand-new memory
+      // has neither a head nor a citation source, so ingest it as a manual source;
+      // the Worker starts the durable compiler and returns its workflow handle.
+      if (args.baseRevisionId === "new") {
+        const sourceId = `source:proposal-${identity}`
+        return {
+          organizationId: claims.organizationId,
+          requestId,
+          method: "POST",
+          path: "/internal/memory/sources",
+          body: {
+            source: {
+              id: sourceId,
+              kind: "manual",
+              title: `Agent memory proposal: ${args.pageId}`,
+              uri: `jingler://memory-proposal/${identity}`,
+              retrievedAt: new Date().toISOString(),
+              contentHash: createHash("sha256").update(args.markdown).digest("hex")
+            },
+            content: args.markdown
+          }
+        }
+      }
+
       return {
         organizationId: claims.organizationId,
         requestId,
         method: "POST",
-        path: "/internal/memory/sources",
+        path: "/internal/memory/proposals",
         body: {
-          source: {
-            id: sourceId,
-            kind: "manual",
-            title: `Agent memory proposal: ${args.pageId}`,
-            uri: `jingler://memory-proposal/${identity}`,
-            retrievedAt: new Date().toISOString(),
-            contentHash: createHash("sha256").update(args.markdown).digest("hex")
-          },
-          content: args.markdown
+          // The proposal id is derived SERVER-SIDE from the grant subject plus the
+          // proposal content — never from a client-supplied header. This removes
+          // client control over the durable id (a grant holder could otherwise
+          // collide with a teammate's in-flight proposal, which the vault rejects
+          // with a same-id/different-content 409), namespaces the id by subject so
+          // two users can never collide, and keeps idempotent replay: the same
+          // subject + same content always hashes to the same id, so the vault's
+          // same-id/same-content dedup returns the existing proposal. `requestId`
+          // (the x-request-id header) is retained for tracing only.
+          id: `proposal-${identity}`,
+          ...args,
+          proposedBy: claims.subject,
+          createdAt: new Date().toISOString()
         }
       }
     }
-
-    return {
-      organizationId: claims.organizationId,
-      requestId,
-      method: "POST",
-      path: "/internal/memory/proposals",
-      body: {
-      // The proposal id is derived SERVER-SIDE from the grant subject plus the
-      // proposal content — never from a client-supplied header. This removes
-      // client control over the durable id (a grant holder could otherwise
-      // collide with a teammate's in-flight proposal, which the vault rejects
-      // with a same-id/different-content 409), namespaces the id by subject so
-      // two users can never collide, and keeps idempotent replay: the same
-      // subject + same content always hashes to the same id, so the vault's
-      // same-id/same-content dedup returns the existing proposal. `requestId`
-      // (the x-request-id header) is retained for tracing only.
-        id: `proposal-${identity}`,
-        ...args,
-        proposedBy: claims.subject,
-        createdAt: new Date().toISOString()
+  ),
+  defineTool(
+    {
+      name: "memory_reviews",
+      description: "List bounded proposal sets for the private review inbox.",
+      privilege: "review"
+    },
+    Schema.Struct({ limit: Schema.optional(limit(100)) }),
+    (args, claims, requestId) => getRequest(claims, requestId, `/internal/memory/reviews?limit=${args.limit ?? 50}`)
+  ),
+  defineTool(
+    {
+      name: "memory_read",
+      description: "Read one accepted page with stable page, revision, source, and citation ids.",
+      privilege: "read"
+    },
+    Schema.Struct({ pageId: NonEmptyString }),
+    (args, claims, requestId) =>
+      getRequest(claims, requestId, `/internal/memory/pages/${encodeURIComponent(args.pageId)}`)
+  ),
+  defineTool(
+    {
+      name: "memory_review",
+      description: "Approve or reject an explicit proposal handle.",
+      privilege: "review"
+    },
+    Schema.Struct({
+      proposalId: NonEmptyString,
+      action: Schema.Literal("approve", "reject")
+    }),
+    (args, claims, requestId) => {
+      const occurredAt = new Date().toISOString()
+      return {
+        organizationId: claims.organizationId,
+        requestId,
+        method: "POST",
+        path: `/internal/memory/proposals/${encodeURIComponent(args.proposalId)}/${args.action}`,
+        acceptedStatuses: args.action === "approve" ? [409] : [],
+        body:
+          args.action === "approve"
+            ? { reviewerId: claims.subject, acceptedAt: occurredAt }
+            : { reviewerId: claims.subject, rejectedAt: occurredAt }
       }
     }
-  }),
-  defineTool({
-    name: "memory_reviews",
-    description: "List bounded proposal sets for the private review inbox.",
-    privilege: "review"
-  }, Schema.Struct({ limit: Schema.optional(limit(100)) }), (args, claims, requestId) =>
-    getRequest(claims, requestId, `/internal/memory/reviews?limit=${args.limit ?? 50}`)),
-  defineTool({
-    name: "memory_read",
-    description: "Read one accepted page with stable page, revision, source, and citation ids.",
-    privilege: "read"
-  }, Schema.Struct({ pageId: NonEmptyString }), (args, claims, requestId) =>
-    getRequest(claims, requestId, `/internal/memory/pages/${encodeURIComponent(args.pageId)}`)),
-  defineTool({
-    name: "memory_review",
-    description: "Approve or reject an explicit proposal handle.",
-    privilege: "review"
-  }, Schema.Struct({ proposalId: NonEmptyString, action: Schema.Literal("approve", "reject") }),
-  (args, claims, requestId) => {
-    const occurredAt = new Date().toISOString()
-    return {
+  ),
+  defineTool(
+    {
+      name: "memory_schema_publish",
+      description: "Publish a schema-governed accepted page.",
+      privilege: "schema"
+    },
+    Schema.Struct({ revisionId: NonEmptyString, markdown: NonEmptyString }),
+    (args, claims, requestId) => ({
       organizationId: claims.organizationId,
       requestId,
       method: "POST",
-      path: `/internal/memory/proposals/${encodeURIComponent(args.proposalId)}/${args.action}`,
-      acceptedStatuses: args.action === "approve" ? [409] : [],
-      body: args.action === "approve"
-        ? { reviewerId: claims.subject, acceptedAt: occurredAt }
-        : { reviewerId: claims.subject, rejectedAt: occurredAt }
-    }
-  }),
-  defineTool({
-    name: "memory_schema_publish",
-    description: "Publish a schema-governed accepted page.",
-    privilege: "schema"
-  }, Schema.Struct({ revisionId: NonEmptyString, markdown: NonEmptyString }),
-  (args, claims, requestId) => ({
-    organizationId: claims.organizationId,
-    requestId,
-    method: "POST",
-    path: "/internal/memory/pages",
-    body: Schema.decodeUnknownSync(MemoryAcceptedPageRequest)({
-      revisionId: args.revisionId,
-      markdown: args.markdown,
-      actorId: claims.subject,
-      createdAt: new Date().toISOString()
+      path: "/internal/memory/pages",
+      body: Schema.decodeUnknownSync(MemoryAcceptedPageRequest)({
+        revisionId: args.revisionId,
+        markdown: args.markdown,
+        actorId: claims.subject,
+        createdAt: new Date().toISOString()
+      })
     })
-  })),
-  defineTool({
-    name: "memory_search",
-    description: "Search accepted team-memory pages using private lexical search.",
-    privilege: "read"
-  }, Schema.Struct({ query: NonEmptyString, limit: Schema.optional(limit(100)) }),
-  (args, claims, requestId) => getRequest(
-    claims,
-    requestId,
-    `/internal/memory/search?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 20}`
-  )),
-  defineTool({
-    name: "memory_suggestions",
-    description:
-      "Read advisory 'related pages' relatedness suggestions. These are hints only, never accepted graph edges.",
-    privilege: "read"
-  }, Schema.Struct({
-    limit: Schema.optional(limit(50)),
-    pageId: Schema.optional(NonEmptyString)
-  }), (args, claims, requestId) =>
-    getRequest(
-      claims,
-      requestId,
-      `/internal/memory/suggestions?limit=${args.limit ?? 5}${
-        args.pageId === undefined ? "" : `&pageId=${encodeURIComponent(args.pageId)}`
-      }`
-    )),
-  defineTool({
-    name: "memory_workflow_status",
-    description: "Poll a proposal or publication workflow by its explicit handle.",
-    privilege: "read"
-  }, Schema.Struct({ workflowId: NonEmptyString }), (args, claims, requestId) =>
-    getRequest(
-      claims,
-      requestId,
-      `/internal/memory/workflows/${encodeURIComponent(args.workflowId)}`
-    ))
+  ),
+  defineTool(
+    {
+      name: "memory_search",
+      description: "Search accepted team-memory pages using private lexical search.",
+      privilege: "read"
+    },
+    Schema.Struct({
+      query: NonEmptyString,
+      limit: Schema.optional(limit(100))
+    }),
+    (args, claims, requestId) =>
+      getRequest(
+        claims,
+        requestId,
+        `/internal/memory/search?q=${encodeURIComponent(args.query)}&limit=${args.limit ?? 20}`
+      )
+  ),
+  defineTool(
+    {
+      name: "memory_suggestions",
+      description:
+        "Read advisory 'related pages' relatedness suggestions. These are hints only, never accepted graph edges.",
+      privilege: "read"
+    },
+    Schema.Struct({
+      limit: Schema.optional(limit(50)),
+      pageId: Schema.optional(NonEmptyString)
+    }),
+    (args, claims, requestId) =>
+      getRequest(
+        claims,
+        requestId,
+        `/internal/memory/suggestions?limit=${args.limit ?? 5}${
+          args.pageId === undefined ? "" : `&pageId=${encodeURIComponent(args.pageId)}`
+        }`
+      )
+  ),
+  defineTool(
+    {
+      name: "memory_workflow_status",
+      description: "Poll a proposal or publication workflow by its explicit handle.",
+      privilege: "read"
+    },
+    Schema.Struct({ workflowId: NonEmptyString }),
+    (args, claims, requestId) =>
+      getRequest(claims, requestId, `/internal/memory/workflows/${encodeURIComponent(args.workflowId)}`)
+  )
 ]
 
 /**
@@ -291,7 +332,10 @@ export const memoryMcpToolManifest: ReadonlyArray<{
   inputSchema
 }))
 
-const StringRecord = Schema.Record({ key: Schema.String, value: Schema.Unknown })
+const StringRecord = Schema.Record({
+  key: Schema.String,
+  value: Schema.Unknown
+})
 const isStringRecord = Schema.is(StringRecord)
 const JsonRpcRequest = Schema.Struct({
   jsonrpc: Schema.Literal("2.0"),
@@ -333,12 +377,7 @@ const errorResult = (
   error: { code, message, ...(data ? { data } : {}) }
 })
 
-const jsonResponse = (
-  body: Record<string, unknown>,
-  status: number,
-  requestId: string,
-  cacheable = false
-): Response =>
+const jsonResponse = (body: Record<string, unknown>, status: number, requestId: string, cacheable = false): Response =>
   Response.json(body, {
     status,
     headers: {
@@ -367,15 +406,24 @@ const validateHeaders = (
   }
   const declaredMethod = request.headers.get("mcp-method")
   if (declaredMethod !== parsed.method) {
-    return { code: MEMORY_MCP_ERROR.headerMismatch, message: "Mcp-Method does not match method" }
+    return {
+      code: MEMORY_MCP_ERROR.headerMismatch,
+      message: "Mcp-Method does not match method"
+    }
   }
   const bodyName = typeof parsed.params.name === "string" ? parsed.params.name : null
   const declaredName = request.headers.get("mcp-name")
   if (bodyName !== null && declaredName !== bodyName) {
-    return { code: MEMORY_MCP_ERROR.headerMismatch, message: "Mcp-Name does not match name" }
+    return {
+      code: MEMORY_MCP_ERROR.headerMismatch,
+      message: "Mcp-Name does not match name"
+    }
   }
   if (bodyName === null && declaredName !== null) {
-    return { code: MEMORY_MCP_ERROR.headerMismatch, message: "Mcp-Name is not valid for this method" }
+    return {
+      code: MEMORY_MCP_ERROR.headerMismatch,
+      message: "Mcp-Name is not valid for this method"
+    }
   }
   return null
 }
@@ -418,8 +466,69 @@ const hasPrivilege = (claims: MemoryGrantClaims, privilege: MemoryPrivilege): bo
 const visibleTools = (claims: MemoryGrantClaims): ReadonlyArray<ToolDefinition> =>
   tools.filter((tool) => hasPrivilege(claims, tool.privilege))
 
-const findTool = (name: string): ToolDefinition | null =>
-  tools.find((tool) => tool.name === name) ?? null
+const findTool = (name: string): ToolDefinition | null => tools.find((tool) => tool.name === name) ?? null
+
+/**
+ * Give both proposal routes the same observable settlement envelope. New pages
+ * enter the durable compiler and MUST expose a pollable workflow. Existing-page
+ * revisions are written directly to the review inbox, so their durable handle is
+ * the proposal id and `pending_review` is explicit rather than a silent 201.
+ */
+const proposalSettlement = (
+  args: Record<string, unknown>,
+  raw: JsonValue
+): Record<string, unknown> => {
+  if (!isStringRecord(raw)) throw new Error("invalid proposal response")
+  if (args.baseRevisionId === "new") {
+    const workflowId = raw.workflowId
+    if (typeof workflowId !== "string" || workflowId.length === 0) {
+      throw new Error("new-page proposal did not return a workflow handle")
+    }
+    return {
+      route: "new_page",
+      status: "queued",
+      terminal: false,
+      workflowId,
+      settlement: {
+        kind: "workflow",
+        status: "queued",
+        workflowId,
+        pollable: true
+      }
+    }
+  }
+
+  const proposalId = raw.id
+  const rawStatus = raw.status
+  if (
+    typeof proposalId !== "string" ||
+    proposalId.length === 0 ||
+    !["open", "accepted", "rejected", "superseded"].includes(String(rawStatus))
+  ) {
+    throw new Error("existing-page proposal did not return a review handle")
+  }
+  const status =
+    rawStatus === "open"
+      ? "pending_review"
+      : rawStatus === "accepted"
+        ? "published"
+        : rawStatus === "rejected"
+          ? "rejected"
+          : "conflict"
+  const terminal = status !== "pending_review"
+  return {
+    route: "existing_page",
+    status,
+    terminal,
+    proposalId,
+    settlement: {
+      kind: "review",
+      status,
+      proposalId,
+      pollable: false
+    }
+  }
+}
 
 const callTool = async (
   parsed: ParsedRequest,
@@ -445,7 +554,13 @@ const callTool = async (
   }
   if (!workerRequest) return errorResult(parsed.id, -32602, "Invalid tool arguments")
   try {
-    const data = await Effect.runPromise(client.request(workerRequest))
+    const raw = await Effect.runPromise(client.request(workerRequest))
+    const data =
+      name === "memory_workflow_status"
+        ? Schema.decodeUnknownSync(MemoryWorkflowStatusResponse)(raw)
+        : name === "memory_propose"
+          ? proposalSettlement(args, raw)
+          : raw
     return successfulResult(parsed.id, {
       content: [{ type: "text", text: JSON.stringify(data) }],
       structuredContent: { data }
@@ -461,41 +576,45 @@ const dispatchAuthenticatedRequest = async (
   client: MemoryClient<JsonValue>,
   requestId: string
 ): Promise<Response> =>
-  Promise.resolve(Match.value(parsed.method).pipe(
-    Match.when("server/discover", () => jsonResponse(
-      successfulResult(parsed.id, {
-        supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
-        capabilities: { tools: {} },
-        serverInfo: MEMORY_MCP_SERVER_INFO,
-        instructions: MEMORY_MCP_INSTRUCTIONS,
-        ttlMs: 60_000,
-        cacheScope: "private"
-      }),
-      200,
-      requestId,
-      true
-    )),
-    Match.when("tools/list", () => jsonResponse(
-      successfulResult(parsed.id, {
-        tools: visibleTools(claims).map(({ name, description, inputSchema }) => ({
-          name,
-          description,
-          inputSchema
-        })),
-        ttlMs: 60_000,
-        cacheScope: "private"
-      }),
-      200,
-      requestId,
-      true
-    )),
-    Match.when("tools/call", async () =>
-      jsonResponse(await callTool(parsed, claims, client, requestId), 200, requestId)
-    ),
-    Match.orElse(() =>
-      jsonResponse(errorResult(parsed.id, -32601, "Method not found"), 404, requestId)
+  Promise.resolve(
+    Match.value(parsed.method).pipe(
+      Match.when("server/discover", () =>
+        jsonResponse(
+          successfulResult(parsed.id, {
+            supportedVersions: [MEMORY_MCP_PROTOCOL_VERSION],
+            capabilities: { tools: {} },
+            serverInfo: MEMORY_MCP_SERVER_INFO,
+            instructions: MEMORY_MCP_INSTRUCTIONS,
+            ttlMs: 60_000,
+            cacheScope: "private"
+          }),
+          200,
+          requestId,
+          true
+        )
+      ),
+      Match.when("tools/list", () =>
+        jsonResponse(
+          successfulResult(parsed.id, {
+            tools: visibleTools(claims).map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema
+            })),
+            ttlMs: 60_000,
+            cacheScope: "private"
+          }),
+          200,
+          requestId,
+          true
+        )
+      ),
+      Match.when("tools/call", async () =>
+        jsonResponse(await callTool(parsed, claims, client, requestId), 200, requestId)
+      ),
+      Match.orElse(() => jsonResponse(errorResult(parsed.id, -32601, "Method not found"), 404, requestId))
     )
-  ))
+  )
 
 /** Fallback MCP revision if a standard client's `initialize` omits one; we echo theirs when present. */
 const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
@@ -508,7 +627,7 @@ const STANDARD_MCP_DEFAULT_VERSION = "2025-06-18"
  * deliberately augments, rather than replaces, this portable MCP contract.
  */
 export const MEMORY_MCP_INSTRUCTIONS =
-  "Recall first: before answering or acting, call memory_search, then memory_read every page you rely on; never treat search snippets or navigation as the page. Cite its pageId, revisionId, sourceIds, and citationIds. When durable knowledge emerges, call memory_propose with baseRevisionId 'new' for a new page or the accepted revision for an update. Retain its workflow handle and poll memory_workflow_status until it settles. Requests are independent; do not create or reuse MCP sessions or cookies."
+  "Recall: memory_search, then memory_read pages you rely on. At turn end, silently reflect on at most three durable learnings; search/read before proposing. memory_propose with baseRevisionId 'new' returns workflowId: poll memory_workflow_status to a typed terminal state. An accepted revision returns pending_review plus a non-pollable proposalId (or terminal replay); existing-page updates require review. New-page compilation auto-accepts unless the organization requires review. Submission is not publication."
 
 /**
  * Serve a STANDARD MCP client — the harnesses' native codex / opencode / Claude
@@ -578,11 +697,7 @@ const handleStandardMcpRequest = async (
   try {
     return await dispatchAuthenticatedRequest({ id, method, params }, claims, dependencies.client, requestId)
   } catch {
-    return jsonResponse(
-      errorResult(id, -32603, "Internal memory service error", { requestId }),
-      500,
-      requestId
-    )
+    return jsonResponse(errorResult(id, -32603, "Internal memory service error", { requestId }), 500, requestId)
   }
 }
 
@@ -616,11 +731,7 @@ export const handleMemoryMcpRequest = async (
   if (!parsed) return jsonResponse(errorResult(null, -32600, "Invalid request"), 400, requestId)
   const validationError = validateHeaders(request, parsed) ?? validateMetadata(parsed.params)
   if (validationError) {
-    return jsonResponse(
-      errorResult(parsed.id, validationError.code, validationError.message),
-      400,
-      requestId
-    )
+    return jsonResponse(errorResult(parsed.id, validationError.code, validationError.message), 400, requestId)
   }
   let claims: MemoryGrantClaims
   try {
@@ -636,7 +747,9 @@ export const handleMemoryMcpRequest = async (
     return await dispatchAuthenticatedRequest(parsed, claims, dependencies.client, requestId)
   } catch {
     return jsonResponse(
-      errorResult(parsed.id, -32603, "Internal memory service error", { requestId }),
+      errorResult(parsed.id, -32603, "Internal memory service error", {
+        requestId
+      }),
       500,
       requestId
     )

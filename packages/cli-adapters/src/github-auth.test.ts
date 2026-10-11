@@ -80,6 +80,23 @@ describe("GitHubAuth desktop grants", () => {
     })
   })
 
+  it("bypasses the status cache when fresh persisted state is required", async () => {
+    let current = STATUS
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => response(current))
+    const client = makeGitHubAuthClient({
+      bearer: async () => "session",
+      fetch,
+      baseUrl: () => "https://server.jingler.test"
+    })
+
+    await expect(client.status()).resolves.toEqual(STATUS)
+    current = { ...STATUS, installations: [] }
+    await expect(client.status()).resolves.toEqual(STATUS)
+    await expect(client.statusFresh()).resolves.toEqual(current)
+    await expect(client.status()).resolves.toEqual(current)
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
   it("adds workflows write only when an inspected workflow path changed", () => {
     expect(githubPushPermissions(["src/index.ts", "README.md"]))
       .toEqual(["contents:write"])

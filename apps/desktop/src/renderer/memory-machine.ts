@@ -508,7 +508,14 @@ export const createMemoryMachine = (api: MemoryApi) =>
                 reviews: context.reviews.map((review) =>
                   review.id === event.output.proposalId
                     ? { ...review, status: "rejected" }
-                    : review
+                    : {
+                        ...review,
+                        relationships: review.relationships.map((relationship) =>
+                          relationship.proposalId === event.output.proposalId
+                            ? { ...relationship, status: "rejected" }
+                            : relationship
+                        )
+                      }
                 )
               }))
             }

@@ -60,10 +60,16 @@ describe("MemoryMap", () => {
           edge,
           evidence: {
             kind: "wikilink",
+            relationshipId: "relationship:a:b",
+            evidenceId: "evidence:a:b",
             pageId: "a",
             path: "a.md",
-            line: 7,
-            raw: "[[b|Beta]]"
+            sourceRevisionId: "revision:a:2",
+            start: 7,
+            end: 17,
+            raw: "[[b|Beta]]",
+            acceptedBy: "reviewer-1",
+            acceptedAt: "2026-08-06T12:00:00.000Z"
           }
         }}
         page={null}
@@ -74,7 +80,34 @@ describe("MemoryMap", () => {
     )
     expect(screen.getByRole("heading", { name: "wikilink" })).toBeDefined()
     expect(screen.getByText("[[b|Beta]]")).toBeDefined()
+    expect(screen.getByText("revision:a:2")).toBeDefined()
+    expect(screen.getByText("reviewer-1")).toBeDefined()
     expect(screen.getByText(NO_INFERRED_EDGES)).toBeDefined()
+  })
+
+  it("labels source citations as provenance rather than durable relationships", () => {
+    render(
+      <MemoryInspector
+        node={null}
+        evidence={{
+          edge: { id: "citation:1", sourceId: "page:a", targetId: "source:1", kind: "citation" },
+          evidence: {
+            kind: "citation",
+            pageId: "a",
+            path: "a.md",
+            sourceId: "source:1",
+            citationId: "citation:1",
+            raw: "[@citation:1]"
+          }
+        }}
+        page={null}
+        onBack={() => {}}
+        onOpenPage={() => {}}
+        onExpandNeighborhood={() => {}}
+      />
+    )
+    expect(screen.getByText("Provenance citation")).toBeDefined()
+    expect(screen.getByText(/does not connect two durable pages/)).toBeDefined()
   })
 
   it("builds a valid canvas font string, resolving the mono family or falling back", () => {

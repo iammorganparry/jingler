@@ -11,6 +11,7 @@ import {
   MemorySourceKind,
   type MemoryAuditEvent,
   type MemoryPage,
+  type MemoryRelationshipEvidence,
   type MemorySource
 } from "./model.js"
 
@@ -59,11 +60,16 @@ export type MemoryGraphEdgeKind = Schema.Schema.Type<typeof MemoryGraphEdgeKind>
 
 export const MemoryWikilinkEvidence = Schema.Struct({
   kind: Schema.Literal("wikilink"),
+  relationshipId: Schema.String,
+  evidenceId: Schema.String,
   pageId: Schema.String,
   path: Schema.String,
-  line: Schema.Number,
-  column: Schema.Number,
-  raw: Schema.String
+  sourceRevisionId: Schema.String,
+  start: Schema.Number,
+  end: Schema.Number,
+  raw: Schema.String,
+  acceptedBy: Schema.String,
+  acceptedAt: Schema.String
 })
 export type MemoryWikilinkEvidence = Schema.Schema.Type<typeof MemoryWikilinkEvidence>
 
@@ -81,22 +87,33 @@ export type MemoryCitationEvidence = Schema.Schema.Type<typeof MemoryCitationEvi
 
 export const MemoryDependencyEvidence = Schema.Struct({
   kind: Schema.Literal("dependency"),
+  relationshipId: Schema.String,
+  evidenceId: Schema.String,
   pageId: Schema.String,
   path: Schema.String,
-  relationshipIndex: Schema.Number,
+  sourceRevisionId: Schema.String,
+  start: Schema.Number,
+  end: Schema.Number,
   target: Schema.String,
-  label: Schema.optional(Schema.String)
+  raw: Schema.String,
+  acceptedBy: Schema.String,
+  acceptedAt: Schema.String
 })
 export type MemoryDependencyEvidence = Schema.Schema.Type<typeof MemoryDependencyEvidence>
 
 export const MemoryBacklinkEvidence = Schema.Struct({
   kind: Schema.Literal("backlink"),
+  relationshipId: Schema.String,
+  evidenceId: Schema.String,
   sourcePageId: Schema.String,
   targetPageId: Schema.String,
   path: Schema.String,
-  line: Schema.Number,
-  column: Schema.Number,
-  raw: Schema.String
+  sourceRevisionId: Schema.String,
+  start: Schema.Number,
+  end: Schema.Number,
+  raw: Schema.String,
+  acceptedBy: Schema.String,
+  acceptedAt: Schema.String
 })
 export type MemoryBacklinkEvidence = Schema.Schema.Type<typeof MemoryBacklinkEvidence>
 
@@ -391,9 +408,8 @@ const resolvePageRelationship = (
  */
 type ReferenceResolver = (page: MemoryPage, target: string) => MemoryPage | undefined
 
-const addWikilinkEdges = (
+const inspectWikilinks = (
   page: MemoryPage,
-  edges: Map<string, MemoryGraphEdge>,
   resolve: ReferenceResolver,
   onUnresolved?: (page: MemoryPage) => void
 ): void => {
@@ -401,38 +417,79 @@ const addWikilinkEdges = (
     const target = link.target === "" ? page : resolve(page, link.target)
     if (target === undefined) {
       onUnresolved?.(page)
-      continue
     }
-    const forward: MemoryGraphEdge = {
-      sourceId: memoryPageNodeId(page.id),
-      targetId: memoryPageNodeId(target.id),
-      kind: "wikilink",
-      evidence: {
-        kind: "wikilink",
-        pageId: page.id,
-        path: page.path,
-        line: link.line,
-        column: link.column,
-        raw: link.raw
-      }
-    }
-    const backlink: MemoryGraphEdge = {
-      sourceId: memoryPageNodeId(target.id),
-      targetId: memoryPageNodeId(page.id),
-      kind: "backlink",
-      evidence: {
-        kind: "backlink",
-        sourcePageId: page.id,
-        targetPageId: target.id,
-        path: page.path,
-        line: link.line,
-        column: link.column,
-        raw: link.raw
-      }
-    }
-    edges.set(canonicalJson(forward), forward)
-    edges.set(canonicalJson(backlink), backlink)
   }
+}
+
+const addAcceptedRelationshipEdges = (
+  relationship: MemoryRelationshipEvidence,
+  pages: ReadonlyMap<string, MemoryPage>,
+  edges: Map<string, MemoryGraphEdge>,
+  strict: boolean
+): void => {
+  const source = pages.get(relationship.sourcePageId)
+  const target = pages.get(relationship.targetPageId)
+  const supported =
+    source !== undefined &&
+    target !== undefined &&
+    source.body.slice(relationship.start, relationship.end) === relationship.quote
+  if (!supported) {
+    if (strict) {
+      throw new MemoryGraphError(
+        `accepted relationship ${relationship.relationshipId} has unresolved endpoints or stale evidence`
+      )
+    }
+    return
+  }
+  const common = {
+    relationshipId: relationship.relationshipId,
+    evidenceId: relationship.id,
+    pageId: source.id,
+    path: source.path,
+    sourceRevisionId: relationship.sourceRevisionId,
+    start: relationship.start,
+    end: relationship.end,
+    raw: relationship.quote,
+    acceptedBy: relationship.acceptedBy,
+    acceptedAt: relationship.acceptedAt
+  }
+  if (relationship.kind === "dependency") {
+    const edge: MemoryGraphEdge = {
+      sourceId: memoryPageNodeId(source.id),
+      targetId: memoryPageNodeId(target.id),
+      kind: "dependency",
+      evidence: { ...common, kind: "dependency", target: target.id }
+    }
+    edges.set(canonicalJson(edge), edge)
+    return
+  }
+  const forward: MemoryGraphEdge = {
+    sourceId: memoryPageNodeId(source.id),
+    targetId: memoryPageNodeId(target.id),
+    kind: "wikilink",
+    evidence: { ...common, kind: "wikilink" }
+  }
+  const backlink: MemoryGraphEdge = {
+    sourceId: memoryPageNodeId(target.id),
+    targetId: memoryPageNodeId(source.id),
+    kind: "backlink",
+    evidence: {
+      kind: "backlink",
+      relationshipId: relationship.relationshipId,
+      evidenceId: relationship.id,
+      sourcePageId: source.id,
+      targetPageId: target.id,
+      path: source.path,
+      sourceRevisionId: relationship.sourceRevisionId,
+      start: relationship.start,
+      end: relationship.end,
+      raw: relationship.quote,
+      acceptedBy: relationship.acceptedBy,
+      acceptedAt: relationship.acceptedAt
+    }
+  }
+  edges.set(canonicalJson(forward), forward)
+  edges.set(canonicalJson(backlink), backlink)
 }
 
 const addCitationEdges = (
@@ -467,28 +524,13 @@ const addCitationEdges = (
 const addRelationshipEdges = (
   page: MemoryPage,
   nodes: Map<string, MemoryGraphNode>,
-  edges: Map<string, MemoryGraphEdge>,
-  resolve: ReferenceResolver
+  edges: Map<string, MemoryGraphEdge>
 ): void => {
   for (let index = 0; index < page.relationships.length; index += 1) {
     const relationship = page.relationships[index]!
     if (relationship.kind === "dependency") {
-      const target = resolve(page, relationship.target)
-      if (target === undefined) continue
-      const edge: MemoryGraphEdge = {
-        sourceId: memoryPageNodeId(page.id),
-        targetId: memoryPageNodeId(target.id),
-        kind: "dependency",
-        evidence: {
-          kind: "dependency",
-          pageId: page.id,
-          path: page.path,
-          relationshipIndex: index,
-          target: relationship.target,
-          ...(relationship.label === undefined ? {} : { label: relationship.label })
-        }
-      }
-      edges.set(canonicalJson(edge), edge)
+      // Legacy frontmatter dependencies are not independently reviewed and
+      // therefore remain non-projecting metadata.
       continue
     }
     const nodeId = memorySchemaNodeId(relationship.target)
@@ -518,13 +560,16 @@ const addRelationshipEdges = (
 const assembleMemoryGraph = (
   pages: ReadonlyArray<MemoryPage>,
   repositorySources: ReadonlyArray<MemorySource>,
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence>,
   resolve: ReferenceResolver,
-  onUnresolvedWikilink?: (page: MemoryPage) => void
+  onUnresolvedWikilink?: (page: MemoryPage) => void,
+  strictRelationships = true
 ): MemoryGraph => {
   const sourceList = uniqueSources(pages, repositorySources)
   const sources = new Map(sourceList.map((source) => [source.id, source]))
   const nodes = new Map<string, MemoryGraphNode>()
   const edges = new Map<string, MemoryGraphEdge>()
+  const pagesById = new Map(pages.map((page) => [page.id, page]))
   for (const page of pages) {
     const nodeId = memoryPageNodeId(page.id)
     nodes.set(nodeId, {
@@ -547,9 +592,12 @@ const assembleMemoryGraph = (
     })
   }
   for (const page of pages) {
-    addWikilinkEdges(page, edges, resolve, onUnresolvedWikilink)
+    inspectWikilinks(page, resolve, onUnresolvedWikilink)
     addCitationEdges(page, sources, edges)
-    addRelationshipEdges(page, nodes, edges, resolve)
+    addRelationshipEdges(page, nodes, edges)
+  }
+  for (const relationship of acceptedRelationships) {
+    addAcceptedRelationshipEdges(relationship, pagesById, edges, strictRelationships)
   }
   return {
     version: 1,
@@ -566,13 +614,14 @@ const assembleMemoryGraph = (
 
 export const buildMemoryGraph = (
   pages: ReadonlyArray<MemoryPage>,
-  repositorySources: ReadonlyArray<MemorySource> = []
+  repositorySources: ReadonlyArray<MemorySource> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): MemoryGraph => {
   const identities = buildIdentityIndex(pages)
   // STRICT resolver: a missing or ambiguous target throws, which is what the
   // reproducible export hashes rely on (accepted pages are lint-validated, so this
   // never fires in production; it guards against a corrupt/incomplete page set).
-  return assembleMemoryGraph(pages, repositorySources, (page, target) =>
+  return assembleMemoryGraph(pages, repositorySources, acceptedRelationships, (page, target) =>
     resolvePageRelationship(page, target, identities)
   )
 }
@@ -592,15 +641,18 @@ export interface MemoryGraphView {
 
 export const buildMemoryGraphView = (
   pages: ReadonlyArray<MemoryPage>,
-  repositorySources: ReadonlyArray<MemorySource> = []
+  repositorySources: ReadonlyArray<MemorySource> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): MemoryGraphView => {
   const identities = buildIdentityIndex(pages)
   const brokenWikiLinksByPage = new Map<string, number>()
   const graph = assembleMemoryGraph(
     pages,
     repositorySources,
+    acceptedRelationships,
     (_page, target) => resolveWikiLink(target, identities),
-    (page) => brokenWikiLinksByPage.set(page.id, (brokenWikiLinksByPage.get(page.id) ?? 0) + 1)
+    (page) => brokenWikiLinksByPage.set(page.id, (brokenWikiLinksByPage.get(page.id) ?? 0) + 1),
+    false
   )
   return { graph, brokenWikiLinksByPage }
 }
@@ -609,9 +661,10 @@ export const buildMemoryGraphView = (
 export const assertMemoryGraphEvidence = (
   graph: MemoryGraph,
   pages: ReadonlyArray<MemoryPage>,
-  repositorySources: ReadonlyArray<MemorySource> = []
+  repositorySources: ReadonlyArray<MemorySource> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): void => {
-  const expected = buildMemoryGraph(pages, repositorySources)
+  const expected = buildMemoryGraph(pages, repositorySources, acceptedRelationships)
   if (canonicalJson(graph) !== canonicalJson(expected)) {
     throw new MemoryGraphError("graph does not match the accepted memory evidence")
   }
@@ -620,10 +673,11 @@ export const assertMemoryGraphEvidence = (
 export const graphMatchesMemoryEvidence = (
   graph: MemoryGraph,
   pages: ReadonlyArray<MemoryPage>,
-  repositorySources: ReadonlyArray<MemorySource> = []
+  repositorySources: ReadonlyArray<MemorySource> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): boolean => {
   try {
-    assertMemoryGraphEvidence(graph, pages, repositorySources)
+    assertMemoryGraphEvidence(graph, pages, repositorySources, acceptedRelationships)
     return true
   } catch {
     return false
@@ -631,16 +685,18 @@ export const graphMatchesMemoryEvidence = (
 }
 
 export const buildBacklinkIndex = (
-  pages: ReadonlyArray<MemoryPage>
+  pages: ReadonlyArray<MemoryPage>,
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): Readonly<Record<string, ReadonlyArray<string>>> => {
-  const identities = buildIdentityIndex(pages)
   const backlinks = new Map<string, Set<string>>(pages.map((page) => [page.id, new Set()]))
-  for (const page of pages) {
-    for (const link of extractWikiLinks(page.body)) {
-      const target = link.target === "" ? page : resolveWikiLink(link.target, identities)
-      if (target !== undefined) {
-        backlinks.get(target.id)?.add(page.id)
-      }
+  const pageIds = new Set(pages.map((page) => page.id))
+  for (const relationship of acceptedRelationships) {
+    if (
+      relationship.kind === "wikilink" &&
+      pageIds.has(relationship.sourcePageId) &&
+      pageIds.has(relationship.targetPageId)
+    ) {
+      backlinks.get(relationship.targetPageId)?.add(relationship.sourcePageId)
     }
   }
   return Object.fromEntries(
@@ -655,9 +711,9 @@ const buildExportManifestFromArtifacts = (
   repositorySources: ReadonlyArray<MemorySource>,
   index: MemoryIndex,
   graph: MemoryGraph,
-  analytics: MemoryAnalyticsSummary
+  analytics: MemoryAnalyticsSummary,
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence>
 ): MemoryExportManifest => {
-  const identities = buildIdentityIndex(pages)
   return {
     version: 1,
     pages: [...pages]
@@ -668,11 +724,12 @@ const buildExportManifestFromArtifacts = (
         revision: page.revision,
         contentHash: stableContentHash(serializeMemoryMarkdown(page)),
         links: sortedUnique(
-          extractWikiLinks(page.body).map((link) => {
-            const target =
-              link.target === "" ? page : resolvePageRelationship(page, link.target, identities)
-            return target.id
-          })
+          acceptedRelationships
+            .filter(
+              (relationship) =>
+                relationship.kind === "wikilink" && relationship.sourcePageId === page.id
+            )
+            .map((relationship) => relationship.targetPageId)
         ),
         citations: sortedUnique(page.citations.map((citation) => citation.id)),
         relationships: page.relationships
@@ -690,34 +747,38 @@ const buildExportManifestFromArtifacts = (
 export const buildExportManifest = (
   pages: ReadonlyArray<MemoryPage>,
   repositorySources: ReadonlyArray<MemorySource> = [],
-  auditEvents: ReadonlyArray<MemoryAuditEvent> = []
+  auditEvents: ReadonlyArray<MemoryAuditEvent> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): MemoryExportManifest =>
   buildExportManifestFromArtifacts(
     pages,
     repositorySources,
     buildMemoryIndex(pages),
-    buildMemoryGraph(pages, repositorySources),
-    buildMemoryAnalytics(pages, auditEvents)
+    buildMemoryGraph(pages, repositorySources, acceptedRelationships),
+    buildMemoryAnalytics(pages, auditEvents),
+    acceptedRelationships
   )
 
 export const buildMemoryArtifacts = (
   pages: ReadonlyArray<MemoryPage>,
   repositorySources: ReadonlyArray<MemorySource> = [],
-  auditEvents: ReadonlyArray<MemoryAuditEvent> = []
+  auditEvents: ReadonlyArray<MemoryAuditEvent> = [],
+  acceptedRelationships: ReadonlyArray<MemoryRelationshipEvidence> = []
 ): MemoryDerivedArtifacts => {
   const index = buildMemoryIndex(pages)
-  const graph = buildMemoryGraph(pages, repositorySources)
+  const graph = buildMemoryGraph(pages, repositorySources, acceptedRelationships)
   const analytics = buildMemoryAnalytics(pages, auditEvents)
   const manifest = buildExportManifestFromArtifacts(
     pages,
     repositorySources,
     index,
     graph,
-    analytics
+    analytics,
+    acceptedRelationships
   )
   return {
     index,
-    backlinks: buildBacklinkIndex(pages),
+    backlinks: buildBacklinkIndex(pages, acceptedRelationships),
     graph,
     analytics,
     manifest

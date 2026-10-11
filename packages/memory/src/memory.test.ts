@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest"
 import {
   MemoryAuditEvent,
   MemoryGraphEdge,
+  MemoryCompilerCandidateResult,
+  MemoryRelationshipCandidate,
+  MemoryRelationshipEvidence,
   MemoryMarkdownParseError,
   MemoryProposal,
   MemoryRevision,
@@ -89,6 +92,60 @@ const pagesFixture = (): ReadonlyArray<MemoryPage> => [
   parseMemoryPage("notes/agent-notes.md", notesMarkdown)
 ]
 
+const acceptedRelationshipsFixture = (
+  pages: ReadonlyArray<MemoryPage>
+): ReadonlyArray<MemoryRelationshipEvidence> => {
+  const byId = new Map(pages.map((page) => [page.id, page]))
+  const evidence = (
+    id: string,
+    kind: MemoryRelationshipEvidence["kind"],
+    sourcePageId: string,
+    targetPageId: string,
+    quote: string
+  ): MemoryRelationshipEvidence => {
+    const source = byId.get(sourcePageId)
+    const start = source?.body.indexOf(quote) ?? -1
+    if (start < 0) throw new Error(`fixture evidence ${id} is missing`)
+    return {
+      id: `evidence:${id}`,
+      relationshipId: `relationship:${id}`,
+      kind,
+      sourcePageId,
+      targetPageId,
+      sourceRevisionId: `revision:${sourcePageId}`,
+      start,
+      end: start + quote.length,
+      quote,
+      compilerEvidence: { sourceId: "architecture", start: 0, end: quote.length, quote },
+      acceptedBy: "reviewer-01",
+      acceptedAt: "2026-08-06T12:00:00.000Z"
+    }
+  }
+  return [
+    evidence(
+      "overview-notes-wikilink",
+      "wikilink",
+      "project-overview",
+      "agent-notes",
+      "See [[Agent Notes#Decisions|the decisions]]."
+    ),
+    evidence(
+      "notes-overview-wikilink",
+      "wikilink",
+      "agent-notes",
+      "project-overview",
+      "Notes can contain [[project-overview|backlinks]]."
+    ),
+    evidence(
+      "overview-notes-dependency",
+      "dependency",
+      "project-overview",
+      "agent-notes",
+      "Jingler stores its durable state as files."
+    )
+  ]
+}
+
 const auditEventsFixture = (): ReadonlyArray<MemoryAuditEvent> => [
   {
     id: "event-page-overview",
@@ -129,17 +186,19 @@ const expectAcceptedGraphEvidence = (
     const evidence = edge.evidence
     if (evidence.kind === "backlink") {
       const page = pages.find((candidate) => candidate.id === evidence.sourcePageId)
-      expect(page?.body).toContain(evidence.raw)
+      expect(page?.body.slice(evidence.start, evidence.end)).toBe(evidence.raw)
     } else {
       const page = pages.find((candidate) => candidate.id === evidence.pageId)
       expect(page).toBeDefined()
       if (evidence.kind === "wikilink") {
-        expect(page?.body).toContain(evidence.raw)
+        expect(page?.body.slice(evidence.start, evidence.end)).toBe(evidence.raw)
       } else if (evidence.kind === "citation") {
         expect(page?.body).toContain(evidence.raw)
         expect(page?.citations).toContainEqual(
           expect.objectContaining({ id: evidence.citationId, sourceId: evidence.sourceId })
         )
+      } else if (evidence.kind === "dependency") {
+        expect(page?.body.slice(evidence.start, evidence.end)).toBe(evidence.raw)
       } else {
         expect(page?.relationships[evidence.relationshipIndex]).toMatchObject({
           kind: evidence.kind,
@@ -198,6 +257,150 @@ describe("memory schemas", () => {
         details: { reason: "initial fixture" }
       }).type
     ).toBe("revision.created")
+  })
+
+  it("decodes structured compiler candidates and a valid empty learning result", () => {
+    const candidate = Schema.decodeUnknownSync(MemoryCompilerCandidateResult)({
+      status: "candidates",
+      candidates: [
+        {
+          claim: "Refund retries share one concurrency limiter across workers.",
+          evidence: {
+            sourceId: "session-redacted",
+            start: 12,
+            end: 72,
+            quote: "Refund retries share one concurrency limiter across workers."
+          },
+          durabilityReason: "verified_finding",
+          sensitivity: "standard",
+          targetIdentity: {
+            action: "update",
+            pageId: "refund-retries",
+            revisionId: "refund-retries-r2"
+          },
+          relationshipSuggestions: [{ kind: "dependency", target: "job-limiter" }]
+        }
+      ]
+    })
+    expect(candidate.status).toBe("candidates")
+
+    expect(
+      Schema.decodeUnknownSync(MemoryCompilerCandidateResult)({
+        status: "no_durable_learning",
+        reason: "all_filtered",
+        candidates: []
+      })
+    ).toEqual({ status: "no_durable_learning", reason: "all_filtered", candidates: [] })
+  })
+
+  it("rejects compiler candidates without an exact evidence span or with an invalid empty result", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(MemoryCompilerCandidateResult)({
+        status: "candidates",
+        candidates: [
+          {
+            claim: "A standalone durable claim with invalid evidence offsets.",
+            evidence: { sourceId: "source", start: 20, end: 10, quote: "invalid" },
+            durabilityReason: "verified_finding",
+            sensitivity: "standard",
+            targetIdentity: {
+              action: "create",
+              pageId: "candidate",
+              path: "learnings/candidate.md",
+              title: "Candidate"
+            },
+            relationshipSuggestions: []
+          }
+        ]
+      })
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(MemoryCompilerCandidateResult)({
+        status: "no_durable_learning",
+        reason: "all_filtered",
+        candidates: [
+          {
+            claim: "An empty result cannot contain a durable candidate.",
+            evidence: { sourceId: "source", start: 0, end: 8, quote: "evidence" },
+            durabilityReason: "verified_finding",
+            sensitivity: "standard",
+            targetIdentity: {
+              action: "create",
+              pageId: "candidate",
+              path: "learnings/candidate.md",
+              title: "Candidate"
+            },
+            relationshipSuggestions: []
+          }
+        ]
+      })
+    ).toThrow()
+  })
+
+  it("decodes independently reviewable relationship candidates and stable accepted evidence", () => {
+    const candidate = Schema.decodeUnknownSync(MemoryRelationshipCandidate)({
+      id: "relationship:refunds:limiter",
+      kind: "dependency",
+      sourcePageId: "refund-retries",
+      targetPageId: "job-limiter",
+      claim: "Refund retries depend on the shared job limiter.",
+      compilerEvidence: {
+        sourceId: "session-redacted",
+        start: 10,
+        end: 58,
+        quote: "Refund retries depend on the shared job limiter."
+      },
+      proposedBy: "agent-01",
+      createdAt: "2026-08-06T10:00:00Z",
+      status: "open"
+    })
+    expect(candidate.status).toBe("open")
+
+    const accepted = Schema.decodeUnknownSync(MemoryRelationshipEvidence)({
+      id: "evidence:relationship:refunds:limiter",
+      relationshipId: candidate.id,
+      kind: candidate.kind,
+      sourcePageId: candidate.sourcePageId,
+      targetPageId: candidate.targetPageId,
+      sourceRevisionId: "revision:refund-retries:3",
+      start: 0,
+      end: candidate.claim.length,
+      quote: candidate.claim,
+      compilerEvidence: candidate.compilerEvidence,
+      acceptedBy: "reviewer-01",
+      acceptedAt: "2026-08-06T11:00:00Z"
+    })
+    expect(accepted.relationshipId).toBe(candidate.id)
+  })
+
+  it("rejects self-links and accepted relationship candidates without review metadata", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(MemoryRelationshipCandidate)({
+        id: "relationship:self",
+        kind: "wikilink",
+        sourcePageId: "same-page",
+        targetPageId: "same-page",
+        claim: "The page relates to itself.",
+        compilerEvidence: { sourceId: "source", start: 0, end: 25, quote: "The page relates to itself." },
+        proposedBy: "agent-01",
+        createdAt: "2026-08-06T10:00:00Z",
+        status: "open"
+      })
+    ).toThrow()
+
+    expect(() =>
+      Schema.decodeUnknownSync(MemoryRelationshipCandidate)({
+        id: "relationship:unreviewed",
+        kind: "dependency",
+        sourcePageId: "source-page",
+        targetPageId: "target-page",
+        claim: "The source depends on the target.",
+        compilerEvidence: { sourceId: "source", start: 0, end: 33, quote: "The source depends on the target." },
+        proposedBy: "agent-01",
+        createdAt: "2026-08-06T10:00:00Z",
+        status: "accepted"
+      })
+    ).toThrow()
   })
 })
 
@@ -463,8 +666,14 @@ describe("derived artifacts", () => {
   it("builds reproducible index, backlink, graph, analytics, and export artifacts", () => {
     const pages = pagesFixture()
     const events = auditEventsFixture()
-    const forward = buildMemoryArtifacts(pages, [], events)
-    const reverse = buildMemoryArtifacts([...pages].reverse(), [], [...events].reverse())
+    const relationships = acceptedRelationshipsFixture(pages)
+    const forward = buildMemoryArtifacts(pages, [], events, relationships)
+    const reverse = buildMemoryArtifacts(
+      [...pages].reverse(),
+      [],
+      [...events].reverse(),
+      [...relationships].reverse()
+    )
 
     expect(canonicalJson(reverse)).toBe(canonicalJson(forward))
     expect(forward.backlinks).toEqual({
@@ -482,7 +691,7 @@ describe("derived artifacts", () => {
       "citation"
     ])
     expectAcceptedGraphEvidence(forward.graph, pages)
-    expect(() => assertMemoryGraphEvidence(forward.graph, pages)).not.toThrow()
+    expect(() => assertMemoryGraphEvidence(forward.graph, pages, [], relationships)).not.toThrow()
     expect(forward.analytics).toMatchObject({
       pageCount: 2,
       sourceCount: 1,
@@ -492,7 +701,7 @@ describe("derived artifacts", () => {
       eventCount: 3,
       actorCount: 2
     })
-    expect(buildMemoryGraph(pages)).toEqual(forward.graph)
+    expect(buildMemoryGraph(pages, [], relationships)).toEqual(forward.graph)
     expect(buildMemoryAnalytics(pages, events)).toEqual(forward.analytics)
     expect(parseMemoryIndex(serializeMemoryIndex(forward.index))).toEqual(forward.index)
     expect(parseMemoryGraph(serializeMemoryGraph(forward.graph))).toEqual(forward.graph)
@@ -500,7 +709,7 @@ describe("derived artifacts", () => {
       forward.analytics
     )
     expect(parseExportManifest(serializeExportManifest(forward.manifest))).toEqual(forward.manifest)
-    expect(buildMemoryArtifacts(pages, [], events).manifest).toEqual(forward.manifest)
+    expect(buildMemoryArtifacts(pages, [], events, relationships).manifest).toEqual(forward.manifest)
   })
 
   it("rejects relationship edges without resolvable accepted evidence", () => {
@@ -513,10 +722,26 @@ describe("derived artifacts", () => {
     expect(lintMemory([broken, notes!]).errors.map((issue) => issue.code)).toContain(
       "broken-reference"
     )
-    expect(() => buildMemoryGraph([broken, notes!])).toThrow(/does not resolve/)
+    const quote = "Jingler stores its durable state as files."
+    const start = broken.body.indexOf(quote)
+    const unsupported: MemoryRelationshipEvidence = {
+      id: "evidence:broken",
+      relationshipId: "relationship:broken",
+      kind: "dependency",
+      sourcePageId: broken.id,
+      targetPageId: "missing-page",
+      sourceRevisionId: "revision:broken",
+      start,
+      end: start + quote.length,
+      quote,
+      compilerEvidence: { sourceId: "architecture", start: 0, end: quote.length, quote },
+      acceptedBy: "reviewer-01",
+      acceptedAt: "2026-08-06T12:00:00.000Z"
+    }
+    expect(() => buildMemoryGraph([broken, notes!], [], [unsupported])).toThrow(/unresolved endpoints/)
     expect(buildBacklinkIndex([broken, notes!])).toEqual({
-      "agent-notes": ["project-overview"],
-      "project-overview": ["agent-notes"]
+      "agent-notes": [],
+      "project-overview": []
     })
   })
 

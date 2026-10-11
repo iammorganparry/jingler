@@ -223,8 +223,13 @@ describe("personal access token MCP auth", () => {
         }
         return Effect.succeed({
           workflowId: "workflow-stable",
-          status: "published",
-          pageIds: ["page-created"]
+          state: "complete",
+          result: {
+            workflowId: "workflow-stable",
+            status: "published",
+            proposalId: "proposal-stable",
+            proposalIds: ["proposal-stable"]
+          }
         })
       }
     }
@@ -288,8 +293,12 @@ describe("personal access token MCP auth", () => {
     expect(settled).toMatchObject({
       result: { structuredContent: { data: {
         workflowId: "workflow-stable",
-        status: "published",
-        pageIds: ["page-created"]
+        state: "complete",
+        result: {
+          status: "published",
+          proposalId: "proposal-stable",
+          proposalIds: ["proposal-stable"]
+        }
       } } }
     })
 

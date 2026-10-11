@@ -103,7 +103,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
     prNumber: 900
   })
   expect(git(session.worktreePath, ["log", "-1", "--format=%s"])).toBe(
-    "chore: ship deterministic publish"
+    "chore: implement deterministic publishing"
   )
   expect(git(session.worktreePath, ["rev-list", "--count", "main..HEAD"])).toBe("1")
   expect(githubServer.operations.filter((operation) => operation.startsWith("pr create"))).toHaveLength(1)

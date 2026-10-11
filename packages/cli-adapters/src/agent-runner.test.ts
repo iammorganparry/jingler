@@ -596,6 +596,79 @@ describe("AgentRunner team memory", () => {
     makeInMemorySecretStore("jingler-user-token")
   )
 
+  it.each([
+    { cli: "claude" as const, normal: "Investigate the retry policy", invocation: "/deploy verify" },
+    { cli: "codex" as const, normal: "Investigate the retry policy", invocation: "$deploy verify" },
+    { cli: "opencode" as const, normal: "Investigate the retry policy", invocation: "/deploy verify" }
+  ])("keeps the full memory rubric attached for $cli normal and command-first prompts", async ({ cli, normal, invocation }) => {
+    const now = "2026-07-24T00:00:00.000Z"
+    writeFileSync(
+      join(temp.root, "sessions.json"),
+      JSON.stringify([{
+        id: SESSION,
+        repo: "widget",
+        branch: `chore/${cli}-memory-prompt`,
+        title: "Memory prompt placement",
+        status: "idle",
+        cli,
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: now,
+        worktreePath: temp.root,
+        chats: [{ id: SESSION, title: null, createdAt: now, updatedAt: now }],
+        activeChatId: SESSION
+      }])
+    )
+    const requests: Request[] = []
+    installMemoryFetch(requests)
+    const captured: SessionSpec[] = []
+    const recordingAdapter = Layer.succeed(
+      CliAdapter,
+      CliAdapter.of({
+        run: (_sessionId, spec, ctx) =>
+          Effect.sync(() => captured.push(spec)).pipe(
+            Effect.zipRight(ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 }))
+          ),
+        stop: () => Effect.void
+      })
+    )
+    const base = Layer.mergeAll(
+      AgentRunner.Default,
+      OpenConnectorService.Default,
+      BrowserControlMcpServiceTest,
+      signedInSecrets,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      PlanStore.Default,
+      recordingAdapter,
+      DiscoveryService.Default,
+      ContextManager.Default,
+      temp.layer
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ConfigService.setMemory({ enabled: true, organizationId: "org-team" })
+        const runner = yield* AgentRunner
+        yield* runner.prompt(SESSION, SESSION, normal).pipe(Stream.runDrain)
+        yield* runner.prompt(SESSION, SESSION, invocation).pipe(Stream.runDrain)
+      }).pipe(Effect.provide(base))
+    )
+
+    expect(captured).toHaveLength(2)
+    expect(captured[0]?.prompt.endsWith(normal)).toBe(true)
+    expect(captured[1]?.prompt.startsWith(invocation)).toBe(true)
+    for (const spec of captured) {
+      expect(spec.prompt).toContain("Before ending each non-trivial settled turn")
+      expect(spec.prompt).toContain("Submit no more than three memory_propose calls")
+      expect(spec.remoteMcpServers?.some((server) => server.name === "jingler-memory")).toBe(true)
+    }
+  })
+
   it("injects memory instructions and enqueues one source only after Done", async () => {
     const requests: Request[] = []
     installMemoryFetch(requests)

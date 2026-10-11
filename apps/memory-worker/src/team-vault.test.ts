@@ -1,19 +1,18 @@
 import { Effect } from "effect"
-import { serializeMemoryMarkdown, type MemoryPage, type MemorySource } from "@jingler/memory"
+import {
+  serializeMemoryMarkdown,
+  type MemoryPage,
+  type MemoryRelationshipEvidence,
+  type MemorySource
+} from "@jingler/memory"
 import { describe, expect, it, vi } from "vitest"
 import type { DurableObjectStorageLike, SqlStorageCursor, SqlStorageLike } from "./env.js"
 import { HISTORY_SNAPSHOT_INTERVAL, InMemoryR2Bucket, MemoryR2Store } from "./r2-store.js"
 import { buildSearchProjection, searchAcceptedPages } from "./search.js"
-import {
-  InMemoryVaultState,
-  RETRIEVAL_RETENTION,
-  SqliteVaultState,
-  TeamVault
-} from "./team-vault.js"
+import { InMemoryVaultState, RETRIEVAL_RETENTION, SqliteVaultState, TeamVault } from "./team-vault.js"
 
 // Runs an Effect-returning vault/layer/state method to a Promise at the test boundary.
 const run = Effect.runPromise
-
 
 const source: MemorySource = {
   id: "source-1",
@@ -77,9 +76,7 @@ class RecordingSqlStorage implements SqlStorageLike, DurableObjectStorageLike {
     this.queries.push(query)
     this.bindings.push(bindings)
     if (this.failOn?.(query)) throw new Error(`exec failed: ${query}`)
-    return new EmptySqlCursor<Row>(
-      query.startsWith("UPDATE vault_state") ? this.updateRowsWritten : 0
-    )
+    return new EmptySqlCursor<Row>(query.startsWith("UPDATE vault_state") ? this.updateRowsWritten : 0)
   }
 }
 
@@ -99,9 +96,11 @@ const projectedCommit = (sql: RecordingSqlStorage) => {
         sources: [],
         proposals: [],
         proposalSets: [],
+        relationshipEvidence: [],
         events: [],
         retrievals: [],
-        sessionRetrievals: []
+        sessionRetrievals: [],
+        funnelTransitions: []
       },
       buildSearchProjection([projectedPage], []),
       [projectedPage]
@@ -114,36 +113,44 @@ describe("TeamVault", () => {
     const bucket = new InMemoryR2Bucket()
     const vault = await run(TeamVault.create("org-one", new InMemoryVaultState(), bucket))
     await run(vault.ingestSource(source, "Primary runbook evidence"))
-    const initial = serializeMemoryMarkdown(page(1, "# Runbook\n\nThe initial procedure is valid. [@runbook-citation]\n"))
-    const first = await run(vault.ingestAcceptedPage({
-      revisionId: "revision-1",
-      markdown: initial,
-      actorId: "author-1",
-      createdAt: "2026-07-01T00:00:00.000Z"
-    }))
+    const initial = serializeMemoryMarkdown(
+      page(1, "# Runbook\n\nThe initial procedure is valid. [@runbook-citation]\n")
+    )
+    const first = await run(
+      vault.ingestAcceptedPage({
+        revisionId: "revision-1",
+        markdown: initial,
+        actorId: "author-1",
+        createdAt: "2026-07-01T00:00:00.000Z"
+      })
+    )
     expect(first.revision.id).toBe("revision-1")
 
     await Promise.all([
-      run(vault.createProposal({
-        id: "proposal-a",
-        pageId: "runbook",
-        baseRevisionId: "revision-1",
-        markdown: serializeMemoryMarkdown(
-          page(2, "# Runbook\n\nThe accepted procedure uses path A. [@runbook-citation]\n")
-        ),
-        proposedBy: "author-a",
-        createdAt: "2026-07-02T00:00:00.000Z"
-      })),
-      run(vault.createProposal({
-        id: "proposal-b",
-        pageId: "runbook",
-        baseRevisionId: "revision-1",
-        markdown: serializeMemoryMarkdown(
-          page(2, "# Runbook\n\nThe competing procedure uses path B. [@runbook-citation]\n")
-        ),
-        proposedBy: "author-b",
-        createdAt: "2026-07-02T00:00:01.000Z"
-      }))
+      run(
+        vault.createProposal({
+          id: "proposal-a",
+          pageId: "runbook",
+          baseRevisionId: "revision-1",
+          markdown: serializeMemoryMarkdown(
+            page(2, "# Runbook\n\nThe accepted procedure uses path A. [@runbook-citation]\n")
+          ),
+          proposedBy: "author-a",
+          createdAt: "2026-07-02T00:00:00.000Z"
+        })
+      ),
+      run(
+        vault.createProposal({
+          id: "proposal-b",
+          pageId: "runbook",
+          baseRevisionId: "revision-1",
+          markdown: serializeMemoryMarkdown(
+            page(2, "# Runbook\n\nThe competing procedure uses path B. [@runbook-citation]\n")
+          ),
+          proposedBy: "author-b",
+          createdAt: "2026-07-02T00:00:01.000Z"
+        })
+      )
     ])
 
     const outcomes = await Promise.all([
@@ -174,13 +181,50 @@ describe("TeamVault", () => {
     expect((await run(original.snapshot())).revisions).toHaveLength(1)
 
     const rebuilt = await run(TeamVault.create("org-rebuild", new InMemoryVaultState(), bucket))
-    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 1, revisions: 1, sources: 1 })
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({
+      pages: 1,
+      revisions: 1,
+      sources: 1
+    })
     expect((await run(rebuilt.readPage("runbook"))).revision.id).toBe("revision-rebuild")
     expect((await run(rebuilt.search("albatross", 10, "2026-08-01T00:00:00.000Z"))).results[0]).toMatchObject({
       pageId: "runbook",
       revision: 1,
       citationIds: ["runbook-citation"]
     })
+  })
+
+  it("persists content-free funnel transitions and aggregates them by source kind", async () => {
+    const bucket = new InMemoryR2Bucket()
+    const vault = await run(TeamVault.create("org-funnel", new InMemoryVaultState(), bucket))
+    await run(vault.ingestSource(source, "Non-secret source evidence."))
+    await run(
+      vault.recordFunnelTransition({
+        id: "funnel:source-1:delivered",
+        occurredAt: "2026-08-01T00:00:01.000Z",
+        stage: "delivery",
+        outcome: "delivered",
+        sourceId: source.id,
+        sourceKind: source.kind,
+        workflowId: "compiler-source-1"
+      })
+    )
+    const snapshot = await run(vault.snapshot())
+    expect(snapshot.funnelTransitions).toHaveLength(2)
+    expect(JSON.stringify(snapshot.funnelTransitions)).not.toContain("Non-secret source evidence")
+    const dashboard = await run(vault.dashboard("2026-08-02T00:00:00.000Z"))
+    expect(dashboard.funnel.bySourceKind).toEqual([
+      expect.objectContaining({
+        sourceKind: "manual",
+        sources: 1,
+        captured: 1,
+        delivered: 1
+      })
+    ])
+
+    const rebuilt = await run(TeamVault.create("org-funnel", new InMemoryVaultState(), bucket))
+    await run(rebuilt.rebuildFromR2())
+    expect((await run(rebuilt.snapshot())).funnelTransitions).toEqual(snapshot.funnelTransitions)
   })
 
   it("rejects every revision from an incomplete multi-page publication during rebuild", async () => {
@@ -224,7 +268,11 @@ describe("TeamVault", () => {
     }
     expect(deletedRevision).toBe(true)
     const rebuilt = await run(TeamVault.create("org-partial", new InMemoryVaultState(), bucket))
-    expect(await run(rebuilt.rebuildFromR2())).toEqual({ pages: 0, revisions: 0, sources: 0 })
+    expect(await run(rebuilt.rebuildFromR2())).toEqual({
+      pages: 0,
+      revisions: 0,
+      sources: 0
+    })
     expect(await run(rebuilt.listPages())).toEqual([])
   })
 
@@ -250,21 +298,40 @@ describe("TeamVault", () => {
       ["linking", "revision-linking"],
       ["target", "revision-target"]
     ])
+    const quote = "Navigate to [[Target]]."
+    const start = linking.body.indexOf(quote)
+    const relationships: ReadonlyArray<MemoryRelationshipEvidence> = [
+      {
+        id: "evidence:linking-target",
+        relationshipId: "relationship:linking-target",
+        kind: "wikilink",
+        sourcePageId: "linking",
+        targetPageId: "target",
+        sourceRevisionId: "revision-linking",
+        start,
+        end: start + quote.length,
+        quote,
+        compilerEvidence: { sourceId: "source", start: 0, end: quote.length, quote },
+        acceptedBy: "reviewer",
+        acceptedAt: "2026-08-06T12:00:00.000Z"
+      }
+    ]
     const targetSearch = searchAcceptedPages(pages, "Target", revisionIds)
-    expect(targetSearch.results.find((result) => result.pageId === "target")?.revisionId).toBe(
-      "revision-target"
-    )
-    expect(targetSearch.results.find((result) => result.pageId === "target")?.matchKinds).toContain(
-      "index"
-    )
-    expect(targetSearch.results.find((result) => result.pageId === "linking")?.matchKinds).toContain(
-      "wikilink"
-    )
+    expect(targetSearch.results.find((result) => result.pageId === "target")?.revisionId).toBe("revision-target")
+    expect(targetSearch.results.find((result) => result.pageId === "target")?.matchKinds).toContain("index")
+    expect(targetSearch.results.find((result) => result.pageId === "linking")?.matchKinds).toContain("wikilink")
     expect(
-      searchAcceptedPages(pages, "Linking page", revisionIds).results.find((result) => result.pageId === "target")
+      searchAcceptedPages(
+        pages,
+        "Linking page",
+        revisionIds,
+        20,
+        undefined,
+        relationships
+      ).results.find((result) => result.pageId === "target")
         ?.matchKinds
     ).toContain("backlink")
-    const navigation = buildSearchProjection(pages, [])
+    const navigation = buildSearchProjection(pages, [], relationships)
     expect(navigation.indexMarkdown).toContain("[[target|Target]] — backlinks: linking")
     expect(navigation.indexMarkdown).toContain("pageId: target")
   })
@@ -276,24 +343,21 @@ describe("TeamVault", () => {
       citations: [],
       metadata: { citationPolicy: "none" }
     })
-    await run(vault.ingestAcceptedPage({
-      revisionId: "revision-export",
-      markdown,
-      actorId: "author",
-      createdAt: "2026-07-01T00:00:00.000Z"
-    }))
+    await run(
+      vault.ingestAcceptedPage({
+        revisionId: "revision-export",
+        markdown,
+        actorId: "author",
+        createdAt: "2026-07-01T00:00:00.000Z"
+      })
+    )
 
     const exported = await run(vault.exportVault())
-    expect(exported.files.map((file) => file.path)).toEqual(expect.arrayContaining([
-      ".obsidian/app.json",
-      "_jingler/manifest.json",
-      "_jingler/Index.md",
-      "runbook.md"
-    ]))
-    expect(exported.files.find((file) => file.path === "runbook.md")?.content).toBe(markdown)
-    expect(exported.files.find((file) => file.path === "runbook.md")?.content).toContain(
-      "[[Runbook]]"
+    expect(exported.files.map((file) => file.path)).toEqual(
+      expect.arrayContaining([".obsidian/app.json", "_jingler/manifest.json", "_jingler/Index.md", "runbook.md"])
     )
+    expect(exported.files.find((file) => file.path === "runbook.md")?.content).toBe(markdown)
+    expect(exported.files.find((file) => file.path === "runbook.md")?.content).toContain("[[Runbook]]")
   })
 
   it("maintains and queries a rebuildable SQLite FTS5 projection", async () => {
@@ -301,22 +365,26 @@ describe("TeamVault", () => {
     const state = new SqliteVaultState(sql)
     await run(state.initialize())
     const projectedPage = page(1, "# Runbook\n\nLexical content. [@runbook-citation]\n")
-    await run(state.commit(
-      0,
-      {
-        version: 1,
-        heads: [],
-        revisions: [],
-        sources: [],
-        proposals: [],
-        proposalSets: [],
-        events: [],
-        retrievals: [],
-        sessionRetrievals: []
-      },
-      buildSearchProjection([projectedPage], []),
-      [projectedPage]
-    ))
+    await run(
+      state.commit(
+        0,
+        {
+          version: 1,
+          heads: [],
+          revisions: [],
+          sources: [],
+          proposals: [],
+          proposalSets: [],
+          relationshipEvidence: [],
+          events: [],
+          retrievals: [],
+          sessionRetrievals: [],
+          funnelTransitions: []
+        },
+        buildSearchProjection([projectedPage], []),
+        [projectedPage]
+      )
+    )
     await run(state.searchPageIds("lexical content", 10))
     expect(sql.queries.some((query) => query.includes("USING fts5"))).toBe(true)
     expect(sql.queries.some((query) => query.includes("INSERT INTO memory_fts"))).toBe(true)
@@ -325,9 +393,7 @@ describe("TeamVault", () => {
     // BEGIN/COMMIT/ROLLBACK — Durable-Object SQLite rejects those at runtime.
     expect(sql.transactionSyncCalls).toBe(1)
     expect(
-      sql.queries.some((query) =>
-        RAW_TRANSACTION_STATEMENTS.some((statement) => query.startsWith(statement))
-      )
+      sql.queries.some((query) => RAW_TRANSACTION_STATEMENTS.some((statement) => query.startsWith(statement)))
     ).toBe(false)
   })
 
@@ -395,38 +461,38 @@ describe("TeamVault", () => {
     const state = new InMemoryVaultState()
     const total = RETRIEVAL_RETENTION + 250
     for (let index = 0; index < total; index += 1) {
-      await run(state.recordRetrieval({
-        id: `retrieval:${String(index).padStart(6, "0")}`,
-        occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
-        queryHash: `hash-${index}`,
-        resultCount: 0,
-        durationMs: 0
-      }))
+      await run(
+        state.recordRetrieval({
+          id: `retrieval:${String(index).padStart(6, "0")}`,
+          occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
+          queryHash: `hash-${index}`,
+          resultCount: 0,
+          durationMs: 0
+        })
+      )
     }
     const kept = await run(state.listRetrievals())
     // The cap holds: N+ records leave exactly N retained, keeping the newest and
     // dropping the oldest.
     expect(kept).toHaveLength(RETRIEVAL_RETENTION)
-    expect(kept.some((metric) => metric.id === `retrieval:${String(total - 1).padStart(6, "0")}`)).toBe(
-      true
-    )
+    expect(kept.some((metric) => metric.id === `retrieval:${String(total - 1).padStart(6, "0")}`)).toBe(true)
     expect(kept.some((metric) => metric.id === "retrieval:000000")).toBe(false)
   })
 
   it("prunes the SQLite retrieval table on insert and reads it back bounded", async () => {
     const sql = new RecordingSqlStorage()
     const state = new SqliteVaultState(sql)
-    await run(state.recordRetrieval({
-      id: "retrieval:1",
-      occurredAt: "2026-08-02T00:00:00.000Z",
-      queryHash: "hash-1",
-      resultCount: 0,
-      durationMs: 0
-    }))
-    // Every insert is followed by a bounded DELETE keeping only the newest rows.
-    expect(sql.queries.some((query) => query.startsWith("INSERT OR IGNORE INTO memory_retrievals"))).toBe(
-      true
+    await run(
+      state.recordRetrieval({
+        id: "retrieval:1",
+        occurredAt: "2026-08-02T00:00:00.000Z",
+        queryHash: "hash-1",
+        resultCount: 0,
+        durationMs: 0
+      })
     )
+    // Every insert is followed by a bounded DELETE keeping only the newest rows.
+    expect(sql.queries.some((query) => query.startsWith("INSERT OR IGNORE INTO memory_retrievals"))).toBe(true)
     expect(
       sql.queries.some(
         (query) =>
@@ -437,23 +503,25 @@ describe("TeamVault", () => {
     sql.queries.length = 0
     await run(state.listRetrievals())
     // The read is itself capped with an explicit LIMIT.
-    expect(
-      sql.queries.some((query) => query.includes("FROM memory_retrievals ORDER BY occurred_at, id LIMIT ?"))
-    ).toBe(true)
+    expect(sql.queries.some((query) => query.includes("FROM memory_retrievals ORDER BY occurred_at, id LIMIT ?"))).toBe(
+      true
+    )
   })
 
   it("aggregates retrieval metrics into one bounded R2 object per UTC day", async () => {
     const bucket = new InMemoryR2Bucket()
     const vault = await run(TeamVault.create("org-retrieval", new InMemoryVaultState(), bucket))
     await run(vault.ingestSource(source, "Primary runbook evidence"))
-    await run(vault.ingestAcceptedPage({
-      revisionId: "revision-1",
-      markdown: serializeMemoryMarkdown(
-        page(1, "# Runbook\n\nThe albatross procedure is valid. [@runbook-citation]\n")
-      ),
-      actorId: "author",
-      createdAt: "2026-07-01T00:00:00.000Z"
-    }))
+    await run(
+      vault.ingestAcceptedPage({
+        revisionId: "revision-1",
+        markdown: serializeMemoryMarkdown(
+          page(1, "# Runbook\n\nThe albatross procedure is valid. [@runbook-citation]\n")
+        ),
+        actorId: "author",
+        createdAt: "2026-07-01T00:00:00.000Z"
+      })
+    )
 
     for (let index = 0; index < 5; index += 1) {
       await run(vault.search("albatross", 10, `2026-08-02T00:00:0${index}.000Z`))
@@ -465,9 +533,7 @@ describe("TeamVault", () => {
     expect(retrievalKeys).toHaveLength(2)
     expect(retrievalKeys.some((key) => key.endsWith("2026-08-02.json"))).toBe(true)
     expect(retrievalKeys.some((key) => key.endsWith("2026-08-03.json"))).toBe(true)
-    const dayObject = await bucket.get(
-      retrievalKeys.find((key) => key.endsWith("2026-08-02.json")) ?? ""
-    )
+    const dayObject = await bucket.get(retrievalKeys.find((key) => key.endsWith("2026-08-02.json")) ?? "")
     expect(JSON.parse((await dayObject?.text()) ?? "[]")).toHaveLength(5)
   })
 
@@ -475,13 +541,15 @@ describe("TeamVault", () => {
     const state = new InMemoryVaultState()
     const total = RETRIEVAL_RETENTION + 500
     for (let index = 0; index < total; index += 1) {
-      await run(state.recordRetrieval({
-        id: `retrieval:${String(index).padStart(6, "0")}`,
-        occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
-        queryHash: `hash-${index}`,
-        resultCount: 1,
-        durationMs: 1
-      }))
+      await run(
+        state.recordRetrieval({
+          id: `retrieval:${String(index).padStart(6, "0")}`,
+          occurredAt: new Date(1_700_000_000_000 + index * 1_000).toISOString(),
+          queryHash: `hash-${index}`,
+          resultCount: 1,
+          durationMs: 1
+        })
+      )
     }
     const vault = await run(TeamVault.create("org-dashboard", state, new InMemoryR2Bucket()))
     const dashboard = await run(vault.dashboard("2030-01-01T00:00:00.000Z", "all"))

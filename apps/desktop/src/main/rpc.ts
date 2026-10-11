@@ -309,6 +309,19 @@ const MemoryBackendReviews = Schema.Struct({
           summary: Schema.optional(Schema.String),
         }),
       ),
+      relationshipCandidates: Schema.optionalWith(
+        Schema.Array(
+          Schema.Struct({
+            id: Schema.String,
+            kind: Schema.Literal("wikilink", "dependency"),
+            sourcePageId: Schema.String,
+            targetPageId: Schema.String,
+            claim: Schema.String,
+            status: Schema.Literal("open", "accepted", "rejected", "superseded"),
+          }),
+        ),
+        { default: () => [] },
+      ),
     }),
   ),
 });
@@ -548,6 +561,14 @@ const memoryReviews = (organizationId: string) =>
           baseRevisionId: page.baseRevisionId,
           summary: page.summary ?? "Proposed memory update",
           markdown: page.markdown,
+        })),
+        relationships: review.relationshipCandidates.map((relationship) => ({
+          proposalId: relationship.id,
+          kind: relationship.kind,
+          sourcePageId: relationship.sourcePageId,
+          targetPageId: relationship.targetPageId,
+          claim: relationship.claim,
+          status: relationship.status,
         })),
       })),
     ),
@@ -2975,7 +2996,7 @@ export const githubEvents = () =>
       const ownedClientIds = new Set<string>();
       const supervisor = new GitHubRelaySupervisor({
         listSessions: async () => {
-          const status = await run(GitHubAuth.status());
+          const status = await run(GitHubAuth.statusFresh());
           const routes = await reconcileRelaySessionRoutes(
             listSessions,
             () => run(GitHubAuth.sessionRoutes()),

@@ -59,7 +59,7 @@ instead: a pre-turn hook injects `<recalled-memories>` every turn and a post-tur
 hook submits marked memories for compilation and any configured review. Wiring for Claude Code (both) and Codex (persist;
 recall stays the skill) is in **[references/hooks.md](references/hooks.md)**.
 
-## Workflow — recall first, remember after
+## Workflow — recall first, reflect silently at settlement
 
 ### Recall first (before answering or acting)
 
@@ -78,27 +78,38 @@ Only skip the recall step for genuinely trivial or self-contained questions. Whe
 doubt, search — it's cheap and often decisive, and it's how the team's knowledge
 compounds instead of being rediscovered.
 
-### Remember after (when something is worth keeping)
+### Reflect at settlement (when something is worth keeping)
 
-Whenever you learn or decide something a teammate would want later, publish it with
-`memory_propose` — don't wait to be asked:
+Before ending a non-trivial settled turn, silently consider at most three standalone
+learnings. Do not narrate this reflection or ask permission to remember. A candidate
+qualifies only when a future teammate would benefit without the current conversation:
 
-- Write **one standalone fact per memory** — future readers have no session context.
-  Include the WHY, not just the WHAT.
-- Worth remembering (any domain): a decision + its reasoning; a convention or team
-  preference; a non-obvious gotcha + root cause; how something connects to something
-  else; a hard-won answer to a question that took real effort; a fact about the
-  product, process, or people that isn't written down elsewhere.
-- Skip: trivia, anything already in the docs, and ephemeral details (line numbers,
-  temp paths, one-off values).
-- Cite where the memory came from (a file, a PR, a ticket, a conversation) when there
-  is a source.
+- Keep a settled decision and its reason, stable convention or preference,
+  non-obvious gotcha and its cause, reusable relationship, or hard-won verified
+  finding.
+- Exclude progress narration, plans and unfinished work; facts already documented in
+  source-controlled code or docs; temporary paths, line numbers, logs, one-off values,
+  and transient state; secrets or credential-shaped content; personal, identifying,
+  or sensitive data; claims corrected or superseded later in the turn; low-confidence
+  inferences; and duplicates.
+- Write one standalone fact per proposal, including WHY and a source citation when
+  available. Submit no more than three `memory_propose` calls per settled turn. When
+  nothing qualifies, do nothing.
 
-Publishing is **auto-accept by default**: the memory becomes shared knowledge
-immediately, and the vault's versioning + contradiction/health checks let the team
-audit and revert. Some organizations enable a human review gate — there, a proposal
-waits in the review queue until a maintainer accepts it. Either way, propose; don't
-self-censor durable learnings.
+For every candidate, run a narrow `memory_search` using the standalone claim and
+`memory_read` every plausible accepted-page match. Drop the candidate if an accepted
+page already contains it. If a page should change, use that page's accepted
+`revisionId`; the response is explicitly `pending_review` with a `proposalId` (or a
+terminal replay state) and `pollable: false`. Existing-page updates always await
+review.
+
+Only use `baseRevisionId: "new"` when the duplicate check finds no page to update.
+This starts the compiler and returns a pollable `workflowId`. Poll
+`memory_workflow_status` until it returns a typed terminal result such as `published`,
+`pending_review`, `no_durable_learning`, `permanent_failure`, `conflict`, or
+`rejected`. New-page compilation auto-publishes by default; organizations may enable
+a human review gate, in which case the terminal settlement is `pending_review`.
+Never treat submission or a queued/running workflow as publication.
 
 ## Tools — quick selection
 
@@ -110,7 +121,8 @@ self-censor durable learnings.
 | A page's linked neighbours | `memory_graph_neighborhood` |
 | The whole bounded graph | `memory_graph` |
 | Vault health / activity overview | `memory_dashboard` |
-| Publish a new/updated memory | `memory_propose` |
+| Propose a new/updated memory | `memory_propose` |
+| Poll a new-page compiler | `memory_workflow_status` |
 
 For the full catalog — every tool, its arguments, and when to use it (including the
 review, edge-evidence, navigation, schema-publish, and export tools) — read

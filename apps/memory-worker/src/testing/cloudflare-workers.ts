@@ -11,5 +11,13 @@ export abstract class WorkflowEntrypoint<Environment, _Payload> {
     protected readonly ctx: ExecutionContext,
     protected readonly env: Environment
   ) {}
+}
 
+export class NonRetryableError extends Error {
+  override readonly name: string
+
+  constructor(message: string, name = "NonRetryableError") {
+    super(message)
+    this.name = name
+  }
 }

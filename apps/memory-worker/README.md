@@ -13,12 +13,12 @@ send both a rotating service credential and `X-Jingler-Organization-Id`.
 
 `wrangler.jsonc` declares the production contract:
 
-| Binding | Kind | Purpose |
-| --- | --- | --- |
-| `MEMORY_VAULTS` | SQLite Durable Object | Serialized heads, proposals, reviews, FTS5, events, and derived projections for one organization. |
-| `MEMORY_R2` | R2 | Immutable sources, accepted Markdown revisions, and publication commit records. |
-| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and durable review wait. |
-| `MEMORY_LINT` | Workflow | class `MemoryLintWorkflow` — scheduled vault health reporting. |
+| Binding           | Kind                  | Purpose                                                                                           |
+| ----------------- | --------------------- | ------------------------------------------------------------------------------------------------- |
+| `MEMORY_VAULTS`   | SQLite Durable Object | Serialized heads, proposals, reviews, FTS5, events, and derived projections for one organization. |
+| `MEMORY_R2`       | R2                    | Immutable sources, accepted Markdown revisions, and publication commit records.                   |
+| `MEMORY_COMPILER` | Workflow              | class `MemoryCompilerWorkflow` — cited source-to-proposal compilation and durable review wait.    |
+| `MEMORY_LINT`     | Workflow              | class `MemoryLintWorkflow` — scheduled vault health reporting.                                    |
 
 `MEMORY_VAULTS` is class `TeamVaultObject` (SQLite DO, `new_sqlite_classes`
 migration `v1`); `MEMORY_R2` is bucket `jingler-memory`; the cron is `17 3 * * *`.
@@ -26,19 +26,22 @@ migration `v1`); `MEMORY_R2` is bucket `jingler-memory`; the cron is `17 3 * * *
 The daily `17 3 * * *` trigger starts lint only for the comma-separated
 `MEMORY_LINT_ORGANIZATIONS`. `MEMORY_AUTO_PUBLISH_FIXES` is also comma-separated;
 leave it empty unless a reviewed mechanical fix identifier is explicitly safe
-to auto-publish.
+to auto-publish. Leave `MEMORY_SESSION_AUTO_PUBLISH` unset: conversation-source
+compilation remains review-only until the redacted compiler evaluation meets its
+rollout guardrails. Setting it to `true` is an explicit rollout action; high-risk
+sensitivity classes remain review-only regardless.
 
 ## Secrets and vars
 
 Secrets via `wrangler secret put` (never in `wrangler.jsonc`):
 
-| Secret | Purpose |
-| --- | --- |
-| `MEMORY_SERVICE_SECRET` | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`. |
-| `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation. |
-| `MEMORY_WORKFLOW_ID_SECRET` | Stable workflow-id HMAC key. Set once; do not rotate with the service credential. |
-| `TURBOPUFFER_API_KEY` | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only here; never forwarded to Next.js or the renderer. |
-| `OPENAI_API_KEY` | Client-side embeddings. Absent ⇒ lexical-only suggestions (the vector layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only here; never forwarded to Next.js or the renderer. |
+| Secret                           | Purpose                                                                                                                                                                             |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MEMORY_SERVICE_SECRET`          | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`.                                                                                            |
+| `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation.                                                                                                                                              |
+| `MEMORY_WORKFLOW_ID_SECRET`      | Stable workflow-id HMAC key. Set once; do not rotate with the service credential.                                                                                                   |
+| `TURBOPUFFER_API_KEY`            | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only here; never forwarded to Next.js or the renderer.                                                               |
+| `OPENAI_API_KEY`                 | Client-side embeddings. Absent ⇒ lexical-only suggestions (the vector layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only here; never forwarded to Next.js or the renderer. |
 
 Non-secret `vars` (committed in `wrangler.jsonc`):
 
@@ -46,6 +49,16 @@ Non-secret `vars` (committed in `wrangler.jsonc`):
 | --- | --- |
 | `TURBOPUFFER_BASE_URL` | `https://api.turbopuffer.com` |
 | `OPENAI_EMBED_MODEL` | `text-embedding-3-small` (client-side embedding, 1536-dim) |
+| `MEMORY_ROLLOUT_REVISION` | `r2-reflection-10-2026-08-06` |
+| `MEMORY_REFLECTION_ROLLOUT_BPS` | `1000` (10% of eligible sessions) |
+| `MEMORY_EXTRACTION_ROLLOUT_BPS` | `10000` with `MEMORY_EXTRACTION_MODE=review` |
+| `MEMORY_AUTO_PUBLICATION_ROLLOUT_BPS` | `0` |
+| `MEMORY_RELATIONSHIP_ROLLOUT_BPS` | `0` |
+| `MEMORY_SOURCE_PUBLICATION_POLICY` | conversation and inferred source kinds review-only; explicit manual proposals auto-publish |
+
+The R2 rollout deliberately changes only agent reflection. Do not expand it or
+enable automatic publication until the observation window and quality gates in
+`docs/shared-memory.md` pass. Automatic stop conditions remain authoritative.
 
 ## Advisory vector layer (turbopuffer)
 
@@ -87,7 +100,11 @@ curl http://127.0.0.1:8787/health
 pnpm dlx wrangler deploy --config apps/memory-worker/wrangler.jsonc
 ```
 
-The health response reports only binding presence. Vault routes remain private.
+The health response reports binding presence and content-free configuration
+readiness. It is `ok` only when the compiler/lint bindings, R2, Durable Objects,
+the stable workflow-ID secret, and at least one lint organization are configured.
+It never returns secret values or organization identifiers. Vault routes remain
+private.
 Run `pnpm --filter @jingler/memory-worker test` before deployment.
 
 ## Limits and definitions
@@ -109,6 +126,11 @@ Run `pnpm --filter @jingler/memory-worker test` before deployment.
 
 Set `MEMORY_WORKFLOW_ID_SECRET` to a dedicated random value before the first
 service-secret rotation and keep it stable for the deployment's lifetime.
+Set it before starting any compiler workflows: falling back to the rotating
+service credential is migration compatibility only and leaves `/health`
+degraded. Configure `MEMORY_LINT_ORGANIZATIONS` with at least one production
+organization (comma-separated); the health endpoint reports only whether the
+list is non-empty.
 Set the current credential in `MEMORY_SERVICE_SECRET` and the old credential in
 `MEMORY_SERVICE_SECRET_PREVIOUS`, deploy the Worker, update
 `MEMORY_WORKER_SERVICE_SECRET` in Next.js, then remove the previous value and

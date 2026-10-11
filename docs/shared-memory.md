@@ -51,38 +51,40 @@ preference.
 
 `apps/memory-worker/wrangler.jsonc` is the deploy contract. Bindings:
 
-| Binding | Kind | Config | Purpose |
-| --- | --- | --- | --- |
-| `MEMORY_VAULTS` | Durable Object | class `TeamVaultObject`, `new_sqlite_classes` migration `v1` | One SQLite DO per organization: heads, proposals, reviews, FTS5, events, projections. |
-| `MEMORY_R2` | R2 bucket | `jingler-memory` | Immutable sources, accepted Markdown revisions, publication commits — the recovery source of truth. |
-| `MEMORY_COMPILER` | Workflow | class `MemoryCompilerWorkflow` | Cited source-to-proposal compilation + durable review wait. |
-| `MEMORY_LINT` | Workflow | class `MemoryLintWorkflow` | Scheduled vault-health reporting. |
-| cron | Trigger | `17 3 * * *` | Daily lint for `MEMORY_LINT_ORGANIZATIONS` only. |
+| Binding           | Kind           | Config                                                       | Purpose                                                                                             |
+| ----------------- | -------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `MEMORY_VAULTS`   | Durable Object | class `TeamVaultObject`, `new_sqlite_classes` migration `v1` | One SQLite DO per organization: heads, proposals, reviews, FTS5, events, projections.               |
+| `MEMORY_R2`       | R2 bucket      | `jingler-memory`                                             | Immutable sources, accepted Markdown revisions, publication commits — the recovery source of truth. |
+| `MEMORY_COMPILER` | Workflow       | class `MemoryCompilerWorkflow`                               | Cited source-to-proposal compilation + durable review wait.                                         |
+| `MEMORY_LINT`     | Workflow       | class `MemoryLintWorkflow`                                   | Scheduled vault-health reporting.                                                                   |
+| cron              | Trigger        | `17 3 * * *`                                                 | Daily lint for `MEMORY_LINT_ORGANIZATIONS` only.                                                    |
 
 Worker secrets — set with `wrangler secret put`, never in `wrangler.jsonc`:
 
-| Secret | Purpose |
-| --- | --- |
-| `MEMORY_SERVICE_SECRET` | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`. |
-| `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation. |
-| `MEMORY_WORKFLOW_ID_SECRET` | Stable workflow-id HMAC key. Set once; do not rotate with the service credential. |
-| `TURBOPUFFER_API_KEY` | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only in the Worker; never forwarded to Next.js or the renderer. |
-| `OPENAI_API_KEY` | Client-side embeddings for the vector layer. Absent ⇒ lexical-only suggestions (the layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only in the Worker; never forwarded to Next.js or the renderer. |
+| Secret                           | Purpose                                                                                                                                                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MEMORY_SERVICE_SECRET`          | Current Next.js-to-Worker credential; must equal Next.js `MEMORY_WORKER_SERVICE_SECRET`.                                                                                                                   |
+| `MEMORY_SERVICE_SECRET_PREVIOUS` | Optional overlap slot during rotation.                                                                                                                                                                     |
+| `MEMORY_WORKFLOW_ID_SECRET`      | Stable workflow-id HMAC key. Set once; do not rotate with the service credential.                                                                                                                          |
+| `MEMORY_LINT_ORGANIZATIONS`      | Comma-separated production organization ids covered by scheduled lint. Configure as a Worker secret when ids should not live in source.                                                                    |
+| `TURBOPUFFER_API_KEY`            | Advisory vector layer. Absent ⇒ lexical-only suggestions. Read only in the Worker; never forwarded to Next.js or the renderer.                                                                             |
+| `OPENAI_API_KEY`                 | Client-side embeddings for the vector layer. Absent ⇒ lexical-only suggestions (the layer needs BOTH this and `TURBOPUFFER_API_KEY`). Read only in the Worker; never forwarded to Next.js or the renderer. |
 
 Worker non-secret vars (committed in `wrangler.jsonc` `vars`):
 
-| Var | Value | Purpose |
-| --- | --- | --- |
-| `TURBOPUFFER_BASE_URL` | `https://api.turbopuffer.com` | turbopuffer API origin. |
-| `OPENAI_EMBED_MODEL` | `text-embedding-3-small` | Client-side embedding model; emits 1536-dim vectors stored as explicit vectors in turbopuffer. |
+| Var                    | Value                         | Purpose                                                                                        |
+| ---------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| `TURBOPUFFER_BASE_URL` | `https://api.turbopuffer.com` | turbopuffer API origin.                                                                        |
+| `OPENAI_EMBED_MODEL`   | `text-embedding-3-small`      | Client-side embedding model; emits 1536-dim vectors stored as explicit vectors in turbopuffer. |
 
 ```bash
 wrangler secret put MEMORY_SERVICE_SECRET   --config apps/memory-worker/wrangler.jsonc
 wrangler secret put MEMORY_WORKFLOW_ID_SECRET --config apps/memory-worker/wrangler.jsonc
+wrangler secret put MEMORY_LINT_ORGANIZATIONS --config apps/memory-worker/wrangler.jsonc
 wrangler secret put TURBOPUFFER_API_KEY     --config apps/memory-worker/wrangler.jsonc
 wrangler secret put OPENAI_API_KEY          --config apps/memory-worker/wrangler.jsonc
 wrangler deploy                             --config apps/memory-worker/wrangler.jsonc
-curl -fsS "$MEMORY_WORKER_URL/health"       # reports binding presence only
+curl -fsS "$MEMORY_WORKER_URL/health"       # must report status=ok and both configuration flags true
 ```
 
 > **Embeddings are client-side; turbopuffer stores explicit vectors.**
@@ -99,15 +101,15 @@ curl -fsS "$MEMORY_WORKER_URL/health"       # reports binding presence only
 
 ## Next.js configuration
 
-| Variable | Contract |
-| --- | --- |
-| `MEMORY_ENABLED` | Global rollout/circuit-breaker (`true` or `1` enables). |
-| `MEMORY_GRANT_SECRET` | Dedicated HMAC secret for short-lived desktop grants. |
-| `MEMORY_GRANT_AUDIENCE` | Grant audience claim; default `jingler-memory-mcp`. Must match the Next.js MCP grant verifier. |
-| `MEMORY_GRANT_TTL_SECONDS` | Organization-grant lifetime for UI calls and agent attachments; default `3600`. |
-| `MEMORY_WORKER_URL` | Private Worker origin. |
-| `MEMORY_WORKER_SERVICE_SECRET` | Current Next.js-to-Worker credential. Must equal the Worker's `MEMORY_SERVICE_SECRET`. |
-| `MEMORY_REQUEST_TIMEOUT_MS` | Bounded upstream request timeout; default `5000`. |
+| Variable                       | Contract                                                                                       |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `MEMORY_ENABLED`               | Global rollout/circuit-breaker (`true` or `1` enables).                                        |
+| `MEMORY_GRANT_SECRET`          | Dedicated HMAC secret for short-lived desktop grants.                                          |
+| `MEMORY_GRANT_AUDIENCE`        | Grant audience claim; default `jingler-memory-mcp`. Must match the Next.js MCP grant verifier. |
+| `MEMORY_GRANT_TTL_SECONDS`     | Organization-grant lifetime for UI calls and agent attachments; default `3600`.                |
+| `MEMORY_WORKER_URL`            | Private Worker origin.                                                                         |
+| `MEMORY_WORKER_SERVICE_SECRET` | Current Next.js-to-Worker credential. Must equal the Worker's `MEMORY_SERVICE_SECRET`.         |
+| `MEMORY_REQUEST_TIMEOUT_MS`    | Bounded upstream request timeout; default `5000`.                                              |
 
 Vercel project root is `apps/server`; runtime is Node/standalone. Configure all
 variables separately in Preview and Production. Never expose either Memory
@@ -161,6 +163,17 @@ Monitor both `GET /api/memory/health` and the Worker `GET /health`. Alert on:
 Logs may include request IDs, organization-scoped aggregate counts, status, and
 duration. They must not include bearer/grant/service credentials, query text,
 page bodies, source content, transcripts, or `Mcp-Session-Id`.
+
+Desktop capture emits structured `memory_capture_delivery` log events for
+capture, delivery, retry, expiry, and membership-drop transitions. These events
+contain only organization/source identifiers, outcome, attempt, and timestamp.
+When a retry eventually delivers, bounded delivery metadata lets the hosted
+funnel reconstruct its preceding retries. Expiry and membership-drop remain
+desktop diagnostics because those terminal states have no valid hosted write.
+
+Dashboard conversion metrics are grouped by source kind. They keep delivery
+failures separate from permanent compiler failures, and source citations
+separate from explicit durable page-to-page relationships.
 
 ## Export, rebuild, and recovery
 

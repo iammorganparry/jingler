@@ -28,11 +28,13 @@ export const isCodexSkillInvocation = (text: string): boolean =>
   /^\$[A-Za-z][\w:-]*(\s|$)/.test(text.trimStart())
 
 /**
- * Whether this harness will treat `text` as a command that has to lead.
+ * Whether this harness will treat `text` as a command or skill invocation that
+ * has to lead.
  *
- * Asked of the harness as well as the text because the syntaxes differ: only Codex
- * treats a `$skill` prefix specially, and mistaking one for a command elsewhere
- * would push the notes after a message that never needed to lead.
+ * Claude and OpenCode expose skills through slash commands, while Codex uses a
+ * `$skill` token. Slash commands lead for all supported harnesses. Asking the
+ * harness as well as the text keeps an ordinary `$value` message in Claude or
+ * OpenCode from moving the always-injected notes behind it.
  */
 export const leadsWithCommand = (cli: CliKind, text: string): boolean =>
   isSlashCommand(text) || (cli === "codex" && isCodexSkillInvocation(text))

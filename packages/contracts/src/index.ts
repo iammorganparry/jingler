@@ -52,8 +52,15 @@ import {
   McpInjectionTarget,
   McpServerStatus,
   MemoryConfig,
+  MemoryFunnelOutcome,
+  MemoryFunnelSourceKind,
+  MemoryQualityCounters,
   MemoryOrganizationRole,
   MemoryPrivilege,
+  MemoryRelationshipReview,
+  MemoryRolloutArm,
+  MemoryRolloutHarness,
+  MemorySessionLengthCohort,
   OpenConnectorConfig,
   OpenConnectorDefaults,
   OrchestratorPreference,
@@ -92,8 +99,8 @@ import {
   Usage,
   VsCodeTheme,
   WorkspaceConfig,
-  FONT_SCALE_RANGE
-} from "@jingler/core"
+  FONT_SCALE_RANGE,
+} from "@jingler/core";
 import {
   AssetOutsideWorktreeError,
   AssetBinaryError,
@@ -117,10 +124,10 @@ import {
   SessionNotFoundError,
   TerminalError,
   ThemeError,
-  WorkspaceNotConfiguredError
-} from "@jingler/core"
-import { Rpc, RpcGroup } from "@effect/rpc"
-import { Schema } from "effect"
+  WorkspaceNotConfiguredError,
+} from "@jingler/core";
+import { Rpc, RpcGroup } from "@effect/rpc";
+import { Schema } from "effect";
 
 /**
  * Renderer-safe team-memory contract.
@@ -133,22 +140,69 @@ export const MemoryOrganizationSummary = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   role: MemoryOrganizationRole,
-  privileges: Schema.Array(MemoryPrivilege)
-})
-export type MemoryOrganizationSummary = Schema.Schema.Type<typeof MemoryOrganizationSummary>
+  privileges: Schema.Array(MemoryPrivilege),
+});
+export type MemoryOrganizationSummary = Schema.Schema.Type<
+  typeof MemoryOrganizationSummary
+>;
 
 export const MemoryAccess = Schema.Struct({
   eligible: Schema.Boolean,
   selectedOrganizationId: Schema.NullOr(Schema.String),
-  organizations: Schema.Array(MemoryOrganizationSummary)
-})
-export type MemoryAccess = Schema.Schema.Type<typeof MemoryAccess>
+  organizations: Schema.Array(MemoryOrganizationSummary),
+});
+export type MemoryAccess = Schema.Schema.Type<typeof MemoryAccess>;
 
 export const MemoryDailyGrowth = Schema.Struct({
   day: Schema.String,
   pages: Schema.Number,
-  revisions: Schema.Number
-})
+  revisions: Schema.Number,
+});
+
+const MemoryQualityMetrics = MemoryQualityCounters.pipe(
+  Schema.extend(
+    Schema.Struct({
+      sources: Schema.Number,
+      deliveredSources: Schema.Number,
+      terminalSources: Schema.Number,
+      workflowErrors: Schema.Number,
+      unexplainedSources: Schema.Number,
+      proposals: Schema.Number,
+      proposalRecall: Schema.Number,
+      pollingCompleteness: Schema.Number,
+      acceptAsIsRatio: Schema.Number,
+      rejectionRatio: Schema.Number,
+      nearDuplicateRatio: Schema.Number,
+      terminalSettlementRatio: Schema.Number,
+      unexplainedFunnelRatio: Schema.Number,
+    }),
+  ),
+);
+
+const MemoryWeeklyQualitySegment = MemoryQualityMetrics.pipe(
+  Schema.extend(
+    Schema.Struct({
+      harness: MemoryRolloutHarness,
+      sourceKind: MemoryFunnelSourceKind,
+      experimentArm: MemoryRolloutArm,
+      sessionLengthCohort: MemorySessionLengthCohort,
+    }),
+  ),
+);
+
+const MemoryRolloutStop = Schema.Struct({
+  reason: Schema.Literal(
+    "sensitive_escape",
+    "workflow_errors",
+    "rejection",
+    "duplication",
+    "broken_evidence",
+    "unexplained_funnel_delta",
+  ),
+  affectedArms: Schema.Array(MemoryRolloutArm),
+  observed: Schema.Number,
+  threshold: Schema.Number,
+});
 
 export const MemoryDashboardSummary = Schema.Struct({
   version: Schema.Literal(1),
@@ -157,24 +211,24 @@ export const MemoryDashboardSummary = Schema.Struct({
     acceptedPages: Schema.Number,
     revisions: Schema.Number,
     sources: Schema.Number,
-    daily: Schema.Array(MemoryDailyGrowth)
+    daily: Schema.Array(MemoryDailyGrowth),
   }),
   citationCoverage: Schema.Struct({
     citations: Schema.Number,
     citedPages: Schema.Number,
     totalPages: Schema.Number,
-    ratio: Schema.Number
+    ratio: Schema.Number,
   }),
   freshness: Schema.Struct({
     fresh: Schema.Number,
     aging: Schema.Number,
     stale: Schema.Number,
-    unknown: Schema.Number
+    unknown: Schema.Number,
   }),
   health: Schema.Struct({
     orphanPages: Schema.Number,
     brokenLinks: Schema.Number,
-    contradictions: Schema.Number
+    contradictions: Schema.Number,
   }),
   reviewThroughput: Schema.Struct({
     proposed: Schema.Number,
@@ -183,13 +237,15 @@ export const MemoryDashboardSummary = Schema.Struct({
     conflicted: Schema.Number,
     open: Schema.Number,
     acceptanceRatio: Schema.Number,
-    medianReviewHours: Schema.NullOr(Schema.Number)
+    medianReviewHours: Schema.NullOr(Schema.Number),
   }),
   connectivity: Schema.Struct({
     pages: Schema.Number,
     directedLinks: Schema.Number,
+    citationEdges: Schema.Number,
+    durablePageEdges: Schema.Number,
     connectedPages: Schema.Number,
-    averageDegree: Schema.Number
+    averageDegree: Schema.Number,
   }),
   retrieval: Schema.Struct({
     searches: Schema.Number,
@@ -202,10 +258,49 @@ export const MemoryDashboardSummary = Schema.Struct({
     resultsReturned: Schema.Number,
     uniqueQueryHashes: Schema.Number,
     medianDurationMs: Schema.NullOr(Schema.Number),
-    p95DurationMs: Schema.NullOr(Schema.Number)
-  })
-})
-export type MemoryDashboardSummary = Schema.Schema.Type<typeof MemoryDashboardSummary>
+    p95DurationMs: Schema.NullOr(Schema.Number),
+  }),
+  funnel: Schema.Struct({
+    transitions: Schema.Number,
+    outcomes: Schema.Array(
+      Schema.Struct({
+        outcome: MemoryFunnelOutcome,
+        count: Schema.Number,
+      }),
+    ),
+    bySourceKind: Schema.Array(
+      Schema.Struct({
+        sourceKind: MemoryFunnelSourceKind,
+        sources: Schema.Number,
+        captured: Schema.Number,
+        delivered: Schema.Number,
+        proposals: Schema.Number,
+        pendingReview: Schema.Number,
+        published: Schema.Number,
+        noDurableLearning: Schema.Number,
+        conflicted: Schema.Number,
+        rejected: Schema.Number,
+        permanentFailures: Schema.Number,
+        deliveryFailures: Schema.Number,
+      }),
+    ),
+  }),
+  quality: Schema.Struct({
+    window: Schema.Literal("7d"),
+    startedAt: Schema.String,
+    endedAt: Schema.String,
+    segments: Schema.Array(MemoryWeeklyQualitySegment),
+    totals: MemoryQualityMetrics,
+  }),
+  rollout: Schema.Struct({
+    safeToExpand: Schema.Boolean,
+    stoppedArms: Schema.Array(MemoryRolloutArm),
+    stops: Schema.Array(MemoryRolloutStop),
+  }),
+});
+export type MemoryDashboardSummary = Schema.Schema.Type<
+  typeof MemoryDashboardSummary
+>;
 
 export const MemoryGraphNode = Schema.Struct({
   id: Schema.String,
@@ -220,35 +315,37 @@ export const MemoryGraphNode = Schema.Struct({
   health: Schema.Struct({
     brokenLinks: Schema.Number,
     contradictions: Schema.Number,
-    orphan: Schema.Boolean
-  })
-})
-export type MemoryGraphNode = Schema.Schema.Type<typeof MemoryGraphNode>
+    orphan: Schema.Boolean,
+  }),
+});
+export type MemoryGraphNode = Schema.Schema.Type<typeof MemoryGraphNode>;
 
 export const MemoryGraphEdgeKind = Schema.Literal(
   "wikilink",
   "citation",
   "dependency",
   "backlink",
-  "schema"
-)
-export type MemoryGraphEdgeKind = Schema.Schema.Type<typeof MemoryGraphEdgeKind>
+  "schema",
+);
+export type MemoryGraphEdgeKind = Schema.Schema.Type<
+  typeof MemoryGraphEdgeKind
+>;
 
 export const MemoryGraphEdge = Schema.Struct({
   id: Schema.String,
   sourceId: Schema.String,
   targetId: Schema.String,
-  kind: MemoryGraphEdgeKind
-})
-export type MemoryGraphEdge = Schema.Schema.Type<typeof MemoryGraphEdge>
+  kind: MemoryGraphEdgeKind,
+});
+export type MemoryGraphEdge = Schema.Schema.Type<typeof MemoryGraphEdge>;
 
 export const MemoryTopicCluster = Schema.Struct({
   id: Schema.String,
   label: Schema.String,
   nodeCount: Schema.Number,
-  sampleNodeIds: Schema.Array(Schema.String)
-})
-export type MemoryTopicCluster = Schema.Schema.Type<typeof MemoryTopicCluster>
+  sampleNodeIds: Schema.Array(Schema.String),
+});
+export type MemoryTopicCluster = Schema.Schema.Type<typeof MemoryTopicCluster>;
 
 export const MemoryGraphView = Schema.Struct({
   version: Schema.Literal(1),
@@ -258,9 +355,9 @@ export const MemoryGraphView = Schema.Struct({
   edges: Schema.Array(MemoryGraphEdge),
   clusters: Schema.Array(MemoryTopicCluster),
   truncated: Schema.Boolean,
-  nextCursor: Schema.optional(Schema.String)
-})
-export type MemoryGraphView = Schema.Schema.Type<typeof MemoryGraphView>
+  nextCursor: Schema.optional(Schema.String),
+});
+export type MemoryGraphView = Schema.Schema.Type<typeof MemoryGraphView>;
 
 export const MemoryEdgeEvidence = Schema.Struct({
   edge: MemoryGraphEdge,
@@ -269,17 +366,24 @@ export const MemoryEdgeEvidence = Schema.Struct({
     pageId: Schema.optional(Schema.String),
     sourcePageId: Schema.optional(Schema.String),
     targetPageId: Schema.optional(Schema.String),
+    relationshipId: Schema.optional(Schema.String),
+    evidenceId: Schema.optional(Schema.String),
+    sourceRevisionId: Schema.optional(Schema.String),
     sourceId: Schema.optional(Schema.String),
     citationId: Schema.optional(Schema.String),
     path: Schema.String,
     line: Schema.optional(Schema.Number),
     column: Schema.optional(Schema.Number),
+    start: Schema.optional(Schema.Number),
+    end: Schema.optional(Schema.Number),
     raw: Schema.optional(Schema.String),
     target: Schema.optional(Schema.String),
-    label: Schema.optional(Schema.String)
-  })
-})
-export type MemoryEdgeEvidence = Schema.Schema.Type<typeof MemoryEdgeEvidence>
+    label: Schema.optional(Schema.String),
+    acceptedBy: Schema.optional(Schema.String),
+    acceptedAt: Schema.optional(Schema.String),
+  }),
+});
+export type MemoryEdgeEvidence = Schema.Schema.Type<typeof MemoryEdgeEvidence>;
 
 export const MemoryPageDetail = Schema.Struct({
   page: Schema.Struct({
@@ -295,9 +399,9 @@ export const MemoryPageDetail = Schema.Struct({
         id: Schema.String,
         sourceId: Schema.String,
         locator: Schema.optional(Schema.String),
-        quote: Schema.optional(Schema.String)
-      })
-    )
+        quote: Schema.optional(Schema.String),
+      }),
+    ),
   }),
   revision: Schema.Struct({
     id: Schema.String,
@@ -305,7 +409,7 @@ export const MemoryPageDetail = Schema.Struct({
     revision: Schema.Number,
     authorId: Schema.String,
     createdAt: Schema.String,
-    acceptedAt: Schema.String
+    acceptedAt: Schema.String,
   }),
   sourceIds: Schema.Array(Schema.String),
   citationIds: Schema.Array(Schema.String),
@@ -314,19 +418,19 @@ export const MemoryPageDetail = Schema.Struct({
   health: Schema.Struct({
     brokenLinks: Schema.Number,
     contradictions: Schema.Number,
-    orphan: Schema.Boolean
-  })
-})
-export type MemoryPageDetail = Schema.Schema.Type<typeof MemoryPageDetail>
+    orphan: Schema.Boolean,
+  }),
+});
+export type MemoryPageDetail = Schema.Schema.Type<typeof MemoryPageDetail>;
 
 export const MemorySearchResult = Schema.Struct({
   pageId: Schema.String,
   path: Schema.String,
   title: Schema.String,
   revisionId: Schema.String,
-  snippet: Schema.String
-})
-export type MemorySearchResult = Schema.Schema.Type<typeof MemorySearchResult>
+  snippet: Schema.String,
+});
+export type MemorySearchResult = Schema.Schema.Type<typeof MemorySearchResult>;
 
 export const MemoryReviewPage = Schema.Struct({
   proposalId: Schema.String,
@@ -334,8 +438,8 @@ export const MemoryReviewPage = Schema.Struct({
   title: Schema.String,
   baseRevisionId: Schema.String,
   summary: Schema.String,
-  markdown: Schema.String
-})
+  markdown: Schema.String,
+});
 
 export const MemoryReviewItem = Schema.Struct({
   id: Schema.String,
@@ -345,9 +449,10 @@ export const MemoryReviewItem = Schema.Struct({
   createdAt: Schema.String,
   status: Schema.Literal("open", "accepted", "rejected", "superseded"),
   changeKind: Schema.Literal("factual", "mechanical"),
-  pages: Schema.Array(MemoryReviewPage)
-})
-export type MemoryReviewItem = Schema.Schema.Type<typeof MemoryReviewItem>
+  pages: Schema.Array(MemoryReviewPage),
+  relationships: Schema.Array(MemoryRelationshipReview),
+});
+export type MemoryReviewItem = Schema.Schema.Type<typeof MemoryReviewItem>;
 
 export const MemoryReviewResult = Schema.Struct({
   status: Schema.Literal("accepted", "rejected", "conflict"),
@@ -356,17 +461,17 @@ export const MemoryReviewResult = Schema.Struct({
     Schema.Struct({
       pageId: Schema.String,
       expectedBaseRevisionId: Schema.String,
-      currentHeadRevisionId: Schema.String
-    })
-  )
-})
-export type MemoryReviewResult = Schema.Schema.Type<typeof MemoryReviewResult>
+      currentHeadRevisionId: Schema.String,
+    }),
+  ),
+});
+export type MemoryReviewResult = Schema.Schema.Type<typeof MemoryReviewResult>;
 
 export const MemoryExport = Schema.Struct({
   filename: Schema.String,
-  saved: Schema.Boolean
-})
-export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>
+  saved: Schema.Boolean,
+});
+export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>;
 
 /**
  * Advisory "related pages" suggestions.
@@ -376,8 +481,10 @@ export type MemoryExport = Schema.Schema.Type<typeof MemoryExport>
  * hash. Promoting one goes through the ordinary cited-wikilink proposal flow.
  * Evidence fields are flattened and optional so either method decodes robustly.
  */
-export const MemorySuggestionMethod = Schema.Literal("lexical", "embedding")
-export type MemorySuggestionMethod = Schema.Schema.Type<typeof MemorySuggestionMethod>
+export const MemorySuggestionMethod = Schema.Literal("lexical", "embedding");
+export type MemorySuggestionMethod = Schema.Schema.Type<
+  typeof MemorySuggestionMethod
+>;
 
 export const MemorySuggestionEvidence = Schema.Struct({
   method: MemorySuggestionMethod,
@@ -387,9 +494,11 @@ export const MemorySuggestionEvidence = Schema.Struct({
   sharedSources: Schema.optional(Schema.Array(Schema.String)),
   sharedSchemas: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
-  neighborRank: Schema.optional(Schema.Number)
-})
-export type MemorySuggestionEvidence = Schema.Schema.Type<typeof MemorySuggestionEvidence>
+  neighborRank: Schema.optional(Schema.Number),
+});
+export type MemorySuggestionEvidence = Schema.Schema.Type<
+  typeof MemorySuggestionEvidence
+>;
 
 export const MemorySuggestion = Schema.Struct({
   sourceId: Schema.String,
@@ -399,22 +508,27 @@ export const MemorySuggestion = Schema.Struct({
   /** Best-effort human titles; fall back to ids when the page is not in view. */
   sourceTitle: Schema.String,
   targetTitle: Schema.String,
-  evidence: MemorySuggestionEvidence
-})
-export type MemorySuggestion = Schema.Schema.Type<typeof MemorySuggestion>
+  evidence: MemorySuggestionEvidence,
+});
+export type MemorySuggestion = Schema.Schema.Type<typeof MemorySuggestion>;
 
 export const MemorySuggestionsView = Schema.Struct({
   version: Schema.Literal(1),
   /** Where the embedding half came from, or "lexical" when vectors are off. */
   vectorSource: Schema.Literal("turbopuffer", "lexical"),
-  suggestions: Schema.Array(MemorySuggestion)
-})
-export type MemorySuggestionsView = Schema.Schema.Type<typeof MemorySuggestionsView>
+  suggestions: Schema.Array(MemorySuggestion),
+});
+export type MemorySuggestionsView = Schema.Schema.Type<
+  typeof MemorySuggestionsView
+>;
 
-export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUiError", {
-  message: Schema.String,
-  status: Schema.Number
-}) {}
+export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()(
+  "MemoryUiError",
+  {
+    message: Schema.String,
+    status: Schema.Number,
+  },
+) {}
 
 /**
  * Kept as a small group so the renderer can construct this client separately
@@ -425,9 +539,13 @@ export class MemoryUiError extends Schema.TaggedError<MemoryUiError>()("MemoryUi
 export class AssetListRpcs extends RpcGroup.make(
   Rpc.make("Asset.list", {
     success: Schema.Array(AssetFileEntry),
-    error: Schema.Union(AssetOutsideWorktreeError, GitError, SessionNotFoundError),
-    payload: { sessionId: Schema.String }
-  })
+    error: Schema.Union(
+      AssetOutsideWorktreeError,
+      GitError,
+      SessionNotFoundError,
+    ),
+    payload: { sessionId: Schema.String },
+  }),
 ) {}
 
 /**
@@ -446,17 +564,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * say so.
    */
   Rpc.make("Billing.paths", {
-    success: Schema.Array(HarnessBilling)
+    success: Schema.Array(HarnessBilling),
   }),
 
   Rpc.make("Discovery.list", {
     success: Schema.Array(CliInfo),
-    error: DiscoveryError
+    error: DiscoveryError,
   }),
 
   /** Read the persisted app config (null `reposDir` means first-run setup is pending). */
   Rpc.make("Config.get", {
-    success: Schema.NullOr(WorkspaceConfig)
+    success: Schema.NullOr(WorkspaceConfig),
   }),
 
   /**
@@ -464,33 +582,33 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * return the updated config. Returns null if the user cancels the dialog.
    */
   Rpc.make("Setup.chooseReposDir", {
-    success: Schema.NullOr(WorkspaceConfig)
+    success: Schema.NullOr(WorkspaceConfig),
   }),
 
   /** Scan the configured repos directory for git repositories. */
   Rpc.make("Workspace.repos", {
     success: Schema.Array(Repo),
-    error: WorkspaceNotConfiguredError
+    error: WorkspaceNotConfiguredError,
   }),
 
   /** List the local branch names for one repo (for the base-branch picker). */
   Rpc.make("Workspace.branches", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String }
+    payload: { repoPath: Schema.String },
   }),
 
   /** List a repo's tracked files (for the `@` code-reference menu). */
   Rpc.make("Workspace.files", {
     success: Schema.Array(Schema.String),
     error: GitError,
-    payload: { repoPath: Schema.String }
+    payload: { repoPath: Schema.String },
   }),
 
   /** Discard ALL uncommitted changes to a file in a session's worktree. */
   Rpc.make("Workspace.revertFile", {
     error: GitError,
-    payload: { sessionId: Schema.String, path: Schema.String }
+    payload: { sessionId: Schema.String, path: Schema.String },
   }),
 
   /** Revert just the uncommitted changes in a NEW-file line range (reverse-apply). */
@@ -500,27 +618,27 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       path: Schema.String,
       startLine: Schema.Number,
-      endLine: Schema.Number
-    }
+      endLine: Schema.Number,
+    },
   }),
 
   /** List all agent sessions for the sidebar. */
   Rpc.make("Sessions.list", {
-    success: Schema.Array(Session)
+    success: Schema.Array(Session),
   }),
 
   /** Fetch one session by id. */
   Rpc.make("Sessions.get", {
     success: Session,
     error: SessionNotFoundError,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String },
   }),
 
   /** Create a worktree-backed or direct-checkout session, persist, and return it. */
   Rpc.make("Sessions.create", {
     success: Session,
     error: GitError,
-    payload: CreateSessionInput
+    payload: CreateSessionInput,
   }),
 
   /**
@@ -530,7 +648,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.createFromPr", {
     success: Session,
     error: Schema.Union(GitError, GitHubApiError),
-    payload: CreateSessionFromPrInput
+    payload: CreateSessionFromPrInput,
   }),
 
   /**
@@ -540,7 +658,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.createFromIssue", {
     success: Session,
     error: GitError,
-    payload: CreateSessionFromIssueInput
+    payload: CreateSessionFromIssueInput,
   }),
 
   /** Link a GitHub issue to a live session (attach flow); returns the updated session. */
@@ -550,15 +668,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       issue: IssueSummary,
-      automations: IssueAutomations
-    }
+      automations: IssueAutomations,
+    },
   }),
 
   /** Unlink the session's GitHub issue; returns the updated session. */
   Rpc.make("Sessions.unlinkIssue", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -568,35 +686,35 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.clearInitialPrompt", {
     success: Session,
     error: Schema.Union(GitError, SessionNotFoundError),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Archive a session (its linked PR merged/closed) — read-only, kept. */
   Rpc.make("Sessions.archive", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, reason: ArchiveReason }
+    payload: { sessionId: Schema.String, reason: ArchiveReason },
   }),
 
   /** Restore an archived session back to an editable state. */
   Rpc.make("Sessions.restore", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Regenerate an auto-titled session's title from its transcript; returns it. */
   Rpc.make("Sessions.retitle", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Manually rename a session — pins the title (stops auto-retitling). */
   Rpc.make("Sessions.rename", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, title: Schema.String }
+    payload: { sessionId: Schema.String, title: Schema.String },
   }),
 
   /**
@@ -607,34 +725,34 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.setStatus", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, status: SettledSessionStatus }
+    payload: { sessionId: Schema.String, status: SettledSessionStatus },
   }),
 
   /** Mark a session persistent or ordinary; returns the updated record. */
   Rpc.make("Sessions.setPersistent", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, persistent: Schema.Boolean }
+    payload: { sessionId: Schema.String, persistent: Schema.Boolean },
   }),
 
   /** Permanently delete a session and remove its worktree. Irreversible. */
   Rpc.make("Sessions.delete", {
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Create and activate a fresh chat inside a session. */
   Rpc.make("Sessions.createChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Persist which chat is active for the session. */
   Rpc.make("Sessions.selectChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /** Rename one chat without changing the session title. */
@@ -644,22 +762,22 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      title: Schema.String
-    }
+      title: Schema.String,
+    },
   }),
 
   /** Close one chat; closing the last creates a fresh Chat 1 replacement. */
   Rpc.make("Sessions.closeChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /** Restore a previously closed chat and make it active. */
   Rpc.make("Sessions.reopenChat", {
     success: Session,
     error: GitError,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /** Toggle Jingler orchestration for one chat without affecting its siblings. */
@@ -669,8 +787,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      orchestratorEnabled: Schema.Boolean
-    }
+      orchestratorEnabled: Schema.Boolean,
+    },
   }),
 
   /**
@@ -690,14 +808,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.Struct({
       messages: Schema.Array(Message),
       hasMore: Schema.Boolean,
-      cursor: Schema.optional(Schema.String)
+      cursor: Schema.optional(Schema.String),
     }),
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
       before: Schema.optional(Schema.String),
-      limit: Schema.Int.pipe(Schema.between(1, 500))
-    }
+      limit: Schema.Int.pipe(Schema.between(1, 500)),
+    },
   }),
 
   /**
@@ -712,13 +830,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("Sessions.attachment", {
     success: Schema.NullOr(Schema.String),
-    payload: { chatId: Schema.String, attachmentId: Schema.String }
+    payload: { chatId: Schema.String, attachmentId: Schema.String },
   }),
 
   /** The session worktree's unified working diff, for the Changes rail. */
   Rpc.make("Sessions.diff", {
     success: Schema.String,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String },
   }),
 
   /**
@@ -740,8 +858,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
        * just-cleared composer value win even if its persistence RPC is in flight.
        */
       reasoning: Schema.optional(Schema.NullOr(ReasoningSetting)),
-      externalInstruction: Schema.optional(ExternalInstructionIdentity)
-    }
+      externalInstruction: Schema.optional(ExternalInstructionIdentity),
+    },
   }),
 
   /** Resolve a pending HITL approval gate (allow / deny / always). */
@@ -750,8 +868,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       gateId: Schema.String,
-      decision: GateDecision
-    }
+      decision: GateDecision,
+    },
   }),
 
   /** Submit answers to a pending AskUserQuestion group, resuming the agent. */
@@ -760,8 +878,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       requestId: Schema.String,
-      answers: Schema.Array(QuestionAnswer)
-    }
+      answers: Schema.Array(QuestionAnswer),
+    },
   }),
 
   /** Change a session's HITL permission mode (ask / accept-edits / auto / plan). */
@@ -769,8 +887,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      mode: PermissionMode
-    }
+      mode: PermissionMode,
+    },
   }),
 
   /** Change the current provider's native thinking settings. */
@@ -779,14 +897,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       Schema.Struct({
         sessionId: Schema.String,
         cli: Schema.Literal("claude"),
-        reasoning: Schema.optional(ClaudeReasoningSetting)
+        reasoning: Schema.optional(ClaudeReasoningSetting),
       }),
       Schema.Struct({
         sessionId: Schema.String,
         cli: Schema.Literal("codex", "opencode"),
-        reasoning: Schema.optional(CodexReasoningSetting)
-      })
-    )
+        reasoning: Schema.optional(CodexReasoningSetting),
+      }),
+    ),
   }),
 
   /**
@@ -803,13 +921,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       planId: Schema.String,
       stepId: Schema.String,
       body: Schema.String,
-      anchor: Schema.optional(PlanAnnotationAnchor)
-    }
+      anchor: Schema.optional(PlanAnnotationAnchor),
+    },
   }),
 
   /** Route the plan's open comments back to the agent as a revision, resuming planning. */
   Rpc.make("Agent.revisePlan", {
-    payload: { sessionId: Schema.String, planId: Schema.String }
+    payload: { sessionId: Schema.String, planId: Schema.String },
   }),
 
   /** Approve a plan — restore the exec mode and start execution. */
@@ -819,8 +937,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       planId: Schema.String,
       executionMode: Schema.optional(ExecutionMode),
-      revision: Schema.optional(Schema.Number)
-    }
+      revision: Schema.optional(Schema.Number),
+    },
   }),
 
   /**
@@ -835,8 +953,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       planId: Schema.String,
-      revision: Schema.optional(Schema.Number)
-    }
+      revision: Schema.optional(Schema.Number),
+    },
   }),
 
   /**
@@ -851,8 +969,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
-      chatId: Schema.String
-    }
+      chatId: Schema.String,
+    },
   }),
 
   /** Stop one provider-neutral plan worker without interrupting its siblings. */
@@ -860,8 +978,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
-      agentId: Schema.String
-    }
+      agentId: Schema.String,
+    },
   }),
 
   /** Retry one settled worker from its latest durable checkpoint. */
@@ -869,8 +987,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
-      agentId: Schema.String
-    }
+      agentId: Schema.String,
+    },
   }),
 
   /**
@@ -889,13 +1007,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       chatId: Schema.String,
       cli: CliKind,
-      model: Schema.String
-    }
+      model: Schema.String,
+    },
   }),
 
   /** Stop a running agent (denies any pending gate). */
   Rpc.make("Agent.stop", {
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /**
@@ -914,8 +1032,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
-      agentId: Schema.String
-    }
+      agentId: Schema.String,
+    },
   }),
 
   /**
@@ -927,24 +1045,24 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       Schema.Struct({
         status: Schema.Literal("accepted"),
         user: Message,
-        assistant: Message
+        assistant: Message,
       }),
       Schema.Struct({
-        status: Schema.Literal("deferred", "unsupported")
-      })
+        status: Schema.Literal("deferred", "unsupported"),
+      }),
     ),
     payload: {
       sessionId: Schema.String,
       chatId: Schema.String,
       text: Schema.String,
-      images: Schema.Array(Attachment)
-    }
+      images: Schema.Array(Attachment),
+    },
   }),
 
   /** List the skills/slash-commands the session's harness exposes (the `/` menu). */
   Rpc.make("Skills.list", {
     success: Schema.Array(Skill),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -957,9 +1075,9 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       config: OpenConnectorConfig,
       hasToken: Schema.Boolean,
       /** Environment-aware onboarding defaults (dev = local, prod = hosted). */
-      defaults: OpenConnectorDefaults
+      defaults: OpenConnectorDefaults,
     }),
-    error: ConfigError
+    error: ConfigError,
   }),
 
   /**
@@ -969,7 +1087,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.autoSetup", {
     success: Schema.Void,
-    error: ConfigError
+    error: ConfigError,
   }),
 
   /**
@@ -982,8 +1100,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: ConfigError,
     payload: {
       config: OpenConnectorConfig,
-      token: Schema.optional(Schema.NullOr(Schema.String))
-    }
+      token: Schema.optional(Schema.NullOr(Schema.String)),
+    },
   }),
 
   /**
@@ -993,7 +1111,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.test", {
     success: McpServerStatus,
-    error: ConfigError
+    error: ConfigError,
   }),
 
   /**
@@ -1008,7 +1126,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("OpenConnector.injection", {
     success: Schema.Array(McpInjectionTarget),
-    error: ConfigError
+    error: ConfigError,
   }),
 
   // ── MCP Connector Center — browse + connect OpenConnector providers ─────────
@@ -1016,7 +1134,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** The provider catalog from the configured instance (`GET /v1/providers`). */
   Rpc.make("Connector.providers", {
     success: Schema.Array(ConnectorProvider),
-    error: ConnectorError
+    error: ConnectorError,
   }),
 
   /**
@@ -1028,19 +1146,19 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Connector.provider", {
     success: ConnectorProviderDetail,
     error: ConnectorError,
-    payload: { service: Schema.String }
+    payload: { service: Schema.String },
   }),
 
   /** The operator's established connections (`GET /api/connections`). No secrets. */
   Rpc.make("Connector.connections", {
     success: Schema.Array(ConnectorConnection),
-    error: ConnectorError
+    error: ConnectorError,
   }),
 
   /** OAuth-client metadata per provider — whether client creds exist + the redirect URI. */
   Rpc.make("Connector.oauthConfigs", {
     success: Schema.Array(OAuthClientInfo),
-    error: ConnectorError
+    error: ConnectorError,
   }),
 
   /**
@@ -1054,8 +1172,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       service: Schema.String,
       authType: Schema.Literal("api_key", "custom_credential"),
       values: Schema.Record({ key: Schema.String, value: Schema.String }),
-      connectionName: Schema.optional(Schema.String)
-    }
+      connectionName: Schema.optional(Schema.String),
+    },
   }),
 
   /** Remove a connection (`DELETE /api/connections/:service`). */
@@ -1064,8 +1182,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: ConnectorError,
     payload: {
       service: Schema.String,
-      connectionName: Schema.optional(Schema.String)
-    }
+      connectionName: Schema.optional(Schema.String),
+    },
   }),
 
   /** Store OAuth client id/secret for a provider — secret INBOUND only. */
@@ -1076,8 +1194,10 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       provider: Schema.String,
       clientId: Schema.String,
       clientSecret: Schema.String,
-      extra: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String }))
-    }
+      extra: Schema.optional(
+        Schema.Record({ key: Schema.String, value: Schema.String }),
+      ),
+    },
   }),
 
   /**
@@ -1091,14 +1211,14 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: ConnectorError,
     payload: {
       service: Schema.String,
-      connectionName: Schema.optional(Schema.String)
-    }
+      connectionName: Schema.optional(Schema.String),
+    },
   }),
 
   /** List the models a harness supports (live from the provider; for the chip). */
   Rpc.make("Models.list", {
     success: Schema.Array(ModelOption),
-    payload: { cli: CliKind }
+    payload: { cli: CliKind },
   }),
 
   /**
@@ -1107,7 +1227,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * round trip instead of one per harness.
    */
   Rpc.make("Models.catalog", {
-    success: Schema.Array(ProviderModels)
+    success: Schema.Array(ProviderModels),
   }),
 
   /**
@@ -1118,7 +1238,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("Opencode.listProviders", {
     success: Schema.Array(OpencodeProviderInfo),
-    error: ConfigError
+    error: ConfigError,
   }),
 
   /**
@@ -1133,12 +1253,12 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Opencode.setAuth", {
     success: Schema.Boolean,
     error: ConfigError,
-    payload: { providerId: Schema.String, key: Schema.String }
+    payload: { providerId: Schema.String, key: Schema.String },
   }),
 
   /** Provider usage / rate-limit windows for the Usage & limits modal. */
   Rpc.make("Usage.get", {
-    success: Usage
+    success: Usage,
   }),
 
   /**
@@ -1148,7 +1268,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    */
   Rpc.make("Context.state", {
     success: ContextSnapshot,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /**
@@ -1160,21 +1280,21 @@ export class JinglerCoreRpcs extends RpcGroup.make(
    * feature exists to remove.
    */
   Rpc.make("Context.compactNow", {
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /** Persist the auto-compaction levers (master switch + working-set budget). */
   Rpc.make("Config.setContext", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: ContextConfig
+    payload: ContextConfig,
   }),
 
   /** Persist renderer-safe memory enablement and the selected organization. */
   Rpc.make("Config.setMemory", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: MemoryConfig
+    payload: MemoryConfig,
   }),
 
   /**
@@ -1196,7 +1316,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
         "page",
         "reviews",
         "review",
-        "export"
+        "export",
       ),
       range: Schema.optional(Schema.String),
       limit: Schema.optional(Schema.Number),
@@ -1205,8 +1325,8 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       query: Schema.optional(Schema.String),
       pageId: Schema.optional(Schema.String),
       proposalId: Schema.optional(Schema.String),
-      action: Schema.optional(Schema.Literal("approve", "reject"))
-    }
+      action: Schema.optional(Schema.Literal("approve", "reject")),
+    },
   }),
 
   /**
@@ -1222,44 +1342,44 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: {
       organizationId: Schema.String,
       pageId: Schema.optional(Schema.String),
-      limit: Schema.optional(Schema.Number)
-    }
+      limit: Schema.optional(Schema.Number),
+    },
   }),
 
   /** Per-session auto-compaction override (absent = follow the global setting). */
   Rpc.make("Sessions.setAutoCompact", {
     success: Session,
     error: GitError,
-    payload: { id: Schema.String, autoCompact: Schema.NullOr(Schema.Boolean) }
+    payload: { id: Schema.String, autoCompact: Schema.NullOr(Schema.Boolean) },
   }),
 
   /** Reconcile and return the signed-in user's shared GitHub App connection. */
   Rpc.make("GitHub.status", {
     success: GitHubAppConnectionStatus,
-    error: AuthError
+    error: AuthError,
   }),
 
   /** Create a state-bound GitHub App installation URL for the system browser. */
   Rpc.make("GitHub.install", {
     success: Schema.String,
-    error: AuthError
+    error: AuthError,
   }),
 
   /** Reconcile installations after repository access or suspension changes. */
   Rpc.make("GitHub.refresh", {
     success: GitHubAppConnectionStatus,
-    error: AuthError
+    error: AuthError,
   }),
 
   /** Revoke and remove the product integration without signing out of Jingler. */
   Rpc.make("GitHub.disconnect", {
-    error: AuthError
+    error: AuthError,
   }),
 
   /** Verified GitHub webhook deliveries awaiting durable visible routing. */
   Rpc.make("Github.events", {
     success: GitHubRelayStreamMessage,
-    stream: true
+    stream: true,
   }),
 
   /** Atomically claim feedback for an exact active linked session. */
@@ -1274,34 +1394,34 @@ export class JinglerCoreRpcs extends RpcGroup.make(
       prNumber: Schema.Number,
       deliveryId: Schema.String,
       semanticKey: Schema.String,
-      event: GitHubRelayEvent
-    }
+      event: GitHubRelayEvent,
+    },
   }),
 
   /** Release a held relay cursor only after visible routing settles. */
   Rpc.make("Github.ackEvent", {
-    payload: { clientId: Schema.String, cursor: Schema.Number }
+    payload: { clientId: Schema.String, cursor: Schema.Number },
   }),
 
   /** Persist the user's GitHub integration preferences. */
   Rpc.make("Config.setGithub", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: GithubConfig
+    payload: GithubConfig,
   }),
 
   /** Persist the user's git behaviour preferences. */
   Rpc.make("Config.setGit", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: GitConfig
+    payload: GitConfig,
   }),
 
   /** Persist the user's desktop-notification preferences. */
   Rpc.make("Config.setNotifications", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: NotificationsConfig
+    payload: NotificationsConfig,
   }),
 
   /**
@@ -1311,7 +1431,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Config.setPlanAutoRun", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ planAutoRun: Schema.Boolean })
+    payload: Schema.Struct({ planAutoRun: Schema.Boolean }),
   }),
 
   /**
@@ -1322,7 +1442,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Config.setAdhdMode", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ adhdMode: Schema.Boolean })
+    payload: Schema.Struct({ adhdMode: Schema.Boolean }),
   }),
 
   /**
@@ -1334,7 +1454,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Config.setOrchestratorEnabled", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ orchestratorEnabled: Schema.Boolean })
+    payload: Schema.Struct({ orchestratorEnabled: Schema.Boolean }),
   }),
 
   /**
@@ -1347,8 +1467,10 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     // The usable range lives in the contract, not only the service — the schema
     // is the single source of truth, so every client is bounded before main runs.
     payload: Schema.Struct({
-      fontScale: Schema.Number.pipe(Schema.between(FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max))
-    })
+      fontScale: Schema.Number.pipe(
+        Schema.between(FONT_SCALE_RANGE.min, FONT_SCALE_RANGE.max),
+      ),
+    }),
   }),
 
   /**
@@ -1358,21 +1480,21 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Config.setDefaultCli", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: Schema.Struct({ cli: CliKind })
+    payload: Schema.Struct({ cli: CliKind }),
   }),
 
   /** Persist the harness/model pair that plans every newly-created session. */
   Rpc.make("Config.setOrchestrator", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: OrchestratorPreference
+    payload: OrchestratorPreference,
   }),
 
   /** Persist concrete implementation-worker routes by plan complexity. */
   Rpc.make("Config.setWorkerRouting", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: WorkerRoutingConfig
+    payload: WorkerRoutingConfig,
   }),
 
   /**
@@ -1397,49 +1519,48 @@ export class JinglerCoreRpcs extends RpcGroup.make(
        * knows authoritatively) to decide whether the operator can already see
        * what we're about to tell them.
        */
-      isActiveSession: Schema.Boolean
-    }
+      isActiveSession: Schema.Boolean,
+    },
   }),
 
   /** Persist the full set of starred repo paths (replaces the stored list). */
   Rpc.make("Config.setStarredRepos", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { paths: Schema.Array(Schema.String) }
+    payload: { paths: Schema.Array(Schema.String) },
   }),
 
   /** Persist the full set of collapsed repo paths (replaces the stored list). */
   Rpc.make("Config.setCollapsedRepos", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { paths: Schema.Array(Schema.String) }
+    payload: { paths: Schema.Array(Schema.String) },
   }),
 
   /** Remember the repo used for the most recent session create (picker default). */
   Rpc.make("Config.setLastRepoPath", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { path: Schema.String }
+    payload: { path: Schema.String },
   }),
 
   /** Persist the editable PRD MDX template used by every native planning harness. */
   Rpc.make("Config.setPlanTemplate", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { template: PlanTemplateConfig }
+    payload: { template: PlanTemplateConfig },
   }),
 
   /** Persist one CLI's provider defaults (model, mode, reasoning, …). */
   Rpc.make("Config.setProvider", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { cli: CliKind, provider: ProviderConfig }
-  })
+    payload: { cli: CliKind, provider: ProviderConfig },
+  }),
 ) {}
 
 /** Review, preview, theme, and plugin half of the renderer RPC client. */
 export class JinglerReviewRpcs extends RpcGroup.make(
-
   /**
    * Run an adversarial review of the session's linked PR: a reviewer agent runs
    * READ-ONLY in the session's worktree, on the configured review model (Fable by
@@ -1452,7 +1573,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** The canonical PRD MDX document shared by every chat in this session. */
   Rpc.make("Plan.current", {
     success: Schema.NullOr(PlanDocument),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1463,7 +1584,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plan.watch", {
     success: PlanDocument,
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1474,20 +1595,24 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plan.startDraft", {
     success: PlanDocument,
     error: Schema.Union(PlanValidationError, PlanPersistenceError),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Compare-and-swap the canonical source after safe MDX validation. */
   Rpc.make("Plan.updateDocument", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError,
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       plan: PlanPrd,
-      author: Schema.Literal("user", "agent")
-    }
+      author: Schema.Literal("user", "agent"),
+    },
   }),
 
   /** List only participants whose exact live route can still own a plan reply. */
@@ -1495,8 +1620,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Array(PlanParticipant),
     payload: {
       sessionId: Schema.String,
-      planId: Schema.String
-    }
+      planId: Schema.String,
+    },
   }),
 
   /**
@@ -1507,9 +1632,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Struct({
       document: PlanDocument,
       messageId: Schema.String,
-      deliveries: Schema.Array(PlanMentionDelivery)
+      deliveries: Schema.Array(PlanMentionDelivery),
     }),
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError,
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1517,8 +1646,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       annotationId: Schema.String,
       body: Schema.String,
       authorId: Schema.String,
-      mentionedParticipantIds: Schema.Array(Schema.String)
-    }
+      mentionedParticipantIds: Schema.Array(Schema.String),
+    },
   }),
 
   /** Route the already-persisted first message from an in-document thread. */
@@ -1526,22 +1655,30 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: Schema.Struct({
       document: PlanDocument,
       messageId: Schema.String,
-      deliveries: Schema.Array(PlanMentionDelivery)
+      deliveries: Schema.Array(PlanMentionDelivery),
     }),
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError,
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,
-      messageId: Schema.String
-    }
+      messageId: Schema.String,
+    },
   }),
 
   /** Update delivery state for one message without replacing the thread. */
   Rpc.make("Plan.updateMessageDelivery", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError,
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
@@ -1549,28 +1686,32 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       annotationId: Schema.String,
       messageId: Schema.String,
       deliveryState: PlanCommentMessageDeliveryState,
-      author: Schema.Literal("user", "agent")
-    }
+      author: Schema.Literal("user", "agent"),
+    },
   }),
 
   /** Resolve or reopen one annotation thread under the canonical revision guard. */
   Rpc.make("Plan.setThreadResolved", {
     success: PlanDocument,
-    error: Schema.Union(PlanConflictError, PlanValidationError, PlanPersistenceError),
+    error: Schema.Union(
+      PlanConflictError,
+      PlanValidationError,
+      PlanPersistenceError,
+    ),
     payload: {
       sessionId: Schema.String,
       planId: Schema.String,
       baseRevision: Schema.Number,
       annotationId: Schema.String,
       resolved: Schema.Boolean,
-      author: Schema.Literal("user", "agent")
-    }
+      author: Schema.Literal("user", "agent"),
+    },
   }),
 
   Rpc.make("Review.run", {
     success: AdversarialReview,
     error: Schema.Union(ReviewError, GitHubApiError),
-    payload: { sessionId: Schema.String, force: Schema.Boolean }
+    payload: { sessionId: Schema.String, force: Schema.Boolean },
   }),
 
   /**
@@ -1593,13 +1734,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Review.watch", {
     success: StreamEvent,
     stream: true,
-    payload: { sessionId: Schema.String, chatId: Schema.String }
+    payload: { sessionId: Schema.String, chatId: Schema.String },
   }),
 
   /** The last stored adversarial review for a session, or null. Never errors. */
   Rpc.make("Review.get", {
     success: Schema.NullOr(AdversarialReview),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1618,7 +1759,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Review.markRouted", {
     success: Schema.NullOr(Schema.String),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1634,7 +1775,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Review.reconcile", {
     success: Schema.NullOr(AdversarialReview),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1645,7 +1786,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.pr", {
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1658,8 +1799,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       repoPath: Schema.String,
       mine: Schema.Boolean,
-      search: Schema.String
-    }
+      search: Schema.String,
+    },
   }),
 
   /**
@@ -1672,21 +1813,21 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       repoPath: Schema.String,
       mine: Schema.Boolean,
-      search: Schema.String
-    }
+      search: Schema.String,
+    },
   }),
 
   /** Close the session's linked issue (close-on-merge automation). */
   Rpc.make("Github.closeIssue", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** The full linked-issue view model for the session's Issue tab (null if none). */
   Rpc.make("Github.issue", {
     success: Schema.NullOr(Issue),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1697,21 +1838,21 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.prState", {
     success: Schema.NullOr(SessionPrStatus),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** The changed files of a session's PR, for the Code Review file list. */
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** The unified diff of a session's PR vs its base branch. */
   Rpc.make("Github.diff", {
     success: Schema.String,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1721,7 +1862,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.detectPr", {
     success: Schema.NullOr(Schema.Number),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1732,7 +1873,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.createPr", {
     success: PublishCheckpoint,
     stream: true,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1744,8 +1885,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       body: Schema.String,
-      toGithub: Schema.Boolean
-    }
+      toGithub: Schema.Boolean,
+    },
   }),
 
   /**
@@ -1765,8 +1906,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: GitHubApiError,
     payload: {
       sessionId: Schema.String,
-      comments: Schema.Array(ReviewComment)
-    }
+      comments: Schema.Array(ReviewComment),
+    },
   }),
 
   /** Submit a review (comment / approve / request-changes) on the session's PR. */
@@ -1775,8 +1916,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       kind: ReviewSubmitKind,
-      body: Schema.String
-    }
+      body: Schema.String,
+    },
   }),
 
   /**
@@ -1788,8 +1929,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       threadId: Schema.String,
-      resolved: Schema.Boolean
-    }
+      resolved: Schema.Boolean,
+    },
   }),
 
   /**
@@ -1801,8 +1942,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       sessionId: Schema.String,
       commentId: Schema.Number,
-      body: Schema.String
-    }
+      body: Schema.String,
+    },
   }),
 
   /**
@@ -1813,8 +1954,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     error: GitHubApiError,
     payload: {
       sessionId: Schema.String,
-      method: Schema.optional(PrMergeMethod)
-    }
+      method: Schema.optional(PrMergeMethod),
+    },
   }),
 
   /**
@@ -1823,7 +1964,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.markReady", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1834,7 +1975,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Github.updateBranch", {
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   // ── Terminal ───────────────────────────────────────────────────────────────
@@ -1855,8 +1996,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       sessionId: Schema.String,
       cwd: Schema.optional(Schema.String),
       cols: Schema.Number,
-      rows: Schema.Number
-    }
+      rows: Schema.Number,
+    },
   }),
 
   /**
@@ -1868,12 +2009,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Terminal.attach", {
     success: TerminalChunk,
     stream: true,
-    payload: { terminalId: Schema.String }
+    payload: { terminalId: Schema.String },
   }),
 
   /** Write operator keystrokes (or pasted text) to a terminal's PTY. No-op if unknown. */
   Rpc.make("Terminal.write", {
-    payload: { terminalId: Schema.String, data: Schema.String }
+    payload: { terminalId: Schema.String, data: Schema.String },
   }),
 
   /** Resize a terminal's PTY (drives SIGWINCH so TUIs reflow). No-op if unknown. */
@@ -1881,19 +2022,19 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       terminalId: Schema.String,
       cols: Schema.Number,
-      rows: Schema.Number
-    }
+      rows: Schema.Number,
+    },
   }),
 
   /** Kill a terminal's shell (SIGHUP) and drop it. Idempotent. */
   Rpc.make("Terminal.kill", {
-    payload: { terminalId: Schema.String }
+    payload: { terminalId: Schema.String },
   }),
 
   /** List the live terminals for a session (to rebuild its tab strip on mount). */
   Rpc.make("Terminal.list", {
     success: Schema.Array(TerminalInfo),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   // ── Background tasks ─────────────────────────────────────────────────────────
@@ -1907,7 +2048,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BackgroundTasks.list", {
     success: Schema.Array(BackgroundTask),
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -1917,7 +2058,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BackgroundTasks.stop", {
     success: Schema.NullOr(BackgroundTask),
-    payload: { sessionId: Schema.String, taskId: Schema.String }
+    payload: { sessionId: Schema.String, taskId: Schema.String },
   }),
 
   /**
@@ -1928,7 +2069,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BackgroundTasks.dismiss", {
     success: Schema.Void,
-    payload: { sessionId: Schema.String, taskId: Schema.String }
+    payload: { sessionId: Schema.String, taskId: Schema.String },
   }),
 
   /**
@@ -1938,7 +2079,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BackgroundTasks.output", {
     success: Schema.String,
-    payload: { sessionId: Schema.String, taskId: Schema.String }
+    payload: { sessionId: Schema.String, taskId: Schema.String },
   }),
 
   // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -1948,7 +2089,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
 
   /** The current authenticated session, or null when signed out. */
   Rpc.make("Auth.getSession", {
-    success: Schema.NullOr(AuthSession)
+    success: Schema.NullOr(AuthSession),
   }),
 
   /**
@@ -1958,7 +2099,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Auth.startSignIn", {
     success: Schema.String,
     error: AuthError,
-    payload: { provider: AuthProvider }
+    payload: { provider: AuthProvider },
   }),
 
   /**
@@ -1968,7 +2109,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Auth.sendMagicLink", {
     error: AuthError,
-    payload: { email: Schema.String, name: Schema.optional(Schema.String) }
+    payload: { email: Schema.String, name: Schema.optional(Schema.String) },
   }),
 
   /** Sign out — revoke on the server (best effort) and clear the local token. */
@@ -1987,23 +2128,27 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserPreview.open", {
     error: BrowserPreviewError,
-    payload: { sessionId: Schema.String, url: Schema.String, bounds: BrowserBounds }
+    payload: {
+      sessionId: Schema.String,
+      url: Schema.String,
+      bounds: BrowserBounds,
+    },
   }),
 
   /** Reposition/resize the view to track the pane's rect (on layout/scroll). No-op if closed. */
   Rpc.make("BrowserPreview.setBounds", {
-    payload: { sessionId: Schema.String, bounds: BrowserBounds }
+    payload: { sessionId: Schema.String, bounds: BrowserBounds },
   }),
 
   /** Navigate the open view to a new URL. Fails with `BrowserPreviewError` for non-http(s). */
   Rpc.make("BrowserPreview.navigate", {
     error: BrowserPreviewError,
-    payload: { sessionId: Schema.String, url: Schema.String }
+    payload: { sessionId: Schema.String, url: Schema.String },
   }),
 
   /** Reload the current page. No-op if closed. */
   Rpc.make("BrowserPreview.reload", {
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /**
@@ -2012,7 +2157,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * page, its history and its scroll position with it.
    */
   Rpc.make("BrowserPreview.setVisible", {
-    payload: { sessionId: Schema.String, visible: Schema.Boolean }
+    payload: { sessionId: Schema.String, visible: Schema.Boolean },
   }),
 
   // ── Browser control (agent QA) ───────────────────────────────────────────────
@@ -2027,20 +2172,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** Navigate the browser to `url` (http/https only) and reveal the dock. */
   Rpc.make("BrowserControl.navigate", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, url: Schema.String }
+    payload: { sessionId: Schema.String, url: Schema.String },
   }),
 
   /** A PNG screenshot of the current page, base64-encoded — the agent's eyes. */
   Rpc.make("BrowserControl.screenshot", {
     success: Schema.Struct({ pngBase64: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Click the first element matching `selector`. Fails if nothing matches. */
   Rpc.make("BrowserControl.click", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String }
+    payload: { sessionId: Schema.String, selector: Schema.String },
   }),
 
   /**
@@ -2049,27 +2194,35 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("BrowserControl.type", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String, text: Schema.String }
+    payload: {
+      sessionId: Schema.String,
+      selector: Schema.String,
+      text: Schema.String,
+    },
   }),
 
   /** The page's visible text (`document.body.innerText`), for the agent to read. */
   Rpc.make("BrowserControl.readText", {
     success: Schema.Struct({ text: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String },
   }),
 
   /** Evaluate `expression` in the page and return its `String(...)` result. */
   Rpc.make("BrowserControl.evaluate", {
     success: Schema.Struct({ result: Schema.String }),
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, expression: Schema.String }
+    payload: { sessionId: Schema.String, expression: Schema.String },
   }),
 
   /** Resolve once `selector` appears in the DOM, or fail after `timeoutMs`. */
   Rpc.make("BrowserControl.waitForSelector", {
     error: BrowserControlError,
-    payload: { sessionId: Schema.String, selector: Schema.String, timeoutMs: Schema.Number }
+    payload: {
+      sessionId: Schema.String,
+      selector: Schema.String,
+      timeoutMs: Schema.Number,
+    },
   }),
 
   // ── Assets ───────────────────────────────────────────────────────────────────
@@ -2091,9 +2244,9 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       AssetBinaryError,
       AssetTooLargeError,
       AssetUnsupportedError,
-      SessionNotFoundError
+      SessionNotFoundError,
     ),
-    payload: { sessionId: Schema.String, path: Schema.String }
+    payload: { sessionId: Schema.String, path: Schema.String },
   }),
 
   /** Replace one existing UTF-8 text asset if its loaded revision is current. */
@@ -2105,20 +2258,20 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       AssetTooLargeError,
       AssetWriteConflictError,
       AssetWriteIoError,
-      SessionNotFoundError
+      SessionNotFoundError,
     ),
     payload: {
       sessionId: Schema.String,
       path: Schema.String,
       text: Schema.String,
-      expectedRevision: Schema.String
-    }
+      expectedRevision: Schema.String,
+    },
   }),
 
   /** Reveal the asset in the OS file manager. */
   Rpc.make("Asset.reveal", {
     error: Schema.Union(AssetOutsideWorktreeError, SessionNotFoundError),
-    payload: { sessionId: Schema.String, path: Schema.String }
+    payload: { sessionId: Schema.String, path: Schema.String },
   }),
 
   /**
@@ -2138,18 +2291,18 @@ export class JinglerReviewRpcs extends RpcGroup.make(
       // an agent-authored `.html` there would get a file origin.
       AssetUnsupportedError,
       SessionNotFoundError,
-      BrowserPreviewError
+      BrowserPreviewError,
     ),
     payload: {
       sessionId: Schema.String,
       path: Schema.String,
-      bounds: BrowserBounds
-    }
+      bounds: BrowserBounds,
+    },
   }),
 
   /** Keep a session-owned PDF aligned with its Files placeholder. */
   Rpc.make("Asset.setPdfBounds", {
-    payload: { sessionId: Schema.String, bounds: BrowserBounds }
+    payload: { sessionId: Schema.String, bounds: BrowserBounds },
   }),
 
   /** Hide only the named session's PDF without affecting Preview or split panes. */
@@ -2169,7 +2322,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * paint nine live previews from one call rather than nine.
    */
   Rpc.make("Theme.list", {
-    success: ThemeCatalog
+    success: ThemeCatalog,
   }),
 
   /**
@@ -2178,7 +2331,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Theme.get", {
     success: Schema.NullOr(VsCodeTheme),
-    payload: { id: Schema.String }
+    payload: { id: Schema.String },
   }),
 
   /**
@@ -2188,13 +2341,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Theme.save", {
     success: ThemeSummary,
     error: ThemeError,
-    payload: { id: Schema.String, theme: VsCodeTheme }
+    payload: { id: Schema.String, theme: VsCodeTheme },
   }),
 
   /** Delete a user theme. Fails on a built-in; a missing file is success. */
   Rpc.make("Theme.delete", {
     error: ThemeError,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String },
   }),
 
   /**
@@ -2204,7 +2357,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Theme.duplicate", {
     success: ThemeSummary,
     error: ThemeError,
-    payload: { id: Schema.String, name: Schema.optional(Schema.String) }
+    payload: { id: Schema.String, name: Schema.optional(Schema.String) },
   }),
 
   /**
@@ -2215,14 +2368,14 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Theme.import", {
     success: ThemeSummary,
     error: ThemeError,
-    payload: { json: Schema.String, name: Schema.optional(Schema.String) }
+    payload: { json: Schema.String, name: Schema.optional(Schema.String) },
   }),
 
   /** Persist the active theme, keeping any colour customizations layered on it. */
   Rpc.make("Theme.setActive", {
     success: WorkspaceConfig,
     error: ConfigError,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String },
   }),
 
   /**
@@ -2234,8 +2387,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: {
-      colors: Schema.Record({ key: Schema.String, value: Schema.String })
-    }
+      colors: Schema.Record({ key: Schema.String, value: Schema.String }),
+    },
   }),
 
   /**
@@ -2249,7 +2402,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Theme.watch", {
     success: ThemeCatalog,
-    stream: true
+    stream: true,
   }),
 
   /**
@@ -2261,7 +2414,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * primitive by accident.
    */
   Rpc.make("Theme.reveal", {
-    payload: { path: Schema.String }
+    payload: { path: Schema.String },
   }),
 
   // ── Plugins ──────────────────────────────────────────────────────────────────
@@ -2280,7 +2433,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * `jingler.plugin.json` can inform the operator without emptying the list.
    */
   Rpc.make("Plugins.list", {
-    success: PluginCatalog
+    success: PluginCatalog,
   }),
 
   /**
@@ -2293,7 +2446,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.watch", {
     success: PluginCatalog,
-    stream: true
+    stream: true,
   }),
 
   /**
@@ -2303,19 +2456,19 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.setEnabled", {
     error: PluginError,
-    payload: { pluginId: PluginId, enabled: Schema.Boolean }
+    payload: { pluginId: PluginId, enabled: Schema.Boolean },
   }),
 
   /** Remove a plugin's directory. Fails `PluginError` for a built-in or unknown id. */
   Rpc.make("Plugins.uninstall", {
     error: PluginError,
-    payload: { pluginId: PluginId }
+    payload: { pluginId: PluginId },
   }),
 
   /** Reveal a plugin's directory in the OS file manager (confined to `pluginsDir`). */
   Rpc.make("Plugins.reveal", {
     error: PluginError,
-    payload: { pluginId: PluginId }
+    payload: { pluginId: PluginId },
   }),
 
   /**
@@ -2324,7 +2477,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.reload", {
     error: PluginError,
-    payload: { pluginId: PluginId }
+    payload: { pluginId: PluginId },
   }),
 
   /**
@@ -2347,7 +2500,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.activate", {
     error: PluginError,
-    payload: { pluginId: PluginId }
+    payload: { pluginId: PluginId },
   }),
 
   /**
@@ -2362,7 +2515,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plugins.installFromFolder", {
     success: LoadedPlugin,
     error: PluginError,
-    payload: { sourcePath: Schema.String }
+    payload: { sourcePath: Schema.String },
   }),
 
   /**
@@ -2385,7 +2538,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.installFromPicker", {
     success: Schema.NullOr(LoadedPlugin),
-    error: PluginError
+    error: PluginError,
   }),
 
   /**
@@ -2401,8 +2554,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: {
       pluginId: PluginId,
       commandId: Schema.String,
-      arg: Schema.optional(Schema.Unknown)
-    }
+      arg: Schema.optional(Schema.Unknown),
+    },
   }),
 
   /**
@@ -2414,7 +2567,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.events", {
     success: PluginEvent,
-    stream: true
+    stream: true,
   }),
 
   /**
@@ -2423,13 +2576,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.storageGet", {
     success: Schema.NullOr(Schema.Unknown),
-    payload: { pluginId: PluginId, key: Schema.String }
+    payload: { pluginId: PluginId, key: Schema.String },
   }),
 
   /** Write a value into a plugin's private key/value store. */
   Rpc.make("Plugins.storageSet", {
     error: PluginError,
-    payload: { pluginId: PluginId, key: Schema.String, value: Schema.Unknown }
+    payload: { pluginId: PluginId, key: Schema.String, value: Schema.Unknown },
   }),
 
   /**
@@ -2440,13 +2593,13 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.storageDelete", {
     error: PluginError,
-    payload: { pluginId: PluginId, key: Schema.String }
+    payload: { pluginId: PluginId, key: Schema.String },
   }),
 
   /** Every key currently set for a plugin. Empty when the store has never been written. */
   Rpc.make("Plugins.storageKeys", {
     success: Schema.Array(Schema.String),
-    payload: { pluginId: PluginId }
+    payload: { pluginId: PluginId },
   }),
 
   /**
@@ -2456,7 +2609,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    * omission (see `packages/core/src/plugin.ts`).
    */
   Rpc.make("Plugins.authSessions", {
-    success: Schema.Array(AuthSessionInfo)
+    success: Schema.Array(AuthSessionInfo),
   }),
 
   /**
@@ -2469,7 +2622,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Plugins.authGrant", {
     success: Schema.NullOr(AuthSessionInfo),
     error: PluginError,
-    payload: AuthSessionRequest
+    payload: AuthSessionRequest,
   }),
 
   /**
@@ -2477,9 +2630,12 @@ export class JinglerReviewRpcs extends RpcGroup.make(
    */
   Rpc.make("Plugins.authRevoke", {
     error: PluginError,
-    payload: { pluginId: PluginId, providerId: Schema.String }
-  })
+    payload: { pluginId: PluginId, providerId: Schema.String },
+  }),
 ) {}
 
 /** The complete server contract; split clients still share this one IPC surface. */
-export const JinglerRpcs = JinglerCoreRpcs.merge(JinglerReviewRpcs, AssetListRpcs)
+export const JinglerRpcs = JinglerCoreRpcs.merge(
+  JinglerReviewRpcs,
+  AssetListRpcs,
+);

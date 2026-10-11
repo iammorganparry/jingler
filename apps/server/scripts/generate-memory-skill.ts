@@ -38,8 +38,8 @@ const WHEN_TO_USE: Record<string, string> = {
   memory_navigation: "Browse structurally (index pages, backlinks) rather than by search.",
   memory_dashboard: "Gauge vault size/health/activity, not to answer a specific question.",
   memory_export: "Only when the user explicitly wants a full dump/backup — this is a heavy call.",
-  memory_propose: "Publish anything worth remembering (any domain). baseRevisionId is 'new' for a new page, or a memory_read revisionId to update one. Idempotent by identity+content.",
-  memory_workflow_status: "After proposing, poll the returned handle to see whether it published or is awaiting review.",
+  memory_propose: "After search + accepted-page reads, submit at most three durable learnings per settled turn. baseRevisionId 'new' returns a pollable compiler workflow; an accepted revision returns an explicit existing-page review settlement. Idempotent by identity+content.",
+  memory_workflow_status: "Poll every new-page compiler workflow to a typed terminal result. Existing-page review handles explicitly say pollable=false and are not workflow ids.",
   memory_reviews: "Only when the org enabled the human review gate — list proposals awaiting a maintainer.",
   memory_review: "Approve or reject a pending proposal (maintainer).",
   memory_schema_publish: "Advanced/maintainer path; most agents use memory_propose instead."

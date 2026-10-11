@@ -58,6 +58,8 @@ export interface GitHubInstallationCredential {
 
 export interface GitHubAuthClient {
   readonly status: () => Promise<GitHubAppConnectionStatus>
+  /** Read persisted server state without the desktop client's short-lived cache. */
+  readonly statusFresh: () => Promise<GitHubAppConnectionStatus>
   readonly install: (redirect?: string) => Promise<string>
   readonly refresh: () => Promise<GitHubAppConnectionStatus>
   readonly disconnect: () => Promise<void>
@@ -313,10 +315,7 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
     return value
   }
 
-  const status = async (): Promise<GitHubAppConnectionStatus> => {
-    if (statusCache && statusCache.expiresAt > now().getTime()) return statusCache.value
-    if (statusRequest) return statusRequest
-    statusRequest = (async () => {
+  const readStatus = async (): Promise<GitHubAppConnectionStatus> => {
       const response = await authenticatedRequest("/api/github/status")
       const parsed = parseStatus(await response.json().catch(() => null))
       if (!parsed) {
@@ -326,7 +325,12 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
         })
       }
       return rememberStatus(parsed)
-    })()
+  }
+
+  const status = async (): Promise<GitHubAppConnectionStatus> => {
+    if (statusCache && statusCache.expiresAt > now().getTime()) return statusCache.value
+    if (statusRequest) return statusRequest
+    statusRequest = readStatus()
     try {
       return await statusRequest
     } finally {
@@ -561,6 +565,7 @@ export const makeGitHubAuthClient = (options: GitHubAuthClientOptions): GitHubAu
 
   return {
     status,
+    statusFresh: readStatus,
     install,
     refresh,
     disconnect,
@@ -641,6 +646,7 @@ export class GitHubAuth extends Effect.Service<GitHubAuth>()("@jingler/GitHubAut
       })
     return {
       status: () => wrap(client.status),
+      statusFresh: () => wrap(client.statusFresh),
       install: (redirect?: string) => wrap(() => client.install(redirect)),
       refresh: () => wrap(client.refresh),
       disconnect: () => wrap(client.disconnect),
