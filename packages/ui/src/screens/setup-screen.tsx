@@ -111,10 +111,11 @@ function renderWorkspaceSetup() {
               </p>
             </div>
 
+            {error && !busy && <Callout tone="red">{error}</Callout>}
             {!chosen ? (
               <Button variant="primary" onClick={onChooseDir} disabled={busy} className="self-start">
                 {busy ? <Spinner size={13} /> : <FolderSearch size={14} />}
-                {busy ? "Scanning…" : "Choose repos folder"}
+                {chooseLabel}
               </Button>
             ) : (
               <>
@@ -239,6 +240,7 @@ return (<ProviderSetupStep
          }
 
   const chosen = reposDir !== null
+  const chooseLabel = busy ? "Scanning…" : error ? "Choose another folder" : "Choose repos folder"
   const shownRepos = repos.slice(0, 6)
   const overflow = repos.length - shownRepos.length
   const githubBusy = busy || github.mode === "connecting"

@@ -171,6 +171,14 @@ const props = (
 });
 
 describe("SetupScreen", () => {
+  it("shows a failed folder scan and lets the user choose another folder", () => {
+    const onChooseDir = vi.fn();
+    render(<SetupScreen {...props({ error: "EACCES: permission denied, scandir '/Users/me/code'", onChooseDir })} />);
+    expect(screen.getByText(/permission denied/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Choose another folder" }));
+    expect(onChooseDir).toHaveBeenCalledTimes(1);
+  });
+
   it("does not present a provider harness picker", () => {
     render(<SetupScreen {...props()} />);
     expect(screen.queryByText("HARNESSES")).toBeNull();
