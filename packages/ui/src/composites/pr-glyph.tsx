@@ -87,6 +87,18 @@ export const prGlyphOf = (pr: SessionPrStatus | null | undefined): PrGlyph => {
   }
 }
 
+const CHECK_SEVERITY: Record<string, number> = { fail: 0, running: 2, pending: 3, pass: 5 }
+
+const severity = (pr: SessionPrStatus): number => {
+  if (pr.state === "merged") return 6
+  if (pr.state === "closed") return 1
+  return CHECK_SEVERITY[pr.checks ?? ""] ?? 4
+}
+
+/** The PR in a stack that most needs attention: failing CI, then closed, then running/queued CI. */
+export const worstPrOf = (stack: ReadonlyArray<SessionPrStatus>): SessionPrStatus | null =>
+  stack.reduce<SessionPrStatus | null>((worst, pr) => (worst === null || severity(pr) < severity(worst) ? pr : worst), null)
+
 /** A hollow ring for a session with no PR — a placeholder, not a status. */
 function NoPr({ className }: { className?: string }) {
   return (
@@ -105,13 +117,33 @@ function NoPr({ className }: { className?: string }) {
  */
 export function PrStatusGlyph({
   pr,
+  stack,
   size = 14,
   className
 }: {
   pr: SessionPrStatus | null | undefined
+  /** A PR stack: renders the worst layer's glyph plus the layer count (`⑂ 3`). Data wiring is 14.1. */
+  stack?: ReadonlyArray<SessionPrStatus>
   size?: number
   className?: string
 }) {
+  if (stack && stack.length > 1) {
+    const worst = worstPrOf(stack)
+    const { tone, label } = prGlyphOf(worst)
+    return (
+      <span
+        data-testid="pr-glyph-stack"
+        data-state={worst?.state ?? "none"}
+        data-checks={worst?.checks ?? "none"}
+        title={`Stack of ${stack.length} pull requests — ${label}`}
+        className={cn("inline-flex flex-none items-center gap-0.5 whitespace-nowrap", tone, className)}
+      >
+        <PrStatusGlyph pr={worst} size={size} />
+        <span aria-hidden="true">{stack.length}</span>
+        <span className="sr-only">Stack of {stack.length} pull requests</span>
+      </span>
+    )
+  }
   const { Icon, tone, mark, label } = prGlyphOf(pr)
   return (
     <span
