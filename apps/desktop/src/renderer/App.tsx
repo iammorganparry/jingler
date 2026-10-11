@@ -171,6 +171,9 @@ const subagentModelsFor = (
  * surface; a genuine outage outlasts it and does.
  */
 const RELAY_UNHEALTHY_GRACE_MS = 4_000;
+const AGENT_WAKE_NOTE = "Sub-agent results arrived";
+const AGENT_WAKE_CONTEXT =
+  "Background sub-agent results or notices arrived while you were idle; they are already in your context above. Review them and continue the work.";
 const delegationEnabled = (configured: boolean | undefined): boolean => configured !== false;
 const subagentAssignments = (config: WorkspaceConfig | null | undefined) =>
   config?.subagentModelsByProvider ?? {};
@@ -1026,6 +1029,19 @@ function AuthedApp({
       cancelEvents();
     };
   }, [appConnected, feedbackRouter, githubRelayAuthorizationVersion]);
+
+  // An idle agent received sub-agent results; give it a real, visible turn.
+  useEffect(
+    () => rpc.agentWakeups(({ sessionId, chatId }) => {
+      const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+      if (!session || session.archived) return;
+      const conversation = getConversationActor(session, chatId);
+      // Several results landing together need one turn, not one each.
+      if (conversation.getSnapshot().context.queued.some((queued) => queued.agentContext === AGENT_WAKE_CONTEXT)) return;
+      conversation.send({ type: "SEND", text: AGENT_WAKE_NOTE, agentContext: AGENT_WAKE_CONTEXT });
+    }),
+    [],
+  );
 
   // Continuously resolve the OPEN PR on every live worktree branch. Sessions can
   // outlive a merged PR and open a replacement, so linked sessions stay in the

@@ -1013,6 +1013,22 @@ export const rpc = {
       if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
     }
   },
+  agentWakeups: (
+    onWake: (wake: { sessionId: string; chatId: string }) => void
+  ): (() => void) => {
+    let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
+    let cancelled = false
+    void clientPromise.then((client) => {
+      if (cancelled) return
+      fiber = coreRuntime.runFork(
+        client.Agent.wakeups().pipe(Stream.runForEach((wake) => Effect.sync(() => onWake(wake))))
+      )
+    })
+    return () => {
+      cancelled = true
+      if (fiber) coreRuntime.runFork(Fiber.interrupt(fiber))
+    }
+  },
   githubClaimFeedback: (input: {
     operation: "claim" | "mark-dispatched"
     sessionId: string

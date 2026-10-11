@@ -58,6 +58,7 @@ import { createPiTools } from "./pi-tool-bridge.js"
 import { piSubagentProgress, piSupervisorAttention } from "./pi-events.js"
 import { estimatePiContextBreakdown } from "./pi-context-breakdown.js"
 import { makePiSubagentAsyncDelegate } from "./pi-subagent-rpc.js"
+import { agentWakes, routeIdleTurnsToChat } from "./pi-idle-wake.js"
 import { makeRuntimeDiagnosticObserver } from "../diagnostics/runtime-diagnostic-observer.js"
 import {
   preparePiSubagentsRuntime,
@@ -408,6 +409,12 @@ const createEmbeddedSession = (
         resources,
         sessionManager
       )
+      // A delegation-only sidecar serves a non-Pi parent; its turns are not chat turns.
+      if (!options.delegationOnly) {
+        routeIdleTurnsToChat(configured.result.session, () =>
+          agentWakes.publish({ sessionId: spec.sessionId, chatId: spec.chatId })
+        )
+      }
       return {
         result: configured.result,
         connection,
@@ -530,7 +537,9 @@ const toHandle = (input: SessionHandleInput): PiSessionHandle => {
         }
       : {}),
     prompt: (text, images) => session.prompt(text, {
-      images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType }))
+      images: images?.map(({ data, mediaType }) => ({ type: "image", data, mimeType: mediaType })),
+      // Pi throws on a prompt that lands mid-turn; queue it behind that turn instead.
+      streamingBehavior: "followUp"
     }),
     steer: (text) => session.steer(text),
     interrupt: () => session.abort(),

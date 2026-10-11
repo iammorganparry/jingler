@@ -1,7 +1,8 @@
-import type {
-  AgentRuntimeContext,
-  PiAgentRuntimeLiveOptions,
-  ToolRegistry
+import {
+  agentWakes,
+  type AgentRuntimeContext,
+  type PiAgentRuntimeLiveOptions,
+  type ToolRegistry
 } from "@jingler/cli-adapters"
 import type { AgentRunSpec, StreamEvent } from "@jingler/core"
 import { Effect, Schema } from "effect"
@@ -16,7 +17,8 @@ export const E2eBackgroundKind = Schema.Literal(
   "watch",
   "agent",
   "complete",
-  "legacy-agent"
+  "legacy-agent",
+  "wake"
 )
 export type E2eBackgroundKind = Schema.Schema.Type<typeof E2eBackgroundKind>
 
@@ -156,6 +158,13 @@ const executeBackgroundFixture = (
 ): Effect.Effect<{ readonly started: E2eBackgroundKind }> => {
   const taskId = `e2e-background-${spec.runId}`
   const toolUseId = `e2e-subagent-${spec.runId}`
+  if (kind === "wake") {
+    // Stands in for a sub-agent result reaching the idle parent after its turn ended.
+    Effect.runFork(Effect.sleep("3 seconds").pipe(Effect.zipRight(Effect.sync(() =>
+      agentWakes.publish({ sessionId: spec.sessionId, chatId: spec.chatId })
+    ))))
+    return Effect.succeed({ started: kind })
+  }
   return (
     kind === "agent"
       ? startAgent(context, taskId, toolUseId)
