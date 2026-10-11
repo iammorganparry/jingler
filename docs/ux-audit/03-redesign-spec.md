@@ -362,6 +362,13 @@ These override anything earlier in this spec.
    - **Right rail (280px):** Assignees (`assignees[]`), Labels (`labels[]` one-line pills), Linked workspace / PR, Provider + repository.
    - **States:** loading skeleton, "No issue is linked to this session." with `Link issue`, couldn't load + mono reason + Retry, closed issue banner (neutral) with `Reopen`.
    - **Data gap:** `IssueDetail` has no milestone, linked PRs or reactions; the rail shows only what exists. **Q:** add `linkedPrs` to `IssueDetail`?
+19. **Subagent worktrees roll up into the main session** (operator request round 5; boards 20c–20d, to draw). Subagents running in their own git worktrees are today invisible: their changes and PRs never reach the parent's Changes or Checks.
+   - **Data:** `SubagentFleetNode` (`packages/core/src/runtime/subagent-fleet.ts:81`) gains `workspace: { path, branch, baseRef } | null` (null = shares the parent checkout) and `prNumber: number | null`. The runtime fills these when it creates or detects the child worktree. **Q:** where the pi runtime reports a child's cwd today (`pi-child-launcher.ts`).
+   - **Main session = aggregate.** Changes gets a scope control next to the turn filter: `All agents ▾` (default) · `Main` · one entry per subagent with a worktree. In `All agents`, each file row carries a one-line agent chip (`reviewer`) and files touched by more than one tree are grouped under the file with one row per agent. The diff stat in the header sums every tree.
+   - **Checks / PR:** the PR header chip becomes `PRs · 3 ▾` when children have PRs, listing each PR with its agent and branch; the PR inbox (19a) filters by `This session`. Child PRs are not part of the main PR stack (§3f) unless stacked on it.
+   - **Clicking into a subagent isolates everything.** When the chat lane shows a child (§6.16), Changes, Checks, the file tree's `Changed` filter, the terminal cwd and the timeline rail scope to that child's `workspace` and `prNumber`. A one-line scope bar at the top of the content area reads `Scoped to reviewer · feat/review-retry · PR #491` with `Show all agents` (and Esc/`← Main` restores the aggregate). Shared-checkout children (no worktree) scope by the files they edited.
+   - **Dropdown & meta strip:** each subagent row in `2 subagents ▾` shows branch mono + `+42 −8` + PR number; the 20a meta strip adds the worktree branch and PR chip.
+   - **States:** worktree deleted/cleaned up (`Worktree removed · changes were merged into feat/x` or `· changes discarded`), merge conflicts between trees surfaced as a neutral notice on the file row, child with no changes yet (`No changes yet`).
 
 ## 4. View map (Improved page artboards)
 

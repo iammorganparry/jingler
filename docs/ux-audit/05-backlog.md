@@ -17,17 +17,17 @@ Companion docs: `03-redesign-spec.md` (what), `04-coverage-matrix.md` (code to b
 | 3 | App shell | 11 | feature 9, style 2 |
 | 4 | Copilot layout | 10 | feature 10 |
 | 5 | Composer & transcript | 15 | feature 9, style 6 |
-| 6 | Changes, Checks & PRs | 26 | feature 23, style 3 |
+| 6 | Changes, Checks & PRs | 28 | feature 25, style 3 |
 | 7 | Plans, explanation & agent asks | 9 | bug 1, feature 5, style 3 |
-| 8 | Subagent fleet, browser preview & terminal | 10 | feature 10 |
+| 8 | Subagent fleet, browser preview & terminal | 12 | feature 12 |
 | 9 | Entry flow (login, onboarding, home, new workspace) | 8 | feature 8 |
 | 10 | Settings, provider auth and import | 20 | feature 11, style 9 |
 | 11 | Usage & analytics | 3 | feature 3 |
 | 12 | Notifications & needs-you | 5 | feature 5 |
 | 13 | System states & recovery | 11 | feature 10, style 1 |
-| 14 | Data model & RPC changes | 11 | data-model 11 |
+| 14 | Data model & RPC changes | 12 | data-model 12 |
 | 15 | Bug fixes | 9 | bug 9 |
-| | **Total** | **169** | |
+| | **Total** | **174** | |
 
 ## Suggested build order
 
@@ -1060,6 +1060,33 @@ Open engineering questions (not product decisions) are written inline as "Open q
 
 ---
 
+### 6.27 Add an agent scope to Changes that aggregates subagent worktrees
+- **Type:** feature · **Board(s):** 05, 20c · **Spec:** §6.19 · **Gaps:** — · **Source:** `ui:composites/changes-review.tsx`, `desk:changes-review.tsx`, `core:runtime/subagent-fleet.ts:81`
+- **Scope:**
+  - Scope control next to the turn filter: `All agents ▾` (default) · `Main` · one entry per subagent with a `workspace`.
+  - `All agents`: each file row gets a one-line agent chip; a file touched by several trees groups one row per agent; header diff stat sums every tree.
+  - Diff reads per tree (main checkout + each child `workspace.path`); reuse the existing diff RPCs with a workspace path, add a payload field only if none accepts one.
+  - Scope state lives in the subagent-view machine from 8.2 (shared with 8.12), not a local `useState`.
+- **Acceptance:**
+  - [ ] Changes made by a child in its own worktree appear in the main session's Changes under `All agents`.
+  - [ ] Picking one agent shows only that tree's files; `Main` hides child files.
+  - [ ] A file edited in two trees shows two agent rows; agent chips stay on one line.
+- **Tests:** unit for merging per-tree file lists; e2e new `apps/desktop/e2e/subagent-worktree-changes.spec.ts`.
+- **Depends on:** 14.12, 8.2, 2.2
+
+### 6.28 Show every session PR (main and subagents) in the header PR chip
+- **Type:** feature · **Board(s):** 06, 19a, 20c · **Spec:** §6.19 · **Gaps:** — · **Source:** `core:runtime/subagent-fleet.ts:81`, `ui:composites/pr-glyph.tsx:52`, `ui:composites/pull-request-inbox.tsx:102`
+- **Scope:**
+  - Header chip becomes `PRs · 3 ▾` when children own PRs; each row: PR number, agent, branch mono, state word.
+  - Selecting a row opens that PR's view (6.18) in the content area.
+  - PR inbox (19a) gains a `This session` filter covering main + child PRs.
+  - Child PRs stay out of the main stack (§3f) unless stacked on it.
+- **Acceptance:**
+  - [ ] A child that opens a PR appears in the chip list without a reload.
+  - [ ] `This session` lists exactly the main and child PRs.
+- **Tests:** unit for building the list from session `prs` + fleet nodes; e2e extend `subagent-worktree-changes.spec.ts`.
+- **Depends on:** 14.12, 14.1, 6.18
+
 ## Epic 7 — Plans, explanation & agent asks
 
 ### 7.1 Restyle Plan review keeping today's layout
@@ -1273,6 +1300,30 @@ Open engineering questions (not product decisions) are written inline as "Open q
 - **Depends on:** 4.6
 
 ---
+
+### 8.11 Show branch, diff stat and PR on subagent dropdown rows and meta strip
+- **Type:** feature · **Board(s):** 20, 20a, 20c · **Spec:** §6.19, §6.16 · **Gaps:** — · **Source:** `ui:app/subagent-tab-bar.tsx:7`, `core:runtime/subagent-fleet.ts:81`
+- **Scope:**
+  - Dropdown rows add `workspace.branch` (mono, truncates), `+42 −8`, PR number; shared-checkout children show `Shared checkout`.
+  - 20a meta strip adds the branch and a PR chip that opens 6.18.
+- **Acceptance:**
+  - [ ] Rows stay one line; branch truncates before stats or PR.
+- **Tests:** extend `subagent-view.test.tsx`.
+- **Depends on:** 14.12, 8.1, 8.3
+
+### 8.12 Isolate Changes, Checks, file tree, terminal and timeline to the viewed subagent
+- **Type:** feature · **Board(s):** 20d · **Spec:** §6.19 · **Gaps:** — · **Source:** `ui:app/subagent-view.tsx:110`, `desk:conversation-pane.tsx:1099`, `ui:app/conversation-view.tsx` (PreviewRail)
+- **Scope:**
+  - While the lane shows a child (8.2), every content view reads the child's `workspace` and `prNumber`: Changes, Checks/PR, Explorer `Changed` filter, new terminals' cwd, timeline rail.
+  - One-line scope bar at the top of the content area: `Scoped to reviewer · feat/review-retry · PR #491` + `Show all agents`; Esc / `← Main` restores the aggregate.
+  - Shared-checkout children scope by the files they edited.
+  - States: worktree removed (`changes were merged into …` / `changes discarded`), `No changes yet`.
+  - Extend `subagent-view-machine.ts` (8.2) with the scope; one transition updates lane + content scope together.
+- **Acceptance:**
+  - [ ] Entering a child scopes Changes and PR to it; `← Main` restores all agents in one step.
+  - [ ] A terminal opened while scoped starts in the child worktree.
+- **Tests:** machine test for scope enter/exit/sibling switch; e2e extend `subagent-view.spec.ts`.
+- **Depends on:** 8.2, 6.27, 6.28, 14.12
 
 ## Epic 9 — Entry flow (login, onboarding, home, new workspace)
 
@@ -1912,6 +1963,18 @@ Open engineering questions (not product decisions) are written inline as "Open q
 - **Depends on:** —
 
 ---
+
+### 14.12 Record each subagent's worktree, branch and PR on `SubagentFleetNode`
+- **Type:** data-model · **Board(s):** 20c, 20d · **Spec:** §6.19 · **Gaps:** — · **Source:** `core:runtime/subagent-fleet.ts:81`, `cli:runtime/subagents/pi-child-launcher.ts`, `cli:runtime/subagents/subagent-supervision-service.ts`
+- **Scope:**
+  - Add `workspace: { path, branch, baseRef } | null` (null = shares parent checkout) and `prNumber: number | null` to `SubagentFleetNode`; old snapshots decode with both null.
+  - The runtime fills `workspace` when it creates or detects a child worktree, and `prNumber` when the child opens or links a PR.
+  - Open question: where the pi runtime exposes a child's cwd today; nothing in `pi-child-launcher.ts` records it.
+- **Acceptance:**
+  - [ ] A child launched with worktree isolation reports its path and branch in the fleet snapshot.
+  - [ ] Old persisted fleet events still decode.
+- **Tests:** schema decode tests; supervision-service test for a worktree child.
+- **Depends on:** —
 
 ## Epic 15 — Bug fixes
 
