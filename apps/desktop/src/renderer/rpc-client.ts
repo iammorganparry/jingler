@@ -992,10 +992,10 @@ export const rpc = {
     run((c) => c.Github.closeIssue({ sessionId })),
   githubIssue: (sessionId: string): Promise<Issue | null> =>
     run((c) => c.Github.issue({ sessionId })),
-  githubFiles: (sessionId: string): Promise<ReadonlyArray<PrFileChange>> =>
-    run((c) => c.Github.files({ sessionId })),
-  githubDiff: (sessionId: string): Promise<string> =>
-    run((c) => c.Github.diff({ sessionId })),
+  githubFiles: (sessionId: string, prNumber?: number): Promise<ReadonlyArray<PrFileChange>> =>
+    run((c) => c.Github.files({ sessionId, ...(prNumber === undefined ? {} : { prNumber }) })),
+  githubDiff: (sessionId: string, prNumber?: number): Promise<string> =>
+    run((c) => c.Github.diff({ sessionId, ...(prNumber === undefined ? {} : { prNumber }) })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
   githubEvents: (

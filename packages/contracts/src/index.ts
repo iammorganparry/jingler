@@ -1884,18 +1884,24 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
-  /** The changed files of a session's PR, for the Code Review file list. */
+  /**
+   * The changed files of a session's PR, for the Code Review file list. `prNumber`
+   * picks one layer of the session's PR stack (default: the top layer).
+   */
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
   }),
 
-  /** The unified diff of a session's PR vs its base branch. */
+  /**
+   * The unified diff of a session's PR vs its base branch. `prNumber` picks one
+   * layer of the stack (default: the top layer); a number outside the stack yields "".
+   */
   Rpc.make("Github.diff", {
     success: Schema.String,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, prNumber: Schema.optional(Schema.Number) }
   }),
 
   /**
