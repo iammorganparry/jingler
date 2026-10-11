@@ -137,7 +137,7 @@ describe("ThemesSettings — import", () => {
     const onSelect = vi.fn()
     renderThemes({ onImport, onSelect })
 
-    fireEvent.click(screen.getByRole("button", { name: /Import from VS Code/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Import VS Code theme/ }))
     fireEvent.change(screen.getByLabelText("VS Code theme JSON"), {
       target: { value: '{"name":"Pasted","type":"dark"}' }
     })
@@ -150,7 +150,7 @@ describe("ThemesSettings — import", () => {
 
   it("will not import an empty box", () => {
     renderThemes()
-    fireEvent.click(screen.getByRole("button", { name: /Import from VS Code/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Import VS Code theme/ }))
     expect(screen.getByRole("button", { name: "Import" })).toHaveProperty("disabled", true)
   })
 
@@ -165,7 +165,7 @@ describe("ThemesSettings — import", () => {
     })
     renderThemes({ onImport })
 
-    fireEvent.click(screen.getByRole("button", { name: /Import from VS Code/ }))
+    fireEvent.click(screen.getByRole("button", { name: /Import VS Code theme/ }))
     fireEvent.change(screen.getByLabelText("VS Code theme JSON"), { target: { value: "{}" } })
     fireEvent.click(screen.getByRole("button", { name: "Import" }))
 

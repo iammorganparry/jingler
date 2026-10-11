@@ -149,12 +149,10 @@ export function ThemesSettings({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-      <div className="mx-auto w-full max-w-[760px]">
-        <div className="mb-4 flex items-center justify-between gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">Colour theme</span>
-          <Button size="sm" variant="ghost" onClick={() => setImporting((v) => !v)}>
-            <Download size={12} /> Import from VS Code
-          </Button>
+      <div className="mx-auto w-full max-w-[720px]">
+        <div className="mb-5 flex flex-col gap-1">
+          <h1 className="text-[20px] font-semibold leading-7 text-text-bright">Theme</h1>
+          <p className="text-[13px] leading-5 text-muted-foreground">Choose a colour theme for the whole app.</p>
         </div>
 
         {error && (
@@ -200,7 +198,7 @@ export function ThemesSettings({
         {grouped.map((group) => (
           <div key={group.kind} className="mb-6">
             <Eyebrow className="mb-2">{KIND_LABEL[group.kind]}</Eyebrow>
-            <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-3">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-5 lg:grid-cols-4">
               {group.items.map((theme) => (
                 <ThemeCard
                   key={theme.id}
@@ -226,7 +224,11 @@ export function ThemesSettings({
           </div>
         ))}
 
-        <p className="mt-2 font-mono text-[10px] leading-relaxed text-dim">
+        <Button size="sm" variant="secondary" className="h-8 rounded-[8px] border-dashed border-line text-[13px] text-muted-foreground" onClick={() => setImporting((v) => !v)}>
+          <Download size={14} /> Import VS Code theme…
+        </Button>
+
+        <p className="mt-5 font-mono text-[10px] leading-relaxed text-dim">
           themes · <span className="text-muted-foreground">~/jingler/themes/*.json</span>
           <br />
           VS Code theme JSON. Edit a file in your own editor and the app repaints as you save.
@@ -263,18 +265,16 @@ function ThemeCard({
 }) {
   const t = theme.tokens
   return (
-    <div
-      className={cn(
-        "group relative overflow-hidden rounded-md border transition-colors",
-        active ? "border-blue" : "border-line hover:border-line-strong"
-      )}
-    >
+    <div className="group relative flex flex-col gap-2">
       <button
         type="button"
         onClick={onSelect}
         aria-pressed={active}
         aria-label={`Use the ${theme.name} theme`}
-        className="block w-full text-left"
+        className={cn(
+          "block w-full overflow-hidden rounded-[8px] border-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          active ? "border-text-bright" : "border-hairline hover:border-line-strong"
+        )}
       >
         {/*
           Inline styles, and deliberately so. These are the ONLY colours in the
@@ -282,28 +282,34 @@ function ThemeCard({
           what a theme you are not currently using looks like. A Tailwind token
           here would render every card identically in the current theme.
         */}
-        <div className="flex h-[72px] w-full" style={{ background: t.editor }}>
-          <div className="h-full w-[26%] border-r" style={{ background: t.panel, borderColor: t.hairline }}>
-            <div className="mt-2 ml-2 h-1 w-8 rounded-full" style={{ background: t.muted }} />
-            <div className="mt-1.5 ml-2 h-1 w-6 rounded-full" style={{ background: t.dim }} />
-            <div className="mt-1.5 ml-2 h-1 w-9 rounded-full" style={{ background: t.dim }} />
+        <div className="flex h-[100px] w-full" style={{ background: t.panel }}>
+          <div className="h-full w-5 border-r" style={{ background: t.canvas, borderColor: t.hairline }}>
+            <div className="mx-auto mt-1.5 size-2.5 rounded-[3px]" style={{ background: t.dim }} />
           </div>
-          <div className="flex-1 p-2">
-            <div className="h-1.5 w-16 rounded-full" style={{ background: t.textBright }} />
-            <div className="mt-1.5 h-1 w-24 rounded-full" style={{ background: t.text }} />
-            <div className="mt-1 h-1 w-20 rounded-full" style={{ background: t.textBody }} />
-            <div className="mt-2 flex gap-1">
+          <div className="flex h-full w-11 flex-col gap-[5px] border-r px-1.5 py-2" style={{ background: t.sunken, borderColor: t.hairline }}>
+            <div className="h-2 rounded-sm" style={{ background: t.dim }} />
+            <div className="h-2 rounded-sm" style={{ background: t.muted }} />
+            <div className="h-2 rounded-sm" style={{ background: t.muted }} />
+          </div>
+          <div className="flex flex-1 flex-col gap-1.5 p-2.5">
+            <div className="h-1.5 w-[70%] rounded-sm" style={{ background: t.textBright }} />
+            <div className="h-[5px] w-[90%] rounded-sm" style={{ background: t.dim }} />
+            <div className="h-[5px] w-[60%] rounded-sm" style={{ background: t.dim }} />
+            <div className="flex-1" />
+            <div className="flex gap-1">
               {[t.blue, t.green, t.yellow, t.red, t.purple, t.cyan].map((c) => (
-                <span key={c} className="h-2 w-2 rounded-full" style={{ background: c }} />
+                <span key={c} className="size-2 rounded-full" style={{ background: c }} />
               ))}
             </div>
           </div>
         </div>
       </button>
 
-      <div className="flex items-center gap-1.5 border-t border-hairline bg-panel px-2.5 py-1.5">
-        {active && <Check size={12} className="shrink-0 text-blue" />}
-        <span className="min-w-0 flex-1 truncate text-[12px] text-text-bright">{theme.name}</span>
+      <div className="flex items-center gap-1.5">
+        <span className={cn("min-w-0 flex-1 truncate text-[13px] font-medium", active ? "text-text-bright" : "text-muted-foreground")}>
+          {theme.name}
+        </span>
+        {active && <Check size={14} className="shrink-0 text-text-bright" />}
 
         {/*
           Actions appear on hover to keep a nine-card grid from reading as a
@@ -356,7 +362,7 @@ function IconAction({
       onClick={onClick}
       className={cn(
         "rounded p-1 text-muted-foreground transition-colors hover:bg-hover",
-        danger ? "hover:text-red" : "hover:text-text-bright"
+        danger ? "hover:text-state-failed" : "hover:text-text-bright"
       )}
     >
       {children}
@@ -386,7 +392,7 @@ function ImportPanel({
         rows={7}
         aria-label="VS Code theme JSON"
         placeholder={'{\n  "name": "My Theme",\n  "type": "dark",\n  "colors": { … }\n}'}
-        className="w-full resize-y rounded border border-line bg-editor p-2 font-mono text-[11px] text-text-body outline-none focus:border-blue"
+        className="w-full resize-y rounded border border-line bg-editor p-2 font-mono text-[11px] text-text-body outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
       <div className="mt-2 flex justify-end gap-2">
         <Button size="sm" variant="ghost" onClick={onCancel}>
