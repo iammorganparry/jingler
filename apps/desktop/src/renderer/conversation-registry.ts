@@ -59,7 +59,7 @@ import type { ActorCandidate } from "./actor-eviction.js"
 import { keysToEvict, MAX_LIVE_ACTORS } from "./actor-eviction.js"
 import { createCoalescer } from "./coalesce.js"
 import type { NotifiableState } from "./notifier.js"
-import { notificationFor } from "./notifier.js"
+import { blockedPromptOf, notificationFor } from "./notifier.js"
 import { rpc } from "./rpc-client.js"
 import {
   clearSubagentTabs,
@@ -547,7 +547,11 @@ const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   // null → needs-input edge on observation #2, and announced "Waiting for your
   // input" for state that predates the operator opening the app — precisely the
   // stale-replay noise the rule exists to prevent.
-  const observed: NotifiableState = { activity, outcome: snap.context.lastOutcome }
+  const observed: NotifiableState = {
+    activity,
+    outcome: snap.context.lastOutcome,
+    prompt: activity?.kind === "needs-input" ? blockedPromptOf(snap.context.messages) : null
+  }
   const announce = snap.context.loaded
     ? notificationFor(session.title, notifyBaselines.get(key) ?? null, observed)
     : null

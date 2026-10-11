@@ -1,7 +1,7 @@
-import type { SessionActivity } from "@jingler/core"
+import type { ApprovalGate, Message, SessionActivity } from "@jingler/core"
 import { describe, expect, it } from "vitest"
 import type { NotifiableState } from "./notifier.js"
-import { notificationFor, prNotification } from "./notifier.js"
+import { blockedPromptOf, notificationFor, prNotification } from "./notifier.js"
 
 /**
  * The edge rules behind desktop notifications.
@@ -111,5 +111,82 @@ describe("baseline discipline", () => {
     expect(
       notificationFor("add auth", state({ activity: thinking }), restored)
     ).toMatchObject({ kind: "needs-input" })
+  })
+})
+
+describe("blocked-agent notification copy", () => {
+  const gate = (over: Partial<ApprovalGate> = {}): ApprovalGate => ({
+    id: "g1",
+    kind: "command",
+    title: "Run a command",
+    detail: "",
+    command: "pnpm test --filter @jingler/desktop",
+    allowLabel: null,
+    status: "pending",
+    ...over
+  })
+  const assistant = (parts: Message["parts"]): Message => ({
+    id: "m1",
+    role: "assistant",
+    parts,
+    streaming: false,
+    createdAt: "2026-01-01T00:00:00Z"
+  })
+
+  it("words a pending command gate as the command, not a plan approval", () => {
+    const prompt = blockedPromptOf([assistant([{ _tag: "Gate", gate: gate() }])])
+    expect(prompt).toBe("Run `pnpm test --filter @jingler/desktop`?")
+    const plan = notificationFor(
+      "add auth",
+      state({ activity: thinking }),
+      state({ activity: blocked("needs-input"), prompt })
+    )
+    expect(plan?.body).toBe(prompt)
+    expect(plan?.body).not.toContain("plan")
+  })
+
+  it("keeps the plan-approval copy for needs-approval, so the two bodies differ", () => {
+    const toolGate = notificationFor(
+      "add auth",
+      state({ activity: thinking }),
+      state({ activity: blocked("needs-input"), prompt: "Run `pnpm test`?" })
+    )
+    const planApproval = notificationFor(
+      "add auth",
+      state({ activity: thinking }),
+      state({ activity: blocked("needs-approval") })
+    )
+    expect(planApproval?.body).toBe("Waiting for you to approve a plan.")
+    expect(toolGate?.body).not.toBe(planApproval?.body)
+  })
+
+  it("cuts a long command to one line with an ellipsis", () => {
+    const long = `pnpm exec vitest run ${"packages/ui/src/composites/very-long-file-name.test.tsx ".repeat(5)}\nsecond line`
+    const prompt = blockedPromptOf([assistant([{ _tag: "Gate", gate: gate({ command: long }) }])])!
+    expect(prompt).not.toContain("\n")
+    expect(prompt).toContain("…")
+    expect(prompt.startsWith("Run `pnpm exec vitest run")).toBe(true)
+  })
+
+  it("uses the first line of a pending question", () => {
+    const prompt = blockedPromptOf([
+      assistant([
+        {
+          _tag: "Question",
+          request: {
+            id: "q1",
+            questions: [{ question: "Which auth method?\nMore detail", header: "Auth", options: [], multiSelect: false }]
+          },
+          answers: null
+        }
+      ])
+    ])
+    expect(prompt).toBe("Which auth method?")
+  })
+
+  it("falls back to the generic copy when nothing in the transcript says what is asked", () => {
+    expect(blockedPromptOf([])).toBeNull()
+    const plan = notificationFor("add auth", state({ activity: thinking }), state({ activity: blocked("needs-input") }))
+    expect(plan?.body).toBe("Waiting for your input.")
   })
 })
