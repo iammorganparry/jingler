@@ -48,6 +48,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
 | Kbd, KbdChip | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). KbdChip formats `mod+k` as ⌘K on macOS, Ctrl+K elsewhere. | shortcut, mac, onFill | yes | #361 (1.3), #374 (2.9) |
+| Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). | — | yes | #361 (1.3), #374 (2.9) |
+| KpiTile, StackedMiniBar | `components/kpi-tile.tsx` | Usage metric tile with one-line partial marker; inline-SVG stacked bar from a number array. | label, value, delta, partial, values | yes | #379 (2.14) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
 | ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | List loading rows at real height, empty state with next action, load error with Retry. | rows, rowHeight, title, action, message, onRetry | yes | #371 (2.6) |
@@ -210,7 +212,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 |---|---|---|
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
-| KpiTile, StackedMiniBar | none (new) | #379 (2.14) |
 | SessionRow / PrGlyph stack slot | `SessionRow`, `PrStatusGlyph` | #381 (2.16) |
 
 Token and button rules that every atom follows: #359 (1.1 Graphite palette), #360 (1.2 neutral primary Button), #361 (1.3 one-line Badge/Pill/Kbd).
