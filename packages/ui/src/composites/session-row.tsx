@@ -129,7 +129,7 @@ export function SessionRow({
           <span className="min-w-0 flex-1 truncate font-medium">{session.repo}</span>
           <span
             title={detail}
-            className={cn("flex flex-none items-center gap-1 font-medium tabular-nums", statusTextClass[status])}
+            className={cn("flex shrink-0 items-center gap-1 whitespace-nowrap font-medium tabular-nums", statusTextClass[status])}
           >
             {display === "thinking" || display === "running" ? (
               <ThinkingOrb compact label={label} />
@@ -202,11 +202,11 @@ export function SessionRow({
           </span>)
     }
 
-    return (<div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+    return (<div className="flex min-w-0 items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
           {renderBranchLabel()}
           {linkedIssue && (
             <span
-              className="flex-none text-green"
+              className="shrink-0 whitespace-nowrap text-green"
               aria-label={`Linked issue ${linkedIssue.identifier}`}
               title={`${linkedIssue.identifier}: ${linkedIssue.title}`}
             >
@@ -215,7 +215,7 @@ export function SessionRow({
           )}
           {session.prNumber !== null && (
             <span
-              className="flex flex-none items-center gap-1"
+              className="flex shrink-0 items-center gap-1 whitespace-nowrap"
               title={`Pull request #${session.prNumber}`}
             >
               <PrStatusGlyph pr={prState} />
@@ -224,12 +224,16 @@ export function SessionRow({
           )}
           <div className="flex-1" />
           {environment && (
-            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] truncate text-dim" title={`${environment.name} · ${environment.state}`}>
+            <span data-testid={`session-environment-${session.id}`} className="max-w-[96px] shrink-0 truncate whitespace-nowrap text-dim" title={`${environment.name} · ${environment.state}`}>
               {environment.name}{environment.state === "online" ? "" : ` · ${environment.state}`}
             </span>
           )}
           {(session.diff.added > 0 || session.diff.removed > 0) && (
-            <DiffStat added={session.diff.added} removed={session.diff.removed} />
+            <DiffStat
+              added={session.diff.added}
+              removed={session.diff.removed}
+              className="shrink-0 whitespace-nowrap"
+            />
           )}
           <span
             data-testid={`session-location-${session.id}`}
