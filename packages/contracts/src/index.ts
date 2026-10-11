@@ -1,5 +1,4 @@
 import {
-  ArchiveReason,
   CliInfo,
   CliKind,
   CreateSessionFromPrInput,
@@ -12,7 +11,6 @@ import {
   ModelOption,
   PermissionMode,
   PrFileChange,
-  PrState,
   PrSummary,
   PullRequest,
   QuestionAnswer,
@@ -125,26 +123,6 @@ export class StarbaseRpcs extends RpcGroup.make(
     success: Session,
     error: Schema.Union(GitError, GhError),
     payload: CreateSessionFromPrInput
-  }),
-
-  /** Archive a session (its linked PR merged/closed) — read-only, kept. */
-  Rpc.make("Sessions.archive", {
-    success: Session,
-    error: GitError,
-    payload: { sessionId: Schema.String, reason: ArchiveReason }
-  }),
-
-  /** Restore an archived session back to an editable state. */
-  Rpc.make("Sessions.restore", {
-    success: Session,
-    error: GitError,
-    payload: { sessionId: Schema.String }
-  }),
-
-  /** Permanently delete a session and remove its worktree. Irreversible. */
-  Rpc.make("Sessions.delete", {
-    error: GitError,
-    payload: { sessionId: Schema.String }
   }),
 
   /** Load a session's persisted conversation transcript. */
@@ -262,12 +240,6 @@ export class StarbaseRpcs extends RpcGroup.make(
       mine: Schema.Boolean,
       search: Schema.String
     }
-  }),
-
-  /** The lifecycle state of a session's linked PR (for the archive sweep). */
-  Rpc.make("Github.prState", {
-    success: Schema.NullOr(PrState),
-    payload: { sessionId: Schema.String }
   }),
 
   /** The changed files of a session's PR, for the Code Review file list. */

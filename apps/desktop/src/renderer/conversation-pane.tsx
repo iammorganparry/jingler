@@ -11,17 +11,7 @@ import { rpc } from "./rpc-client.js"
 import { setSessionStatus } from "./session-status.js"
 import { useConversation } from "./use-conversation.js"
 
-export function ConversationPane({
-  session,
-  onRestore,
-  onDelete
-}: {
-  session: Session
-  /** Restore this session from archived (the banner + locked composer). */
-  onRestore?: (sessionId: string) => void
-  /** Permanently delete this session (the banner). */
-  onDelete?: (sessionId: string) => void
-}) {
+export function ConversationPane({ session }: { session: Session }) {
   const convo = useConversation(session)
 
   // Publish the live agent status so the sidebar/tab bar reflect it.
@@ -64,17 +54,6 @@ export function ConversationPane({
       question={convo.question}
       onAnswerQuestion={convo.answerQuestion}
       changeActions={changeActions}
-      archived={
-        session.archived
-          ? {
-              reason: session.archiveReason ?? "merged",
-              prNumber: session.prNumber,
-              base: session.baseBranch,
-              onRestore: () => onRestore?.(session.id),
-              onDelete: () => onDelete?.(session.id)
-            }
-          : undefined
-      }
     />
   )
 }

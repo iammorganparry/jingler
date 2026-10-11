@@ -5,7 +5,6 @@ import { Callout } from "../components/callout.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { FileIcon } from "../components/file-icon.js"
 import { SegmentedControl } from "../components/segmented-control.js"
-import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { ReviewDiff } from "./review-diff.js"
 import { ReviewFileRow } from "./review-file-row.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
@@ -75,12 +74,8 @@ export function CodeReviewView({
   const activeFile = files.find((f) => f.path === activePath) ?? null
   const isLocal = source === "local"
 
-  // Persisted, drag-resizable widths for the two side panels.
-  const fileList = useResizableWidth({ storageKey: "sb.review.files", initial: 212, min: 160, max: 440 })
-  const tray = useResizableWidth({ storageKey: "sb.review.tray.v2", initial: 300, min: 260, max: 480 })
-
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Header — source toggle (PR vs local) + the review's "finish" action. */}
       <div className="flex h-10 flex-none items-center gap-3 border-b border-hairline px-[14px]">
         <SegmentedControl
@@ -117,12 +112,9 @@ export function CodeReviewView({
         </div>
       )}
 
-      <div className="flex min-h-0 min-w-0 flex-1">
-        {/* File list (resizable) */}
-        <div
-          style={{ width: fileList.width }}
-          className="flex flex-none flex-col border-r border-hairline bg-panel"
-        >
+      <div className="flex min-h-0 flex-1">
+        {/* File list */}
+        <div className="flex w-[212px] flex-none flex-col border-r border-hairline bg-panel">
           <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
             <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
             <span className="font-mono text-[10px] text-muted-foreground">{files.length}</span>
@@ -147,23 +139,19 @@ export function CodeReviewView({
           </div>
         </div>
 
-        <ResizeHandle onResize={fileList.adjust} aria-label="Resize file list" />
-
         {/* Diff center */}
         <div className="flex min-w-0 flex-1 flex-col bg-editor">
           {activeFile ? (
             <>
               <div className="flex h-[42px] flex-none items-center gap-2.5 border-b border-hairline bg-panel px-4">
                 <FileIcon path={activeFile.path} size={13} />
-                <span className="truncate font-mono text-[12.5px] text-text-bright">
-                  {activeFile.path}
-                </span>
+                <span className="font-mono text-[12.5px] text-text-bright">{activeFile.path}</span>
                 <DiffStat
                   added={activeFile.additions}
                   removed={activeFile.deletions}
-                  className="flex-none text-[10.5px]"
+                  className="text-[10.5px]"
                 />
-                <div className="min-w-[8px] flex-1" />
+                <div className="flex-1" />
                 {isLocal
                   ? onRevertFile && (
                       <Button
@@ -219,11 +207,8 @@ export function CodeReviewView({
           )}
         </div>
 
-        {/* Review tray (resizable) — drag left edge; moving right shrinks it. */}
-        <ResizeHandle onResize={(dx) => tray.adjust(-dx)} aria-label="Resize review panel" />
-        <div style={{ width: tray.width }} className="flex flex-none border-l border-hairline">
-          <ReviewTray drafts={drafts} onRemoveDraft={onRemoveDraft} onFinishReview={onFinishReview} />
-        </div>
+        {/* Review tray */}
+        <ReviewTray drafts={drafts} onRemoveDraft={onRemoveDraft} onFinishReview={onFinishReview} />
       </div>
     </div>
   )

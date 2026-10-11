@@ -24,7 +24,7 @@ import {
   defaultModel,
   setGateStatus,
   setQuestionAnswers,
-  settleLoaded,
+  settleStreaming,
   userMessage
 } from "@starbase/core"
 import { assign, fromCallback, fromPromise, setup } from "xstate"
@@ -74,10 +74,8 @@ const loadConversation = fromPromise<LoadedData, { session: Session }>(async ({ 
     rpc.sessionsDiff(input.session.id)
   ])
   // A loaded transcript has no live run — settle any turn left mid-stream (the
-  // app was closed mid-response) so it doesn't show the typing indicator forever,
-  // and resolve orphaned approval gates / questions whose live run has died (their
-  // approve/deny buttons would otherwise be dead no-ops).
-  const transcript = rawTranscript.map(settleLoaded)
+  // app was closed mid-response) so it doesn't show the typing indicator forever.
+  const transcript = rawTranscript.map(settleStreaming)
   return { transcript, skills, files, models, patch }
 })
 

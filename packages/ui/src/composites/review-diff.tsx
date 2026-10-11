@@ -101,16 +101,12 @@ export function ReviewDiff({
 
   return (
     <div className="min-h-0 flex-1 overflow-auto">
-      {/* Size to the widest line (`w-max`) but never narrower than the viewport
-          (`min-w-full`) so every row's background + selection highlight spans the
-          full line — not just the visible width — when scrolled horizontally. */}
-      <div className="w-max min-w-full">
       {rows.map((row, i) => {
         if (row.kind === "hunk") {
           return (
             <div
               key={row.key}
-              className="w-full border-y border-hairline bg-sunken px-4 py-[5px] font-mono text-[10.5px] text-blue"
+              className="border-y border-hairline bg-sunken px-4 py-[5px] font-mono text-[10.5px] text-blue"
             >
               {row.header}
             </div>
@@ -156,7 +152,6 @@ export function ReviewDiff({
           </React.Fragment>
         )
       })}
-      </div>
     </div>
   )
 }
@@ -190,7 +185,7 @@ function DiffLine({
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
       className={cn(
-        "flex w-full cursor-pointer select-none border-l-2 font-mono text-[12px] leading-[1.85]",
+        "flex cursor-pointer select-none border-l-2 font-mono text-[12px] leading-[1.85]",
         selected ? "border-blue" : "border-transparent",
         bg
       )}
