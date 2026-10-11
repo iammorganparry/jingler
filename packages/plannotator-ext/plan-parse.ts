@@ -95,6 +95,8 @@ export type PlanSectionBlock =
 	| { kind: "list"; ordered: boolean; items: string[] }
 	| { kind: "code"; language?: string; code: string }
 	| { kind: "diagram"; source: string }
+	/** Raw JSON body; the host decodes it and falls back to a code block. */
+	| { kind: "architecture"; source: string }
 	| ({ kind: "change" } & PlanChange);
 
 export interface PlanSection {
@@ -244,6 +246,7 @@ class SectionBuilder {
 	code(language: string, code: string, path: string | null): void {
 		this.flush();
 		if (language === "mermaid") this.blocks.push({ kind: "diagram", source: code });
+		else if (language === "architecture") this.blocks.push({ kind: "architecture", source: code });
 		else if (path !== null) this.blocks.push({ kind: "change", path, patch: code });
 		else
 			this.blocks.push({
