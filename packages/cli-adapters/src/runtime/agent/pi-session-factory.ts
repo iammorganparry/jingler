@@ -675,6 +675,7 @@ const createSessionHandle = (
     const lifecycle = new PiSubagentLifecycleAdapter({
       events: prepared.eventBus,
       parentRuntimeSessionId: embedded.result.session.sessionId,
+      parentCwd: spec.cwd,
       parentPiSessionAliases: embedded.result.session.sessionFile
         ? [embedded.result.session.sessionFile]
         : [],

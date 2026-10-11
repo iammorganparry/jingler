@@ -47,6 +47,8 @@ const node = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => ({
   },
   artifacts: [],
   attention: null,
+  workspace: null,
+  prNumber: null,
   ...over
 })
 

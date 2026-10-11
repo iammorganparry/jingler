@@ -87,6 +87,8 @@ const DurableStep = Schema.Struct({
   startedAt: Schema.optional(Schema.Number),
   lastUpdate: Schema.optional(Schema.Number),
   sessionFile: Schema.optional(Schema.String),
+  worktreePath: Schema.optional(Schema.String),
+  branch: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   runId: Schema.optional(Schema.String),
   toolCount: Schema.optional(Schema.Number),
@@ -223,7 +225,9 @@ const projectRoot = (
     currentTool: status.currentTool ?? null,
     usage: usage(status.startedAt, updatedAt),
     artifacts: [],
-    attention: null
+    attention: null,
+    workspace: null,
+    prNumber: null
   }
 }
 
@@ -257,7 +261,12 @@ const projectStep = (
     currentTool: step.currentTool ?? null,
     usage: usage(startedAt, updatedAt, step.toolCount ?? 0),
     artifacts: [],
-    attention: null
+    attention: null,
+    // pi-subagents copies the lane's worktree path and branch into status.json; baseRef is not recorded there.
+    workspace: step.worktreePath !== undefined && step.branch !== undefined
+      ? { path: step.worktreePath, branch: step.branch, baseRef: null }
+      : null,
+    prNumber: null
   }
 }
 

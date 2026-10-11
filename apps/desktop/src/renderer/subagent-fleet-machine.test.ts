@@ -40,7 +40,9 @@ const node: SubagentFleetNode = {
     toolCalls: 0
   },
   artifacts: [],
-  attention: null
+  attention: null,
+  workspace: null,
+  prNumber: null
 }
 
 describe("subagentFleetMachine", () => {

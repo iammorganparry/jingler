@@ -33,6 +33,8 @@ const fleetNode = (over: Partial<SubagentFleetNode> = {}): SubagentFleetNode => 
   usage: { inputTokens: 100, outputTokens: 40, totalTokens: 140, costUsd: 0, durationMs: 10_000, toolCalls: 2 },
   artifacts: [],
   attention: null,
+  workspace: null,
+  prNumber: null,
   ...over
 })
 
