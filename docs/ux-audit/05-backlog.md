@@ -42,7 +42,7 @@ Companion docs: `03-redesign-spec.md` (what), `04-coverage-matrix.md` (code to b
 
 ## Product decisions
 
-Decided 2026-10-11: **D1 optional**, **D2 replace**, **D3 keep as context menu**. Only D4 is still pending (issues carry `**Decision pending:**`).
+Decided 2026-10-11: **D1 optional**, **D2 replace**, **D3 keep as context menu**, **D4 Jingler creates/restacks layer branches**.
 
 | Id | Question | Issues |
 |---|---|---|
@@ -852,7 +852,7 @@ Open engineering questions (not product decisions) are written inline as "Open q
   - [ ] Stacking creates a PR whose base is the previous layer's branch (Option A), or an opened PR is ordered into the stack (Option B).
 - **Tests:** e2e extend `pr-stack.spec.ts` with chained fake PRs.
 - **Depends on:** 6.7, 14.1, 14.2
-- **Decision pending:** D4 — who creates the stacked layer branch: Jingler (needs `Github.restack`) or the agent. Both options are in scope above; do not pick.
+- **Decided:** D4 — Jingler creates and restacks stacked-PR layer branches (`Create PR → Stack on #481`), via a new `Github.restack` RPC. Option B (agent-driven) is dropped.
 
 ### 6.9 Build the PR stack rail and header switcher
 - **Type:** feature · **Board(s):** 04m · **Spec:** §3f · **Gaps:** — · **Source:** `ui:composites/pr-glyph.tsx:52`, `ui:composites/pr-glyph.tsx:106`, `ui:composites/pull-request-view.tsx:201`, `ui:composites/pr-side-panel.tsx:113`
@@ -875,7 +875,7 @@ Open engineering questions (not product decisions) are written inline as "Open q
   - [ ] After the base merges, Restack retargets and rebases every upper layer.
 - **Tests:** unit on the restack plan; e2e extend `pr-stack.spec.ts`.
 - **Depends on:** 6.9, 14.2
-- **Decision pending:** D4 — Option A (Jingler restacks via `Github.restack`) is the scope above. Option B (agent restacks): replace the buttons with a `Ask agent to restack` prompt.
+- **Decided:** D4 — Jingler creates and restacks stacked-PR layer branches (`Create PR → Stack on #481`), via a new `Github.restack` RPC. Option B (agent-driven) is dropped.
 
 ### 6.11 Add Merge stack with ordered progress
 - **Type:** feature · **Board(s):** 04m, 04m+ · **Spec:** §3f · **Gaps:** F3-04 · **Source:** `ui:composites/pull-request-view.tsx:175`, `desk:use-pull-request.ts:34`, `contracts:1959` (`Github.merge`)
@@ -1811,7 +1811,7 @@ Open engineering questions (not product decisions) are written inline as "Open q
   - [ ] Creating a second PR on a session appends rather than replaces.
 - **Tests:** unit for the migration and ordering; e2e extend `github-publish.spec.ts`.
 - **Depends on:** —
-- **Decision pending:** D4 — who creates the layer branch decides whether `createPr` takes a base (Jingler) or `prs` is discovered from PRs the agent opens. Both paths share this model.
+- **Decided:** D4 — Jingler creates and restacks stacked-PR layer branches (`Create PR → Stack on #481`), via a new `Github.restack` RPC. Option B (agent-driven) is dropped.
 
 ### 14.2 Add `Github.restack`
 - **Type:** data-model · **Board(s):** 04m, 04m+ · **Spec:** §3f · **Gaps:** F3-03 · **Source:** `contracts:1982` (`Github.updateBranch`), `desk:use-pull-request.ts:45`
@@ -1822,7 +1822,7 @@ Open engineering questions (not product decisions) are written inline as "Open q
   - [ ] Restack of two upper layers returns two results; a conflict is reported, not thrown.
 - **Tests:** unit with a fake git; e2e extend `pr-stack.spec.ts`.
 - **Depends on:** 14.1
-- **Decision pending:** D4 — build only if Jingler creates and restacks branches; if the agent does, replace with a prompt-only path and drop this RPC.
+- **Decided:** D4 — Jingler creates and restacks stacked-PR layer branches (`Create PR → Stack on #481`), via a new `Github.restack` RPC. Option B (agent-driven) is dropped.
 
 ### 14.3 Make the PR sweep stack-aware
 - **Type:** data-model · **Board(s):** 04m, 09c, 24b+, 04m+, 09c+ · **Spec:** §3f · **Gaps:** F3-07, F3-09 · **Source:** `desk:pr-sweep.ts:33`, `desk:pr-sweep.ts:49`, `desk:notifier.ts:76`, `core:domain.ts:349`
