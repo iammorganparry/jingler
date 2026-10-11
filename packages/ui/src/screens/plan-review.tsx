@@ -345,7 +345,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={general}
               onChange={(event) => setGeneral(event.target.value)}
               rows={1}
-              className="min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-1.5 text-[13px] outline-none"
+              className="h-8 min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-[5px] text-[13px] leading-5 outline-none"
             />
             <Button variant="danger" size="sm" disabled={busy} onClick={() => void decide(false)}>
               Request changes
