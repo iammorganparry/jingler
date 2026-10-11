@@ -22,6 +22,7 @@ import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
  */
 import {
   EMPTY_REVIEW_DIFF,
+  agentWakes,
   AgentRunner,
   AgentRuntime,
   runtimeOwnerForSession,
@@ -5202,6 +5203,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       const runner = yield* AgentRunner;
       return yield* runner.chatBusy(chatId);
     }),
+  "Agent.wakeups": () =>
+    interruptOnPageGone(
+      Stream.async<{ sessionId: string; chatId: string }>((emit) => {
+        const unsubscribe = agentWakes.subscribe((wake) => {
+          void emit.single(wake);
+        });
+        return Effect.sync(unsubscribe);
+      }),
+    ),
   "Agent.plannotatorRecoveryNeeded": ({ sessionId, chatId }) =>
     Effect.gen(function* () {
       const runner = yield* AgentRunner;

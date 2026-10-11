@@ -232,6 +232,7 @@ const backgroundKindFrom = (context: PiContext): E2eBackgroundKind | null => {
   if (prompt.includes("[[legacy-agent]]")) return "legacy-agent"
   if (prompt.includes("[[background-agent]]")) return "agent"
   if (prompt.includes("[[background-completes]]")) return "complete"
+  if (prompt.includes("[[background-wake]]")) return "wake"
   if (prompt.includes("[[background")) return "watch"
   return null
 }
@@ -251,6 +252,8 @@ const backgroundResponse = (
       ? "Delegated the survey to a background agent."
       : kind === "legacy-agent"
         ? "Delegated through the normalized compatibility path."
+        : kind === "wake"
+          ? "Delegated; results will arrive after this turn."
         : "Started a watcher in the background."
   )
 }
@@ -948,6 +951,9 @@ function scenarioFixtureResponse(context: PiContext) {
   }
   if (operatorText(context).some((text) => text.includes("[[plan]]"))) {
     return planModeResponse(context)
+  }
+  if (latestOperatorText(context).includes("arrived while you were idle")) {
+    return fauxAssistantMessage("Picked up the sub-agent results and continued.")
   }
   const backgroundKind = backgroundKindFrom(context)
   if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)

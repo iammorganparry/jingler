@@ -1097,6 +1097,16 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
+  /**
+   * Chats whose idle agent received results (sub-agent completions, control
+   * notices) that need a turn. The renderer answers each with a normal SEND, so
+   * the turn streams, persists, and can ask questions like any other.
+   */
+  Rpc.make("Agent.wakeups", {
+    success: Schema.Struct({ sessionId: Schema.String, chatId: Schema.String }),
+    stream: true
+  }),
+
   /** Whether a persisted Plannotator review was interrupted by host restart. */
   Rpc.make("Agent.plannotatorRecoveryNeeded", {
     success: Schema.Boolean,
