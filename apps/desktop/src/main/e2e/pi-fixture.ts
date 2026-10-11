@@ -678,6 +678,53 @@ const richScratchpadResponse = (context: PiContext): ReturnType<typeof fauxAssis
   )
 }
 
+const ARCHITECTURE_FIGURE = {
+  title: "Checkout request path",
+  layers: [{ id: "app", label: "App" }, { id: "data", label: "Data" }],
+  components: [
+    { id: "api", label: "orders-api", layer: "app", shape: "service", detail: "Hono, 3 replicas" },
+    { id: "db", label: "Postgres", layer: "data", shape: "store", detail: "primary + replica" }
+  ],
+  links: [{ from: "api", to: "db", label: "INSERT", mode: "data" }],
+  lit: "api"
+}
+
+const ARCHITECTURE_PLAN = [
+  "# Checkout architecture",
+  "",
+  "```architecture",
+  JSON.stringify(ARCHITECTURE_FIGURE),
+  "```",
+  "",
+  "- [ ] Ship the orders API"
+].join("\n")
+
+// Publishes an architecture figure to the Explanation view, then adopts a plan
+// carrying the same figure as a ```architecture fence.
+const architectureFigureResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
+  const lastMessage = context.messages.at(-1)
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === UPDATE_PLAN_TOOL) {
+    return fauxAssistantMessage("Architecture figure published.")
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === WRITE_TOOL) {
+    return callTool(UPDATE_PLAN_TOOL, { filePath: "PLAN.md" }, "architecture-plan-update")
+  }
+  if (lastMessage?.role === "toolResult" && lastMessage.toolName === "jingler_publish_explanation") {
+    return callTool(WRITE_TOOL, { path: "PLAN.md", content: ARCHITECTURE_PLAN }, "architecture-plan-write")
+  }
+  return callTool("jingler_publish_explanation", {
+    explanation: {
+      title: "Checkout architecture",
+      summary: "Orders flow from the API into Postgres.",
+      sections: [{
+        id: "system",
+        title: "System",
+        blocks: [{ kind: "architecture", id: "checkout", ...ARCHITECTURE_FIGURE }]
+      }]
+    }
+  }, "architecture-publish")
+}
+
 const defaultResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> => {
   const prompt = latestOperatorText(context)
   if (prompt.includes("[[complete-session]]")) {
@@ -801,6 +848,8 @@ const responsesFor = (fixture: E2ePiFixture): ReadonlyArray<FauxResponseStep> =>
       return Array.from({ length: 8 }, () => planScratchpadResponse)
     case "rich-plan-scratchpad":
       return Array.from({ length: 8 }, () => richScratchpadResponse)
+    case "architecture-figure":
+      return Array.from({ length: 8 }, () => architectureFigureResponse)
     case "managed-resources":
       return [
         fauxAssistantMessage(fauxToolCall("jingler_load_resource", { id: "managed-skill" }), {

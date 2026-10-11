@@ -46,6 +46,48 @@ describe("explanation document schemas", () => {
     expect(Either.isLeft(Schema.decodeUnknownEither(ExplanationPayload)(invalid))).toBe(true)
   })
 
+  describe("architecture block", () => {
+    const architecture = {
+      kind: "architecture",
+      id: "checkout",
+      layers: [{ id: "app", label: "App" }, { id: "data", label: "Data" }],
+      components: [
+        { id: "api", label: "orders-api", layer: "app", shape: "service" },
+        { id: "db", label: "Postgres", layer: "data", shape: "store" }
+      ],
+      links: [{ from: "api", to: "db", mode: "data" }],
+      lit: "api"
+    }
+    const decodes = (block: unknown) => Either.isRight(Schema.decodeUnknownEither(VisualBlock)(block))
+
+    it("decodes a consistent system", () => {
+      expect(decodes(architecture)).toBe(true)
+    })
+
+    it.each([
+      ["a link to an unknown component", { links: [{ from: "api", to: "cache" }] }],
+      ["a lit part that does not exist", { lit: "cache" }],
+      ["a component on an unknown layer", {
+        components: [{ id: "api", label: "api", layer: "edge", shape: "service" }]
+      }],
+      ["duplicate component ids", {
+        components: [
+          { id: "api", label: "a", layer: "app", shape: "service" },
+          { id: "api", label: "b", layer: "app", shape: "worker" }
+        ],
+        links: [],
+        lit: undefined
+      }],
+      ["an unknown shape", {
+        components: [{ id: "api", label: "api", layer: "app", shape: "blob" }],
+        links: [],
+        lit: undefined
+      }]
+    ])("rejects %s", (_, override) => {
+      expect(decodes({ ...architecture, ...override })).toBe(false)
+    })
+  })
+
   it("preserves PlanBlock compatibility", () => {
     const block = { kind: "table", id: "shape", headers: ["Input"], rows: [["Prompt"]] }
     expect(Schema.decodeUnknownSync(VisualBlock)(block)).toEqual(Schema.decodeUnknownSync(PlanBlock)(block))
