@@ -481,4 +481,24 @@ describe("appMachine first-run coordination", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();
   });
+
+  it("re-enters loading when Retry is sent from failure, and fails again if the load still fails", async () => {
+    const initialLoad = vi.fn(async (): Promise<InitialData> => {
+      throw new Error("server unreachable");
+    });
+    const machine = unconfigured().provide({
+      actors: { initialLoad: fromPromise<InitialData>(initialLoad) },
+    });
+    const actor = createActor(machine).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(actor.getSnapshot().context.error).toBe("server unreachable");
+
+    actor.send({ type: "RETRY" });
+    expect(actor.getSnapshot().matches("loading")).toBe(true);
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(initialLoad).toHaveBeenCalledTimes(2);
+    actor.stop();
+  });
 });
