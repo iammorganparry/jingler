@@ -75,28 +75,28 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
           <mark
             key={highlight.id}
             data-comment-highlight={highlight.id}
-            className="absolute rounded-sm bg-yellow/25"
+            className="absolute rounded-sm bg-state-needs/25"
             style={{ top: highlight.top, left: highlight.left, width: highlight.width, height: highlight.height }}
           />
         ))}
       </div>
       <aside aria-label="Plan comments" className="mx-auto mt-5 flex max-w-[760px] flex-col gap-2 px-8 pb-10">
         {comments.map((comment) => (
-          <article key={comment.id} data-comment-thread={comment.id} className="rounded-lg border border-line bg-panel p-3 text-[13px]">
+          <article key={comment.id} data-comment-thread={comment.id} className="rounded-[12px] border border-line bg-panel p-3 text-[13px]">
             <header className="mb-2 flex items-center gap-2 text-muted-foreground">
               <MessageSquare className="size-3.5" />
               <span>{comment.stageId === null ? "Plan" : comment.stageId}</span>
-              {detached.has(comment.id) && <span className="text-yellow">Detached from changed text</span>}
+              {detached.has(comment.id) && <span className="text-state-needs">Detached from changed text</span>}
               <button
                 type="button"
                 disabled={!editable}
-                className="ml-auto inline-flex items-center gap-1 text-[10.5px] hover:text-text-bright disabled:opacity-50"
+                className="ml-auto inline-flex items-center gap-1 text-[11px] hover:text-text-bright disabled:opacity-50"
                 onClick={() => onResolve(comment.id, comment.status === "open")}
               >
                 {comment.status === "open" ? <><Check className="size-3" /> Resolve</> : <><RotateCcw className="size-3" /> Reopen</>}
               </button>
             </header>
-            {comment.anchor && <q className="mb-2 block border-l-2 border-yellow/40 pl-2 text-muted-foreground">{comment.anchor.quote}</q>}
+            {comment.anchor && <q className="mb-2 block border-l-2 border-line-strong pl-2 text-muted-foreground">{comment.anchor.quote}</q>}
             <div className="space-y-1.5">
               {comment.messages.map((message) => <p key={message.id} className="m-0 text-text-body">{message.body}</p>)}
             </div>
