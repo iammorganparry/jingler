@@ -391,6 +391,8 @@ export const rpc = {
   }> => run((c) => c.Mcp.list()),
   mcpStatus: (): Promise<ReadonlyArray<McpServerStatus>> =>
     run((c) => c.Mcp.status()),
+  mcpLogTail: (server: string, lines?: number): Promise<{ readonly lines: ReadonlyArray<string> }> =>
+    run((c) => c.Mcp.logTail({ server, lines })),
   mcpWrite: (name: string, entry: McpConfigEntry): Promise<void> =>
     run((c) => c.Mcp.write({ name, entry })),
   mcpRemove: (name: string): Promise<void> =>

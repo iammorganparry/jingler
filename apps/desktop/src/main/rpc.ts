@@ -97,6 +97,7 @@ import {
   AgentResourceService,
   McpConfigService,
   probeAll,
+  mcpLogTail,
   parseClaudeMcp,
   parseCodexMcp,
   parseOpencodeMcp,
@@ -5381,6 +5382,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Skills.list": ({ sessionId }) => skillsList(sessionId),
   "Mcp.list": () => mcpList(),
   "Mcp.status": () => mcpStatus(),
+  "Mcp.logTail": ({ server, lines }) =>
+    Effect.succeed({ lines: mcpLogTail(server, lines) }),
   "Mcp.write": ({ name, entry }) =>
     McpConfigService.write(name, entry).pipe(
       Effect.mapError((cause) => mcpError(cause.message, cause)),
