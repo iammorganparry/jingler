@@ -56,7 +56,7 @@ export function HoverCard({
               // No enter/exit animation: `tailwindcss-animate` isn't in this
               // build, and a card that fades while the pointer is already moving
               // to the next cell reads as lag rather than as polish.
-              "z-50 rounded-lg border border-hairline bg-panel p-2.5 shadow-2xl",
+              "z-50 rounded-lg border border-line bg-surface p-2.5 shadow-[0_16px_48px_var(--sb-shadow-strong)]",
               className
             )}
           >
