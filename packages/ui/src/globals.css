@@ -152,7 +152,8 @@
   --sb-state-working: var(--sb-blue);
   --sb-state-needs: var(--sb-yellow);
   --sb-state-ready: var(--sb-green);
-  --sb-state-failed: var(--sb-red);
+  /* Spec §2/§6.10: destructive text and the confirm-dialog fill use #f0605d, not the softer --sb-red. */
+  --sb-state-failed: #f0605d;
 
   /*
    * Effects — translucent ON PURPOSE.
