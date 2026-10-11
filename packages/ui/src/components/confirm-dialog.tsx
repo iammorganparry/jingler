@@ -14,7 +14,7 @@ import {
  * A small yes/no confirmation modal for destructive or irreversible actions
  * (e.g. deleting a session). Controlled via `open`/`onOpenChange`; `onConfirm`
  * fires then the dialog closes unless `closeOnConfirm={false}` leaves closing to
- * the caller. `tone="danger"` styles the confirm button red.
+ * the caller. `tone="danger"` gives the confirm button the solid destructive fill (the only place one is allowed).
  */
 export function ConfirmDialog({
   open,
@@ -62,7 +62,7 @@ export function ConfirmDialog({
             {cancelLabel}
           </Button>
           <Button
-            variant={tone === "danger" ? "danger" : "primary"}
+            variant={tone === "danger" ? "destructive-solid" : "primary"}
             size="sm"
             disabled={pending}
             aria-busy={pending}

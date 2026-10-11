@@ -9,11 +9,15 @@ const button = cva(
   {
     variants: {
       variant: {
-        primary: "bg-brand text-white hover:bg-brand-hover",
-        secondary: "border border-line bg-panel text-text-bright hover:border-line-strong",
-        danger: "border border-red/40 bg-transparent text-red hover:bg-red/10",
-        ghost: "text-muted-foreground hover:bg-brand/5 hover:text-text-bright",
-        outline: "border border-line bg-transparent text-text-bright hover:bg-brand/5"
+        // Neutral fill (spec §6.10). Rose/brand is never a button fill; it is the focus ring only.
+        primary: "bg-primary-fill text-primary-fg hover:bg-primary-hover disabled:bg-primary-disabled disabled:text-dim disabled:opacity-100",
+        secondary: "border border-line-strong bg-transparent text-text-bright hover:bg-text-bright/5",
+        // Destructive = failed-coloured text on transparent. A solid fill is `destructive-solid`, reserved
+        // for the last button of a ConfirmDialog.
+        danger: "border border-line-strong bg-transparent text-state-failed hover:bg-state-failed/10",
+        "destructive-solid": "bg-state-failed text-primary-fg hover:bg-state-failed/90",
+        ghost: "text-muted-foreground hover:bg-text-bright/5 hover:text-text-bright",
+        outline: "border border-line bg-transparent text-text-bright hover:bg-text-bright/5"
       },
       size: {
         sm: "h-8 gap-1.5 rounded-lg px-3 text-xs",

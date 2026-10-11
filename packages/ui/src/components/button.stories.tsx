@@ -7,7 +7,7 @@ const meta = {
   component: Button,
   args: { children: "Primary" },
   argTypes: {
-    variant: { control: "select", options: ["primary", "secondary", "danger", "ghost"] },
+    variant: { control: "select", options: ["primary", "secondary", "danger", "destructive-solid", "ghost", "outline"] },
     size: { control: "select", options: ["sm", "md", "icon"] }
   }
 } satisfies Meta<typeof Button>
@@ -18,6 +18,8 @@ type Story = StoryObj<typeof meta>
 export const Primary: Story = { args: { variant: "primary" } }
 export const Secondary: Story = { args: { variant: "secondary", children: "Secondary" } }
 export const Danger: Story = { args: { variant: "danger", children: "Danger" } }
+export const DestructiveSolid: Story = { args: { variant: "destructive-solid", children: "Delete" } }
+export const Disabled: Story = { args: { variant: "primary", disabled: true, children: "Disabled" } }
 export const Ghost: Story = { args: { variant: "ghost", children: "Ghost" } }
 
 export const AllVariants: Story = {
@@ -28,7 +30,10 @@ export const AllVariants: Story = {
       </Button>
       <Button variant="secondary">Secondary</Button>
       <Button variant="danger">Danger</Button>
+      <Button variant="destructive-solid">Delete</Button>
       <Button variant="ghost">Ghost</Button>
+      <Button variant="outline">Outline</Button>
+      <Button disabled>Disabled</Button>
     </div>
   )
 }
