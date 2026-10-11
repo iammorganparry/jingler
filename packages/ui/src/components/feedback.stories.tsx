@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { ClaudeGlyph } from "./eyebrow.js"
 import { AsyncButton } from "./async-button.js"
-import { InlineStatus, IndeterminateBar } from "./feedback.js"
+import { Button } from "./button.js"
+import { EmptyState, InlineError, InlineStatus, IndeterminateBar, ListSkeleton } from "./feedback.js"
 
 const meta: Meta = { title: "Feedback" }
 export default meta
@@ -59,6 +60,38 @@ export const Bars: Story = {
     <div className="flex w-[320px] flex-col gap-5 bg-editor p-8">
       <IndeterminateBar />
       <IndeterminateBar progress={0.64} tone="bg-green" />
+    </div>
+  )
+}
+
+/** ListSkeleton: rows at the real session-row height so nothing shifts on load. */
+export const ListSkeletons: Story = {
+  render: () => (
+    <div className="w-[280px] bg-panel p-4">
+      <ListSkeleton rows={5} rowHeight={32} label="Loading sessions" />
+    </div>
+  )
+}
+
+/** EmptyState: what's here and the one next action. */
+export const EmptyStates: Story = {
+  render: () => (
+    <div className="w-[360px] bg-panel">
+      <EmptyState
+        title="No pull requests"
+        description="PRs this session opens show up here."
+        action={<Button variant="secondary" size="sm">Open a PR</Button>}
+      />
+    </div>
+  )
+}
+
+/** InlineError: message plus Retry; red is reserved for this state. */
+export const InlineErrors: Story = {
+  render: () => (
+    <div className="flex w-[360px] flex-col gap-3 bg-panel p-4">
+      <InlineError onRetry={() => {}}>Couldn't load pull requests.</InlineError>
+      <InlineError>Couldn't reach GitHub.</InlineError>
     </div>
   )
 }

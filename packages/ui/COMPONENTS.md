@@ -32,7 +32,6 @@ Primitives in `components/`. Prefer these over raw elements.
 | DiffPeek | `components/diff-peek.tsx` | Single-file diff peek, virtualised for large patches. | — | no | — |
 | DiffStat | `components/diff-stat.tsx` | Added/removed line counts (+313 −23). | — | no | — |
 | Eyebrow, ClaudeGlyph | `components/eyebrow.tsx` | Uppercase tracked section label; ClaudeGlyph. | — | yes | — |
-| InlineStatus, IndeterminateBar | `components/feedback.tsx` | InlineStatus message and IndeterminateBar. | — | yes | #371 (2.6) |
 | FileChangeList | `components/file-change-list.tsx` | List of changed files with on-demand per-file diffs. | — | no | — |
 | FileChip | `components/file-chip.tsx` | Inline file link with Material icon and diff evidence. | path, added, removed, onOpen, className, children | yes | — |
 | FileIcon | `components/file-icon.tsx` | Material Icon Theme glyph chosen from a file name. | — | no | — |
@@ -44,6 +43,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. | — | yes | #361 (1.3), #374 (2.9) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
+| InlineStatus, IndeterminateBar, ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | Inline status line, progress bar, list loading rows (real row height), empty state with next action, error with Retry. | rows, rowHeight, title, description, action, onRetry | yes | #371 (2.6) |
 | Markdown | `components/markdown.tsx` | Markdown renderer with math (KaTeX) and code. | — | no | — |
 | MermaidDiagram | `components/mermaid-diagram.tsx` | Mermaid diagram renderer. | — | no | — |
 | OAuthButton | `components/oauth-button.tsx` | OAuth provider button (GitHub octocat etc.). | provider, mode, onClick, disabled, className | no | — |
@@ -199,7 +199,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | SegmentedControl 28px | `SegmentedControl` | #368 (2.3) |
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
 | StatusRow, Stepper | ad-hoc status lists | #370 (2.5) |
-| ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
 | SettingsCard, SettingsRow | `Toggle` rows in settings | #372 (2.7) |
 | Drawer | `Dialog` | #373 (2.8) |
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
