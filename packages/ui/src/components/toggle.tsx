@@ -55,7 +55,7 @@ export function Toggle({ checked, defaultChecked = false, onCheckedChange, disab
           data-state={currentChecked ? "checked" : "unchecked"}
           className={cn(
             "group peer inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full px-1 outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-60",
-            currentChecked ? "justify-end bg-brand" : "justify-start bg-muted-foreground/60"
+            currentChecked ? "justify-end bg-primary-fill" : "justify-start bg-line-strong"
           )}
         >
           <m.div ref={thumbRef} layout animate={{ scale: squish ? 0.9 : 1 }} className="pointer-events-none block size-5 rounded-full bg-panel shadow-md">
