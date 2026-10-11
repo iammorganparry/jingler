@@ -48,18 +48,19 @@ Two themes ship as Jingler's own — `jingler-dark` (the default) and
 **not** produced by `scripts/vendor-themes.mjs`. Do not let the vendor script
 overwrite them.
 
-### Surfaces are warm-neutral, never red
+### Surfaces are neutral, never red ("Jingler Graphite")
 
 | | dark | light |
 | --- | --- | --- |
-| `canvas` | `#141414` | `#efeaea` |
-| `sunken` | `#171717` | `#f4f0f0` |
-| `panel` | `#1b1b1b` | `#f9f6f6` |
-| `editor` | `#212121` | `#ffffff` |
-| `surface` | `#2b2b2b` | `#f1ecec` |
+| `canvas` | `#0b0b0c` | `#efeaea` |
+| `sunken` | `#0e0e0f` | `#f4f0f0` |
+| `panel` | `#131315` | `#f9f6f6` |
+| `editor` | `#1a1a1d` | `#ffffff` |
+| `surface` | `#202024` | `#f1ecec` |
 
-`#212121` is the wordmark's own neutral, so the greys step off it rather than
-off an arbitrary slate. They are **not** hue-shifted toward the brand: a
+The dark greys are cool-neutral near-black (Graphite). The primary action is
+neutral too (`--sb-primary-fill` text-1 on `--sb-primary-fg`); the brand rose is
+only the mark, focus ring, selection and drop zone. They are **not** hue-shifted toward the brand: a
 red-washed editor looks committed for about ten minutes and unreadable for the
 rest of the day, and the mark is loud enough that it does not need the walls
 helping.

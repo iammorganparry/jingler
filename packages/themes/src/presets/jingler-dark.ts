@@ -1,5 +1,5 @@
 /**
- * Jingler Dark — Jingler's own brand theme. HAND-AUTHORED.
+ * Jingler Dark ("Graphite") — Jingler's own brand theme. HAND-AUTHORED.
  *
  * NOT produced by `scripts/vendor-themes.mjs`. Every OTHER file in this
  * directory is machine-generated from a VS Code built-in and carries a "do not
@@ -10,18 +10,17 @@
  *
  * ## Why the surfaces are what they are
  *
- * Brand red is `#EF3F57` and the wordmark's own neutral is `#212121`. The
- * temptation with a red brand is to tint the chrome red; we do not. A red-washed
- * editor is fatiguing to read against for the length of a real coding session,
- * so the surfaces are warm-neutral greys — `#212121` for the editor (the
- * wordmark colour itself), stepping DOWN toward black for the recessed planes
- * the way `SURFACE_STEPS.dark` expects: sidebar `#1b1b1b`, panels/terminal
- * `#181818`, title bar / tab strip `#141414`. Red appears only where the eye
- * wants a single point of emphasis: the cursor, the primary button, focus
- * rings, links, the progress and badge chips. The mapper reads
+ * Brand rose is `#EF3F57`. The temptation with a red brand is to tint the
+ * chrome red; we do not, and since red reads as destructive the primary button
+ * is neutral too (`button.background` = the text-1 tone, label = the app
+ * ground). Surfaces are cool-neutral near-black greys — `#1a1a1d` for the
+ * editor, stepping DOWN toward black for the recessed planes the way
+ * `SURFACE_STEPS.dark` expects: sidebar `#131315`, panels/terminal `#0e0e0f`,
+ * title bar / tab strip `#0b0b0c`. Rose appears only on the mark, focus ring,
+ * selection, cursor and links. The mapper reads
  * `editor.background` → `sideBar.background` → `panel.background` →
  * `titleBar.activeBackground` for its four surface planes, so those keys are set
- * to land the fold on `#212121 / #1b1b1b / #181818 / #141414` exactly.
+ * to land the fold on `#1a1a1d / #131315 / #0e0e0f / #0b0b0c` exactly.
  *
  * ## Why the syntax ramp stays full-spectrum
  *
@@ -44,61 +43,60 @@ export const jinglerDark: VsCodeTheme = {
   "type": "dark",
   "colors": {
     // ── Surfaces (drive the fold: editor → panel → sunken → canvas) ──────────
-    "editor.background": "#212121",
-    "editor.foreground": "#c6c1c1",
-    "foreground": "#dedada",
-    "sideBar.background": "#1b1b1b",
-    "sideBar.foreground": "#c6c1c1",
-    "activityBar.background": "#1b1b1b",
-    "activityBar.foreground": "#dedada",
-    "panel.background": "#181818",
-    "terminal.background": "#181818",
-    "dropdown.background": "#181818",
-    "dropdown.foreground": "#c6c1c1",
-    "titleBar.activeBackground": "#141414",
-    "titleBar.activeForeground": "#dedada",
-    "titleBar.inactiveBackground": "#141414",
-    "titleBar.inactiveForeground": "#8d8686",
-    "editorGroupHeader.tabsBackground": "#141414",
-    "list.hoverBackground": "#2b2b2b",
-    "input.background": "#1b1b1b",
-    "input.foreground": "#dedada",
-    "editorWidget.background": "#181818",
-    "quickInput.background": "#181818",
-    "sideBarSectionHeader.background": "#1b1b1b",
-    "statusBar.background": "#141414",
-    "statusBar.foreground": "#8d8686",
-    "tab.activeBackground": "#212121",
-    "tab.inactiveBackground": "#141414",
+    "editor.background": "#1a1a1d",
+    "editor.foreground": "#c4c4cb",
+    "foreground": "#dcdce0",
+    "sideBar.background": "#131315",
+    "sideBar.foreground": "#c4c4cb",
+    "activityBar.background": "#131315",
+    "activityBar.foreground": "#dcdce0",
+    "panel.background": "#0e0e0f",
+    "terminal.background": "#0e0e0f",
+    "dropdown.background": "#0e0e0f",
+    "dropdown.foreground": "#c4c4cb",
+    "titleBar.activeBackground": "#0b0b0c",
+    "titleBar.activeForeground": "#dcdce0",
+    "titleBar.inactiveBackground": "#0b0b0c",
+    "titleBar.inactiveForeground": "#a1a1aa",
+    "editorGroupHeader.tabsBackground": "#0b0b0c",
+    "list.hoverBackground": "#202024",
+    "input.background": "#131315",
+    "input.foreground": "#dcdce0",
+    "editorWidget.background": "#0e0e0f",
+    "quickInput.background": "#0e0e0f",
+    "sideBarSectionHeader.background": "#131315",
+    "statusBar.background": "#0b0b0c",
+    "statusBar.foreground": "#a1a1aa",
+    "tab.activeBackground": "#1a1a1d",
+    "tab.inactiveBackground": "#0b0b0c",
 
     // ── Borders ──────────────────────────────────────────────────────────────
-    "editorGroup.border": "#0f0f0f",
-    "sideBar.border": "#0f0f0f",
-    "panel.border": "#333333",
-    "input.border": "#333333",
-    "contrastBorder": "#454545",
+    "editorGroup.border": "#232327",
+    "sideBar.border": "#232327",
+    "panel.border": "#303036",
+    "input.border": "#303036",
+    "contrastBorder": "#44444c",
 
     // ── Text ramp (brightest → dimmest) ──────────────────────────────────────
-    "tab.activeForeground": "#f4f1f1",
-    "list.activeSelectionForeground": "#f4f1f1",
-    "descriptionForeground": "#8d8686",
-    "tab.inactiveForeground": "#8d8686",
-    "editorLineNumber.foreground": "#6a6363",
-    "editorLineNumber.activeForeground": "#c6c1c1",
+    "tab.activeForeground": "#ededef",
+    "list.activeSelectionForeground": "#ededef",
+    "descriptionForeground": "#a1a1aa",
+    "tab.inactiveForeground": "#a1a1aa",
+    "editorLineNumber.foreground": "#7c7c86",
+    "editorLineNumber.activeForeground": "#c4c4cb",
 
     // ── Accents — brand red where the eye wants one point of emphasis ────────
     "progressBar.background": "#EF3F57",
     "activityBarBadge.background": "#EF3F57",
     "activityBarBadge.foreground": "#ffffff",
-    "button.background": "#EF3F57",
-    "button.foreground": "#ffffff",
-    "button.hoverBackground": "#f5687b",
+    "button.background": "#ededef",
+    "button.foreground": "#0b0b0c",
     "focusBorder": "#EF3F57",
     "textLink.foreground": "#EF3F57",
     "textLink.activeForeground": "#f5687b",
     "terminalCursor.foreground": "#EF3F57",
     "editorCursor.foreground": "#EF3F57",
-    "list.activeSelectionBackground": "#2b2b2b",
+    "list.activeSelectionBackground": "#26262b",
 
     // ── Terminal ANSI — the full-spectrum ramp the syntax rules borrow from ──
     "terminal.foreground": "#c6c1c1",
