@@ -120,4 +120,28 @@ describe("ProjectSidebar", () => {
     expect(screen.getByTestId("project-sidebar").getAttribute("aria-busy")).toBe("true")
     expect(screen.getAllByTestId("project-skeleton")).toHaveLength(3)
   })
+
+  it("renders a 56px rail on neutral tokens with a white bar and fill on the active tile", () => {
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={[testSession({ id: "w", projectId: "beta", status: "running" })]}
+        activeProjectId="alpha"
+        liveActivity={{ w: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 } }}
+        onSelect={() => {}}
+      />
+    )
+    const rail = screen.getByTestId("project-sidebar")
+    expect(rail.className).toContain("w-14")
+    expect(rail.className).toContain("bg-canvas")
+    const active = screen.getByRole("button", { name: "Alpha" })
+    expect(active.className).toContain("bg-surface")
+    expect(active.querySelector(".bg-text-bright")).toBeTruthy()
+    const inactive = screen.getByRole("button", { name: "Beta" })
+    expect(inactive.querySelector(".bg-text-bright")).toBeNull()
+    expect(screen.getByRole("status", { name: "Beta: sessions in progress" }).innerHTML).toContain("bg-state-working")
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.innerHTML).not.toMatch(/bg-(blue|green|yellow|red|brand)\b|text-brand/)
+    }
+  })
 })
