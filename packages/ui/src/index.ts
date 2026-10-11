@@ -151,6 +151,7 @@ export * from "./asset/open-asset-context.js"
 
 // App compositions
 export * from "./app/title-bar.js"
+export * from "./app/window-controls.js"
 export * from "./app/tab-bar.js"
 export * from "./app/tab-contributions.js"
 export * from "./app/pane-contributions.js"

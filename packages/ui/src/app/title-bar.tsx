@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react"
+import { WindowControls } from "./window-controls.js"
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
@@ -6,11 +7,17 @@ const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
 /** Window chrome plus the focused session's global tab row. */
 export function TitleBar({
   title = "Jingler",
-  actions
+  actions,
+  platform,
+  windowControls
 }: {
   title?: string
   actions?: ReactNode
+  /** `process.platform`. Window controls draw only when this is set and is not `darwin`. */
+  platform?: string
+  windowControls?: Parameters<typeof WindowControls>[0]
 }) {
+  const overlay = platform !== undefined && platform !== "darwin"
   return (
     <div
       data-testid="title-bar"
@@ -18,7 +25,7 @@ export function TitleBar({
       style={drag}
       className="window-drag-region flex h-11 flex-none items-center gap-2 border-b border-hairline bg-panel px-3.5"
     >
-      <div aria-hidden className="w-11 flex-none" />
+      {overlay ? null : <div aria-hidden className="w-11 flex-none" />}
       <div
         id="session-tab-bar-portal"
         className="flex h-full min-w-0 flex-1 items-center overflow-hidden"
@@ -28,6 +35,7 @@ export function TitleBar({
           {actions}
         </div>
       ) : null}
+      {overlay ? <WindowControls {...windowControls} /> : null}
     </div>
   )
 }
