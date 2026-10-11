@@ -20,10 +20,10 @@ const button = cva(
         outline: "border border-line bg-transparent text-text-bright hover:bg-text-bright/5"
       },
       size: {
-        sm: "h-8 gap-1.5 rounded-lg px-3 text-xs",
-        md: "h-10 gap-2 rounded-lg px-5 text-sm",
-        lg: "h-12 gap-2 rounded-lg px-6 text-base",
-        icon: "size-8 rounded-lg"
+        sm: "h-7 gap-1.5 rounded-[6px] px-3 text-xs",
+        md: "h-8 gap-2 rounded-[6px] px-3.5 text-[13px]",
+        lg: "h-10 gap-2 rounded-[6px] px-5 text-sm",
+        icon: "size-8 rounded-[6px]"
       }
     },
     defaultVariants: { variant: "primary", size: "md" }

@@ -60,8 +60,8 @@ describe("BeUI motion catalog", () => {
     </>)
 
     const button = screen.getByRole("button", { name: "Continue" })
-    expect(button.className).toContain("h-10")
-    expect(button.className).toContain("rounded-lg")
+    expect(button.className).toContain("h-8")
+    expect(button.className).toContain("rounded-[6px]")
     fireEvent.click(button)
     expect(onClick).toHaveBeenCalledOnce()
 

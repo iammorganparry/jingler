@@ -6,7 +6,7 @@ const source = (relative: string) => readFileSync(new URL(relative, import.meta.
 describe("BeUI production ownership", () => {
   it("keeps compatibility atoms backed by BeUI implementations", () => {
     expect(source("../button.tsx")).toContain('from "motion/react"')
-    expect(source("../button.tsx")).toContain("rounded-lg")
+    expect(source("../button.tsx")).toContain("rounded-[6px]")
     expect(source("../input.tsx")).toContain("BeUI Input")
     expect(source("../checkbox.tsx")).toContain('from "motion/react"')
     expect(source("../toggle.tsx")).toContain("THUMB_SPRING")
