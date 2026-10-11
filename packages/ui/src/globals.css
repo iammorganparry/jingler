@@ -1009,7 +1009,7 @@
 .sb-arch-front { fill: var(--sb-panel); stroke: var(--sb-line-strong); stroke-width: 0.75; stroke-linejoin: round; }
 .sb-arch-side { fill: var(--sb-canvas); stroke: var(--sb-line-strong); stroke-width: 0.75; stroke-linejoin: round; }
 .sb-arch-groove { fill: none; stroke: var(--sb-line-strong); stroke-width: 0.75; }
-.sb-arch-label { fill: var(--sb-muted); font-family: var(--font-mono); font-size: 7px; }
+.sb-arch-label { fill: var(--sb-muted); font-family: var(--font-mono); font-size: 9.5px; }
 .sb-arch-part { cursor: default; outline: none; }
 .sb-arch-part.is-lit .sb-arch-top { fill: var(--sb-brand); }
 .sb-arch-part.is-focus .sb-arch-top,

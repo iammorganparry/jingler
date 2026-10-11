@@ -115,7 +115,7 @@ export function ArchitectureFigure({ block }: ArchitectureFigureProps) {
             >
               <Box at={pedestal} size={[PEDESTAL.width, PEDESTAL.depth, PEDESTAL.height]} />
               <text className="sb-arch-label sb-arch-label--part" transform={frontFaceText([pedestal[0] + 5, pedestal[1] + PEDESTAL.depth, 3])}>
-                {short(component.label, 18)}
+                {short(component.label, 13)}
               </text>
               {recipe(part)}
             </g>

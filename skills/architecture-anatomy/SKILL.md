@@ -20,7 +20,7 @@ Adapted from Anatomy (skills.wheresryan.sh/anatomy). Its one rule carries over: 
    - `external`: a third-party API outside your control
 4. **Layers run back to front, in request order.** List them from the far edge to the near edge, for example `edge → app → data`. Each component sits on exactly one layer. Use at most 6 layers.
 5. **Lines resolve.** Every link connects two real components. Set `mode` to `sync` for a request/response call, `async` for fire-and-forget or events, and `data` for reads and writes to a store. Keep `label` short, like a verb or a route (`POST /orders`, `publish`, `INSERT`).
-6. **Put words in `detail`, not the drawing.** Labels are cut to 18 characters on the plinth. Versions, replica counts and why-it-matters go in `detail`, which shows in the readout when the part is focused.
+6. **Put words in `detail`, not the drawing.** Labels are cut to 13 characters on the plinth. Versions, replica counts and why-it-matters go in `detail`, which shows in the readout when the part is focused.
 7. **Critic pass.** Re-read the figure against the code. Check for any part that doesn't exist yet, any missing hop, a wrong direction, or a wrong `lit`. Fix it before you publish.
 
 ## Explanation view
