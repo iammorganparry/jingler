@@ -189,8 +189,10 @@ describe("subagentFleetMachine", () => {
       expect.objectContaining({
         runId: "legacy:reviewer",
         agent: "Reviewer",
+        task: "Review the worktree",
         status: "completed",
-        parentId: "parent/legacy%3Alegacy-parent"
+        parentId: "parent/legacy%3Alegacy-parent",
+        terminal: expect.objectContaining({ summary: "" })
       })
     ])
     actor.stop()

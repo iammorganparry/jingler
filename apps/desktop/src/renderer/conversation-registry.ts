@@ -41,8 +41,10 @@ import { createCoalescer } from "./coalesce.js"
 import type { NotifiableState } from "./notifier.js"
 import { notificationFor } from "./notifier.js"
 import { rpc } from "./rpc-client.js"
+import { publishSessionUpdate } from "./session-updates.js"
 import {
   clearSubagentTabs,
+  mergeCompletedSubagentNodes,
   projectSubagentTabs,
   publishActorSubagentTabs
 } from "./subagent-tab-store.js"
@@ -68,6 +70,7 @@ let chatActivities: Record<string, Record<string, SessionActivity>> = {}
 const EMPTY_CHAT_ACTIVITIES: Readonly<Record<string, SessionActivity>> = {}
 const activityListeners = new Set<() => void>()
 const sharedPlanBodies = new Map<string, string>()
+const persistedSubagentHistoryBodies = new Map<string, string>()
 /**
  * Previous observation per actor, for the notification edge detector — see
  * `notificationFor`. Held per key (and dropped with the actor) rather than in the
@@ -200,19 +203,40 @@ const broadcastSharedPlan = (key: string, snap: ConversationSnapshot): void => {
 const publishSnapshot = (key: string, snap: ConversationSnapshot): void => {
   const session = snap.context.session
   const chatId = snap.context.chatId
+  const chat =
+    session.chats.find(({ id }) => id === chatId) ??
+    session.closedChats?.find(({ id }) => id === chatId)
   const legacyAgents = snap.context.reviewer === null
     ? snap.context.subagents
     : [...snap.context.subagents, snap.context.reviewer]
-  publishActorSubagentTabs(
-    session.id,
-    projectSubagentTabs({
-      sessionId: session.id,
-      chatId,
-      piSessionId: session.chats.find(({ id }) => id === chatId)?.piSessionId ?? null,
-      events: snap.context.subagentFleetEvents,
-      legacyAgents
-    })
-  )
+  const projectedTabs = projectSubagentTabs({
+    sessionId: session.id,
+    chatId,
+    piSessionId: chat?.piSessionId ?? null,
+    events: snap.context.subagentFleetEvents,
+    legacyAgents
+  })
+  const activeRunIds = new Set(projectedTabs.active.map((node) => node.runId))
+  const completed = mergeCompletedSubagentNodes(
+    chat?.subagentHistory ?? [],
+    projectedTabs.completed
+  ).filter((node) => !activeRunIds.has(node.runId))
+  publishActorSubagentTabs(session.id, { ...projectedTabs, completed })
+  const historyKey = registryKey(session.id, chatId)
+  const historyBody = JSON.stringify(completed)
+  if (
+    historyBody !== JSON.stringify(chat?.subagentHistory ?? []) &&
+    persistedSubagentHistoryBodies.get(historyKey) !== historyBody
+  ) {
+    persistedSubagentHistoryBodies.set(historyKey, historyBody)
+    void rpc.sessionsSetSubagentHistory(session.id, chatId, completed)
+      .then(publishSessionUpdate)
+      .catch(() => {
+        if (persistedSubagentHistoryBodies.get(historyKey) === historyBody) {
+          persistedSubagentHistoryBodies.delete(historyKey)
+        }
+      })
+  }
   const activity = activityFor(snap)
   // Nothing is announced until the transcript has LOADED, and the first loaded
   // snapshot becomes the baseline rather than an edge.
@@ -291,6 +315,7 @@ const forget = (key: string): void => {
   snapshots.delete(key)
   notifyBaselines.delete(key)
   pendingFileActivities.delete(key)
+  persistedSubagentHistoryBodies.delete(key)
   publishes.cancel(key)
   const separator = key.indexOf(":")
   if (separator === -1) return

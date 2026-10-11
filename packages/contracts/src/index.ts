@@ -88,6 +88,7 @@ import {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
+  SubagentFleetNode,
   SubagentFleetSnapshot,
   TerminalChunk,
   TerminalInfo,
@@ -1040,6 +1041,17 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Persist bounded completed-agent metadata for Previous chats. */
+  Rpc.make("Sessions.setSubagentHistory", {
+    success: Session,
+    error: GitError,
+    payload: {
+      sessionId: Schema.String,
+      chatId: Schema.String,
+      nodes: Schema.Array(SubagentFleetNode)
+    }
   }),
 
   /**

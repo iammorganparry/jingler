@@ -5308,6 +5308,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
+  "Sessions.setSubagentHistory": ({ sessionId, chatId, nodes }) =>
+    Effect.gen(function* () {
+      yield* SessionStore.setSubagentHistory(sessionId, chatId, nodes);
+      return yield* SessionStore.get(sessionId);
+    }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause })),
+      ),
+    ),
   // The windowed read the renderer opens sessions with — only the tail loads,
   // older turns page in on demand. Same attachment-stripping as the whole read.
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>

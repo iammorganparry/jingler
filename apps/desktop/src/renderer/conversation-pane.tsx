@@ -49,6 +49,7 @@ import {
 import { useConversation } from "./use-conversation.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet } from "./use-subagent-fleet.js"
 import {
+  mergeCompletedSubagentNodes,
   publishSubagentTabs,
   releaseSubagentTabController,
   useSubagentTabSelection
@@ -667,21 +668,23 @@ export function ConversationPane({
     chatId: activeChat.id,
     piSessionId: activeChat.piSessionId ?? null,
     events: convo.subagentFleetEvents,
-    legacyAgents: legacyFleetAgents
+    legacyAgents: legacyFleetAgents,
+    persistedCompletedNodes: activeChat.subagentHistory
   })
-  const [subagentControlOutcome, setSubagentControlOutcome] = useState<
-    SubagentFleetControlOutcome | null
-  >(null)
+  const [subagentControlReceipt, setSubagentControlReceipt] = useState<{
+    nodeId: string
+    outcome: SubagentFleetControlOutcome
+  } | null>(null)
   const controlSubagent = (
     node: SubagentFleetNode,
     action: SubagentFleetControlAction,
     message?: string,
     replyTo?: string
   ) => fleet.control(node, action, message, replyTo).then((outcome) => {
-    setSubagentControlOutcome(outcome)
+    setSubagentControlReceipt({ nodeId: node.id, outcome })
     return outcome
   })
-  useEffect(() => setSubagentControlOutcome(null), [fleet.selectedNode?.id])
+  useEffect(() => setSubagentControlReceipt(null), [fleet.selectedNode?.id])
   const childTranscriptQuery = useQuery({
     queryKey: [
       "subagent-transcript",
@@ -758,16 +761,16 @@ export function ConversationPane({
     ),
     [fleet.nodes]
   )
-  const completedFleetNodes = useMemo(() => {
-    const completed = new Map(fleet.completedNodes.map((node) => [node.id, node]))
-    for (const node of fleet.nodes) {
-      if (
+  const completedFleetNodes = useMemo(
+    () => mergeCompletedSubagentNodes(
+      fleet.completedNodes,
+      fleet.nodes.filter((node) =>
         node.nodeKind === "agent" &&
         ["completed", "failed", "stopped", "unknown"].includes(node.status)
-      ) completed.set(node.id, node)
-    }
-    return [...completed.values()].slice(-8).reverse()
-  }, [fleet.completedNodes, fleet.nodes])
+      )
+    ),
+    [fleet.completedNodes, fleet.nodes]
+  )
   useEffect(() => {
     publishSubagentTabs(session.id, {
       chatId: activeChat.id,
@@ -776,6 +779,15 @@ export function ConversationPane({
       selectedId: fleet.selectedId
     })
   }, [activeChat.id, activeFleetNodes, completedFleetNodes, fleet.selectedId, session.id])
+  useEffect(() => {
+    if (
+      JSON.stringify(completedFleetNodes) ===
+      JSON.stringify(activeChat.subagentHistory ?? [])
+    ) return
+    void rpc.sessionsSetSubagentHistory(session.id, activeChat.id, completedFleetNodes)
+      .then(publishSessionUpdate)
+      .catch(() => {})
+  }, [activeChat.id, activeChat.subagentHistory, completedFleetNodes, session.id])
   useEffect(
     () => () => releaseSubagentTabController(session.id, activeChat.id),
     [activeChat.id, session.id]
@@ -1091,7 +1103,11 @@ export function ConversationPane({
                 : [fleet.selectedLegacyAgent.message]
             }
             providerId={session.providerId}
-            controlOutcome={subagentControlOutcome}
+            controlOutcome={
+              subagentControlReceipt?.nodeId === fleet.selectedNode.id
+                ? subagentControlReceipt.outcome
+                : null
+            }
             onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
             loading={
               fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading

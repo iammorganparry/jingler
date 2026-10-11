@@ -11,6 +11,7 @@ import {
 } from "./runtime/provider-connection.js";
 import { RuntimeCapabilityManifest } from "./runtime/capability-manifest.js";
 import { RuntimeRecoveryState } from "./runtime/runtime-recovery.js";
+import { SubagentFleetNode } from "./runtime/subagent-fleet.js";
 import { OffloadComputeSettings } from "./offload-compute.js";
 import { WebSearchConfig } from "./web-search.js";
 
@@ -396,6 +397,8 @@ export const Chat = Schema.Struct({
   providerId: Schema.optional(ProviderId),
   modelId: Schema.optional(ProviderModelId),
   piSessionId: Schema.optional(Schema.String),
+  /** Bounded completed-agent tabs retained for Previous chats across restarts. */
+  subagentHistory: Schema.optional(Schema.Array(SubagentFleetNode)),
   modelSelectionRequired: Schema.optional(Schema.Boolean),
   connectionSelectionRequired: Schema.optional(Schema.Boolean),
   legacyModel: Schema.optional(Schema.String),

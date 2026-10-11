@@ -8,7 +8,7 @@
  * them); the duplication is intended — both places drive the same session store
  * and there is nothing shared to hoist that would be simpler than the calls.
  */
-import type { Session } from "@jingler/core"
+import type { Session, SubagentFleetNode } from "@jingler/core"
 import { ChatTabBar, FileIcon } from "@jingler/ui"
 import { X } from "lucide-react"
 import { rpc } from "./rpc-client.js"
@@ -38,9 +38,29 @@ export function SessionChatTabs({
   const chatActivities = useChatActivities(session.id)
   const subagentTabs = useSessionSubagentTabs(session.id)
   const activeSubagents = subagentTabs.find(({ chatId }) => chatId === activeChat.id)
-  const previousSubagents = subagentTabs.flatMap(({ chatId, completed }) =>
-    completed.map((node) => ({ chatId, node }))
+  const activeRunIds = new Set<string>(
+    subagentTabs.flatMap(({ chatId, active }) =>
+      active.map((node) => `${chatId}:${node.runId}`)
+    )
   )
+  const previousById = new Map<string, { chatId: string; node: SubagentFleetNode }>(
+    [...session.chats, ...(session.closedChats ?? [])].flatMap((chat) =>
+      (chat.subagentHistory ?? [])
+        .filter((node) => !activeRunIds.has(`${chat.id}:${node.runId}`))
+        .map((node) => [
+          `${chat.id}:${node.runId}`,
+          { chatId: chat.id, node }
+        ] as const)
+    )
+  )
+  for (const { chatId, completed } of subagentTabs) {
+    for (const node of completed) {
+      const key = `${chatId}:${node.runId}`
+      if (!activeRunIds.has(key)) previousById.set(key, { chatId, node })
+    }
+  }
+  const previousSubagents = [...previousById.values()]
+    .sort((a, b) => b.node.updatedAt - a.node.updatedAt)
   const files = useFileBrowser(session.id, session.worktreePath)
 
   const createChat = () => {
@@ -185,7 +205,12 @@ export function SessionChatTabs({
       subagents={(activeSubagents?.active ?? []).map((node) => ({
         id: node.id,
         title: `${node.agent} · ${node.task}`,
-        status: node.status === "needs-attention" ? "attention" : "running"
+        status:
+          node.status === "needs-attention"
+            ? "attention"
+            : node.status === "paused"
+              ? "paused"
+              : "running"
       }))}
       subagentChatId={activeChat.id}
       activeSubagentId={filesActive ? undefined : activeSubagents?.selectedId}

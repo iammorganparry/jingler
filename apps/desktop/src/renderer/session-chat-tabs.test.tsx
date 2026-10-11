@@ -12,7 +12,9 @@ import {
 } from "./subagent-tab-store.js"
 
 const mocks = vi.hoisted(() => ({
-  files: null as FileBrowserController | null
+  files: null as FileBrowserController | null,
+  selectChat: vi.fn(() => new Promise(() => {})),
+  reopenChat: vi.fn(() => new Promise(() => {}))
 }))
 
 vi.mock("./use-file-browser.js", () => ({
@@ -31,10 +33,10 @@ vi.mock("./conversation-registry.js", () => ({
 vi.mock("./rpc-client.js", () => ({
   rpc: {
     sessionsCreateChat: vi.fn(),
-    sessionsSelectChat: vi.fn(),
+    sessionsSelectChat: mocks.selectChat,
     sessionsRenameChat: vi.fn(),
     sessionsCloseChat: vi.fn(),
-    sessionsReopenChat: vi.fn()
+    sessionsReopenChat: mocks.reopenChat
   }
 }))
 
@@ -209,6 +211,94 @@ describe("SessionChatTabs subagent tabs", () => {
       chatId: "chat-1",
       nodeId: reviewer.id
     })
+  })
+
+  it("renders paused agents with a non-pulsing paused indicator", () => {
+    act(() => publishSubagentTabs(session.id, {
+      chatId: "chat-1",
+      active: [subagentNode({ status: "paused" })],
+      completed: [],
+      selectedId: "main"
+    }))
+    renderTabs(false)
+
+    const indicator = screen.getByTestId("subagent-tab-parent/worker-1").querySelector("span")
+    expect(indicator?.className).toContain("bg-blue")
+    expect(indicator?.className).not.toContain("animate-pulse-dot")
+  })
+
+  it("hydrates completed agents from inactive and closed chats after restart", () => {
+    const inactive = subagentNode({
+      id: "inactive/reviewer",
+      runId: "inactive-reviewer",
+      subagentId: "inactive-reviewer",
+      agent: "reviewer",
+      task: "Inactive review",
+      status: "completed",
+      updatedAt: 3,
+      completedAt: 3,
+      terminal: {
+        reason: "completed",
+        summary: "Inactive review complete.",
+        at: 3,
+        retryable: false
+      }
+    })
+    const closed = subagentNode({
+      id: "closed/worker",
+      runId: "closed-worker",
+      subagentId: "closed-worker",
+      task: "Closed work",
+      status: "completed",
+      updatedAt: 2,
+      completedAt: 2,
+      terminal: {
+        reason: "completed",
+        summary: "Closed worker complete.",
+        at: 2,
+        retryable: false
+      }
+    })
+    const restored: Session = {
+      ...session,
+      chats: [
+        session.chats[0]!,
+        {
+          ...session.chats[0]!,
+          id: "chat-2",
+          title: "Inactive",
+          subagentHistory: [inactive]
+        }
+      ],
+      closedChats: [{
+        ...session.chats[0]!,
+        id: "chat-3",
+        title: "Closed",
+        subagentHistory: [closed]
+      }]
+    }
+    render(
+      <SessionChatTabs
+        session={restored}
+        filesActive={false}
+        onSelectConversation={vi.fn()}
+        onSelectFiles={vi.fn()}
+      />
+    )
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open reviewer · Inactive review" }))
+    expect(mocks.selectChat).toHaveBeenCalledWith("session-1", "chat-2")
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous chats" }), {
+      button: 0,
+      ctrlKey: false
+    })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open worker · Closed work" }))
+    expect(mocks.reopenChat).toHaveBeenCalledWith("session-1", "chat-3")
   })
 })
 

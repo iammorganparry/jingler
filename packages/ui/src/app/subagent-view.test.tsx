@@ -113,6 +113,30 @@ describe("FleetAgentView", () => {
     expect(screen.getByRole("alert").textContent).toContain("Agent is no longer running")
   })
 
+  it("hides a late control outcome from another child", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({ runId: "run-2" })}
+        messages={[]}
+        controlOutcome={{
+          version: 2,
+          requestId: "request-1",
+          runId: "run-1",
+          action: "stop",
+          acknowledged: true,
+          status: "accepted",
+          deliveryStatus: "delivered",
+          sequence: 1,
+          nativeRequestId: null,
+          message: "Stopped run-1",
+          acknowledgedAt: 30
+        }}
+      />
+    )
+
+    expect(screen.queryByText("Stopped run-1")).toBeNull()
+  })
+
   it("shows supervisor attention above an existing transcript", () => {
     const message: Message = {
       id: "child-1",

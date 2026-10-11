@@ -151,7 +151,7 @@ export function FleetAgentView({
           </button>
         ))}
       </div>
-      {controlOutcome && (
+      {controlOutcome && (node === undefined || controlOutcome.runId === node.runId) && (
         <div
           data-testid="subagent-control-outcome"
           role={controlOutcome.acknowledged ? "status" : "alert"}

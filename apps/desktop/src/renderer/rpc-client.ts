@@ -86,6 +86,7 @@ import type {
   StreamEvent,
   SubagentFleetControlOutcome,
   SubagentFleetControlRequest,
+  SubagentFleetNode,
   SubagentFleetSnapshot,
   TerminalChunk,
   ThemeCatalog,
@@ -661,6 +662,12 @@ export const rpc = {
     run((c) => c.Sessions.closeChat({ sessionId, chatId })),
   sessionsReopenChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.reopenChat({ sessionId, chatId })),
+  sessionsSetSubagentHistory: (
+    sessionId: string,
+    chatId: string,
+    nodes: ReadonlyArray<SubagentFleetNode>
+  ): Promise<Session> =>
+    run((c) => c.Sessions.setSubagentHistory({ sessionId, chatId, nodes })),
   /**
    * A newest-anchored window of the transcript. Omit `before` for the newest
    * page; pass the previous page's opaque cursor to page further back. `hasMore`

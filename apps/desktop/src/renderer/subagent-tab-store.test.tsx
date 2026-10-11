@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   clearSubagentTabs,
   completedSubagentNodes,
+  mergeCompletedSubagentNodes,
   publishActorSubagentTabs,
   publishSubagentTabs,
   releaseSubagentTabController,
@@ -90,13 +91,58 @@ describe("subagent tab store", () => {
       }
     })
     const events: ReadonlyArray<SubagentFleetEvent> = [{
-      _tag: "Upsert",
+      _tag: "Snapshot",
       version: 2,
-      eventId: "unknown",
+      eventId: "unknown-snapshot",
       occurredAt: 2,
-      node: unknown
+      snapshot: {
+        version: 2,
+        parentPiSessionId: "parent",
+        registryRevision: 2,
+        generatedAt: 2,
+        totalActive: 0,
+        omitted: 0,
+        activeCapacity: { used: 0, limit: 8 },
+        nodes: [unknown]
+      }
     }]
 
     expect(completedSubagentNodes(events)).toEqual([unknown])
+  })
+
+  it("deduplicates completed history when a run receives its canonical parent id", () => {
+    const provisional = node({ id: "session-1:chat-1/worker-1", updatedAt: 2 })
+    const canonical = node({ id: "parent/worker-1", updatedAt: 3 })
+
+    expect(mergeCompletedSubagentNodes([provisional], [canonical])).toEqual([canonical])
+  })
+
+  it("does not retain a terminal Upsert when the authoritative snapshot is active", () => {
+    const completed = node({ status: "completed", updatedAt: 2, completedAt: 2 })
+    const running = node({ registryRevision: 3, updatedAt: 3 })
+    const events: ReadonlyArray<SubagentFleetEvent> = [{
+      _tag: "Upsert",
+      version: 2,
+      eventId: "completed",
+      occurredAt: 2,
+      node: completed
+    }, {
+      _tag: "Snapshot",
+      version: 2,
+      eventId: "active-snapshot",
+      occurredAt: 3,
+      snapshot: {
+        version: 2,
+        parentPiSessionId: "parent",
+        registryRevision: 3,
+        generatedAt: 3,
+        totalActive: 1,
+        omitted: 0,
+        activeCapacity: { used: 1, limit: 8 },
+        nodes: [running]
+      }
+    }]
+
+    expect(completedSubagentNodes(events)).toEqual([])
   })
 })

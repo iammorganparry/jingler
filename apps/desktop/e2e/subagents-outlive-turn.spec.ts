@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url"
 import { appShell, expect, test } from "./fixtures.js"
+import type { SubagentFleetNode } from "@jingler/core"
 import type { SeedSession } from "./fixtures.js"
 
 const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => [{
@@ -26,6 +27,53 @@ const SUPERVISOR_CHILD_WRAPPER = fileURLToPath(
 )
 const REVIEWER_REPLY_PLACEHOLDER = /Reply to reviewer/i
 
+const historicalNode = (
+  id: string,
+  agent: string,
+  task: string,
+  summary: string,
+  updatedAt: number
+): SubagentFleetNode => ({
+  id,
+  subagentId: id,
+  orchestrationRunId: id,
+  nodeKind: "agent",
+  registryRevision: updatedAt,
+  childSequence: 1,
+  runId: id,
+  parentId: null,
+  parentPiSessionId: "historical-parent",
+  agent,
+  task,
+  model: null,
+  status: "completed",
+  health: "unknown",
+  phase: null,
+  blocking: null,
+  terminal: {
+    reason: "completed",
+    summary,
+    at: updatedAt,
+    retryable: false
+  },
+  background: false,
+  sessionFile: null,
+  currentTool: null,
+  startedAt: updatedAt - 1,
+  updatedAt,
+  completedAt: updatedAt,
+  usage: {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    durationMs: 0,
+    toolCalls: 0
+  },
+  artifacts: [],
+  attention: null
+})
+
 const openPreviousChats = async (window: Parameters<typeof appShell>[0]) => {
   await window.getByRole("button", { name: "Previous chats" }).click()
 }
@@ -33,7 +81,8 @@ const openPreviousChats = async (window: Parameters<typeof appShell>[0]) => {
 test("live subagents get chat-row tabs and completed output moves to Previous chats", async ({
   launchApp
 }) => {
-  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  const firstApp = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  const { window } = firstApp
   await expect(appShell(window)).toBeVisible()
 
   const composer = window.getByPlaceholder("Message the agent…")
@@ -59,6 +108,20 @@ test("live subagents get chat-row tabs and completed output moves to Previous ch
   await openPreviousChats(window)
   await expect(window.getByRole("menuitem", { name: /Open .*Survey the tab bar/ })).toBeVisible()
   await expect(window.getByRole("menuitem", { name: /Open .*Audit the theme tokens/ })).toBeVisible()
+  await firstApp.app.close()
+
+  const restarted = await launchApp({
+    home: firstApp.home,
+    reposDir: firstApp.reposDir,
+    configured: true,
+    withRepo: true
+  })
+  await expect(appShell(restarted.window)).toBeVisible()
+  await openPreviousChats(restarted.window)
+  await expect(restarted.window.getByRole("menuitem", { name: /Open .*Survey the tab bar/ }))
+    .toBeVisible()
+  await expect(restarted.window.getByRole("menuitem", { name: /Open .*Audit the theme tokens/ }))
+    .toBeVisible()
 })
 
 test("selecting a direct child opens its transcript and the parent chat restores Main", async ({
@@ -152,6 +215,66 @@ test("global Stop removes every held subagent tab and restores the idle composer
   await expect(second).toHaveCount(0)
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
   await expect(window.getByRole("button", { name: "Stop", exact: true })).toBeHidden()
+})
+
+test("inactive and closed chat agent history is available immediately after restart", async ({
+  launchApp
+}) => {
+  const inactive = historicalNode(
+    "inactive-reviewer",
+    "reviewer",
+    "Inactive review",
+    "Inactive review survived restart.",
+    3
+  )
+  const closed = historicalNode(
+    "closed-worker",
+    "worker",
+    "Closed work",
+    "Closed work survived restart.",
+    2
+  )
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{
+      ...seededSessions({ repoPath })[0]!,
+      chats: [{
+        id: "chat-main",
+        title: "Main",
+        createdAt: "2026-07-26T10:00:00.000Z",
+        updatedAt: "2026-07-26T10:00:00.000Z",
+        mode: "accept-edits"
+      }, {
+        id: "chat-inactive",
+        title: "Inactive",
+        createdAt: "2026-07-26T10:00:00.000Z",
+        updatedAt: "2026-07-26T10:00:00.000Z",
+        mode: "accept-edits",
+        subagentHistory: [inactive]
+      }],
+      closedChats: [{
+        id: "chat-closed",
+        title: "Closed",
+        createdAt: "2026-07-26T10:00:00.000Z",
+        updatedAt: "2026-07-26T10:00:00.000Z",
+        mode: "accept-edits",
+        subagentHistory: [closed]
+      }],
+      activeChatId: "chat-main"
+    }]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await openPreviousChats(window)
+  await expect(window.getByRole("menuitem", { name: "Open reviewer · Inactive review" }))
+    .toBeVisible()
+  const closedItem = window.getByRole("menuitem", { name: "Open worker · Closed work" })
+  await expect(closedItem).toBeVisible()
+  await closedItem.click()
+  await expect(window.getByTestId("subagent-final-output")).toContainText(
+    "Closed work survived restart."
+  )
 })
 
 test("completed compatibility-agent output remains in Previous chats", async ({

@@ -16,6 +16,7 @@ import type {
   ProviderModelId,
   Session,
   SettledSessionStatus,
+  SubagentFleetNode,
   WorkspaceMode
 } from "@jingler/core"
 import {
@@ -1293,6 +1294,30 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           )
         }))
 
+      const setSubagentHistory = (
+        id: string,
+        chatId: string,
+        nodes: ReadonlyArray<SubagentFleetNode>
+      ) => update(id, (session) => {
+        const patch = (chat: Chat): Chat => {
+          if (chat.id !== chatId) return chat
+          const unique = new Map(nodes.map((node) => [node.runId, node]))
+          return {
+            ...chat,
+            subagentHistory: [...unique.values()]
+              .sort((a, b) => b.updatedAt - a.updatedAt)
+              .slice(0, 8)
+          }
+        }
+        return {
+          ...session,
+          chats: session.chats.map(patch),
+          ...(session.closedChats === undefined
+            ? {}
+            : { closedChats: session.closedChats.map(patch) })
+        }
+      })
+
       /** Clear one chat's pi continuation before a deliberate context reseed. */
       const clearPiSessionId = (id: string, chatId?: string) =>
         update(id, (session) => {
@@ -1888,6 +1913,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setReasoning,
         addUsage,
         setPiSessionId,
+        setSubagentHistory,
         clearPiSessionId,
         setContextTokens,
         setChatContextTokens,

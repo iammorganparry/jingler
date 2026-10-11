@@ -59,6 +59,21 @@ const setSnapshot = (
   refreshSession(sessionId)
 }
 
+export const mergeCompletedSubagentNodes = (
+  ...groups: ReadonlyArray<ReadonlyArray<SubagentFleetNode>>
+): ReadonlyArray<SubagentFleetNode> => {
+  const merged = new Map<string, SubagentFleetNode>()
+  for (const node of groups.flat()) {
+    const existing = merged.get(node.runId)
+    if (existing === undefined || node.updatedAt >= existing.updatedAt) {
+      merged.set(node.runId, node)
+    }
+  }
+  return [...merged.values()]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 8)
+}
+
 export const completedSubagentNodes = (
   events: ReadonlyArray<SubagentFleetEvent>
 ): ReadonlyArray<SubagentFleetNode> => {
@@ -73,19 +88,31 @@ export const completedSubagentNodes = (
       completed.delete(node.id)
     }
   }
-  const values = [...completed.values()]
+  const parentPiSessionId = parentPiSessionIdFromFleetEvents(events, "")
+  const projected = parentPiSessionId === ""
+    ? []
+    : projectSubagentFleetEvents(parentPiSessionId, events).nodes
+  for (const node of projected) completed.delete(node.id)
+  const values = new Map(
+    [
+      ...completed.values(),
+      ...projected.filter((node) =>
+        node.nodeKind === "agent" && COMPLETED.has(node.status)
+      )
+    ].map((node) => [node.id, node])
+  )
   const childOrchestrations = new Set(
-    values
+    [...values.values()]
       .filter((node) => node.runId !== node.orchestrationRunId)
       .map((node) => node.orchestrationRunId)
   )
-  return values
+  return [...values.values()]
     .filter((node) =>
       node.runId !== node.orchestrationRunId ||
       !childOrchestrations.has(node.orchestrationRunId)
     )
-    .slice(-8)
-    .reverse()
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 8)
 }
 
 export const projectSubagentTabs = (input: {

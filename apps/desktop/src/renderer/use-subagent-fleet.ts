@@ -9,7 +9,10 @@ import type {
 } from "@jingler/core"
 import { SUBAGENT_FLEET_PROTOCOL_VERSION } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
-import { completedSubagentNodes } from "./subagent-tab-store.js"
+import {
+  completedSubagentNodes,
+  mergeCompletedSubagentNodes
+} from "./subagent-tab-store.js"
 import {
   MAIN_FLEET_AGENT,
   legacySubagentNodeId,
@@ -42,6 +45,7 @@ export function useSubagentFleet(input: {
   readonly piSessionId: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
   readonly legacyAgents?: ReadonlyArray<Subagent>
+  readonly persistedCompletedNodes?: ReadonlyArray<SubagentFleetNode>
 }): SubagentFleetController {
   const parentPiSessionId = parentPiSessionIdFromFleetEvents(
     input.events,
@@ -147,10 +151,24 @@ export function useSubagentFleet(input: {
     }
   }, [actor, hasFleetSession, input.chatId, input.sessionId, parentPiSessionId])
   const context = useSelector(actor, (snapshot) => snapshot.context)
-  const completedNodes = useMemo(
-    () => completedSubagentNodes(events),
-    [events]
-  )
+  const completedNodes = useMemo(() => {
+    const activeRunIds = new Set(
+      context.tree.nodes
+        .filter((node) =>
+          node.nodeKind === "agent" &&
+          ["queued", "running", "paused", "needs-attention"].includes(node.status)
+        )
+        .map((node) => node.runId)
+    )
+    return mergeCompletedSubagentNodes(
+      input.persistedCompletedNodes ?? [],
+      completedSubagentNodes(events),
+      context.tree.nodes.filter((node) =>
+        node.nodeKind === "agent" &&
+        ["completed", "failed", "stopped", "unknown"].includes(node.status)
+      )
+    ).filter((node) => !activeRunIds.has(node.runId))
+  }, [context.tree.nodes, events, input.persistedCompletedNodes])
   const [completedSelection, setCompletedSelection] = useState<string | null>(null)
   useEffect(() => {
     const selected = context.tree.nodes.find((node) => node.id === context.selectedId)

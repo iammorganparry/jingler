@@ -14,7 +14,8 @@ import type {
   CreateSessionFromPrInput,
   CreateSessionInput,
   GitHubRelayEvent,
-  Session
+  Session,
+  SubagentFleetNode
 } from "@jingler/core"
 import {
   GitHubApiError,
@@ -49,6 +50,47 @@ const activeChat = (session: Session) =>
 const connectionId = Schema.decodeUnknownSync(ProviderConnectionId)("claude-max")
 const providerId = Schema.decodeUnknownSync(ProviderId)("anthropic")
 const modelId = Schema.decodeUnknownSync(ProviderModelId)("anthropic/claude-sonnet")
+
+const completedSubagent = (): SubagentFleetNode => ({
+  id: "parent/worker-1",
+  subagentId: "worker-1",
+  orchestrationRunId: "run-1",
+  nodeKind: "agent",
+  registryRevision: 1,
+  childSequence: 1,
+  runId: "worker-1",
+  parentId: null,
+  parentPiSessionId: "parent",
+  agent: "worker",
+  task: "Implement tabs",
+  model: null,
+  status: "completed",
+  health: "connected",
+  phase: null,
+  blocking: null,
+  terminal: {
+    reason: "completed",
+    summary: "Implemented tabs.",
+    at: 2,
+    retryable: false
+  },
+  background: false,
+  sessionFile: "/sessions/worker.jsonl",
+  currentTool: null,
+  startedAt: 1,
+  updatedAt: 2,
+  completedAt: 2,
+  usage: {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    durationMs: 0,
+    toolCalls: 0
+  },
+  artifacts: [],
+  attention: null
+})
 
 const feedbackEvent = (patch: Partial<GitHubRelayEvent> = {}): GitHubRelayEvent => ({
   version: 1,
@@ -578,6 +620,31 @@ describe("SessionStore", () => {
         modelId
       })
     )
+  })
+
+  it("persists bounded subagent history on open and closed chats", async () => {
+    const node = completedSubagent()
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Agent history" }))
+        const chatId = created.activeChatId
+        yield* SessionStore.setSubagentHistory(created.id, chatId, [node])
+        const open = yield* SessionStore.get(created.id)
+        yield* SessionStore.createChat(created.id)
+        yield* SessionStore.closeChat(created.id, chatId)
+        const closed = yield* SessionStore.get(created.id)
+        return { chatId, open, closed }
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.open.chats[0]?.subagentHistory).toEqual([node])
+    expect(
+      exit.value.closed.closedChats?.find(({ id }) => id === exit.value.chatId)
+        ?.subagentHistory
+    ).toEqual([node])
   })
 
   it("stamps provider identity, mode, and reasoning defaults when supplied", async () => {

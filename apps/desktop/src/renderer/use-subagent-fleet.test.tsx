@@ -159,6 +159,77 @@ describe("useSubagentFleet reconciliation", () => {
     expect(result.current.nodes).toStrictEqual([])
   })
 
+  it("keeps terminal nodes recovered only from the startup snapshot", async () => {
+    const recovered: SubagentFleetNode = {
+      ...node,
+      status: "unknown",
+      health: "unknown",
+      updatedAt: 30,
+      completedAt: 30,
+      terminal: {
+        reason: "unknown",
+        summary: "Recovered output",
+        at: 30,
+        retryable: false
+      }
+    }
+    mocks.snapshot.mockResolvedValue({
+      ...snapshot,
+      registryRevision: 30,
+      generatedAt: 30,
+      nodes: [recovered]
+    })
+    const events: ReadonlyArray<SubagentFleetEvent> = []
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events
+    }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.completedNodes).toEqual([recovered])
+    act(() => result.current.select(recovered.id))
+    expect(result.current.selectedNode).toEqual(recovered)
+  })
+
+  it("removes persisted completed history when the run is active again", async () => {
+    const persisted: SubagentFleetNode = {
+      ...node,
+      id: "session-1:chat-1/run-1",
+      status: "completed",
+      updatedAt: 20,
+      completedAt: 20
+    }
+    const resumed: SubagentFleetNode = { ...node, updatedAt: 30 }
+    mocks.snapshot.mockResolvedValue({
+      ...snapshot,
+      registryRevision: 30,
+      generatedAt: 30,
+      totalActive: 1,
+      activeCapacity: { used: 1, limit: 8 },
+      nodes: [resumed]
+    })
+    const events: ReadonlyArray<SubagentFleetEvent> = []
+    const { result } = renderHook(() => useSubagentFleet({
+      sessionId: "session-1",
+      chatId: "chat-1",
+      piSessionId: "parent",
+      events,
+      persistedCompletedNodes: [persisted]
+    }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.nodes).toEqual([resumed])
+    expect(result.current.completedNodes).toEqual([])
+  })
+
   it("keeps completed output after its live tab disappears, even without a session file", async () => {
     mocks.snapshot.mockResolvedValue(snapshot)
     const completed = {

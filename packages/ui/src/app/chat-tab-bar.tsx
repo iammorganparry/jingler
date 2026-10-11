@@ -15,7 +15,7 @@ export interface ChatTabItem {
 export interface SubagentTabItem {
   id: string
   title: string
-  status: "running" | "attention"
+  status: "running" | "paused" | "attention"
 }
 
 export interface PreviousSubagentTabItem {
@@ -257,8 +257,14 @@ export function ChatTabBar({
                 )}
               >
                 <StatusDot
-                  tone={subagent.status === "attention" ? "bg-purple" : "bg-yellow"}
-                  pulse
+                  tone={
+                    subagent.status === "attention"
+                      ? "bg-purple"
+                      : subagent.status === "paused"
+                        ? "bg-blue"
+                        : "bg-yellow"
+                  }
+                  pulse={subagent.status !== "paused"}
                   size={7}
                 />
                 <Bot className="size-3 text-purple" />

@@ -88,6 +88,22 @@ describe("ChatTabBar closed chats", () => {
     expect(onOpenPreviousSubagent).toHaveBeenCalledWith("reviewer-1")
   })
 
+  it("shows paused subagents without a running pulse", () => {
+    render(
+      <ChatTabBar
+        chats={[{ id: "chat-1", title: "Main" }]}
+        activeChatId=""
+        subagentChatId="chat-1"
+        subagents={[{ id: "worker-1", title: "worker · Waiting", status: "paused" }]}
+        {...chatCallbacks()}
+      />
+    )
+
+    const dot = screen.getByTestId("subagent-tab-worker-1").querySelector("span")
+    expect(dot?.className).toContain("bg-blue")
+    expect(dot?.className).not.toContain("animate-pulse-dot")
+  })
+
   it("collapses chats and files into independently labelled groups", () => {
     render(
       <ChatTabBar

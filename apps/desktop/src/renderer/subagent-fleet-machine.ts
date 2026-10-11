@@ -73,7 +73,7 @@ export const projectLegacySubagents = (
       blocking: null,
       terminal: status === "running" ? null : {
         reason: status === "completed" ? "completed" : status === "stopped" ? "stopped" : "failed",
-        summary: agent.description,
+        summary: "",
         at: occurredAt,
         retryable: false
       },
