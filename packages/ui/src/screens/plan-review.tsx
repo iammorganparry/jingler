@@ -128,7 +128,7 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
               className="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-[13px] leading-snug text-muted-foreground hover:bg-surface hover:text-text-bright aria-[current]:bg-surface aria-[current]:text-text-bright"
             >
               {item.done
-                ? <Check aria-label="Done" className="size-3 flex-none self-center text-green" strokeWidth={3} />
+                ? <Check aria-label="Done" className="size-3 flex-none self-center text-state-ready" strokeWidth={3} />
                 : item.number !== undefined && <span className="flex-none font-mono text-[11px] text-dim">{item.number}</span>}
               <span className="min-w-0">{item.label}</span>
             </button>
@@ -256,18 +256,18 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-10">
           <PlanContents items={contents} scroller={container} />
         <article ref={content} className="sb-plan flex min-w-0 max-w-[760px] flex-1 flex-col">
-          <header className="border-b border-line pb-8">
-            <p className="m-0 font-mono text-[12px] uppercase tracking-wide text-dim">
+          <header className="flex flex-col gap-2 border-b border-hairline pb-4">
+            <p className="m-0 font-mono text-[12px] uppercase tracking-[0.06em] text-dim">
               Plan · revision {document.revision} · {document.status}
             </p>
-            <h1 className="sb-plan-doc-title mt-2">{plan.title}</h1>
+            <h1 className="sb-plan-doc-title m-0">{plan.title}</h1>
             {plan.stages.length > 0 && (
-              <p className="mt-3 text-[14px] text-muted-foreground">
+              <p className="m-0 text-[13px] leading-5 text-muted-foreground">
                 {plan.stages.length} {plan.stages.length === 1 ? "stage" : "stages"} · {fileCount} {fileCount === 1 ? "file" : "files"} touched
               </p>
             )}
             {document.previousSourceMarkdown !== undefined && document.sourceMarkdown !== undefined && (
-              <div className="mt-4 flex flex-col gap-2">
+              <div className="flex flex-col gap-2">
                 <Button
                   variant="secondary"
                   size="sm"
@@ -309,7 +309,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               setDraft(selection)
               setSelection(null)
             }}
-            className="absolute z-20 inline-flex items-center gap-1 rounded-md border border-line bg-sunken px-2 py-1 text-[12px] text-text-bright shadow-lg"
+            className="absolute z-20 inline-flex items-center gap-1 rounded-[6px] border border-line-strong bg-surface px-2 py-1 text-[12px] text-text-bright shadow-lg"
             style={{ top: selection.top, left: selection.left }}
           >
             <MessageSquarePlus className="size-3" /> Add comment
@@ -317,7 +317,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         )}
         {draft !== null && (
           <div
-            className="absolute z-30 w-[320px] rounded-lg border border-line bg-editor p-2 shadow-xl"
+            className="absolute z-30 w-[320px] rounded-[8px] border border-line-strong bg-surface p-2 shadow-xl"
             style={{ top: draft.top, left: Math.max(8, draft.left) }}
           >
             <textarea
@@ -325,7 +325,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={draftBody}
               onChange={(event) => setDraftBody(event.target.value)}
               rows={3}
-              className="w-full resize-none rounded border border-line bg-editor p-1.5 text-[13px] outline-none"
+              className="w-full resize-none rounded-[8px] border border-line bg-editor p-1.5 text-[13px] outline-none"
             />
             <div className="mt-1.5 flex justify-end gap-1.5">
               <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
@@ -336,8 +336,8 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
       </div>
 
       {canDecide && (
-        <footer className="flex flex-col gap-2 border-t border-line bg-panel px-4 py-3">
-          {decisionError !== null && <p role="alert" className="text-[11.5px] text-red">{decisionError}</p>}
+        <footer className="flex flex-col gap-2 border-t border-hairline bg-editor px-4 py-3">
+          {decisionError !== null && <p role="alert" className="text-[12px] text-state-failed">{decisionError}</p>}
           <div className="flex items-end gap-2">
             <textarea
               aria-label="General feedback"
@@ -345,7 +345,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               value={general}
               onChange={(event) => setGeneral(event.target.value)}
               rows={1}
-              className="min-w-0 flex-1 resize-none rounded border border-line bg-editor px-2 py-1.5 text-[13px] outline-none"
+              className="min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-1.5 text-[13px] outline-none"
             />
             <Button variant="danger" size="sm" disabled={busy} onClick={() => void decide(false)}>
               Request changes
