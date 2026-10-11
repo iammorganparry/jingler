@@ -38,22 +38,22 @@ export function ApprovalGate({
 }) {
   const pending = status === "pending"
   return (
-    <ToolApprovalSurface className={cn("border-blue/50", className)}>
-      <div className="flex items-center gap-[9px] border-b border-blue/20 px-3 py-[9px]">
-        <span className="flex size-5 items-center justify-center rounded-md bg-blue/[0.16] text-blue">
+    <ToolApprovalSurface className={cn("border-line bg-panel", className)}>
+      <div className="flex items-center gap-[9px] border-b border-hairline px-3 py-[9px]">
+        <span className="flex size-5 items-center justify-center rounded-md bg-surface text-muted-foreground">
           <KeyRound size={11} />
         </span>
         <span className="flex-1 text-[12px] font-semibold text-text-bright">{title}</span>
         {pending ? (
-          <span className="flex items-center gap-1.5 font-mono text-[10px] text-blue">
-            <StatusDot tone="bg-blue" size={6} pulse />
+          <span className="flex items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+            <StatusDot tone="bg-state-needs" size={6} pulse />
             waiting
           </span>
         ) : (
           <span
             className={cn(
               "font-mono text-[10px]",
-              status === "rejected" ? "text-red" : "text-green"
+              status === "rejected" ? "text-state-failed" : "text-muted-foreground"
             )}
           >
             {RESOLVED_LABEL[status]}
@@ -63,7 +63,7 @@ export function ApprovalGate({
       <div className="flex flex-col gap-[9px] px-3 py-2.5">
         {kind === "command" && command && (
           <div className="flex items-center gap-[9px] rounded-md border border-line bg-sunken px-2.5 py-[7px] font-mono text-[12px]">
-            <span className="text-green">❯</span>
+            <span className="text-muted-foreground">❯</span>
             <span className="flex-1 text-text-bright">{command}</span>
           </div>
         )}
