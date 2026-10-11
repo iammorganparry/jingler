@@ -1,7 +1,7 @@
 import type { CommandExecutor } from "@effect/platform"
 import { Effect } from "effect"
 import { describe, expect, it } from "vitest"
-import { GhService, mapIssueSummary, mapPrSummary, mapPrView } from "./gh.js"
+import { GhService, inlineReviewItems, mapIssueSummary, mapPrSummary, mapPrView } from "./gh.js"
 import { failureOf, fakeCommandExecutor, runExit } from "./test-support.js"
 import type { FakeCommandHandler } from "./test-support.js"
 
@@ -146,6 +146,43 @@ describe("mapPrView", () => {
   it("maps MERGED and CLOSED states", () => {
     expect(mapPrView({ state: "MERGED", number: 1, url: "u" }).state).toBe("merged")
     expect(mapPrView({ state: "CLOSED", number: 1, url: "u" }).state).toBe("closed")
+  })
+
+  it("groups REST inline comments under their review when inline data is supplied", () => {
+    const reviews = [
+      { id: 100, user: { login: "greptile-apps[bot]" }, state: "COMMENTED", body: "", submitted_at: "2026-07-11T09:05:00Z" },
+      { id: 101, user: { login: "dan" }, state: "CHANGES_REQUESTED", body: "Please fix", submitted_at: "2026-07-11T09:00:00Z" }
+    ]
+    const comments = [
+      { id: 1, pull_request_review_id: 100, user: { login: "greptile-apps[bot]" }, body: "null deref", path: "a.ts", line: null, original_line: 41, created_at: "2026-07-11T09:05:00Z" }
+    ]
+    const pr = mapPrView({ state: "OPEN", number: 5, url: "u" }, { reviews, comments })
+    // Greptile's empty-body COMMENTED review survives because it has an inline
+    // comment; `dan`'s change-request survives on its verdict. Timeline is
+    // chronological, so dan's 09:00 review precedes Greptile's 09:05.
+    expect(pr.timeline.map((t) => t.author)).toStrictEqual(["dan", "greptile-apps"])
+    const greptile = pr.timeline.find((t) => t.author === "greptile-apps")
+    expect(greptile?.comments).toHaveLength(1)
+    // `line` is null on an outdated diff → falls back to `original_line`; `[bot]` stripped.
+    expect(greptile?.comments[0]).toMatchObject({ author: "greptile-apps", path: "a.ts", line: 41 })
+    expect(pr.timeline.find((t) => t.author === "dan")?.comments).toHaveLength(0)
+  })
+})
+
+describe("inlineReviewItems", () => {
+  it("drops empty commented reviews with no inline comments, keeps the rest", () => {
+    const reviews = [
+      { id: 1, user: { login: "noop" }, state: "COMMENTED", body: "", submitted_at: "t1" },
+      { id: 2, user: { login: "wrote" }, state: "COMMENTED", body: "a note", submitted_at: "t2" },
+      { id: 3, user: { login: "approver" }, state: "APPROVED", body: "", submitted_at: "t3" }
+    ]
+    const items = inlineReviewItems(reviews, [])
+    expect(items.map((i) => i.author)).toStrictEqual(["wrote", "approver"])
+  })
+
+  it("tolerates missing/garbage payloads", () => {
+    expect(inlineReviewItems(null, undefined)).toStrictEqual([])
+    expect(inlineReviewItems("nope", 42)).toStrictEqual([])
   })
 })
 

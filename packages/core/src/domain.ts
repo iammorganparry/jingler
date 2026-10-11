@@ -351,8 +351,25 @@ export const PrCheck = Schema.Struct({
 export type PrCheck = Schema.Schema.Type<typeof PrCheck>
 
 /**
- * A review / comment entry in the PR timeline. `path`/`line` are set only for
- * inline review comments (null for issue comments / v1 — see the plan).
+ * An inline review comment anchored to a file + line, nested under its parent
+ * review in the timeline. This is where AI reviewers (Greptile, CodeRabbit,
+ * Devin) put their per-line feedback — a review with an empty body but N of these.
+ */
+export const PrInlineComment = Schema.Struct({
+  id: Schema.String,
+  author: Schema.String,
+  body: Schema.String,
+  path: Schema.String,
+  /** 1-based line in the file; null when the comment is on an outdated diff. */
+  line: Schema.NullOr(Schema.Number),
+  createdAt: Schema.String
+})
+export type PrInlineComment = Schema.Schema.Type<typeof PrInlineComment>
+
+/**
+ * A review / comment entry in the PR timeline. Top-level `path`/`line` are set
+ * only for standalone inline comments; a review groups its per-line feedback in
+ * `comments` (empty for issue comments and review bodies).
  */
 export const PrTimelineItem = Schema.Struct({
   id: Schema.String,
@@ -361,7 +378,9 @@ export const PrTimelineItem = Schema.Struct({
   body: Schema.String,
   createdAt: Schema.String,
   path: Schema.NullOr(Schema.String),
-  line: Schema.NullOr(Schema.Number)
+  line: Schema.NullOr(Schema.Number),
+  /** Inline review comments grouped under this review (empty otherwise). */
+  comments: Schema.Array(PrInlineComment)
 })
 export type PrTimelineItem = Schema.Schema.Type<typeof PrTimelineItem>
 

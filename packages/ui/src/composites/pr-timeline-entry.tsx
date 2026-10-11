@@ -38,11 +38,14 @@ const kindMeta = {
 export function PrTimelineEntry({
   item,
   sent = false,
+  sentIds,
   onSendToAgent
 }: {
   item: PrTimelineItem
-  /** This entry has already been routed to the agent — the action stays "Sent". */
+  /** This review body has already been routed to the agent — action stays "Sent". */
   sent?: boolean
+  /** Ids (review or inline-comment) already routed to the agent — drives nested "Sent". */
+  sentIds?: ReadonlySet<string>
   onSendToAgent?: (id: string) => Promise<void> | void
 }) {
   const meta = kindMeta[item.kind]
@@ -76,7 +79,37 @@ export function PrTimelineEntry({
           {hasRef && (
             <CodeChip path={item.path as string} line={item.line as number} className="self-start" />
           )}
-          {onSendToAgent && (
+          {/* Inline per-line comments grouped under this review (e.g. Greptile). */}
+          {item.comments.map((c) => (
+            <div key={c.id} className="flex flex-col gap-2 rounded-md border border-hairline bg-sunken/50 p-[11px]">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-semibold text-text-bright">{c.author}</span>
+                <span className="font-mono text-[11px] text-dim">{relativeTime(c.createdAt)}</span>
+              </div>
+              {c.path && (
+                <CodeChip path={c.path} line={c.line ?? undefined} className="self-start" />
+              )}
+              {c.body && <Markdown className="text-[13px]">{c.body}</Markdown>}
+              {onSendToAgent && (
+                <AsyncButton
+                  variant="secondary"
+                  size="sm"
+                  icon={<ClaudeGlyph />}
+                  pendingLabel="Sending…"
+                  successLabel="Sent"
+                  doneLabel="Sent to agent"
+                  terminal
+                  done={sentIds?.has(c.id)}
+                  onClick={() => onSendToAgent(c.id)}
+                  className="self-start"
+                >
+                  Send to agent
+                </AsyncButton>
+              )}
+            </div>
+          ))}
+          {/* Review-level send (a written review body, not the inline comments). */}
+          {onSendToAgent && item.body.length > 0 && (
             <div className="flex items-center gap-2">
               <AsyncButton
                 variant="secondary"

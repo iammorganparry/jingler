@@ -5,6 +5,7 @@ import type {
   PrCheck,
   PrCheckStatus,
   PrFileChange,
+  PrInlineComment,
   PrLabel,
   PrMergeMethod,
   PrReviewer,
@@ -102,6 +103,61 @@ const timelineKindOf = (state: string | null): "commented" | "approved" | "chang
 
 const reviewKindOf = (state: string | null): PrReviewKind => timelineKindOf(state)
 
+/** `greptile-apps[bot]` → `greptile-apps` (REST logins carry a `[bot]` suffix). */
+const stripBot = (login: string): string => login.replace(/\[bot\]$/, "")
+
+/**
+ * Build the review timeline from the REST `pulls/N/reviews` + `pulls/N/comments`
+ * payloads (numeric ids that actually cross-reference, unlike `gh pr view`'s
+ * GraphQL node ids). Each review carries its inline comments grouped in
+ * `comments`, so an empty-body `COMMENTED` review from an AI reviewer still
+ * surfaces its per-line feedback. Pure + defensive.
+ */
+export const inlineReviewItems = (
+  reviewsRaw: unknown,
+  commentsRaw: unknown
+): ReadonlyArray<PrTimelineItem> => {
+  // Group inline comments by their parent review id.
+  const byReview = new Map<number, PrInlineComment[]>()
+  for (const c of arr(commentsRaw)) {
+    const reviewId = num(c.pull_request_review_id)
+    if (reviewId === null) continue
+    const comment: PrInlineComment = {
+      id: String(num(c.id) ?? str(c.id) ?? ""),
+      author: stripBot(str(rec(c.user).login) ?? "unknown"),
+      body: str(c.body) ?? "",
+      path: str(c.path) ?? "",
+      // `line` is null for comments on an outdated diff — fall back to the
+      // original line the comment was first anchored to.
+      line: num(c.line) ?? num(c.original_line),
+      createdAt: str(c.created_at) ?? ""
+    }
+    const list = byReview.get(reviewId)
+    if (list) list.push(comment)
+    else byReview.set(reviewId, [comment])
+  }
+
+  return arr(reviewsRaw)
+    .map((rv): PrTimelineItem => {
+      const reviewId = num(rv.id)
+      return {
+        id: String(reviewId ?? str(rv.id) ?? ""),
+        author: stripBot(str(rec(rv.user).login) ?? "unknown"),
+        kind: timelineKindOf(str(rv.state)),
+        body: str(rv.body) ?? "",
+        createdAt: str(rv.submitted_at) ?? str(rv.created_at) ?? "",
+        path: null,
+        line: null,
+        comments: reviewId === null ? [] : (byReview.get(reviewId) ?? [])
+      }
+    })
+    // Keep verdicts, reviews with a written body, and reviews that carry inline
+    // feedback; drop empty "commented" reviews (e.g. an approval-less no-op).
+    .filter(
+      (item) => item.kind !== "commented" || item.body.length > 0 || item.comments.length > 0
+    )
+}
+
 const checkStatusOf = (c: Json): PrCheckStatus => {
   const status = str(c.status)?.toUpperCase()
   const conclusion = str(c.conclusion)?.toUpperCase()
@@ -139,7 +195,16 @@ const durationOf = (c: Json): number | null => {
  * primary unit-test target. "draft" state, `mergeBlockers`, and `checks` are
  * synthesized here (GitHub reports none of them as a single field).
  */
-export const mapPrView = (raw: unknown): PullRequest => {
+export const mapPrView = (
+  raw: unknown,
+  /**
+   * Raw REST `pulls/N/reviews` + `pulls/N/comments` payloads. When present, the
+   * timeline's reviews come from these (with inline comments grouped in), so an
+   * AI reviewer's empty-body review still surfaces its per-line feedback. When
+   * absent (unit tests), the timeline falls back to `gh pr view`'s reviews.
+   */
+  inline?: { reviews: unknown; comments: unknown }
+): PullRequest => {
   const j = rec(raw)
   const rawState = str(j.state)?.toUpperCase()
   const isDraft = j.isDraft === true
@@ -174,21 +239,26 @@ export const mapPrView = (raw: unknown): PullRequest => {
     state: s
   }))
 
-  // Timeline: substantive reviews + issue comments, chronological.
-  const reviewItems: ReadonlyArray<PrTimelineItem> = arr(j.reviews)
-    .filter((rv) => {
-      const s = str(rv.state)?.toUpperCase()
-      return s === "APPROVED" || s === "CHANGES_REQUESTED" || (str(rv.body) ?? "").length > 0
-    })
-    .map((rv, i) => ({
-      id: str(rv.id) ?? `review-${i}`,
-      author: str(rec(rv.author).login) ?? "unknown",
-      kind: timelineKindOf(str(rv.state)),
-      body: str(rv.body) ?? "",
-      createdAt: str(rv.submittedAt) ?? str(rv.createdAt) ?? "",
-      path: null,
-      line: null
-    }))
+  // Timeline: substantive reviews + issue comments, chronological. Reviews come
+  // from the REST payload when provided (so inline comments group under them);
+  // otherwise from `gh pr view` (bodies only — the pre-inline fallback).
+  const reviewItems: ReadonlyArray<PrTimelineItem> = inline
+    ? inlineReviewItems(inline.reviews, inline.comments)
+    : arr(j.reviews)
+        .filter((rv) => {
+          const s = str(rv.state)?.toUpperCase()
+          return s === "APPROVED" || s === "CHANGES_REQUESTED" || (str(rv.body) ?? "").length > 0
+        })
+        .map((rv, i) => ({
+          id: str(rv.id) ?? `review-${i}`,
+          author: str(rec(rv.author).login) ?? "unknown",
+          kind: timelineKindOf(str(rv.state)),
+          body: str(rv.body) ?? "",
+          createdAt: str(rv.submittedAt) ?? str(rv.createdAt) ?? "",
+          path: null,
+          line: null,
+          comments: []
+        }))
   const commentItems: ReadonlyArray<PrTimelineItem> = arr(j.comments).map((c, i) => ({
     id: str(c.id) ?? `comment-${i}`,
     author: str(rec(c.author).login) ?? "unknown",
@@ -196,7 +266,8 @@ export const mapPrView = (raw: unknown): PullRequest => {
     body: str(c.body) ?? "",
     createdAt: str(c.createdAt) ?? "",
     path: null,
-    line: null
+    line: null,
+    comments: []
   }))
   const timeline = [...reviewItems, ...commentItems].sort((a, b) =>
     a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0
@@ -540,9 +611,24 @@ export class GhService extends Effect.Service<GhService>()(
         cwd: string,
         number: number
       ): Effect.Effect<PullRequest | null, never, CommandExecutor.CommandExecutor> =>
-        ghJson(cwd, ["pr", "view", String(number), "--json", PR_VIEW_FIELDS]).pipe(
-          Effect.map((raw) => (raw === null ? null : mapPrView(raw)))
-        ),
+        Effect.gen(function* () {
+          const raw = yield* ghJson(cwd, ["pr", "view", String(number), "--json", PR_VIEW_FIELDS])
+          if (raw === null) return null
+          // Inline review comments aren't exposed by `gh pr view`; pull the REST
+          // reviews + comments (numeric ids that cross-reference) so AI reviewers'
+          // per-line feedback shows in the timeline. `{owner}/{repo}` are filled by
+          // gh from the repo context; failures fold to null → no inline items.
+          const q = "?per_page=100"
+          const reviews = yield* ghJson(cwd, [
+            "api",
+            `repos/{owner}/{repo}/pulls/${number}/reviews${q}`
+          ])
+          const comments = yield* ghJson(cwd, [
+            "api",
+            `repos/{owner}/{repo}/pulls/${number}/comments${q}`
+          ])
+          return mapPrView(raw, { reviews, comments })
+        }),
 
       /** The changed files of `number` for the Code Review file list. */
       prFiles: (

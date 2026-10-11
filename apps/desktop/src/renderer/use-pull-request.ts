@@ -124,10 +124,16 @@ export function usePullRequest(
   const sentEntryIds = useRoutedEntries(session.id)
   const sendEntryToAgent = useCallback(
     async (entryId: string) => {
-      const item = pr?.timeline.find((t) => t.id === entryId)
-      if (!item) return
-      const ref = item.path ? ` (on ${item.path}${item.line ? ` line ${item.line}` : ""})` : ""
-      routeToAgent(`Review feedback from @${item.author}${ref}:\n\n${item.body}\n\nPlease address this.`)
+      // The id may be a review OR one of its nested inline comments — find either.
+      const timeline = pr?.timeline ?? []
+      const review = timeline.find((t) => t.id === entryId)
+      const inline = review
+        ? null
+        : timeline.flatMap((t) => t.comments).find((c) => c.id === entryId)
+      const entry = review ?? inline
+      if (!entry) return
+      const ref = entry.path ? ` (on ${entry.path}${entry.line ? ` line ${entry.line}` : ""})` : ""
+      routeToAgent(`Review feedback from @${entry.author}${ref}:\n\n${entry.body}\n\nPlease address this.`)
       markRouted(session.id, entryId)
     },
     [pr, routeToAgent, session.id]

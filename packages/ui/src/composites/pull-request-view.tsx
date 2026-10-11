@@ -221,6 +221,7 @@ export function PullRequestView({
                 key={item.id}
                 item={item}
                 sent={sentEntryIds?.has(item.id)}
+                sentIds={sentEntryIds}
                 onSendToAgent={onSendEntryToAgent}
               />
             ))

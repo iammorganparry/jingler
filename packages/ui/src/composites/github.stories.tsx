@@ -40,7 +40,36 @@ const pr: PullRequestData = {
       body: "The refresh guard should also handle the 401 retry path — right now a stale token 500s instead of refreshing.",
       createdAt: "2026-07-11T09:00:00.000Z",
       path: "src/auth/session.ts",
-      line: 34
+      line: 34,
+      comments: []
+    },
+    {
+      // An AI reviewer: empty review body, feedback lives in inline comments.
+      id: "r2",
+      author: "greptile-apps",
+      kind: "commented",
+      body: "",
+      createdAt: "2026-07-11T09:05:00.000Z",
+      path: null,
+      line: null,
+      comments: [
+        {
+          id: "c1",
+          author: "greptile-apps",
+          body: "**Possible null deref** — `session.token` can be undefined here when the refresh races.",
+          path: "src/auth/session.ts",
+          line: 41,
+          createdAt: "2026-07-11T09:05:00.000Z"
+        },
+        {
+          id: "c2",
+          author: "greptile-apps",
+          body: "Consider memoizing this — it re-parses on every render.",
+          path: "src/auth/refresh.ts",
+          line: 12,
+          createdAt: "2026-07-11T09:05:10.000Z"
+        }
+      ]
     }
   ],
   checks: [
