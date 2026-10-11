@@ -543,6 +543,37 @@ export const PublishMetadata = Schema.Struct({
 });
 export type PublishMetadata = Schema.Schema.Type<typeof PublishMetadata>;
 
+/** Overall state of a pull request. "draft" is synthesized from `isDraft`. */
+export const PrState = Schema.Literal("open", "closed", "merged", "draft");
+export type PrState = Schema.Schema.Type<typeof PrState>;
+
+/** Normalized CI check status (mapped from GitHub checks and commit statuses). */
+export const PrCheckStatus = Schema.Literal(
+  "pass",
+  "fail",
+  "running",
+  "pending",
+);
+export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>;
+
+/**
+ * One PR in a session's stack. `prs` is ordered bottom of the stack first, so
+ * the last entry is the top layer (and is mirrored into `Session.prNumber`).
+ * Only `number` is always known: sessions persisted before stacks existed carry
+ * just their single `prNumber`, and `state`/`checks` are live reads filled in
+ * later rather than guessed here.
+ */
+export const SessionPr = Schema.Struct({
+  number: Schema.Number,
+  /** Head branch of this layer. */
+  branch: Schema.optional(Schema.String),
+  /** Base this layer targets: the trunk, or the branch of the layer below. */
+  base: Schema.optional(Schema.String),
+  state: Schema.optional(PrState),
+  checks: Schema.optional(Schema.NullOr(PrCheckStatus)),
+});
+export type SessionPr = Schema.Schema.Type<typeof SessionPr>;
+
 /** Durable checkpoint for the deterministic session publishing workflow. */
 export const PublishCheckpoint = Schema.Struct({
   step: PublishStep,
@@ -618,8 +649,13 @@ export const Session = Schema.Struct({
    */
   executionLocation: Schema.optional(Schema.Literal("local", "cloud")),
   diff: DiffStat,
-  /** Optional linked pull-request number. */
+  /** Optional linked pull-request number: always the top of `prs` when that is set. */
   prNumber: Schema.NullOr(Schema.Number),
+  /**
+   * The session's PR stack, bottom layer first. Optional so older sessions
+   * decode; the session store fills it from `prNumber` on read.
+   */
+  prs: Schema.optional(Schema.Array(SessionPr)),
   /** Immutable GitHub App installation owning the linked repository. */
   githubInstallationId: Schema.optional(Schema.String),
   /** Immutable GitHub repository database id used for webhook/session routing. */
@@ -1145,19 +1181,6 @@ export const Worktree = Schema.Struct({
 export type Worktree = Schema.Schema.Type<typeof Worktree>;
 
 // ── Pull requests / code review ──────────────────────────────────────────────
-
-/** Overall state of a pull request. "draft" is synthesized from `isDraft`. */
-export const PrState = Schema.Literal("open", "closed", "merged", "draft");
-export type PrState = Schema.Schema.Type<typeof PrState>;
-
-/** Normalized CI check status (mapped from GitHub checks and commit statuses). */
-export const PrCheckStatus = Schema.Literal(
-  "pass",
-  "fail",
-  "running",
-  "pending",
-);
-export type PrCheckStatus = Schema.Schema.Type<typeof PrCheckStatus>;
 
 /**
  * A session's linked PR, reduced to the two facts a sidebar row can show in one

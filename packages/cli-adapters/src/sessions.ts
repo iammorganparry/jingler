@@ -21,6 +21,7 @@ import type {
   ProviderModelId,
   RuntimeContinuation,
   Session,
+  SessionPr,
   SettledSessionStatus,
   WorkspaceLifecycle,
   WorkspaceMode
@@ -389,6 +390,21 @@ export const migrateSessionIssue = (session: Session): Session => {
 }
 
 /**
+ * Keep `prs` (the stack, bottom first) and `prNumber` (its top) consistent.
+ * Sessions persisted before stacks existed have only `prNumber`; they read as a
+ * one-element stack. Deterministic, so it is safe on every read and write.
+ */
+export const migrateSessionPrs = (session: Session): Session => {
+  const prs = session.prs ?? []
+  if (prs.length > 0) {
+    const top = prs[prs.length - 1]!.number
+    return session.prNumber === top && session.prs === prs ? session : { ...session, prs, prNumber: top }
+  }
+  if (session.prNumber === null) return session
+  return { ...session, prs: [{ number: session.prNumber }] }
+}
+
+/**
  * The longest slug we will put on disk.
  *
  * A slug becomes a DIRECTORY NAME (`~/jingler/worktrees/<repo>/<slug>`) and a
@@ -565,7 +581,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           yield* fs
             .makeDirectory(paths.root, { recursive: true })
             .pipe(Effect.mapError((cause) => new GitError({ message: "Failed to create ~/jingler", cause })))
-          const encoded = yield* Schema.encode(SessionArray)(sessions.map(migrateSessionIssue)).pipe(
+          const encoded = yield* Schema.encode(SessionArray)(sessions.map((session) => migrateSessionPrs(migrateSessionIssue(session)))).pipe(
             Effect.mapError((cause) => new GitError({ message: "Failed to encode sessions", cause }))
           )
           // Write-then-RENAME, never write in place.
@@ -1695,7 +1711,17 @@ export class SessionStore extends Effect.Service<SessionStore>()(
             githubFeedbackSemanticKeys: _semanticKeys,
             ...unlinked
           } = session
-          return { ...unlinked, prNumber }
+          const { prs: _prs, ...single } = unlinked
+          return migrateSessionPrs({ ...single, prNumber })
+        })
+
+      /** Add a PR on top of the stack (or update it in place when `number` is already in it). */
+      const appendPr = (id: string, pr: SessionPr) =>
+        update(id, (session) => {
+          const prs = session.prs ?? []
+          const at = prs.findIndex((existing) => existing.number === pr.number)
+          const next = at === -1 ? [...prs, pr] : prs.map((existing, i) => (i === at ? { ...existing, ...pr } : existing))
+          return migrateSessionPrs({ ...session, prs: next })
         })
 
       /** Persist the live worktree/PR identity as one routing transition. */
@@ -1708,13 +1734,16 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           readonly branch?: string
         }
       ) =>
-        update(id, (session) => ({
-          ...session,
-          ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
-          prNumber: link.prNumber,
-          githubInstallationId: link.installationId,
-          githubRepositoryId: link.repositoryId
-        }))
+        update(id, (session) => {
+          const { prs: _prs, ...single } = session
+          return migrateSessionPrs({
+            ...single,
+            ...propertiesWhen(link.branch !== undefined, { branch: link.branch }),
+            prNumber: link.prNumber,
+            githubInstallationId: link.installationId,
+            githubRepositoryId: link.repositoryId
+          })
+        })
 
     /**
      * Exactly-once claim, validated and persisted atomically before the
@@ -2104,6 +2133,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         setStatus,
         addAllowlist,
         setPrNumber,
+        appendPr,
         setGitHubLink,
         claimGitHubFeedback,
         markGitHubFeedbackDispatched,
@@ -2314,7 +2344,11 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
     const decoded = Schema.decodeUnknownEither(SessionSchema)(
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
-    if (Either.isRight(decoded)) { updateWorkspaceReadiness(decoded.right); sessions.push(decoded.right) }
+    if (Either.isRight(decoded)) {
+      const session = migrateSessionPrs(decoded.right)
+      updateWorkspaceReadiness(session)
+      sessions.push(session)
+    }
   }
   return sessions
 }
