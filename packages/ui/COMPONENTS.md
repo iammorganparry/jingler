@@ -19,7 +19,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Avatar | `components/avatar.tsx` | User avatar image from a GitHub login. | — | yes | #378 (2.13) |
 | Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). | children, tone, size, className, title | yes | #361 (1.3) |
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
-| ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | #366 (2.1) |
+| ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | — |
 | Callout | `components/callout.tsx` | Inline notice with a leading glyph and tone. | children, glyph, className | no | #376 (2.11) |
 | Card, CardHeader | `components/card.tsx` | Bordered panel surface (Card, CardHeader). | — | no | — |
 | Checkbox | `components/checkbox.tsx` | Checkbox. | checked, onCheckedChange, indeterminate, label, tone | yes | — |
@@ -40,6 +40,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | GithubMark | `components/github-mark.tsx` | GitHub octocat mark. | — | no | — |
 | HoverCard | `components/hover-card.tsx` | Detail popover opening on hover intent and focus. | — | no | #374 (2.9) |
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
+| IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
 | Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. | — | yes | #361 (1.3), #374 (2.9) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
@@ -196,7 +197,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 
 | Component | Replaces / extends | Issue |
 |---|---|---|
-| IconButtonGroup | `ButtonGroup` | #366 (2.1) |
 | SearchField, FilterChips | `SearchInput` | #367 (2.2) |
 | SegmentedControl 28px | `SegmentedControl` | #368 (2.3) |
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
