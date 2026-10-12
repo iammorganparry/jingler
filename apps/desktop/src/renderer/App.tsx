@@ -98,6 +98,7 @@ import {
 import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
+import { clearDismissedFindings } from "./dismissed-findings-store.js";
 import {
   closeSessionFile,
   disposeFileBrowserActor,
@@ -737,6 +738,7 @@ function AuthedApp({
     // nothing else would ever collect it (and it's persisted).
     for (const chatId of chatIds) clearDraft(chatId);
     clearViewedPaths(sessionId);
+    clearDismissedFindings(sessionId);
     forgetEditorLayout(sessionId);
     send({ type: "SESSION_DELETED", sessionId });
   };

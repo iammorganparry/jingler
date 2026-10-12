@@ -15,6 +15,8 @@ import { getConversationActor } from "./conversation-registry.js"
 import { markRouted, useRoutedEntries } from "./routed-store.js"
 import { resolveSentIds, reviewQueryKey, routedKey } from "./review-routing.js"
 import { routeReviewToCurrentAgent } from "./auto-route.js"
+import { findingFingerprint } from "./dismissed-findings-store.js"
+import { setFindingDismissed, useSessionReviewState } from "./review-store.js"
 
 /** Format a finding as the instruction handed to the session's agent. */
 const findingPrompt = (finding: ReviewFinding): string => {
@@ -54,6 +56,10 @@ export interface AdversarialReviewState {
    * business, not the UI's.
    */
   readonly sentFindingIds: ReadonlySet<string>
+  /** Ids of findings in the CURRENT review the reviewer dismissed; survives reload. */
+  readonly dismissedFindingIds: ReadonlySet<string>
+  /** Dismiss (or restore) a finding of the current review. */
+  readonly dismissFinding: (findingId: string, dismissed?: boolean) => void
 }
 
 export function useAdversarialReview(
@@ -177,6 +183,24 @@ export function useAdversarialReview(
     [review, session]
   )
 
+  const { dismissedFindings } = useSessionReviewState(session.id, session.prNumber)
+  const dismissedFindingIds = useMemo(
+    () =>
+      new Set(
+        (review?.findings ?? [])
+          .filter((f) => dismissedFindings.has(findingFingerprint(f)))
+          .map((f) => f.id)
+      ),
+    [review, dismissedFindings]
+  )
+  const dismissFinding = useCallback(
+    (findingId: string, dismissed = true) => {
+      const finding = review?.findings.find((f) => f.id === findingId)
+      if (finding) setFindingDismissed(session.id, session.prNumber, findingFingerprint(finding), dismissed)
+    },
+    [review, session.id, session.prNumber]
+  )
+
   return {
     review,
     loading: query.isPending && hasPr && connected,
@@ -190,6 +214,8 @@ export function useAdversarialReview(
       : null,
     runReview,
     sendFindingToAgent,
-    sentFindingIds
+    sentFindingIds,
+    dismissedFindingIds,
+    dismissFinding
   }
 }
