@@ -85,7 +85,7 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
     ? "inline-flex w-max items-center gap-1 rounded-full bg-panel p-1"
     : variant === "underline"
       ? "inline-flex w-max min-w-full items-center gap-1 border-b border-line"
-      : "inline-flex w-max min-w-full items-center gap-0 rounded-lg bg-sunken p-0.5"
+      : "inline-flex w-max min-w-full items-center gap-0 rounded-[6px] border border-hairline bg-panel p-0.5"
 
   const segment = variant === "segment"
   const radius = segment ? "rounded-md" : "rounded-full"
