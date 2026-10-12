@@ -207,3 +207,5 @@ export * from "./composites/themes-settings.js"
 export * from "./composites/plugins-settings.js"
 
 export * from "./composites/routines-settings-view.js"
+export * from "./app/chat-lane-machine.js"
+export * from "./app/use-chat-lane.js"

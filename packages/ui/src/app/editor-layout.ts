@@ -461,6 +461,21 @@ const isChatContentSplit = (node: EditorNode): boolean => {
   return leftAllChat && rightAllContent
 }
 
+/** True when this drag would take the root chat lane below the collapse threshold. */
+export const wouldCollapseChatLane = (layout: EditorLayout, splitId: string, index: number, delta: number, containerWidth: number | undefined): boolean => {
+  const root = layout.root
+  if (!root || root.type !== "split" || root.id !== splitId || index !== 0 || !containerWidth || !isChatContentSplit(root)) return false
+  return resizeChatLane(root.ratios[0] ?? 0, delta, containerWidth) === null
+}
+
+/** The layout with the chat lane hidden (collapsed to the Ask pill); ratios are untouched so restore keeps the width. */
+export const withoutChatLane = (layout: EditorLayout): EditorLayout => {
+  const root = layout.root
+  if (!root || root.type !== "split" || !isChatContentSplit(root)) return layout
+  const content = root.children[1]
+  return content ? { ...layout, root: content } : layout
+}
+
 /** Apply chat lane resize or generic pair resize based on split type. */
 const applyResize = (
   node: EditorSplit,
@@ -474,7 +489,7 @@ const applyResize = (
 
   // Apply chat lane pixel logic to the chat/content split
   if (index === 0 && isChatContentSplit(node) && containerWidth !== undefined && containerWidth > 0) {
-    // ponytail: below the collapse threshold the lane pins at its minimum until 4.4 renders the Ask pill.
+    // The pane collapses to the Ask pill first (wouldCollapseChatLane); this pin only covers callers without that.
     const nextChatRatio = resizeChatLane(a, delta, containerWidth) ?? CHAT_LANE_MIN_PX / containerWidth
     return { ...node, ratios: [nextChatRatio, 1 - nextChatRatio] }
   }

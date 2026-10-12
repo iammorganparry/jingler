@@ -56,6 +56,8 @@ import {
   openTab,
   pruneEditorLayout,
   resizeSplit,
+  withoutChatLane,
+  wouldCollapseChatLane,
   type EditorLayout
 } from "../app/editor-layout.js"
 import {
@@ -65,6 +67,9 @@ import {
   useEditorLayout
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
+import { useChatLane } from "../app/use-chat-lane.js"
+import { matchCollapseChatChord, matchFocusChatChord } from "../app/app-shortcuts.js"
+import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
 
@@ -529,6 +534,7 @@ const handleSurfaceCommand = (
 // oxlint-disable eslint/complexity
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: splitting the coordinator would duplicate those effects.
 function SessionPaneBody(props: SessionPaneProps) {
+
   const active = props.session
   const sessionId = active.id
   const mainChatId = active.chats[0]?.id
@@ -549,6 +555,8 @@ function SessionPaneBody(props: SessionPaneProps) {
   )
   useLayoutEffect(() => initEditorLayout(sessionId, initialLayout), [sessionId, initialLayout])
   const layout = useEditorLayout(sessionId) ?? initialLayout
+  // Chat lane mode: collapsed shows the Ask pill; Focus hides (but keeps mounted) the content tabs.
+  const chatLane = useChatLane(allTabs(layout).some((tab) => tab.kind !== "chat"))
   const update = useCallback(
     (fn: (current: EditorLayout) => EditorLayout) => updateEditorLayout(sessionId, fn),
     [sessionId]
@@ -798,6 +806,8 @@ function SessionPaneBody(props: SessionPaneProps) {
     .map((contribution) => describeTab(contribution, tabCtx))
   const viewRailMenus = { ...buildProviderMenus(active, tabs, props.onSelectIssue), ...props.viewRailMenus }
 
+  
+
   const closeTabIn = useCallback(
     (groupId: string, surface: SessionSurface) => {
       const current = editorLayoutOf(sessionId) ?? layout
@@ -876,6 +886,21 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const renderRevision = useMemo(() => ({}), [active, contributions])
   const paneFocused = props.pane === undefined || props.pane.focused
+  // Keyboard shortcuts for chat lane collapse (⌘L) and Focus mode (⌘⇧L)
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (matchCollapseChatChord(e)) {
+        e.preventDefault()
+        chatLane.toggleCollapse()
+      } else if (matchFocusChatChord(e)) {
+        e.preventDefault()
+        chatLane.toggleFocus()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [paneFocused, chatLane])
   useEffect(() => {
     if (!paneFocused) return
     const onCommand = (event: Event) => handleSurfaceCommand(
@@ -899,15 +924,21 @@ function SessionPaneBody(props: SessionPaneProps) {
   return (
     <>
       {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-row">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-row relative">
+        {chatLane.showAskPill && (
+          <AskPill
+            onClick={() => chatLane.toggleCollapse()}
+            className="absolute bottom-4 left-4 z-10"
+          />
+        )}
         <EditorGroups
           onOpenCheckpoints={props.onOpenCheckpoints ? (trigger) => props.onOpenCheckpoints?.(sessionId, trigger) : undefined}
           sessionId={sessionId}
-          layout={layout}
+          layout={chatLane.showAskPill ? withoutChatLane(layout) : layout}
           // Layout-only updates keep this token, while render dependencies replace it.
           revision={renderRevision}
           describe={describeSurface}
-          renderBody={renderBody}
+          renderBody={(surface, ctx) => renderBody(surface, { ...ctx, visible: ctx.visible && !chatLane.contentHidden })}
           onActivate={(groupId, surface) => {
             update((current) => activateTab(current, groupId, sessionSurfaceKey(surface)))
             if (surface.kind === "chat") props.onFocusChat?.(sessionId, surface.id)
@@ -923,7 +954,10 @@ function SessionPaneBody(props: SessionPaneProps) {
             const surface = surfaceInGroup(groupId)
             if (surface) syncChat(surface)
           }}
-          onResize={(splitId, index, delta, containerWidth) => update((current) => resizeSplit(current, splitId, index, delta, containerWidth))}
+          onResize={(splitId, index, delta, containerWidth) => {
+            if (wouldCollapseChatLane(layout, splitId, index, delta, containerWidth)) chatLane.toggleCollapse()
+            else update((current) => resizeSplit(current, splitId, index, delta, containerWidth))
+          }}
           launcherItems={launcherItems}
         />
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
