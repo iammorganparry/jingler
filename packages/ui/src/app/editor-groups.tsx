@@ -427,7 +427,7 @@ const EditorGroup = memo(function EditorGroup({
   
   useEffect(() => {
     const section = sectionRef.current
-    if (!section) return
+    if (!section || typeof ResizeObserver === "undefined") return
     
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0]
