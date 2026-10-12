@@ -71,7 +71,7 @@ export interface EditorGroupsProps {
   readonly onClose: (groupId: string, surface: SessionSurface) => void
   readonly onDrop: (drag: TabDrag, groupId: string | null, edge: DropEdge, copy: boolean) => void
   readonly onFocusGroup: (groupId: string) => void
-  readonly onResize: (splitId: string, index: number, delta: number) => void
+  readonly onResize: (splitId: string, index: number, delta: number, containerWidth?: number) => void
   /** The "+" menu at the end of each tab strip. */
   readonly launcherItems?: ReadonlyArray<TabLauncherItem>
   readonly emptyState?: ReactNode
@@ -273,7 +273,7 @@ const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { read
       controller.abort()
       dragController.current = null
       if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      if (delta !== 0) rest.api.onResize(split.id, index, delta)
+      if (delta !== 0) rest.api.onResize(split.id, index, delta, size)
     }
     const options = { signal: controller.signal }
     window.addEventListener("pointermove", move, options)

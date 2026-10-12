@@ -58,8 +58,57 @@ export const EDITOR_LAYOUT_STORAGE_PREFIX = "sb.editor-layout.v1:"
 
 const newId = (prefix: string): string => `${prefix}-${Math.random().toString(36).slice(2, 10)}`
 const keyOf = sessionSurfaceKey
+
+/** Chat lane pixel constraints (see chat-lane-machine.ts) */
+export const CHAT_LANE_MIN_PX = 360
+export const CHAT_LANE_MAX_PX = 560
+export const CHAT_LANE_COLLAPSE_PX = 320
+const CHAT_LANE_SNAP_RATIOS = [1 / 3, 1 / 2] as const
+const CHAT_LANE_SNAP_TOLERANCE_PX = 16
+
 const CHAT_RATIO = 1 / 3
 const CONTENT_RATIO = 2 / 3
+
+/**
+ * Compute the initial chat lane ratio, clamped to 360-560px.
+ * Falls back to 1/3 when containerWidth is unknown (0 or negative).
+ */
+export const chatLaneRatio = (containerWidth: number): number => {
+  if (containerWidth <= 0) return 1 / 3
+  const idealPx = containerWidth / 3
+  const clampedPx = Math.min(CHAT_LANE_MAX_PX, Math.max(CHAT_LANE_MIN_PX, idealPx))
+  return clampedPx / containerWidth
+}
+
+/**
+ * Apply pixel-based resize to the chat lane: snap to 1/3 or 1/2, clamp to 360-560px,
+ * collapse (return null) below 320px.
+ */
+export const resizeChatLane = (
+  currentRatio: number,
+  delta: number,
+  containerWidth: number
+): number | null => {
+  if (containerWidth <= 0) return currentRatio + delta
+  const currentPx = currentRatio * containerWidth
+  const newPx = currentPx + delta * containerWidth
+
+  // Collapse below threshold
+  if (newPx < CHAT_LANE_COLLAPSE_PX) return null
+
+  // Snap to 1/3 or 1/2 if within tolerance
+  for (const snapRatio of CHAT_LANE_SNAP_RATIOS) {
+    const snapPx = snapRatio * containerWidth
+    if (Math.abs(newPx - snapPx) <= CHAT_LANE_SNAP_TOLERANCE_PX) {
+      return snapRatio
+    }
+  }
+
+  // Clamp to 360-560px
+  const clampedPx = Math.min(CHAT_LANE_MAX_PX, Math.max(CHAT_LANE_MIN_PX, newPx))
+  return clampedPx / containerWidth
+}
+
 const laneOf = (surface: SessionSurface): "chat" | "content" => surface.kind === "chat" ? "chat" : "content"
 const isBrowser = (surface: SessionSurface) => surface.kind === "view" && surface.id === "browser"
 const uniqueTabs = (tabs: ReadonlyArray<SessionSurface>): ReadonlyArray<SessionSurface> => {
@@ -380,16 +429,65 @@ export const resizedPair = (a: number, b: number, delta: number): readonly [numb
   return [next, total - next]
 }
 
-export const resizeSplit = (layout: EditorLayout, splitId: string, index: number, delta: number): EditorLayout => {
+/**
+ * Detect if a split is the chat/content lane split: a 2-child row split where
+ * the left is all chats and the right is all content.
+ */
+const isChatContentSplit = (node: EditorNode): boolean => {
+  if (node.type !== "split" || node.axis !== "row" || node.children.length !== 2) return false
+  const left = node.children[0]
+  const right = node.children[1]
+  if (!left || !right) return false
+  const leftGroups = groupsOf(left)
+  const rightGroups = groupsOf(right)
+  if (leftGroups.length === 0 || rightGroups.length === 0) return false
+  const leftAllChat = leftGroups.every((g) => g.tabs.every((t) => laneOf(t) === "chat"))
+  const rightAllContent = rightGroups.every((g) => g.tabs.every((t) => laneOf(t) === "content"))
+  return leftAllChat && rightAllContent
+}
+
+/** Apply chat lane resize or generic pair resize based on split type. */
+const applyResize = (
+  node: EditorSplit,
+  index: number,
+  delta: number,
+  containerWidth: number | undefined
+): EditorSplit | null => {
+  const a = node.ratios[index]
+  const b = node.ratios[index + 1]
+  if (a === undefined || b === undefined) return null
+
+  // Apply chat lane pixel logic to the chat/content split
+  if (index === 0 && isChatContentSplit(node) && containerWidth !== undefined && containerWidth > 0) {
+    const nextChatRatio = resizeChatLane(a, delta, containerWidth)
+    // null means collapse; the caller should handle closing the content
+    if (nextChatRatio === null) return null
+    return { ...node, ratios: [nextChatRatio, 1 - nextChatRatio] }
+  }
+
+  // Generic split resizing
+  const pair = resizedPair(a, b, delta)
+  if (!pair || (pair[0] === a && pair[1] === b)) return null
+  return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
+}
+
+/**
+ * Resize a split, applying pixel-based logic to the chat/content lane split.
+ * Pass containerWidth for pixel-aware chat lane resizing; omit for generic ratio resizing.
+ */
+export const resizeSplit = (
+  layout: EditorLayout,
+  splitId: string,
+  index: number,
+  delta: number,
+  containerWidth?: number
+): EditorLayout => {
   if (!layout.root) return layout
   const resize = (node: EditorNode): EditorNode => {
     if (node.type === "group") return node
     if (node.id !== splitId) return mapChildren(node, resize)
-    const a = node.ratios[index]
-    const b = node.ratios[index + 1]
-    const pair = a === undefined || b === undefined ? null : resizedPair(a, b, delta)
-    if (!pair || (pair[0] === a && pair[1] === b)) return node
-    return { ...node, ratios: node.ratios.map((r, i) => (i === index ? pair[0] : i === index + 1 ? pair[1] : r)) }
+    const resized = applyResize(node, index, delta, containerWidth)
+    return resized ?? node
   }
   const root = resize(layout.root)
   return root === layout.root ? layout : { ...layout, root }
