@@ -1759,26 +1759,46 @@ describe("AgentRunner stop", () => {
     expect(transcript[transcript.length - 1]!.streaming).toBe(false)
   })
 
+  const stuckRunnerLayer = (driver: Layer.Layer<AgentTurnDriver>) =>
+    Layer.mergeAll(
+      AgentRunner.Default,
+      BrowserControlMcpServiceTest,
+      InMemorySecretStoreLive,
+      ConfigService.Default,
+      SessionStore.Default,
+      TranscriptStore.Default,
+      BackgroundTaskStore.Default,
+      ContextManager.Default,
+      driver,
+      temp.layer
+    )
+
   /**
    * A harness stuck unwinding (a tool that ignores the abort) outlives `stop`'s
    * grace. The chat used to refuse every later prompt as "already running" until
-   * the zombie died — and when it finally did, its late output must not land on
-   * the turn that replaced it.
+   * the zombie died. When it finally does, it must not touch the turn that
+   * replaced it — not its transcript, not its steer handle — and it keeps the
+   * workspace lease until it has really exited.
    */
   it("admits the next prompt when a stopped run never finishes unwinding", async () => {
     const result = await Effect.gen(function* () {
       const started = yield* Deferred.make<boolean>()
+      const secondStarted = yield* Deferred.make<void>()
+      const finishSecond = yield* Deferred.make<void>()
       const unwedge = yield* Deferred.make<void>()
       const zombieDone = yield* Deferred.make<void>()
       const calls = yield* Ref.make(0)
-      const stuckThenNormal = Layer.succeed(
+      const driver = Layer.succeed(
         AgentTurnDriver,
         AgentTurnDriver.of({
           run: (_sessionId, _spec, ctx) =>
             Effect.gen(function* () {
               const call = yield* Ref.getAndUpdate(calls, (n) => n + 1)
               if (call > 0) {
+                yield* ctx.registerTurnSteer?.(() => Promise.resolve("accepted")) ?? Effect.void
                 yield* ctx.emit({ _tag: "Assistant", text: "second reply" })
+                yield* Deferred.succeed(secondStarted, void 0)
+                yield* Deferred.await(finishSecond)
                 yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
                 return
               }
@@ -1797,18 +1817,6 @@ describe("AgentRunner stop", () => {
           stop: () => Effect.void
         })
       )
-      const base = Layer.mergeAll(
-        AgentRunner.Default,
-        BrowserControlMcpServiceTest,
-        InMemorySecretStoreLive,
-        ConfigService.Default,
-        SessionStore.Default,
-        TranscriptStore.Default,
-        BackgroundTaskStore.Default,
-        ContextManager.Default,
-        stuckThenNormal,
-        temp.layer
-      )
       return yield* Effect.gen(function* () {
         const runner = yield* AgentRunner
         yield* runner.setMode(SESSION, "auto")
@@ -1823,34 +1831,121 @@ describe("AgentRunner stop", () => {
         yield* runner.stop(SESSION)
         yield* Fiber.join(first).pipe(Effect.timeout("2 seconds"))
         const busyAfterStop = yield* runner.chatBusy(SESSION)
+        const leaseAfterStop = workspaceActivityCount(SESSION)
         const secondEvents: Array<StreamEvent> = []
-        yield* runner
-          .prompt(SESSION, SESSION, "again")
-          .pipe(Stream.runForEach((ev) => Effect.sync(() => secondEvents.push(ev))), Effect.timeout("5 seconds"))
-        // Now let the zombie finish and try to write.
+        const second = yield* Effect.fork(
+          runner
+            .prompt(SESSION, SESSION, "again")
+            .pipe(Stream.runForEach((ev) => Effect.sync(() => secondEvents.push(ev))))
+        )
+        yield* Deferred.await(secondStarted).pipe(Effect.timeout("5 seconds"))
+        // The zombie finishes unwinding WHILE its successor is live.
         yield* Deferred.succeed(unwedge, void 0)
         yield* Deferred.await(zombieDone).pipe(Effect.timeout("5 seconds"))
         yield* Effect.sleep("200 millis")
+        const steered = yield* runner.steer(SESSION, SESSION, "nudge")
+        yield* Deferred.succeed(finishSecond, void 0)
+        yield* Fiber.join(second).pipe(Effect.timeout("5 seconds"))
         return {
           firstEvents,
           secondEvents,
           busyAfterStop,
+          leaseAfterStop,
+          leaseAtEnd: workspaceActivityCount(SESSION),
+          steered: steered.status,
           transcript: yield* TranscriptStore.list(SESSION)
         }
-      }).pipe(Effect.provide(base))
+      }).pipe(Effect.provide(stuckRunnerLayer(driver)))
     }).pipe(Effect.runPromise)
 
     expect(result.firstEvents.some((e) => e._tag === "Failed" && e.message === STOPPED_NOTE)).toBe(true)
     expect(result.busyAfterStop).toBe(false)
+    // The zombie may still be writing to the worktree, so archive/delete must wait.
+    expect(result.leaseAfterStop).toBeGreaterThan(0)
+    expect(result.leaseAtEnd).toBe(0)
     expect(result.secondEvents.some((e) => e._tag === "Failed" && e.message.includes("already running"))).toBe(false)
     expect(result.secondEvents.some((e) => e._tag === "Done")).toBe(true)
-    const [, stopped, , second] = result.transcript
-    expect(stopped!.streaming).toBe(false)
+    // The zombie's cleanup must not have dropped the successor's steer handle.
+    expect(result.steered).toBe("accepted")
+    const stopped = result.transcript[1]!
+    expect(stopped.streaming).toBe(false)
     expect(JSON.stringify(stopped)).toContain(STOPPED_NOTE)
-    expect(second!.streaming).toBe(false)
-    expect(JSON.stringify(second)).toContain("second reply")
-    expect(JSON.stringify(result.transcript)).not.toContain("zombie output")
+    const all = JSON.stringify(result.transcript)
+    expect(all).toContain("second reply")
+    expect(all).toContain("nudge")
+    expect(all).not.toContain("zombie output")
+    expect(result.transcript[result.transcript.length - 1]!.streaming).toBe(false)
   }, 20_000)
+
+  /**
+   * The worst case: a steer is parked inside `turnMutation` when stop gives up,
+   * so abandon's own `Failed` emit cannot get the permit. The turn must still
+   * settle on disk, and a steer that completes after abandonment must not
+   * append a user/assistant pair onto a transcript the run no longer owns.
+   */
+  it("settles an abandoned turn even when a parked steer holds the permit", async () => {
+    const result = await Effect.gen(function* () {
+      const started = yield* Deferred.make<boolean>()
+      const steerEntered = yield* Deferred.make<void>()
+      const releaseSteer = yield* Deferred.make<void>()
+      const unwedge = yield* Deferred.make<void>()
+      const driver = Layer.succeed(
+        AgentTurnDriver,
+        AgentTurnDriver.of({
+          run: (_sessionId, _spec, ctx) =>
+            Effect.gen(function* () {
+              yield* ctx.registerTurnSteer?.(() =>
+                Effect.runPromise(
+                  Deferred.succeed(steerEntered, void 0).pipe(
+                    Effect.andThen(Deferred.await(releaseSteer)),
+                    Effect.as("accepted" as const)
+                  )
+                )
+              ) ?? Effect.void
+              yield* ctx.emit({ _tag: "Assistant", text: "working…" })
+              yield* Deferred.succeed(started, true)
+              yield* Effect.never.pipe(Effect.onInterrupt(() => Deferred.await(unwedge)))
+            }) as ReturnType<AgentTurnDriverShape["run"]>,
+          stop: () => Effect.void
+        })
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        const events: Array<StreamEvent> = []
+        const first = yield* Effect.fork(
+          runner
+            .prompt(SESSION, SESSION, "go")
+            .pipe(Stream.runForEach((ev) => Effect.sync(() => events.push(ev))))
+        )
+        yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
+        const stopping = yield* Effect.fork(runner.stop(SESSION))
+        // Park a steer inside the permit for longer than abandon will wait for it
+        // (interrupt grace + emit grace), but inside the steer handler's own cap.
+        yield* Effect.sleep("1 second")
+        const steering = yield* Effect.fork(runner.steer(SESSION, SESSION, "late"))
+        yield* Deferred.await(steerEntered).pipe(Effect.timeout("2 seconds"))
+        yield* Fiber.join(stopping)
+        // Abandoned; now let the native steer report success.
+        yield* Deferred.succeed(releaseSteer, void 0)
+        const steered = yield* Fiber.join(steering)
+        yield* Fiber.join(first).pipe(Effect.timeout("2 seconds"))
+        const busy = yield* runner.chatBusy(SESSION)
+        const transcript = yield* TranscriptStore.list(SESSION)
+        yield* Deferred.succeed(unwedge, void 0)
+        return { events, steered: steered.status, busy, transcript }
+      }).pipe(Effect.provide(stuckRunnerLayer(driver)))
+    }).pipe(Effect.runPromise)
+
+    expect(result.events.some((e) => e._tag === "Failed" && e.message === STOPPED_NOTE)).toBe(true)
+    expect(result.busy).toBe(false)
+    // `unsupported` hands the message to the stop-and-replay path instead of losing it.
+    expect(result.steered).toBe("unsupported")
+    expect(result.transcript).toHaveLength(2)
+    expect(result.transcript[1]!.streaming).toBe(false)
+    expect(JSON.stringify(result.transcript[1])).toContain(STOPPED_NOTE)
+    expect(JSON.stringify(result.transcript)).not.toContain("late")
+  }, 30_000)
 })
 
 /**

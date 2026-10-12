@@ -83,6 +83,7 @@ import { UsageFactStore } from "./usage-facts.js"
 import { ExplanationStore } from "./explanation-store.js"
 import {
   appendSteeredReply,
+  type BoundedSteerResult,
   invokeSteer,
   makeSteeredReplyWaiter,
   type SteeredReplyWaiter
@@ -910,7 +911,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                     transcriptDirty,
                     nextId,
                     chatId,
-                    providerId: chat.providerId
+                    providerId: chat.providerId,
+                    detached
                   }, text, images,
                   captureReply
                 )).pipe(Effect.provide(env))
@@ -1176,16 +1178,28 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
               token,
               settled: sawTerminal,
               abandon: Effect.gen(function* () {
-                // Capped: a run wedged inside `emit` holds `turnMutation`, and
-                // `stop` calls this under the chat lock.
-                yield* emit({ _tag: "Failed", message: STOPPED_NOTE }).pipe(
+                const stopped: StreamEvent = { _tag: "Failed", message: STOPPED_NOTE }
+                // Capped: a run wedged inside `emit` or a steer holds `turnMutation`,
+                // and `stop` calls this under the chat lock.
+                const emitted = yield* emit(stopped).pipe(
                   Effect.timeout(INTERRUPT_GRACE),
-                  Effect.ignore
+                  Effect.as(true),
+                  Effect.orElseSucceed(() => false)
                 )
-                yield* Ref.set(sawTerminal, true)
                 yield* Ref.set(detached, true)
+                // ponytail: bypasses the permit, so a wedged emit that later lands mid-write
+                // could still race this patch; per-message versioning if that ever shows up.
+                if (!emitted && (yield* claimTurnTerminal(stopped, sawTerminal, turnSettled))) {
+                  const id = (yield* Ref.get(acc)).id
+                  yield* TranscriptStore.patchById(chatId, id, (m) => applyStreamEvent(m, stopped)).pipe(
+                    Effect.provide(env),
+                    Effect.ignore
+                  )
+                  yield* out.offer(stopped)
+                }
                 yield* deactivate
-                yield* Effect.sync(() => workspaceTurn.release())
+                // The workspace lease stays held: the harness may still be touching the
+                // worktree, and it is released by the run's own `ensuring` when it exits.
                 yield* out.end
               })
             })
@@ -1815,7 +1829,16 @@ interface ActiveTurnSteering {
   readonly nextId: Effect.Effect<number>
   readonly chatId: string
   readonly providerId: Session["chats"][number]["providerId"]
+  /** An abandoned run's steer must not touch the transcript its successor now owns. */
+  readonly detached: Ref.Ref<boolean>
 }
+
+/** Abandoned while the native call was out: `unsupported` replays it as a fresh turn. */
+const steerOutcome = (steered: BoundedSteerResult, detached: Ref.Ref<boolean>) =>
+  Effect.map(Ref.get(detached), (gone) =>
+    gone ? "unsupported" as const
+      : steered === "accepted" || steered === "unsupported" ? steered : "deferred" as const
+  )
 
 const steerActiveTurn = (
   state: ActiveTurnSteering,
@@ -1823,8 +1846,9 @@ const steerActiveTurn = (
   images: ReadonlyArray<Attachment>,
   captureReply: boolean
 ) => {
-  const { turnSteer, steeredReply, acc, transcriptDirty, nextId, chatId, providerId } = state
+  const { turnSteer, steeredReply, acc, transcriptDirty, nextId, chatId, providerId, detached } = state
   return Effect.gen(function* () {
+    if (yield* Ref.get(detached)) return { status: "unsupported" } as const
     const handler = yield* Ref.get(turnSteer)
     if (handler === null) {
       // No handle is a PHASE, not a verdict: the driver registers it a
@@ -1844,7 +1868,7 @@ const steerActiveTurn = (
     // can NEVER land on this run's channel (pi steering is text-only),
     // and only that status licenses "Send now" to stop and replay.
     // Timeouts and failures stay `deferred` — they may clear.
-    const outcome = steered === "accepted" || steered === "unsupported" ? steered : "deferred"
+    const outcome = yield* steerOutcome(steered, detached)
     if (outcome !== "accepted") {
       if (replyWaiter !== null) yield* Ref.set(steeredReply, null)
       return { status: outcome } as const
