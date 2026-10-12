@@ -222,6 +222,26 @@ describe("PullRequestInbox", () => {
     expect(screen.queryByText("No pull request yet for this branch")).toBeNull()
   })
 
+  it("shows a skeleton while loading, then a failed load with Retry that recovers", () => {
+    const onRetry = vi.fn()
+    const props = { viewerLogin: "morgan", selected: null, detail: null, onSelect: () => {}, onRetry }
+    const { container, rerender } = render(<WidthTierValue width={1200}><PullRequestInbox prs={[]} loading {...props} /></WidthTierValue>)
+    expect(container.querySelector("[aria-busy='true']")).toBeTruthy()
+    rerender(<WidthTierValue width={1200}><PullRequestInbox prs={[]} error="GitHub could not load pull requests." {...props} /></WidthTierValue>)
+    expect(container.querySelector("[aria-busy='true']")).toBeNull()
+    expect(screen.getByText("GitHub could not load pull requests.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+    rerender(<WidthTierValue width={1200}><PullRequestInbox prs={prs} {...props} /></WidthTierValue>)
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+    expect(screen.getByRole("button", { name: UPDATE_API })).toBeTruthy()
+  })
+
+  it("shows an empty state when no pull requests match", () => {
+    render(<WidthTierValue width={1200}><PullRequestInbox prs={[]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></WidthTierValue>)
+    expect(screen.getByText("No pull requests match this view")).toBeTruthy()
+  })
+
   it("replaces the list with detail on small screens and returns", () => {
     const onCreateSession = vi.fn()
     render(
