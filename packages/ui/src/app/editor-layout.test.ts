@@ -288,3 +288,38 @@ describe("editor layout helpers", () => {
     expect(pair[1]).toBeCloseTo(0.025)
   })
 })
+
+describe("max groups cap", () => {
+  it("openTab at the cap adds a tab instead of a 4th group", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts")])
+    layout = dropTab(layout, { surface: file("b.ts") }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts") }, groupsOf(layout.root)[2]!.id, "right")
+    expect(shape(layout)).toEqual([["chat:main"], ["file:a.ts"], ["file:b.ts"], ["file:c.ts"]])
+    
+    // At the cap openTab joins an existing content group instead of splitting.
+    const opened = openTab(layout, file("d.ts"))
+    expect(groupsOf(opened.root).filter((g) => g.tabs.some((t) => t.kind !== "chat"))).toHaveLength(3)
+    expect(shape(opened).flat()).toContain("file:d.ts")
+  })
+
+  it("refuses to create a 4th content group via edge drop", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts"), file("b.ts"), file("c.ts")])
+    layout = dropTab(layout, { surface: file("b.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[2]!.id, "right")
+    expect(groupsOf(layout.root).filter(g => g.tabs.some(t => t.kind !== "chat"))).toHaveLength(3)
+    
+    const contentGroup = groupsOf(layout.root)[3]!
+    const refused = dropTab(layout, { surface: file("d.ts") }, contentGroup.id, "right")
+    expect(groupsOf(refused.root).filter(g => g.tabs.some(t => t.kind !== "chat"))).toHaveLength(3)
+  })
+
+  it("allows center drops even at cap", () => {
+    let layout = createEditorLayout([chat("main"), file("a.ts"), file("b.ts"), file("c.ts")])
+    layout = dropTab(layout, { surface: file("b.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[1]!.id, "right")
+    layout = dropTab(layout, { surface: file("c.ts"), from: groupsOf(layout.root)[1]!.id }, groupsOf(layout.root)[2]!.id, "right")
+    
+    const target = groupsOf(layout.root)[1]!
+    const dropped = dropTab(layout, { surface: file("d.ts") }, target.id, "center")
+    expect(shape(dropped)[1]).toContain("file:d.ts")
+  })
+})

@@ -35,6 +35,7 @@ import {
   activeSurface,
   groupsOf,
   resizedPair,
+  MIN_GROUP_PX,
   type DropEdge,
   type EditorLayout,
   type EditorNode,
@@ -273,9 +274,6 @@ const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { read
       controller.abort()
       dragController.current = null
       if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      // Hand the final size back to React: the committed ratio may differ from the drag preview (pixel clamp/snap).
-      first.style.flexGrow = String(a)
-      second.style.flexGrow = String(b)
       if (delta !== 0) rest.api.onResize(split.id, index, delta, size)
     }
     const options = { signal: controller.signal }
@@ -325,7 +323,7 @@ function SplitChild({
           onPointerDown={onDividerDown}
           className={cn(
             "relative z-10 flex-none touch-none bg-hairline hover:bg-blue/50",
-            row ? "-mx-px w-[3px] cursor-col-resize" : "-my-px h-[3px] cursor-row-resize"
+            row ? "-mx-1 w-px cursor-col-resize box-content px-1" : "-my-1 h-px cursor-row-resize box-content py-1"
           )}
         />
       )}
@@ -424,6 +422,23 @@ const EditorGroup = memo(function EditorGroup({
   api: Api
   revision: unknown
 }) {
+  const [width, setWidth] = useState(0)
+  const sectionRef = useRef<HTMLElement>(null)
+  
+  useEffect(() => {
+    const section = sectionRef.current
+    if (!section || typeof ResizeObserver === "undefined") return
+    
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) setWidth(entry.contentRect.width)
+    })
+    
+    observer.observe(section)
+    return () => observer.disconnect()
+  }, [])
+  
+  const collapsed = width > 0 && width < MIN_GROUP_PX
   const active = activeSurface(group)
   const groupDrop = useDropZone(mime, group.id, api, undefined, active.kind === "chat")
   const tabStripDrop = useDropZone(mime, group.id, api, "center")
@@ -441,6 +456,7 @@ const EditorGroup = memo(function EditorGroup({
   const crumbs = api.describe(active).crumbs ?? []
   return (
     <section
+      ref={sectionRef}
       data-testid="editor-group"
       data-focused={focused || undefined}
       aria-label={`Editor group: ${api.describe(active).label}`}
@@ -456,9 +472,9 @@ const EditorGroup = memo(function EditorGroup({
       <div
         data-testid="editor-tab-strip"
         {...tabStripHandlers}
-        className="relative flex h-9 flex-none items-stretch border-b border-hairline bg-sunken"
+        className="relative flex h-8 flex-none items-stretch border-b border-hairline bg-sunken"
       >
-        <div role="tablist" className="sb-no-scrollbar -mb-px flex min-w-0 flex-1 items-stretch overflow-x-auto">
+        <div role="tablist" className="sb-no-scrollbar flex min-w-0 flex-1 items-stretch overflow-x-auto">
           {group.tabs.map((surface) => (
             <EditorTab
               key={sessionSurfaceKey(surface)}
@@ -476,7 +492,7 @@ const EditorGroup = memo(function EditorGroup({
         {active.kind === "chat" && api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
         {tabStripDrop.overlay}
       </div>
-      {crumbs.length > 0 && (
+      {!collapsed && crumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="flex h-6 flex-none items-center gap-1 px-3 text-[11px] text-dim">
           {crumbs.map((crumb, index) => (
             <span key={`${index}-${crumb}`} className="flex min-w-0 items-center gap-1">
@@ -486,12 +502,14 @@ const EditorGroup = memo(function EditorGroup({
           ))}
         </nav>
       )}
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        {group.tabs.map((surface) => {
-          const key = sessionSurfaceKey(surface)
-          return <TabBody key={key} surface={surface} visible={key === group.active} focused={focused} api={api} revision={revision} />
-        })}
-      </div>
+      {!collapsed && (
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          {group.tabs.map((surface) => {
+            const key = sessionSurfaceKey(surface)
+            return <TabBody key={key} surface={surface} visible={key === group.active} focused={focused} api={api} revision={revision} />
+          })}
+        </div>
+      )}
       {groupDrop.overlay}
     </section>
   )
@@ -526,10 +544,10 @@ const EditorTab = memo(function EditorTab({
       }}
       onAuxClick={(e) => e.button === 1 && api.onClose(groupId, surface)}
       className={cn(
-        "group flex flex-none items-center border-r border-t-2 border-r-hairline text-xs",
+        "group flex flex-none items-center border-b-2 border-r border-r-hairline text-xs",
         selected
-          ? cn("bg-editor text-text-bright", focused ? "border-t-blue" : "border-t-line")
-          : "border-t-transparent text-muted-foreground hover:text-text"
+          ? cn("bg-editor text-text-bright", focused ? "border-b-text-bright" : "border-b-line-strong")
+          : "border-b-transparent text-muted-foreground hover:text-text"
       )}
     >
       <button

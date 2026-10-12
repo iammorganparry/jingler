@@ -66,6 +66,11 @@ export const CHAT_LANE_COLLAPSE_PX = 320
 const CHAT_LANE_SNAP_RATIOS = [1 / 3, 1 / 2] as const
 const CHAT_LANE_SNAP_TOLERANCE_PX = 16
 
+/** Keep content readable when several groups are open. */
+export const MAX_GROUPS = 3
+/** Narrowest a group may be and still show content — below this it shows only its tab strip. */
+export const MIN_GROUP_PX = 240
+
 const CHAT_RATIO = 1 / 3
 const CONTENT_RATIO = 2 / 3
 
@@ -279,6 +284,14 @@ export const focusAdjacentGroup = (layout: EditorLayout, direction: -1 | 1): Edi
   return next ? { ...layout, focusedGroupId: next.id } : layout
 }
 
+/** Count content groups in a row split. */
+const contentGroupCount = (node: EditorNode | null): number => {
+  if (!node) return 0
+  if (node.type === "group") return node.tabs.some((tab) => laneOf(tab) === "content") ? 1 : 0
+  if (node.axis !== "row") return 0
+  return node.children.reduce((sum, child) => sum + contentGroupCount(child), 0)
+}
+
 /**
  * Shows a surface: reveals it where it is already open, otherwise adds it to
  * the focused matching lane (or the first matching lane).
@@ -312,6 +325,7 @@ export const openTab = (
   if (!anchor) return commit(layout, groupOf([surface]))
   const added = groupOf([surface])
   const edge = lane === "chat" ? "left" : "right"
+  if (lane === "content" && contentGroupCount(layout.root) >= MAX_GROUPS) return layout
   return commit(
     layout,
     splitBeside(layout.root, anchor.id, edge, added, [CHAT_RATIO, CONTENT_RATIO]),
@@ -374,6 +388,7 @@ export const dropTab = (
   const move = from !== undefined && !copy
   const activationTarget = dropActivationTarget(groups, surface, move, from, dropTarget, edge)
   if (activationTarget) return activateTab(layout, activationTarget.id, key)
+  if (edge !== "center" && laneOf(surface) === "content" && contentGroupCount(layout.root) >= MAX_GROUPS) return layout
   const added = edge === "center" ? null : groupOf([surface])
   let root = added
     ? splitBeside(layout.root, dropTarget.id, edge as Exclude<DropEdge, "center">, added)
