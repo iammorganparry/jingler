@@ -1,13 +1,8 @@
-import { ImportableSession } from "@jingler/core";
+import type { ImportableSession } from "@jingler/core";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-
-/**
- * Scanner interface for discovering importable sessions from other apps.
- * Each scanner reads a specific app's session store format.
- */
 
 interface ScanOptions {
   /** Home directory (defaults to process.env.HOME, overridable for tests). */
@@ -16,265 +11,137 @@ interface ScanOptions {
   limit?: number;
 }
 
-/**
- * Scan Claude Code sessions from ~/.claude/projects.
- * Each project folder contains *.jsonl session files with one JSON object per line.
- */
-export async function scanClaudeCodeSessions(
-  opts: ScanOptions = {}
-): Promise<ImportableSession[]> {
-  const homeDir = opts.homeDir ?? process.env.HOME;
-  if (!homeDir) return [];
+// biome-ignore lint/suspicious/noExplicitAny: undocumented third-party JSONL, every field is read defensively
+type Json = Record<string, any>;
 
-  const projectsDir = path.join(homeDir, ".claude", "projects");
-  try {
-    await fs.access(projectsDir);
-  } catch {
-    return [];
-  }
-
-  const sessions: ImportableSession[] = [];
-  const projectDirs = await fs.readdir(projectsDir, { withFileTypes: true });
-
-  for (const dir of projectDirs) {
-    if (!dir.isDirectory()) continue;
-
-    const projectPath = path.join(projectsDir, dir.name);
-    const files = await fs.readdir(projectPath);
-
-    for (const file of files) {
-      if (!file.endsWith(".jsonl")) continue;
-
-      const sessionPath = path.join(projectPath, file);
-      try {
-        const session = await parseClaudeCodeSession(sessionPath);
-        if (session) {
-          sessions.push(session);
-          if (opts.limit && sessions.length >= opts.limit) return sessions;
-        }
-      } catch {
-        // Skip unparseable files
-        continue;
-      }
-    }
-  }
-
-  return sessions;
+interface Draft {
+  sessionId?: string;
+  cwd?: string;
+  branch?: string;
+  title?: string;
+  updatedAt?: string;
+  messageCount: number;
 }
 
-async function parseClaudeCodeSession(
-  filePath: string
-): Promise<ImportableSession | null> {
-  const rl = createInterface({
-    input: createReadStream(filePath),
-    crlfDelay: Infinity,
-  });
+const exists = (p: string) =>
+  fs.access(p).then(
+    () => true,
+    () => false
+  );
 
-  let sessionId: string | null = null;
-  let cwd: string | null = null;
-  let branch: string | null = null;
-  let title: string | null = null;
-  let updatedAt: string | null = null;
-  let messageCount = 0;
+const firstLine = (text: string) => (text.split("\n")[0] ?? "").slice(0, 60).trim();
 
+/** Streams a JSONL file, skipping blank and unparseable lines. */
+async function* jsonLines(filePath: string): AsyncGenerator<Json> {
+  const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Number.POSITIVE_INFINITY });
   for await (const line of rl) {
     if (!line.trim()) continue;
-
     try {
-      const obj = JSON.parse(line);
-
-      // Extract sessionId from any line that has it
-      if (obj.sessionId && !sessionId) {
-        sessionId = obj.sessionId;
-      }
-
-      // Extract cwd and branch from user message metadata
-      if (obj.cwd && !cwd) {
-        cwd = obj.cwd;
-      }
-      if (obj.gitBranch && !branch) {
-        branch = obj.gitBranch;
-      }
-
-      // Extract title from first user message
-      if (
-        !title &&
-        obj.type === "user" &&
-        obj.message?.role === "user" &&
-        obj.message?.content?.[0]?.text
-      ) {
-        const text = obj.message.content[0].text;
-        // Take first 60 chars, stop at newline
-        title = text.split("\n")[0].slice(0, 60).trim();
-        messageCount++;
-      } else if (obj.type === "user") {
-        messageCount++;
-      }
-
-      // Track latest timestamp
-      if (obj.timestamp) {
-        updatedAt = obj.timestamp;
-      }
+      const value = JSON.parse(line);
+      if (value && typeof value === "object") yield value;
     } catch {
-      // Skip malformed JSON lines
-      continue;
+      // Undocumented third-party format: skip lines we can't parse.
     }
   }
+}
 
-  if (!sessionId || !cwd) return null;
-
-  const folderExists = await fs
-    .access(cwd)
-    .then(() => true)
-    .catch(() => false);
-
+async function parseSession(
+  filePath: string,
+  apply: (draft: Draft, line: Json) => void,
+  meta: Pick<ImportableSession, "source" | "harness">
+): Promise<ImportableSession | null> {
+  const draft: Draft = { messageCount: 0 };
+  for await (const line of jsonLines(filePath)) apply(draft, line);
+  if (!(draft.sessionId && draft.cwd)) return null;
   return {
-    source: "claude-code",
-    nativeSessionId: sessionId,
-    harness: "claude",
-    cwd,
-    branch: branch ?? undefined,
-    title: title ?? "Untitled session",
-    updatedAt: updatedAt ?? new Date().toISOString(),
-    messageCount,
-    folderExists,
+    ...meta,
+    nativeSessionId: draft.sessionId,
+    cwd: draft.cwd,
+    branch: draft.branch,
+    title: draft.title ?? "Untitled session",
+    updatedAt: draft.updatedAt ?? new Date().toISOString(),
+    messageCount: draft.messageCount,
+    folderExists: await exists(draft.cwd)
   };
 }
 
-/**
- * Scan Codex sessions from ~/.codex/sessions.
- * Sessions are organized as YYYY/MM/DD/*.jsonl with session_meta + messages.
- */
-export async function scanCodexSessions(
-  opts: ScanOptions = {}
+async function scanDir(
+  root: string,
+  parse: (file: string) => Promise<ImportableSession | null>,
+  limit?: number
 ): Promise<ImportableSession[]> {
-  const homeDir = opts.homeDir ?? process.env.HOME;
-  if (!homeDir) return [];
-
-  const sessionsDir = path.join(homeDir, ".codex", "sessions");
-  try {
-    await fs.access(sessionsDir);
-  } catch {
-    return [];
-  }
-
+  if (!(await exists(root))) return [];
+  const files = (await fs.readdir(root, { recursive: true })).filter((f) => f.endsWith(".jsonl")).sort();
   const sessions: ImportableSession[] = [];
-
-  // Walk YYYY/MM/DD structure
-  const years = await fs.readdir(sessionsDir, { withFileTypes: true });
-  for (const year of years) {
-    if (!year.isDirectory()) continue;
-
-    const yearPath = path.join(sessionsDir, year.name);
-    const months = await fs.readdir(yearPath, { withFileTypes: true });
-
-    for (const month of months) {
-      if (!month.isDirectory()) continue;
-
-      const monthPath = path.join(yearPath, month.name);
-      const days = await fs.readdir(monthPath, { withFileTypes: true });
-
-      for (const day of days) {
-        if (!day.isDirectory()) continue;
-
-        const dayPath = path.join(monthPath, day.name);
-        const files = await fs.readdir(dayPath);
-
-        for (const file of files) {
-          if (!file.endsWith(".jsonl")) continue;
-
-          const sessionPath = path.join(dayPath, file);
-          try {
-            const session = await parseCodexSession(sessionPath);
-            if (session) {
-              sessions.push(session);
-              if (opts.limit && sessions.length >= opts.limit) return sessions;
-            }
-          } catch {
-            continue;
-          }
-        }
-      }
-    }
+  for (const file of files) {
+    // biome-ignore lint/performance/noAwaitInLoops: sequential keeps memory flat and honours `limit`
+    const session = await parse(path.join(root, file)).catch(() => null);
+    if (!session) continue;
+    sessions.push(session);
+    if (limit && sessions.length >= limit) break;
   }
-
   return sessions;
 }
 
-async function parseCodexSession(
-  filePath: string
-): Promise<ImportableSession | null> {
-  const rl = createInterface({
-    input: createReadStream(filePath),
-    crlfDelay: Infinity,
-  });
+// Claude Code: user lines carry sessionId, cwd, gitBranch, timestamp. Content is a
+// string or an array of blocks; tool_result blocks are tool output, not user turns.
+function claudeUserText(line: Json): string | null {
+  const content = line.message?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content) || content.some((b) => b?.type === "tool_result")) return null;
+  const text = content.find((b) => b?.type === "text")?.text;
+  return typeof text === "string" ? text : null;
+}
 
-  let sessionId: string | null = null;
-  let cwd: string | null = null;
-  let branch: string | null = null;
-  let title: string | null = null;
-  let updatedAt: string | null = null;
-  let messageCount = 0;
+function applyClaudeLine(draft: Draft, line: Json): void {
+  draft.sessionId ??= line.sessionId;
+  draft.cwd ??= line.cwd;
+  draft.branch ??= line.gitBranch || undefined;
+  if (line.timestamp) draft.updatedAt = line.timestamp;
+  if (line.type !== "user") return;
+  const text = claudeUserText(line);
+  if (text === null) return;
+  draft.messageCount++;
+  draft.title ??= firstLine(text) || undefined;
+}
 
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-
-    try {
-      const obj = JSON.parse(line);
-
-      // First line should be session_meta
-      if (obj.type === "session_meta" && obj.payload) {
-        sessionId = obj.payload.id;
-        cwd = obj.payload.cwd;
-        branch = obj.payload.git?.branch ?? null;
-        updatedAt = obj.timestamp ?? obj.payload.timestamp;
-      }
-
-      // Extract title from first user message
-      if (
-        !title &&
-        obj.type === "response_item" &&
-        obj.payload?.type === "message" &&
-        obj.payload?.role === "user" &&
-        obj.payload?.content?.[0]?.type === "input_text"
-      ) {
-        const text = obj.payload.content[0].text;
-        // Skip environment context boilerplate, find actual user text
-        if (!text.includes("<environment_context>")) {
-          title = text.split("\n")[0].slice(0, 60).trim();
-          messageCount++;
-        }
-      } else if (
-        obj.type === "response_item" &&
-        obj.payload?.role === "user"
-      ) {
-        messageCount++;
-      }
-
-      if (obj.timestamp && !updatedAt) {
-        updatedAt = obj.timestamp;
-      }
-    } catch {
-      continue;
-    }
+// Codex: first line is session_meta (payload.id, cwd, git.branch); user turns are
+// response_item messages, the first of which is often <environment_context> boilerplate.
+function applyCodexLine(draft: Draft, line: Json): void {
+  const payload = line.payload;
+  if (line.timestamp) draft.updatedAt = line.timestamp;
+  if (line.type === "session_meta" && payload) {
+    draft.sessionId = payload.id;
+    draft.cwd = payload.cwd;
+    draft.branch = payload.git?.branch ?? undefined;
+    draft.updatedAt ??= payload.timestamp;
+    return;
   }
+  if (line.type !== "response_item" || payload?.type !== "message" || payload.role !== "user") return;
+  const text = payload.content?.find((b: Json) => b?.type === "input_text")?.text;
+  if (typeof text !== "string" || text.includes("<environment_context>")) return;
+  draft.messageCount++;
+  draft.title ??= firstLine(text) || undefined;
+}
 
-  if (!sessionId || !cwd) return null;
+/** Claude Code sessions: ~/.claude/projects/<cwd-slug>/*.jsonl. */
+export function scanClaudeCodeSessions(opts: ScanOptions = {}): Promise<ImportableSession[]> {
+  const home = opts.homeDir ?? process.env.HOME;
+  if (!home) return Promise.resolve([]);
+  return scanDir(
+    path.join(home, ".claude", "projects"),
+    (f) => parseSession(f, applyClaudeLine, { source: "claude-code", harness: "claude" }),
+    opts.limit
+  );
+}
 
-  const folderExists = await fs
-    .access(cwd)
-    .then(() => true)
-    .catch(() => false);
-
-  return {
-    source: "codex",
-    nativeSessionId: sessionId,
-    harness: "codex",
-    cwd,
-    branch: branch ?? undefined,
-    title: title ?? "Untitled session",
-    updatedAt: updatedAt ?? new Date().toISOString(),
-    messageCount,
-    folderExists,
-  };
+/** Codex sessions: ~/.codex/sessions/YYYY/MM/DD/*.jsonl. */
+export function scanCodexSessions(opts: ScanOptions = {}): Promise<ImportableSession[]> {
+  const home = opts.homeDir ?? process.env.HOME;
+  if (!home) return Promise.resolve([]);
+  return scanDir(
+    path.join(home, ".codex", "sessions"),
+    (f) => parseSession(f, applyCodexLine, { source: "codex", harness: "codex" }),
+    opts.limit
+  );
 }
