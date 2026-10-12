@@ -69,3 +69,15 @@ export const EditPending: Story = {
     status: "pending"
   }
 }
+
+export const PendingWithSwitchToAuto: Story = {
+  args: {
+    kind: "command",
+    title: "Run pnpm test?",
+    detail: "cwd ~/jingler",
+    command: "pnpm --filter @jingler/desktop test",
+    allowLabel: "pnpm test",
+    status: "pending",
+    onSwitchToAuto: () => undefined
+  }
+}

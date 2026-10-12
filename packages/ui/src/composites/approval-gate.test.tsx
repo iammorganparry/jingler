@@ -1,7 +1,9 @@
-import { describe, it, expect } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { afterEach, describe, it, expect, vi } from "vitest"
+import { cleanup, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ApprovalGate } from "./approval-gate.js"
+
+afterEach(cleanup)
 
 describe("ApprovalGate long command", () => {
   it("clamps long commands to 6 lines with expand toggle", async () => {
@@ -55,5 +57,64 @@ describe("ApprovalGate long command", () => {
 
     const copyButton = container.querySelector('button[aria-label="Copy command"]')
     expect(copyButton).toBeTruthy()
+  })
+})
+
+describe("ApprovalGate Switch to Auto", () => {
+  it("does not render Switch to Auto link when onSwitchToAuto is not provided", () => {
+    render(
+      <ApprovalGate
+        kind="command"
+        title="Run command"
+        detail="cwd ~"
+        command="pnpm test"
+        status="pending"
+      />
+    )
+    expect(screen.queryByText("Switch session to Auto")).toBeNull()
+  })
+
+  it("renders Switch to Auto link when onSwitchToAuto is provided and status is pending", () => {
+    render(
+      <ApprovalGate
+        kind="command"
+        title="Run command"
+        detail="cwd ~"
+        command="pnpm test"
+        status="pending"
+        onSwitchToAuto={() => {}}
+      />
+    )
+    expect(screen.getByText("Switch session to Auto")).toBeTruthy()
+  })
+
+  it("does not render Switch to Auto link when status is not pending", () => {
+    render(
+      <ApprovalGate
+        kind="command"
+        title="Run command"
+        detail="cwd ~"
+        status="approved"
+        onSwitchToAuto={() => {}}
+      />
+    )
+    expect(screen.queryByText("Switch session to Auto")).toBeNull()
+  })
+
+  it("calls onSwitchToAuto when the link is clicked", async () => {
+    const user = userEvent.setup()
+    const onSwitchToAuto = vi.fn()
+    render(
+      <ApprovalGate
+        kind="command"
+        title="Run command"
+        detail="cwd ~"
+        command="pnpm test"
+        status="pending"
+        onSwitchToAuto={onSwitchToAuto}
+      />
+    )
+    await user.click(screen.getByText("Switch session to Auto"))
+    expect(onSwitchToAuto).toHaveBeenCalledOnce()
   })
 })

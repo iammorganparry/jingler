@@ -1257,6 +1257,7 @@ function renderMainConversation({
     onStop={convo.stop}
     onDecideGate={convo.decideGate}
     onSetMode={convo.setMode}
+    onSwitchToAuto={() => convo.setMode("auto")}
     reasoningEffort={convo.reasoning?.effort}
     thinkingEnabled={convo.reasoning?.enabled}
     onSetReasoning={convo.setReasoning}
