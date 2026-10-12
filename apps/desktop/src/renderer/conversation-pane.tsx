@@ -5,7 +5,7 @@
  * machine lives above the Conversation ↔ Plan switch, so opening Plannotator
  * does not unmount the agent stream.
  */
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import type {
   AgentEndpointCatalog,
@@ -42,6 +42,7 @@ import {
   useContainerWidth
 } from "@jingler/ui"
 import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
+import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
@@ -79,7 +80,7 @@ import {
   PLAN_SPLIT_HANDLE_WIDTH,
   resizedPlanSplitRatio
 } from "./plan-split-ratio.js"
-import { claimPlanAutoPresentation } from "./plan-presence.js"
+import { claimPlanAutoPresentation, usePlanDisconnected } from "./plan-presence.js"
 import {
   rpcFailureMessage,
   rpcFailureReason,
@@ -342,6 +343,11 @@ export function ConversationPane({
       onPlanDraftAvailable()
     }
   }, [activeChat.id, plannotatorReviewId(convo.plannotator), onPlanDraftAvailable, onPlanDraftUnavailable])
+  // An interrupted review has no live review to auto-present, so open the Plan tab for its Reopen card.
+  const planDisconnected = usePlanDisconnected(activeChat.id)
+  useEffect(() => {
+    if (planDisconnected) onPlanDraftAvailable?.()
+  }, [planDisconnected, onPlanDraftAvailable])
   // Branch-drift recovery (the `BranchDrift` banner). Stable per session so the
   // memoised transcript turns don't re-render while a turn streams. Adopt updates
   // this session in place; fork publishes a NEW worktree session into the sidebar
@@ -790,7 +796,19 @@ export function ConversationPane({
   )
   // The plan surface persists for as long as a plan exists. Plannotator owns
   // review actions while pending, then stays read-only as the checklist advances.
-  const planSurface = renderPlanSurface(plannotatorDocument, pendingReviewId, decideReview)
+  const planSurface = renderPlanSurface(
+    plannotatorDocument,
+    pendingReviewId,
+    decideReview,
+    <PlanReviewerDisconnectedCard
+      sessionId={session.id}
+      chatId={activeChat.id}
+      onResume={() => {
+        convo.setMode("plan")
+        convo.sendPrompt("/plannotator-resume-review")
+      }}
+    />
+  )
 
   if (view === "plan") {
     return (
@@ -1531,17 +1549,21 @@ function configuredFontScale(config: Awaited<ReturnType<typeof rpc.configGet>> |
 function renderPlanSurface(
   plannotatorDocument: import("@jingler/core").PlanDocument | null,
   pendingReviewId: string | null,
-  decideReview: (approved: boolean, feedback?: string) => Promise<void>
+  decideReview: (approved: boolean, feedback?: string) => Promise<void>,
+  disconnectedCard: ReactNode
 ) {
-  return plannotatorDocument !== null
-    ? (
-      <PlanReview
-        key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}:${pendingReviewId ?? "plan"}`}
-        document={plannotatorDocument}
-        canApprove={pendingReviewId !== null}
-        onApprove={() => decideReview(true)}
-        onRevise={(feedback) => decideReview(false, feedback)}
-      />
-    )
-    : null
+  return (
+    <>
+      {disconnectedCard}
+      {plannotatorDocument !== null && (
+        <PlanReview
+          key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}:${pendingReviewId ?? "plan"}`}
+          document={plannotatorDocument}
+          canApprove={pendingReviewId !== null}
+          onApprove={() => decideReview(true)}
+          onRevise={(feedback) => decideReview(false, feedback)}
+        />
+      )}
+    </>
+  )
 }

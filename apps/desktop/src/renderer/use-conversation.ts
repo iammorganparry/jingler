@@ -37,6 +37,7 @@ import type {
 import { pendingQuestion } from "@jingler/core"
 import type { QueuedMessage } from "./conversation-machine.js"
 import { getConversationActor } from "./conversation-registry.js"
+import { setPlanDisconnected } from "./plan-presence.js"
 import { rpc } from "./rpc-client.js"
 
 export interface Conversation {
@@ -162,8 +163,7 @@ export function useConversation(
     let cancelled = false
     void rpc.agentPlannotatorRecoveryNeeded(session.id, chatId).then((needed) => {
       if (cancelled || !needed) return
-      actor.send({ type: "SET_MODE", mode: "plan" })
-      actor.send({ type: "SEND", text: "/plannotator-resume-review" })
+      setPlanDisconnected(chatId, true)
     }).catch(() => {
       if (!cancelled) recoveryChecked.current = null
     })
