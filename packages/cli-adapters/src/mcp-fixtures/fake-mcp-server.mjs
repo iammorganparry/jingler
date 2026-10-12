@@ -10,6 +10,7 @@
  *   ok [n]        — normal server exposing n tools (default 2)
  *   hang          — accepts input, never replies (exercises the probe timeout)
  *   crash         — exits non-zero immediately (exercises spawn/transport failure)
+ *   stderr-crash  — writes three stderr lines (no trailing newline on the last), then exits non-zero
  *   protocol      — replies with a JSON-RPC error to initialize
  *   needs-env VAR — behaves as `ok` only if VAR is set, else errors; proves the probe
  *                   forwards configured credentials rather than the redacted half
@@ -18,6 +19,10 @@
 const [mode = "ok", arg] = process.argv.slice(2)
 
 if (mode === "crash") process.exit(3)
+
+if (mode === "stderr-crash") {
+  process.stderr.write("booting\nmissing API_KEY\nfatal: no cred", () => process.exit(3))
+}
 
 const send = (msg) => process.stdout.write(`${JSON.stringify(msg)}\n`)
 

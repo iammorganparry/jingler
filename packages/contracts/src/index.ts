@@ -1239,6 +1239,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     error: ConfigError
   }),
 
+  /**
+   * The last `lines` (default 200, max 500) stderr lines the most recent probe saw
+   * from a stdio server. Empty for an unknown, remote or never-probed server.
+   */
+  Rpc.make("Mcp.logTail", {
+    success: Schema.Struct({ lines: Schema.Array(Schema.String) }),
+    payload: { server: Schema.String, lines: Schema.optional(Schema.Number) }
+  }),
+
   /** Create or replace one entry. Values travel INBOUND only. */
   Rpc.make("Mcp.write", {
     success: Schema.Void,

@@ -578,3 +578,6 @@ Each "+" board sits on the row below the original and draws the missing states f
 - **25b+** — gaps F1-12, F7-01, F7-07; sub-issues 9.8, 10.14.
 - **25c+** — gaps F1-08, F1-15, F2-14, F8-04; sub-issues 9.2, 13.1, 13.2, 13.3, 13.7, 15.6.
 - **25e+** — gaps F2-10, F2-11, F2-12; sub-issues 6.12, 6.13, 6.14.
+
+## 14.10 MCP log tail (#532) — where MCP logs live
+Nowhere on disk. `probeServer` used to spawn stdio servers with `stderr: "ignore"`, so there was no log to read. It now pipes stderr and keeps the last 500 lines per server name in an in-memory ring (`packages/cli-adapters/src/mcp-log.ts`), replaced on every probe. `Mcp.logTail { server, lines? }` returns the last `lines` (default 200, max 500); an unknown, remote (http/sse, no stderr) or never-probed server returns `{ lines: [] }`. The tail is lost on app restart and reflects only the most recent probe, not a long-running agent attachment. If board 16d needs live logs from agent sessions, the attachment launch path (`runtime/mcp/attachment.ts`) would need to feed the same ring.
