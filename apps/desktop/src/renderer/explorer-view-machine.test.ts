@@ -23,7 +23,7 @@ describe("explorerViewMachine", () => {
   })
 
   test("toggle mode", () => {
-    const actor = createActor(explorerViewMachine).start()
+    const actor = createActor(explorerViewMachine, { input: {} }).start()
     expect(actor.getSnapshot().context.mode).toBe("sessions")
 
     actor.send({ type: "TOGGLE_MODE" })
@@ -36,7 +36,7 @@ describe("explorerViewMachine", () => {
   })
 
   test("filter remembered per project and restored on SET_PROJECT", () => {
-    const actor = createActor(explorerViewMachine).start()
+    const actor = createActor(explorerViewMachine, { input: {} }).start()
 
     actor.send({ type: "SET_PROJECT", path: "/proj-a" })
     actor.send({ type: "SET_FILTER", filter: "local" })
@@ -56,13 +56,13 @@ describe("explorerViewMachine", () => {
   })
 
   test("persisted state survives a fresh actor (restart)", () => {
-    const actor1 = createActor(explorerViewMachine).start()
+    const actor1 = createActor(explorerViewMachine, { input: {} }).start()
     actor1.send({ type: "SET_MODE", mode: "explorer" })
     actor1.send({ type: "SET_PROJECT", path: "/proj-x" })
     actor1.send({ type: "SET_FILTER", filter: "pr" })
     actor1.stop()
 
-    const actor2 = createActor(explorerViewMachine).start()
+    const actor2 = createActor(explorerViewMachine, { input: {} }).start()
     expect(actor2.getSnapshot().context.mode).toBe("explorer")
     expect(actor2.getSnapshot().context.projectMemory.get("/proj-x")).toBe("pr")
 
@@ -72,7 +72,7 @@ describe("explorerViewMachine", () => {
   })
 
   test("REVEAL_CHANGES lands on explorer + local", () => {
-    const actor = createActor(explorerViewMachine).start()
+    const actor = createActor(explorerViewMachine, { input: {} }).start()
     expect(actor.getSnapshot().context.mode).toBe("sessions")
     expect(actor.getSnapshot().context.filter).toBe("all")
 
@@ -84,7 +84,7 @@ describe("explorerViewMachine", () => {
   })
 
   test("REVEAL_CHANGES prefers remembered pr filter", () => {
-    const actor = createActor(explorerViewMachine).start()
+    const actor = createActor(explorerViewMachine, { input: {} }).start()
     actor.send({ type: "SET_PROJECT", path: "/proj-pr" })
     actor.send({ type: "SET_FILTER", filter: "pr" })
     actor.send({ type: "TOGGLE_MODE" })
