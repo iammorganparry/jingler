@@ -313,6 +313,10 @@ export interface JinglerAppProps {
   onRevealChanges?: (sessionId: string) => void
   /** Review Focus: hold the workspace sidebar collapsed. */
   sidebarCollapsed?: boolean
+  /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
+  initialWorkspaceView?: "sessions" | "explorer"
+  /** Callback when the workspace view (Sessions/Explorer) changes. */
+  onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (
     session: Session,
@@ -488,6 +492,8 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
          function renderSessionWorkspace() {
            return (<SessionConversation
         onOpenCheckpoints={props.onOpenCheckpoints}
+        initialWorkspaceView={props.initialWorkspaceView}
+        onWorkspaceViewChange={props.onWorkspaceViewChange}
         search={
           <TitleSearch
             onOpen={() => setPaletteOpen(true)}

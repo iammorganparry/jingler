@@ -1,5 +1,6 @@
 import type { SessionChatActions } from "../app/session-tree.js"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { matchExplorerToggleChord } from "../app/app-shortcuts.js"
 import type {
   DiffStat,
   Environment,
@@ -206,6 +207,8 @@ export interface SessionConversationProps {
   sidebarCollapsed?: boolean
   /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
   initialWorkspaceView?: "sessions" | "explorer"
+  /** Called when the sidebar switches between Sessions and Explorer (the host persists it). */
+  onWorkspaceViewChange?: (view: "sessions" | "explorer") => void
   /** The review tray beside a session's panes; null until drafts exist. */
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   /** Render the Issue tab — the rich linked-issue view (shown when one is linked). */
@@ -244,9 +247,27 @@ export function SessionConversation(props: SessionConversationProps) {
   )
   const selectedProjectId = props.selectedProjectId ?? localProjectId
   const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
-  const [workspaceView, setWorkspaceView] = useState<"sessions" | "explorer">(
+  const [workspaceView, setWorkspaceViewState] = useState<"sessions" | "explorer">(
     props.initialWorkspaceView ?? "sessions"
   )
+  const onWorkspaceViewChangeProp = props.onWorkspaceViewChange
+  const setWorkspaceView = useCallback(
+    (view: "sessions" | "explorer") => {
+      setWorkspaceViewState(view)
+      onWorkspaceViewChangeProp?.(view)
+    },
+    [onWorkspaceViewChangeProp]
+  )
+  // ⌘⇧E toggles the sidebar between Sessions and Explorer.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matchExplorerToggleChord(event)) return
+      event.preventDefault()
+      setWorkspaceView(workspaceView === "explorer" ? "sessions" : "explorer")
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [workspaceView, setWorkspaceView])
   const onRevealChangesProp = props.onRevealChanges
   const [sidebarExpandRequest, setSidebarExpandRequest] = useState(0)
   const revealChanges = useCallback(
