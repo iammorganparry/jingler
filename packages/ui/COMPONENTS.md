@@ -44,6 +44,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. | — | yes | #361 (1.3), #374 (2.9) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
+| ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | List loading rows at real height, empty state with next action, load error with Retry. | rows, rowHeight, title, action, message, onRetry | yes | #371 (2.6) |
 | Markdown | `components/markdown.tsx` | Markdown renderer with math (KaTeX) and code. | — | no | — |
 | MermaidDiagram | `components/mermaid-diagram.tsx` | Mermaid diagram renderer. | — | no | — |
 | OAuthButton | `components/oauth-button.tsx` | OAuth provider button (GitHub octocat etc.). | provider, mode, onClick, disabled, className | no | — |
