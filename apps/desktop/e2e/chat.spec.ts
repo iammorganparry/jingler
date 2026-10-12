@@ -1059,3 +1059,41 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   // persisted, so a readable restored transcript IS the "finished, not mid-flight"
   // claim — a half-written run would have no assistant text to find.
 })
+
+test("long session rail shows gap marker and expands on click", async ({ launchApp }) => {
+  const { window, repoPath } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  
+  // Send 15 messages to create a long history
+  for (let i = 0; i < 15; i++) {
+    await composer.fill(`Message ${i + 1}`)
+    await composer.press("Enter")
+    await window.waitForTimeout(500) // Let each turn start
+  }
+
+  // Wait for rail to be visible
+  const rail = window.locator('[aria-label="Section navigation"]')
+  await expect(rail).toBeVisible()
+
+  // Count visible tick marks - should be ≤10 + gap markers
+  const ticks = rail.locator('[data-slot="preview-rail-item"]')
+  const tickCount = await ticks.count()
+  expect(tickCount).toBeLessThanOrEqual(11) // 10 ticks + 1 gap max in simple case
+
+  // Find and click the gap marker (button with +N text)
+  const gapMarker = rail.locator('button[aria-label*="earlier turn"]').first()
+  await expect(gapMarker).toBeVisible()
+  await gapMarker.click()
+
+  // After expansion, all ticks should be visible
+  await window.waitForTimeout(300)
+  const expandedTickCount = await ticks.count()
+  expect(expandedTickCount).toBeGreaterThan(tickCount)
+  expect(expandedTickCount).toBe(15)
+})
