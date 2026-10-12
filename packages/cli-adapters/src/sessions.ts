@@ -2053,6 +2053,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           })
         )
 
+      const setImportedFrom = (sessionId: string, importedFrom: NonNullable<Session["importedFrom"]>) =>
+        atomically(
+          Effect.gen(function* () {
+            const sessions = yield* readAll();
+            const updated = sessions.map(s =>
+              s.id === sessionId ? { ...s, importedFrom } : s
+            );
+            yield* writeAll(updated);
+            const found = updated.find(s => s.id === sessionId);
+            if (!found) return yield* Effect.fail(new SessionNotFoundError({ sessionId }));
+            return found;
+          })
+        );
+
       return {
         list,
         get,
@@ -2102,6 +2116,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
         setProject,
+        setImportedFrom,
         setIssue,
         addIssues,
         selectIssue,

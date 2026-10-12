@@ -123,3 +123,13 @@ export { configureAnchoredFsProcess, anchoredFs } from "./anchored-fs.js"
 export type { AnchoredProcess } from "./anchored-fs.js"
 
 export * from "./project-config.js"
+
+// Session import scanners
+export {
+  scanClaudeCodeSessions,
+  scanCodexSessions,
+} from "./session-import-scanners.js";
+export {
+  scanConductorSessions,
+  scanT3CodeSessions,
+} from "./session-import-scanners-sqlite.js";
