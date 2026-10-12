@@ -328,7 +328,7 @@ export const appMachine = setup({
           states: {
             idle: {
               on: {
-                CHOOSE: "choosing",
+                CHOOSE: { target: "choosing", actions: assign({ error: null }) },
                 CONTINUE: {
                   target: "#app.setup.github",
                   guard: ({ context }) => context.reposDir !== null,
@@ -349,8 +349,10 @@ export const appMachine = setup({
                       : {},
                   ),
                 },
+                // A failed scan keeps onboarding alive: stay on step 1 with the
+                // error so the user can retry or pick another folder.
                 onError: {
-                  target: "#app.failure",
+                  target: "idle",
                   actions: assign(({ event }) => ({
                     error: messageOf(event.error),
                   })),

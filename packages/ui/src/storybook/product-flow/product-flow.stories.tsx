@@ -328,6 +328,32 @@ export const CompleteJourney: Story = {
   render: () => frame(<ProductFlow startAt="auth" />)
 }
 
+/** A failed folder scan keeps onboarding on step 1 with the error and a way to pick another folder. */
+export const WorkspaceScanFailed: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      error="EACCES: permission denied, scandir '/Users/morgan/Code'"
+      onChooseDir={noop}
+      onContinue={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onImportResources={noop}
+      onSkipResources={noop}
+      onCancelResourceImport={noop}
+      onRetryResources={noop}
+    />
+  )
+}
+
 export const ProviderOnboarding: Story = {
   render: () => frame(<ProductFlow startAt="provider" />)
 }

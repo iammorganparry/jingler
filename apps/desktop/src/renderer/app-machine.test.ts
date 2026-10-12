@@ -481,6 +481,37 @@ describe("appMachine first-run coordination", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();
   });
+
+  it("keeps onboarding on step 1 when the folder scan fails, then recovers on retry", async () => {
+    let attempts = 0;
+    const flaky = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("EACCES: permission denied");
+          return { reposDir: "/repos", repos: [] };
+        }),
+      },
+    });
+    const actor = createActor(flaky).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ setup: { workspace: "idle" } }) &&
+        snapshot.context.error !== null,
+    );
+    expect(actor.getSnapshot().context.error).toContain("permission denied");
+    expect(actor.getSnapshot().matches("failure")).toBe(false);
+
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    expect(actor.getSnapshot().context.error).toBeNull();
+    actor.stop();
+  });
 });
 
 describe("appMachine boot failure retry", () => {
