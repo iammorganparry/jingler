@@ -19,6 +19,7 @@ import { Maximize2, Minimize2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import { FilterChips } from "../components/filter-chips.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
 import type { JinglerLineSelection } from "../diff/pierre-selection.js"
@@ -111,6 +112,9 @@ export interface ExplorerPanelProps {
   readonly onFilterChange: (filter: ExplorerFilter) => void
   readonly localAvailable: boolean
   readonly prAvailable: boolean
+  readonly localCount?: number
+  readonly prCount?: number
+  readonly prNumber?: number
   /** The repository tree, or `ChangedFilesExplorer` when filtered. */
   readonly children: ReactNode
 }
@@ -127,8 +131,17 @@ export function ExplorerPanel({
   onFilterChange,
   localAvailable,
   prAvailable,
+  localCount,
+  prCount,
+  prNumber,
   children
 }: ExplorerPanelProps) {
+  const options = [
+    { value: "all" as const, label: "All" },
+    ...(localAvailable ? [{ value: "local" as const, label: "Changed", count: localCount }] : []),
+    ...(prAvailable ? [{ value: "pr" as const, label: prNumber ? `PR #${prNumber}` : "PR", count: prCount }] : [])
+  ]
+
   return (
     <section aria-label="Worktree explorer" className="flex h-full min-h-0 flex-col">
       <div className="flex-none border-b border-hairline px-3 py-2">
@@ -139,15 +152,11 @@ export function ExplorerPanel({
           </div>
         ) : null}
         <div className="mt-2">
-          <SegmentedControl<ExplorerFilter>
+          <FilterChips
+            options={options}
             value={filter}
             onChange={onFilterChange}
-            className="w-full"
-            items={[
-              { value: "all", label: "All files" },
-              { value: "local", label: "Uncommitted", disabled: !localAvailable },
-              { value: "pr", label: "Pull request", disabled: !prAvailable }
-            ]}
+            ariaLabel="Explorer filter"
           />
         </div>
       </div>

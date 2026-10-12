@@ -176,7 +176,7 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
   const { filter } = useSessionReviewState(session.id, session.prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
   // falls back to the uncommitted changes, and the control must not claim "PR".
-  const { source } = useReview(session)
+  const { source, files } = useReview(session)
   const shownFilter = filter === "all" ? "all" : source
   useEffect(() => browser.activate(), [browser.activate])
   // A changed file opens on its diff: that is the point of filtering to it.
@@ -187,6 +187,9 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
     onOpenPath(path)
   }
 
+  const localCount = source === "local" ? files.length : undefined
+  const prCount = source === "pr" ? files.length : undefined
+
   return (
     <ExplorerPanel
       branch={session.branch}
@@ -195,6 +198,9 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
       onFilterChange={(next) => setReviewFilter(session.id, session.prNumber, next)}
       localAvailable={session.worktreePath != null}
       prAvailable={session.prNumber != null}
+      localCount={localCount}
+      prCount={prCount}
+      prNumber={session.prNumber ?? undefined}
     >
         {filter !== "all" ? (
           <ChangesExplorerPanel

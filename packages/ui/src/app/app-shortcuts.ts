@@ -17,6 +17,10 @@ export const matchBrowserChord = (event: Chord): boolean =>
   event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey &&
   (event.key === "B" || event.code === "KeyB")
 
+export const matchExplorerToggleChord = (event: Chord): boolean =>
+  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
+  (event.key === "E" || event.code === "KeyE")
+
 /** ⌘\\ splits the focused tab right; ⌘⇧\\ splits it down. */
 export const matchSplitEditorChord = (event: Chord): "split-right" | "split-down" | null =>
   (event.metaKey || event.ctrlKey) && !event.altKey && (event.code === "Backslash" || event.key === "\\" || event.key === "|")
