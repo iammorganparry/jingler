@@ -24,7 +24,6 @@ import {
 } from "./provider-connections-settings.js"
 import {
   Boxes,
-  ChevronRight,
   Cloud,
   Cpu,
   Keyboard,
@@ -52,6 +51,9 @@ import {
   DialogHeader,
   DialogTitle
 } from "../components/dialog.js"
+import { SearchField } from "../components/search-input.js"
+import { Badge } from "../components/badge.js"
+import { JinglerWordmark } from "../brand/jingler-mark.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
@@ -104,62 +106,51 @@ interface NavItem {
   ready: boolean
 }
 
-const NAV: ReadonlyArray<NavItem> = [
+// ── Grouped nav structure per §5e ──────────────────────────────────────────
+
+interface NavGroup {
+  label: string
+  items: ReadonlyArray<NavItem>
+}
+
+const NAV_GROUPS: ReadonlyArray<NavGroup> = [
   {
-    key: "general",
-    label: "General",
-    icon: <SlidersHorizontal size={14} />,
-    ready: true
-  },
-  { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
-  { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true },
-  {
-    key: "providers",
-    label: "Providers",
-    icon: <Cpu size={14} />,
-    ready: true
-  },
-  { key: "context", label: "Context", icon: <Gauge size={14} />, ready: true },
-  { key: "plan", label: "Plan", icon: <Sparkles size={14} />, ready: true },
-  {
-    key: "agents",
-    label: "Agents & skills",
-    icon: <Sparkles size={14} />,
-    ready: true
+    label: "Workspace",
+    items: [
+      { key: "general", label: "General", icon: <SlidersHorizontal size={14} />, ready: true },
+      { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
+      { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false }
+    ]
   },
   {
-    key: "runtime",
-    label: "Runtime",
-    icon: <Gauge size={14} />,
-    ready: true
+    label: "Agents",
+    items: [
+      { key: "providers", label: "Providers", icon: <Cpu size={14} />, ready: true },
+      { key: "agents", label: "Agents & skills", icon: <Sparkles size={14} />, ready: true },
+      { key: "context", label: "Context", icon: <Gauge size={14} />, ready: true },
+      { key: "plan", label: "Plan", icon: <Sparkles size={14} />, ready: true },
+      { key: "runtime", label: "Runtime", icon: <Gauge size={14} />, ready: true }
+    ]
   },
   {
-    key: "permissions",
-    label: "Permissions",
-    icon: <ShieldCheck size={14} />,
-    ready: false
+    label: "Integrations",
+    items: [
+      { key: "github", label: "GitHub", icon: <GithubMark size={14} />, ready: true },
+      { key: "connectors", label: "MCP servers", icon: <Plug size={14} />, ready: true },
+      { key: "plugins", label: "Plugins", icon: <Boxes size={14} />, ready: true },
+      { key: "devices", label: "Devices", icon: <Server size={14} />, ready: true }
+    ]
   },
   {
-    key: "connectors",
-    label: "MCP servers",
-    icon: <Plug size={14} />,
-    ready: true
-  },
-  {
-    key: "github",
-    label: "GitHub",
-    icon: <GithubMark size={14} />,
-    ready: true
-  },
-  { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
-  { key: "plugins", label: "Plugins", icon: <Boxes size={14} />, ready: true },
-  {
-    key: "keybindings",
-    label: "Keybindings",
-    icon: <Keyboard size={14} />,
-    ready: false
+    label: "Appearance",
+    items: [
+      { key: "themes", label: "Themes", icon: <Palette size={14} />, ready: true },
+      { key: "keybindings", label: "Keybindings", icon: <Keyboard size={14} />, ready: false }
+    ]
   }
 ]
+
+const NAV: ReadonlyArray<NavItem> = NAV_GROUPS.flatMap(g => g.items)
 
 export interface SettingsViewProps {
   routines?: (projectId: string, templates?: ReadonlyArray<import("@jingler/core").ProjectRoutineTemplate>) => import("react").ReactNode
@@ -243,7 +234,7 @@ export interface SettingsViewProps {
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
-  initialSection?: "providers" | "github" | "devices" | "agents" | "runtime"
+  initialSection?: SectionKey
 }
 
 /**
@@ -392,6 +383,7 @@ return (<GithubSection
          }
 
   const [section, setSection] = React.useState<SectionKey>(initialSection)
+  const [searchQuery, setSearchQuery] = React.useState("")
   const selectSection = (next: SectionKey) => {
     setSection(next)
     if (next === "providers") providerConnections?.onReload?.()
@@ -409,7 +401,7 @@ return (<GithubSection
       <nav
         className={cn(
           "flex flex-none flex-col gap-0.5 border-r border-hairline bg-panel p-2.5",
-          compact ? "w-[56px] items-center" : "w-[216px]"
+          compact ? "w-[56px] items-center" : "w-[220px]"
         )}
       >
         <div
@@ -418,7 +410,7 @@ return (<GithubSection
             compact ? "justify-center" : "justify-between"
           )}
         >
-          {!compact && <Eyebrow>Settings</Eyebrow>}
+          {!compact && <JinglerWordmark className="text-[13px]" />}
           {onClose && (
             <button
               type="button"
@@ -430,42 +422,73 @@ return (<GithubSection
             </button>
           )}
         </div>
-        {NAV.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => selectSection(item.key)}
-            aria-current={section === item.key}
-            // The label is the accessible name in both modes — the compact rail
-            // hides the TEXT, not the name, so a by-name lookup still finds it.
-            aria-label={item.label}
-            title={item.label}
-            className={cn(
-              "flex items-center gap-2.5 rounded-md py-2 text-[13px] transition-colors",
-              compact ? "justify-center px-2" : "px-2.5",
-              section === item.key
-                ? "border border-blue/45 bg-surface font-semibold text-text-bright shadow-[0_0_0_3px] shadow-blue/10"
-                : "border border-transparent text-text-body hover:bg-surface/60"
-            )}
-          >
-            <span
-              className={cn(
-                section === item.key ? "text-blue" : "text-muted-foreground"
+        
+        {/* Search */}
+        {!compact && (
+          <div className="px-1 pb-2">
+            <SearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Search settings"
+              aria-label="Search settings"
+            />
+          </div>
+        )}
+
+        {/* Grouped nav items */}
+        {NAV_GROUPS.map((group) => {
+          const visibleItems = group.items.filter(item => 
+            !searchQuery || item.label.toLowerCase().includes(searchQuery.toLowerCase())
+          )
+          if (visibleItems.length === 0) return null
+          
+          return (
+            <div key={group.label} className={cn("flex flex-col gap-0.5", compact && "items-center")}>
+              {!compact && (
+                <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-text-dim">
+                  {group.label}
+                </div>
               )}
-            >
-              {item.icon}
-            </span>
-            {!compact && <span className="flex-1 text-left">{item.label}</span>}
-            {!compact && item.key === "providers" && (
-              <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
-                {providerConnections?.catalog?.connections.length ?? 0}
-              </span>
-            )}
-          </button>
-        ))}
-        {/* A three-line path caption is the first thing to go at 56px — it is
-            reference material, not navigation, and the same path is printed in
-            the Settings body. */}
+              {visibleItems.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => selectSection(item.key)}
+                  aria-current={section === item.key}
+                  aria-label={item.label}
+                  title={item.label}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md py-2 text-[13px] transition-colors",
+                    compact ? "justify-center px-2" : "px-2.5",
+                    section === item.key
+                      ? "bg-surface font-medium text-text-bright"
+                      : "text-muted-foreground hover:bg-hover"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      section === item.key ? "text-text-bright" : "text-muted-foreground"
+                    )}
+                  >
+                    {item.icon}
+                  </span>
+                  {!compact && (
+                    <>
+                      <span className="flex-1 text-left">{item.label}</span>
+                      {!item.ready && <Badge tone="count">Soon</Badge>}
+                      {item.key === "providers" && (
+                        <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
+                          {providerConnections?.catalog?.connections.length ?? 0}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )
+        })}
+        
         {!compact && (
           <div className="mt-auto rounded-md border border-line px-2.5 py-2 font-mono text-[10px] leading-relaxed text-dim">
             config ·{" "}
