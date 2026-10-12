@@ -2176,5 +2176,36 @@ export const BrowserBounds = Schema.Struct({
 });
 export type BrowserBounds = Schema.Schema.Type<typeof BrowserBounds>;
 
+// ── Session import ─────────────────────────────────────────────────────────
+
+/**
+ * A session discovered in another app's store (Claude Code, Codex, Conductor,
+ * T3 Code) that can be imported into Jingler. The `nativeSessionId` allows
+ * resuming the original harness session (`claude --resume <id>`, `codex resume
+ * <id>`), not just copying the transcript.
+ */
+export const ImportableSession = Schema.Struct({
+  /** Which app's store this session came from. */
+  source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+  /** The native session id used to resume the harness session. */
+  nativeSessionId: Schema.String,
+  /** Which harness the session ran on. */
+  harness: Schema.Literal("claude", "codex"),
+  /** Working directory the session ran in. */
+  cwd: Schema.String,
+  /** Git branch the session was on (optional, derived from transcript). */
+  branch: Schema.optional(Schema.String),
+  /** Session title (derived from first user message). */
+  title: Schema.String,
+  /** Last update timestamp (ISO 8601 string). */
+  updatedAt: Schema.String,
+  /** Number of messages in the transcript. */
+  messageCount: Schema.Number,
+  /** Whether the session's working directory still exists on disk. */
+  folderExists: Schema.Boolean,
+});
+export type ImportableSession = Schema.Schema.Type<typeof ImportableSession>;
+
+
 // The conversation/transcript model (Message, ToolCall, ApprovalGate) and the
 // normalized StreamEvent seam live in ./conversation.ts.
