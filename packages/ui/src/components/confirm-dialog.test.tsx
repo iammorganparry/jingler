@@ -46,3 +46,25 @@ it("leaves closing to the machine after a synchronous confirmation", async () =>
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
+
+describe("ConfirmDialog tone (spec §6.10)", () => {
+  it("makes the destructive confirm the solid red button and focuses Cancel first", async () => {
+    render(<ConfirmDialog open onOpenChange={() => {}} title="Discard changes?" confirmLabel="Discard" tone="danger" onConfirm={() => {}} />)
+    expect(screen.getByRole("button", { name: "Discard" }).className).toContain("bg-state-failed")
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })))
+  })
+
+  it("keeps a non-destructive confirm neutral", () => {
+    render(<ConfirmDialog open onOpenChange={() => {}} title="Rename?" confirmLabel="Rename" onConfirm={() => {}} />)
+    const confirm = screen.getByRole("button", { name: "Rename" })
+    expect(confirm.className).toContain("bg-primary-fill")
+    expect(confirm.className).not.toContain("bg-state-failed")
+  })
+
+  it("cancels on Esc", async () => {
+    const onOpenChange = vi.fn()
+    render(<ConfirmDialog open onOpenChange={onOpenChange} title="Delete?" tone="danger" onConfirm={() => {}} />)
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+})

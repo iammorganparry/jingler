@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { Button } from "./button.js"
 import {
   Dialog,
@@ -38,6 +38,7 @@ export function ConfirmDialog({
   onConfirm: () => void | Promise<void>
 }) {
   const [pending, setPending] = useState(false)
+  const cancelRef = useRef<HTMLButtonElement>(null)
   const confirm = () => {
     if (pending) return
     setPending(true)
@@ -48,7 +49,11 @@ export function ConfirmDialog({
   }
   return (
     <Dialog open={open} onOpenChange={(next) => !pending && onOpenChange(next)}>
-      <DialogContent className="w-[420px]">
+      <DialogContent
+        className="w-[420px]"
+        // Destructive dialogs start on the safe button so Enter can't confirm by accident.
+        onOpenAutoFocus={tone === "danger" ? (event) => { event.preventDefault(); cancelRef.current?.focus() } : undefined}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
@@ -58,7 +63,7 @@ export function ConfirmDialog({
           </DialogBody>
         )}
         <DialogFooter>
-          <Button variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
+          <Button ref={cancelRef} variant="secondary" size="sm" disabled={pending} onClick={() => onOpenChange(false)}>
             {cancelLabel}
           </Button>
           <Button

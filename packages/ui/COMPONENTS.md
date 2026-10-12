@@ -26,7 +26,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | ChipMenu | `components/chip-menu.tsx` | Compact Command picker anchored to a composer control. | — | no | — |
 | CodeChip | `components/code-chip.tsx` | Rendered code reference chip (file, range). | — | no | — |
 | Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut | `components/command.tsx` | cmdk primitives: Command, CommandDialog, Input, List, Item… | — | yes | — |
-| ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal for destructive or irreversible actions. | — | no | #375 (2.10) |
+| ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal; neutral confirm by default, `tone="danger"` = the only solid red button, Cancel focused first, Esc cancels. | open, onOpenChange, title, tone, onConfirm | no | #375 (2.10) |
 | ContextMenu | `components/context-menu.tsx` | Right-click menu. | — | yes | — |
 | Dialog, DialogTrigger, DialogPortal, DialogClose, DialogOverlay, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, DialogBody | `components/dialog.tsx` | Modal dialog primitives (Dialog, Header, Body, Footer…). | — | no | #373 (2.8) |
 | DiffPeek | `components/diff-peek.tsx` | Single-file diff peek, virtualised for large patches. | — | no | — |
@@ -205,7 +205,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | SettingsCard, SettingsRow | `Toggle` rows in settings | #372 (2.7) |
 | Drawer | `Dialog` | #373 (2.8) |
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
-| ConfirmDialog destructive rule | `ConfirmDialog` | #375 (2.10) |
 | BannerShell | `Callout`, archived/branch-drift banners | #376 (2.11) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
 | Avatar, AvatarStack | `Avatar` | #378 (2.13) |
