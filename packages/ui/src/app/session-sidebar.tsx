@@ -39,6 +39,7 @@ import { SessionTree, type SessionChatActions } from "./session-tree.js"
 import type { SessionSurface } from "./session-surface-layout.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
 import { UserMenu } from "../composites/user-menu.js"
+import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import type { PendingEnvironmentSession } from "./environment-session-startup-machine.js"
 import {
   filterSessions,
@@ -142,6 +143,8 @@ export interface SessionSidebarProps {
   update?: SidebarUpdate
   /** "Updated to vX" notes, shown once after the app relaunches on a new version. */
   releaseNotes?: SidebarReleaseNotes
+  /** Every version's notes behind the account menu's "What's new" item. */
+  whatsNew?: readonly WhatsNewEntry[]
   /** Global open pull requests across the connected GitHub App. */
   pullRequestsActive?: boolean
   onOpenPullRequests?: () => void
@@ -357,6 +360,7 @@ function SidebarBody({
   version,
   update,
   releaseNotes,
+  whatsNew,
   defaultFilters,
   pullRequestsActive = false,
   onOpenPullRequests,
@@ -877,6 +881,7 @@ return (renderExpandedGroupHeading())
           onSignIn={onSignIn}
           ghConnected={ghConnected}
           version={version}
+          whatsNew={whatsNew}
         />
       </div>
     </AISidebarSurface>

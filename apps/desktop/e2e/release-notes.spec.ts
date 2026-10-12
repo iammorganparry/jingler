@@ -44,3 +44,21 @@ test("relaunching on a newer version announces what changed, once", async ({ lau
   await expect(appShell(window)).toBeVisible()
   await expect(card).toHaveCount(0)
 })
+
+test("What's new reopens from the account menu after dismissal", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true })
+  await expect(appShell(window)).toBeVisible()
+  await window.evaluate((key) => localStorage.setItem(key, "0.0.1"), LAST_RUN_VERSION_KEY)
+  await window.reload()
+  await expect(appShell(window)).toBeVisible()
+  const card = window.getByRole("region", { name: `Updated to Jingler ${appVersion}` })
+  await card.getByRole("button", { name: `Dismiss Jingler ${appVersion} release notes` }).click()
+  await expect(card).toHaveCount(0)
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: /^What's new \(v\d/ }).click()
+  const dialog = window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText(`v${appVersion}`)
+  await expect(dialog).toContainText(firstNoteFor(appVersion))
+})

@@ -261,7 +261,7 @@ function AuthedApp({
   const update = useAutoUpdate();
   // The build-time version: Changesets keys the CHANGELOG on it, and unlike
   // Electron's runtime version it is right in unpackaged builds too.
-  const releaseNotes = useReleaseNotes(__APP_VERSION__);
+  const { announcement: releaseNotes, whatsNew } = useReleaseNotes(__APP_VERSION__);
   const github = useGitHubConnection();
   const pullRequestInbox = usePullRequestInbox(
     github.connection.connected || github.connection.cliAvailable === true,
@@ -1473,6 +1473,7 @@ function AuthedApp({
         user={user}
         update={update}
         releaseNotes={releaseNotes}
+        whatsNew={whatsNew}
         pullRequestsView={
           renderPullRequestInbox(pullRequestInbox, github, selectedPullRequestTarget, openSelectedPullRequestFiles, openSelectedPullRequestSession)
         }
