@@ -14,13 +14,20 @@
  * session. Keeping the pure part here — `notificationFor` — means the edge rules
  * are testable without Electron, an actor, or a clock.
  */
-import type { NotificationKind, SessionActivity } from "@jingler/core"
+import { pendingQuestion } from "@jingler/core"
+import type { Message, NotificationKind, SessionActivity } from "@jingler/core"
 
 /** The slice of a session's state a notification decision depends on. */
 export interface NotifiableState {
   readonly activity: SessionActivity | null
   /** How the last run ended, or null while one is in flight. */
   readonly outcome: "done" | "failed" | null
+  /**
+   * One line saying what the blocked agent is asking, from `blockedPromptOf`.
+   * Null when nothing is blocked or the block has no transcript part (a fleet
+   * child needing attention), in which case the generic copy is used.
+   */
+  readonly prompt?: string | null
 }
 
 export interface NotificationPlan {
@@ -52,7 +59,9 @@ export const notificationFor = (
     return {
       kind: "needs-input",
       title: sessionTitle,
-      body: approval ? "Waiting for you to approve a plan." : "Waiting for your input."
+      body: approval
+        ? "Waiting for you to approve a plan."
+        : (next.prompt ?? "Waiting for your input.")
     }
   }
 
@@ -66,6 +75,33 @@ export const notificationFor = (
   }
 
   return null
+}
+
+const PROMPT_MAX = 80
+
+/** First line, whitespace-normalised, cut to one notification line. */
+const oneLine = (text: string): string => {
+  const line = text.split("\n")[0]!.replace(/\s+/g, " ").trim()
+  return line.length > PROMPT_MAX ? `${line.slice(0, PROMPT_MAX - 1).trimEnd()}…` : line
+}
+
+/**
+ * What a blocked agent is asking, in one line: "Run `pnpm test`?" for a pending
+ * command gate, the gate's title for an edit gate, else the first question.
+ * Plans are not covered — `needs-approval` already has its own copy.
+ */
+export const blockedPromptOf = (messages: ReadonlyArray<Message>): string | null => {
+  const last = messages[messages.length - 1]
+  const gate =
+    last?.role === "assistant"
+      ? last.parts.flatMap((part) => (part._tag === "Gate" && part.gate.status === "pending" ? [part.gate] : []))[0]
+      : undefined
+  if (gate) {
+    const text = gate.kind === "command" && gate.command ? `Run \`${oneLine(gate.command)}\`?` : oneLine(gate.title)
+    return text === "" ? null : text
+  }
+  const question = pendingQuestion(messages)?.questions[0]?.question
+  return question ? oneLine(question) : null
 }
 
 /** Both kinds of "the agent has stopped and is waiting on a human". */
