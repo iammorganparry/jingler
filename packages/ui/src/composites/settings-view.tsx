@@ -52,7 +52,8 @@ import {
   DialogTitle
 } from "../components/dialog.js"
 import { SearchField } from "../components/search-input.js"
-import { Pill } from "../components/pill.js"
+import { Badge } from "../components/badge.js"
+import { JinglerWordmark } from "../brand/jingler-mark.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
@@ -409,7 +410,7 @@ return (<GithubSection
             compact ? "justify-center" : "justify-between"
           )}
         >
-          {!compact && <Eyebrow>Settings</Eyebrow>}
+          {!compact && <JinglerWordmark className="text-[13px]" />}
           {onClose && (
             <button
               type="button"
@@ -460,13 +461,13 @@ return (<GithubSection
                     "flex items-center gap-2.5 rounded-md py-2 text-[13px] transition-colors",
                     compact ? "justify-center px-2" : "px-2.5",
                     section === item.key
-                      ? "border border-blue/45 bg-surface font-semibold text-text-bright shadow-[0_0_0_3px] shadow-blue/10"
-                      : "border border-transparent text-text-body hover:bg-surface/60"
+                      ? "bg-surface font-medium text-text-bright"
+                      : "text-muted-foreground hover:bg-hover"
                   )}
                 >
                   <span
                     className={cn(
-                      section === item.key ? "text-blue" : "text-muted-foreground"
+                      section === item.key ? "text-text-bright" : "text-muted-foreground"
                     )}
                   >
                     {item.icon}
@@ -474,7 +475,7 @@ return (<GithubSection
                   {!compact && (
                     <>
                       <span className="flex-1 text-left">{item.label}</span>
-                      {!item.ready && <Pill tone="blue" dot={false}>Soon</Pill>}
+                      {!item.ready && <Badge tone="count">Soon</Badge>}
                       {item.key === "providers" && (
                         <span className="rounded bg-hover px-1.5 py-px font-mono text-[9px] text-muted-foreground">
                           {providerConnections?.catalog?.connections.length ?? 0}
