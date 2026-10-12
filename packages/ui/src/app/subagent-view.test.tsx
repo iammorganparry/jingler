@@ -1,5 +1,5 @@
 import type { Message, SubagentFleetNode } from "@jingler/core"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { FleetAgentView } from "./subagent-view.js"
 
@@ -194,6 +194,26 @@ describe("FleetAgentView", () => {
     expect(screen.getByTestId("subagent-final-output").textContent).toContain(
       "Validation: 12 tests passed."
     )
+  })
+
+  it("renders a worker's final output as markdown", async () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          agent: "worker",
+          status: "completed",
+          currentTool: null,
+          completedAt: 30,
+          terminal: { reason: "completed", summary: "**Merged** it.\n\n- one\n- two", at: 30, retryable: false }
+        })}
+        messages={[]}
+      />
+    )
+
+    const output = screen.getByTestId("subagent-final-output")
+    await waitFor(() => expect(output.querySelector("[data-streamdown=strong]")?.textContent).toBe("Merged"))
+    expect(output.querySelectorAll("li")).toHaveLength(2)
+    expect(output.textContent).not.toContain("**")
   })
 
   it("still shows the plain fallback when there is no fleet node at all", () => {

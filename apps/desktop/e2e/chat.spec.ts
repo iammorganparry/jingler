@@ -1059,3 +1059,16 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   // persisted, so a readable restored transcript IS the "finished, not mid-flight"
   // claim — a half-written run would have no assistant text to find.
 })
+
+test("renders markdown in the operator's own message", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("Please **refactor** this:\n\n- one\n- two")
+  await composer.press("Enter")
+
+  const transcript = window.getByTestId("conversation-scroll")
+  await expect(transcript.locator("[data-streamdown=strong]", { hasText: "refactor" }).first()).toBeVisible({ timeout: 20_000 })
+  await expect(transcript.getByText("**refactor**")).toHaveCount(0)
+})

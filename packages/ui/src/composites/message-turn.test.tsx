@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { Message, PlanDocument } from "@jingler/core"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
 import { MessageTurn, PlanProgressContext } from "./message-turn.js"
 
@@ -120,5 +120,18 @@ describe("MessageTurn streaming text", () => {
       ]
     })} />)
     expect(withProgress.container.querySelector(".jingler-streaming-text")).toBeNull()
+  })
+})
+
+describe("MessageTurn user markdown", () => {
+  it("renders a fenced block in a user turn as code, not raw backticks", async () => {
+    const view = render(<MessageTurn message={assistant({
+      role: "user",
+      streaming: false,
+      parts: [{ _tag: "Text", text: "Report:\n\n```json\n{ \"ok\": true }\n```\n\n**done**" }]
+    })} />)
+    await waitFor(() => expect(view.container.querySelector("[data-streamdown=strong]")?.textContent).toBe("done"))
+    expect(view.container.querySelector("pre, [data-streamdown^=code]")).toBeTruthy()
+    expect(view.container.textContent).not.toContain("```")
   })
 })
