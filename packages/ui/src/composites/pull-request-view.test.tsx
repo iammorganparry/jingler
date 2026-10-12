@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { PullRequest } from "@jingler/core"
+import type { PublishCheckpoint, PullRequest } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { PullRequestView } from "./pull-request-view.js"
@@ -82,5 +82,74 @@ describe("PullRequestView evidence navigation", () => {
     render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
     expect(screen.queryByText("Add a review")).toBeNull()
     expect(screen.queryByRole("button", { name: "Merge pull request" })).toBeNull()
+  })
+})
+
+describe("PullRequestView publish stepper", () => {
+  it("shows 3-step stepper during publishing", () => {
+    const checkpoint: PublishCheckpoint = {
+      step: "committing",
+      completed: ["verifying-branch", "generating-metadata", "staging"],
+      updatedAt: "2026-08-26T08:00:00Z"
+    }
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView pr={null} connected publish={checkpoint} publishing onCreatePr={() => {}} />
+      </WidthTierValue>
+    )
+    expect(screen.getByText("Commit")).toBeTruthy()
+    expect(screen.getByText("Push")).toBeTruthy()
+    expect(screen.getByText("Open PR")).toBeTruthy()
+  })
+
+  it("marks the failing step on push failure", () => {
+    const checkpoint: PublishCheckpoint = {
+      step: "failed",
+      completed: ["verifying-branch", "generating-metadata", "staging", "committing", "authenticating"],
+      resumeFrom: "pushing",
+      error: "Network timeout during push",
+      updatedAt: "2026-08-26T08:00:00Z"
+    }
+    const onRetry = vi.fn()
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView pr={null} connected publish={checkpoint} onCreatePr={() => {}} onRetryPublish={onRetry} />
+      </WidthTierValue>
+    )
+    expect(screen.getByText("Publishing stopped")).toBeTruthy()
+    expect(screen.getByText("Network timeout during push")).toBeTruthy()
+    const retryButton = screen.getByRole("button", { name: /Retry from Push/i })
+    expect(retryButton).toBeTruthy()
+    fireEvent.click(retryButton)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows completed checkmarks for finished phases", () => {
+    const checkpoint: PublishCheckpoint = {
+      step: "creating-pr",
+      completed: ["verifying-branch", "generating-metadata", "staging", "committing", "authenticating", "pushing"],
+      updatedAt: "2026-08-26T08:00:00Z"
+    }
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView pr={null} connected publish={checkpoint} publishing onCreatePr={() => {}} />
+      </WidthTierValue>
+    )
+    // Commit and Push phases should be marked done
+    expect(screen.getAllByRole("listitem").length).toBe(3)
+  })
+
+  it("shows nothing-to-publish state", () => {
+    const checkpoint: PublishCheckpoint = {
+      step: "no-changes",
+      completed: [],
+      updatedAt: "2026-08-26T08:00:00Z"
+    }
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView pr={null} connected publish={checkpoint} onCreatePr={() => {}} />
+      </WidthTierValue>
+    )
+    expect(screen.getByText("Nothing to publish")).toBeTruthy()
   })
 })

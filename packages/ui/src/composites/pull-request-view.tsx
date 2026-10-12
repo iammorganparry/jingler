@@ -10,7 +10,8 @@ import type {
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Check, Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Stepper } from "../components/status-row.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -119,21 +120,28 @@ const buildFeed = (pr: PullRequest): ReadonlyArray<FeedEntry> => {
   return entries.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 }
 
-const PUBLISH_PROGRESS: ReadonlyArray<{ readonly step: PublishStep; readonly label: string }> = [
-  { step: "verifying-branch", label: "Verify semantic branch" },
-  { step: "generating-metadata", label: "Prepare commit and pull request" },
-  { step: "staging", label: "Stage session changes" },
-  { step: "committing", label: "Create commit" },
-  { step: "authenticating", label: "Authenticate with GitHub App" },
-  { step: "pushing", label: "Push branch" },
-  { step: "resolving-pr", label: "Find existing pull request" },
-  { step: "creating-pr", label: "Create pull request" },
-  { step: "updating-pr", label: "Update pull request description" },
-  { step: "linking", label: "Link pull request to session" }
-]
+type PublishPhase = "commit" | "push" | "open-pr"
 
-const publishStepLabel = (step: PublishStep): string =>
-  PUBLISH_PROGRESS.find((candidate) => candidate.step === step)?.label ?? step
+const PUBLISH_PHASE_LABELS: Record<PublishPhase, string> = {
+  commit: "Commit",
+  push: "Push",
+  "open-pr": "Open PR"
+}
+
+const publishPhaseFromStep = (step: PublishStep): PublishPhase | null => {
+  if (step === "idle" || step === "complete" || step === "failed" || step === "no-changes") return null
+  if (step === "verifying-branch" || step === "generating-metadata" || step === "staging" || step === "committing") return "commit"
+  if (step === "inspecting" || step === "authenticating" || step === "pushing") return "push"
+  return "open-pr"
+}
+
+const PUBLISH_PHASES: ReadonlyArray<PublishPhase> = ["commit", "push", "open-pr"]
+
+function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
+  const active = publishPhaseFromStep(publish.step) ?? (publish.resumeFrom ? publishPhaseFromStep(publish.resumeFrom) : null)
+  const current = publish.step === "complete" ? PUBLISH_PHASES.length : active ? PUBLISH_PHASES.indexOf(active) : 0
+  return <Stepper className="mt-2" steps={PUBLISH_PHASES.map((phase) => PUBLISH_PHASE_LABELS[phase])} current={current} />
+}
 
 export interface PullRequestViewProps {
   pr: PullRequest | null
@@ -449,6 +457,7 @@ return (evidence === "checks" ? (
           ))
          }
 
+         // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: existing complexity
          function renderCreatePullRequest() {
            return (<div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
         <span className="flex size-14 items-center justify-center rounded-2xl bg-surface text-dim">
@@ -482,27 +491,11 @@ return (evidence === "checks" ? (
                   <p className="font-medium text-text-bright">
                     {getStep(publish)}
                   </p>
-                  <ol className="mt-2 flex flex-col gap-1.5">
-                    {PUBLISH_PROGRESS.map(({ step, label }) => {
-                      const done = publish.completed.includes(step)
-                      const active = publish.step === step || publish.resumeFrom === step
-                      return (
-                        <li
-                          key={step}
-                          className={cn("flex items-center gap-2", active && "font-medium text-text-bright")}
-                        >
-                          <span className="flex size-3.5 shrink-0 items-center justify-center">
-                            {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
-                          </span>
-                          <span>{label}</span>
-                        </li>
-                      )
-                    })}
-                  </ol>
+                  <PublishStepper publish={publish} />
                   {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
                   {publish.step === "failed" && onRetryPublish && (
                     <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
-                      Retry from {publish.resumeFrom ?? "inspection"}
+                      Retry from {publish.resumeFrom ? PUBLISH_PHASE_LABELS[publishPhaseFromStep(publish.resumeFrom) ?? "commit"] : "inspection"}
                     </Button>
                   )}
                 </div>
@@ -531,7 +524,8 @@ return (evidence === "checks" ? (
            if (publish.step === "failed") return ("Publishing stopped")
            if (publish.step === "no-changes") return ("Nothing to publish")
            if (publish.step === "complete" && publish.prNumber !== undefined) return (`Pull request #${publish.prNumber} linked`)
-           return (`Current step: ${publishStepLabel(publish.step)}`)
+           const phase = publishPhaseFromStep(publish.step)
+           return phase ? `Current step: ${PUBLISH_PHASE_LABELS[phase]}` : "Publishing"
          }
 
          function getPublishing() {
