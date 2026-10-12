@@ -67,7 +67,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | StatusDot | `components/status-dot.tsx` | Status dot, optionally glowing / pulsing. | status, tone, size, glow, pulse, className | yes | #362 (1.4) |
 | StatusRow, Stepper | `components/status-row.tsx` | Neutral status line (red only when failed); numbered done/current/upcoming stepper with aria-current. | icon, failed, steps, current | yes | #370 (2.5) |
 | SettingsCard, SettingsRow | `components/settings-row.tsx` | Bordered card of rows; row = label + wrapping help left, fixed control right. | title, label, help, control | yes | #372 (2.7) |
-| Toggle | `components/toggle.tsx` | Switch toggle (role=switch); neutral track, primary-fill when on. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
+| Toast, ToastRegion | `components/toast.tsx` | Bottom-right notification stack (success, error + Retry, Needs you + Jump, info); queue, 6 s timeout and hover-pause live in `components/toast-machine.ts`. | variant, title, description, action, onDismiss | yes | #369 (2.4) |
+| Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
 
 ## Atoms — BeUI base
@@ -205,7 +206,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 
 | Component | Replaces / extends | Issue |
 |---|---|---|
-| Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
