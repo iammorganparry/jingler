@@ -39,6 +39,7 @@ import type {
   GitHubRelayEvent,
   GitConfig,
   NotificationKind,
+  NotificationPermission,
   NotificationsConfig,
   GithubConfig,
   Issue,
@@ -925,6 +926,8 @@ export const rpc = {
     body: string
     isActiveSession: boolean
   }): Promise<void> => run((c) => c.Notify.show(input)),
+  notifyPermission: (): Promise<NotificationPermission> =>
+    run((c) => c.Notify.permission()),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>

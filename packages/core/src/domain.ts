@@ -896,6 +896,22 @@ export const NotificationKind = Schema.Literal(
 export type NotificationKind = Schema.Schema.Type<typeof NotificationKind>;
 
 /**
+ * Whether the OS will show Jingler's notifications. Electron's `Notification`
+ * exposes only `isSupported()` (no permission query), so main reports
+ * `unsupported` or `unknown`. `granted`/`denied` are reserved for a platform
+ * probe that can actually observe them; never emit them without one.
+ */
+export const NotificationPermission = Schema.Literal(
+  "granted",
+  "denied",
+  "unsupported",
+  "unknown",
+);
+export type NotificationPermission = Schema.Schema.Type<
+  typeof NotificationPermission
+>;
+
+/**
  * Desktop-notification preferences. Persisted inside `WorkspaceConfig`.
  *
  * Per-kind toggles rather than one switch: the kinds differ sharply in how

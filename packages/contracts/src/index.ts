@@ -26,6 +26,7 @@ import {
   GitConfig,
   GithubConfig,
   NotificationKind,
+  NotificationPermission,
   NotificationsConfig,
   Issue,
   IssueAutomations,
@@ -1585,6 +1586,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
        */
       isActiveSession: Schema.Boolean
     }
+  }),
+
+  /**
+   * Can the OS show notifications? Settings → Notifications uses this to warn
+   * when they cannot. Electron has no permission query, so main answers
+   * `unsupported` or `unknown`, never a guessed `granted`/`denied`.
+   */
+  Rpc.make("Notify.permission", {
+    success: NotificationPermission
   }),
 
   /** Persist the full set of starred repo paths (replaces the stored list). */
