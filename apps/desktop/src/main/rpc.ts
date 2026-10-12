@@ -5685,6 +5685,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Notify.permission": () => Effect.sync(() => notificationPermission()),
   "Config.setStarredRepos": ({ paths }) => ConfigService.setStarredRepos(paths),
+  "Config.setHeaderViews": ({ views }) => ConfigService.setHeaderViews(views),
   "Config.setCollapsedRepos": ({ paths }) =>
     ConfigService.setCollapsedRepos(paths),
   "Config.setLastRepoPath": ({ path }) => ConfigService.setLastRepoPath(path),

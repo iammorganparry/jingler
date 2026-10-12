@@ -40,6 +40,7 @@ import type { SessionCreationPhase } from "@jingler/contracts";
 import {
   clampFontScale,
   DEFAULT_THEME_ID,
+  normalizeHeaderViews,
   workspaceModeOf,
 } from "@jingler/core";
 import {
@@ -1991,8 +1992,9 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const contextConfig = configQuery.data?.context ?? null;
   const starredRepos = configQuery.data?.starredRepos ?? [];
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
+  const headerViews = normalizeHeaderViews(configQuery.data?.headerViews);
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
-  return { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
+  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
 }
 
 function renderIssueInbox(

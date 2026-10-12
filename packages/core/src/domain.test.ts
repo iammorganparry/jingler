@@ -10,6 +10,9 @@ import {
   GitHubSessionRelayGrantResponse,
   GitHubSessionRoute,
   GithubConfig,
+  HEADER_VIEWS_DEFAULT,
+  HEADER_VIEWS_MAX,
+  normalizeHeaderViews,
   IssueDetail,
   IssueReference,
   issueReferenceForProvider,
@@ -669,5 +672,29 @@ describe("defaultModeFor", () => {
   it("honours the operator's configured default over the auto fallback", () => {
     expect(defaultModeFor("accept-edits")).toBe("accept-edits");
     expect(defaultModeFor("ask")).toBe("ask");
+  });
+});
+
+describe("normalizeHeaderViews", () => {
+  it("falls back to the default when nothing was saved", () => {
+    expect(normalizeHeaderViews(undefined)).toEqual(HEADER_VIEWS_DEFAULT);
+    expect(normalizeHeaderViews(null)).toEqual(HEADER_VIEWS_DEFAULT);
+  });
+
+  it("drops unknown ids and repeats but keeps order and plugin views", () => {
+    expect(normalizeHeaderViews(["terminal", "nope", "changes", "terminal", "linear.issues"])).toEqual([
+      "terminal",
+      "changes",
+      "linear.issues"
+    ]);
+  });
+
+  it("clamps to the header maximum", () => {
+    const six = ["changes", "checks", "terminal", "browser", "files", "plan"];
+    expect(normalizeHeaderViews(six)).toEqual(six.slice(0, HEADER_VIEWS_MAX));
+  });
+
+  it("keeps an explicitly emptied list empty", () => {
+    expect(normalizeHeaderViews([])).toEqual([]);
   });
 });

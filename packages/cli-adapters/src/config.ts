@@ -13,6 +13,7 @@ import type {
 } from "@jingler/core"
 import {
   clampFontScale,
+  normalizeHeaderViews,
   DEFAULT_THEME_ID,
   ProviderId,
   SubagentModelAssignments,
@@ -33,7 +34,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   if (existing === null) return {}
   // Every unrelated section must survive this whole-object read-modify-write.
   const truthyKeys = [
-    "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
+    "context", "github", "git", "starredRepos", "headerViews", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
     "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
@@ -225,6 +226,10 @@ export class ConfigService extends Effect.Service<ConfigService>()(
       const setStarredRepos = (starredRepos: ReadonlyArray<string>) =>
         patch({ starredRepos })
 
+      /** Unknown ids and repeats are dropped; the list is clamped to the header's max. */
+      const setHeaderViews = (views: ReadonlyArray<string>) =>
+        patch({ headerViews: normalizeHeaderViews(views) })
+
       const setCollapsedRepos = (collapsedRepos: ReadonlyArray<string>) =>
         patch({ collapsedRepos })
 
@@ -335,6 +340,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setAdhdMode,
         setFontScale,
         setStarredRepos,
+        setHeaderViews,
         setCollapsedRepos,
         setLastRepoPath,
         setContext,

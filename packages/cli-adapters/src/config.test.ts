@@ -441,6 +441,30 @@ describe("ConfigService", () => {
     if (exit._tag === "Success") expect(exit.value?.fontScale).toBe(2)
   })
 
+  it("round-trips pinned header views in order, dropping unknown ids, across an unrelated save", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setHeaderViews(["browser", "bogus", "changes", "browser"])
+        yield* ConfigService.setLastRepoPath("/repos/widget")
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value?.headerViews).toEqual(["browser", "changes"])
+  })
+
+  it("persists an emptied header view list instead of dropping it", async () => {
+    const exit = await provided(
+      Effect.gen(function* () {
+        yield* ConfigService.setHeaderViews(["changes"])
+        yield* ConfigService.setHeaderViews([])
+        return yield* ConfigService.get()
+      })
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag === "Success") expect(exit.value?.headerViews).toEqual([])
+  })
+
   it("persists the active theme and keeps it across an unrelated save", async () => {
     const exit = await provided(
       Effect.gen(function* () {

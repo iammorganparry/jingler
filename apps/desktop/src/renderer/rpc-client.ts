@@ -932,6 +932,8 @@ export const rpc = {
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setStarredRepos({ paths })),
+  configSetHeaderViews: (views: ReadonlyArray<string>): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setHeaderViews({ views })),
   configSetCollapsedRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>

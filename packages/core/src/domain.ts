@@ -1004,6 +1004,13 @@ export const WorkspaceConfig = Schema.Struct({
    */
   starredRepos: Schema.optional(Schema.Array(Schema.String)),
   /**
+   * The views pinned to the workspace header, in display order (max
+   * `HEADER_VIEWS_MAX`). Absent on older configs; read it through
+   * `normalizeHeaderViews`, which drops unknown ids and falls back to
+   * `HEADER_VIEWS_DEFAULT`.
+   */
+  headerViews: Schema.optional(Schema.Array(Schema.String)),
+  /**
    * Absolute paths of the repos the user has collapsed in the sidebar (their
    * sessions hidden). The reserved sentinel `"__archived__"` collapses the
    * Archived group. Absent on older configs (treated as an empty list).
@@ -1113,6 +1120,36 @@ export const clampFontScale = (value: number | null | undefined): number =>
   value !== null && value !== undefined && Number.isFinite(value)
     ? Math.min(FONT_SCALE_RANGE.max, Math.max(FONT_SCALE_RANGE.min, value))
     : FONT_SCALE_DEFAULT;
+
+/** The views pinned to the header until the operator changes them (spec §3c). */
+export const HEADER_VIEWS_DEFAULT: ReadonlyArray<string> = ["changes", "checks", "terminal", "browser"];
+
+/** The header holds at most this many pinned views; the rest overflow. */
+export const HEADER_VIEWS_MAX = 5;
+
+/** Built-in view ids that can be pinned. Plugin views are `<pluginId>.<local>`. */
+export const HEADER_VIEW_BUILTIN_IDS: ReadonlyArray<string> = [
+  "changes", "checks", "terminal", "browser", "files", "plan", "explanation", "issue"
+];
+
+const PLUGIN_VIEW_ID = /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/;
+
+/**
+ * Coerce a stored/incoming pinned-view list into a valid one: unknown ids and
+ * repeats are dropped, order is kept, and the list is clamped to
+ * `HEADER_VIEWS_MAX`. Absent (never saved) yields the default. The read path
+ * uses it because a hand-edited `config.json` can carry anything.
+ */
+export const normalizeHeaderViews = (
+  views: ReadonlyArray<string> | null | undefined
+): ReadonlyArray<string> => {
+  if (views === null || views === undefined) return HEADER_VIEWS_DEFAULT;
+  const known = views.filter(
+    (id, index) =>
+      (HEADER_VIEW_BUILTIN_IDS.includes(id) || PLUGIN_VIEW_ID.test(id)) && views.indexOf(id) === index
+  );
+  return known.slice(0, HEADER_VIEWS_MAX);
+};
 
 /** A git repository discovered under the configured repos directory. */
 export const Repo = Schema.Struct({
