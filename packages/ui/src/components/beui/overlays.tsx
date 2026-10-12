@@ -1,9 +1,9 @@
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react"
+import { type ReactNode, useCallback, useId, useState } from "react"
 import { AnimatePresence, m, useReducedMotion } from "motion/react"
 import { cn } from "../../lib/cn.js"
 import { FAST, SPRING, SPRING_SOFT } from "../../lib/motion.js"
 import { Tooltip } from "./tooltip.js"
-import { isGapMarker, windowRailItems, type RailItem, type WindowedRailItem } from "../../lib/window-rail-items.js"
+import { isGapMarker, windowRailItems, type RailItem } from "../../lib/window-rail-items.js"
 
 export function SharedLayoutIndicator({ layoutId = "shared-active", className }: { layoutId?: string; className?: string }) {
   return <m.span layoutId={layoutId} transition={SPRING} className={cn("absolute inset-0 -z-10 rounded-md bg-surface", className)} />
@@ -30,6 +30,15 @@ export interface PreviewRailProps {
   previewContainerClassName?: string
   previewClassName?: string
 }
+// Expansion is keyed to the first item, so switching sessions collapses the rail again.
+function useWindowedRail<T extends RailItem>(items: ReadonlyArray<T>, activeId: string, maxItems?: number) {
+  const firstId = items[0]?.id
+  const [expandedFor, setExpandedFor] = useState<string | undefined>()
+  const expanded = expandedFor !== undefined && expandedFor === firstId
+  const windowedItems = maxItems ? windowRailItems(items, activeId, expanded, maxItems) : items
+  return { windowedItems, expand: () => setExpandedFor(firstId) }
+}
+
 const TICK_SCALES = [1, 0.68, 0.44]
 const tickScale = (highlighted: boolean, distance: number) => (highlighted ? 1 : (TICK_SCALES[distance] ?? 0.25))
 
@@ -54,23 +63,13 @@ export function PreviewRail({ items, label = "Section navigation", activeId, def
   const [internalActiveId, setInternalActiveId] = useState(defaultActiveId ?? items[0]?.id ?? "")
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState(false)
-  const firstItemIdRef = useRef(items[0]?.id)
-  
-  // Reset expanded state when session changes (first item id changes)
-  useEffect(() => {
-    if (items[0]?.id !== firstItemIdRef.current) {
-      setExpanded(false)
-      firstItemIdRef.current = items[0]?.id
-    }
-  }, [items])
   
   const requestedActiveId = activeId ?? internalActiveId
   const selectedId = getActiveItemId()
   const displayedId = hoveredId ?? focusedId ?? ""
   const highlightedId = displayedId || (highlightActive ? selectedId : "")
   
-  const windowedItems = maxItems ? windowRailItems(items, selectedId, expanded, maxItems) : items
+  const { windowedItems, expand: setExpanded } = useWindowedRail(items, selectedId, maxItems)
   const displayedIndex = windowedItems.findIndex(item => !isGapMarker(item) && item.id === highlightedId)
   const rowTemplate = windowedItems.length ? `repeat(${windowedItems.length}, ${itemSize}px)` : undefined
   
@@ -84,7 +83,7 @@ export function PreviewRail({ items, label = "Section navigation", activeId, def
   return <m.div layoutRoot className={cn("isolate relative flex min-h-80 w-full overflow-visible", className)}>
     <nav aria-label={label} onPointerLeave={() => setHoveredId(null)} style={{ gridTemplateRows: rowTemplate }} className={cn("relative z-10 grid w-12 shrink-0 content-center", railClassName)}>
       {windowedItems.map((item, index) => {
-        if (isGapMarker(item)) return <RailGapButton key={`gap-${item.firstHiddenId}`} hiddenCount={item.hiddenCount} height={itemSize} onExpand={() => setExpanded(true)} />
+        if (isGapMarker(item)) return <RailGapButton key={`gap-${item.firstHiddenId}`} hiddenCount={item.hiddenCount} height={itemSize} onExpand={setExpanded} />
         const selected = item.id === selectedId
         const highlighted = item.id === highlightedId
         const scale = tickScale(highlighted, displayedIndex < 0 ? Number.POSITIVE_INFINITY : Math.abs(index - displayedIndex))
