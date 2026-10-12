@@ -36,3 +36,11 @@ export function surfaceCommandForShortcut(shortcut: SplitShortcut): SessionSurfa
     default: return null
   }
 }
+
+export const matchCollapseChatChord = (event: Chord): boolean =>
+  (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey &&
+  (event.code === "KeyL" || event.key.toLowerCase() === "l")
+
+export const matchFocusChatChord = (event: Chord): boolean =>
+  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
+  (event.code === "KeyL" || event.key.toLowerCase() === "l")
