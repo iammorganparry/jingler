@@ -1630,14 +1630,17 @@ export const githubPr = (sessionId: string) =>
 
 /**
  * `Github.prState` handler — the lifecycle state of a session's linked PR (or
- * null when there's no worktree / linked PR). Drives the archive sweep. Exported
+ * null when there's no worktree / linked PR). `number` selects one layer of the
+ * session's PR stack. Drives the PR sweep. Exported
  * for tests.
  */
-export const githubPrState = (sessionId: string) =>
+export const githubPrState = (sessionId: string, number?: number) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath || session.prNumber === null) return null;
-    return yield* GitHubApi.prState(session.worktreePath, session.prNumber);
+    // A layer must belong to this session's stack; anything else is not ours to read.
+    if (number !== undefined && !(session.prs ?? []).some((pr) => pr.number === number) && number !== session.prNumber) return null;
+    return yield* GitHubApi.prState(session.worktreePath, number ?? session.prNumber);
   });
 
 /**
@@ -5891,7 +5894,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
   "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
   "Github.pr": ({ sessionId }) => githubPr(sessionId),
-  "Github.prState": ({ sessionId }) => githubPrState(sessionId),
+  "Github.prState": ({ sessionId, number }) => githubPrState(sessionId, number),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
     githubSlug
       ? GitHubApi.listPrsBySlug(githubSlug, { mine, search })

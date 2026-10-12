@@ -1,6 +1,14 @@
-import type { PrState, Session } from "@jingler/core"
+import type { PrState, Session, SessionPrStatus } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js"
+import {
+  issuesToCloseOnMerge,
+  prNotifyKey,
+  prNumbersOf,
+  prsToNotify,
+  stackLifecycle,
+  worstPrStatus,
+  type PrLayer
+} from "./pr-sweep.js"
 
 /**
  * `issuesToCloseOnMerge` is all that survives of what used to be the "archive
@@ -164,15 +172,19 @@ describe("issuesToCloseOnMerge", () => {
  * numeric indexing of a `Record<string, T>`.
  */
 describe("prsToNotify", () => {
+  const status = (state: PrState, checks: SessionPrStatus["checks"] = null): SessionPrStatus => ({ state, checks })
+  const layer = (number: number, state: PrState, checks: SessionPrStatus["checks"] = null): PrLayer => ({
+    number,
+    status: status(state, checks)
+  })
   const merged = session({ id: "s1" })
   const closed = session({ id: "s2" })
   const open = session({ id: "s3" })
-  const states: Record<string, PrState> = { s1: "merged", s2: "closed", s3: "open" }
+  const stacks = { s1: [layer(1, "merged")], s2: [layer(2, "closed")], s3: [layer(3, "open")] }
 
   it("finds resolved PRs by SESSION ID, not by position", () => {
-    // Ordered so a positional lookup can't accidentally agree: reversed here,
-    // and the numeric keys 0/1/2 simply don't exist on this Record.
-    const out = prsToNotify(states, [open, closed, merged], new Set())
+    // Reversed so a positional lookup can't accidentally agree.
+    const out = prsToNotify(stacks, [open, closed, merged], new Set())
     expect(out.map((n) => [n.session.id, n.state])).toStrictEqual([
       ["s2", "closed"],
       ["s1", "merged"]
@@ -180,7 +192,7 @@ describe("prsToNotify", () => {
   })
 
   it("ignores a PR that is still open", () => {
-    expect(prsToNotify(states, [open], new Set())).toStrictEqual([])
+    expect(prsToNotify(stacks, [open], new Set())).toStrictEqual([])
   })
 
   it("ignores a session whose PR state hasn't loaded yet", () => {
@@ -188,8 +200,63 @@ describe("prsToNotify", () => {
   })
 
   it("announces each resolution once — the poll re-runs every minute", () => {
-    // A merged PR stays merged forever; without this the sweep would re-announce
-    // it on every tick for as long as the app is open.
-    expect(prsToNotify(states, [merged], new Set(["s1"]))).toStrictEqual([])
+    expect(prsToNotify(stacks, [merged], new Set([prNotifyKey("s1", 1)]))).toStrictEqual([])
+  })
+
+  it("a 3-PR stack produces 3 notifications, each keyed by (session, PR) and naming the layer above", () => {
+    const stacked = session({ id: "st", prNumber: 482, prs: [{ number: 480 }, { number: 481 }, { number: 482 }] })
+    const layers = { st: [layer(480, "merged"), layer(481, "merged"), layer(482, "closed")] }
+    const seen = new Set<string>()
+    const out = prsToNotify(layers, [stacked], seen)
+    expect(out.map((n) => [n.number, n.state, n.stackedUnder])).toStrictEqual([
+      [480, "merged", 481],
+      [481, "merged", 482],
+      [482, "closed", undefined]
+    ])
+    for (const n of out) seen.add(prNotifyKey("st", n.number))
+    expect(prsToNotify(layers, [stacked], seen)).toStrictEqual([])
+  })
+})
+
+describe("stack-aware sweep", () => {
+  const layer = (number: number, state: PrState, checks: SessionPrStatus["checks"] = null): PrLayer => ({
+    number,
+    status: { state, checks }
+  })
+
+  it("polls every PR in prs bottom-first, and a pre-stack session as its single prNumber", () => {
+    expect(prNumbersOf(session({ id: "a", prNumber: 3, prs: [{ number: 1 }, { number: 2 }, { number: 3 }] }))).toStrictEqual([1, 2, 3])
+    expect(prNumbersOf(session({ id: "a", prNumber: 9 }))).toStrictEqual([9])
+    expect(prNumbersOf(session({ id: "a", prNumber: null }))).toStrictEqual([])
+  })
+
+  it("stackLifecycle is merged only once every layer resolved, so the issue closes after the last merge", () => {
+    expect(stackLifecycle([layer(1, "merged"), layer(2, "merged"), layer(3, "open")])).toBe("open")
+    expect(stackLifecycle([layer(1, "merged"), layer(2, "merged"), layer(3, "merged")])).toBe("merged")
+    expect(stackLifecycle([layer(1, "merged"), layer(2, "closed")])).toBe("merged")
+    expect(stackLifecycle([layer(1, "closed"), layer(2, "closed")])).toBe("closed")
+    expect(stackLifecycle([])).toBeUndefined()
+  })
+
+  it("closes the linked issue only after the last PR of the stack merges", () => {
+    const stacked = session({
+      id: "a",
+      issueNumber: 7,
+      automations: { progressComments: false, closeOnMerge: true },
+      prs: [{ number: 1 }, { number: 2 }]
+    })
+    const partial = { a: stackLifecycle([layer(1, "merged"), layer(2, "open")])! }
+    const done = { a: stackLifecycle([layer(1, "merged"), layer(2, "merged")])! }
+    expect(issuesToCloseOnMerge(partial, [stacked], new Set())).toStrictEqual([])
+    expect(issuesToCloseOnMerge(done, [stacked], new Set())).toStrictEqual(["a"])
+  })
+
+  it("worst layer wins: failing CI > closed > running/queued > passing, and merged never hides a failing upper layer", () => {
+    expect(worstPrStatus([layer(1, "merged"), layer(2, "open", "pass"), layer(3, "open", "fail")])).toStrictEqual({ state: "open", checks: "fail" })
+    expect(worstPrStatus([layer(1, "open", "pass"), layer(2, "closed"), layer(3, "open", "running")])).toStrictEqual({ state: "closed", checks: null })
+    expect(worstPrStatus([layer(1, "open", "pass"), layer(2, "open", "pending"), layer(3, "open", "pass")])).toStrictEqual({ state: "open", checks: "pending" })
+    expect(worstPrStatus([layer(1, "merged"), layer(2, "open", "pass")])).toStrictEqual({ state: "open", checks: "pass" })
+    expect(worstPrStatus([layer(1, "merged"), layer(2, "merged")])).toStrictEqual({ state: "merged", checks: null })
+    expect(worstPrStatus([])).toBeUndefined()
   })
 })

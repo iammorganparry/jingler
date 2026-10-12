@@ -109,7 +109,15 @@ import { onSessionUpdate, publishSessionUpdate } from "./session-updates.js";
 import { setVisibleSessionIds } from "./active-session.js";
 import { prNotification } from "./notifier.js";
 import { completedSessionIds } from "./pr-refresh.js";
-import { issuesToCloseOnMerge, prsToNotify } from "./pr-sweep.js";
+import {
+  issuesToCloseOnMerge,
+  prNotifyKey,
+  prNumbersOf,
+  prsToNotify,
+  stackLifecycle,
+  worstPrStatus,
+  type PrLayer,
+} from "./pr-sweep.js";
 import { routeReviewToAgent } from "./auto-route.js";
 import { reviewQueryKey } from "./review-routing.js";
 import {
@@ -1178,10 +1186,18 @@ function AuthedApp({
       ),
     [canUseGitHubForSession, sessions],
   );
-  const prStates = useQueries({
-    queries: sweepTargets.map((s) => ({
-      queryKey: ["pr-state", s.id, s.prNumber] as const,
-      queryFn: () => rpc.githubPrState(s.id),
+  // One query per PR in each session's stack (bottom first), not just the head PR.
+  const sweepLayers = useMemo(
+    () =>
+      sweepTargets.flatMap((s) =>
+        prNumbersOf(s).map((number) => ({ session: s, number })),
+      ),
+    [sweepTargets],
+  );
+  const prStacks = useQueries({
+    queries: sweepLayers.map(({ session: s, number }) => ({
+      queryKey: ["pr-state", s.id, number] as const,
+      queryFn: () => rpc.githubPrState(s.id, number),
       enabled: connected,
       staleTime: PR_STATE_STALE_MS,
       // Poll so a PR merged/closed on GitHub badges its session live instead of
@@ -1190,25 +1206,45 @@ function AuthedApp({
       refetchIntervalInBackground: true,
       refetchOnWindowFocus: true,
     })),
-    combine: (results) =>
+    combine: (results) => {
+      const stacks: Record<string, PrLayer[]> = {};
+      sweepLayers.forEach(({ session: s, number }, i) => {
+        const status = results[i]?.data;
+        if (!status) return;
+        const layers = stacks[s.id] ?? [];
+        layers.push({ number, status });
+        stacks[s.id] = layers;
+      });
+      return stacks;
+    },
+  });
+  // What the sidebar shows per session: the worst layer of its stack.
+  const prStates = useMemo(
+    () =>
       Object.fromEntries(
-        sweepTargets.flatMap((s, i) => {
-          const state = results[i]?.data;
-          return state ? [[s.id, state] as const] : [];
+        Object.entries(prStacks).flatMap(([id, layers]) => {
+          const worst = worstPrStatus(layers);
+          return worst ? [[id, worst] as const] : [];
         }),
       ),
-  });
-  // The lifecycle half of the same poll, for the pure sweep functions below.
-  //
-  // Those two ask exactly one question — "has this PR resolved?" — and the CI
-  // rollup would be noise in their signature and in their tests. Derived here
-  // rather than fetched twice: one poll, two shapes.
+    [prStacks],
+  );
+  // The lifecycle half of the same poll, for the close-on-merge sweep. A stack is
+  // only resolved once every layer has loaded and resolved, so a merged bottom
+  // layer never closes the issue while upper layers are still open.
   const prLifecycle = useMemo(
     () =>
       Object.fromEntries(
-        Object.entries(prStates).map(([id, pr]) => [id, pr.state] as const),
+        sweepTargets.flatMap((s) => {
+          const layers = prStacks[s.id] ?? [];
+          const lifecycle =
+            layers.length === prNumbersOf(s).length
+              ? stackLifecycle(layers)
+              : undefined;
+          return lifecycle ? [[s.id, lifecycle] as const] : [];
+        }),
       ),
-    [prStates],
+    [prStacks, sweepTargets],
   );
 
   // Auto adversarial review (opt-in). Polls `Review.run` on the same cadence as
@@ -1316,15 +1352,15 @@ function AuthedApp({
     // An empty first result is the "still loading" state, not a real baseline —
     // taking it would let the genuine first result through as an edge.
     const seeding =
-      !prBaselineRef.current && Object.keys(prLifecycle).length > 0;
-    for (const { session, state: prState } of prsToNotify(
-      prLifecycle,
+      !prBaselineRef.current && Object.keys(prStacks).length > 0;
+    for (const { session, number, state: prState, stackedUnder } of prsToNotify(
+      prStacks,
       sweepTargets,
       notifiedPrsRef.current,
     )) {
-      notifiedPrsRef.current.add(session.id);
+      notifiedPrsRef.current.add(prNotifyKey(session.id, number));
       if (seeding) continue;
-      const plan = prNotification(session.title, prState);
+      const plan = prNotification(session.title, prState, number, stackedUnder);
       void rpc
         .notifyShow({
           sessionId: session.id,
@@ -1339,7 +1375,7 @@ function AuthedApp({
         .catch(() => {});
     }
     if (seeding) prBaselineRef.current = true;
-  }, [prLifecycle, sweepTargets]);
+  }, [prStacks, sweepTargets]);
 
   useEffect(() => {
     if (!state.matches({ setup: "github" })) return;
