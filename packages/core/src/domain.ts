@@ -738,6 +738,13 @@ export const Session = Schema.Struct({
   archiveReason: Schema.optional(Schema.Literal("merged", "closed")),
   /** ISO-8601 timestamp the session was archived (for the "2d ago" label). */
   archivedAt: Schema.optional(Schema.String),
+  /** Set when imported from another app; identifies the native session to resume. */
+  importedFrom: Schema.optional(
+    Schema.Struct({
+      source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+      nativeSessionId: Schema.String
+    })
+  ),
 });
 export type Session = Schema.Schema.Type<typeof Session>;
 
@@ -2203,6 +2210,8 @@ export const ImportableSession = Schema.Struct({
   messageCount: Schema.Number,
   /** Whether the session's working directory still exists on disk. */
   folderExists: Schema.Boolean,
+  /** True when a Jingler session already imports this native session. */
+  alreadyImported: Schema.optional(Schema.Boolean),
 });
 export type ImportableSession = Schema.Schema.Type<typeof ImportableSession>;
 

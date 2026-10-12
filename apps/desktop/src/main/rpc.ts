@@ -4256,8 +4256,12 @@ const scanImportableSessions = () =>
     const merged = [...claudeCode, ...codex, ...conductor, ...t3code];
     merged.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     
-    // Note: alreadyImported flag skipped for v1; requires resumeId persistence design
-    return merged;
+    const imported = new Set(
+      (yield* SessionStore.list()).flatMap((s) =>
+        s.importedFrom ? [`${s.importedFrom.source}:${s.importedFrom.nativeSessionId}`] : []
+      )
+    );
+    return merged.map((s) => ({ ...s, alreadyImported: imported.has(`${s.source}:${s.nativeSessionId}`) }));
   });
 
 const selectScanner = (source: "claude-code" | "codex" | "conductor" | "t3code") =>
@@ -4299,7 +4303,9 @@ const importSession = (
     }
     
     const existing = yield* SessionStore.list();
-    const imported = existing.find(s => s.repoPath === session.cwd && s.title === session.title);
+    const imported = existing.find(
+      (s) => s.importedFrom?.source === source && s.importedFrom.nativeSessionId === nativeSessionId
+    );
     if (imported) return imported;
     
     const project = yield* ensureProjectForPath(
@@ -4321,8 +4327,7 @@ const importSession = (
       {}
     );
     
-    yield* SessionStore.setResumeId(created.id, nativeSessionId);
-    return created;
+    return yield* SessionStore.setImportedFrom(created.id, { source, nativeSessionId });
   }).pipe(
     Effect.catchTag("SessionNotFoundError", (error) =>
       Effect.fail(new GitError({ message: error.message, cause: error }))
