@@ -43,11 +43,11 @@ Primitives in `components/`. Prefer these over raw elements.
 | FileIcon | `components/file-icon.tsx` | Material Icon Theme glyph chosen from a file name. | — | no | — |
 | FilterMenu | `components/filter-menu.tsx` | Menu of filter axes, each opening a value flyout. | — | no | — |
 | GithubMark | `components/github-mark.tsx` | GitHub octocat mark. | — | no | — |
-| HoverCard | `components/hover-card.tsx` | Detail popover opening on hover intent and focus. | — | no | #374 (2.9) |
+| HoverCard | `components/hover-card.tsx` | Detail popover on hover intent and focus; elevated surface, r8, 150ms delay, Esc closes. | — | no | #374 (2.9) |
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
 | IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
-| Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). | — | yes | #361 (1.3), #374 (2.9) |
+| Kbd, KbdChip | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). KbdChip formats `mod+k` as ⌘K on macOS, Ctrl+K elsewhere. | shortcut, mac, onFill | yes | #361 (1.3), #374 (2.9) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
 | ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | List loading rows at real height, empty state with next action, load error with Retry. | rows, rowHeight, title, action, message, onRetry | yes | #371 (2.6) |
@@ -70,6 +70,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | Toast, ToastRegion | `components/toast.tsx` | Bottom-right notification stack (success, error + Retry, Needs you + Jump, info); queue, 6 s timeout and hover-pause live in `components/toast-machine.ts`. | variant, title, description, action, onDismiss | yes | #369 (2.4) |
 | Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
+| Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
+| Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip); optional `shortcut` renders a KbdChip. | — | no | #374 (2.9) |
 
 ## Atoms — BeUI base
 
@@ -207,7 +209,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | Component | Replaces / extends | Issue |
 |---|---|---|
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
-| HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
 | KpiTile, StackedMiniBar | none (new) | #379 (2.14) |
 | SessionRow / PrGlyph stack slot | `SessionRow`, `PrStatusGlyph` | #381 (2.16) |

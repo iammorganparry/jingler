@@ -36,3 +36,21 @@ export function Kbd({
     </span>
   )
 }
+
+const MAC_GLYPHS: Record<string, string> = { mod: "⌘", cmd: "⌘", ctrl: "⌃", alt: "⌥", option: "⌥", shift: "⇧", enter: "↩", backspace: "⌫", esc: "Esc" }
+const PC_GLYPHS: Record<string, string> = { mod: "Ctrl", cmd: "Ctrl", ctrl: "Ctrl", alt: "Alt", option: "Alt", shift: "Shift", enter: "Enter", backspace: "Backspace", esc: "Esc" }
+
+const isMacPlatform = (): boolean =>
+  typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+
+/** Formats `mod+shift+k` as `⌘⇧K` on macOS and `Ctrl+Shift+K` elsewhere. */
+export function formatShortcut(shortcut: string, mac = isMacPlatform()): string {
+  const glyphs = mac ? MAC_GLYPHS : PC_GLYPHS
+  const parts = shortcut.split("+").map((key) => glyphs[key.toLowerCase()] ?? (key.length === 1 ? key.toUpperCase() : key))
+  return parts.join(mac ? "" : "+")
+}
+
+/** A shortcut as one nowrap Kbd unit with the platform's glyphs. */
+export function KbdChip({ shortcut, mac, onFill, className }: { shortcut: string; mac?: boolean; onFill?: boolean; className?: string }) {
+  return <Kbd onFill={onFill} className={className}>{formatShortcut(shortcut, mac)}</Kbd>
+}
