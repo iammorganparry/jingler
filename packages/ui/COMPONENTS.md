@@ -111,6 +111,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | AuthCard | `composites/auth-card.tsx` | Sign-in card chrome: brand mark, heading, tinted background. | title, subtitle, children, className | yes | — |
 | BackgroundTaskDock, BackgroundTaskOutput | `composites/background-task-dock.tsx` | Dock of background tasks with output viewer. | — | no | — |
 | BranchDriftBanner | `composites/branch-drift-banner.tsx` | Banner when the shared checkout drifted off the pinned branch. | — | no | #376 (2.11) |
+| ImportSessionsList | `composites/import-sessions-list.tsx` | Import step: sessions found in other apps, grouped by source, searchable, multi-select with Import / Skip. | candidates, status, error, query, selected, onToggle, onImport, onSkip, onRetry | yes | #613 (16.5) |
 | OmittedFilesNotice, ExplorerPanel, ChangedFilesExplorer, ReviewFileDiff, ReviewSidebar | `composites/changes-review.tsx` | Changes review: explorer, file diff, sidebar, omitted-files notice. | branch, worktreePath, filter, onFilterChange, localAvailable, prAvailable | yes | — |
 | CommandMenu | `composites/command-menu.tsx` | `/` command palette for skills and built-in commands. | — | no | — |
 | Composer | `composites/composer.tsx` | Prompt composer: input, chips, attachments, send/stop. | skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth | yes | — |
