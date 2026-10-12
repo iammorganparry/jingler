@@ -991,6 +991,8 @@ export class GitHubCli extends Effect.Service<GitHubCli>()("@jingler/GitHubCli",
       execute(null, ["pr", "merge", String(number), "--repo", repository, mergeFlag(method)]).pipe(Effect.asVoid),
     prUpdateBranch: (cwd: string, number: number) =>
       execute(cwd, ["pr", "update-branch", String(number)]).pipe(Effect.asVoid),
+    prSetBase: (cwd: string, number: number, base: string) =>
+      execute(cwd, ["pr", "edit", String(number), "--base", base]).pipe(Effect.asVoid),
     prReady: (cwd: string, number: number) =>
       execute(cwd, ["pr", "ready", String(number)]).pipe(Effect.asVoid),
     issueComment: (cwd: string, number: number, body: string) =>

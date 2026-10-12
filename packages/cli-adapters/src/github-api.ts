@@ -184,6 +184,8 @@ export interface GitHubApiClient {
   readonly prMerge: (cwd: string, number: number, method?: PrMergeMethod) => Promise<void>
   readonly prMergeBySlug: (slug: string, number: number, method?: PrMergeMethod) => Promise<void>
   readonly prUpdateBranch: (cwd: string, number: number) => Promise<void>
+  /** Retarget a PR onto a different base branch (`PATCH /pulls/{n}` with `base`). */
+  readonly prSetBase: (cwd: string, number: number, base: string) => Promise<void>
   readonly prReady: (cwd: string, number: number) => Promise<void>
   readonly issueComment: (cwd: string, number: number, body: string) => Promise<void>
   readonly closeIssue: (cwd: string, number: number) => Promise<void>
@@ -1104,6 +1106,15 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
         ["pull_requests:write", "contents:write"]
       )
     },
+    prSetBase: async (cwd, pullNumber, base) => {
+      await repositoryCall(
+        cwd,
+        "PATCH",
+        "/repos/{owner}/{repo}/pulls/{pull_number}",
+        { pull_number: pullNumber, base },
+        ["pull_requests:write"]
+      )
+    },
     prReady: async (cwd, pullNumber) => {
       const repository = await resolveRepository(cwd)
       const pr = await pull(cwd, pullNumber)
@@ -1370,6 +1381,8 @@ export class GitHubApi extends Effect.Service<GitHubApi>()("@jingler/GitHubApi",
         mutate(`github-slug:${slug}`, cli.prMergeBySlug(slug, number, method), () => client.prMergeBySlug(slug, number, method)),
       prUpdateBranch: (cwd: string, number: number) =>
         mutate(cwd, cli.prUpdateBranch(cwd, number), () => client.prUpdateBranch(cwd, number)),
+      prSetBase: (cwd: string, number: number, base: string) =>
+        mutate(cwd, cli.prSetBase(cwd, number, base), () => client.prSetBase(cwd, number, base)),
       prReady: (cwd: string, number: number) =>
         mutate(cwd, cli.prReady(cwd, number), () => client.prReady(cwd, number)),
       issueComment: (cwd: string, number: number, body: string) =>

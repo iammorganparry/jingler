@@ -1,6 +1,7 @@
 import type { ResolvingCommit, Worktree } from "@jingler/core"
 import {
   GitError,
+  RestackConflictError,
   MAX_SEMANTIC_BRANCH_NAME_LENGTH,
   cleanSemanticBranchProposal,
   semanticBranchName,
@@ -42,6 +43,16 @@ type GitEnv =
   | FileSystem.FileSystem
   | Path.Path
   | CommandExecutor.CommandExecutor
+
+/**
+ * Optional push shape. `source` pushes a specific commit instead of HEAD;
+ * `leaseSha` makes the push a force push guarded by `--force-with-lease`, so it
+ * only overwrites the remote branch if it still points at that commit.
+ */
+export interface PushOptions {
+  readonly source?: string
+  readonly leaseSha?: string
+}
 
 /** The current branch name checked out at `cwd`, or null (detached / error). */
 export const branchAt = (
@@ -714,14 +725,15 @@ export class GitService extends Effect.Service<GitService>()(
      * This is intentionally non-interactive and never accepts a brokered
      * desktop token; remote environments own their Git credential boundary.
      */
-    const pushConfigured = (cwd: string, branch: string) =>
+    const pushConfigured = (cwd: string, branch: string, options: PushOptions = {}) =>
         runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
           Effect.zipRight(
             runGitWithEnv(
               cwd,
               [
                 "-c", "core.hooksPath=/dev/null",
-                "push", "--set-upstream", "origin", `HEAD:refs/heads/${branch}`
+                "push", ...(options.leaseSha ? [`--force-with-lease=refs/heads/${branch}:${options.leaseSha}`] : ["--set-upstream"]),
+                "origin", `${options.source ?? "HEAD"}:refs/heads/${branch}`
               ],
               { GIT_TERMINAL_PROMPT: "0", GITHUB_TOKEN: "", GH_TOKEN: "" }
             )
@@ -739,7 +751,8 @@ export class GitService extends Effect.Service<GitService>()(
         cwd: string,
         branch: string,
         repositoryFullName: string,
-        token: string
+        token: string,
+        options: PushOptions = {}
       ) => {
         const pushUrl = githubHttpsPushUrl(repositoryFullName)
         if (!pushUrl || token.length === 0) {
@@ -751,7 +764,12 @@ export class GitService extends Effect.Service<GitService>()(
           Effect.zipRight(
             runGitWithInstallationToken(
               cwd,
-              ["push", pushUrl, `HEAD:refs/heads/${branch}`],
+              [
+                "push",
+                ...(options.leaseSha ? [`--force-with-lease=refs/heads/${branch}:${options.leaseSha}`] : []),
+                pushUrl,
+                `${options.source ?? "HEAD"}:refs/heads/${branch}`
+              ],
               token
             ).pipe(Effect.asVoid)
           )
@@ -843,6 +861,76 @@ export class GitService extends Effect.Service<GitService>()(
           authenticatedFetch
         )
       })
+
+    /**
+     * Fetch `branches` into `refs/remotes/origin/*`. With a GitHub token the
+     * fetch goes through the same credential-bound path as team pickup;
+     * otherwise it uses the credentials already configured for `origin`.
+     */
+    const fetchRemoteBranches = (
+      cwd: string,
+      branches: ReadonlyArray<string>,
+      credential?: { readonly fullName: string; readonly token: string }
+    ): Effect.Effect<void, GitError, CommandExecutor.CommandExecutor> =>
+      Effect.forEach(
+        [...new Set(branches)],
+        (branch) =>
+          runGit(cwd, ["check-ref-format", "--branch", branch]).pipe(
+            Effect.zipRight(
+              credential
+                ? fetchWithGitHubToken(cwd, credential.fullName, `+refs/heads/${branch}:refs/remotes/origin/${branch}`, credential.token)
+                : runGit(cwd, ["fetch", "--no-tags", "origin", `+refs/heads/${branch}:refs/remotes/origin/${branch}`]).pipe(Effect.asVoid)
+            )
+          ),
+        { discard: true }
+      )
+
+    /**
+     * Rebase `origin/<branch>` onto `onto`, replaying only the commits after
+     * `upstream` (`git rebase --onto <onto> <upstream>`), in a throwaway
+     * detached worktree. The caller's worktree and the real branch are never
+     * touched: the result is a commit that the caller pushes with a lease. On a
+     * conflict the rebase is aborted and the conflicting paths are returned in a
+     * `RestackConflictError`.
+     */
+    const rebaseRemoteBranchOnto = (
+      cwd: string,
+      input: { readonly branch: string; readonly onto: string; readonly upstream: string }
+    ): Effect.Effect<{ readonly oldSha: string; readonly newSha: string }, GitError | RestackConflictError, CommandExecutor.CommandExecutor> =>
+      Effect.acquireUseRelease(
+        Effect.tryPromise({
+          try: () => mkdtemp(join(tmpdir(), "jingler-restack-")),
+          catch: (cause) => new GitError({ message: "Could not create a scratch directory to restack in.", cause })
+        }),
+        (dir) =>
+          Effect.gen(function* () {
+            const wt = join(dir, "wt")
+            yield* runGit(cwd, ["worktree", "add", "--detach", wt, `refs/remotes/origin/${input.branch}`])
+            const oldSha = yield* runGit(wt, ["rev-parse", "HEAD"])
+            const rebased = yield* runGit(wt, ["-c", "core.hooksPath=/dev/null", "rebase", "--onto", input.onto, input.upstream]).pipe(Effect.either)
+            if (rebased._tag === "Left") {
+              const paths = (yield* runGit(wt, ["diff", "--name-only", "--diff-filter=U"]).pipe(Effect.orElseSucceed(() => "")))
+                .split("\n").map((path) => path.trim()).filter(Boolean)
+              yield* runGit(wt, ["rebase", "--abort"]).pipe(Effect.ignore)
+              return yield* Effect.fail(
+                paths.length > 0
+                  ? new RestackConflictError({
+                      message: `Rebasing ${input.branch} hit conflicts in ${paths.join(", ")}.`,
+                      branch: input.branch,
+                      paths
+                    })
+                  : rebased.left
+              )
+            }
+            const newSha = yield* runGit(wt, ["rev-parse", "HEAD"])
+            return { oldSha, newSha }
+          }),
+        (dir) =>
+          runGit(cwd, ["worktree", "remove", "--force", join(dir, "wt")]).pipe(
+            Effect.ignore,
+            Effect.zipRight(Effect.tryPromise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore))
+          )
+      )
 
     /**
      * Remove the worktree at `worktreePath` (deleting a session). Resolves the
@@ -979,6 +1067,8 @@ export class GitService extends Effect.Service<GitService>()(
       commit,
       pushConfigured,
       pushWithInstallationToken,
+      fetchRemoteBranches,
+      rebaseRemoteBranchOnto,
       cloneWithInstallationToken,
       checkoutBranch,
       checkoutPullRequestHead,

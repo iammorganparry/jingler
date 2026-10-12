@@ -574,6 +574,15 @@ export const SessionPr = Schema.Struct({
 });
 export type SessionPr = Schema.Schema.Type<typeof SessionPr>;
 
+/** One stack layer that `Github.restack` rebased and retargeted. */
+export const RestackedLayer = Schema.Struct({
+  number: Schema.Number,
+  branch: Schema.String,
+  /** The base the layer now targets. */
+  base: Schema.String,
+});
+export type RestackedLayer = Schema.Schema.Type<typeof RestackedLayer>;
+
 /** Durable checkpoint for the deterministic session publishing workflow. */
 export const PublishCheckpoint = Schema.Struct({
   step: PublishStep,
