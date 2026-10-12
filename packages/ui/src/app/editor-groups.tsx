@@ -72,7 +72,7 @@ export interface EditorGroupsProps {
   readonly onClose: (groupId: string, surface: SessionSurface) => void
   readonly onDrop: (drag: TabDrag, groupId: string | null, edge: DropEdge, copy: boolean) => void
   readonly onFocusGroup: (groupId: string) => void
-  readonly onResize: (splitId: string, index: number, delta: number) => void
+  readonly onResize: (splitId: string, index: number, delta: number, containerWidth?: number) => void
   /** The "+" menu at the end of each tab strip. */
   readonly launcherItems?: ReadonlyArray<TabLauncherItem>
   readonly emptyState?: ReactNode
@@ -126,7 +126,7 @@ export function EditorGroups(props: EditorGroupsProps) {
       onClose: (g, s) => latest.current.onClose(g, s),
       onDrop: (d, g, e, c) => latest.current.onDrop(d, g, e, c),
       onFocusGroup: (g) => latest.current.onFocusGroup(g),
-      onResize: (s, i, d) => latest.current.onResize(s, i, d),
+      onResize: (s, i, d, w) => latest.current.onResize(s, i, d, w),
       get onOpenCheckpoints() { return latest.current.onOpenCheckpoints },
       get launcherItems() {
         return latest.current.launcherItems
@@ -274,7 +274,7 @@ const SplitNode = memo(function SplitNode({ split, ...rest }: NodeProps & { read
       controller.abort()
       dragController.current = null
       if (handle.hasPointerCapture?.(e.pointerId)) handle.releasePointerCapture(e.pointerId)
-      if (delta !== 0) rest.api.onResize(split.id, index, delta)
+      if (delta !== 0) rest.api.onResize(split.id, index, delta, size)
     }
     const options = { signal: controller.signal }
     window.addEventListener("pointermove", move, options)
@@ -323,9 +323,8 @@ function SplitChild({
           onPointerDown={onDividerDown}
           className={cn(
             "relative z-10 flex-none touch-none bg-hairline hover:bg-blue/50",
-            row ? "w-px cursor-col-resize" : "h-px cursor-row-resize"
+            row ? "-mx-1 w-px cursor-col-resize box-content px-1" : "-my-1 h-px cursor-row-resize box-content py-1"
           )}
-          style={row ? { marginLeft: "-4px", marginRight: "-4px", paddingLeft: "4px", paddingRight: "3px" } : { marginTop: "-4px", marginBottom: "-4px", paddingTop: "4px", paddingBottom: "3px" }}
         />
       )}
     </>
