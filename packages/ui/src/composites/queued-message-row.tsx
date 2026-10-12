@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from "react"
 import { Check, Forward, ImageIcon, Pencil, SendHorizontal, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
+import { Button } from "../components/button.js"
+import { Tooltip } from "../components/tooltip.js"
 
 /**
  * One pending message in the composer's queue.
  *
- * The actions are ICON-ONLY on purpose. Four verbs (send now / hand off / edit /
- * remove) as words made a row that was mostly chrome and truncated the message
- * itself to nothing — and the message is the only part the operator cannot
- * reconstruct from memory. Each icon keeps a `title`, which is both the tooltip
- * and the accessible name the tests address rows by.
+ * The actions are icon buttons with tooltips. Each action shows its purpose
+ * on hover and has an accessible label for screen readers and test automation.
  */
 export interface QueuedMessageRowProps {
   /** The queued text; empty means an image-only message. */
@@ -37,17 +36,103 @@ export interface QueuedMessageRowProps {
   readonly sending?: boolean
 }
 
-/**
- * Four 12px glyphs in a row are hard to tell apart at a glance, so each one
- * claims a 24px target (comfortable to hit without growing the row) and its own
- * hover colour — the colour is what makes "remove" unmistakably not "edit" in the
- * half-second before the tooltip appears.
- */
-const ACTION =
-  "flex size-6 flex-none items-center justify-center rounded text-dim outline-none transition-colors hover:bg-surface hover:text-text-bright focus-visible:ring-2 focus-visible:ring-ring"
-const SEND = "text-blue hover:bg-blue/10 hover:text-blue"
-const HANDOFF = "hover:bg-cyan/10 hover:text-cyan"
-const REMOVE = "hover:bg-red/10 hover:text-red"
+function EditActions({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
+  return (
+    <>
+      <Tooltip label="Save edit">
+        <Button size="icon" variant="ghost" onClick={onSave} title="Save edit" aria-label="Save edit">
+          <Check size={13} />
+        </Button>
+      </Tooltip>
+      <Tooltip label="Cancel edit">
+        <Button
+          size="icon"
+          variant="ghost"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            onCancel()
+          }}
+          onClick={onCancel}
+          title="Cancel edit"
+          aria-label="Cancel edit"
+        >
+          <X size={13} />
+        </Button>
+      </Tooltip>
+    </>
+  )
+}
+
+function IdleActions({
+  onSendNow,
+  onHandoff,
+  onEdit,
+  onRemove,
+  handoffHint
+}: {
+  onSendNow?: () => void
+  onHandoff?: () => void
+  onEdit?: () => void
+  onRemove?: () => void
+  handoffHint?: string
+}) {
+  return (
+    <>
+      {onSendNow && (
+        <Tooltip label="Send now — steer the agent immediately">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onSendNow}
+            title="Send now — steer the agent immediately"
+            aria-label="Send now — steer the agent immediately"
+          >
+            <SendHorizontal size={13} />
+          </Button>
+        </Tooltip>
+      )}
+      {onHandoff && (
+        <Tooltip label={handoffHint ?? "Hand off — run this in a new chat"}>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onHandoff}
+            title={handoffHint ?? "Hand off — run this in a new chat"}
+            aria-label={handoffHint ?? "Hand off — run this in a new chat"}
+          >
+            <Forward size={13} />
+          </Button>
+        </Tooltip>
+      )}
+      {onEdit && (
+        <Tooltip label="Edit queued message">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onEdit}
+            title="Edit queued message"
+            aria-label="Edit queued message"
+          >
+            <Pencil size={13} />
+          </Button>
+        </Tooltip>
+      )}
+      {onRemove && (
+        <Tooltip label="Remove from queue">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={onRemove}
+            title="Remove from queue"
+            aria-label="Remove from queue"
+          >
+            <X size={13} />
+          </Button>
+        </Tooltip>
+      )}
+    </>
+  )
+}
 
 export function QueuedMessageRow({
   text,
@@ -64,8 +149,6 @@ export function QueuedMessageRow({
   const inputRef = useRef<HTMLInputElement>(null)
   const rowRef = useRef<HTMLDivElement>(null)
 
-  // Re-seed when the queue shifts a different message into this row: the row is
-  // addressed positionally, so the same component can be handed new text.
   useEffect(() => {
     if (!editing) setValue(text)
   }, [text, editing])
@@ -77,9 +160,6 @@ export function QueuedMessageRow({
   const commit = () => {
     const next = value.trim()
     setEditing(false)
-    // An emptied message with no images has nothing left to send — that is a
-    // remove, not an edit, and silently keeping the old text would read as the
-    // edit having been ignored.
     if (next.length === 0 && images === 0) {
       setValue(text)
       onRemove?.()
@@ -119,8 +199,6 @@ export function QueuedMessageRow({
           aria-label="Edit queued message"
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
-            // Stop Enter/Escape here: the composer and the view both bind them,
-            // and an edit that also submitted the draft would be a nasty surprise.
             e.stopPropagation()
             if (e.key === "Enter") {
               e.preventDefault()
@@ -131,14 +209,6 @@ export function QueuedMessageRow({
               cancel()
             }
           }}
-          /*
-            Commit when focus leaves the ROW, not merely the input. Tab moves it
-            to Save and then Cancel, and committing on that first move made both
-            buttons unreachable from the keyboard: the row left edit mode before
-            either could be activated, so a keyboard-only operator reaching for the
-            visible Cancel control SAVED the edit instead. Escape was the only
-            cancel that worked, and nothing on screen said so.
-          */
           onBlur={(e) => {
             const next = e.relatedTarget
             if (next instanceof Node && rowRef.current?.contains(next)) return
@@ -157,90 +227,18 @@ export function QueuedMessageRow({
           {images}
         </span>
       )}
-      {/* One tight cluster rather than four evenly-spaced glyphs: the row's own
-          `gap-2` would space them like separate controls, which reads as four
-          unrelated buttons instead of this message's toolbar. */}
       <div className="-mr-1.5 flex flex-none items-center gap-0.5">
-      {sending ? (
-        // No actions at all while it is in flight. Not disabled buttons: there is
-        // nothing to re-enable, because the next state is the row disappearing.
-        // Anything offered here would act on a message the agent already has.
-        null
-      ) : editing ? (
-        <>
-          <button
-            type="button"
-            onClick={commit}
-            title="Save edit"
-            className={cn(ACTION, "text-green hover:bg-green/10 hover:text-green")}
-          >
-            <Check size={13} />
-          </button>
-          {/*
-            Both handlers, because they cover different inputs. `onMouseDown` with
-            `preventDefault` stops the blur ever happening for a pointer — some
-            browsers do not focus a button on click, so the relatedTarget check
-            above cannot be relied on there. `onClick` is what Enter and Space fire.
-            Whichever runs first wins; the second is a no-op on a row that has
-            already left edit mode.
-          */}
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault()
-              cancel()
-            }}
-            onClick={cancel}
-            title="Cancel edit"
-            className={cn(ACTION, REMOVE)}
-          >
-            <X size={13} />
-          </button>
-        </>
-      ) : (
-        <>
-          {onSendNow && (
-            <button
-              type="button"
-              onClick={onSendNow}
-              title="Send now — steer the agent immediately"
-              className={cn(ACTION, SEND)}
-            >
-              <SendHorizontal size={13} />
-            </button>
-          )}
-          {onHandoff && (
-            <button
-              type="button"
-              onClick={onHandoff}
-              title={handoffHint ?? "Hand off — run this in a new chat"}
-              className={cn(ACTION, HANDOFF)}
-            >
-              <Forward size={13} />
-            </button>
-          )}
-          {onEdit && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              title="Edit queued message"
-              className={ACTION}
-            >
-              <Pencil size={13} />
-            </button>
-          )}
-          {onRemove && (
-            <button
-              type="button"
-              onClick={onRemove}
-              title="Remove from queue"
-              className={cn(ACTION, REMOVE)}
-            >
-              <X size={13} />
-            </button>
-          )}
-        </>
-      )}
+        {sending ? null : editing ? (
+          <EditActions onSave={commit} onCancel={cancel} />
+        ) : (
+          <IdleActions
+            onSendNow={onSendNow}
+            onHandoff={onHandoff}
+            onEdit={onEdit ? () => setEditing(true) : undefined}
+            onRemove={onRemove}
+            handoffHint={handoffHint}
+          />
+        )}
       </div>
     </div>
   )

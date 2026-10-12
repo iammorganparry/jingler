@@ -142,7 +142,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[1]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "message 1, revised" } })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onEditQueued).toHaveBeenCalledWith("q1", "message 1, revised")
@@ -159,7 +159,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "scrap this" } })
     fireEvent.keyDown(input, { key: "Escape" })
     expect(onEditQueued).not.toHaveBeenCalled()
@@ -179,7 +179,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "  " } })
     fireEvent.keyDown(input, { key: "Enter" })
     expect(onEditQueued).not.toHaveBeenCalled()
@@ -199,7 +199,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "scrap this" } })
     fireEvent.mouseDown(screen.getByTitle("Cancel edit"))
     expect(onEditQueued).not.toHaveBeenCalled()
@@ -214,13 +214,13 @@ describe("ConversationView — queued messages", () => {
     const props = { messages: [], mode: "accept-edits" as const, onEditQueued: vi.fn() }
     const { rerender } = render(<ConversationView {...props} queued={queued(3)} />)
     fireEvent.click(screen.getAllByTitle("Edit queued message")[1]!)
-    fireEvent.change(screen.getByLabelText("Edit queued message"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Edit queued message" }), {
       target: { value: "half-typed correction" }
     })
 
     rerender(<ConversationView {...props} queued={queued(3).slice(1)} />)
 
-    expect(screen.getByLabelText("Edit queued message")).toHaveProperty(
+    expect(screen.getByRole("textbox", { name: "Edit queued message" })).toHaveProperty(
       "value",
       "half-typed correction"
     )
@@ -241,7 +241,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "scrap this" } })
 
     // Tabbing to Cancel must not commit on the way.
@@ -268,7 +268,7 @@ describe("ConversationView — queued messages", () => {
       />
     )
     fireEvent.click(screen.getAllByTitle("Edit queued message")[0]!)
-    const input = screen.getByLabelText("Edit queued message")
+    const input = screen.getByRole("textbox", { name: "Edit queued message" })
     fireEvent.change(input, { target: { value: "message 0, revised" } })
     fireEvent.blur(input, { relatedTarget: document.body })
     expect(onEditQueued).toHaveBeenCalledWith("q0", "message 0, revised")
