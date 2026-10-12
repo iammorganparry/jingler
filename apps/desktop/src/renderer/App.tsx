@@ -51,6 +51,7 @@ import {
   JinglerApp,
   PullRequestInbox,
   IssueInbox,
+  InlineError,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -2216,18 +2217,11 @@ function renderAuthedAppGate(
   if (state.matches("failure")) {
     return (
       <div className="flex h-screen items-center justify-center bg-canvas p-8">
-        <div className="max-w-md space-y-3">
-          <div className="rounded-lg border border-red/50 bg-sunken px-4 py-3 font-mono text-[13px] text-red">
-            Failed to load: {state.context.error}
-          </div>
-          <button
-            type="button"
-            onClick={() => send({ type: "RETRY" })}
-            className="w-full rounded-md border border-outline bg-surface px-3 py-2 text-sm font-medium text-foreground hover:bg-sunken"
-          >
-            Retry
-          </button>
-        </div>
+        <InlineError
+          className="w-full max-w-md"
+          message={`Failed to load: ${state.context.error}`}
+          onRetry={() => send({ type: "RETRY" })}
+        />
       </div>
     );
   }
