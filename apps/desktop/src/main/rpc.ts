@@ -4248,7 +4248,7 @@ export const updateWebSearchAtomically = <A, E, R>(
 });
 
 /** Scan all four CLI stores and return merged, sorted importable sessions. */
-const scanImportableSessions = () =>
+export const scanImportableSessions = () =>
   Effect.gen(function* () {
     const home = homedir();
     const [claudeCode, codex, conductor, t3code] = yield* Effect.all([
@@ -4285,7 +4285,7 @@ const ensureProjectForPath = (cwd: string, name: string) =>
   });
 
 /** Import one session from a native CLI store. */
-const importSession = (
+export const importSession = (
   source: "claude-code" | "codex" | "conductor" | "t3code",
   nativeSessionId: string,
 ) =>
