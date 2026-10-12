@@ -2,12 +2,14 @@ import { type ReactNode, useCallback, useId, useState } from "react"
 import { AnimatePresence, m, useReducedMotion } from "motion/react"
 import { cn } from "../../lib/cn.js"
 import { FAST, SPRING, SPRING_SOFT } from "../../lib/motion.js"
+import { Tooltip } from "./tooltip.js"
+import { isGapMarker, windowRailItems, type RailItem } from "../../lib/window-rail-items.js"
 
 export function SharedLayoutIndicator({ layoutId = "shared-active", className }: { layoutId?: string; className?: string }) {
   return <m.span layoutId={layoutId} transition={SPRING} className={cn("absolute inset-0 -z-10 rounded-md bg-surface", className)} />
 }
 
-export interface PreviewRailItem { id: string; label: string; description?: ReactNode; ariaLabel?: string }
+export interface PreviewRailItem extends RailItem { description?: ReactNode; ariaLabel?: string }
 export interface PreviewRailProps {
   items: ReadonlyArray<PreviewRailItem>
   label?: string
@@ -21,13 +23,37 @@ export interface PreviewRailProps {
   previewSide?: "before" | "after"
   highlightActive?: boolean
   itemSize?: number
+  maxItems?: number
   children?: ReactNode
   className?: string
   railClassName?: string
   previewContainerClassName?: string
   previewClassName?: string
 }
-export function PreviewRail({ items, label = "Section navigation", activeId, defaultActiveId, onActiveChange, onItemSelect, onSelect, showPreview = true, previewSide = "after", highlightActive = false, itemSize = 24, children, className, railClassName, previewContainerClassName, previewClassName }: PreviewRailProps) {
+// Expansion is keyed to the first item, so switching sessions collapses the rail again.
+function useWindowedRail<T extends RailItem>(items: ReadonlyArray<T>, activeId: string, maxItems?: number) {
+  const firstId = items[0]?.id
+  const [expandedFor, setExpandedFor] = useState<string | undefined>()
+  const expanded = expandedFor !== undefined && expandedFor === firstId
+  const windowedItems = maxItems ? windowRailItems(items, activeId, expanded, maxItems) : items
+  return { windowedItems, expand: () => setExpandedFor(firstId) }
+}
+
+const TICK_SCALES = [1, 0.68, 0.44]
+const tickScale = (highlighted: boolean, distance: number) => (highlighted ? 1 : (TICK_SCALES[distance] ?? 0.25))
+
+function RailGapButton({ hiddenCount, height, onExpand }: { hiddenCount: number; height: number; onExpand: () => void }) {
+  const label = `${hiddenCount} earlier turn${hiddenCount === 1 ? "" : "s"}`
+  return (
+    <Tooltip content={label} side="left" className="text-xs">
+      <button type="button" aria-label={`Show ${label}`} onClick={onExpand} style={{ height }} className="relative flex h-6 w-12 items-center justify-center text-[10px] leading-none text-muted-foreground outline-none transition-colors hover:text-text focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="rounded-sm bg-line px-1 py-0.5">+{hiddenCount}</span>
+      </button>
+    </Tooltip>
+  )
+}
+
+export function PreviewRail({ items, label = "Section navigation", activeId, defaultActiveId, onActiveChange, onItemSelect, onSelect, showPreview = true, previewSide = "after", highlightActive = false, itemSize = 24, maxItems, children, className, railClassName, previewContainerClassName, previewClassName }: PreviewRailProps) {
          function getActiveItemId() {
            return (items.some(item => item.id === requestedActiveId) ? requestedActiveId : (items[0]?.id ?? ""))
          }
@@ -37,12 +63,16 @@ export function PreviewRail({ items, label = "Section navigation", activeId, def
   const [internalActiveId, setInternalActiveId] = useState(defaultActiveId ?? items[0]?.id ?? "")
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
+  
   const requestedActiveId = activeId ?? internalActiveId
   const selectedId = getActiveItemId()
   const displayedId = hoveredId ?? focusedId ?? ""
   const highlightedId = displayedId || (highlightActive ? selectedId : "")
-  const displayedIndex = items.findIndex(item => item.id === highlightedId)
-  const rowTemplate = items.length ? `repeat(${items.length}, ${itemSize}px)` : undefined
+  
+  const { windowedItems, expand: setExpanded } = useWindowedRail(items, selectedId, maxItems)
+  const displayedIndex = windowedItems.findIndex(item => !isGapMarker(item) && item.id === highlightedId)
+  const rowTemplate = windowedItems.length ? `repeat(${windowedItems.length}, ${itemSize}px)` : undefined
+  
   const selectItem = useCallback((item: PreviewRailItem) => {
     if (activeId === undefined) setInternalActiveId(item.id)
     onActiveChange?.(item.id)
@@ -52,18 +82,21 @@ export function PreviewRail({ items, label = "Section navigation", activeId, def
 
   return <m.div layoutRoot className={cn("isolate relative flex min-h-80 w-full overflow-visible", className)}>
     <nav aria-label={label} onPointerLeave={() => setHoveredId(null)} style={{ gridTemplateRows: rowTemplate }} className={cn("relative z-10 grid w-12 shrink-0 content-center", railClassName)}>
-      {items.map((item, index) => {
+      {windowedItems.map((item, index) => {
+        if (isGapMarker(item)) return <RailGapButton key={`gap-${item.firstHiddenId}`} hiddenCount={item.hiddenCount} height={itemSize} onExpand={setExpanded} />
         const selected = item.id === selectedId
         const highlighted = item.id === highlightedId
-        const distance = displayedIndex < 0 ? Number.POSITIVE_INFINITY : Math.abs(index - displayedIndex)
-        const scale = highlighted ? 1 : distance === 1 ? 0.68 : distance === 2 ? 0.44 : 0.25
+        const scale = tickScale(highlighted, displayedIndex < 0 ? Number.POSITIVE_INFINITY : Math.abs(index - displayedIndex))
         return <button key={item.id} data-slot="preview-rail-item" type="button" aria-label={item.ariaLabel ?? item.label} aria-current={selected ? "location" : undefined} onPointerEnter={event => { if (event.pointerType !== "touch") setHoveredId(item.id) }} onFocus={event => { if (event.currentTarget.matches(":focus-visible")) setFocusedId(item.id) }} onBlur={() => setFocusedId(null)} onClick={() => selectItem(item)} style={{ height: itemSize }} className="relative flex h-6 w-12 items-center text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span data-slot="preview-rail-tick" aria-hidden="true" style={{ transform: `scaleX(${scale})` }} className={cn("block h-0.5 w-12 origin-left bg-current transition-transform duration-200 ease-out motion-reduce:duration-0", highlighted && "text-text-bright")} />
         </button>
       })}
     </nav>
     {showPreview && <div aria-hidden="true" style={{ gridTemplateRows: rowTemplate }} className={cn("pointer-events-none absolute inset-y-0 z-50 grid content-center", previewSide === "before" ? "right-16 left-4" : "right-4 left-16", previewContainerClassName)}>
-      {items.map(item => <div key={item.id} style={{ height: itemSize }} className="relative flex items-center">{item.id === displayedId && <div className={cn("w-full max-w-sm", previewSide === "before" && "ml-auto", previewClassName)}><m.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING}><AnimatePresence mode="wait" initial={false}><m.div key={item.id} initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)", transitionEnd: { filter: "none" } }} exit={reduce ? { opacity: 0 } : { opacity: 0, y: -2, filter: "blur(4px)" }} transition={FAST}><div data-slot="preview-rail-card" className="rounded-2xl border border-line bg-panel p-4 shadow-sm"><p data-slot="preview-rail-title" className="font-medium text-text-bright">{item.label}</p>{item.description && <div data-slot="preview-rail-description" className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</div>}</div></m.div></AnimatePresence></m.div></div>}</div>)}
+      {windowedItems.map(item => {
+        if (isGapMarker(item)) return <div key={`gap-preview-${item.firstHiddenId}`} style={{ height: itemSize }} />
+        return <div key={item.id} style={{ height: itemSize }} className="relative flex items-center">{item.id === displayedId && <div className={cn("w-full max-w-sm", previewSide === "before" && "ml-auto", previewClassName)}><m.div layoutId={`preview-rail-card-${uid}`} transition={reduce ? { duration: 0 } : SPRING}><AnimatePresence mode="wait" initial={false}><m.div key={item.id} initial={reduce ? { opacity: 0 } : { opacity: 0, y: 4, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)", transitionEnd: { filter: "none" } }} exit={reduce ? { opacity: 0 } : { opacity: 0, y: -2, filter: "blur(4px)" }} transition={FAST}><div data-slot="preview-rail-card" className="rounded-2xl border border-line bg-panel p-4 shadow-sm"><p data-slot="preview-rail-title" className="font-medium text-text-bright">{item.label}</p>{item.description && <div data-slot="preview-rail-description" className="mt-1 text-sm leading-6 text-muted-foreground">{item.description}</div>}</div></m.div></AnimatePresence></m.div></div>}</div>
+      })}
     </div>}
     {children && <div className="min-h-0 min-w-0 flex-1">{children}</div>}
   </m.div>

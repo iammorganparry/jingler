@@ -1059,3 +1059,41 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   // persisted, so a readable restored transcript IS the "finished, not mid-flight"
   // claim — a half-written run would have no assistant text to find.
 })
+
+test("long session rail shows gap marker and expands on click", async ({ launchApp }) => {
+  const turns = 15
+  const transcript = Array.from({ length: turns }, (_, index) => [
+    {
+      id: `u_rail_${index}`,
+      role: "user",
+      parts: [{ _tag: "Text", text: `Rail question ${index + 1}` }],
+      streaming: false,
+      createdAt: "2026-07-11T00:00:00.000Z"
+    },
+    {
+      id: `a_rail_${index}`,
+      role: "assistant",
+      parts: [{ _tag: "Text", text: `Answer ${index + 1}. ${"Long answer line to make the conversation overflow. ".repeat(12)}` }],
+      streaming: false,
+      createdAt: "2026-07-11T00:00:00.000Z"
+    }
+  ]).flat()
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: seededSessions,
+    transcripts: { s_seeded: transcript }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await expect(window.getByText("Rail question 15")).toBeVisible()
+  const rail = window.getByRole("navigation", { name: "Message navigation" })
+  const ticks = rail.locator('[data-slot="preview-rail-item"]')
+  const gap = rail.getByRole("button", { name: /^Show \d+ earlier turns?$/ })
+
+  await expect(gap).toHaveCount(1)
+  await expect(ticks).toHaveCount(10)
+  await gap.click()
+  await expect(gap).toHaveCount(0)
+  await expect(ticks).toHaveCount(turns)
+})
