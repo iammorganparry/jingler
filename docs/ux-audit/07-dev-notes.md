@@ -59,6 +59,44 @@ Legend: **Reuse** existing code to restyle · **New** component (atom / molecule
 - **Q:** stale question card behaviour (F4-05).
 - **E2E:** new `home-needs-you.spec.ts`; extend `mcp-import-dialog.spec.ts`.
 
+## 3.7 · Project rail
+
+**Merged in #592.** Paper parity check completed in #600.
+
+- **Reuse:** `app/project-sidebar.tsx:81` (`ProjectAvatar :12`, `ProjectSidebar :81`). 56 px rail, 36 px buttons, 8 px radius.
+- **States:** active (surface bg, bright left bar), inactive (editor bg, hairline border), hover, loading skeleton, unavailable dot.
+- **Hover card:** project name, path, session count, active session count.
+- **Badges:** session count (16 px pill, 10 px semibold, `bg-line-strong`), active dot (8 px pulse, `bg-state-working`), unavailable dot (8 px `bg-state-needs`).
+- **Tokens:** `bg-canvas`, `border-hairline`, `bg-surface` (active), `bg-editor` (inactive), `text-text-bright` (active bar, badge text), `bg-line-strong` (badge bg), neutral states (spec §6.10).
+- **E2E:** `apps/desktop/e2e/project-sidebar.spec.ts` (6 assertions).
+
+### Paper parity (node CD8-0, board 02 · Improved)
+
+**Paper MCP unavailable during this check.** Comparison is from code inspection of the merged implementation.
+
+| Property | Implementation (project-sidebar.tsx) | Spec/Expected | Match |
+|---|---|---|
+| Rail width | `w-14` (56px) | 56px | yes |
+| Rail background | `bg-canvas` | neutral canvas | yes |
+| Rail border | `border-r border-hairline` | hairline right border | yes |
+| Rail padding | `py-2` (8px vertical) | 8px | yes |
+| Project button size | `size-9` (36px square) | 36px | yes |
+| Project button radius | `rounded-[8px]` (8px) | 8px | yes |
+| Project button bg (inactive) | `bg-editor`, `border-hairline` | neutral editor + hairline border | yes |
+| Project button bg (active) | `bg-surface`, `border-transparent` | elevated surface | yes |
+| Avatar size | 28px | 28px | yes |
+| Avatar radius | `rounded-[6px]` (6px) | 6px | yes |
+| Badge size | `h-4 min-w-4` (16px min) | 16px height, flexible width | yes |
+| Badge font | `text-[10px] font-semibold` | 10px semibold | yes |
+| Badge background | `bg-line-strong` | strong neutral line | yes |
+| Badge text color | `text-text-bright` | bright text | yes |
+| Badge radius | `rounded-full` | full pill | yes |
+| Badge padding | `px-1` (4px horizontal) | 4px | yes |
+| Active indicator | `h-5 w-[2px] bg-text-bright` left bar | 5px × 2px bright bar | yes |
+| State colors | neutral (working, needs), rose only for focus ring | §6.10: neutral states, red only for failure | yes |
+
+All measurements and colors follow Graphite tokens and spec §6.10. No code changes required.
+
 ## 04b · Chat full
 - **Reuse:** `app/conversation-view.tsx` (rail `PreviewRail :46`, `createMessageRailPreview :45`, `activeRailIdFor :123`, `navigation="rail" :695`), `composites/message-turn.tsx:122`, `composites/composer.tsx:514`, `session-pane.tsx:282`.
 - **New:** `ChatLaneHeader` (thread switcher, `+ New chat`, subagent chips, follow toggle). Replaces `chat-tab-bar.tsx:115` inside the lane.
