@@ -20,10 +20,8 @@ test("one project picker owns workflow rows and routine drafts and revokes custo
   await window.getByRole("button", { name: "Account menu" }).click()
   await window.getByRole("menuitem", { name: "Settings" }).click()
   
-  // Verify grouped navigation is present
-  await expect(window.getByText("Workspace")).toBeVisible()
-  await expect(window.getByText("Agents")).toBeVisible()
-  await expect(window.getByText("Integrations")).toBeVisible()
+  const nav = window.getByRole("navigation")
+  for (const group of ["Workspace", "Agents", "Integrations"]) await expect(nav.getByText(group, { exact: true })).toBeVisible()
   
   await window.getByRole("button", { name: "Projects", exact: true }).click()
   await expect(window.getByRole("button", { name: "Routines", exact: true })).toHaveCount(0)

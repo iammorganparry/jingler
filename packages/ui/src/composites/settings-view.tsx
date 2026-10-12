@@ -233,7 +233,7 @@ export interface SettingsViewProps {
   /** Close the view and return to the active session. */
   onClose?: () => void
   /** Recovery actions open directly on GitHub; ordinary Settings opens Providers. */
-  initialSection?: "providers" | "github" | "devices" | "agents" | "runtime"
+  initialSection?: SectionKey
 }
 
 /**
