@@ -16,7 +16,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | AttachmentSourceProvider | `components/attachment-source.tsx` | Context provider telling thumbnails where to load attachment bytes from. | — | no | — |
 | AttachmentThumb | `components/attachment-thumb.tsx` | Image attachment thumbnail with filename. | — | yes | — |
 | AuthDivider | `components/auth-divider.tsx` | Labelled hairline divider ("or with email"). | — | no | — |
-| Avatar | `components/avatar.tsx` | User avatar image from a GitHub login. | — | yes | #378 (2.13) |
+| Avatar | `components/avatar.tsx` | Author avatar, sizes 16/20/24/32: image → initials fallback, mono Jingler mark for agents, optional one-line count badge, focusable button with `onClick`. | initial, src, size, agent, label, count, onClick | yes | #378 (2.13) |
+| AvatarStack | `components/avatar.tsx` | Non-wrapping row of avatars overlapping by 6px, `max` collapses extras into `+N`. | children, max, size | yes | #378 (2.13) |
 | Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). One line by construction (nowrap, shrink-0). | children, tone, size, className, title | yes | #361 (1.3) |
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
 | ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | — |
@@ -206,7 +207,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
 | BannerShell | `Callout`, archived/branch-drift banners | #376 (2.11) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
-| Avatar, AvatarStack | `Avatar` | #378 (2.13) |
 | KpiTile, StackedMiniBar | none (new) | #379 (2.14) |
 | CommentRow | none (new) | #380 (2.15) |
 | SessionRow / PrGlyph stack slot | `SessionRow`, `PrStatusGlyph` | #381 (2.16) |
