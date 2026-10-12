@@ -369,7 +369,9 @@ const heldFleetNode = (
       artifacts: phase === "start"
         ? []
         : [{ kind: "report", path: `reports/${id}.md`, label: "Report" }],
-      attention: null
+      attention: null,
+      workspace: null,
+      prNumber: null
     }
   }
 })

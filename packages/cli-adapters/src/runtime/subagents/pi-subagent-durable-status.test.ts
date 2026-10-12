@@ -94,6 +94,36 @@ describe("readDurablePiSubagentNodes", () => {
     ]))
   })
 
+  it("reports a step's worktree path and branch as its workspace, null otherwise", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-durable-ws-"))
+    roots.push(root)
+    await mkdir(join(root, ".active-runs"), { recursive: true })
+    await mkdir(join(root, "wf-2"), { recursive: true })
+    await writeFile(join(root, ".active-runs", "wf-2"), "")
+    await writeFile(join(root, "wf-2", "status.json"), JSON.stringify({
+      runId: "wf-2",
+      sessionId: "parent",
+      state: "running",
+      mode: "parallel",
+      startedAt: 10,
+      steps: [
+        { agent: "reviewer", status: "running", worktreePath: "/wt/reviewer", branch: "pi-subagents/reviewer" },
+        { agent: "scout", status: "running" }
+      ]
+    }))
+    const projection = await Effect.runPromise(readDurablePiSubagentNodes({
+      asyncDir: root,
+      parentRuntimeSessionId: "parent",
+      parentPiSessionAliases: new Set(["parent"]),
+      now: 50
+    }))
+    expect(projection.nodes.find((n) => n.agent === "reviewer")).toMatchObject({
+      workspace: { path: "/wt/reviewer", branch: "pi-subagents/reviewer", baseRef: null },
+      prNumber: null
+    })
+    expect(projection.nodes.find((n) => n.agent === "scout")?.workspace).toBeNull()
+  })
+
   it("keeps a workflow's completed steps selectable for their transcripts", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-durable-steps-"))
     roots.push(root)

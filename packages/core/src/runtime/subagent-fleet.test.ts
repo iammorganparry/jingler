@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
+  SubagentFleetNode,
   SubagentFleetControlOutcome,
   SubagentFleetEvent,
   SubagentFleetSnapshot,
@@ -77,9 +78,11 @@ describe("subagent fleet contracts", () => {
       }]
     } as const
 
-    expect(Schema.decodeUnknownSync(SubagentFleetSnapshot)(snapshot)).toEqual(
-      snapshot
-    )
+    // Nodes without the worktree fields decode with them defaulted to null.
+    expect(Schema.decodeUnknownSync(SubagentFleetSnapshot)(snapshot)).toEqual({
+      ...snapshot,
+      nodes: snapshot.nodes.map((n) => ({ ...n, workspace: null, prNumber: null }))
+    })
     const event = Schema.decodeUnknownSync(SubagentFleetEvent)({
       _tag: "Snapshot",
       version: 2,
@@ -89,6 +92,21 @@ describe("subagent fleet contracts", () => {
     })
     expect(event._tag).toBe("Snapshot")
     if (event._tag === "Snapshot") expect(event.snapshot.nodes).toHaveLength(2)
+  })
+
+  it("decodes nodes written before worktree roll-up with null workspace and prNumber", () => {
+    const decoded = Schema.decodeUnknownSync(SubagentFleetNode)(node)
+    expect(decoded.workspace).toBeNull()
+    expect(decoded.prNumber).toBeNull()
+  })
+
+  it("round-trips a child worktree and PR", () => {
+    const withWorkspace = {
+      ...node,
+      workspace: { path: "/wt/reviewer", branch: "feat/review-retry", baseRef: "main" },
+      prNumber: 491
+    }
+    expect(Schema.decodeUnknownSync(SubagentFleetNode)(withWorkspace)).toEqual(withWorkspace)
   })
 
   it("models factual acknowledged control outcomes", () => {

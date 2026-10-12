@@ -92,7 +92,9 @@ export const projectLegacySubagents = (
         toolCalls: 0
       },
       artifacts: [],
-      attention: null
+      attention: null,
+      workspace: null,
+      prNumber: null
     }
     return {
       _tag: "Upsert",
@@ -179,7 +181,9 @@ export const settleStoppedFleet = (
         currentTool: null,
         updatedAt: occurredAt,
         completedAt: occurredAt,
-        attention: null
+        attention: null,
+        workspace: null,
+        prNumber: null
       }
     }))
   ]

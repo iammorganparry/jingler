@@ -42,6 +42,7 @@ import {
   type SubagentSupervisionServiceShape
 } from "./subagent-supervision-service.js"
 import type { SubagentRunTreeContext } from "./subagent-run-tree-reducer.js"
+import { childWorkspace } from "./child-workspace.js"
 
 const RPC_REQUEST_EVENT = "subagents:rpc:v1:request"
 const RPC_REPLY_PREFIX = "subagents:rpc:v1:reply:"
@@ -129,7 +130,8 @@ const AsyncStarted = Schema.Struct({
   agents: Schema.optional(Schema.Array(Schema.String)),
   goal: Schema.optional(Schema.String),
   task: Schema.optional(Schema.String),
-  parentWorkflowRunId: Schema.optional(Schema.String)
+  parentWorkflowRunId: Schema.optional(Schema.String),
+  cwd: Schema.optional(Schema.String)
 })
 const ResultUsage = Schema.Struct({
   input: Schema.Number,
@@ -364,6 +366,8 @@ export interface PiSubagentCompletedInput {
 export interface PiSubagentLifecycleAdapterOptions {
   readonly events: EventBus
   readonly parentRuntimeSessionId: string
+  /** The parent session's checkout; a child launched in a different git worktree reports it as its workspace. */
+  readonly parentCwd?: string
   readonly parentPiSessionAliases?: ReadonlyArray<string>
   readonly asyncRunsDir?: string
   readonly emit: (event: SubagentFleetEvent) => void
@@ -376,6 +380,7 @@ export interface PiSubagentLifecycleAdapterOptions {
 export class PiSubagentLifecycleAdapter {
   readonly #events: EventBus
   readonly #parentRuntimeSessionId: string
+  readonly #parentCwd: string | undefined
   readonly #parentRuntimeSessionIds: ReadonlySet<string>
   readonly #asyncRunsDir: string | undefined
   readonly #emitExternal: (event: SubagentFleetEvent) => void
@@ -388,6 +393,7 @@ export class PiSubagentLifecycleAdapter {
   constructor(options: PiSubagentLifecycleAdapterOptions) {
     this.#events = options.events
     this.#parentRuntimeSessionId = options.parentRuntimeSessionId
+    this.#parentCwd = options.parentCwd
     this.#parentRuntimeSessionIds = new Set([
       options.parentRuntimeSessionId,
       ...(options.parentPiSessionAliases ?? [])
@@ -604,7 +610,9 @@ export class PiSubagentLifecycleAdapter {
           completedAt: null,
           usage: existing?.usage ?? emptyUsage(),
           artifacts: existing?.artifacts ?? [],
-          attention: existing?.attention ?? null
+          attention: existing?.attention ?? null,
+          workspace: existing?.workspace ?? null,
+          prNumber: existing?.prNumber ?? null
         }
       })
       return
@@ -674,7 +682,9 @@ export class PiSubagentLifecycleAdapter {
           completedAt: status === "completed" || status === "failed" ? now : null,
           usage: progressChildUsage(child, existing),
           artifacts: existing?.artifacts ?? [],
-          attention: existing?.attention ?? null
+          attention: existing?.attention ?? null,
+          workspace: existing?.workspace ?? null,
+          prNumber: existing?.prNumber ?? null
         }
       })
   }
@@ -791,7 +801,9 @@ export class PiSubagentLifecycleAdapter {
           sessionFile: null,
           startedAt: now,
           usage: emptyUsage(),
-          artifacts: []
+          artifacts: [],
+          workspace: null,
+          prNumber: null
         }),
         ...this.#identity(subagentId, input.runId),
         status: "needs-attention",
@@ -1123,7 +1135,9 @@ export class PiSubagentLifecycleAdapter {
         toolCalls: 0
       },
       artifacts: [],
-      attention: null
+      attention: null,
+      workspace: null,
+      prNumber: null
     }))
   }
 
@@ -1266,7 +1280,9 @@ export class PiSubagentLifecycleAdapter {
         completedAt: null,
         usage: emptyUsage(),
         artifacts: [],
-        attention: null
+        attention: null,
+        workspace: childWorkspace(started.cwd, this.#parentCwd),
+        prNumber: null
       }
     })
   }
@@ -1308,7 +1324,8 @@ export class PiSubagentLifecycleAdapter {
         completedAt: now,
         usage: emptyUsage(),
         artifacts: [],
-        attention: null
+        attention: null,
+        ...priorWorkspace(existingRoot)
       }
     })
     completion.results?.forEach((child, position) => {
@@ -1367,7 +1384,8 @@ export class PiSubagentLifecycleAdapter {
         completedAt: input.now,
         usage: usageFor(input.child.usage),
         artifacts: artifactsFor(input.child),
-        attention: null
+        attention: null,
+        ...priorWorkspace(existing)
       }
     })
     this.#onChildCompleted?.({
@@ -1513,6 +1531,12 @@ const emptyProgressIdentity = (
   agent: existing?.agent ?? mode,
   task: existing?.task ?? "Delegated work",
   model: existing?.model ?? null
+})
+
+/** Keep a node's worktree and PR across later events that don't restate them. */
+const priorWorkspace = (existing: SubagentFleetNode | undefined) => ({
+  workspace: existing?.workspace ?? null,
+  prNumber: existing?.prNumber ?? null
 })
 
 const priorProgressLocation = (existing: SubagentFleetNode | undefined, now: number) => ({
