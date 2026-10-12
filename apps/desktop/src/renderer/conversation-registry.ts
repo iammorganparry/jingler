@@ -52,7 +52,7 @@ import {
   projectSubagentFleetEvents
 } from "./subagent-fleet-machine.js"
 import { setSessionActivity } from "./session-activity.js"
-import { setPlanPresent } from "./plan-presence.js"
+import { setPlanDisconnected, setPlanPresent } from "./plan-presence.js"
 import { clearSessionDiff, setSessionDiff } from "./diff-presence.js"
 import { isSessionVisible } from "./active-session.js"
 import type { ActorCandidate } from "./actor-eviction.js"
@@ -758,6 +758,7 @@ export const disposeConversationActor = (sessionId: string): void => {
   for (const key of [...registry.keys()]) {
     if (!key.startsWith(`${sessionId}:`)) continue
     setPlanPresent(key.slice(sessionId.length + 1), false)
+    setPlanDisconnected(key.slice(sessionId.length + 1), false)
     forget(key)
   }
   delete chatActivities[sessionId]
@@ -769,6 +770,7 @@ export const disposeConversationActor = (sessionId: string): void => {
 export const disposeChatActor = (sessionId: string, chatId: string): void => {
   const key = registryKey(sessionId, chatId)
   setPlanPresent(chatId, false)
+  setPlanDisconnected(chatId, false)
   forget(key)
   clearAgentFileActivityChat(sessionId, chatId)
   publishChatActivity(sessionId, chatId, null)

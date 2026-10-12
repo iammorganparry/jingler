@@ -496,6 +496,10 @@ test("a pending Plannotator review reopens natively after an Electron restart", 
   const planTab = planEditorTab(reopened)
   await expect(planTab).toBeVisible({ timeout: 20_000 })
   await planTab.click()
+  // The interrupted review is offered back, not resumed behind the operator's back.
+  await expect(reopened.window.getByText("Plan reviewer disconnected")).toBeVisible({ timeout: 20_000 })
+  await reopened.window.getByRole("button", { name: "Reopen", exact: true }).click()
+  await expect(reopened.window.getByText("Plan reviewer disconnected")).toHaveCount(0)
   await expect(review(reopened)).toBeVisible({ timeout: 30_000 })
   await expect.poll(() => reviewText(reopened)).toContain("Implement the auth change")
 
@@ -570,6 +574,8 @@ for (const recoveryCase of [
       githubRelay: first.githubRelay
     })
     await expect(appShell(reopened.window)).toBeVisible()
+    await planEditorTab(reopened).click({ timeout: 20_000 })
+    await reopened.window.getByRole("button", { name: "Reopen", exact: true }).click()
     await expect(reopened.window.getByText(recoveryCase.message)).toBeVisible({ timeout: 20_000 })
     await expect(reopened.window.getByText("Implemented and verified the approved plan."))
       .toHaveCount(0)
