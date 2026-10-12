@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import type {
   PrLabel,
   PrMergeMethod,
+  SessionPr,
   PrReviewThread,
   PrState,
   PrTimelineItem,
@@ -26,6 +27,7 @@ import { Spinner } from "../components/loading.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { StatusDot } from "../components/status-dot.js"
 import { MotionTabs } from "../components/beui/controls.js"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/beui/select.js"
 import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
@@ -156,9 +158,13 @@ export interface PullRequestViewProps {
   publish?: PublishCheckpoint | null
   publishing?: boolean
   branch?: string
+  /** The session base branch (e.g., "main"). */
+  baseBranch?: string
+  /** The session PR stack (ordered, bottom layer first). */
+  prs?: ReadonlyArray<SessionPr>
   /** The owning session's title, for the "routed to <session>" copy. */
   sessionTitle?: string
-  onCreatePr?: () => Promise<void> | void
+  onCreatePr?: (base?: string) => Promise<void> | void
   onRetryPublish?: () => void
   onConnectGithub?: () => void
   onSubmitReview?: (input: { body: string; kind: ReviewSubmitKind; routeToAgent: boolean }) => Promise<void> | void
@@ -216,6 +222,8 @@ export function PullRequestView({
   publish,
   publishing = false,
   branch,
+  baseBranch,
+  prs,
   onCreatePr,
   onRetryPublish,
   onConnectGithub,
@@ -477,12 +485,42 @@ return (evidence === "checks" ? (
               <Button
                 size="md"
                 disabled={busy || publishing}
-                onClick={() => onCreatePr()}
+                onClick={() => onCreatePr(selectedBase)}
               >
                 <GitPullRequest size={14} />
                 {getPublishing()}
               </Button>
               {branch && <p className="text-[11px] text-muted-foreground">Branch: <code>{branch}</code></p>}
+              {(baseBranch || (prs && prs.length > 0)) && (
+                <div className="flex w-full flex-col gap-1.5">
+                  <label className="text-[11px] font-medium text-muted-foreground">
+                    Base
+                  </label>
+                  <Select
+                    value={selectedBase}
+                    onValueChange={setSelectedBase}
+                  >
+                    <SelectTrigger
+                      className="h-8 text-xs"
+                      aria-label="Select base branch for pull request"
+                    >
+                      <SelectValue placeholder="Select base branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {baseBranch && (
+                        <SelectItem value={baseBranch}>
+                          {baseBranch}
+                        </SelectItem>
+                      )}
+                      {prs?.map((pr) => pr.branch && (
+                        <SelectItem key={pr.number} value={pr.branch}>
+                          Stack on #{pr.number}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               {publish && publish.step !== "idle" && (
                 <div
                   aria-live="polite"
@@ -544,6 +582,11 @@ return (evidence === "checks" ? (
   // left roughly 88px of it — narrower than the PR title.
   const roomy = atLeast(useWidthTier(), "wide")
   const [railOpen, setRailOpen] = useState(false)
+  // Base branch choice for stacking PRs
+  const [selectedBase, setSelectedBase] = useState<string | undefined>(() => {
+    const topPr = prs && prs.length > 0 ? prs[prs.length - 1] : undefined
+    return topPr?.branch ?? baseBranch
+  })
   const [evidence, setEvidence] = useState<PrEvidence>("overview")
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
   useEffect(() => {
