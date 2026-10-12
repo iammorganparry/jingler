@@ -39,6 +39,7 @@ export interface SessionConversationProps {
   projectsLoading?: boolean
   projectOwners?: Readonly<Record<string, string>>
   onAddProject?: () => void
+  onImportSessions?: () => void
   onNewSessionForProject?: (projectId: string) => void
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
   environments?: ReadonlyArray<Environment>
@@ -363,6 +364,7 @@ export function SessionConversation(props: SessionConversationProps) {
           loading={props.projectsLoading}
           onSelect={selectProject}
           onAddProject={props.onAddProject}
+          onImportSessions={props.onImportSessions}
         />
       ) : null}
       <SessionSidebar

@@ -44,7 +44,13 @@ import {
   workspaceModeOf,
 } from "@jingler/core";
 import {
-  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogBody,
+  ImportSessionsList,
+    ConfirmDialog,
   ExplanationView,
   LoadingScreen,
   SignInDialog,
@@ -134,6 +140,7 @@ import { useRuntimeInspector } from "./use-runtime-inspector.js";
 import { useEnvironments } from "./use-environments.js";
 import { createOffloadSettingsMachine } from "./offload-settings-machine.js";
 import { useProjects } from "./use-projects.js";
+import { useImportSessions } from "./use-import-sessions.js";
 import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js";
 import { WorkspaceWorkflowBar } from "./workspace-workflow-bar.js";
 import { useAutoUpdate } from "./use-auto-update.js";
@@ -438,7 +445,9 @@ function AuthedApp({
     }
   }, [environmentController.environments, providerCatalog.endpointCatalog, providerCatalog.remoteCatalogs])
   const projectController = useProjects();
+  const importSessionsProps = useImportSessions();
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
+  const [importSessionsDialogOpen, setImportSessionsDialogOpen] = useState(false);
 
   // Provider capabilities are versioned by the auth Durable Object. Refresh the
   // unified inventory after every GitHub auth refresh so managed provider choices
@@ -1488,6 +1497,7 @@ function AuthedApp({
         onListProjectDirectories={projectController.listDirectories}
         onListGitHubRepositories={projectController.listGitHubRepositories}
         onRegisterProject={projectController.register}
+        onImportSessions={() => setImportSessionsDialogOpen(true)}
         onCreateProjectDirectory={projectController.createDirectory}
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}
@@ -2290,7 +2300,9 @@ function renderAppSetup(
       ? "provider"
       : state.matches({ setup: "resources" })
         ? "resources"
-        : "workspace";
+        : state.matches({ setup: "importSessions" })
+          ? "importSessions"
+          : "workspace";
   const providerBusy =
     state.matches({ setup: { provider: "refreshing" } }) ||
     state.matches({ setup: { provider: "authenticating" } }) ||
@@ -2378,6 +2390,8 @@ function renderAppSetup(
       onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
       onCancelResourceImport={() => send({ type: "CANCEL_RESOURCE_IMPORT" })}
       onRetryResources={() => send({ type: "RETRY_RESOURCES" })}
+      onSkipImportSessions={() => send({ type: "SKIP_IMPORT_SESSIONS" })}
+      onContinueImportSessions={() => send({ type: "CONTINUE_IMPORT_SESSIONS" })}
     />
   );
 }

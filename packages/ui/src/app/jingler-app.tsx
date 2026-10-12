@@ -169,6 +169,8 @@ export interface JinglerAppProps {
   /** Durable registered repositories, independent of workspaces. */
   projects?: ReadonlyArray<Project>
   projectsLoading?: boolean
+  /** Opens the "Import sessions…" dialog (Claude/Codex sessions found on disk). */
+  onImportSessions?: () => void
   onBrowseProject?: () => Promise<string | null>
   onBrowseCloneDestination?: (repositoryName: string) => Promise<string | null>
   onListProjectDirectories?: (path?: string) => Promise<ProjectDirectoryListing>
@@ -499,6 +501,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         projectsLoading={props.projectsLoading}
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
+        onImportSessions={props.onImportSessions}
         onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}
         renderExplorer={renderExplorer}
         environments={environments}
@@ -702,6 +705,7 @@ function getActiveTabContext(active: Session) {
               onAddProject={
                 getAddProjectAction()
               }
+              onImportSessions={props.onImportSessions}
               projects={projects}
               environments={environments}
               environmentStartup={pendingEnvironmentSession}

@@ -22,7 +22,7 @@ import { ProviderSetupStep } from "./setup/provider-setup-step.js"
 import { ResourceSetupStep } from "./setup/resource-setup-step.js"
 
 export interface SetupScreenProps {
-  step: "workspace" | "github" | "provider" | "resources"
+  step: "workspace" | "github" | "provider" | "resources" | "importSessions"
   github: GitHubConnection
   providerCatalog?: ProviderCatalog | null
   nativeEndpointLogin?: NativeEndpointLoginActions
@@ -49,6 +49,8 @@ export interface SetupScreenProps {
   onSkipResources: () => void
   onCancelResourceImport: () => void
   onRetryResources: () => void
+  onSkipImportSessions: () => void
+  onContinueImportSessions: () => void
 }
 
 const githubLabel = (github: GitHubConnection): string => {
@@ -96,7 +98,9 @@ export function SetupScreen({
   onImportResources,
   onSkipResources,
   onCancelResourceImport,
-  onRetryResources
+  onRetryResources,
+  onSkipImportSessions,
+  onContinueImportSessions
 }: SetupScreenProps) {
 function renderWorkspaceSetup() {
              return (<>
@@ -197,6 +201,30 @@ function renderGithubSetup() {
           </>)
            }
 
+
+function renderImportSessionsSetup() {
+  return (<>
+    <div className="flex flex-col gap-2.5">
+      <Eyebrow>Setup complete</Eyebrow>
+      <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-bright">
+        Import existing sessions?
+      </h1>
+      <p className="text-[13px] leading-[1.6] text-muted-foreground">
+        Jingler can import sessions from Claude Code, Codex, Conductor, and T3 Code.
+        This is optional and can be done later.
+      </p>
+    </div>
+    <div className="flex items-center gap-2.5 pt-1">
+      <Button variant="primary" onClick={onContinueImportSessions}>
+        Continue
+        <ArrowRight size={14} />
+      </Button>
+      <Button variant="ghost" onClick={onSkipImportSessions}>
+        Skip for now
+      </Button>
+    </div>
+  </>)
+}
          function getStep() {
 
 

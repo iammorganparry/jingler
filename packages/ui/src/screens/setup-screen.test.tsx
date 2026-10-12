@@ -167,6 +167,8 @@ const props = (
   onSkipResources: vi.fn(),
   onCancelResourceImport: vi.fn(),
   onRetryResources: vi.fn(),
+    onSkipImportSessions: vi.fn(),
+    onContinueImportSessions: vi.fn(),
   ...overrides,
 });
 

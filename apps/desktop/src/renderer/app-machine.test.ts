@@ -264,6 +264,7 @@ describe("appMachine first-run coordination", () => {
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
     actor.send({ type: "SKIP_RESOURCES" });
+    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();
   });
@@ -406,6 +407,7 @@ describe("appMachine first-run coordination", () => {
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
     actor.send({ type: "SKIP_RESOURCES" });
+    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     expect(importSpy).not.toHaveBeenCalled();
     actor.stop();
@@ -478,6 +480,7 @@ describe("appMachine first-run coordination", () => {
       snapshot.matches({ setup: { resources: "reviewing" } }),
     );
     actor.send({ type: "SKIP_RESOURCES" });
+    actor.send({ type: "SKIP_IMPORT_SESSIONS" });
     await waitFor(actor, (snapshot) => snapshot.matches("ready"));
     actor.stop();
   });

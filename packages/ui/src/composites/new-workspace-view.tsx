@@ -327,6 +327,7 @@ export interface NewWorkspaceViewProps {
   /** App-owned remote startup state survives navigation away from this view. */
   environmentStartup?: PendingEnvironmentSession | null;
   onAddProject?: () => void;
+  onImportSessions?: () => void;
   onClose: () => void;
 }
 
