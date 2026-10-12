@@ -546,7 +546,7 @@ const EditorTab = memo(function EditorTab({
       className={cn(
         "group flex flex-none items-center border-b-2 border-r border-r-hairline text-xs",
         selected
-          ? cn("bg-editor text-text-bright", focused ? "border-b-blue" : "border-b-line")
+          ? cn("bg-editor text-text-bright", focused ? "border-b-text-bright" : "border-b-line-strong")
           : "border-b-transparent text-muted-foreground hover:text-text"
       )}
     >
