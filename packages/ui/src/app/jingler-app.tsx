@@ -149,6 +149,10 @@ export interface JinglerAppProps {
   sessions: ReadonlyArray<Session>
   /** The signed-in user, shown in the sidebar footer account menu. */
   user?: User
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  platform?: string
+  /** Window control handlers for non-macOS platforms. */
+  windowControls?: Parameters<typeof import("./title-bar.js").TitleBar>[0]["windowControls"]
   /** Available packaged-app update shown in the sidebar. */
   update?: SidebarUpdate
   /** "Updated to vX" notes, shown once after relaunching on a new version. */
@@ -1344,7 +1348,7 @@ function getActiveTabContext(active: Session) {
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
-    <AppShell title="Jingler">
+    <AppShell title="Jingler" platform={props.platform} windowControls={props.windowControls}>
       {renderSessionWorkspace()}
       {renderAddProjectDialog()}
       {onLoadUsage && (

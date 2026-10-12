@@ -4333,6 +4333,11 @@ const importSession = (
       Effect.fail(new GitError({ message: error.message, cause: error }))
     )
   );
+
+// Resolved per call: importing the window from ./index.js pulls Electron's app bootstrap into every rpc.ts importer (and its tests).
+const appWindow = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
@@ -5517,6 +5522,17 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
   "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
+
+  "Window.minimize": () => Effect.sync(() => appWindow()?.minimize()),
+  "Window.toggleMaximize": () =>
+    Effect.sync(() => {
+      const window = appWindow()
+      if (!window) return
+      if (window.isMaximized()) window.unmaximize()
+      else window.maximize()
+    }),
+  "Window.close": () => Effect.sync(() => appWindow()?.close()),
+  "Window.isMaximized": () => Effect.sync(() => appWindow()?.isMaximized() ?? false),
   "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via

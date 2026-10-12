@@ -18,6 +18,8 @@ interface JinglerBridge {
   readonly initialThemeCss: string
   /** True when running under e2e; gates test-only renderer hooks. */
   readonly isE2E: boolean
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  readonly platform: string
   /** Send one client→server RPC frame to the main process. */
   readonly send: (data: unknown) => void
   /** Subscribe to server→client RPC frames. Returns an unsubscribe fn. */

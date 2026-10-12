@@ -1297,6 +1297,20 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   /** Open the app's log folder in the file manager (crash screen "Open logs"). */
   Rpc.make("App.revealLogs", {}),
 
+  /** Minimize the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.minimize", {}),
+
+  /** Toggle maximize/restore on the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.toggleMaximize", {}),
+
+  /** Close the main window (Windows/Linux custom controls). */
+  Rpc.make("Window.close", {}),
+
+  /** Check if the main window is currently maximized (Windows/Linux custom controls). */
+  Rpc.make("Window.isMaximized", {
+    success: Schema.Boolean
+  }),
+
   /** Reveal mcp.json in the file manager, creating an empty file if absent. */
   Rpc.make("Mcp.reveal", {
     success: Schema.Void,

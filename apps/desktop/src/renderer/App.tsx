@@ -195,6 +195,45 @@ function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
   )
 }
 
+
+/** Set up window control state and event listeners for Windows/Linux. */
+function useWindowControls() {
+  const [maximized, setMaximized] = useState(false)
+
+  useEffect(() => {
+    const platform = window.jingler.platform
+    if (platform === undefined || platform === "darwin") return
+    void rpc.windowIsMaximized().then(setMaximized)
+    
+    // Listen for maximize/unmaximize events
+    const handleMaximized = () => setMaximized(true)
+    const handleUnmaximized = () => setMaximized(false)
+    
+    window.addEventListener('jingler:window-maximized', handleMaximized)
+    window.addEventListener('jingler:window-unmaximized', handleUnmaximized)
+    
+    return () => {
+      window.removeEventListener('jingler:window-maximized', handleMaximized)
+      window.removeEventListener('jingler:window-unmaximized', handleUnmaximized)
+    }
+  }, [])
+
+  if (window.jingler.platform === undefined || window.jingler.platform === "darwin") {
+    return undefined
+  }
+
+  return {
+    maximized,
+    onMinimize: () => void rpc.windowMinimize(),
+    onToggleMaximize: () => {
+      void rpc.windowToggleMaximize().then(() => {
+        void rpc.windowIsMaximized().then(setMaximized)
+      })
+    },
+    onClose: () => void rpc.windowClose()
+  }
+}
+
 function AuthedApp({
   user,
   onSignOut,
@@ -204,6 +243,8 @@ function AuthedApp({
   onSignOut?: () => void;
   onSignIn?: () => void;
 }) {
+  const windowControls = useWindowControls()
+
   const [state, send] = useMachine(appMachine);
   const reviewFocused = useReviewFocused();
   const update = useAutoUpdate();
@@ -1386,6 +1427,8 @@ function AuthedApp({
         selectSessionRequest={selectRequest}
         newSessionRequest={newSessionRequest}
         onVisibleSessionsChange={onVisibleSessionsChange}
+        platform={window.jingler.platform}
+        windowControls={windowControls}
         sessions={sessions}
         user={user}
         update={update}
