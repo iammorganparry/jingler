@@ -1491,7 +1491,7 @@ const acquireRuntimeBrowser = (runtimeId: string | undefined, sessionId: string,
   })
 
 
-const continuationFromImport = (
+export const continuationFromImport = (
   session: Session,
   chat: Session["chats"][number],
   priorMessages: ReadonlyArray<Message>,
