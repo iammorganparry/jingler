@@ -25,7 +25,7 @@ export function Kbd({
   return (
     <span
       className={cn(
-        "rounded-sm px-1.5 py-0.5 font-mono text-[10px] leading-none",
+        "inline-block shrink-0 whitespace-nowrap rounded-sm px-1.5 py-0.5 font-mono text-[10px] leading-none",
         onFill
           ? "bg-primary-fg/15 text-primary-fg"
           : "border border-line text-muted-foreground",

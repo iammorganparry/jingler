@@ -28,19 +28,19 @@ export function CodeChip({
     <span
       title={isCapturedRange ? displayLabel : path}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-bright",
+        "inline-flex max-w-full min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-line bg-surface px-1.5 py-0.5 font-mono text-[11px] text-text-bright",
         className
       )}
     >
-      <FileIcon path={path} size={12} />
-      {displayLabel}
-      {!isCapturedRange && line !== undefined && <span className="text-dim">:{line}</span>}
+      <FileIcon path={path} size={12} className="shrink-0" />
+      <span className="min-w-0 truncate">{displayLabel}</span>
+      {!isCapturedRange && line !== undefined && <span className="shrink-0 text-dim">:{line}</span>}
       {onRemove && (
         <button
           type="button"
           onClick={onRemove}
           aria-label={`Remove ${displayLabel}`}
-          className="text-dim hover:text-text"
+          className="shrink-0 text-dim hover:text-text"
         >
           <X size={11} />
         </button>
