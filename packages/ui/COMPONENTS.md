@@ -21,7 +21,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). One line by construction (nowrap, shrink-0). | children, tone, size, className, title | yes | #361 (1.3) |
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
 | ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | — |
-| Callout | `components/callout.tsx` | Inline notice with a leading glyph and tone. | children, glyph, className | no | #376 (2.11) |
+| BannerShell | `components/banner-shell.tsx` | Neutral notice: icon (red only when failed), truncating message, up to two one-line actions, dismiss; top/lane/card placements. | icon, failed, actions, onDismiss, placement | yes | #376 (2.11) |
+| Callout | `components/callout.tsx` | Inline notice with a leading glyph; tones share BannerShell neutral styling, only red colours the glyph. | children, glyph, className | no | #376 (2.11) |
 | Card, CardHeader | `components/card.tsx` | Bordered panel surface (Card, CardHeader). | — | no | — |
 | Checkbox | `components/checkbox.tsx` | Checkbox. | checked, onCheckedChange, indeterminate, label, tone | yes | — |
 | ChipMenu | `components/chip-menu.tsx` | Compact Command picker anchored to a composer control. | — | no | — |
@@ -205,7 +206,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
-| BannerShell | `Callout`, archived/branch-drift banners | #376 (2.11) |
 | VirtualList (searchable) | none (new) | #377 (2.12) |
 | KpiTile, StackedMiniBar | none (new) | #379 (2.14) |
 | CommentRow | none (new) | #380 (2.15) |
