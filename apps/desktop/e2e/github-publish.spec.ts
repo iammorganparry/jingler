@@ -63,10 +63,8 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await window.getByTestId("view-tab-pr").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect(window.getByText("Publishing stopped")).toBeVisible()
-  // 3-step stepper shows Commit, Push, Open PR
-  await expect(window.getByText("Commit")).toBeVisible()
-  await expect(window.getByText("Push")).toBeVisible()
-  await expect(window.getByText("Open PR")).toBeVisible()
+  const stepper = window.getByRole("list", { name: "Progress" })
+  for (const step of ["Commit", "Push", "Open PR"]) await expect(stepper.getByText(step, { exact: true })).toBeVisible()
   await expect(window.getByText(/Finish creating the semantic task branch/)).toBeVisible()
   expect(githubServer.operations).toEqual([])
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
@@ -101,7 +99,7 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await expect(window.getByText(`Branch: ${session.branch}`)).toBeVisible()
   await window.getByRole("button", { name: /publishing again/i }).dblclick()
   await expect(window.getByText("Publishing stopped")).toBeVisible({ timeout: 25_000 })
-  await expect(window.getByText("Update pull request description")).toBeVisible()
+  await expect(window.getByRole("list", { name: "Progress" }).locator("[aria-current='step']")).toHaveText(/Open PR/)
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
   expect(sessionsAt(home)[0]?.publish).toMatchObject({
     resumeFrom: "updating-pr",

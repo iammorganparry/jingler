@@ -10,7 +10,8 @@ import type {
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Check, Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { Stepper } from "../components/status-row.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { relativeTime } from "../lib/relative-time.js"
@@ -136,39 +137,10 @@ const publishPhaseFromStep = (step: PublishStep): PublishPhase | null => {
 
 const PUBLISH_PHASES: ReadonlyArray<PublishPhase> = ["commit", "push", "open-pr"]
 
-
-function PublishStepperRows({ publish, publishing }: { publish: PublishCheckpoint; publishing: boolean }) {
-  const currentPhase = publishPhaseFromStep(publish.step)
-  const resumePhase = publish.resumeFrom ? publishPhaseFromStep(publish.resumeFrom) : null
-  const completedPhases = new Set(
-    publish.completed.map(publishPhaseFromStep).filter((p): p is PublishPhase => p !== null)
-  )
-  
-  return (
-    <ol className="mt-2 flex flex-col gap-1.5">
-      {PUBLISH_PHASES.map((phase) => {
-        const done = completedPhases.has(phase)
-        const active = currentPhase === phase || resumePhase === phase
-        const failed = publish.step === "failed" && resumePhase === phase
-        
-        return (
-          <li
-            key={phase}
-            className={cn(
-              "flex items-center gap-2",
-              active && "font-medium text-text-bright",
-              failed && "text-red"
-            )}
-          >
-            <span className="flex size-3.5 shrink-0 items-center justify-center">
-              {done ? <Check size={12} aria-hidden /> : active && publishing ? <Spinner size={12} /> : "·"}
-            </span>
-            <span>{PUBLISH_PHASE_LABELS[phase]}</span>
-          </li>
-        )
-      })}
-    </ol>
-  )
+function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
+  const active = publishPhaseFromStep(publish.step) ?? (publish.resumeFrom ? publishPhaseFromStep(publish.resumeFrom) : null)
+  const current = publish.step === "complete" ? PUBLISH_PHASES.length : active ? PUBLISH_PHASES.indexOf(active) : 0
+  return <Stepper className="mt-2" steps={PUBLISH_PHASES.map((phase) => PUBLISH_PHASE_LABELS[phase])} current={current} />
 }
 
 export interface PullRequestViewProps {
@@ -519,7 +491,7 @@ return (evidence === "checks" ? (
                   <p className="font-medium text-text-bright">
                     {getStep(publish)}
                   </p>
-                  <PublishStepperRows publish={publish} publishing={publishing} />
+                  <PublishStepper publish={publish} />
                   {publish.error && <Callout tone="red" className="mt-2">{publish.error}</Callout>}
                   {publish.step === "failed" && onRetryPublish && (
                     <Button variant="secondary" size="sm" className="mt-3" onClick={onRetryPublish}>
