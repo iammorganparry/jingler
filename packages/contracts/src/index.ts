@@ -1,5 +1,6 @@
 import { NativeEndpointLogin } from "@jingler/core"
 import {
+  ImportableSession,
   ProjectConfig,
   RoutineInput,
   RoutineDocument,
@@ -941,6 +942,21 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Session,
     error: GitError,
     payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Scan all local CLI session stores and return importable sessions. */
+  Rpc.make("Sessions.scanImportable", {
+    success: Schema.Array(ImportableSession)
+  }),
+
+  /** Import one session from a native CLI store. */
+  Rpc.make("Sessions.import", {
+    success: Session,
+    error: GitError,
+    payload: {
+      source: Schema.Literal("claude-code", "codex", "conductor", "t3code"),
+      nativeSessionId: Schema.String
+    }
   }),
 
   /**

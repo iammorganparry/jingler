@@ -106,7 +106,12 @@ import {
   checkoutWorkspaceHandoffBase,
   importWorkspaceHandoff,
   branchAt,
+  scanClaudeCodeSessions,
+  scanCodexSessions,
+  scanConductorSessions,
+  scanT3CodeSessions
 } from "@jingler/cli-adapters";
+
 import { appendFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
@@ -143,6 +148,8 @@ import {
   ProviderConnectionError,
   type AgentEndpointId,
   type ProviderConnectionId,
+  ProviderId,
+  ProviderModelId,
   piEndpointId,
   providerConnectionIdForPiEndpoint,
   AgentResourceRpcError,
@@ -4235,6 +4242,92 @@ export const updateWebSearchAtomically = <A, E, R>(
   );
 });
 
+/** Scan all four CLI stores and return merged, sorted importable sessions. */
+const scanImportableSessions = () =>
+  Effect.gen(function* () {
+    const home = homedir();
+    const [claudeCode, codex, conductor, t3code] = yield* Effect.all([
+      Effect.promise(() => scanClaudeCodeSessions({ homeDir: home })),
+      Effect.promise(() => scanCodexSessions({ homeDir: home })),
+      Effect.promise(() => scanConductorSessions({ homeDir: home })),
+      Effect.promise(() => scanT3CodeSessions({ homeDir: home })),
+    ]);
+    
+    const merged = [...claudeCode, ...codex, ...conductor, ...t3code];
+    merged.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    
+    // Note: alreadyImported flag skipped for v1; requires resumeId persistence design
+    return merged;
+  });
+
+const selectScanner = (source: "claude-code" | "codex" | "conductor" | "t3code") =>
+  source === "claude-code" ? scanClaudeCodeSessions :
+  source === "codex" ? scanCodexSessions :
+  source === "conductor" ? scanConductorSessions :
+  scanT3CodeSessions;
+
+const ensureProjectForPath = (cwd: string, name: string) =>
+  Effect.gen(function* () {
+    const projects = yield* ProjectService;
+    const allProjects = yield* projects.list();
+    const existing = allProjects.find(p => resolve(p.path) === resolve(cwd));
+    if (existing) return existing;
+    return yield* projects.register({ path: cwd, name });
+  });
+
+/** Import one session from a native CLI store. */
+const importSession = (
+  source: "claude-code" | "codex" | "conductor" | "t3code",
+  nativeSessionId: string,
+) =>
+  Effect.gen(function* () {
+    const home = homedir();
+    const scanner = selectScanner(source);
+    const sessions = yield* Effect.promise(() => scanner({ homeDir: home }));
+    const session = sessions.find(s => s.nativeSessionId === nativeSessionId);
+    
+    if (!session) {
+      return yield* Effect.fail(
+        new GitError({ message: `Session ${nativeSessionId} not found in ${source} store` })
+      );
+    }
+    
+    if (!session.folderExists) {
+      return yield* Effect.fail(
+        new GitError({ message: `Session folder ${session.cwd} no longer exists` })
+      );
+    }
+    
+    const existing = yield* SessionStore.list();
+    const imported = existing.find(s => s.repoPath === session.cwd && s.title === session.title);
+    if (imported) return imported;
+    
+    const project = yield* ensureProjectForPath(
+      session.cwd,
+      session.cwd.split("/").pop() ?? "imported"
+    );
+    
+    const created = yield* SessionStore.create(
+      {
+        repoPath: session.cwd,
+        repoName: project.name,
+        projectId: project.id,
+        baseBranch: session.branch ?? "main",
+        title: session.title,
+        useWorktree: false,
+        providerId: ProviderId.make("anthropic"),
+        modelId: ProviderModelId.make("anthropic/claude-sonnet-4"),
+      },
+      {}
+    );
+    
+    yield* SessionStore.setResumeId(created.id, nativeSessionId);
+    return created;
+  }).pipe(
+    Effect.catchTag("SessionNotFoundError", (error) =>
+      Effect.fail(new GitError({ message: error.message, cause: error }))
+    )
+  );
 const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "RuntimeDiagnostics.get": ({ runId }) => RuntimeDiagnostics.get(runId),
   "RuntimeDiagnostics.latest": () => RuntimeDiagnostics.latest(),
@@ -4840,6 +4933,9 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
+  "Sessions.scanImportable": () => scanImportableSessions(),
+  "Sessions.import": ({ source, nativeSessionId }) =>
+    importSession(source, nativeSessionId),
   // The windowed read the renderer opens sessions with — only the tail loads,
   // older turns page in on demand. Same attachment-stripping as the whole read.
   "Sessions.transcriptPage": ({ sessionId, chatId, before, limit }) =>
