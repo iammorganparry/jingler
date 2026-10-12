@@ -60,7 +60,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | Spin | `components/spin.tsx` | Box carrying a looping keyframe spin for icons. | active, animation, className, children | no | — |
 | StatusDot | `components/status-dot.tsx` | Status dot, optionally glowing / pulsing. | status, tone, size, glow, pulse, className | yes | #362 (1.4) |
 | StatusRow, Stepper | `components/status-row.tsx` | Neutral status line (red only when failed); numbered done/current/upcoming stepper with aria-current. | icon, failed, steps, current | yes | #370 (2.5) |
-| Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
+| SettingsCard, SettingsRow | `components/settings-row.tsx` | Bordered card of rows; row = label + wrapping help left, fixed control right. | title, label, help, control | yes | #372 (2.7) |
+| Toggle | `components/toggle.tsx` | Switch toggle (role=switch); neutral track, primary-fill when on. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
 
 ## Atoms — BeUI base
@@ -201,7 +202,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | SearchField, FilterChips | `SearchInput` | #367 (2.2) |
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
-| SettingsCard, SettingsRow | `Toggle` rows in settings | #372 (2.7) |
 | Drawer | `Dialog` | #373 (2.8) |
 | HoverCard / Tooltip / Kbd restyle | existing | #374 (2.9) |
 | BannerShell | `Callout`, archived/branch-drift banners | #376 (2.11) |
