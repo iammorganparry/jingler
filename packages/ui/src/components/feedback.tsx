@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Check, X } from "lucide-react"
+import { Check, CircleAlert, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Button } from "./button.js"
 import { Skeleton } from "./loading.js"
@@ -87,7 +87,7 @@ export function IndeterminateBar({
 export function ListSkeleton({
   rows = 3,
   rowHeight = 32,
-  gap = 4,
+  gap = 10,
   className
 }: {
   rows?: number
@@ -141,8 +141,12 @@ export function InlineError({
   className?: string
 }) {
   return (
-    <div role="alert" className={cn("flex items-center gap-3 px-3 py-2 text-[12px]", className)}>
-      <span className="min-w-0 flex-1 text-state-failed">{message}</span>
+    <div
+      role="alert"
+      className={cn("flex h-9 items-center gap-2 rounded-md bg-state-failed/10 px-2.5 text-[12px]", className)}
+    >
+      <CircleAlert size={14} className="flex-none text-state-failed" />
+      <span className="min-w-0 flex-1 truncate text-state-failed">{message}</span>
       {onRetry && (
         <Button variant="secondary" size="sm" onClick={onRetry}>
           {retryLabel}
