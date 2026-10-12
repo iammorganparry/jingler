@@ -21,6 +21,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Avatar | `components/avatar.tsx` | User avatar image from a GitHub login. | — | yes | #378 (2.13) |
 | CommentRow | `components/comment-row.tsx` | Plain review comment row: muted severity label, message, action slot, Dismiss icon button; no fill. | severity, location, action, onDismiss | yes | #380 (2.15) |
 | Badge | `components/badge.tsx` | Status / count badge (BeUI AnimatedBadge). One line by construction (nowrap, shrink-0). | children, tone, size, className, title | yes | #361 (1.3) |
+| BootFailureCard | `screens/boot-failure-card.tsx` | Boot failure card: "Jingler couldn't start", cause, raw error behind Details, primary Retry, Copy diagnostics. Red only on the icon. | error, onRetry, getDiagnostics | yes | #511 (13.1) |
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
 | ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | — |
 | BannerShell | `components/banner-shell.tsx` | Neutral notice: icon (red only when failed), truncating message, up to two one-line actions, dismiss; top/lane/card placements. | icon, failed, actions, onDismiss, placement | yes | #376 (2.11) |
