@@ -1,4 +1,5 @@
-import { KeyRound } from "lucide-react"
+import { useState } from "react"
+import { KeyRound, Copy } from "lucide-react"
 import type { GateDecision, GateKind, GateStatus } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -36,7 +37,22 @@ export function ApprovalGate({
   onDecide?: (decision: GateDecision) => void
   className?: string
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
   const pending = status === "pending"
+
+  const handleCopy = () => {
+    if (command) {
+      navigator.clipboard.writeText(command).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+    }
+  }
+
+  const lineCount = command ? command.split('\n').length : 0
+  const shouldClamp = !expanded && lineCount > 6
+
   return (
     <ToolApprovalSurface className={cn("border-line bg-panel", className)}>
       <div className="flex items-center gap-[9px] border-b border-hairline px-3 py-[9px]">
@@ -62,9 +78,40 @@ export function ApprovalGate({
       </div>
       <div className="flex flex-col gap-[9px] px-3 py-2.5">
         {kind === "command" && command && (
-          <div className="flex items-center gap-[9px] rounded-md border border-line bg-sunken px-2.5 py-[7px] font-mono text-[12px]">
-            <span className="text-muted-foreground">❯</span>
-            <span className="flex-1 text-text-bright">{command}</span>
+          <div className="relative flex w-full flex-col gap-1.5 rounded-lg border border-line bg-sunken px-2.5 py-2">
+            <div className={cn("relative pr-6", shouldClamp ? "h-24 shrink-0 overflow-clip" : "max-h-80 overflow-auto")}>
+              <div className="break-all font-mono text-[11px] leading-[1.45] text-text-bright">
+                {command}
+              </div>
+              {shouldClamp && (
+                <div
+                  className="absolute inset-x-0 bottom-0 h-10"
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(in oklab 180deg, oklab(18.8% 0.001 -0.004 / 0%) 0%, oklab(18.8% 0.001 -0.004) 100%)"
+                  }}
+                />
+              )}
+            </div>
+            {lineCount > 6 && (
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-label={expanded ? "Show less" : `Show all · ${lineCount} lines`}
+                className="w-max shrink-0 text-[11px] leading-[1.45] text-muted-foreground hover:text-text"
+              >
+                {expanded ? "Show less" : `Show all · ${lineCount} lines`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleCopy}
+              aria-label={copied ? "Copied" : "Copy command"}
+              title={copied ? "Copied" : "Copy command"}
+              className="absolute right-1.5 top-1.5 flex size-[22px] items-center justify-center rounded-[5px] border border-line bg-panel hover:bg-surface"
+            >
+              <Copy size={12} className="text-muted-foreground" />
+            </button>
           </div>
         )}
         <span className="text-[12px] leading-[1.5] text-muted-foreground">{detail}</span>
