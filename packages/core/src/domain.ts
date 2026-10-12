@@ -854,6 +854,26 @@ export const issueReferenceForProvider = (
 ): IssueReference | undefined =>
   issueReferencesOf(session).find((issue) => issue.providerId === providerId);
 
+/**
+ * Live (non-archived) sessions already linked to an issue, for the New workspace
+ * "Already open in '<title>'" warning. A pure scan over the session list the
+ * renderer already holds, so it needs no RPC. Matches any canonical or legacy
+ * link, not just the selected one.
+ */
+export const sessionsLinkedToIssue = <
+  S extends SessionIssueLinks & Pick<Session, "archived">,
+>(
+  sessions: ReadonlyArray<S>,
+  issue: Pick<IssueIdentity, "providerId" | "id">,
+): ReadonlyArray<S> =>
+  sessions.filter(
+    (session) =>
+      !session.archived &&
+      issueReferencesOf(session).some((linked) =>
+        sameIssueIdentity(linked, issue),
+      ),
+  );
+
 /** A missing environment id is deliberately the local desktop. */
 export const executionTargetOf = (
   session: Pick<Session, "environmentId">,
