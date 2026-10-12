@@ -49,7 +49,9 @@ import {
   LoadingScreen,
   SignInDialog,
   SetupScreen,
-  JinglerApp,
+  ToastRegion,
+  toastMachine,
+    JinglerApp,
   PullRequestInbox,
   IssueInbox,
   BootFailureCard,
@@ -257,6 +259,7 @@ function AuthedApp({
   const windowControls = useWindowControls()
 
   const [state, send] = useMachine(appMachine);
+  const [toastSnapshot, sendToast] = useMachine(toastMachine, { input: undefined });
   const reviewFocused = useReviewFocused();
   const update = useAutoUpdate();
   // The build-time version: Changesets keys the CHANGELOG on it, and unlike
@@ -1766,6 +1769,7 @@ function AuthedApp({
             onSetMcpApiKey={mcp.setApiKey}
             onSetMcpAuth={mcp.setAuth}
             onAuthorizeMcp={mcp.startAuthorization}
+            onPushToast={(toast) => sendToast({ type: "PUSH", toast })}
             paneFocused={ctx.paneFocused ?? true}
           />
           </div>
@@ -1936,6 +1940,12 @@ function AuthedApp({
             throw error;
           }
         }}
+      />
+      <ToastRegion
+        toasts={toastSnapshot.context.toasts}
+        onDismiss={(key) => sendToast({ type: "DISMISS", key })}
+        onPause={() => sendToast({ type: "PAUSE" })}
+        onResume={() => sendToast({ type: "RESUME" })}
       />
     </>
   );
