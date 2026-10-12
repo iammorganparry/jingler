@@ -241,6 +241,8 @@ export const appMachine = setup({
       | { type: "SKIP_RESOURCES" }
       | { type: "CANCEL_RESOURCE_IMPORT" }
       | { type: "RETRY_RESOURCES" }
+      | { type: "SKIP_IMPORT_SESSIONS" }
+      | { type: "CONTINUE_IMPORT_SESSIONS" }
       | { type: "SESSION_CREATED"; session: Session }
       | { type: "SESSION_PR_LINKED"; sessionId: string; prNumber: number }
       | {
@@ -536,7 +538,7 @@ export const appMachine = setup({
             detectFailed: {
               on: {
                 RETRY_RESOURCES: "detecting",
-                SKIP_RESOURCES: "#app.starting",
+                SKIP_RESOURCES: "#app.setup.importSessions",
               },
             },
             reviewing: {
@@ -548,14 +550,14 @@ export const appMachine = setup({
                     error: null,
                   })),
                 },
-                SKIP_RESOURCES: "#app.starting",
+                SKIP_RESOURCES: "#app.setup.importSessions",
               },
             },
             importing: {
               invoke: {
                 src: "importResources",
                 input: ({ context }) => context.selectedResourceCandidates,
-                onDone: "#app.starting",
+                onDone: "#app.setup.importSessions",
                 onError: {
                   target: "importFailed",
                   actions: assign(({ event }) => ({
@@ -569,7 +571,18 @@ export const appMachine = setup({
               on: {
                 RETRY_RESOURCES: "importing",
                 CANCEL_RESOURCE_IMPORT: "reviewing",
-                SKIP_RESOURCES: "#app.starting",
+                SKIP_RESOURCES: "#app.setup.importSessions",
+              },
+            },
+          },
+        },
+        importSessions: {
+          initial: "idle",
+          states: {
+            idle: {
+              on: {
+                SKIP_IMPORT_SESSIONS: "#app.starting",
+                CONTINUE_IMPORT_SESSIONS: "#app.starting",
               },
             },
           },

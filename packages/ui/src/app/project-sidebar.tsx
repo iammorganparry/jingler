@@ -1,5 +1,5 @@
 import { displayStatusOf, type Project, type Session, type SessionActivity } from "@jingler/core"
-import { Plus } from "lucide-react"
+import { Import, Plus } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { HoverCard } from "../components/hover-card.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -86,7 +86,8 @@ export function ProjectSidebar({
   projectOwners,
   loading = false,
   onSelect,
-  onAddProject
+  onAddProject,
+  onImportSessions
 }: {
   projects: ReadonlyArray<Project>
   sessions: ReadonlyArray<Session>
@@ -96,6 +97,7 @@ export function ProjectSidebar({
   loading?: boolean
   onSelect: (projectId: string) => void
   onAddProject?: () => void
+  onImportSessions?: () => void
 }) {
   const openSessions = sessions.filter((session) => !session.archived)
   const hasUnassigned = openSessions.some(
@@ -153,6 +155,17 @@ export function ProjectSidebar({
           className="mt-2 flex size-9 flex-none items-center justify-center rounded-[8px] border border-dashed border-line text-dim outline-none hover:border-line-strong hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Plus size={16} />
+        </button>
+      ) : null}
+      {onImportSessions ? (
+        <button
+          type="button"
+          aria-label="Import sessions…"
+          title="Import sessions…"
+          onClick={onImportSessions}
+          className="mt-2 flex size-9 flex-none items-center justify-center rounded-[8px] border border-dashed border-line text-dim outline-none hover:border-line-strong hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Import size={16} />
         </button>
       ) : null}
     </nav>

@@ -295,6 +295,8 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       onSkipResources={() => send({ type: "SKIP_RESOURCES" })}
       onCancelResourceImport={noop}
       onRetryResources={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
     />
   )
 }
@@ -350,6 +352,8 @@ export const WorkspaceScanFailed: Story = {
       onSkipResources={noop}
       onCancelResourceImport={noop}
       onRetryResources={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
     />
   )
 }
