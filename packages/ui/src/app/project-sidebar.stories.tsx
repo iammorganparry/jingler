@@ -13,6 +13,9 @@ type Story = StoryObj<typeof meta>
 
 const project = (over: Partial<Project> & Pick<Project, "id" | "name">): Project => ({
   availability: "available",
+  path: `/Users/dev/repos/${over.id}`,
+  createdAt: "2026-10-12T10:00:00.000Z",
+  updatedAt: "2026-10-12T10:00:00.000Z",
   ...over
 })
 
@@ -91,7 +94,7 @@ export const WithUnavailable: Story = {
   args: {
     projects: [
       ...PROJECTS,
-      project({ id: "offline", name: "Offline", availability: "unavailable" })
+      project({ id: "offline", name: "Offline", availability: "offline" })
     ],
     sessions: [
       ...SESSIONS,
