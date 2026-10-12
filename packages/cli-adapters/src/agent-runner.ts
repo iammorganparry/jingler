@@ -22,7 +22,8 @@ import type {
   ReasoningSetting,
   Session,
   StreamEvent,
-  UsageFact
+  UsageFact,
+  RuntimeContinuation
 } from "@jingler/core"
 import {
   ADHD_MODE_DEFAULT,
@@ -34,6 +35,7 @@ import {
   defaultModeFor,
   isFileMutationTool,
   piEndpointId,
+  nativeCliEndpointId,
   setQuestionAnswers,
   settleStreaming,
   STOPPED_NOTE,
@@ -1488,6 +1490,24 @@ const acquireRuntimeBrowser = (runtimeId: string | undefined, sessionId: string,
     return yield* (yield* BrowserControlMcpService).acquire(sessionId, chatId, `${sessionId}:${chatId}`)
   })
 
+
+export const continuationFromImport = (
+  session: Session,
+  chat: Session["chats"][number],
+  priorMessages: ReadonlyArray<Message>,
+  digest: ContextDigest | null
+): RuntimeContinuation | null => {
+  if (digest !== null) return null
+  if (chat.continuation !== undefined) return chat.continuation
+  if (priorMessages.length !== 0 || session.importedFrom === undefined) return null
+  const runtimeId: "claude" | "codex" = session.importedFrom.source === "codex" ? "codex" : "claude"
+  return {
+    runtimeId,
+    endpointId: nativeCliEndpointId(session.environmentId ?? "desktop", runtimeId),
+    id: session.importedFrom.nativeSessionId
+  }
+}
+
 function prepareTurnSpec(
   session: Session,
   priorMessages: ReadonlyArray<Message>,
@@ -1539,7 +1559,7 @@ function prepareTurnSpec(
     modelId,
     role: mode === "plan" ? "plan" : activePlanExecutionId ? "plan-execution" : "conversation",
     priorMessages,
-    continuation: digest === null ? (chat.continuation ?? null) : null,
+    continuation: continuationFromImport(session, chat, priorMessages, digest),
     seed:
       digest === null && chat.continuation === undefined && priorMessages.length > 0
         ? { reason: "migration", messages: priorMessages }
