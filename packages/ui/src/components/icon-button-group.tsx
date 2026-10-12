@@ -45,7 +45,7 @@ export function IconButtonGroup({
       aria-label={label}
       data-slot="icon-button-group"
       onKeyDown={onKeyDown}
-      className={cn("flex w-fit items-stretch divide-x divide-line overflow-hidden rounded-lg border border-line", className)}
+      className={cn("flex w-fit items-stretch divide-x divide-line overflow-hidden rounded-[6px] border border-line", className)}
     >
       {items.map((item) => (
         <Tooltip key={item.id} label={item.label}>

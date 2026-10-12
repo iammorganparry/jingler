@@ -7,9 +7,9 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 const nav = [
-  { id: "back", label: "Back", icon: <ArrowLeft size={14} /> },
-  { id: "forward", label: "Forward", icon: <ArrowRight size={14} /> },
-  { id: "reload", label: "Reload", icon: <RotateCw size={14} /> }
+  { id: "back", label: "Back", icon: <ArrowLeft size={16} /> },
+  { id: "forward", label: "Forward", icon: <ArrowRight size={16} /> },
+  { id: "reload", label: "Reload", icon: <RotateCw size={16} /> }
 ]
 
 export const Default: Story = { args: { label: "Browser navigation", items: nav } }
@@ -19,9 +19,9 @@ export const Disabled: Story = {
 }
 
 const widths = [
-  { id: "phone", label: "Phone", icon: <Smartphone size={14} />, pressed: false },
-  { id: "tablet", label: "Tablet", icon: <Tablet size={14} />, pressed: true },
-  { id: "desktop", label: "Desktop", icon: <Monitor size={14} />, pressed: false }
+  { id: "phone", label: "Phone", icon: <Smartphone size={16} />, pressed: false },
+  { id: "tablet", label: "Tablet", icon: <Tablet size={16} />, pressed: true },
+  { id: "desktop", label: "Desktop", icon: <Monitor size={16} />, pressed: false }
 ]
 
 export const WithActiveItem: Story = { args: { label: "Device width", items: widths } }
