@@ -3,12 +3,13 @@ import { Search, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
 
 /**
- * A reusable search / filter input — a leading magnifier, a controlled value, and
- * either a trailing clear (✕) once there's text or an optional `kbd` hint while
- * empty. Used for the session filter, the PR picker search, etc. Forwards its ref
+ * The 32px search field — a leading magnifier, a controlled value, and a trailing
+ * slot that is the clear (✕) button once there's text, else an optional `count`
+ * (results) and `kbd` hint. Esc clears a non-empty field. Used for the session
+ * filter, the PR/issue pickers, the Agents & skills list, etc. Forwards its ref
  * so callers can focus it from a shortcut.
  */
-export const SearchInput = React.forwardRef<
+export const SearchField = React.forwardRef<
   HTMLInputElement,
   {
     value: string
@@ -16,14 +17,16 @@ export const SearchInput = React.forwardRef<
     placeholder?: string
     /** Hint shown on the right while the field is empty (e.g. a `⌘K` Kbd). */
     kbd?: React.ReactNode
+    /** Result count shown next to the clear button while there's text (e.g. "12 results"). */
+    count?: React.ReactNode
     autoFocus?: boolean
     className?: string
     "aria-label"?: string
   }
->(({ value, onChange, placeholder = "Search…", kbd, autoFocus, className, "aria-label": ariaLabel }, ref) => (
+>(({ value, onChange, placeholder = "Search…", kbd, count, autoFocus, className, "aria-label": ariaLabel }, ref) => (
   <div
     className={cn(
-      "flex items-center gap-2 rounded-md border border-line bg-sunken px-2.5 py-[7px] text-[12.5px] text-dim focus-within:border-line-strong",
+      "flex h-8 items-center gap-2 rounded-md border border-line bg-sunken px-2.5 text-[12.5px] text-dim focus-within:border-line-strong",
       className
     )}
   >
@@ -32,11 +35,19 @@ export const SearchInput = React.forwardRef<
       ref={ref}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && value) {
+          e.preventDefault()
+          e.stopPropagation()
+          onChange("")
+        }
+      }}
       placeholder={placeholder}
       autoFocus={autoFocus}
       aria-label={ariaLabel ?? placeholder}
       className="min-w-0 flex-1 bg-transparent text-text-body outline-none placeholder:text-dim"
     />
+    {value && count != null && <span className="flex-none whitespace-nowrap text-[11px] text-dim">{count}</span>}
     {value ? (
       <button
         type="button"
@@ -51,4 +62,7 @@ export const SearchInput = React.forwardRef<
     )}
   </div>
 ))
-SearchInput.displayName = "SearchInput"
+SearchField.displayName = "SearchField"
+
+/** Kept for plugin-sdk callers; same component as {@link SearchField}. */
+export const SearchInput = SearchField
