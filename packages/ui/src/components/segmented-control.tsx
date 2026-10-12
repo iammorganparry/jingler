@@ -12,12 +12,19 @@ export function SegmentedControl<T extends string>({
   items,
   value,
   onChange,
+  size,
+  fullWidth,
+  "aria-label": ariaLabel,
   className
 }: {
   items: ReadonlyArray<SegmentItem<T>>
   value: T
   onChange?: (value: T) => void
+  /** md = 28px (default), sm = 24px. */
+  size?: "sm" | "md"
+  fullWidth?: boolean
+  "aria-label"?: string
   className?: string
 }) {
-  return <MotionTabs items={items} value={value} onChange={onChange} variant="segment" className={className} />
+  return <MotionTabs items={items} value={value} onChange={onChange} variant="segment" size={size} fullWidth={fullWidth} ariaLabel={ariaLabel} className={className} />
 }
