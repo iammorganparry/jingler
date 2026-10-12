@@ -70,48 +70,27 @@ Legend: **Reuse** existing code to restyle · **New** component (atom / molecule
 - **Tokens:** `bg-canvas`, `border-hairline`, `bg-surface` (active), `bg-editor` (inactive), `text-text-bright` (active bar, badge text), `bg-line-strong` (badge bg), neutral states (spec §6.10).
 - **E2E:** `apps/desktop/e2e/project-sidebar.spec.ts` (6 assertions).
 
-### Paper parity (node CD8-0, board 02 · Improved)
+### Paper parity (node CD8-0, board 02 · Improved, read via Paper `get_jsx`)
 
 | Property | Story (project-sidebar.tsx) | Paper (CD8-0) | Match |
 |---|---|---|---|
 | Rail width | `w-14` (56px) | 56px | yes |
-| Rail background | `bg-canvas` (#141414) | #0B0B0C | token kept (close) |
-| Rail border | `border-hairline` (#0f0f0f) | #232327 | token kept |
+| Rail background | `bg-canvas` (#0b0b0c) | #0B0B0C | yes |
+| Rail border | `border-hairline` (`--sb-border` #232327) | #232327 | yes |
 | Rail padding | `py-2` (8px vertical) | 8px | yes |
-| Project button size | `size-9` (36px square) | 36px | yes |
-| Project button radius | `rounded-[8px]` (8px) | 8px (rounded-lg) | yes |
-| Button bg (inactive) | `bg-editor` (#212121) | #1A1A1D | token kept (close) |
-| Button border (inactive) | `border-hairline` (#0f0f0f) | #232327 | token kept |
-| Button bg (active) | `bg-surface` (#2b2b2b) | #26262B | yes (1 level off) |
-| Button border (active) | `border-transparent` | none shown | yes |
-| Avatar size | 28px | 28px (inferred) | yes |
-| Avatar radius | `rounded-[6px]` (6px) | 6px | yes |
-| Active left bar | `w-[2px] h-5 bg-text-bright` | 2px × 20px #EDEDEF | yes |
-| Badge bg (neutral) | `bg-line-strong` (#454545) | not shown (spec §6.10) | spec ✓ |
-| Badge font | `text-[10px] font-semibold` | 11px/14px semibold (warning) | close |
-| Badge text | `text-text-bright` (#f4f1f1) | #0B0B0C (warning badge) | neutral chosen |
-| Add button border | `border-line` hover `border-line-strong` | dashed #303036 | token kept |
+| Project button size | `size-9` (36px) | 36px | yes |
+| Project button radius | `rounded-[8px]` | 8px | yes |
+| Button bg (inactive) | `bg-editor` (#1a1a1d) | #1A1A1D | yes |
+| Button border (inactive) | `border-hairline` (#232327) | #232327 | yes |
+| Button bg (active) | `bg-surface` (#202024) | #26262B | token kept (one step off) |
+| Button border (active) | `border-transparent` | none | yes |
+| Avatar size / radius | 28px / 6px | 28px / 6px | yes |
+| Active left bar | 2px × 20px `bg-text-bright` (#ededef) | 2px × 20px #EDEDEF | yes |
+| Badge font | 10px semibold | 11px/14px semibold | no, follow-up |
+| Badge colours | `bg-line-strong` (#44444c) / `text-text-bright` | warning fill, #0B0B0C text | spec §6.10 wins (neutral) |
+| Add button border | `border-line`, hover `border-line-strong` | dashed #303036 | token kept |
 
-| Rail width | `w-14` (56px) | 56px | yes |
-| Rail background | `bg-canvas` | neutral canvas | yes |
-| Rail border | `border-r border-hairline` | hairline right border | yes |
-| Rail padding | `py-2` (8px vertical) | 8px | yes |
-| Project button size | `size-9` (36px square) | 36px | yes |
-| Project button radius | `rounded-[8px]` (8px) | 8px | yes |
-| Project button bg (inactive) | `bg-editor`, `border-hairline` | neutral editor + hairline border | yes |
-| Project button bg (active) | `bg-surface`, `border-transparent` | elevated surface | yes |
-| Avatar size | 28px | 28px | yes |
-| Avatar radius | `rounded-[6px]` (6px) | 6px | yes |
-| Badge size | `h-4 min-w-4` (16px min) | 16px height, flexible width | yes |
-| Badge font | `text-[10px] font-semibold` | 10px semibold | yes |
-| Badge background | `bg-line-strong` | strong neutral line | yes |
-| Badge text color | `text-text-bright` | bright text | yes |
-| Badge radius | `rounded-full` | full pill | yes |
-| Badge padding | `px-1` (4px horizontal) | 4px | yes |
-| Active indicator | `h-5 w-[2px] bg-text-bright` left bar | 5px × 2px bright bar | yes |
-| State colors | neutral (working, needs), rose only for focus ring | §6.10: neutral states, red only for failure | yes |
-
-All measurements and colors follow Graphite tokens and spec §6.10. No code changes required.
+No code changes. One real mismatch: badge font 10px vs Paper 11px (follow-up).
 
 ## 04b · Chat full
 - **Reuse:** `app/conversation-view.tsx` (rail `PreviewRail :46`, `createMessageRailPreview :45`, `activeRailIdFor :123`, `navigation="rail" :695`), `composites/message-turn.tsx:122`, `composites/composer.tsx:514`, `session-pane.tsx:282`.
