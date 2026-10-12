@@ -34,7 +34,8 @@ import {
   isSessionPublishBranchReady,
   SessionStore,
   migrateRepoName,
-  migrateSessionChats
+  migrateSessionChats,
+  migrateSessionPrs
 } from "./sessions.js"
 import {
   failureOf,
@@ -996,6 +997,61 @@ describe("SessionStore", () => {
       temp.layer
     )
     expect(cleared._tag === "Success" && cleared.value.prNumber).toBe(null)
+  })
+
+  it("reads a session persisted with only prNumber as a one-element stack", async () => {
+    const original = await Effect.runPromise(SessionStore.create(input({ title: "Pre-stack" })).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    const file = join(temp.root, "sessions.json")
+    // SAFETY: the store wrote this JSON immediately above; this test strips the field to mimic an old file.
+    const persisted = JSON.parse(readFileSync(file, "utf-8")) as JsonObject[]
+    delete persisted[0]!.prs
+    persisted[0]!.prNumber = 481
+    writeFileSync(file, JSON.stringify(persisted))
+    const restored = await Effect.runPromise(SessionStore.get(original.id).pipe(Effect.provide(services), Effect.provide(temp.layer)))
+    expect(restored.prNumber).toBe(481)
+    expect(restored.prs).toEqual([{ number: 481 }])
+  })
+
+  it("appends stacked PRs bottom-first, mirrors the top into prNumber, and round-trips the order", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Stacked" }))
+        yield* SessionStore.appendPr(created.id, { number: 481, branch: "feat/a", base: "main" })
+        yield* SessionStore.appendPr(created.id, { number: 482, branch: "feat/b", base: "feat/a" })
+        yield* SessionStore.appendPr(created.id, { number: 481, state: "merged" })
+        return yield* SessionStore.get(created.id)
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value.prs).toEqual([
+      { number: 481, branch: "feat/a", base: "main", state: "merged" },
+      { number: 482, branch: "feat/b", base: "feat/a" }
+    ])
+    expect(exit.value.prNumber).toBe(482)
+    const onDisk = JSON.parse(readFileSync(join(temp.root, "sessions.json"), "utf-8")) as Array<{ prs: Array<{ number: number }> }>
+    expect(onDisk[0]!.prs.map((pr) => pr.number)).toEqual([481, 482])
+  })
+
+  it("setPrNumber replaces the stack with the single new PR and null clears it", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const created = yield* SessionStore.create(input({ title: "Relink" }))
+        yield* SessionStore.appendPr(created.id, { number: 1 })
+        yield* SessionStore.appendPr(created.id, { number: 2 })
+        yield* SessionStore.setPrNumber(created.id, 9)
+        const relinked = yield* SessionStore.get(created.id)
+        yield* SessionStore.setPrNumber(created.id, null)
+        return [relinked, yield* SessionStore.get(created.id)] as const
+      }).pipe(Effect.provide(services)),
+      temp.layer
+    )
+    expect(exit._tag).toBe("Success")
+    if (exit._tag !== "Success") return
+    expect(exit.value[0].prs).toEqual([{ number: 9 }])
+    expect(exit.value[1].prNumber).toBeNull()
+    expect(exit.value[1].prs).toBeUndefined()
   })
 
   it("clears stale App routing identity when the PR number changes", async () => {
@@ -2316,6 +2372,26 @@ describe("SessionStore", () => {
  * headings — the old name holding every session that predated the rename, the
  * new name holding only what came after.
  */
+describe("migrateSessionPrs", () => {
+  // SAFETY: only prNumber/prs are read by the migration; the rest of a Session is irrelevant here.
+  const withPrs = (prNumber: number | null, prs?: Session["prs"]) =>
+    ({ prNumber, ...(prs ? { prs } : {}) }) as Session
+
+  it("derives a one-element stack from prNumber", () => {
+    expect(migrateSessionPrs(withPrs(7)).prs).toEqual([{ number: 7 }])
+  })
+
+  it("leaves a session with no PR untouched", () => {
+    expect(migrateSessionPrs(withPrs(null))).toEqual({ prNumber: null })
+  })
+
+  it("makes prNumber the top of an existing stack", () => {
+    const migrated = migrateSessionPrs(withPrs(1, [{ number: 1 }, { number: 2 }]))
+    expect(migrated.prNumber).toBe(2)
+    expect(migrated.prs?.map((pr) => pr.number)).toEqual([1, 2])
+  })
+})
+
 describe("migrateRepoName", () => {
   const at = (repoPath: string | undefined, repo: string) => {
     const input = repoPath === undefined ? { id: "s1", repo } : { id: "s1", repo, repoPath }
