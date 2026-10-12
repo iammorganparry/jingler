@@ -138,5 +138,5 @@ export const Empty: Story = {
 }
 
 export const ListError: Story = {
-  render: () => <InboxMock width={1440} issues={[]} selected={null} detail={null} error="GitHub CLI is not authenticated. Run gh auth login, then refresh." />,
+  render: () => <InboxMock width={1440} issues={[]} selected={null} detail={null} error="GitHub CLI is not authenticated. Run gh auth login, then refresh." onRetry={() => {}} />,
 }
