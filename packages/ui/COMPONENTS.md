@@ -58,6 +58,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | SignalBars | `components/signal-bars.tsx` | Ascending signal-strength bars. | — | no | — |
 | Spin | `components/spin.tsx` | Box carrying a looping keyframe spin for icons. | active, animation, className, children | no | — |
 | StatusDot | `components/status-dot.tsx` | Status dot, optionally glowing / pulsing. | status, tone, size, glow, pulse, className | yes | #362 (1.4) |
+| StatusRow, Stepper | `components/status-row.tsx` | Neutral status line (red only when failed); numbered done/current/upcoming stepper with aria-current. | icon, failed, steps, current | yes | #370 (2.5) |
 | Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
 
@@ -200,7 +201,6 @@ Epic 2 (#365). Build in this order; each is its own PR into `epic/redesign`, and
 | SearchField, FilterChips | `SearchInput` | #367 (2.2) |
 | SegmentedControl 28px | `SegmentedControl` | #368 (2.3) |
 | Toast, ToastRegion, toast-machine | none (new) | #369 (2.4) |
-| StatusRow, Stepper | ad-hoc status lists | #370 (2.5) |
 | ListSkeleton, EmptyState, InlineError | `Skeleton`, `InlineStatus` | #371 (2.6) |
 | SettingsCard, SettingsRow | `Toggle` rows in settings | #372 (2.7) |
 | Drawer | `Dialog` | #373 (2.8) |
