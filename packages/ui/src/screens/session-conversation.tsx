@@ -11,6 +11,7 @@ import type {
   User
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
+import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
 import { ProjectSidebar } from "../app/project-sidebar.js"
 import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
@@ -214,6 +215,7 @@ export interface SessionConversationProps {
   /** Available packaged-app update shown in the sidebar. */
   update?: SidebarUpdate
   releaseNotes?: SidebarReleaseNotes
+  whatsNew?: readonly WhatsNewEntry[]
   /**
    * A command-palette request to switch tabs. Passed straight through to the
    * split, which hands it to the focused pane only.
@@ -411,6 +413,7 @@ export function SessionConversation(props: SessionConversationProps) {
         version={props.version}
         update={props.update}
         releaseNotes={props.releaseNotes}
+        whatsNew={props.whatsNew}
         pullRequestsActive={props.pullRequestsActive}
         onOpenPullRequests={props.onOpenPullRequests}
         issuesActive={props.issuesActive}

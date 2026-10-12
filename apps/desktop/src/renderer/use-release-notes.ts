@@ -1,7 +1,7 @@
-import type { SidebarReleaseNotes } from "@jingler/ui"
+import type { SidebarReleaseNotes, WhatsNewEntry } from "@jingler/ui"
 import { useState } from "react"
 import changelog from "../../CHANGELOG.md?raw"
-import { compareVersions, notesBetween, parseChangelog } from "./release-notes.js"
+import { compareVersions, entriesBetween, notesBetween, parseChangelog } from "./release-notes.js"
 
 /** The version the app last ran as; the card shows when this falls behind. */
 export const LAST_RUN_VERSION_KEY = "jingler.last-run-version"
@@ -22,34 +22,53 @@ const remember = (version: string): void => {
   }
 }
 
+export interface ReleaseNotesState {
+  /** The "Updated to vX" card; absent once dismissed or when nothing is new. */
+  readonly announcement?: SidebarReleaseNotes
+  /** What the account menu's "What's new" dialog lists; always available. */
+  readonly whatsNew: readonly WhatsNewEntry[]
+}
+
 /**
- * "Updated to vX" after the app relaunches on a newer version.
+ * "Updated to vX" after the app relaunches on a newer version, plus the
+ * reopenable "What's new" list behind the account menu.
  *
  * The first launch of an install has nothing to compare against, so it only
  * records the version. After that, a launch on a newer version than last seen
- * shows every CHANGELOG entry in between until the operator dismisses it.
+ * announces every CHANGELOG entry in between until the operator dismisses it.
+ * Dismissal only hides the card: the dialog keeps listing every version the
+ * app skipped this launch, and falls back to the current version's notes when
+ * none were skipped.
  */
 export function useReleaseNotes(
   currentVersion: string,
   source: string = changelog
-): SidebarReleaseNotes | undefined {
-  const [previous, setPrevious] = useState(() => {
+): ReleaseNotesState {
+  const [launchedFrom] = useState(() => {
     const stored = read()
     if (stored === null) remember(currentVersion)
     return stored ?? currentVersion
   })
+  const [dismissed, setDismissed] = useState(false)
 
-  if (compareVersions(currentVersion, previous) <= 0) {
-    if (previous !== currentVersion) remember(currentVersion)
-    return undefined
-  }
+  const entries = parseChangelog(source)
+  const updated = compareVersions(currentVersion, launchedFrom) > 0
+  if (!updated && launchedFrom !== currentVersion) remember(currentVersion)
 
   return {
-    version: currentVersion,
-    notes: notesBetween(parseChangelog(source), previous, currentVersion),
-    onDismiss: () => {
-      remember(currentVersion)
-      setPrevious(currentVersion)
-    }
+    announcement:
+      updated && !dismissed
+        ? {
+            version: currentVersion,
+            notes: notesBetween(entries, launchedFrom, currentVersion),
+            onDismiss: () => {
+              remember(currentVersion)
+              setDismissed(true)
+            }
+          }
+        : undefined,
+    whatsNew: updated
+      ? entriesBetween(entries, launchedFrom, currentVersion)
+      : entries.filter((entry) => entry.version === currentVersion)
   }
 }

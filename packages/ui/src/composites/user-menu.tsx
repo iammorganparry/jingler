@@ -1,10 +1,11 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import type { User } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings } from "lucide-react"
+import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings, Sparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Avatar } from "../components/avatar.js"
 import { StatusDot } from "../components/status-dot.js"
+import { WhatsNewDialog, type WhatsNewEntry } from "./whats-new-dialog.js"
 
 export interface UserMenuProps {
   /**
@@ -24,6 +25,8 @@ export interface UserMenuProps {
   ghConnected?: boolean
   /** App version, shown at the foot of the menu. */
   version?: string
+  /** Notes behind the "What's new" item; the item is hidden when absent. */
+  whatsNew?: readonly WhatsNewEntry[]
 }
 
 /** First letter of the display name (or email), for the monogram fallback. */
@@ -92,11 +95,14 @@ export function UserMenu({
   onSignOut,
   onSignIn,
   ghConnected = false,
-  version
+  version,
+  whatsNew
 }: UserMenuProps) {
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false)
   const { name: displayName, detail, header, initial, image, tone } = identityOf(user, onSignIn !== undefined, version)
 
   return (
+    <>
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
@@ -144,6 +150,14 @@ export function UserMenu({
             <MenuItem icon={<Gauge size={14} />} label="Usage & limits" onSelect={onOpenUsage} />
           )}
 
+          {whatsNew && (
+            <MenuItem
+              icon={<Sparkles size={14} />}
+              label={version ? `What's new (v${version})` : "What's new"}
+              onSelect={() => setWhatsNewOpen(true)}
+            />
+          )}
+
           {user && onSignOut && (
             <>
               <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
@@ -166,5 +180,7 @@ export function UserMenu({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+    {whatsNew && <WhatsNewDialog open={whatsNewOpen} onOpenChange={setWhatsNewOpen} entries={whatsNew} />}
+    </>
   )
 }

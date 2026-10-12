@@ -357,6 +357,24 @@ describe("SessionSidebar release notes", () => {
     expect(onDismiss).toHaveBeenCalledOnce()
   })
 
+  it("reopens every skipped version from the account menu after dismissal", () => {
+    const whatsNew = [
+      { version: "0.3.0", notes: ["Review changes"] },
+      { version: "0.2.2", notes: ["Send comments"] }
+    ]
+    const props = { sessions: [], activeSessionId: null, onSelect: () => {}, version: "0.3.0", whatsNew }
+    const { rerender } = render(<SessionSidebar {...props} releaseNotes={{ version: "0.3.0", notes: ["x"], onDismiss: () => {} }} />)
+    rerender(<SessionSidebar {...props} />)
+    expect(screen.queryByTestId("release-notes-card")).toBeNull()
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Account menu" }), { key: "Enter" })
+    fireEvent.click(screen.getByRole("menuitem", { name: "What's new (v0.3.0)" }))
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByText("v0.3.0")).toBeTruthy()
+    expect(within(dialog).getByText("v0.2.2")).toBeTruthy()
+    expect(within(dialog).getByText("Send comments")).toBeTruthy()
+  })
+
   it("renders nothing when there is nothing new", () => {
     render(<SessionSidebar sessions={[]} activeSessionId={null} onSelect={() => {}} />)
     expect(screen.queryByTestId("release-notes-card")).toBeNull()
