@@ -13,6 +13,19 @@ const RESOLVED_LABEL: Record<Exclude<GateStatus, "pending">, string> = {
   always: "Always allowed"
 }
 
+function SwitchToAutoLink({ onClick }: { onClick?: () => void }) {
+  if (!onClick) return null
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="text-[12px] leading-[1.33] text-dim underline underline-offset-2 transition-colors hover:text-text"
+    >
+      Switch session to Auto
+    </button>
+  )
+}
+
 /**
  * Human-in-the-loop approval gate — pauses the agent for the operator's call.
  * Renders both the command variant (with the shell command awaiting approval) and
@@ -26,6 +39,7 @@ export function ApprovalGate({
   allowLabel,
   status,
   onDecide,
+  onSwitchToAuto,
   className
 }: {
   kind: GateKind
@@ -35,6 +49,7 @@ export function ApprovalGate({
   allowLabel?: string | null
   status: GateStatus
   onDecide?: (decision: GateDecision) => void
+  onSwitchToAuto?: () => void
   className?: string
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -116,22 +131,25 @@ export function ApprovalGate({
         )}
         <span className="text-[12px] leading-[1.5] text-muted-foreground">{detail}</span>
         {pending && (
-          <div className="flex items-center gap-2">
-            <Button variant="danger" size="sm" onClick={() => onDecide?.("deny")}>
-              Deny
-              <Kbd>esc</Kbd>
-            </Button>
-            <div className="flex-1" />
-            {allowLabel && (
-              <Button variant="secondary" size="sm" onClick={() => onDecide?.("always")}>
-                Always allow <span className="font-mono text-dim">{allowLabel}</span>
+          <>
+            <div className="flex items-center gap-2">
+              <Button variant="danger" size="sm" onClick={() => onDecide?.("deny")}>
+                Deny
+                <Kbd>esc</Kbd>
               </Button>
-            )}
-            <Button variant="primary" size="sm" onClick={() => onDecide?.("allow")}>
-              Allow once
-              <Kbd onFill>⌥↵</Kbd>
-            </Button>
-          </div>
+              <div className="flex-1" />
+              {allowLabel && (
+                <Button variant="secondary" size="sm" onClick={() => onDecide?.("always")}>
+                  Always allow <span className="font-mono text-dim">{allowLabel}</span>
+                </Button>
+              )}
+              <Button variant="primary" size="sm" onClick={() => onDecide?.("allow")}>
+                Allow once
+                <Kbd onFill>⌥↵</Kbd>
+              </Button>
+            </div>
+            <SwitchToAutoLink onClick={onSwitchToAuto} />
+          </>
         )}
       </div>
     </ToolApprovalSurface>

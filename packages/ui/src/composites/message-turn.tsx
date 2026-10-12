@@ -418,6 +418,7 @@ const PartView = memo(function PartView({
   part,
   markdown,
   onDecideGate,
+  onSwitchToAuto,
   onForkOntoBranch,
   onAdoptBranch,
   streamingText = false
@@ -426,6 +427,7 @@ const PartView = memo(function PartView({
   markdown: boolean
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
+  onSwitchToAuto?: () => void
   onForkOntoBranch?: () => void | Promise<void>
   onAdoptBranch?: () => void | Promise<void>
 }) {
@@ -454,6 +456,7 @@ const PartView = memo(function PartView({
           allowLabel={part.gate.allowLabel}
           status={part.gate.status}
           onDecide={(decision) => onDecideGate?.(part.gate.id, decision)}
+          onSwitchToAuto={onSwitchToAuto}
           className={WIDTH}
         />
       )
@@ -492,6 +495,7 @@ function renderParts(
   markdown: boolean,
   {
     onDecideGate,
+    onSwitchToAuto,
     onForkOntoBranch,
     onAdoptBranch,
     afterPart,
@@ -499,6 +503,7 @@ function renderParts(
     streamingTextIndex = -1
   }: {
     onDecideGate?: (gateId: string, decision: GateDecision) => void
+    onSwitchToAuto?: () => void
     onForkOntoBranch?: () => void | Promise<void>
     onAdoptBranch?: () => void | Promise<void>
     afterPart?: { readonly index: number; readonly content: ReactNode }
@@ -586,6 +591,7 @@ function renderParts(
         markdown={markdown}
         streamingText={i === streamingTextIndex}
         onDecideGate={onDecideGate}
+        onSwitchToAuto={onSwitchToAuto}
         onForkOntoBranch={onForkOntoBranch}
         onAdoptBranch={onAdoptBranch}
       />
@@ -634,6 +640,7 @@ function MessageTurnImpl({
   message,
   providerId,
   onDecideGate,
+  onSwitchToAuto,
   onForkOntoBranch,
   onAdoptBranch,
   afterPart
@@ -642,6 +649,7 @@ function MessageTurnImpl({
   /** Canonical provider identity for the assistant eyebrow. */
   providerId?: ProviderId | null
   onDecideGate?: (gateId: string, decision: GateDecision) => void
+  onSwitchToAuto?: () => void
   /** Fork a drifted direct session's work onto a new worktree session. */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session. */
@@ -686,6 +694,7 @@ function MessageTurnImpl({
       )}
       {renderParts(visibleParts, isAssistant, {
         onDecideGate,
+        onSwitchToAuto,
         onForkOntoBranch,
         onAdoptBranch,
         afterPart,
