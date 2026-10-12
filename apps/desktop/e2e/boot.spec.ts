@@ -40,3 +40,37 @@ test("a configured workspace boots into the app shell with its sessions", async 
   // The setup screen is NOT shown.
   await expect(window.getByText("Set up your workspace")).toHaveCount(0)
 })
+
+test("crash screen renders when the app hits an unhandled error", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true })
+
+  try {
+    // Set a flag in localStorage (persists through reload) that the App component checks.
+    await window.evaluate(() => {
+      localStorage.setItem('__TEST_CRASH', 'true')
+    })
+
+    // Reload to trigger the App component with the flag set.
+    await window.reload()
+    await window.waitForLoadState("domcontentloaded")
+
+    // Assert the CrashScreen is visible with expected content.
+    await expect(window.getByRole("alert")).toBeVisible()
+    await expect(window.getByText("Jingler hit an error")).toBeVisible()
+    await expect(window.getByText("Agents keep running in the background.")).toBeVisible()
+    
+    // The Reload button is visible.
+    const reloadBtn = window.getByRole("button", { name: /reload window/i })
+    await expect(reloadBtn).toBeVisible()
+
+    // The Open logs button exists and is clickable.
+    const openLogsBtn = window.getByRole("button", { name: /open logs/i })
+    await expect(openLogsBtn).toBeVisible()
+    await openLogsBtn.click()
+    // The RPC call is fire-and-forget; verify the screen stays visible after the click.
+    await expect(window.getByRole("alert")).toBeVisible()
+  } finally {
+    // Clean up the test flag, even if assertions fail.
+    await window.evaluate(() => localStorage.removeItem('__TEST_CRASH'))
+  }
+})

@@ -16,6 +16,8 @@ interface JinglerBridge {
    * when main had no answer — the fallback in `globals.css` then applies.
    */
   readonly initialThemeCss: string
+  /** True when running under e2e; gates test-only renderer hooks. */
+  readonly isE2E: boolean
   /** Send one client→server RPC frame to the main process. */
   readonly send: (data: unknown) => void
   /** Subscribe to server→client RPC frames. Returns an unsubscribe fn. */
