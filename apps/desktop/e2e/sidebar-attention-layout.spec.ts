@@ -93,3 +93,53 @@ test("groups chats by attention and opens session views in a responsive two-thir
   await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
+
+test("a long branch name truncates while the status word and diff stat stay on one line", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      {
+        id: "s_long_branch",
+        repo: "widget",
+        branch: "jingler/a-very-long-branch-name-that-cannot-possibly-fit-in-the-sidebar-row-at-any-width",
+        title: "Long branch session",
+        status: "running",
+        diff: { added: 1234, removed: 567 },
+        prNumber: 4821,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-08-07T12:00:00.000Z",
+        worktreePath: repoPath,
+        mode: "accept-edits"
+      }
+    ]
+  })
+
+  const row = window.getByTestId("session-row-s_long_branch")
+  await expect(row).toBeVisible()
+
+  const status = row.locator("span.tabular-nums.font-medium").first()
+  const diffStat = row.locator("span.inline-flex.font-mono.tabular-nums").first()
+  const branch = row.locator("div.font-mono > span.truncate").first()
+
+  // The branch is the only thing that gives way.
+  const truncated = await branch.evaluate((el) => el.scrollWidth > el.clientWidth)
+  expect(truncated).toBe(true)
+
+  // The status word is a single line (not wrapped to a second one).
+  const statusBox = await status.boundingBox()
+  expect(statusBox?.height ?? 99).toBeLessThan(20)
+
+  // +added and −removed share a line, and the whole stat is a single line.
+  const tops = await diffStat.locator("span").evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect().top)
+  )
+  expect(tops).toHaveLength(2)
+  expect(Math.abs(tops[0]! - tops[1]!)).toBeLessThanOrEqual(2)
+  const statBox = await diffStat.boundingBox()
+  expect(statBox?.height ?? 99).toBeLessThan(20)
+})
