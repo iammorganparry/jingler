@@ -1930,20 +1930,32 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
     ),
   );
 
-/** `Github.files` handler — the PR's changed files (empty without a linked PR). */
-export const githubFiles = (sessionId: string) =>
+/** The PR a files/diff read targets: the requested stack layer, else the top PR; null if not in the stack. */
+const layerPrNumber = (session: Session, requested: number | undefined): number | null => {
+  if (requested === undefined) return session.prNumber;
+  return session.prNumber === requested || session.prs?.some((pr) => pr.number === requested) === true
+    ? requested
+    : null;
+};
+
+/** `Github.files` handler — a PR layer's changed files (empty without a linked PR). */
+export const githubFiles = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    if (!session?.worktreePath || session.prNumber === null) return [];
-    return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber);
+    if (!session?.worktreePath) return [];
+    const number = layerPrNumber(session, prNumber);
+    if (number === null) return [];
+    return yield* GitHubApi.prFiles(session.worktreePath, number);
   });
 
-/** `Github.diff` handler — the PR's unified diff (empty without a linked PR). */
-export const githubDiff = (sessionId: string) =>
+/** `Github.diff` handler — a PR layer's unified diff (empty without a linked PR). */
+export const githubDiff = (sessionId: string, prNumber?: number) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
-    if (!session?.worktreePath || session.prNumber === null) return "";
-    return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber);
+    if (!session?.worktreePath) return "";
+    const number = layerPrNumber(session, prNumber);
+    if (number === null) return "";
+    return yield* GitHubApi.prDiff(session.worktreePath, number);
   });
 
 /** `Review.get` handler — the stored review for the active PR, or null. */
@@ -5905,8 +5917,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       : GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
-  "Github.files": ({ sessionId }) => githubFiles(sessionId),
-  "Github.diff": ({ sessionId }) => githubDiff(sessionId),
+  "Github.files": ({ sessionId, prNumber }) => githubFiles(sessionId, prNumber),
+  "Github.diff": ({ sessionId, prNumber }) => githubDiff(sessionId, prNumber),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
   "Explanation.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(

@@ -84,6 +84,8 @@ import {
   createTerminal,
   githubConnectionRefresh,
   githubDetectPr,
+  githubDiff,
+  githubFiles,
   githubSubmitReview,
   githubPr,
   mismatchedIssueProviderId,
@@ -1296,6 +1298,60 @@ describe("RPC handlers", () => {
       const info = await runCreate({ sessionId: "nope", cols: 80, rows: 24 });
       expect(info.cwd).toBe(homedir());
       expect(info.cwd).not.toBe(process.cwd());
+    });
+  });
+
+  describe("Github.diff / Github.files layer selection", () => {
+    const stackSession = () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(
+        join(root, "sessions.json"),
+        JSON.stringify([
+          {
+            id: "stack",
+            repo: "widget",
+            branch: "feat/c",
+            title: "Stack",
+            status: "idle",
+            diff: { added: 0, removed: 0 },
+            prNumber: 482,
+            prs: [{ number: 480 }, { number: 481 }, { number: 482 }],
+            costUsd: 0,
+            tokens: 0,
+            updatedAt: "2026-07-16T10:00:00.000Z",
+            worktreePath: join(root, "worktrees", "stack"),
+            baseBranch: "main",
+          },
+        ]),
+      );
+      return Layer.mergeAll(
+        base,
+        SessionStore.Default,
+        fakeGithubApi({
+          prDiff: (_cwd: string, number: number) => Effect.succeed(`diff for #${number}`),
+          prFiles: (_cwd: string, number: number) => Effect.succeed([{ path: `layer-${number}.ts` }]),
+        }),
+      );
+    };
+
+    it("reads the top layer by default and the requested layer when given", async () => {
+      const layer = stackSession();
+      const read = (n?: number) => Effect.runPromise(githubDiff("stack", n).pipe(Effect.provide(layer)));
+      await expect(read()).resolves.toBe("diff for #482");
+      await expect(read(480)).resolves.toBe("diff for #480");
+      await expect(read(481)).resolves.toBe("diff for #481");
+    });
+
+    it("returns nothing for a PR that is not in the stack", async () => {
+      const layer = stackSession();
+      await expect(Effect.runPromise(githubDiff("stack", 999).pipe(Effect.provide(layer)))).resolves.toBe("");
+      await expect(Effect.runPromise(githubFiles("stack", 999).pipe(Effect.provide(layer)))).resolves.toStrictEqual([]);
+    });
+
+    it("lists a chosen layer's files", async () => {
+      const layer = stackSession();
+      const files = await Effect.runPromise(githubFiles("stack", 481).pipe(Effect.provide(layer)));
+      expect(files).toStrictEqual([{ path: "layer-481.ts" }]);
     });
   });
 
