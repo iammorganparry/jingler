@@ -9,6 +9,7 @@ import type {
 import { Schema } from "effect"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
+import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import {
   Dialog,
@@ -19,6 +20,8 @@ import {
   DialogTitle
 } from "../components/dialog.js"
 import { Input } from "../components/input.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
+import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
 
 /**
@@ -59,26 +62,6 @@ const IMPORT_SOURCES: ReadonlyArray<{ id: McpImportSourceId; label: string }> = 
   { id: "codex", label: "Codex" },
   { id: "opencode", label: "opencode" }
 ]
-
-function renderMcpStatus(status: McpServerStatus | null) {
-  return (status ? (
-                    <span
-                      className={`text-[10px] ${
-                        status.state === "connected"
-                          ? "text-green"
-                          : status.state === "failed"
-                            ? "text-red"
-                            : "text-dim"
-                      }`}
-                    >
-                      {status.state === "connected"
-                        ? `connected — ${status.toolCount ?? 0} tools`
-                        : status.state === "failed"
-                          ? status.error ?? "failed"
-                          : status.state}
-                    </span>
-                  ) : null)
-}
 
 const statusFor = (
   statuses: ReadonlyArray<McpServerStatus> | null,
@@ -535,74 +518,6 @@ export function McpBrand({ server, compact = false }: { readonly server: McpServ
   )
 }
 
-function McpAuthAction({
-  server,
-  setApiKey,
-  startAuthorization,
-  onConfigure,
-  onError
-}: {
-  readonly server: McpServer
-  readonly setApiKey: McpSettingsProps["setApiKey"]
-  readonly startAuthorization: McpSettingsProps["startAuthorization"]
-  readonly onConfigure: (server: McpServer) => void
-  readonly onError: (message: string) => void
-}) {
-  const [editing, setEditing] = React.useState(false)
-  const [apiKey, setApiKeyValue] = React.useState("")
-  if (server.authKind === "none") {
-    return server.transport === "http" ? (
-      <button type="button" onClick={() => onConfigure(server)} className="text-[11px] text-blue hover:underline">
-        Set up auth
-      </button>
-    ) : null
-  }
-  if (server.authKind === "oauth") {
-    return (
-      <AsyncButton
-        pendingLabel="Opening…"
-        onClick={() => startAuthorization(server.name).catch((cause) => {
-          const message = cause instanceof Error ? cause.message : "Authorization failed"
-          onError(message)
-          throw cause
-        })}
-      >
-        {server.authState === "ready" ? "Reauthorize" : "Authorize"}
-      </AsyncButton>
-    )
-  }
-  if (!editing) {
-    return (
-      <button type="button" onClick={() => setEditing(true)} className="text-[11px] text-blue hover:underline">
-        {server.authState === "ready" ? "Replace key" : "Add key"}
-      </button>
-    )
-  }
-  return (
-    <div className="flex items-center gap-1.5">
-      <Input
-        type="password"
-        value={apiKey}
-        onChange={(event) => setApiKeyValue(event.target.value)}
-        aria-label={`API key for ${server.displayName}`}
-        className="h-8 w-36"
-      />
-      <AsyncButton
-        disabled={apiKey.length === 0}
-        pendingLabel="Saving…"
-        onClick={() => setApiKey(server.name, apiKey).then(() => {
-          setApiKeyValue("")
-          setEditing(false)
-        }).catch((cause) => {
-          const message = cause instanceof Error ? cause.message : "Could not save API key"
-          onError(message)
-          throw cause
-        })}
-      >Save</AsyncButton>
-    </div>
-  )
-}
-
 export function McpSettings({
   servers,
   parseError,
@@ -629,45 +544,6 @@ export function McpSettings({
     )
   }
 
-  const renderMcpServer = ((server) => {
-          const status = statusFor(statuses, server.name)
-          return (
-            <div
-              key={server.name}
-              className="flex max-w-xl items-center gap-3 rounded-md border border-line bg-panel px-3 py-2"
-            >
-              <McpBrand server={server} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[12.5px] font-medium text-text-body">{server.name}</span>
-                  <span className="text-[10px] uppercase text-dim">{server.transport}</span>
-                  {renderMcpStatus(status)}
-                </div>
-                <div className="truncate font-mono text-[10px] text-dim">{server.target}</div>
-              </div>
-              <McpAuthAction
-                server={server}
-                setApiKey={setApiKey}
-                startAuthorization={startAuthorization}
-                onConfigure={setAuthSetupServer}
-                onError={setActionError}
-              />
-              <Toggle
-                checked={server.enabled}
-                onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
-                aria-label={`Enable ${server.name}`}
-              />
-              <button
-                type="button"
-                onClick={() => run(() => remove(server.name))}
-                className="text-[11px] text-red hover:underline"
-              >
-                Remove
-              </button>
-            </div>
-          )
-        }) satisfies  Parameters<typeof servers.map>[0]
-
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -686,12 +562,69 @@ export function McpSettings({
       ) : null}
       {actionError ? <div role="alert"><Callout tone="red">{actionError}</Callout></div> : null}
 
-      <div className="flex flex-col gap-1">
-        {servers.length === 0 && !loading && parseError === null ? (
-          <p className="text-[12px] text-dim">No servers configured yet.</p>
-        ) : null}
-        {servers.map(renderMcpServer)}
-      </div>
+      {servers.length === 0 && !loading && parseError === null ? (
+        <p className="text-[12px] text-dim">No servers configured yet.</p>
+      ) : (
+        <SettingsCard>
+          {servers.map((server) => {
+            const status = statusFor(statuses, server.name)
+            const failed = status?.state === "failed"
+            const toolCount = status?.toolCount ?? 0
+            
+            return (
+              <SettingsRow
+                key={server.name}
+                label={
+                  <div className="flex min-w-0 items-center gap-2">
+                    <McpBrand server={server} compact />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium text-text-bright">{server.displayName}</div>
+                      <div className="truncate font-mono text-[11px] text-dim">{server.target}</div>
+                    </div>
+                  </div>
+                }
+                help={
+                  <div className="mt-1 flex flex-col gap-1">
+                    {status ? (
+                      <StatusRow failed={failed}>
+                        {failed ? (status.error ?? "Connection failed") : `${toolCount} tool${toolCount === 1 ? "" : "s"}`}
+                      </StatusRow>
+                    ) : null}
+                    {server.authState === "needs-auth" && (
+                      <StatusRow>
+                        Needs sign-in · <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => run(() => startAuthorization(server.name))}
+                          className="inline h-auto px-0 py-0 hover:bg-transparent hover:underline"
+                        >
+                          Connect
+                        </Button>
+                      </StatusRow>
+                    )}
+                  </div>
+                }
+                control={
+                  <div className="flex items-center gap-2">
+                    <Toggle
+                      checked={server.enabled}
+                      onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
+                      aria-label={`Enable ${server.name}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => run(() => remove(server.name))}
+                      className="text-[11px] text-state-failed hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                }
+              />
+            )
+          })}
+        </SettingsCard>
+      )}
 
       <div className="flex items-center gap-2">
         <AddServerForm add={add} setApiKey={setApiKey} />

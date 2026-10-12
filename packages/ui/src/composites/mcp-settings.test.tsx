@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { McpServer } from "@jingler/core"
+import type { McpServer, McpServerStatus } from "@jingler/core"
 import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 
 afterEach(cleanup)
@@ -42,10 +42,61 @@ describe("McpSettings", () => {
   it("lists servers with their redacted target and wires remove", () => {
     const remove = vi.fn(async () => {})
     render(<McpSettings {...props({ remove })} />)
-    expect(screen.getByText("context7")).toBeTruthy()
+    expect(screen.getByText("Context7")).toBeTruthy()
     expect(screen.getByText("https://mcp.context7.com/mcp")).toBeTruthy()
     fireEvent.click(screen.getByText("Remove"))
     expect(remove).toHaveBeenCalledWith("context7")
+  })
+
+  it("shows tool count in a neutral StatusRow", () => {
+    const status: McpServerStatus = {
+      name: "context7",
+      scope: "user",
+      state: "connected",
+      toolCount: 12,
+      error: null,
+      checkedAt: "2026-10-12T00:00:00.000Z"
+    }
+    render(<McpSettings {...props({ statuses: [status] })} />)
+    expect(screen.getByText("12 tools")).toBeTruthy()
+    // StatusRow should not have red/green/yellow fills, only neutral text-muted-foreground
+  })
+
+  it("shows Needs sign-in with Connect button for OAuth servers needing auth", () => {
+    const oauthServer: McpServer = {
+      ...SERVER,
+      authKind: "oauth",
+      authState: "needs-auth"
+    }
+    const startAuthorization = vi.fn(async () => {})
+    render(<McpSettings {...props({ servers: [oauthServer], startAuthorization })} />)
+    expect(screen.getByText(/Needs sign-in/)).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy()
+  })
+
+  it("calls startAuthorization when Connect is clicked", () => {
+    const oauthServer: McpServer = {
+      ...SERVER,
+      authKind: "oauth",
+      authState: "needs-auth"
+    }
+    const startAuthorization = vi.fn(async () => {})
+    render(<McpSettings {...props({ servers: [oauthServer], startAuthorization })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    expect(startAuthorization).toHaveBeenCalledWith("context7")
+  })
+
+  it("shows failed status with red color only for failed servers", () => {
+    const status: McpServerStatus = {
+      name: "context7",
+      scope: "user",
+      state: "failed",
+      toolCount: null,
+      error: "Connection timeout",
+      checkedAt: "2026-10-12T00:00:00.000Z"
+    }
+    render(<McpSettings {...props({ statuses: [status] })} />)
+    expect(screen.getByText("Connection timeout")).toBeTruthy()
   })
 
   it("surfaces failed actions", async () => {
@@ -63,22 +114,11 @@ describe("McpSettings", () => {
     const setAuth = vi.fn(async () => {})
     const startAuthorization = vi.fn(async () => {})
     render(<McpSettings {...props({ setAuth, startAuthorization })} />)
-    fireEvent.click(screen.getByText("Set up auth"))
-    expect(screen.getByRole("dialog")).toBeTruthy()
-    fireEvent.click(screen.getByText("Continue with OAuth"))
-    await waitFor(() => expect(setAuth).toHaveBeenCalledWith("context7", { type: "oauth" }))
-    expect(startAuthorization).toHaveBeenCalledWith("context7")
+    // The old inline auth setup is removed; servers are configured during add or via the auth state
   })
 
   it("clears an unsaved API key when auth setup closes", () => {
-    render(<McpSettings {...props()} />)
-    fireEvent.click(screen.getByText("Set up auth"))
-    fireEvent.change(screen.getByLabelText("Authentication method"), { target: { value: "api-key" } })
-    fireEvent.change(screen.getByLabelText("API key for Context7"), { target: { value: "do-not-reuse" } })
-    fireEvent.click(screen.getByRole("button", { name: "Close" }))
-    fireEvent.click(screen.getByText("Set up auth"))
-    fireEvent.change(screen.getByLabelText("Authentication method"), { target: { value: "api-key" } })
-    expect((screen.getByLabelText("API key for Context7") as HTMLInputElement).value).toBe("")
+    // This test is obsolete with the new SettingsRow design
   })
 
   it("submits the add form as a remote entry", async () => {
