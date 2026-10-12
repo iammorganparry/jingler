@@ -1,11 +1,12 @@
 import type { ImportableSession } from "@jingler/core"
 import type { ImportSessionsListProps } from "@jingler/ui"
 import { useMachine } from "@xstate/react"
+import { useEffect } from "react"
 import { fromPromise } from "xstate"
 import { importSessionsMachine } from "./import-sessions-machine.js"
 import { rpc } from "./rpc-client.js"
 
-export function useImportSessions(): ImportSessionsListProps {
+export function useImportSessions(onComplete?: () => void): ImportSessionsListProps {
   const [state, send] = useMachine(
     importSessionsMachine.provide({
       actors: {
@@ -16,6 +17,12 @@ export function useImportSessions(): ImportSessionsListProps {
       }
     })
   )
+
+  useEffect(() => {
+    if (state.matches("done") && onComplete) {
+      onComplete()
+    }
+  }, [state, onComplete])
 
   const status = state.matches("scanning")
     ? "loading"

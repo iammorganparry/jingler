@@ -445,7 +445,7 @@ function AuthedApp({
     }
   }, [environmentController.environments, providerCatalog.endpointCatalog, providerCatalog.remoteCatalogs])
   const projectController = useProjects();
-  const importSessionsProps = useImportSessions();
+  const importSessionsProps = useImportSessions(() => setImportSessionsDialogOpen(false));
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
   const [importSessionsDialogOpen, setImportSessionsDialogOpen] = useState(false);
 
@@ -1925,6 +1925,16 @@ function AuthedApp({
         apply={mcp.applyImport}
       />
       <ArchiveConfirmation state={archiveState} send={sendArchive} />
+      <Dialog open={importSessionsDialogOpen} onOpenChange={setImportSessionsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import sessions</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <ImportSessionsList {...importSessionsProps} />
+          </DialogBody>
+        </DialogContent>
+      </Dialog>
       <ConfirmDialog
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
