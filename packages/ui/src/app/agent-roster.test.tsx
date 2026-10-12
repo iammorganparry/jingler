@@ -25,8 +25,24 @@ describe("AgentRoster", () => {
     fireEvent.click(send)
     fireEvent.click(send)
 
-    await waitFor(() => expect(screen.getByText("failed")).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/Not delivered/)).toBeTruthy())
+    expect(screen.getByText(/Retry/)).toBeTruthy()
     expect(onMessage).toHaveBeenCalledOnce()
+  })
+
+  it("Retry resends the undelivered message to the same peer", async () => {
+    const onMessage = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ status: "delivered" as const, targetChatId: "b" })
+    render(<AgentRoster agents={agents} currentChatId="a" onMessage={onMessage} />)
+    fireEvent.click(screen.getByText("Peer agents"))
+    fireEvent.click(screen.getByRole("button", { name: "Message Agent B" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Message to Agent B" }), { target: { value: "hello" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(onMessage).toHaveBeenCalledTimes(2))
+    expect(onMessage).toHaveBeenLastCalledWith("b", "hello")
+    await waitFor(() => expect(screen.queryByText(/Not delivered/)).toBeNull())
   })
 
   it("shows peer work and sends only to the selected peer", async () => {

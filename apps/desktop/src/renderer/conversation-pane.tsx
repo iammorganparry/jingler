@@ -20,6 +20,7 @@ import type {
   SubagentFleetControlOutcome,
   SubagentFleetNode
 } from "@jingler/core"
+import type { ToastInput } from "@jingler/ui"
 import {
   agentFileActivityOf,
   clampFontScale,
@@ -251,6 +252,7 @@ export function ConversationPane({
   onSetMcpApiKey,
   onSetMcpAuth,
   onAuthorizeMcp,
+  onPushToast,
   paneFocused = true
 }: {
   session: Session
@@ -297,6 +299,7 @@ export function ConversationPane({
   onSetMcpApiKey?: (name: string, apiKey: string) => Promise<void>
   onSetMcpAuth?: (name: string, auth: McpRemoteAuth) => Promise<void>
   onAuthorizeMcp?: (name: string) => Promise<void>
+  onPushToast?: (toast: ToastInput) => void
   /**
    * Whether this is the pane the operator is looking at. Only that pane's
    * composer takes the caret when the conversation opens.
@@ -922,7 +925,8 @@ export function ConversationPane({
                       convo,
                       fileBrowser,
                       toggleFollowAgent,
-                      paneFocused
+                      paneFocused,
+                      onPushToast
                     })}
           </div>
           </div>
@@ -1055,7 +1059,8 @@ function renderFleetComposer({
   convo,
   fileBrowser,
   toggleFollowAgent,
-  paneFocused
+  paneFocused,
+  onPushToast
 }: {
   session: Session;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
@@ -1069,6 +1074,7 @@ function renderFleetComposer({
   fileBrowser: FileBrowserController;
   toggleFollowAgent: (enabled: boolean) => void;
   paneFocused: boolean;
+  onPushToast?: (toast: ToastInput) => void;
 }) {
   return <Composer
     repo={session.repo}
@@ -1113,7 +1119,19 @@ function renderFleetComposer({
         if (legacy.status === "working") convo.stopSubagent(legacy.id)
         return
       }
-      controlSubagent(node, "stop").catch(() => { })
+      controlSubagent(node, "stop").catch(() => {
+        onPushToast?.({
+          key: `stop-failed-${node.id}`,
+          variant: "error",
+          title: `Couldn't stop ${node.agent}`,
+          action: {
+            label: "Retry",
+            onAction: () => {
+              void controlSubagent(node, "stop")
+            }
+          }
+        })
+      })
     }}
     followAgent={fileBrowser.followEnabled}
     onToggleFollowAgent={toggleFollowAgent}
