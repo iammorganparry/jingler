@@ -7,9 +7,10 @@ import { ArrowLeft, GitPullRequest, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
-import { Spinner } from "../components/loading.js"
-import { SearchInput } from "../components/search-input.js"
-import { MotionTabs } from "../components/beui/controls.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
+import { Button } from "../components/button.js"
+import { FilterChips } from "../components/filter-chips.js"
+import { SearchField } from "../components/search-input.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
@@ -96,6 +97,8 @@ export interface PullRequestInboxProps {
   detailLoading?: boolean
   detailError?: string | null
   error?: string | null
+  /** Re-runs the failed list load; the error row only shows Retry when this is given. */
+  onRetry?: () => void
 }
 
 /** Global GitHub-style PR list with a responsive read-only detail pane. */
@@ -121,7 +124,8 @@ export function PullRequestInbox({
   loading = false,
   detailLoading = false,
   detailError = null,
-  error = null
+  error = null,
+  onRetry
 }: PullRequestInboxProps) {
          function renderSelectedPullRequest() {
            return (<PullRequestView
@@ -156,9 +160,15 @@ export function PullRequestInbox({
   }
 
          function getLoading() {
-           if (loading) return (<InboxMessage><Spinner size={18} />Loading pull requests…</InboxMessage>)
-           if (error) return (<InboxMessage>{error}</InboxMessage>)
-           if (visible.length === 0) return (<InboxMessage><GitPullRequest className="size-5 text-dim" />{warnings.length > 0 ? "No pull requests loaded. Some results could not be retrieved." : "No pull requests match this view."}</InboxMessage>)
+           if (loading) return <ListSkeleton rows={6} rowHeight={64} gap={8} className="p-4" />
+           if (error) return <div className="p-4"><InlineError message={error} onRetry={onRetry} /></div>
+           if (visible.length === 0) return (<EmptyState
+              className="min-h-48 justify-center"
+              icon={<GitPullRequest className="size-5" />}
+              title={warnings.length > 0 ? "No pull requests loaded" : "No pull requests match this view"}
+              description={warnings.length > 0 ? "Some results could not be retrieved." : undefined}
+              action={hasActiveInboxFilters(facets) ? <Button variant="secondary" size="sm" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</Button> : undefined}
+            />)
            return (visible.map((pr) => {
               const active = keyOf(pr) === selectedKey
               return (
@@ -230,9 +240,9 @@ export function PullRequestInbox({
               <h1 className="text-[14px] font-semibold text-text-bright">Pull requests</h1>
               <Badge tone="count" size="xs">{visible.length}</Badge>
             </div>
-            <SearchInput value={query} onChange={setQuery} placeholder="Search pull requests" />
+            <SearchField value={query} onChange={setQuery} placeholder="Search pull requests" />
             {teamControls ? <InboxTeamControls controls={teamControls} filter={filter} onFilter={setFilter} />
-              : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
+              : <FilterChips options={FILTERS} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
             <div className="grid min-w-0 grid-cols-2 gap-2">
               {(["repository", "author", "label"] as const).map((kind) => <InboxFilterSelect
                 key={kind} label={kind === "repository" ? "Repository" : kind === "author" ? "Author" : "Label"}
@@ -315,7 +325,7 @@ function InboxTeamControls({ controls: teamControls, filter, onFilter: setFilter
               <option value="reviews">Requested reviews</option>
               <option value="authored">Member-authored</option>
               <option value="repositories">Team repositories</option>
-            </select> : <MotionTabs items={FILTERS} value={filter} onChange={setFilter} variant="segment" />}
+            </select> : <FilterChips options={FILTERS} value={filter} onChange={setFilter} ariaLabel="Pull request filter" />}
   </>
 }
 
