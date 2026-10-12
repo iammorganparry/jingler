@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react"
 import { Loader } from "./beui/loader.js"
 import { cn } from "../lib/cn.js"
 
@@ -20,11 +21,12 @@ export function Spinner({ size = 14, className }: { size?: number; className?: s
 }
 
 /** BeUI loading-state shimmer, kept as a rectangular compatibility primitive. */
-export function Skeleton({ className }: { className?: string }) {
+export function Skeleton({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
     <span
       role="status"
       aria-label="Loading"
+      style={style}
       className={cn(
         "block h-5 rounded-md bg-[linear-gradient(100deg,var(--sb-muted),var(--sb-text-bright),var(--sb-muted))] bg-[length:220%_100%] animate-shine opacity-20",
         className

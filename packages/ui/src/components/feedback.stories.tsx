@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { ClaudeGlyph } from "./eyebrow.js"
 import { AsyncButton } from "./async-button.js"
-import { InlineStatus, IndeterminateBar } from "./feedback.js"
+import { EmptyState, IndeterminateBar, InlineError, InlineStatus, ListSkeleton } from "./feedback.js"
+import { Button } from "./button.js"
 
 const meta: Meta = { title: "Feedback" }
 export default meta
@@ -61,4 +62,23 @@ export const Bars: Story = {
       <IndeterminateBar progress={0.64} tone="bg-green" />
     </div>
   )
+}
+
+/** ListSkeleton: loading rows at real row height. */
+export const ListLoading: Story = {
+  render: () => <div className="w-72 bg-editor p-4"><ListSkeleton rows={5} rowHeight={32} /></div>
+}
+
+/** EmptyState: what is missing + next action. */
+export const ListEmpty: Story = {
+  render: () => (
+    <div className="w-72 bg-editor">
+      <EmptyState title="No open pull requests" description="Open one from a session to see it here." action={<Button variant="secondary" size="sm">Create PR</Button>} />
+    </div>
+  )
+}
+
+/** InlineError: message + Retry. */
+export const ListError: Story = {
+  render: () => <div className="w-72 bg-editor"><InlineError message="Couldn't load pull requests" onRetry={() => undefined} /></div>
 }
