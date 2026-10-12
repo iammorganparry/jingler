@@ -52,7 +52,7 @@ import {
   JinglerApp,
   PullRequestInbox,
   IssueInbox,
-  InlineError,
+  BootFailureCard,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -2243,6 +2243,12 @@ function AppContent({
   );
 }
 
+/** Latest runtime diagnostics export; the raw boot error when no run has been recorded yet. */
+async function exportBootDiagnostics(error: string | null): Promise<string> {
+  const latest = await rpc.runtimeDiagnosticsLatest();
+  return latest ? rpc.runtimeDiagnosticsExport(latest.runId) : (error ?? "");
+}
+
 function renderAuthedAppGate(
   splashHeld: boolean,
   state: import("xstate").SnapshotFrom<typeof appMachine>,
@@ -2256,13 +2262,11 @@ function renderAuthedAppGate(
   }
   if (state.matches("failure")) {
     return (
-      <div className="flex h-screen items-center justify-center bg-canvas p-8">
-        <InlineError
-          className="w-full max-w-md"
-          message={`Failed to load: ${state.context.error}`}
-          onRetry={() => send({ type: "RETRY" })}
-        />
-      </div>
+      <BootFailureCard
+        error={state.context.error ?? "Unknown error"}
+        onRetry={() => send({ type: "RETRY" })}
+        getDiagnostics={() => exportBootDiagnostics(state.context.error)}
+      />
     );
   }
   return state.matches("setup")
