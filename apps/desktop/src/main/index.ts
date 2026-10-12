@@ -58,7 +58,7 @@ app.setName("Jingler")
 registerAppVersionChannel()
 
 /** The single renderer window (kept so deep-link callbacks can reach + focus it). */
-let mainWindow: BrowserWindow | null = null
+export let mainWindow: BrowserWindow | null = null
 let quitPending = false
 let readyToQuit = false
 
@@ -289,7 +289,7 @@ if (!gotPrimaryLock) {
       // canvas here meant a light theme flashed dark on every single launch,
       // before the document had a chance to say otherwise.
       backgroundColor: themeBackgroundColor,
-      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+      titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
       webPreferences: {
         preload: join(import.meta.dirname, "../preload/index.mjs"),
         contextIsolation: true,
@@ -400,6 +400,16 @@ if (!gotPrimaryLock) {
     window.on("closed", () => {
       if (mainWindow === window) mainWindow = null
     })
+
+    // Notify renderer of window state changes (Windows/Linux custom controls)
+    if (process.platform !== "darwin") {
+      window.on("maximize", () => {
+        window.webContents.send("jingler:window-maximized")
+      })
+      window.on("unmaximize", () => {
+        window.webContents.send("jingler:window-unmaximized")
+      })
+    }
 
     // Cold-start deep link (Windows/Linux): the URL is in our own argv. Deliver it
     // once the renderer has loaded so the auth-complete event isn't dropped.

@@ -1,3 +1,4 @@
+import { mainWindow } from "./index.js"
 import { archiveMetadataOnly, restoreMetadataOnly } from "./metadata-only-archive.js"
 import { RoutinesService } from "./routines.js"
 import { AssetWriteIoError } from "@jingler/core";
@@ -5517,6 +5518,18 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
   "App.revealLogs": () => Effect.sync(() => { void shell.openPath(app.getPath("logs")); }),
+
+  "Window.minimize": () => Effect.sync(() => { mainWindow?.minimize(); }),
+  "Window.toggleMaximize": () => Effect.sync(() => { 
+    if (!mainWindow) return;
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }),
+  "Window.close": () => Effect.sync(() => { mainWindow?.close(); }),
+  "Window.isMaximized": () => Effect.sync(() => mainWindow?.isMaximized() ?? false),
   "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via

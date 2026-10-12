@@ -68,6 +68,9 @@ interface PreviewEventPayload {
 }
 
 /** True when running under e2e; gates test-only renderer hooks. */
+
+/** The platform (darwin, win32, linux) for conditional UI (window controls). */
+const platform = process.platform
 const isE2E = process.env.JINGLER_E2E === "1"
 
 contextBridge.exposeInMainWorld("jingler", {
@@ -77,6 +80,8 @@ contextBridge.exposeInMainWorld("jingler", {
   initialThemeCss,
   /** True when running under e2e; gates test-only renderer hooks. */
   isE2E,
+  /** The platform (darwin, win32, linux) for conditional UI (window controls). */
+  platform,
   /** Ship one client→server RPC frame to main. */
   send: (data: unknown) => ipcRenderer.send(RPC_CHANNEL, data),
   /** Subscribe to server→client RPC frames; returns an unsubscribe fn. */
@@ -156,3 +161,13 @@ contextBridge.exposeInMainWorld("jingler", {
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_DOWNLOAD_CHANNEL),
   installUpdate: (): Promise<void> => ipcRenderer.invoke(UPDATE_INSTALL_CHANNEL)
 })
+
+// Forward maximize/unmaximize events from main to renderer (Windows/Linux custom controls)
+if (process.platform !== "darwin") {
+  ipcRenderer.on("jingler:window-maximized", () => {
+    window.dispatchEvent(new CustomEvent("jingler:window-maximized"))
+  })
+  ipcRenderer.on("jingler:window-unmaximized", () => {
+    window.dispatchEvent(new CustomEvent("jingler:window-unmaximized"))
+  })
+}

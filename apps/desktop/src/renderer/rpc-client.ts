@@ -1510,7 +1510,13 @@ export const rpc = {
    * contract themes have, and the reason a plugin author can edit a file and see
    * the tab update without restarting the app.
    */
-  pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
+  // Window controls (Windows/Linux custom title bar)
+  windowMinimize: (): Promise<void> => run((c) => c.Window.minimize()),
+  windowToggleMaximize: (): Promise<void> => run((c) => c.Window.toggleMaximize()),
+  windowClose: (): Promise<void> => run((c) => c.Window.close()),
+  windowIsMaximized: (): Promise<boolean> => run((c) => c.Window.isMaximized()),
+
+    pluginsWatch: (onCatalog: (catalog: PluginCatalog) => void): (() => void) => {
     let fiber: Fiber.RuntimeFiber<void, unknown> | null = null
     let cancelled = false
     void clientPromise.then((client) => {
