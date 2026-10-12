@@ -57,8 +57,8 @@ function TaskRow({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
-        <span className="truncate text-[13px] text-text">{task.description}</span>
-        <div className="flex items-center gap-[7px] font-mono text-[10.5px] text-muted-foreground">
+        <span className="truncate font-mono text-xs text-text-bright">{task.description}</span>
+        <div className="flex items-center gap-[7px] font-mono text-[11px] text-dim">
           <Badge tone={tone.tone} size="sm">
             {tone.label}
           </Badge>
@@ -195,7 +195,7 @@ export function BackgroundTaskDock({
         className="flex items-center gap-2 px-3 py-2 text-left hover:bg-surface/40"
       >
         <ChevronRight size={13} className={cn("flex-none transition-transform", open && "rotate-90")} />
-        <span className="flex-1 text-[11.5px] font-semibold text-text">Background tasks</span>
+        <span className="flex-1 text-xs font-medium text-text-bright">Background tasks</span>
         {live.length > 0 && (
           <Badge tone="neutral" size="xs">
             {live.length} running
