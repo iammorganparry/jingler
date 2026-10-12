@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import type { IssueListItem } from "@jingler/core"
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -59,6 +59,15 @@ describe("IssueInbox load states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(onRetry).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.getByRole("button", { name: /Crash on start/ })).toBeTruthy()
+  })
+
+  it("offers Clear filters on an empty filtered view, and clearing brings the rows back", () => {
+    mount(<IssueInbox {...props} issues={[item({ author: actor("lee") })]} />)
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull()
+    fireEvent.click(screen.getByRole("radio", { name: "Created" }))
+    const empty = screen.getByText("No issues match this view.").parentElement as HTMLElement
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }))
     expect(screen.getByRole("button", { name: /Crash on start/ })).toBeTruthy()
   })
 

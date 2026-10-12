@@ -4,6 +4,7 @@ import type { IssueDetail, IssueListItem } from "@jingler/core"
 import { ArrowLeft, CircleDot, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { AsyncButton } from "../components/async-button.js"
+import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
 import { Card } from "../components/card.js"
@@ -121,7 +122,8 @@ export function IssueInbox({
   function renderList() {
     if (loading) return <ListSkeleton rows={6} rowHeight={72} className="p-4" />
     if (error) return <InlineError message={error} onRetry={onRetry} className="m-4" />
-    if (visible.length === 0) return <EmptyState icon={<CircleDot className="size-5" />} title="No issues match this view." description={filtered ? "Clear the filters to see every loaded issue." : undefined} />
+    if (visible.length === 0) return <EmptyState icon={<CircleDot className="size-5" />} title="No issues match this view." description={filtered ? "Clear the filters to see every loaded issue." : undefined}
+      action={filtered ? <Button variant="secondary" size="sm" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</Button> : undefined} />
     return visible.map((issue) => (
       <button
         key={keyOf(issue)}
