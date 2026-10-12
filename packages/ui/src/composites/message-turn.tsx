@@ -190,25 +190,17 @@ function renderProgressMarkers(
 
 function MessageText({
   text,
-  markdown,
   streaming = false
 }: {
   text: string
-  markdown: boolean
   streaming?: boolean
 }) {
   const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
-  if (markdown) {
-    const progress = renderProgressMarkers(text, planDocument, streaming)
-    if (progress !== null) return progress
-  }
-  return markdown ? (
-    <StreamingText text={text} streaming={streaming} className={WIDTH} />
-  ) : (
-    <p className={`m-0 ${WIDTH} whitespace-pre-wrap text-[calc(14.5px*var(--sb-font-scale,1))] leading-[1.65] text-text-body`}>
-      {text}
-    </p>
+  return (
+    renderProgressMarkers(text, planDocument, streaming) ?? (
+      <StreamingText text={text} streaming={streaming} className={WIDTH} />
+    )
   )
 }
 
@@ -416,14 +408,12 @@ const MergedThoughts = memo(function MergedThoughts({ parts }: { parts: Readonly
 
 const PartView = memo(function PartView({
   part,
-  markdown,
   onDecideGate,
   onForkOntoBranch,
   onAdoptBranch,
   streamingText = false
 }: {
   part: ContentPart
-  markdown: boolean
   streamingText?: boolean
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onForkOntoBranch?: () => void | Promise<void>
@@ -431,7 +421,7 @@ const PartView = memo(function PartView({
 }) {
   switch (part._tag) {
     case "Text": {
-      return <MessageText text={part.text} markdown={markdown} streaming={streamingText} />
+      return <MessageText text={part.text} streaming={streamingText} />
     }
     case "PlanTaskProgress":
       return <PlanTaskProgressChip progress={part} />
@@ -489,7 +479,6 @@ const PartView = memo(function PartView({
  */
 function renderParts(
   parts: ReadonlyArray<ContentPart>,
-  markdown: boolean,
   {
     onDecideGate,
     onForkOntoBranch,
@@ -583,7 +572,6 @@ function renderParts(
       <PartView
         key={i}
         part={part}
-        markdown={markdown}
         streamingText={i === streamingTextIndex}
         onDecideGate={onDecideGate}
         onForkOntoBranch={onForkOntoBranch}
@@ -684,7 +672,7 @@ function MessageTurnImpl({
           Show {hiddenParts} earlier steps
         </button>
       )}
-      {renderParts(visibleParts, isAssistant, {
+      {renderParts(visibleParts, {
         onDecideGate,
         onForkOntoBranch,
         onAdoptBranch,
