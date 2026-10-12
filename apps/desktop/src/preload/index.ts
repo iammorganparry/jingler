@@ -67,11 +67,16 @@ interface PreviewEventPayload {
   readonly url: string
 }
 
+/** True when running under e2e; gates test-only renderer hooks. */
+const isE2E = process.env.JINGLER_E2E === "1"
+
 contextBridge.exposeInMainWorld("jingler", {
   /** The packaged application's runtime version from Electron. */
   appVersion,
   /** The active theme's `:root` block, for `main.tsx` to inject pre-paint. */
   initialThemeCss,
+  /** True when running under e2e; gates test-only renderer hooks. */
+  isE2E,
   /** Ship one client→server RPC frame to main. */
   send: (data: unknown) => ipcRenderer.send(RPC_CHANNEL, data),
   /** Subscribe to server→client RPC frames; returns an unsubscribe fn. */

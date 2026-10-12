@@ -2049,8 +2049,8 @@ function loginStateOf(
  * preload bridge and re-validates the freshly-stored token.
  */
 export function App() {
-  // Test-only hook: throw immediately if the global flag is set, before any real work.
-  if (typeof window !== 'undefined' && localStorage.getItem('__TEST_CRASH') === 'true') {
+  // Test-only hook: throw immediately if the e2e flag is set, before any real work.
+  if (window.jingler.isE2E && localStorage.getItem('__TEST_CRASH') === 'true') {
     throw new Error('Test crash triggered by __TEST_CRASH global')
   }
 
