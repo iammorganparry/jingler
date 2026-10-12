@@ -59,6 +59,39 @@ Legend: **Reuse** existing code to restyle · **New** component (atom / molecule
 - **Q:** stale question card behaviour (F4-05).
 - **E2E:** new `home-needs-you.spec.ts`; extend `mcp-import-dialog.spec.ts`.
 
+## 3.7 · Project rail
+
+**Merged in #592.** Paper parity check completed in #600.
+
+- **Reuse:** `app/project-sidebar.tsx:81` (`ProjectAvatar :12`, `ProjectSidebar :81`). 56 px rail, 36 px buttons, 8 px radius.
+- **States:** active (surface bg, bright left bar), inactive (editor bg, hairline border), hover, loading skeleton, unavailable dot.
+- **Hover card:** project name, path, session count, active session count.
+- **Badges:** session count (16 px pill, 10 px semibold, `bg-line-strong`), active dot (8 px pulse, `bg-state-working`), unavailable dot (8 px `bg-state-needs`).
+- **Tokens:** `bg-canvas`, `border-hairline`, `bg-surface` (active), `bg-editor` (inactive), `text-text-bright` (active bar, badge text), `bg-line-strong` (badge bg), neutral states (spec §6.10).
+- **E2E:** `apps/desktop/e2e/project-sidebar.spec.ts` (6 assertions).
+
+### Paper parity (node CD8-0, board 02 · Improved, read via Paper `get_jsx`)
+
+| Property | Story (project-sidebar.tsx) | Paper (CD8-0) | Match |
+|---|---|---|---|
+| Rail width | `w-14` (56px) | 56px | yes |
+| Rail background | `bg-canvas` (#0b0b0c) | #0B0B0C | yes |
+| Rail border | `border-hairline` (`--sb-border` #232327) | #232327 | yes |
+| Rail padding | `py-2` (8px vertical) | 8px | yes |
+| Project button size | `size-9` (36px) | 36px | yes |
+| Project button radius | `rounded-[8px]` | 8px | yes |
+| Button bg (inactive) | `bg-editor` (#1a1a1d) | #1A1A1D | yes |
+| Button border (inactive) | `border-hairline` (#232327) | #232327 | yes |
+| Button bg (active) | `bg-surface` (#202024) | #26262B | token kept (one step off) |
+| Button border (active) | `border-transparent` | none | yes |
+| Avatar size / radius | 28px / 6px | 28px / 6px | yes |
+| Active left bar | 2px × 20px `bg-text-bright` (#ededef) | 2px × 20px #EDEDEF | yes |
+| Badge font | 10px semibold | 11px/14px semibold | no, follow-up |
+| Badge colours | `bg-line-strong` (#44444c) / `text-text-bright` | warning fill, #0B0B0C text | spec §6.10 wins (neutral) |
+| Add button border | `border-line`, hover `border-line-strong` | dashed #303036 | token kept |
+
+No code changes. One real mismatch: badge font 10px vs Paper 11px (follow-up).
+
 ## 04b · Chat full
 - **Reuse:** `app/conversation-view.tsx` (rail `PreviewRail :46`, `createMessageRailPreview :45`, `activeRailIdFor :123`, `navigation="rail" :695`), `composites/message-turn.tsx:122`, `composites/composer.tsx:514`, `session-pane.tsx:282`.
 - **New:** `ChatLaneHeader` (thread switcher, `+ New chat`, subagent chips, follow toggle). Replaces `chat-tab-bar.tsx:115` inside the lane.
