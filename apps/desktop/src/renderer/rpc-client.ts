@@ -27,6 +27,7 @@ import type {
   ExecutionMode,
   Environment,
   ExplanationDocument,
+  ImportableSession,
   PairSshEnvironmentInput,
   SshHost,
   ExternalInstructionIdentity,
@@ -561,6 +562,10 @@ export const rpc = {
     run((c) => c.Sessions.list()),
   sessionsGet: (id: string): Promise<Session> =>
     run((c) => c.Sessions.get({ id })),
+  sessionsScanImportable: (): Promise<ReadonlyArray<ImportableSession>> =>
+    run((c) => c.Sessions.scanImportable()),
+  sessionsImport: (source: ImportableSession["source"], nativeSessionId: string): Promise<Session> =>
+    run((c) => c.Sessions.import({ source, nativeSessionId })),
   sessionsCreate: (
     input: CreateSessionInput,
     onProgress?: (phase: SessionCreationPhase) => void
