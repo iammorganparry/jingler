@@ -581,3 +581,7 @@ Each "+" board sits on the row below the original and draws the missing states f
 
 ## 14.10 MCP log tail (#532) — where MCP logs live
 Nowhere on disk. `probeServer` used to spawn stdio servers with `stderr: "ignore"`, so there was no log to read. It now pipes stderr and keeps the last 500 lines per server name in an in-memory ring (`packages/cli-adapters/src/mcp-log.ts`), replaced on every probe. `Mcp.logTail { server, lines? }` returns the last `lines` (default 200, max 500); an unknown, remote (http/sse, no stderr) or never-probed server returns `{ lines: [] }`. The tail is lost on app restart and reflects only the most recent probe, not a long-running agent attachment. If board 16d needs live logs from agent sessions, the attachment launch path (`runtime/mcp/attachment.ts`) would need to feed the same ring.
+
+## 14.8 Usage filters (#530)
+- Range, runtime and project filtering stay client-side over `UsageReport.facts`; the `Usage.report` payload is unchanged.
+- Slowest runs come from `slowestRuns(facts)` in `core/runtime/usage-facts.ts`; `turnRunId` is the parent turn's run id (`parentRunId ?? runId`), so a child run links to the turn that spawned it.
