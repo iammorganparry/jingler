@@ -18,7 +18,7 @@ const session: SeedSession = {
   updatedAt: "2026-10-12T10:00:00.000Z"
 }
 
-test("dragging the chat lane below 320px pins it at the 360px minimum", async ({ launchApp }) => {
+test("dragging the chat lane below 320px collapses it to the Ask pill and the pill restores it", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -59,8 +59,20 @@ test("dragging the chat lane below 320px pins it at the 360px minimum", async ({
   // The chat lane should remain at the minimum width (not collapse in this implementation)
   // because we're in the editor layout, not the desktop shell
   // This test validates the clamping behavior
-  const afterBox = await chatGroup.boundingBox()
-  expect(afterBox!.width).toBeGreaterThanOrEqual(359) // Clamped to minimum
+  // Below 320px the lane collapses to the floating Ask pill; clicking it restores the previous width.
+  const pill = launched.window.getByRole("button", { name: "Show chat lane" })
+  await expect(pill).toBeVisible()
+  await expect(launched.window.getByTestId("editor-divider")).toHaveCount(0)
+  await pill.click()
+  await expect(pill).toHaveCount(0)
+  const restored = await launched.window.getByTestId("editor-group").first().boundingBox()
+  expect(Math.abs(restored!.width - initialBox!.width)).toBeLessThan(2)
+
+  // ⌘L collapses and restores too.
+  await launched.window.keyboard.press("ControlOrMeta+l")
+  await expect(pill).toBeVisible()
+  await launched.window.keyboard.press("ControlOrMeta+l")
+  await expect(pill).toHaveCount(0)
 })
 
 test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
