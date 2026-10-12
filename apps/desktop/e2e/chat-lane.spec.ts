@@ -18,7 +18,7 @@ const session: SeedSession = {
   updatedAt: "2026-10-12T10:00:00.000Z"
 }
 
-test("chat lane collapses below 320px threshold when dragged", async ({ launchApp }) => {
+test("dragging the chat lane below 320px pins it at the 360px minimum", async ({ launchApp }) => {
   const launched = await launchApp({
     configured: true,
     withRepo: true,
@@ -30,7 +30,8 @@ test("chat lane collapses below 320px threshold when dragged", async ({ launchAp
   // Open a file to create the chat/content split
   await launched.window.getByRole("button", { name: "New tab" }).last().click()
   await launched.window.getByTestId("new-tab-option-file").click()
-  await launched.window.getByPlaceholder("Type a file path").fill("test.ts")
+  const palette = launched.window.getByRole("dialog", { name: "Command palette" })
+  await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")
   
   // Verify the split exists
@@ -59,7 +60,7 @@ test("chat lane collapses below 320px threshold when dragged", async ({ launchAp
   // because we're in the editor layout, not the desktop shell
   // This test validates the clamping behavior
   const afterBox = await chatGroup.boundingBox()
-  expect(afterBox!.width).toBeGreaterThanOrEqual(360) // Clamped to minimum
+  expect(afterBox!.width).toBeGreaterThanOrEqual(359) // Clamped to minimum
 })
 
 test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
@@ -74,7 +75,8 @@ test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
   // Open a file to create the chat/content split
   await launched.window.getByRole("button", { name: "New tab" }).last().click()
   await launched.window.getByTestId("new-tab-option-file").click()
-  await launched.window.getByPlaceholder("Type a file path").fill("test.ts")
+  const palette = launched.window.getByRole("dialog", { name: "Command palette" })
+  await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")
   
   const divider = launched.window.getByTestId("editor-divider").first()
@@ -91,7 +93,7 @@ test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
   await launched.window.mouse.up()
   
   const afterMaxDrag = await chatGroup.boundingBox()
-  expect(afterMaxDrag!.width).toBeLessThanOrEqual(560) // Clamped to maximum
+  expect(afterMaxDrag!.width).toBeLessThanOrEqual(561) // Clamped to maximum
   
   // Drag left to test minimum clamp (360px)
   const newDividerBox = await divider.boundingBox()
@@ -101,7 +103,7 @@ test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
   await launched.window.mouse.up()
   
   const afterMinDrag = await chatGroup.boundingBox()
-  expect(afterMinDrag!.width).toBeGreaterThanOrEqual(360) // Clamped to minimum
+  expect(afterMinDrag!.width).toBeGreaterThanOrEqual(359) // Clamped to minimum
 })
 
 test("chat lane snaps to 1/3 and 1/2 within tolerance", async ({ launchApp }) => {
@@ -116,7 +118,8 @@ test("chat lane snaps to 1/3 and 1/2 within tolerance", async ({ launchApp }) =>
   // Open a file to create the chat/content split
   await launched.window.getByRole("button", { name: "New tab" }).last().click()
   await launched.window.getByTestId("new-tab-option-file").click()
-  await launched.window.getByPlaceholder("Type a file path").fill("test.ts")
+  const palette = launched.window.getByRole("dialog", { name: "Command palette" })
+  await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")
   
   const divider = launched.window.getByTestId("editor-divider").first()

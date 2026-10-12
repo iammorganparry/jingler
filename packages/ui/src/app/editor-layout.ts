@@ -459,9 +459,8 @@ const applyResize = (
 
   // Apply chat lane pixel logic to the chat/content split
   if (index === 0 && isChatContentSplit(node) && containerWidth !== undefined && containerWidth > 0) {
-    const nextChatRatio = resizeChatLane(a, delta, containerWidth)
-    // null means collapse; the caller should handle closing the content
-    if (nextChatRatio === null) return null
+    // ponytail: below the collapse threshold the lane pins at its minimum until 4.4 renders the Ask pill.
+    const nextChatRatio = resizeChatLane(a, delta, containerWidth) ?? CHAT_LANE_MIN_PX / containerWidth
     return { ...node, ratios: [nextChatRatio, 1 - nextChatRatio] }
   }
 
