@@ -448,7 +448,10 @@ function AuthedApp({
     }
   }, [environmentController.environments, providerCatalog.endpointCatalog, providerCatalog.remoteCatalogs])
   const projectController = useProjects();
-  const importSessionsProps = useImportSessions(() => setImportSessionsDialogOpen(false));
+  const importSessionsProps = useImportSessions(
+    () => setImportSessionsDialogOpen(false),
+    (session) => send({ type: "SESSION_UPDATED", session }),
+  );
   const [environmentDialogOpen, setEnvironmentDialogOpen] = useState(false);
   const [importSessionsDialogOpen, setImportSessionsDialogOpen] = useState(false);
 

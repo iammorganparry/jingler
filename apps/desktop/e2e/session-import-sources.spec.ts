@@ -152,4 +152,8 @@ test("imports sessions from all four sources", async ({ launchApp }) => {
     source: "claude-code",
     nativeSessionId: "claude123"
   })
+
+  // Opening the imported workspace shows the native transcript.
+  await launched.window.getByTestId(`session-row-${imported.id}`).click()
+  await expect(launched.window.getByText("Fix login from Claude Code").first()).toBeVisible()
 })
