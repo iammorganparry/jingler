@@ -8,6 +8,7 @@ import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
+import { Button } from "../components/button.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { SearchField } from "../components/search-input.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
@@ -166,6 +167,7 @@ export function PullRequestInbox({
               icon={<GitPullRequest className="size-5" />}
               title={warnings.length > 0 ? "No pull requests loaded" : "No pull requests match this view"}
               description={warnings.length > 0 ? "Some results could not be retrieved." : undefined}
+              action={hasActiveInboxFilters(facets) ? <Button variant="secondary" size="sm" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</Button> : undefined}
             />)
            return (visible.map((pr) => {
               const active = keyOf(pr) === selectedKey

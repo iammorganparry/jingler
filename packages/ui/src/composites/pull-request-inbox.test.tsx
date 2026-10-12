@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { PullRequest, PullRequestListItem } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
@@ -240,6 +240,14 @@ describe("PullRequestInbox", () => {
   it("shows an empty state when no pull requests match", () => {
     render(<WidthTierValue width={1200}><PullRequestInbox prs={[]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></WidthTierValue>)
     expect(screen.getByText("No pull requests match this view")).toBeTruthy()
+  })
+
+  it("offers Clear filters on an empty filtered view, and clearing brings the rows back", () => {
+    render(<WidthTierValue width={1200}><PullRequestInbox prs={[item({ author: { login: "lee", avatarUrl: null } })]} viewerLogin="morgan" selected={null} detail={null} onSelect={() => {}} /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("radio", { name: "Created" }))
+    const empty = screen.getByText("No pull requests match this view").parentElement as HTMLElement
+    fireEvent.click(within(empty).getByRole("button", { name: "Clear filters" }))
+    expect(screen.getByRole("button", { name: /Fix token refresh/ })).toBeTruthy()
   })
 
   it("replaces the list with detail on small screens and returns", () => {
