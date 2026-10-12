@@ -923,7 +923,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             const surface = surfaceInGroup(groupId)
             if (surface) syncChat(surface)
           }}
-          onResize={(splitId, index, delta) => update((current) => resizeSplit(current, splitId, index, delta))}
+          onResize={(splitId, index, delta, containerWidth) => update((current) => resizeSplit(current, splitId, index, delta, containerWidth))}
           launcherItems={launcherItems}
         />
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
