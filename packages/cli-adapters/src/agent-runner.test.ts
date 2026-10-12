@@ -1758,6 +1758,99 @@ describe("AgentRunner stop", () => {
     // And the turn settles, rather than streaming forever.
     expect(transcript[transcript.length - 1]!.streaming).toBe(false)
   })
+
+  /**
+   * A harness stuck unwinding (a tool that ignores the abort) outlives `stop`'s
+   * grace. The chat used to refuse every later prompt as "already running" until
+   * the zombie died — and when it finally did, its late output must not land on
+   * the turn that replaced it.
+   */
+  it("admits the next prompt when a stopped run never finishes unwinding", async () => {
+    const result = await Effect.gen(function* () {
+      const started = yield* Deferred.make<boolean>()
+      const unwedge = yield* Deferred.make<void>()
+      const zombieDone = yield* Deferred.make<void>()
+      const calls = yield* Ref.make(0)
+      const stuckThenNormal = Layer.succeed(
+        AgentTurnDriver,
+        AgentTurnDriver.of({
+          run: (_sessionId, _spec, ctx) =>
+            Effect.gen(function* () {
+              const call = yield* Ref.getAndUpdate(calls, (n) => n + 1)
+              if (call > 0) {
+                yield* ctx.emit({ _tag: "Assistant", text: "second reply" })
+                yield* ctx.emit({ _tag: "Done", costUsd: 0, tokens: 0 })
+                return
+              }
+              yield* ctx.emit({ _tag: "Assistant", text: "working…" })
+              yield* Deferred.succeed(started, true)
+              yield* Effect.never.pipe(
+                // Teardown wedged until the test lets go, then it talks.
+                Effect.onInterrupt(() =>
+                  Deferred.await(unwedge).pipe(
+                    Effect.andThen(ctx.emit({ _tag: "Assistant", text: "zombie output" })),
+                    Effect.andThen(Deferred.succeed(zombieDone, void 0))
+                  )
+                )
+              )
+            }) as ReturnType<AgentTurnDriverShape["run"]>,
+          stop: () => Effect.void
+        })
+      )
+      const base = Layer.mergeAll(
+        AgentRunner.Default,
+        BrowserControlMcpServiceTest,
+        InMemorySecretStoreLive,
+        ConfigService.Default,
+        SessionStore.Default,
+        TranscriptStore.Default,
+        BackgroundTaskStore.Default,
+        ContextManager.Default,
+        stuckThenNormal,
+        temp.layer
+      )
+      return yield* Effect.gen(function* () {
+        const runner = yield* AgentRunner
+        yield* runner.setMode(SESSION, "auto")
+        const firstEvents: Array<StreamEvent> = []
+        const first = yield* Effect.fork(
+          runner
+            .prompt(SESSION, SESSION, "go")
+            .pipe(Stream.runForEach((ev) => Effect.sync(() => firstEvents.push(ev))))
+        )
+        yield* Deferred.await(started).pipe(Effect.timeout("5 seconds"))
+        // Returns after the grace even though the run is still unwinding.
+        yield* runner.stop(SESSION)
+        yield* Fiber.join(first).pipe(Effect.timeout("2 seconds"))
+        const busyAfterStop = yield* runner.chatBusy(SESSION)
+        const secondEvents: Array<StreamEvent> = []
+        yield* runner
+          .prompt(SESSION, SESSION, "again")
+          .pipe(Stream.runForEach((ev) => Effect.sync(() => secondEvents.push(ev))), Effect.timeout("5 seconds"))
+        // Now let the zombie finish and try to write.
+        yield* Deferred.succeed(unwedge, void 0)
+        yield* Deferred.await(zombieDone).pipe(Effect.timeout("5 seconds"))
+        yield* Effect.sleep("200 millis")
+        return {
+          firstEvents,
+          secondEvents,
+          busyAfterStop,
+          transcript: yield* TranscriptStore.list(SESSION)
+        }
+      }).pipe(Effect.provide(base))
+    }).pipe(Effect.runPromise)
+
+    expect(result.firstEvents.some((e) => e._tag === "Failed" && e.message === STOPPED_NOTE)).toBe(true)
+    expect(result.busyAfterStop).toBe(false)
+    expect(result.secondEvents.some((e) => e._tag === "Failed" && e.message.includes("already running"))).toBe(false)
+    expect(result.secondEvents.some((e) => e._tag === "Done")).toBe(true)
+    const [, stopped, , second] = result.transcript
+    expect(stopped!.streaming).toBe(false)
+    expect(JSON.stringify(stopped)).toContain(STOPPED_NOTE)
+    expect(second!.streaming).toBe(false)
+    expect(JSON.stringify(second)).toContain("second reply")
+    expect(JSON.stringify(result.transcript)).not.toContain("zombie output")
+  }, 20_000)
 })
 
 /**

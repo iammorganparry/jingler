@@ -170,6 +170,12 @@ interface RunFiber {
    * fiber liveness, or a backgrounded task locks its chat for its whole lifetime.
    */
   readonly settled: Ref.Ref<boolean>
+  /**
+   * Settle the turn as stopped and fence off the run's later output. For a run
+   * that outlived `stop`'s grace (stuck unwinding inside a tool): without it the
+   * chat refuses every prompt as "already running" until the zombie dies.
+   */
+  readonly abandon: Effect.Effect<void>
 }
 
 /**
@@ -407,6 +413,20 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
      * entries, since the code that clears them sits after the `Deferred.await`
      * we'd have just killed.
      */
+    const interruptOrAbandon = (running: RunFiber, awaitTeardown: boolean) =>
+      Effect.gen(function* () {
+        const interrupt = Fiber.interrupt(running.fiber).pipe(Effect.asVoid)
+        if (awaitTeardown) return yield* interrupt
+        const landed = yield* interrupt.pipe(
+          Effect.timeout(INTERRUPT_GRACE),
+          Effect.as(true),
+          Effect.orElseSucceed(() => false)
+        )
+        // Still unwinding (stuck in a tool that ignores the abort): settle the
+        // turn ourselves so the chat accepts its next prompt.
+        if (!landed) yield* running.abandon
+      })
+
     const stop = (
       sessionId: string,
       requestedChatId?: string,
@@ -443,15 +463,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             if (running === undefined) return
             const current = (yield* Ref.get(fibers)).get(chatId)
             if (current?.token !== running.token) return
-            const interrupt = Fiber.interrupt(running.fiber).pipe(Effect.asVoid)
-            yield* (
-              awaitTeardown
-                ? interrupt
-                : interrupt.pipe(
-                    Effect.timeout(INTERRUPT_GRACE),
-                    Effect.ignore
-                  )
-            )
+            yield* interruptOrAbandon(running, awaitTeardown)
           })
         )
         // Kill any digest being prepared for this session too. It runs on a
@@ -678,6 +690,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
            * behaviour and cannot fail a run (`Effect.ignore` at the call site).
            */
           const sawTerminal = yield* Ref.make(false)
+          /** Set by `abandon`: the run outlived its stop, so nothing it emits may land. */
+          const detached = yield* Ref.make(false)
           const completionDeclared = yield* Ref.make(false)
           /** Unsettled background tasks belonging to this chat, right now. */
           const liveTasks = BackgroundTaskStore.liveFor(sessionId, chatId).pipe(
@@ -705,6 +719,8 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           const transcriptDirty = yield* Ref.make(false)
           const flushScheduled = yield* Ref.make(false)
           const flushTranscript: Effect.Effect<void> = Effect.gen(function* () {
+            // A pending flush from a detached run would patch the NEXT turn's message.
+            if (yield* Ref.get(detached)) return
             yield* Ref.set(transcriptDirty, false)
             const current = yield* Ref.get(acc)
             yield* TranscriptStore.patchLast(chatId, () => current).pipe(Effect.ignore)
@@ -814,7 +830,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   //
                   // `Done` is the only point at which the transcript is coherent.
                   yield* observeTurnContext(chatId, event)
-                })).pipe(Effect.provide(env), Effect.asVoid)
+                }).pipe(Effect.unlessEffect(Ref.get(detached)))).pipe(Effect.provide(env), Effect.asVoid)
 
           const canUseTool = (req: PermissionRequest): Effect.Effect<PermissionDecision> =>
             Effect.gen(function* () {
@@ -899,16 +915,22 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                   captureReply
                 )).pipe(Effect.provide(env))
 
-          yield* Ref.update(active, (m) =>
-            new Map(m).set(chatId, {
-              steer,
-              clearReplyWaiter: (waiter) =>
-                Ref.update(steeredReply, (current) =>
-                  current === waiter ? null : current
-                ),
-              replyGate
-            })
-          )
+          const activeRun: ActiveRun = {
+            steer,
+            clearReplyWaiter: (waiter) =>
+              Ref.update(steeredReply, (current) =>
+                current === waiter ? null : current
+              ),
+            replyGate
+          }
+          yield* Ref.update(active, (m) => new Map(m).set(chatId, activeRun))
+          // Only ever drop OUR entry: an abandoned run unwinds after its successor registered.
+          const deactivate = Ref.update(active, (m) => {
+            if (m.get(chatId) !== activeRun) return m
+            const nextMap = new Map(m)
+            nextMap.delete(chatId)
+            return nextMap
+          })
 
           /** Identifies THIS run, so its cleanup can't evict a successor's fiber. */
           const token: RunToken = {}
@@ -1066,13 +1088,7 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 Effect.andThen(emit({ _tag: "Failed", message: describeRunFailure(cause) }))
               )
             }),
-            Effect.ensuring(
-              Ref.update(active, (m) => {
-                const nextMap = new Map(m)
-                nextMap.delete(chatId)
-                return nextMap
-              })
-            ),
+            Effect.ensuring(deactivate),
             Effect.ensuring(
               // Deregister THIS run only. A session's slot can already belong to a
               // NEWER run by the time this one finishes: "send now" interrupts the
@@ -1153,7 +1169,26 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
             )
           )
           yield* Ref.update(fibers, (m) =>
-            new Map(m).set(chatId, { sessionId, chatId, fiber, token, settled: sawTerminal })
+            new Map(m).set(chatId, {
+              sessionId,
+              chatId,
+              fiber,
+              token,
+              settled: sawTerminal,
+              abandon: Effect.gen(function* () {
+                // Capped: a run wedged inside `emit` holds `turnMutation`, and
+                // `stop` calls this under the chat lock.
+                yield* emit({ _tag: "Failed", message: STOPPED_NOTE }).pipe(
+                  Effect.timeout(INTERRUPT_GRACE),
+                  Effect.ignore
+                )
+                yield* Ref.set(sawTerminal, true)
+                yield* Ref.set(detached, true)
+                yield* deactivate
+                yield* Effect.sync(() => workspaceTurn.release())
+                yield* out.end
+              })
+            })
           )
 
           /**
@@ -1185,7 +1220,9 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
           yield* Effect.addFinalizer(() =>
             Effect.gen(function* () {
               const decision = yield* fate(false)
-              if (decision.verdict === "end") yield* Fiber.interrupt(fiber)
+              // An abandoned run already got its interrupt; awaiting it again would
+              // hang this consumer on the very teardown `stop` gave up on.
+              if (decision.verdict === "end" && !(yield* Ref.get(detached))) yield* Fiber.interrupt(fiber)
               yield* out.end
             })
           )
