@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
@@ -76,6 +76,48 @@ test("browses, filters, comments on and closes issues through authenticated gh",
 
     await issues.getByRole("button", { name: "Close issue" }).click()
     await expect.poll(() => readFileSync(log, "utf8")).toContain("issue close 1 --repo acme/widget")
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("shows a failed issue load with Retry, and Retry loads the inbox", async ({ launchApp }) => {
+  const root = mkdtempSync(join(tmpdir(), "jingler-e2e-issues-retry-"))
+  const bin = join(root, "bin")
+  const failFlag = join(root, "fail")
+  try {
+    mkdirSync(bin)
+    writeFileSync(failFlag, "")
+    const script = [
+      "#!/usr/bin/env node",
+      "const fs = require('node:fs')",
+      "const args = process.argv.slice(2)",
+      "const joined = args.join(' ')",
+      `const inbox = ${JSON.stringify(inbox)}`,
+      "if (args[0] === 'auth' && args[1] === 'status') process.exit(0)",
+      "if (args[0] === 'api' && args[1] === 'graphql' && joined.includes('is:issue')) {",
+      `  if (fs.existsSync(${JSON.stringify(failFlag)})) { console.error('gh: network unreachable'); process.exit(1) }`,
+      "  console.log(JSON.stringify(inbox)); process.exit(0)",
+      "}",
+      "console.error('unsupported gh command: ' + joined)",
+      "process.exit(1)"
+    ].join("\n")
+    writeFileSync(join(bin, "gh"), script)
+    chmodSync(join(bin, "gh"), 0o755)
+
+    const { window } = await launchApp({
+      configured: true,
+      withRepo: true,
+      e2eEnv: { PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` }
+    })
+
+    await window.getByTestId("issues-sidebar-item").click()
+    const issues = window.getByTestId("issue-inbox")
+    await expect(issues.getByRole("alert")).toBeVisible({ timeout: 20_000 })
+    unlinkSync(failFlag)
+    await issues.getByRole("button", { name: "Retry" }).click()
+    await expect(issues.getByRole("button", { name: /Widget crashes/ })).toBeVisible({ timeout: 20_000 })
+    await expect(issues.getByRole("alert")).toHaveCount(0)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

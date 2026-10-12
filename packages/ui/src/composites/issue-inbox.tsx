@@ -9,8 +9,9 @@ import { Callout } from "../components/callout.js"
 import { Card } from "../components/card.js"
 import { Markdown } from "../components/markdown.js"
 import { Spinner } from "../components/loading.js"
-import { SearchInput } from "../components/search-input.js"
-import { MotionTabs } from "../components/beui/controls.js"
+import { SearchField } from "../components/search-input.js"
+import { FilterChips } from "../components/filter-chips.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { atLeast, useWidthTier, WidthTierProvider } from "../hooks/width-tier.js"
 import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
@@ -67,6 +68,8 @@ export interface IssueInboxProps {
   warnings?: ReadonlyArray<string>
   onActivate?: () => void
   onRefresh?: () => void
+  /** Re-runs the failed issue load; shown as Retry beside the load error. */
+  onRetry?: () => void
   refreshing?: boolean
   selected: { repository: string; number: number } | null
   detail: IssueDetail | null
@@ -91,7 +94,7 @@ const hasActiveIssueFilters = (f: typeof initialIssueInboxFilters) =>
 
 /** Global GitHub issue list with a responsive detail pane, modelled on PullRequestInbox. */
 export function IssueInbox({
-  issues, viewerLogin, warnings = [], onActivate, onRefresh, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
+  issues, viewerLogin, warnings = [], onActivate, onRefresh, onRetry, refreshing = false, selected, detail, onSelect, onOpenOnGithub, onComment, onCloseIssue, closeError,
   sessionAction, loading = false, detailLoading = false, detailError = null, error = null
 }: IssueInboxProps) {
   const [filterState, sendFilters] = useMachine(issueInboxFilterMachine)
@@ -116,9 +119,9 @@ export function IssueInbox({
   const change = (fields: Partial<typeof facets>) => sendFilters({ type: "CHANGE", fields })
 
   function renderList() {
-    if (loading) return <InboxMessage><Spinner size={18} />Loading issues…</InboxMessage>
-    if (error) return <InboxMessage>{error}</InboxMessage>
-    if (visible.length === 0) return <InboxMessage><CircleDot className="size-5 text-dim" />No issues match this view.</InboxMessage>
+    if (loading) return <ListSkeleton rows={6} rowHeight={72} className="p-4" />
+    if (error) return <InlineError message={error} onRetry={onRetry} className="m-4" />
+    if (visible.length === 0) return <EmptyState icon={<CircleDot className="size-5" />} title="No issues match this view." description={filtered ? "Clear the filters to see every loaded issue." : undefined} />
     return visible.map((issue) => (
       <button
         key={keyOf(issue)}
@@ -192,8 +195,8 @@ export function IssueInbox({
                 </button>
               )}
             </div>
-            <SearchInput value={query} onChange={(next) => change({ query: next })} placeholder="Search issues" />
-            <MotionTabs items={FILTERS} value={filter} onChange={(next) => change({ filter: next })} variant="segment" />
+            <SearchField value={query} onChange={(next) => change({ query: next })} placeholder="Search issues" />
+            <FilterChips options={FILTERS} value={filter} onChange={(next) => change({ filter: next })} ariaLabel="Issue relationship" />
             <div className="grid min-w-0 grid-cols-2 gap-2">
               {(["repository", "author", "assignee", "label"] as const).map((kind) => <InboxFilterSelect
                 key={kind} label={kind[0]!.toUpperCase() + kind.slice(1)}

@@ -2046,6 +2046,7 @@ function renderIssueInbox(
     warnings={issueInbox.warnings}
     onActivate={issueInbox.activate}
     onRefresh={issueInbox.refresh}
+    onRetry={issueInbox.refresh}
     refreshing={issueInbox.refreshing}
     selected={issueInbox.selected ? { repository: issueInbox.selected.repository, number: issueInbox.selected.number } : null}
     detail={issueInbox.detail}
