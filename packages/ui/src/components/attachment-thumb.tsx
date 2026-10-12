@@ -53,12 +53,13 @@ export function AttachmentThumb({
           type="button"
           onClick={onRemove}
           title="Remove image"
-          className="absolute right-1 top-1 flex size-4 items-center justify-center rounded-full border border-line bg-canvas/85 text-text-body outline-none transition-colors hover:bg-canvas focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Remove image"
+          className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full border border-line bg-canvas/85 text-text-body outline-none transition-colors hover:bg-canvas focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X size={10} />
         </button>
       )}
-      <span className="absolute inset-x-0 bottom-0 truncate bg-canvas/80 px-1.5 py-px font-mono text-[8.5px] text-muted-foreground">
+      <span className="absolute inset-x-0 bottom-0 truncate bg-canvas/80 px-1.5 py-px font-mono text-[10px] text-muted-foreground">
         {attachment.name}
       </span>
     </div>
