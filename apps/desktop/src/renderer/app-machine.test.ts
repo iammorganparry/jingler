@@ -482,3 +482,54 @@ describe("appMachine first-run coordination", () => {
     actor.stop();
   });
 });
+
+describe("appMachine boot failure retry", () => {
+  it("retries from failure back to loading", async () => {
+    const machine = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => {
+          throw new Error("Network unavailable");
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(actor.getSnapshot().context.error).toBe("Network unavailable");
+
+    actor.send({ type: "RETRY" });
+
+    await waitFor(actor, (snapshot) => snapshot.matches("loading"));
+    actor.stop();
+  });
+
+  it("succeeds after retry from a transient boot failure", async () => {
+    let attempts = 0;
+    const machine = appMachine.provide({
+      actors: {
+        initialLoad: fromPromise<InitialData>(async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error("Transient failure");
+          return {
+            configured: true,
+            providerReady: true,
+            reposDir: "/repos",
+            repos: [],
+            sessions: [],
+            providerCatalog,
+          };
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+
+    await waitFor(actor, (snapshot) => snapshot.matches("failure"));
+    expect(actor.getSnapshot().context.error).toBe("Transient failure");
+
+    actor.send({ type: "RETRY" });
+
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"));
+    expect(attempts).toBe(2);
+    actor.stop();
+  });
+});
