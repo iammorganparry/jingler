@@ -63,6 +63,10 @@ test("refuses detached work, then resumes an idempotent publish after restart", 
   await window.getByTestId("view-tab-pr").click()
   await window.getByRole("button", { name: "Publish pull request" }).click()
   await expect(window.getByText("Publishing stopped")).toBeVisible()
+  // 3-step stepper shows Commit, Push, Open PR
+  await expect(window.getByText("Commit")).toBeVisible()
+  await expect(window.getByText("Push")).toBeVisible()
+  await expect(window.getByText("Open PR")).toBeVisible()
   await expect(window.getByText(/Finish creating the semantic task branch/)).toBeVisible()
   expect(githubServer.operations).toEqual([])
   await expect.poll(() => sessionsAt(home)[0]?.publish?.step).toBe("failed")
