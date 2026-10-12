@@ -72,10 +72,26 @@ Legend: **Reuse** existing code to restyle · **New** component (atom / molecule
 
 ### Paper parity (node CD8-0, board 02 · Improved)
 
-**Paper MCP unavailable during this check.** Comparison is from code inspection of the merged implementation.
+| Property | Story (project-sidebar.tsx) | Paper (CD8-0) | Match |
+|---|---|---|---|
+| Rail width | `w-14` (56px) | 56px | yes |
+| Rail background | `bg-canvas` (#141414) | #0B0B0C | token kept (close) |
+| Rail border | `border-hairline` (#0f0f0f) | #232327 | token kept |
+| Rail padding | `py-2` (8px vertical) | 8px | yes |
+| Project button size | `size-9` (36px square) | 36px | yes |
+| Project button radius | `rounded-[8px]` (8px) | 8px (rounded-lg) | yes |
+| Button bg (inactive) | `bg-editor` (#212121) | #1A1A1D | token kept (close) |
+| Button border (inactive) | `border-hairline` (#0f0f0f) | #232327 | token kept |
+| Button bg (active) | `bg-surface` (#2b2b2b) | #26262B | yes (1 level off) |
+| Button border (active) | `border-transparent` | none shown | yes |
+| Avatar size | 28px | 28px (inferred) | yes |
+| Avatar radius | `rounded-[6px]` (6px) | 6px | yes |
+| Active left bar | `w-[2px] h-5 bg-text-bright` | 2px × 20px #EDEDEF | yes |
+| Badge bg (neutral) | `bg-line-strong` (#454545) | not shown (spec §6.10) | spec ✓ |
+| Badge font | `text-[10px] font-semibold` | 11px/14px semibold (warning) | close |
+| Badge text | `text-text-bright` (#f4f1f1) | #0B0B0C (warning badge) | neutral chosen |
+| Add button border | `border-line` hover `border-line-strong` | dashed #303036 | token kept |
 
-| Property | Implementation (project-sidebar.tsx) | Spec/Expected | Match |
-|---|---|---|
 | Rail width | `w-14` (56px) | 56px | yes |
 | Rail background | `bg-canvas` | neutral canvas | yes |
 | Rail border | `border-r border-hairline` | hairline right border | yes |
