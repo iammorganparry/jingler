@@ -7,6 +7,7 @@ import type {
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
+import { PrReviewGroup } from "./pr-review-group.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
 import { ReviewFindingRow } from "./review-findings.js"
@@ -169,6 +170,15 @@ export const TimelineEntries: Story = {
           item={{ id: kind, author: "dan", kind, body: `A ${kind} entry.`, createdAt: "2026-07-11T09:00:00.000Z", path: null, line: null }}
         />
       ))}
+    </div>
+  )
+}
+
+/** Review threads grouped under one review: open + outdated, and resolved (collapsed), neutral chrome. */
+export const ReviewThreads: Story = {
+  render: () => (
+    <div className="max-w-[760px] bg-editor p-6">
+      <PrReviewGroup threads={pr.reviewThreads} prAuthor="claude-agent" onResolve={() => {}} onReply={() => {}} />
     </div>
   )
 }
