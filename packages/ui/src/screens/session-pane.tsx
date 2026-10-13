@@ -580,11 +580,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     for (const path of filePaths.split("\n")) props.onTrackFile?.(sessionId, path)
   }, [filePaths, props.onTrackFile, sessionId])
 
-  const lastDebugStop = useRef(0)
-  useEffect(() => {
-    const sequence = props.debugStopSequence ?? 0
-    lastDebugStop.current = sequence
-  }, [props.debugStopSequence])
 
   // A pending deep link into Plan Review. One-shot: Plan Review reports its own
   // selection back and we drop it. Tagged with its session because step ids

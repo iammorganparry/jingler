@@ -111,8 +111,8 @@ describe("visibleTabs", () => {
     expect(idsFor(s, { hasExplanation: true })).toContain("explanation")
   })
 
-  it("shows Files only for worktree-backed sessions", () => {
-    expect(idsFor(session({ id: "a" }))).toContain("files")
+  it("never offers a Files tab: files open from the Explorer and ⌘P", () => {
+    expect(idsFor(session({ id: "a" }))).not.toContain("files")
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("files")
   })
 
@@ -126,7 +126,6 @@ describe("visibleTabs", () => {
   it("keeps the built-in order the operator already knows", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
-      "files",
       "plan",
       "pr",
       "changes"
@@ -193,23 +192,6 @@ describe("visibleTabs", () => {
  * so querying by it is both what a screen-reader user does and the only spelling
  * that is stable across tiers.
  */
-describe("debug source following", () => {
-  it("opens Files for every new debugger stop sequence", () => {
-    const props = {
-      session: session({ id: "debug", worktreePath: "/repo" }),
-      renderConversation: () => <div>transcript</div>,
-      renderFiles: () => <div>debug source</div>
-    }
-    const view = render(<SessionPane {...props} debugStopSequence={0} />)
-    expect(screen.getByText("transcript")).toBeTruthy()
-    view.rerender(<SessionPane {...props} debugStopSequence={1} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
-    view.rerender(<SessionPane {...props} debugStopSequence={2} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-  })
-})
-
 describe("plugin tab contributions", () => {
   it("renders a plugin tab body through the same path as a built-in", () => {
     render(
@@ -849,53 +831,6 @@ describe("SessionPane", () => {
     expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
     command("close")
     expect(screen.queryByTestId("editor-tab-view-explanation")).toBeNull()
-  })
-
-  it("renders the Files built-in through the host renderer", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={() => <div>transcript</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-  })
-
-  it("opens Files as a tab while the transcript stays mounted", async () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-
-    await screen.findByRole("button", { name: "Files" })
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-    expect(screen.getByText("transcript for a")).toBeTruthy()
-    expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
-  })
-
-  it("routes a Files code reference to Conversation in the same session pane", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s, ctx) => (
-          <button type="button" onClick={ctx.onSelectConversation}>
-            forward reference for {s.id}
-          </button>
-        )}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    fireEvent.click(screen.getByRole("button", { name: "forward reference for a" }))
-
-    expect(screen.getByText("transcript for a")).toBeTruthy()
   })
 
   it("hydrates restored file panes into the host's file tab actor", async () => {

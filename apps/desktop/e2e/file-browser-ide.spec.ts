@@ -122,25 +122,9 @@ const scrollTree = (tree: Locator, direction: "top" | "down"): Promise<boolean> 
     return scroller.scrollTop !== previous
   }, direction)
 
+// The Files tab is gone (#389): opening a file from the Explorer creates the content group beside chat.
 const splitChatBesideFiles = async (window: Page): Promise<void> => {
-  await window.evaluate(() => {
-    const source = document.querySelector('[data-testid^="editor-tab-chat-"]')
-    const target = document.querySelector('[data-testid="editor-group"]')
-    if (!source || !target) throw new Error("missing chat/file split node")
-    const box = target.getBoundingClientRect()
-    const dataTransfer = new DataTransfer()
-    const init = {
-      dataTransfer,
-      bubbles: true,
-      cancelable: true,
-      clientX: box.left + box.width * 0.04,
-      clientY: box.top + box.height / 2
-    }
-    source.dispatchEvent(new DragEvent("dragstart", init))
-    target.dispatchEvent(new DragEvent("dragover", init))
-    target.dispatchEvent(new DragEvent("drop", init))
-    source.dispatchEvent(new DragEvent("dragend", init))
-  })
+  await selectTreePath(window, "src/other.ts")
   await expect(window.getByTestId("editor-group")).toHaveCount(2)
 }
 
@@ -395,8 +379,8 @@ test("follows the selected chat agent through edited and newly created files", a
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   await expect(window.getByTestId("editor-group")).toHaveCount(2)
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(composerFollow).toHaveClass(/is-active/)
@@ -458,8 +442,8 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
 
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[subagent-edit-preview]] Delegate this file update.")
@@ -491,8 +475,8 @@ test("refreshes the repository tree and follows a moved file to its destination"
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   await selectTreePath(window, "src/config.ts")
   await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
   await composerFollow.click()
@@ -541,8 +525,8 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   const composerFollow = window
     .getByTestId("composer")
     .getByRole("button", { name: "Follow agent", exact: true })
-  await composerFollow.click()
   await splitChatBesideFiles(window)
+  await composerFollow.click()
   const composer = window.getByPlaceholder("Message the agent…")
   await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
   await composer.press("Enter")
@@ -675,8 +659,8 @@ test("following a settled operation keeps its rendered file mounted while Pi str
     piFixture: { scenarioId: "follow-stability", authRoute: "api-key" }
   })
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("composer").getByRole("button", { name: "Follow agent", exact: true }).click()
   await splitChatBesideFiles(window)
+  await window.getByTestId("composer").getByRole("button", { name: "Follow agent", exact: true }).click()
   const composer = window.getByPlaceholder("Message the agent…")
   const operations: readonly [string, string, string][] = [
     ["first", "stability-first", "export const mode = 'modern'"],
