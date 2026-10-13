@@ -91,6 +91,10 @@ describe("managed pi-subagent profiles", () => {
       PONYTAIL_EXTENSION_PATH
     ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
+    for (const agent of ["worker", "oracle"]) {
+      const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
+      expect(profile).toMatch(/^defaultContext: fresh$/m)
+    }
     expect(fanout.contract.tools.fanoutAuthorized).toBe(true)
     expect(fanout.contract.tools.requestedBuiltin).toEqual([
       "subagent",
