@@ -1,7 +1,8 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { createContext, useEffect, useRef, type ReactNode } from "react"
-import { ChevronDown, ChevronRight, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
+import { ArrowLeft, ChevronDown, ChevronRight, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
+import { Kbd } from "../components/kbd.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 
@@ -51,9 +52,6 @@ function SubagentBreadcrumb({ title, view }: { readonly title: string; readonly 
   const current = view.siblings.find((sibling) => sibling.id === view.selectedId)
   return (
     <div data-testid="subagent-breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-xs">
-      <Button variant="ghost" size="sm" data-testid="subagent-back" onClick={view.onBack} className="flex-none px-2">
-        ← Main
-      </Button>
       <span className="min-w-0 max-w-[40%] truncate text-muted-foreground">{title}</span>
       <ChevronRight className="size-3 flex-none text-dim" />
       <DropdownMenu.Root>
@@ -91,6 +89,11 @@ function SubagentBreadcrumb({ title, view }: { readonly title: string; readonly 
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      <span className="flex-1" />
+      {/* Board 20a: bordered "← Main" pill with an Esc hint on the right. */}
+      <Button variant="outline" size="sm" data-testid="subagent-back" onClick={view.onBack} className="flex-none gap-1.5 px-2">
+        <ArrowLeft className="size-3" /> Main <Kbd>Esc</Kbd>
+      </Button>
     </div>
   )
 }
