@@ -23,6 +23,11 @@ export const matchChangesChord = (event: Chord): boolean =>
   (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
   (event.key.toLowerCase() === "d" || event.code === "KeyD")
 
+/** ⌘⇧P (or ⌃⇧P off macOS) opens Checks. */
+export const matchChecksChord = (event: Chord): boolean =>
+  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
+  (event.key.toLowerCase() === "p" || event.code === "KeyP")
+
 /** ⌥1–⌥9 → zero-based position of the header view button to open, matching the physical digit key. */
 export const matchHeaderViewChord = (event: Chord): number | null =>
   event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)

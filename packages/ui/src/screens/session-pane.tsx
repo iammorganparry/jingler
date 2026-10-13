@@ -70,7 +70,7 @@ import {
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
 import { useChatLane } from "../app/use-chat-lane.js"
-import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
+import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchChecksChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
@@ -899,19 +899,20 @@ function SessionPaneBody(props: SessionPaneProps) {
     id: tab.id,
     label: tab.label,
     icon: tab.icon,
+    ...(tab.id === BUILTIN_TAB.checks ? { shortcut: "mod+shift+p" } : tab.id === BUILTIN_TAB.changes ? { shortcut: "mod+shift+d" } : {}),
     ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
     ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
     ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
   }))
   const pinnedViews = props.headerViews ?? []
   const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
-  // ⌘⇧D opens Changes; ⌥1–⌥9 open the header button at that position. Both go through
+  // ⌘⇧D opens Changes; ⌘⇧P opens Checks; ⌥1–⌥9 open the header button at that position. Both go through
   // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
   useEffect(() => {
     if (!paneFocused) return
     const onKeyDown = (e: KeyboardEvent) => {
       const position = matchHeaderViewChord(e)
-      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : pinnedHeaderItems[position]?.id
+      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : matchChecksChord(e) ? (tabs.some((tab) => tab.id === BUILTIN_TAB.checks) ? BUILTIN_TAB.checks : undefined) : position === null ? undefined : pinnedHeaderItems[position]?.id
       if (target === undefined) return
       e.preventDefault()
       selectTab(target)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { matchBrowserChord, matchChangesChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord } from "./app-shortcuts.js"
+import { matchBrowserChord, matchChangesChord, matchChecksChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord } from "./app-shortcuts.js"
 
 const chord = (over: Partial<Parameters<typeof matchSplitEditorChord>[0]>) => ({
   key: "\\",
@@ -41,6 +41,14 @@ describe("header view chords", () => {
       expect(matchChangesChord(e) || matchBrowserChord(e)).toBe(false)
     }
     expect(matchChangesChord(key({ metaKey: true, key: "l", code: "KeyL" }))).toBe(false)
+  })
+
+  it("opens Checks on ⌘⇧P (⌃⇧P off macOS) and not on bare ⌘P or with Alt", () => {
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, key: "P", code: "KeyP" }))).toBe(true)
+    expect(matchChecksChord(key({ ctrlKey: true, shiftKey: true, key: "P", code: "KeyP" }))).toBe(true)
+    expect(matchChecksChord(key({ metaKey: true, key: "p", code: "KeyP" }))).toBe(false)
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, altKey: true, key: "P", code: "KeyP" }))).toBe(false)
+    expect(matchChecksChord(key({ metaKey: true, shiftKey: true, key: "D", code: "KeyD" }))).toBe(false)
   })
 
   it("opens Terminal on ⌃`", () => {

@@ -1105,6 +1105,19 @@ describe("SessionPane", () => {
     })
   })
 
+  it("⌘⇧P opens Checks without duplicating the tab", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a", prNumber: 5 })}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderPullRequest={() => <div>review view</div>}
+      />
+    )
+    for (let i = 0; i < 2; i++) fireEvent.keyDown(window, { key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+    expect(screen.getByText("review view")).toBeTruthy()
+    expect(screen.getAllByTestId("editor-tab-view-checks")).toHaveLength(1)
+  })
+
   it("falls back to Conversation when the selected tab stops being available", async () => {
     const { rerender } = render(
       <SessionPane
