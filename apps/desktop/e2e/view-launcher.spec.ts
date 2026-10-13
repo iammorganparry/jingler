@@ -95,8 +95,43 @@ test("⌘K → Open view… opens the chosen view and leaves one tab on repeat",
   await window.getByTestId("session-row-s_view_launcher").click()
   for (let attempt = 0; attempt < 2; attempt++) {
     await window.keyboard.press("Meta+k")
-    await window.getByTestId("palette-item-view:pr").click()
+    await window.getByTestId("palette-item-view:checks").click()
     await expect(window.getByTestId("command-palette")).toBeHidden()
+    await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
+  }
+})
+
+test("a session with a PR shows Checks a/b in the header and ⌘⇧P opens it without duplicating", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [
+      { ...session, prNumber: 482, githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath }
+    ],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 482,
+        title: "Refactor auth flow",
+        headRefName: "chore/refactor",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        additions: 1,
+        deletions: 0,
+        checks: [
+          { name: "lint", conclusion: "success" },
+          { name: "unit", conclusion: "success" },
+          { name: "e2e", conclusion: "failure" }
+        ]
+      }]
+    }
+  })
+  await window.getByTestId("session-row-s_view_launcher").click()
+  await expect(window.getByTestId("header-view-checks")).toHaveText("Checks2/3")
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await window.keyboard.press("Meta+Shift+p")
     await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
   }
 })
