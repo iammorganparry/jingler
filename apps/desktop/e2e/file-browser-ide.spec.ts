@@ -283,7 +283,7 @@ test("shows a previously existing large worktree without a repository search bar
     return editorBox.y + editorBox.height - (lineBox.y + lineBox.height)
   }).toBeGreaterThanOrEqual(24)
 
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
+  await expect(window.getByTestId("chat-lane-header")).toBeVisible()
   await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const restoredTree = await showRepositoryTree(window)
   await expect(restoredTree.locator('[role="treeitem"]').first()).toBeVisible({
@@ -426,7 +426,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
   await selectTreePath(window, "src/other.ts")
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "false")
 })
 
@@ -457,7 +457,7 @@ test("follows a nested sub-agent edit for the selected chat", async ({ launchApp
     window
       .getByTestId("editor-tab-file-src/delegated.ts").getByRole("tab")
   ).toBeVisible()
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -479,7 +479,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
   await splitChatBesideFiles(window)
   await composerFollow.click()
   await selectTreePath(window, "src/config.ts")
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await composerFollow.click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 
@@ -507,7 +507,7 @@ test("refreshes the repository tree and follows a moved file to its destination"
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
   await expect(tree.locator('[data-item-path="src/config.ts"]')).toHaveCount(0)
   await expect(tree.locator('[data-item-path="src/settings/"]')).toHaveCount(1)
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await window.getByTestId("composer").getByRole("textbox").click()
   await expect(composerFollow).toHaveAttribute("aria-pressed", "true")
 })
 
