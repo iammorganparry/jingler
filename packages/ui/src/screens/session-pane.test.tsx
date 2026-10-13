@@ -141,6 +141,8 @@ describe("visibleTabs", () => {
     expect(idsFor(session({ id: "a", prNumber: 12 }))).toContain("changes")
     // Code Review merged into the Explorer's changed-files filter.
     expect(idsFor(session({ id: "a", prNumber: 12 }))).not.toContain("review")
+    // One tab, never two: Changes appears exactly once.
+    expect(idsFor(session({ id: "a", prNumber: 12 })).filter((id) => id === "changes")).toHaveLength(1)
   })
 
   it("keeps the built-in order the operator already knows", () => {

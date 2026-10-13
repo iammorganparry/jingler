@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { matchBrowserChord, matchChangesChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord } from "./app-shortcuts.js"
+import { matchBrowserChord, matchChangesChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord, tabShortcutHint } from "./app-shortcuts.js"
 
 const chord = (over: Partial<Parameters<typeof matchSplitEditorChord>[0]>) => ({
   key: "\\",
@@ -41,6 +41,11 @@ describe("header view chords", () => {
       expect(matchChangesChord(e) || matchBrowserChord(e)).toBe(false)
     }
     expect(matchChangesChord(key({ metaKey: true, key: "l", code: "KeyL" }))).toBe(false)
+  })
+
+  it("shows ⌘⇧D beside Changes only, since Code Review merged into it", () => {
+    expect(tabShortcutHint("changes")).toBe("⌘⇧D")
+    expect(tabShortcutHint("review")).toBeUndefined()
   })
 
   it("opens Terminal on ⌃`", () => {

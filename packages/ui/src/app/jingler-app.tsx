@@ -1,5 +1,5 @@
 import { defaultProps } from "../lib/default-props.js"
-import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut } from "./app-shortcuts.js"
+import { matchGlobalSearchChord, matchTerminalChord, matchBrowserChord, matchSplitEditorChord, surfaceCommandForShortcut, tabShortcutHint } from "./app-shortcuts.js"
 import {
   type ReactNode,
   useCallback,
@@ -1143,12 +1143,6 @@ function getActiveTabContext(active: Session) {
       })
     }
 
-  }
-
-  function tabShortcutHint(tabId: TabKey) {
-    if (tabId === BUILTIN_TAB.browser) return "⌃⇧B"
-    if (tabId === BUILTIN_TAB.terminal) return "⌃`"
-    return undefined
   }
 
   function appendTabActions(items: PaletteItem[]) {
