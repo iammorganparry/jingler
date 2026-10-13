@@ -72,6 +72,25 @@ const mockPaneWidth = (width: number) =>
 
 
 
+
+
+
+/** 
+ * Click a chat tab or thread option, handling both ChatLaneHeader (chat-only) 
+ * and normal tab strip (mixed surfaces).
+ */
+const clickChat = (chatId: string, title: string = "Chat 1") => {
+  // Try normal tab first (mixed surfaces)
+  const tab = screen.queryByRole("tab", { name: title })
+  if (tab) {
+    fireEvent.click(tab)
+    return
+  }
+  // Fall back to thread switcher (chat-only)
+  fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
+}
+
 describe("visibleTabs", () => {
   it("shows only Conversation for a bare session", () => {
     expect(idsFor(session({ id: "a", worktreePath: undefined }))).toEqual([
@@ -111,8 +130,8 @@ describe("visibleTabs", () => {
     expect(idsFor(s, { hasExplanation: true })).toContain("explanation")
   })
 
-  it("shows Files only for worktree-backed sessions", () => {
-    expect(idsFor(session({ id: "a" }))).toContain("files")
+  it("never offers a Files tab: files open from the Explorer and ⌘P", () => {
+    expect(idsFor(session({ id: "a" }))).not.toContain("files")
     expect(idsFor(session({ id: "b", worktreePath: undefined }))).not.toContain("files")
   })
 
@@ -126,7 +145,6 @@ describe("visibleTabs", () => {
   it("keeps the built-in order the operator already knows", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
-      "files",
       "plan",
       "pr",
       "changes"
@@ -193,23 +211,6 @@ describe("visibleTabs", () => {
  * so querying by it is both what a screen-reader user does and the only spelling
  * that is stable across tiers.
  */
-describe("debug source following", () => {
-  it("opens Files for every new debugger stop sequence", () => {
-    const props = {
-      session: session({ id: "debug", worktreePath: "/repo" }),
-      renderConversation: () => <div>transcript</div>,
-      renderFiles: () => <div>debug source</div>
-    }
-    const view = render(<SessionPane {...props} debugStopSequence={0} />)
-    expect(screen.getByText("transcript")).toBeTruthy()
-    view.rerender(<SessionPane {...props} debugStopSequence={1} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
-    view.rerender(<SessionPane {...props} debugStopSequence={2} />)
-    expect(screen.getByText("debug source")).toBeTruthy()
-  })
-})
-
 describe("plugin tab contributions", () => {
   it("renders a plugin tab body through the same path as a built-in", () => {
     render(
@@ -410,7 +411,7 @@ describe("session browser tab", () => {
     render(<BrowserHarness />)
     fireEvent.click(screen.getByRole("button", { name: "Browser" }))
     expect(screen.getByText("browser for browser-owner")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+    clickChat("c_browser-owner_1", "Chat 1")
     expect(screen.getByText("owner transcript")).toBeTruthy()
     expect(toggled).toEqual(["browser-owner"])
   })
@@ -731,7 +732,8 @@ describe("SessionPane", () => {
     )
 
     expect(document.getElementById("session-tab-bar-portal")!.childElementCount).toBe(0)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(1)
+    // With ChatLaneHeader, chat-only groups use a dropdown instead of tabs
+    expect(screen.getByTestId("chat-lane-header")).toBeTruthy()
   })
 
   it("moves the focused session view rail into the main frame", () => {
@@ -841,8 +843,8 @@ describe("SessionPane", () => {
     const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }], activeChatId: "b" }
     render(<SessionPane session={s} renderConversation={(owner) => <div>chat {owner.activeChatId}</div>} />)
     const stored = () => JSON.parse(localStorage.getItem("sb.editor-layout.v1:reopen")!)
-    const mainTab = screen.getByTestId(`editor-tab-chat-${mainId}`)
-    fireEvent.click(within(mainTab).getByRole("button", { name: /^Close / }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByTestId(`chat-close-${mainId}`))
     await waitFor(() => expect(stored().mainChatId).toBeNull())
     fireEvent.drop(screen.getByTestId("editor-group"), {
       dataTransfer: {
@@ -901,53 +903,6 @@ describe("SessionPane", () => {
     expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
     command("close")
     expect(screen.queryByTestId("editor-tab-view-explanation")).toBeNull()
-  })
-
-  it("renders the Files built-in through the host renderer", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={() => <div>transcript</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-  })
-
-  it("opens Files as a tab while the transcript stays mounted", async () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s) => <div>files for {s.id}</div>}
-      />
-    )
-
-    await screen.findByRole("button", { name: "Files" })
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    expect(screen.getByText("files for a")).toBeTruthy()
-    expect(screen.getByText("transcript for a")).toBeTruthy()
-    expect(screen.getAllByTestId("editor-group")).toHaveLength(2)
-  })
-
-  it("routes a Files code reference to Conversation in the same session pane", () => {
-    render(
-      <SessionPane
-        session={session({ id: "a" })}
-        renderConversation={(s) => <div>transcript for {s.id}</div>}
-        renderFiles={(s, ctx) => (
-          <button type="button" onClick={ctx.onSelectConversation}>
-            forward reference for {s.id}
-          </button>
-        )}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Files" }))
-    fireEvent.click(screen.getByRole("button", { name: "forward reference for a" }))
-
-    expect(screen.getByText("transcript for a")).toBeTruthy()
   })
 
   it("hydrates restored file panes into the host's file tab actor", async () => {
@@ -1089,14 +1044,14 @@ describe("SessionPane", () => {
       expect(screen.getByText("transcript b")).toBeTruthy()
     })
 
-    it("fires again for the same tab when the nonce moves", () => {
+    it("fires again for the same tab when the nonce moves", async () => {
       const onTabRequestHandled = vi.fn()
       const { rerender } = render(
         pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
-      fireEvent.click(screen.getByRole("tab", { name: /Chat 1/ }))
+      clickChat("c_a_1", "Chat 1")
       expect(screen.getByText("transcript a")).toBeTruthy()
 
       // Asking for the SAME tab a second time has to work — that is what the

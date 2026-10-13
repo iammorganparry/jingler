@@ -74,7 +74,8 @@ import {
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
-import { useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { openSessionFileDiff, useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { useFollowAgentFiles } from "./use-follow-agent-files.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
@@ -244,7 +245,6 @@ export function ConversationPane({
   environments,
   providerCatalog,
   agentEndpointCatalog,
-  onSelectFiles,
   onSelectChanges,
   onOpenProviderSettings,
   onAddMcp,
@@ -287,9 +287,7 @@ export function ConversationPane({
    * Storybook and the component tests want.
    */
   onOpenFile?: (sessionId: string, path: string) => void
-  /** Present Files beside the conversation when follow mode is enabled here. */
-  onSelectFiles?: () => void
-  /** Open the canonical Changes view from uncertain-mutation recovery. */
+/** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
@@ -322,13 +320,24 @@ export function ConversationPane({
     (enabled: boolean) => {
       if (enabled) {
         fileBrowser.enableFollow()
-        onSelectFiles?.()
       } else {
         fileBrowser.disableFollow()
       }
     },
-    [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
+    [fileBrowser.disableFollow, fileBrowser.enableFollow]
   )
+  // Follow opens each edited file as a file tab; the viewed subagent's edits win.
+  useFollowAgentFiles({
+    sessionId: session.id,
+    chatId: activeChat.id,
+    worktreePath: session.worktreePath,
+    enabled: fileBrowser.followEnabled,
+    onFollow: ({ path, eventId, preview, completed }) => {
+      fileBrowser.followAgentTarget(path, eventId, preview, completed)
+      openSessionFileDiff(session.id, session.worktreePath, path, { eventId, preview, completed })
+      onOpenFile?.(session.id, path)
+    }
+  })
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
     const reviewId = plannotatorReviewId(convo.plannotator)

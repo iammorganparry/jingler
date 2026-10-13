@@ -239,7 +239,8 @@ test("plan review reads as a document: real heading scale, inline detail, file r
   // Untracked paths stay plain text; tracked ones open in Files.
   await expect(files.getByRole("button", { name: "Open src/auth.test.ts" })).toHaveCount(0)
   await files.getByRole("button", { name: "Open README.md" }).click()
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 })
 
 test("diff and diagram file links open Files; diagrams pan, zoom and go fullscreen", async ({ launchApp }) => {
@@ -252,7 +253,8 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   // src/auth.ts is not tracked in the fixture repo, so it must not render as a link.
   await expect(review(launched).getByRole("button", { name: "Open src/auth.ts" })).toHaveCount(0)
   await review(launched).locator('[data-plan-change="README.md"]').getByRole("button", { name: "Open README.md" }).click()
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 
   await openPlanTab(launched)
   const stage = review(launched).getByRole("region", { name: "Implement auth", exact: true })
@@ -287,7 +289,8 @@ test("diff and diagram file links open Files; diagrams pan, zoom and go fullscre
   await expect(dialog).toBeVisible()
   await dialog.getByRole("link", { name: "Open file README.md" }).click()
   await expect(dialog).toHaveCount(0)
-  await expect(launched.window.getByTestId("view-tab-files").first()).toHaveAttribute("aria-current", "page")
+  // File opens in editor (files tab removed in redesign 3.6)
+  await expect(launched.window.getByTestId("editor-tab-file-README.md")).toBeVisible()
 })
 
 test("submission rejects a plan with an unsafe diff path and no test strategy", async ({ launchApp }) => {

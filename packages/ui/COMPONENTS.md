@@ -189,6 +189,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | HeaderViewButtons | `app/header-view-buttons.tsx` | Pinned view launchers in the workspace header (Changes N, Checks a/b, Terminal, Browser); neutral pressed state, one-line count badges, shortcut tooltips. | views, activeId, onOpen | yes | #383 (3.1) |
 | ViewOverflowMenu | `app/view-overflow-menu.tsx` | ⋯ menu listing every view and plugin view, each with "Pin to header"; a sixth pin is refused with a tooltip. | views, pinned, onOpen, onPinnedChange | yes | #383 (3.1) |
 | ChatTabBar | `app/chat-tab-bar.tsx` | Chat tab strip. | chats, closedChats, activeChatId, onSelectChat, onCreateChat, onRenameChat | yes | — |
+| ChatLaneHeader | `app/chat-lane-header.tsx` | Thread switcher dropdown, new chat, and follow-agent toggle replacing the chat tab strip in redesign 4.3. | chats, activeChatId, onSelectChat, onCreateChat, followAgent, onToggleFollowAgent | yes | #398 (4.3) |
 | PALETTE, CommandPalette | `app/command-palette.tsx` | Global ⌘K palette. | — | yes | — |
 | ConversationView | `app/conversation-view.tsx` | Chat transcript, composer and queue. | messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills | no | — |
 | DiffPanel | `app/diff-panel.tsx` | Right-hand worktree diff rail. | — | no | — |

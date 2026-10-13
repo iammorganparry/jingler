@@ -49,6 +49,7 @@ import type { TabBadge } from "./tab-contributions.js"
 import { matchNewTabChord } from "./app-shortcuts.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
+import { ChatLaneHeader, type ChatLaneHeaderChat } from "./chat-lane-header.js"
 
 export interface EditorTabMeta {
   readonly label: string
@@ -76,9 +77,12 @@ export interface EditorGroupsProps {
   /** The "+" menu at the end of each tab strip. */
   readonly launcherItems?: ReadonlyArray<TabLauncherItem>
   readonly emptyState?: ReactNode
+  readonly onCreateChat?: (sessionId: string) => void
+  readonly followAgent?: boolean
+  readonly onToggleFollowAgent?: (enabled: boolean) => void
 }
 
-type Api = Omit<EditorGroupsProps, "sessionId" | "layout" | "revision" | "emptyState">
+type Api = Omit<EditorGroupsProps, "layout" | "revision" | "emptyState"> & { readonly sessionId: string }
 
 /** A drag only drops into the session it came from: the MIME type carries the session. */
 export const editorTabMime = (sessionId: string): string =>
@@ -120,6 +124,7 @@ export function EditorGroups(props: EditorGroupsProps) {
   latest.current = props
   const api = useMemo<Api>(
     () => ({
+      sessionId: props.sessionId,
       describe: (s) => latest.current.describe(s),
       renderBody: (s, ctx) => latest.current.renderBody(s, ctx),
       onActivate: (g, s) => latest.current.onActivate(g, s),
@@ -130,9 +135,12 @@ export function EditorGroups(props: EditorGroupsProps) {
       get onOpenCheckpoints() { return latest.current.onOpenCheckpoints },
       get launcherItems() {
         return latest.current.launcherItems
-      }
+      },
+      get followAgent() { return latest.current.followAgent },
+      get onToggleFollowAgent() { return latest.current.onToggleFollowAgent },
+      get onCreateChat() { return latest.current.onCreateChat }
     }),
-    []
+    [props.sessionId]
   )
   const [commandOpen, setCommandOpen] = useState(false)
   const launchers = props.launcherItems ?? []
@@ -454,6 +462,14 @@ const EditorGroup = memo(function EditorGroup({
     }
   }
   const crumbs = api.describe(active).crumbs ?? []
+  
+  // Check if all tabs are chats
+  const allChats = group.tabs.every(tab => tab.kind === "chat")
+  const chatTabs = useMemo(() => 
+    allChats ? group.tabs.filter((tab): tab is Extract<SessionSurface, { kind: "chat" }> => tab.kind === "chat") : [],
+    [allChats, group.tabs]
+  )
+  
   return (
     <section
       ref={sectionRef}
@@ -469,6 +485,47 @@ const EditorGroup = memo(function EditorGroup({
       {...groupDrop.handlers}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-editor"
     >
+      {allChats ? (
+        <div className="relative flex h-10 flex-none items-stretch border-b border-hairline bg-sunken" {...tabStripHandlers}>
+          <ChatLaneHeader
+            chats={chatTabs.map((chat): ChatLaneHeaderChat => ({
+              id: chat.id,
+              title: api.describe(chat).label,
+              running: false
+            }))}
+            activeChatId={(active as Extract<SessionSurface, { kind: "chat" }>).id}
+            onSelectChat={(id) => {
+              const chat = chatTabs.find(c => c.id === id)
+              if (chat) api.onActivate(group.id, chat)
+            }}
+            onCreateChat={() => api.onCreateChat?.(api.sessionId)}
+            onCloseChat={(id) => {
+              const chat = chatTabs.find((c) => c.id === id)
+              if (chat) api.onClose(group.id, chat)
+            }}
+            followAgent={api.followAgent}
+            onToggleFollowAgent={api.onToggleFollowAgent}
+          />
+          <Launcher api={api} />
+          {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
+          {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
+          {chatTabs.map((chat) => (
+            <div
+              key={chat.id}
+              data-testid={`editor-tab-chat-${chat.id}`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(mime, JSON.stringify({ surface: chat, from: group.id } satisfies TabDrag))
+                e.dataTransfer.effectAllowed = "copyMove"
+              }}
+              className="pointer-events-none absolute inset-0"
+              aria-hidden
+            >
+            </div>
+          ))}
+          {tabStripDrop.overlay}
+        </div>
+      ) : (
       <div
         data-testid="editor-tab-strip"
         {...tabStripHandlers}
@@ -492,6 +549,7 @@ const EditorGroup = memo(function EditorGroup({
         {active.kind === "chat" && api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
         {tabStripDrop.overlay}
       </div>
+      )}
       {!collapsed && crumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="flex h-6 flex-none items-center gap-1 px-3 text-[11px] text-dim">
           {crumbs.map((crumb, index) => (

@@ -11,6 +11,25 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
+
+/** 
+ * Click a chat tab or thread option, handling both ChatLaneHeader (chat-only) 
+ * and normal tab strip (mixed surfaces).
+ */
+const clickChat = (chatId: string, title?: string) => {
+  // Try normal tab first (mixed surfaces)
+  if (title) {
+    const tab = screen.queryByRole("tab", { name: title })
+    if (tab) {
+      fireEvent.click(tab)
+      return
+    }
+  }
+  // Fall back to thread switcher (chat-only)
+  fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+  fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
+}
+
 describe("SessionPane editor-group regressions", () => {
   it("updates an already-mounted Plan body when its step target changes", () => {
     const owner = session({ id: "plan-target" })
@@ -60,7 +79,7 @@ describe("SessionPane editor-group regressions", () => {
         getData: () => JSON.stringify({ surface: { kind: "chat", id: "chat-b" } })
       }
     })
-    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-a")).getByRole("tab"))
+        clickChat("chat-a")
     fireEvent.click(screen.getByTestId("chat-b-conversation").querySelector("button")!)
     expect(screen.getByTestId("chat-b-plan")).toBeTruthy()
     expect(screen.queryByTestId("chat-a-plan")).toBeNull()
@@ -78,7 +97,7 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+        clickChat(owner.activeChatId, "Chat 1")
 
     expect(focusChat).toHaveBeenCalledExactlyOnceWith(owner.id, owner.activeChatId)
   })
@@ -101,7 +120,8 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
 
-    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-b")).getByRole("button", { name: "Close Chat 2" }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close Chat 2" }))
 
     expect(discard).toHaveBeenCalledOnce()
     expect(discard).toHaveBeenCalledWith(owner.id, "chat-b")
@@ -182,7 +202,8 @@ describe("SessionPane editor-group regressions", () => {
     })
     const view = render(<SessionPane session={owner} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
     view.rerender(<SessionPane session={{ ...owner, activeChatId: "chat-b" }} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(2)
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    expect(screen.getAllByTestId(/^chat-option-/)).toHaveLength(2)
   })
 
   it("mounts one visible terminal in the content pane", () => {

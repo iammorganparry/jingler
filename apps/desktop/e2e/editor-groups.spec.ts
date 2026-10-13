@@ -197,20 +197,22 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Beta session" }).first().click()
   await expect(window.getByText("Keep this chat.")).toBeVisible()
 
-  await window.getByRole("button", { name: "New tab" }).click()
-  await window.getByTestId("new-tab-option-chat").click()
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toBeVisible()
+  // Chat-only groups use ChatLaneHeader with a dedicated "New chat" button
+  await window.getByTestId("new-chat-button").click()
+  await expect(window.getByTestId("thread-switcher")).toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
 
-  await window.getByRole("tab", { name: "Chat 2" }).locator("..").getByRole("button", { name: "Close Chat 2" }).click()
+  // Close via the thread switcher's per-chat close item
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 2" }).click()
 
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toHaveCount(0)
+  await expect(window.getByTestId("thread-switcher")).not.toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toHaveCount(0)
   await expect(window.getByTestId("session-tree-s_beta").getByText(/^Closed/)).toHaveCount(0)
 
   // Closing a chat with history only closes its tab; its sidebar entry remains.
-  await window.getByRole("tab", { name: "Chat 1" }).locator("..").getByRole("button", { name: "Close Chat 1" }).click()
-  await expect(window.getByRole("tab", { name: "Chat 1" })).toHaveCount(0)
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 1" }).click()
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
 })
 

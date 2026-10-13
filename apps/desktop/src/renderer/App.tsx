@@ -1780,7 +1780,6 @@ function AuthedApp({
             onDelete={deleteSession}
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
-            onSelectFiles={ctx.onSelectFiles}
             onSelectChanges={ctx.onSelectChanges}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
             onAddMcp={mcp.add}
