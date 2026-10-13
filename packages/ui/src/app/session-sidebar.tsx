@@ -564,7 +564,7 @@ return (renderExpandedGroupHeading())
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
             )}
           >
-            <CircleDot size={15} className={issuesActive ? "text-blue" : undefined} />
+            <CircleDot size={15} className={issuesActive ? "text-text-bright" : undefined} />
             <span className="flex-1">Issues</span>
             {issuesActive && <span className="text-[10px] text-blue">Open</span>}
           </button>
@@ -587,7 +587,7 @@ return (renderExpandedGroupHeading())
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
             )}
           >
-            <GitPullRequest size={15} className={pullRequestsActive ? "text-blue" : undefined} />
+            <GitPullRequest size={15} className={pullRequestsActive ? "text-text-bright" : undefined} />
             <span className="flex-1">Pull requests</span>
             {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
           </button>
@@ -1089,7 +1089,7 @@ function SessionRail({
           className={cn(
             "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
             pullRequestsActive
-              ? "bg-surface text-blue"
+              ? "bg-surface text-text-bright"
               : "text-dim hover:bg-surface hover:text-text"
           )}
         >
@@ -1107,7 +1107,7 @@ function SessionRail({
           className={cn(
             "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
             issuesActive
-              ? "bg-surface text-blue"
+              ? "bg-surface text-text-bright"
               : "text-dim hover:bg-surface hover:text-text"
           )}
         >
