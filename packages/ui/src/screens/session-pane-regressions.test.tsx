@@ -120,7 +120,8 @@ describe("SessionPane editor-group regressions", () => {
       />
     )
 
-    fireEvent.click(within(screen.getByTestId("editor-tab-chat-chat-b")).getByRole("button", { name: "Close Chat 2" }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close Chat 2" }))
 
     expect(discard).toHaveBeenCalledOnce()
     expect(discard).toHaveBeenCalledWith(owner.id, "chat-b")
@@ -201,7 +202,8 @@ describe("SessionPane editor-group regressions", () => {
     })
     const view = render(<SessionPane session={owner} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
     view.rerender(<SessionPane session={{ ...owner, activeChatId: "chat-b" }} renderConversation={(chat) => <div>{chat.activeChatId}</div>} />)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(2)
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    expect(screen.getAllByTestId(/^chat-option-/)).toHaveLength(2)
   })
 
   it("mounts one visible terminal in the content pane", () => {

@@ -429,7 +429,7 @@ describe("session browser tab", () => {
     render(<BrowserHarness />)
     fireEvent.click(screen.getByRole("button", { name: "Browser" }))
     expect(screen.getByText("browser for browser-owner")).toBeTruthy()
-    clickChat("c_debug_1", "Chat 1")
+    clickChat("c_browser-owner_1", "Chat 1")
     expect(screen.getByText("owner transcript")).toBeTruthy()
     expect(toggled).toEqual(["browser-owner"])
   })
@@ -809,9 +809,8 @@ describe("SessionPane", () => {
     const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }], activeChatId: "b" }
     render(<SessionPane session={s} renderConversation={(owner) => <div>chat {owner.activeChatId}</div>} />)
     const stored = () => JSON.parse(localStorage.getItem("sb.editor-layout.v1:reopen")!)
-    // Hidden draggable element for active chat still has the testid
-    const mainTab = screen.getByTestId(`editor-tab-chat-${mainId}`)
-    fireEvent.click(within(mainTab).getByRole("button", { name: /^Close / }))
+    fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
+    fireEvent.click(screen.getByTestId(`chat-close-${mainId}`))
     await waitFor(() => expect(stored().mainChatId).toBeNull())
     fireEvent.drop(screen.getByTestId("editor-group"), {
       dataTransfer: {
@@ -1065,7 +1064,7 @@ describe("SessionPane", () => {
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
-      clickChat("c_debug_1", "Chat 1")
+      clickChat("c_a_1", "Chat 1")
       expect(screen.getByText("transcript a")).toBeTruthy()
 
       // Asking for the SAME tab a second time has to work — that is what the
