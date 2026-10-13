@@ -244,7 +244,6 @@ export function ConversationPane({
   environments,
   providerCatalog,
   agentEndpointCatalog,
-  onSelectFiles,
   onSelectChanges,
   onOpenProviderSettings,
   onAddMcp,
@@ -287,9 +286,7 @@ export function ConversationPane({
    * Storybook and the component tests want.
    */
   onOpenFile?: (sessionId: string, path: string) => void
-  /** Present Files beside the conversation when follow mode is enabled here. */
-  onSelectFiles?: () => void
-  /** Open the canonical Changes view from uncertain-mutation recovery. */
+/** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
@@ -322,12 +319,11 @@ export function ConversationPane({
     (enabled: boolean) => {
       if (enabled) {
         fileBrowser.enableFollow()
-        onSelectFiles?.()
       } else {
         fileBrowser.disableFollow()
       }
     },
-    [fileBrowser.disableFollow, fileBrowser.enableFollow, onSelectFiles]
+    [fileBrowser.disableFollow, fileBrowser.enableFollow]
   )
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {

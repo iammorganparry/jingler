@@ -46,8 +46,6 @@ const seedRepository = ({ repoPath }: { repoPath: string }): void => {
   })
 }
 
-const filesTab = (window: Page) => window.getByTestId("view-tab-files")
-
 const projectRoot = resolve(import.meta.dirname, "../../..")
 
 const showRepositoryTree = explorerTree
@@ -169,7 +167,6 @@ test("splits the session repository beside chat and edits a file through Pierre"
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
   await showRepositoryTree(window)
   await splitChatBesideFiles(window)
   await expect(window.getByTestId("editor-group").nth(0)).toBeVisible()
@@ -236,7 +233,7 @@ test("shows a previously existing large worktree without a repository search bar
 
   await expect(appShell(window)).toBeVisible()
   await window.setViewportSize({ width: 1320, height: 860 })
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const tree = await showRepositoryTree(window)
   await expect.poll(async () => (await tree.boundingBox())?.height ?? 0).toBeGreaterThan(400)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
@@ -303,7 +300,7 @@ test("shows a previously existing large worktree without a repository search bar
   }).toBeGreaterThanOrEqual(24)
 
   await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const restoredTree = await showRepositoryTree(window)
   await expect(restoredTree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
@@ -326,7 +323,7 @@ test("shows a previously existing large worktree while its agent is running", as
   await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
     timeout: 15_000
   })
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   const tree = await showRepositoryTree(window)
   await expect(tree.locator('[role="treeitem"]').first()).toBeVisible({
     timeout: 20_000
@@ -345,7 +342,7 @@ test("adds selected code to the active chat from the editor context menu", async
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await selectTreePath(window, "src/config.ts")
   await selectFirstTwoLines(window)
   await fileBody(window, "src/config.ts")
@@ -371,7 +368,7 @@ test("adds selected code to the active chat with the platform J shortcut", async
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await selectTreePath(window, "src/config.ts")
   await selectFirstTwoLines(window)
   await window.getByRole("textbox", { name: "src/config.ts" }).focus()
@@ -595,7 +592,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
     window.getByRole("button", { name: "Remove src/config.ts:L1", exact: true })
   ).toBeVisible()
 
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await expect(followed).toBeVisible()
   await followedLine.click({ position: { x: 6, y: 6 } })
   const comment = followed.getByPlaceholder("Ask the agent to fix this…")
@@ -604,7 +601,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
 
   await sessionRow(window, "Other file browser session").click()
   await sessionRow(window, "File browser IDE").click()
-  await expect(filesTab(window)).toHaveAttribute("aria-current", "page")
+  // Explorer mode is active (files tab removed in redesign 3.6)
   await expect(followed).toBeVisible()
   await expect(window.getByText("Received selected diff context.", { exact: true })).toBeVisible({
     timeout: 20_000

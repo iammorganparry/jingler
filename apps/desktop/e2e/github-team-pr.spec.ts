@@ -256,7 +256,8 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
     await inbox.getByRole("tab", { name: /Files changed/ }).click()
     await expect(inbox).not.toBeVisible()
-    await expect(window.getByTestId("view-tab-files").first()).toBeVisible()
+    // Files accessed via Explorer (files tab removed in redesign 3.6)
+    await expect(window.getByRole("tab", { name: "Explorer", exact: true })).toBeVisible()
     expect(JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))).toHaveLength(1)
   } finally { rmSync(cli.root, { recursive: true, force: true }) }
 })
