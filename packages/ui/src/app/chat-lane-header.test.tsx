@@ -179,6 +179,26 @@ describe("ChatLaneHeader", () => {
       expect(onBack).toHaveBeenCalledTimes(2)
     })
 
+    it("keeps the follow toggle in the breadcrumb header and toggles it", () => {
+      const onToggleFollowAgent = vi.fn()
+      render(
+        <ChatLaneHeader
+          chats={[{ id: "chat-1", title: "Main workspace" }]}
+          activeChatId="chat-1"
+          onSelectChat={vi.fn()}
+          onCreateChat={vi.fn()}
+          followAgent
+          onToggleFollowAgent={onToggleFollowAgent}
+          subagentView={{ selectedId: "a", siblings, onSwitch: vi.fn(), onBack: vi.fn() }}
+        />
+      )
+      expect(screen.getByTestId("subagent-breadcrumb")).toBeTruthy()
+      const toggle = screen.getByTestId("follow-agent-toggle")
+      expect(toggle.getAttribute("aria-pressed")).toBe("true")
+      fireEvent.click(toggle)
+      expect(onToggleFollowAgent).toHaveBeenCalledWith(false)
+    })
+
     it("switches to a sibling from the ▾ menu", () => {
       const onSwitch = vi.fn()
       renderCrumb({ onSwitch })
