@@ -82,7 +82,7 @@ export interface EditorGroupsProps {
   readonly onToggleFollowAgent?: (enabled: boolean) => void
 }
 
-type Api = Omit<EditorGroupsProps, "sessionId" | "layout" | "revision" | "emptyState">
+type Api = Omit<EditorGroupsProps, "layout" | "revision" | "emptyState"> & { readonly sessionId: string }
 
 /** A drag only drops into the session it came from: the MIME type carries the session. */
 export const editorTabMime = (sessionId: string): string =>
@@ -124,6 +124,7 @@ export function EditorGroups(props: EditorGroupsProps) {
   latest.current = props
   const api = useMemo<Api>(
     () => ({
+      sessionId: props.sessionId,
       describe: (s) => latest.current.describe(s),
       renderBody: (s, ctx) => latest.current.renderBody(s, ctx),
       onActivate: (g, s) => latest.current.onActivate(g, s),
@@ -134,9 +135,12 @@ export function EditorGroups(props: EditorGroupsProps) {
       get onOpenCheckpoints() { return latest.current.onOpenCheckpoints },
       get launcherItems() {
         return latest.current.launcherItems
-      }
+      },
+      get followAgent() { return latest.current.followAgent },
+      get onToggleFollowAgent() { return latest.current.onToggleFollowAgent },
+      get onCreateChat() { return latest.current.onCreateChat }
     }),
-    []
+    [props.sessionId]
   )
   const [commandOpen, setCommandOpen] = useState(false)
   const launchers = props.launcherItems ?? []
@@ -482,21 +486,36 @@ const EditorGroup = memo(function EditorGroup({
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-editor"
     >
       {allChats ? (
-        <ChatLaneHeader
-          chats={chatTabs.map((chat): ChatLaneHeaderChat => ({
-            id: chat.id,
-            title: api.describe(chat).label,
-            running: false
-          }))}
-          activeChatId={(active as Extract<SessionSurface, { kind: "chat" }>).id}
-          onSelectChat={(id) => {
-            const chat = chatTabs.find(c => c.id === id)
-            if (chat) api.onActivate(group.id, chat)
-          }}
-          onCreateChat={() => api.onCreateChat?.(mime.replace("application/x-jingler-editor-tab-", ""))}
-          followAgent={api.followAgent}
-          onToggleFollowAgent={api.onToggleFollowAgent}
-        />
+        <div className="relative flex h-10 flex-none items-stretch border-b border-hairline bg-sunken" {...tabStripHandlers}>
+          <ChatLaneHeader
+            chats={chatTabs.map((chat): ChatLaneHeaderChat => ({
+              id: chat.id,
+              title: api.describe(chat).label,
+              running: false
+            }))}
+            activeChatId={(active as Extract<SessionSurface, { kind: "chat" }>).id}
+            onSelectChat={(id) => {
+              const chat = chatTabs.find(c => c.id === id)
+              if (chat) api.onActivate(group.id, chat)
+            }}
+            onCreateChat={() => api.onCreateChat?.(api.sessionId)}
+            followAgent={api.followAgent}
+            onToggleFollowAgent={api.onToggleFollowAgent}
+          />
+          {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
+          {/* Hidden draggable element for active chat to enable drag-to-split */}
+          <div
+            data-testid={`editor-tab-chat-${(active as Extract<SessionSurface, { kind: "chat" }>).id}`}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData(mime, JSON.stringify({ surface: active, from: group.id } satisfies TabDrag))
+              e.dataTransfer.effectAllowed = "copyMove"
+            }}
+            className="pointer-events-none absolute inset-0"
+            aria-hidden
+          />
+          {tabStripDrop.overlay}
+        </div>
       ) : (
       <div
         data-testid="editor-tab-strip"
