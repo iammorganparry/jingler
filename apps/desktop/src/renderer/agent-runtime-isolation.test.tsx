@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { Session } from "@jingler/core"
-import { SessionPane } from "../../../../packages/ui/src/screens/session-pane.js"
+import { SessionPaneWithHeaderViews as SessionPane } from "../../../../packages/ui/src/screens/session-pane-header-views-host.js"
 import { allTabs } from "../../../../packages/ui/src/app/editor-layout.js"
 import { editorLayoutOf, resetEditorLayouts } from "../../../../packages/ui/src/app/editor-layout-machine.js"
 import { createActor } from "xstate"
