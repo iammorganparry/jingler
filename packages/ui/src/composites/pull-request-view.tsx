@@ -24,7 +24,7 @@ import { Eyebrow } from "../components/eyebrow.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
-import { Spinner } from "../components/loading.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { StatusDot } from "../components/status-dot.js"
 import { MotionTabs } from "../components/beui/controls.js"
@@ -154,6 +154,9 @@ export interface PullRequestViewProps {
   connectionMessage?: string
   connectionActionLabel?: string
   busy?: boolean
+  /** The PR failed to load — shown with Retry instead of the Create PR empty state. */
+  loadError?: string | null
+  onRetryLoad?: () => void
   /** The authenticated GitHub login — to detect the viewer's own PR (no self-approve). */
   viewerLogin?: string | null
   /** Authoritative main-process publish progress. */
@@ -220,6 +223,8 @@ export function PullRequestView({
   connectionMessage,
   connectionActionLabel = "Connect GitHub",
   busy = false,
+  loadError,
+  onRetryLoad,
   viewerLogin,
   publish,
   publishing = false,
@@ -424,7 +429,7 @@ return (evidence === "checks" ? (
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
           <Eyebrow>Timeline</Eyebrow>
           {feed.length === 0 ? (
-            <p className="text-[13px] text-dim">No reviews or comments yet.</p>
+            <EmptyState title="No reviews or comments yet" description="Reviews and comments on this pull request will appear here." />
           ) : (
             feed.map((entry) =>
               entry.kind === "item" ? (
@@ -606,9 +611,15 @@ return (evidence === "checks" ? (
   // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
   if (pr === null && busy) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Spinner size={20} />
-        <span className="text-[13px]">Loading pull request…</span>
+      <div aria-label="Loading pull request" className="flex flex-1 flex-col gap-[18px] px-[30px] py-[26px]">
+        <ListSkeleton rows={5} rowHeight={28} gap={12} />
+      </div>
+    )
+  }
+  if (pr === null && loadError) {
+    return (
+      <div className="flex flex-1 flex-col px-[30px] py-[26px]">
+        <InlineError message={loadError} onRetry={onRetryLoad} />
       </div>
     )
   }
@@ -705,7 +716,7 @@ function CommitEvidence({ pr }: { pr: PullRequest }) {
 
 function CheckEvidence({ pr }: { pr: PullRequest }) {
   if (pr.checks.length === 0) {
-    return <p className="text-[13px] text-dim">No checks reported.</p>
+    return <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
   }
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">

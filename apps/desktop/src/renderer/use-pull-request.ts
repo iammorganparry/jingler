@@ -30,6 +30,10 @@ export const prKey = (sessionId: string, prNumber: number | null) =>
 export interface PullRequestState {
   readonly pr: PullRequest | null
   readonly busy: boolean
+  /** The message from a failed PR read, or null. */
+  readonly loadError: string | null
+  /** Re-run the PR read after a failure. */
+  readonly retryLoad: () => void
   /** Merge the PR. Defaults to a merge commit; the side panel offers the choice. */
   readonly mergePr: (method?: PrMergeMethod) => Promise<void>
   /** A merge is in flight. */
@@ -201,6 +205,8 @@ export function usePullRequest(
   return {
     pr,
     busy: query.isPending,
+    loadError: query.error ? ((query.error as { message?: string }).message ?? "Failed to load pull request") : null,
+    retryLoad: () => void query.refetch(),
     mergePr,
     merging: mergeMutation.isPending,
     mergeError: mergeMutation.error

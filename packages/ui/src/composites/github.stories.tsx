@@ -183,6 +183,16 @@ export const ReviewThreads: Story = {
   )
 }
 
+/** Loading (skeleton at real row height) and load-error (Retry) states of the Checks view. */
+export const ChecksLoadingAndError: Story = {
+  render: () => (
+    <div className="flex h-screen flex-col bg-editor">
+      <PullRequestView pr={null} connected busy />
+      <PullRequestView pr={null} connected loadError="Couldn't reach GitHub." onRetryLoad={() => {}} />
+    </div>
+  )
+}
+
 /** The Pull Request tab — open PR with checks, reviewers, and a blocked merge. */
 export const PullRequestOpen: Story = {
   render: () => (
