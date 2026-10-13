@@ -24,7 +24,7 @@ export function RuntimeInspector({ snapshot, loading, exported = false, error, o
       </header>
       {loading && <p className="text-xs text-muted-foreground">Loading runtime metadata…</p>}
       {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-      {exported && <p role="status" className="text-xs text-green">Redacted diagnostic bundle prepared.</p>}
+      {exported && <p role="status" className="text-xs text-muted-foreground">Redacted diagnostic bundle prepared.</p>}
       {!loading && snapshot === null && !error && (
         <p className="text-xs text-muted-foreground">No pi runtime diagnostics have been recorded yet.</p>
       )}

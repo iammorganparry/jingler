@@ -229,7 +229,7 @@ function renderConflictActions() {
            if (draft) return (renderDraftActions())
            if (blocked) return (renderConflictActions())
            return (<div className="flex flex-col gap-3">
-            <Callout tone="green">This branch has no conflicts and can be merged.</Callout>
+            <Callout tone="blue">This branch has no conflicts and can be merged.</Callout>
             {/*
               The strategy picker. `PrMergeMethod` and the GitHub API value
               supported all three from the start; only the UI didn't, so every

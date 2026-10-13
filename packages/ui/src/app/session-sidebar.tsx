@@ -284,7 +284,7 @@ function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes 
       className="relative mx-2 mb-2 flex flex-none flex-col gap-2 rounded-xl border border-green/30 bg-gradient-to-br from-green/10 via-surface to-panel p-3 shadow-sm"
     >
       <div className="flex items-center gap-2 pr-6">
-        <span className="flex size-7 flex-none items-center justify-center rounded-lg bg-green/15 text-green">
+        <span className="flex size-7 flex-none items-center justify-center rounded-lg bg-surface text-muted-foreground">
           <Sparkles size={14} />
         </span>
         <strong className="text-[13px] font-semibold text-text-bright">
@@ -295,7 +295,7 @@ function ReleaseNotesCard({ releaseNotes }: { releaseNotes: SidebarReleaseNotes 
         <ul className="flex flex-col gap-1.5 pl-1 text-[11.5px] leading-[1.45] text-muted-foreground">
           {shown.map((note) => (
             <li key={note} className="flex gap-1.5">
-              <span aria-hidden className="mt-[7px] size-1 flex-none rounded-full bg-green/70" />
+              <span aria-hidden className="mt-[7px] size-1 flex-none rounded-full bg-muted-foreground/70" />
               <span className="line-clamp-2">{note}</span>
             </li>
           ))}
@@ -564,7 +564,7 @@ return (renderExpandedGroupHeading())
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
             )}
           >
-            <CircleDot size={15} className={issuesActive ? "text-green" : undefined} />
+            <CircleDot size={15} className={issuesActive ? "text-blue" : undefined} />
             <span className="flex-1">Issues</span>
             {issuesActive && <span className="text-[10px] text-blue">Open</span>}
           </button>
@@ -587,7 +587,7 @@ return (renderExpandedGroupHeading())
                 : "text-muted-foreground hover:bg-surface/60 hover:text-text"
             )}
           >
-            <GitPullRequest size={15} className={pullRequestsActive ? "text-green" : undefined} />
+            <GitPullRequest size={15} className={pullRequestsActive ? "text-blue" : undefined} />
             <span className="flex-1">Pull requests</span>
             {pullRequestsActive && <span className="text-[10px] text-blue">Open</span>}
           </button>
@@ -1089,7 +1089,7 @@ function SessionRail({
           className={cn(
             "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
             pullRequestsActive
-              ? "bg-surface text-green"
+              ? "bg-surface text-blue"
               : "text-dim hover:bg-surface hover:text-text"
           )}
         >
@@ -1107,7 +1107,7 @@ function SessionRail({
           className={cn(
             "flex size-8 flex-none items-center justify-center rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
             issuesActive
-              ? "bg-surface text-green"
+              ? "bg-surface text-blue"
               : "text-dim hover:bg-surface hover:text-text"
           )}
         >

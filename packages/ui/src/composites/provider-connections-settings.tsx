@@ -240,7 +240,7 @@ export function ProviderConnectionsSettings({
   function renderConnectionHeading(selected: SelectedConnection) {
            return (<div className="flex items-start gap-3">
                 <span className="flex size-9 items-center justify-center rounded-lg bg-canvas">
-                  <ShieldCheck size={18} className={selected.connection.status === "authenticated" ? "text-green" : "text-dim"} />
+                  <ShieldCheck size={18} className={selected.connection.status === "authenticated" ? "text-muted-foreground" : "text-dim"} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[15px] font-semibold text-text-bright">{providerAuthRouteLabel(selected.connection.authKind)}</div>
@@ -370,8 +370,8 @@ export function ProviderConnectionsSettings({
               {renderConnectionHeading(selected)}
 
               {selected.connection.status !== "authenticated" && (
-                <div className="flex flex-col gap-3 rounded-lg border border-yellow/30 bg-yellow/[0.04] p-3">
-                  <Callout tone="yellow">
+                <div className="flex flex-col gap-3 rounded-lg border border-line bg-surface p-3">
+                  <Callout tone="blue">
                     Reauthentication required. Jingler has not retained usable credentials for this connection.
                   </Callout>
                   <ProviderAuthForms

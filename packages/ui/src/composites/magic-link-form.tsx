@@ -51,7 +51,7 @@ export function MagicLinkForm({
   if (state === "sent") {
     return (
       <div className="flex w-full flex-col items-center gap-2.5">
-        <Callout tone="green" glyph={<MailCheck className="size-3.5" />}>
+        <Callout tone="blue" glyph={<MailCheck className="size-3.5" />}>
           {signup ? "Confirm your account with the link we sent to" : "Sign-in link sent to"}{" "}
           <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong>.
         </Callout>

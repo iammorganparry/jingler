@@ -158,7 +158,7 @@ function renderGithubSetup() {
             <div className="flex items-center gap-3 rounded-lg border border-line bg-sunken px-3 py-3">
               <GithubMark size={18} className="flex-none text-text-bright" />
               <StatusDot
-                tone={hasConnection ? "bg-green" : github.mode === "error" ? "bg-red" : "bg-line-strong"}
+                tone={github.mode === "error" ? "bg-red" : "bg-line-strong"}
                 size={8}
                 glow={hasConnection}
               />
