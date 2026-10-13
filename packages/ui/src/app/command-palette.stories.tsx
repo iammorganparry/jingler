@@ -137,6 +137,15 @@ export const Default: Story = {
   args: { open: true, onOpenChange: noop, items: ITEMS }
 }
 
+/** Scope switch on Chat: only the active chat's tabs, views and subagents remain. */
+export const ChatScope: Story = {
+  args: { open: true, onOpenChange: noop, items: ITEMS },
+  play: async () => {
+    const chat = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find((tab) => tab.textContent === "Chat")
+    chat?.click()
+  }
+}
+
 /** Nothing but sessions, the state on a fresh install with no plugins. */
 export const SessionsOnly: Story = {
   args: {

@@ -55,7 +55,7 @@ export function CommandDialog({
             </DialogOverlay>
             <DialogPrimitive.Content
               forceMount
-              className="fixed left-1/2 top-[12vh] z-50 w-[600px] max-w-[92vw] -translate-x-1/2 outline-none"
+              className="fixed left-1/2 top-[120px] z-50 w-[640px] max-w-[92vw] -translate-x-1/2 outline-none"
             >
               <DialogTitle className="sr-only">{title}</DialogTitle>
               <DialogDescription className="sr-only">{description}</DialogDescription>

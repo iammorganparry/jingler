@@ -255,6 +255,31 @@ export const viewPaletteItems = (
     run: () => open(view.id)
   }))
 
+/**
+ * The palette's scope switch: **Workspace** is every row, **Chat** is the
+ * subset about the active chat (its tabs, views and subagents). Chat narrows
+ * Workspace, so the default scope never hides a row the palette had before.
+ */
+export type PaletteScope = "workspace" | "chat"
+
+export const PALETTE_SCOPES: ReadonlyArray<PaletteScope> = ["workspace", "chat"]
+
+const CHAT_GROUP_NAMES: ReadonlySet<string> = new Set([
+  PALETTE_GROUP.tabs,
+  PALETTE_GROUP.views,
+  PALETTE_GROUP.subagents
+])
+
+export const itemsInScope = (
+  items: ReadonlyArray<PaletteItem>,
+  scope: PaletteScope
+): ReadonlyArray<PaletteItem> =>
+  scope === "workspace" ? items : items.filter((item) => CHAT_GROUP_NAMES.has(item.group))
+
+/** Tab cycles scopes, wrapping. */
+export const nextScope = (scope: PaletteScope): PaletteScope =>
+  PALETTE_SCOPES[(PALETTE_SCOPES.indexOf(scope) + 1) % PALETTE_SCOPES.length] ?? "workspace"
+
 const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
 
 /**
