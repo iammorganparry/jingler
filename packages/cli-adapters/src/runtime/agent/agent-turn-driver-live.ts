@@ -68,7 +68,12 @@ const usageFactFor = (
     totalTokens: event._tag === "Done" ? event.tokens : null,
     // OpenCode reports message cost. PI can be API or subscription-backed, so
     // its generic terminal event cannot prove whether a numeric zero is known.
-    costUsd: event._tag === "Done" && spec.runtimeId === "opencode"
+    // The Claude CLI reports `total_cost_usd`, and Anthropic traffic is priced per token,
+    // so a positive figure is a known spend; zero stays unknown (subscription turns).
+    costUsd: event._tag === "Done" && (
+      spec.runtimeId === "opencode" ||
+      (event.costUsd > 0 && (spec.runtimeId === "claude" || spec.providerId === "anthropic"))
+    )
       ? event.costUsd
       : null,
     outcome: event._tag === "Done" ? "success" : "error",

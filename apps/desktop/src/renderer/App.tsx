@@ -18,6 +18,7 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   GitConfig,
+  ObsidianExplanationsConfig,
   IssueIdentity,
   IssueSummary,
   GithubConfig,
@@ -136,6 +137,7 @@ import {
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
+import { ObsidianSaveToast, useObsidianVaultConfigured } from "./obsidian-save-toast.js";
 import { useDebugSessions } from "./debug-session.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -403,6 +405,7 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  const obsidianVaultConfigured = useObsidianVaultConfigured();
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
@@ -441,7 +444,7 @@ function AuthedApp({
     enabled: false,
   });
 
-  const { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
+  const { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
   useEffect(() => {
     if (persistedOffloadCompute !== null) {
       sendOffloadSettings({ type: "SYNC", settings: persistedOffloadCompute });
@@ -497,6 +500,10 @@ function AuthedApp({
     });
   const saveGitConfig = (config: GitConfig) =>
     rpc.configSetGit(config).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const saveObsidianExplanations = (config: ObsidianExplanationsConfig) =>
+    rpc.configSetObsidianExplanations(config).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveNotificationsConfig = (config: NotificationsConfig) =>
@@ -1391,6 +1398,7 @@ function AuthedApp({
           GitHub feedback is reconnecting. {relayError}
         </div>
       )}
+      <ObsidianSaveToast />
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <JinglerApp
         onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
@@ -1451,6 +1459,9 @@ function AuthedApp({
         onSaveGithubConfig={saveGithubConfig}
         gitConfig={gitConfig}
         onSaveGitConfig={saveGitConfig}
+        obsidianExplanations={obsidianExplanations}
+        onSaveObsidianExplanations={saveObsidianExplanations}
+        obsidianVaultConfigured={obsidianVaultConfigured}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
         offloadCompute={offloadCompute}
@@ -2324,9 +2335,10 @@ function deleteSessionDescription(pendingDelete: Session | null) {
 function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> | undefined) {
   const githubConfig = config?.github ?? null;
   const gitConfig = config?.git ?? null;
+  const obsidianExplanations = config?.obsidianExplanations ?? null;
   const notificationsConfig = config?.notifications ?? null;
   const persistedOffloadCompute = config?.offloadCompute ?? null;
-  return { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
+  return { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
 }
 
 function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {

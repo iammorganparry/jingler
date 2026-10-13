@@ -12,6 +12,8 @@ import {
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent"
 import {
   AuthKind,
+  CLAUDE_CLI_API_ROUTE,
+  CLAUDE_CLI_SUBSCRIPTION_ROUTE,
   CURRENT_RUNTIME_CONTRACTS,
   ProviderConnection,
   ProviderId,
@@ -40,6 +42,8 @@ const E2ePiFixture = Schema.Struct({
   authRoute: AuthKind,
   reasoning: Schema.optional(Schema.Array(ReasoningEffort)),
   seedConnection: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** A Claude CLI login billed per token (Enterprise): api route, no subscription windows. */
+  apiPriced: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   staleCertification: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   modelCount: Schema.optionalWith(Schema.Int.pipe(Schema.between(1, 100)), {
     default: () => 1
@@ -58,10 +62,12 @@ const COMMAND_TOOL = "command_execute"
 const SUBAGENT_TOOL = "subagent"
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
 const E2E_CONTEXT_WINDOW = 1_000_000
-const observedRouteFor = (authRoute: E2ePiFixture["authRoute"]): string =>
-  authRoute === "claude-setup-token"
-    ? "claude-cli:subscription"
-    : `e2e-${authRoute}`
+const observedRouteFor = (fixture: E2ePiFixture): string =>
+  fixture.authRoute === "claude-setup-token"
+    ? fixture.apiPriced ? CLAUDE_CLI_API_ROUTE : CLAUDE_CLI_SUBSCRIPTION_ROUTE
+    : `e2e-${fixture.authRoute}`
+const billsPerToken = (fixture: E2ePiFixture): boolean =>
+  fixture.authRoute === "api-key" || fixture.apiPriced
 const COMPACTION_THINKING = "context ".repeat(17_500)
 const DIGEST_REPLY = `\`\`\`json
 {
@@ -92,12 +98,12 @@ export const e2eProviderConnection = (fixture: E2ePiFixture) => {
     status: "authenticated",
     subscription: {
       entitlement: "active",
-      planLabel: fixture.authRoute === "api-key" ? null : "Test subscription",
+      planLabel: fixture.apiPriced ? "Enterprise · API pricing" : fixture.authRoute === "api-key" ? null : "Test subscription",
       expiresAt: null,
       quotaLabel: null,
       rateLimitLabel: null,
-      confirmedBillingRoute: fixture.authRoute === "api-key" ? "api" : "subscription",
-      observedRoute: observedRouteFor(fixture.authRoute)
+      confirmedBillingRoute: billsPerToken(fixture) ? "api" : "subscription",
+      observedRoute: observedRouteFor(fixture)
     },
     createdAt: "2026-08-10T00:00:00.000Z",
     updatedAt: "2026-08-10T00:00:00.000Z"
@@ -145,8 +151,8 @@ export const e2eCertification = (
   modelId,
   authRoute: {
     kind: fixture.authRoute,
-    observedRoute: observedRouteFor(fixture.authRoute),
-    subscription: fixture.authRoute !== "api-key",
+    observedRoute: observedRouteFor(fixture),
+    subscription: !billsPerToken(fixture),
     entitlementConfirmed: true,
     apiBillingFallbackObserved: false
   },

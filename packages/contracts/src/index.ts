@@ -26,6 +26,7 @@ import {
   GithubConfig,
   NotificationKind,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
   IssueComment,
@@ -1428,6 +1429,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: GitConfig
   }),
 
+  /** Persist the Obsidian explanation auto-save preferences. */
+  Rpc.make("Config.setObsidianExplanations", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: ObsidianExplanationsConfig
+  }),
+
   /** Persist the user's desktop-notification preferences. */
   Rpc.make("Config.setNotifications", {
     success: WorkspaceConfig,
@@ -1608,6 +1616,17 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   /** The latest focused visual explanation for this session. */
   Rpc.make("Explanation.current", {
     success: Schema.NullOr(ExplanationDocument),
+    payload: { sessionId: Schema.String }
+  }),
+
+  /**
+   * Write the session's current explanation into its Obsidian vault when the
+   * setting is on. Resolves the vault-relative path, or null when nothing was
+   * written (setting off, no vault, no explanation).
+   */
+  Rpc.make("Explanation.saveToObsidian", {
+    success: Schema.NullOr(Schema.String),
+    error: ConfigError,
     payload: { sessionId: Schema.String }
   }),
 

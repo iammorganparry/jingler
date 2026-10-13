@@ -5,6 +5,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   OffloadComputeSettings,
   ContextConfig,
   ContextSnapshot,
@@ -15,6 +16,7 @@ import {
   BUDGET_RANGE,
   DEFAULT_CONTEXT_CONFIG,
   NOTIFICATIONS_DEFAULT,
+  OBSIDIAN_EXPLANATIONS_DEFAULT,
   clampFontScale
 } from "@jingler/core"
 import { ContextMeter } from "./context-meter.js"
@@ -221,6 +223,11 @@ export interface SettingsViewProps {
   git?: GitConfig | null
   onSaveGithub?: (config: GithubConfig) => void
   onSaveGit?: (config: GitConfig) => void
+  /** Obsidian explanation auto-save; absent means the default (off). */
+  obsidianExplanations?: ObsidianExplanationsConfig | null
+  onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => void | Promise<void>
+  /** Whether any session has an Obsidian vault configured; hides the setting otherwise. */
+  obsidianVaultConfigured?: boolean
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
@@ -285,6 +292,9 @@ export function SettingsView({
   git,
   onSaveGithub,
   onSaveGit,
+  obsidianExplanations,
+  onSaveObsidianExplanations,
+  obsidianVaultConfigured,
   notifications,
   onSaveNotifications,
   offloadCompute,
@@ -310,6 +320,9 @@ return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettin
 }
 case "general": {
 return (<GeneralSection
+          obsidianExplanations={obsidianExplanations}
+          onSaveObsidianExplanations={onSaveObsidianExplanations}
+          obsidianVaultConfigured={obsidianVaultConfigured}
           notifications={notifications}
           onSaveNotifications={onSaveNotifications}
           offloadCompute={offloadCompute}
@@ -942,6 +955,9 @@ function FontSizeRow({
  * review: each switch is independently meaningful and instantly reversible.
  */
 function GeneralSection({
+  obsidianExplanations,
+  onSaveObsidianExplanations,
+  obsidianVaultConfigured,
   notifications,
   onSaveNotifications,
   offloadCompute,
@@ -957,6 +973,9 @@ function GeneralSection({
   onSaveFontScale,
   webSearch
 }: {
+  obsidianExplanations?: ObsidianExplanationsConfig | null
+  onSaveObsidianExplanations?: (config: ObsidianExplanationsConfig) => void | Promise<void>
+  obsidianVaultConfigured?: boolean
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
   offloadCompute?: OffloadComputeSettings | null
@@ -1029,6 +1048,17 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
     () => setFontScaleDraft(clampFontScale(fontScale)),
     [fontScale]
   )
+  const [obsidianDraft, setObsidianDraft] = React.useState<ObsidianExplanationsConfig>(
+    obsidianExplanations ?? OBSIDIAN_EXPLANATIONS_DEFAULT
+  )
+  React.useEffect(
+    () => setObsidianDraft(obsidianExplanations ?? OBSIDIAN_EXPLANATIONS_DEFAULT),
+    [obsidianExplanations]
+  )
+  const saveObsidian = (next: ObsidianExplanationsConfig) => {
+    setObsidianDraft(next)
+    void onSaveObsidianExplanations?.(next)
+  }
   // Absent config means the DEFAULTS, not silence — an operator who never opened
   // this pane should still be told when an agent needs them.
   const [draft, setDraft] = React.useState<NotificationsConfig>(
@@ -1177,6 +1207,39 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
         </div>
 
         {webSearch ? <WebSearchSettings {...webSearch} /> : null}
+
+        {obsidianVaultConfigured ? (
+          <>
+            <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
+              <span className="text-[13px] font-semibold text-text-bright">
+                Obsidian
+              </span>
+            </div>
+            <div className="divide-y divide-hairline">
+              <ToggleRow
+                label="Save explanations to Obsidian"
+                description="Write every explanation an agent publishes as a Markdown note in the session's vault. Publishing again updates the same note."
+                checked={obsidianDraft.enabled}
+                onChange={(enabled) => saveObsidian({ ...obsidianDraft, enabled })}
+              />
+              <label
+                htmlFor="obsidian-explanations-folder"
+                className="flex flex-col gap-2 py-2.5 text-[11px] font-medium text-muted-foreground"
+              >
+                Vault folder
+                <Input
+                  id="obsidian-explanations-folder"
+                  value={obsidianDraft.folder}
+                  disabled={!obsidianDraft.enabled}
+                  onChange={(event) =>
+                    setObsidianDraft({ ...obsidianDraft, folder: event.target.value })
+                  }
+                  onBlur={() => saveObsidian(obsidianDraft)}
+                />
+              </label>
+            </div>
+          </>
+        ) : null}
 
         <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
           <span className="text-[13px] font-semibold text-text-bright">
