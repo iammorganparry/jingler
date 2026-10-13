@@ -124,7 +124,7 @@ export function ProviderSetupStep({
               <div
                 key={endpoint.id}
                 className={endpoint.status === "ready"
-                  ? "rounded-full border border-green/30 bg-green/10 px-2.5 py-1 text-xs text-green"
+                  ? "rounded-full border border-line bg-surface px-2.5 py-1 text-xs text-muted-foreground"
                   : "rounded-full border border-line bg-canvas px-2.5 py-1 text-xs text-muted-foreground"}
               >
                 <NativeEndpointLogin endpoint={endpoint} actions={nativeEndpointLogin} />
@@ -146,7 +146,7 @@ export function ProviderSetupStep({
       )}
 
       {unconfirmedConnections.map(({ connection }) => (
-        <Callout key={connection.id} tone="yellow">
+        <Callout key={connection.id} tone="blue">
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">
               {providerAuthRouteLabel(connection.authKind)} needs attention
@@ -185,7 +185,7 @@ export function ProviderSetupStep({
                       : ""}
                   </div>
                 </div>
-                <ShieldCheck size={15} className="text-green" />
+                <ShieldCheck size={15} className="text-muted-foreground" />
               </div>
             ))}
           </div>

@@ -87,7 +87,7 @@ export function ResourceSetupStep({ detection, busy, error, onImport, onSkip, on
                     return next
                   })}
                 >
-                  <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-green">{checked && <Check size={12} />}</span>
+                  <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-muted-foreground">{checked && <Check size={12} />}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-[12px] font-medium text-text-body">{candidate.name}</span>
                     <span className="block truncate font-mono text-[10px] text-dim">{candidate.kind} · {candidate.provenance.sourcePath}</span>

@@ -66,7 +66,7 @@ function CandidateRow({
       className="flex w-full items-start gap-3 rounded-md px-3 py-2 text-left hover:bg-hover"
       onClick={onToggle}
     >
-      <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-green">
+      <span className="mt-0.5 flex size-4 items-center justify-center rounded border border-line-strong bg-canvas text-muted-foreground">
         {selected && <Check size={12} />}
       </span>
       <span className="min-w-0 flex-1">
@@ -193,7 +193,7 @@ export function AgentsSettings(props: AgentsSettingsProps) {
               ))}
             </div>
             {props.detection.skipped.length > 0 && (
-              <p className="mt-2 text-[10.5px] text-yellow">
+              <p className="mt-2 text-[10.5px] text-muted-foreground">
                 {props.detection.skipped.length} malformed or unsupported resource entries were skipped.
               </p>
             )}

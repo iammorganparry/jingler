@@ -587,10 +587,10 @@ export function DevicesSection({
                                function getClassName() {
                                  switch (environment.state) {
 case "online": {
-return ("bg-green/10 text-green")
+return ("bg-surface text-muted-foreground")
 }
 case "incompatible": {
-return ("bg-yellow/10 text-yellow")
+return ("bg-surface text-muted-foreground")
 }
 case "revoked": {
 return ("bg-red/10 text-red")
@@ -1314,7 +1314,7 @@ function GithubSection({
   function getTone() {
     switch (connection.mode) {
 case "connected": {
-return ("bg-green")
+return ("bg-line-strong")
 }
 case "error": {
 return ("bg-red")
@@ -1323,7 +1323,7 @@ case "disconnected": {
 return ("bg-line-strong")
 }
 }
-    return ("bg-yellow")
+    return ("bg-line-strong")
   }
 
   const [draft, setDraft] = React.useState<GithubConfig>(
@@ -1389,7 +1389,7 @@ return ("bg-line-strong")
               >
                 <StatusDot
                   tone={
-                    installation.status === "active" ? "bg-green" : "bg-red"
+                    installation.status === "active" ? "bg-line-strong" : "bg-red"
                   }
                   size={7}
                   glow={false}

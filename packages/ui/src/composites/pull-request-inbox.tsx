@@ -186,7 +186,7 @@ export function PullRequestInbox({
                   )}
                 >
                   <div className="flex min-w-0 items-start gap-2">
-                    <GitPullRequest className={cn("mt-0.5 size-4 flex-none", pr.isDraft ? "text-dim" : "text-green")} />
+                    <GitPullRequest className={cn("mt-0.5 size-4 flex-none", pr.isDraft ? "text-dim" : "text-muted-foreground")} />
                     <span className="min-w-0 flex-1 text-[13px] font-semibold leading-[1.35] text-text-bright">{pr.title}</span>
                     {pr.isDraft && <Badge tone="neutral" size="xs">Draft</Badge>}
                   </div>
@@ -236,7 +236,7 @@ export function PullRequestInbox({
         <section className={cn("flex min-h-0 min-w-0 flex-col border-r border-line bg-panel", compact ? "flex-1" : "w-1/3 min-w-[280px] max-w-[430px]")}>
           <header className="flex flex-none flex-col gap-3 border-b border-line px-4 py-3.5">
             <div className="flex items-center gap-2">
-              <GitPullRequest className="size-4 text-green" />
+              <GitPullRequest className="size-4 text-muted-foreground" />
               <h1 className="text-[14px] font-semibold text-text-bright">Pull requests</h1>
               <Badge tone="count" size="xs">{visible.length}</Badge>
             </div>
@@ -259,7 +259,7 @@ export function PullRequestInbox({
               {hasActiveInboxFilters(facets) &&
                 <button type="button" className="shrink-0 text-brand hover:underline" onClick={() => sendFilters({ type: "CLEAR" })}>Clear filters</button>}
             </div>
-            {warnings.length > 0 && <div role="status" className="text-xs text-yellow">
+            {warnings.length > 0 && <div role="status" className="text-xs text-muted-foreground">
               <strong>Partial results</strong>
               {warnings.map((warning) => <p key={warning}>{warning}</p>)}
               <p>Use Refresh to retry missing results.</p>

@@ -270,7 +270,7 @@ export function PrReviewThreadView({
           {thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}
         </span>
         {thread.isResolved && (
-          <Badge tone="green" size="xs">
+          <Badge tone="blue" size="xs">
             Resolved
           </Badge>
         )}

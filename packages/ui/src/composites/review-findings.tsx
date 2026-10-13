@@ -124,7 +124,7 @@ const OUTCOME_META: Record<
   Exclude<FindingOutcome["kind"], "manual" | "resolved">,
   { Icon: LucideIcon; label: string; tone: string }
 > = {
-  routed: { Icon: CornerDownRight, label: "Sent to agent", tone: "text-green" },
+  routed: { Icon: CornerDownRight, label: "Sent to agent", tone: "text-muted-foreground" },
   posted: { Icon: MessageSquare, label: "Posted to PR", tone: "text-dim" },
   "post-failed": { Icon: AlertTriangle, label: "Couldn't post to PR", tone: "text-red" }
 }
@@ -139,7 +139,7 @@ function OutcomeLine({ outcome }: { outcome: FindingOutcome }) {
   if (outcome.kind === "resolved") {
     return (
       <div
-        className="flex items-center gap-[5px] text-[10.5px] leading-none text-green"
+        className="flex items-center gap-[5px] text-[10.5px] leading-none text-muted-foreground"
         title={`${outcome.sha.slice(0, 7)} — ${outcome.subject}`}
       >
         <GitCommitHorizontal size={11} strokeWidth={2.25} />
@@ -354,7 +354,7 @@ export function ReviewFindings({
         <div className="flex flex-wrap items-center gap-x-[7px] gap-y-1 text-[11px] text-muted-foreground">
           {split.toAgent.length > 0 && (
             <span className="flex items-center gap-[5px]">
-              <CornerDownRight size={11} strokeWidth={2.25} className="text-green" />
+              <CornerDownRight size={11} strokeWidth={2.25} className="text-muted-foreground" />
               <span className="tabular-nums text-text">{split.toAgent.length}</span>
               <span>to the agent</span>
             </span>
@@ -377,7 +377,7 @@ export function ReviewFindings({
             <>
               <span className="text-dim">·</span>
               <span className="flex items-center gap-[5px]">
-                <GitCommitHorizontal size={12} strokeWidth={2.25} className="text-green" />
+                <GitCommitHorizontal size={12} strokeWidth={2.25} className="text-muted-foreground" />
                 <span className="tabular-nums text-text">{resolved}</span>
                 <span>resolved</span>
               </span>
@@ -409,13 +409,13 @@ export function ReviewFindings({
       {/* The reviewer ran but said something we couldn't parse — a refusal, or
           prose. Showing its words beats an empty list that reads as "no bugs". */}
       {review?.note != null && (
-        <Callout tone="yellow" className="items-start">
+        <Callout tone="blue" className="items-start">
           {review.note}
         </Callout>
       )}
 
       {review !== null && findings.length === 0 && review.note == null && (
-        <Callout tone="green">
+        <Callout tone="blue">
           The reviewer argued against this diff and found nothing to report.
         </Callout>
       )}

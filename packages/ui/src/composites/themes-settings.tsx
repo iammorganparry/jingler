@@ -168,7 +168,7 @@ export function ThemesSettings({
           fix and giving up on user themes.
         */}
         {skipped.length > 0 && (
-          <Callout tone="yellow" className="mb-4">
+          <Callout tone="blue" className="mb-4">
             <div className="font-medium">
               {skipped.length} theme file{skipped.length === 1 ? "" : "s"} could not be read
             </div>
