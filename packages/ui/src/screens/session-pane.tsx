@@ -12,6 +12,7 @@ import { createPortal } from "react-dom"
 import type {
   DiffStat,
   IssueIdentity,
+  IssueReference,
   Session,
   SessionActivity
 } from "@jingler/core"
@@ -72,6 +73,10 @@ import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHe
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
+import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
+
+const issueMenuValue = (issue: IssueReference): string =>
+  `${issue.providerId}:${issue.providerAccountId ?? ""}:${issue.id}`
 
 /**
  * What the host hands the live conversation pane so it can drive the Plan tab.
@@ -247,9 +252,10 @@ export interface SessionPaneProps {
   onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for this session (the "+" menu's File entry). */
   onOpenFilePicker?: (sessionId: string) => void
-  /** Persist selection of a provider-scoped issue from the right view rail. */
+  /** Persist selection of a provider-scoped issue from the header issue picker. */
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
-  /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
+  /** Plugin-supplied linked-issue pickers shown in the header, keyed by tab id; overrides the derived ones. */
+  issueMenus?: Readonly<Record<TabKey, IssueMenu | undefined>>
   /** Pinned header view ids in order (`Config.headerViews`). Absent hides the header buttons. */
   headerViews?: ReadonlyArray<string>
   /** Persist a new pinned set, from the overflow menu's "Pin to header". */
@@ -340,6 +346,41 @@ const tabOf = (surface: SessionSurface): TabKey =>
   surface.kind === "view"
     ? surface.id
     : BUILTIN_TAB.conversation
+
+/** A linked-issue picker for one issue-provider tab: derived from the session's linked issues, or supplied by a plugin. */
+export interface IssueMenu {
+  readonly value: string
+  readonly ariaLabel: string
+  readonly items: ReadonlyArray<LinkedIssueSelectorItem>
+  readonly onSelect: (value: string) => void
+}
+
+function buildIssueMenu(
+  session: Session,
+  contribution: TabContribution | undefined,
+  onSelectIssue: SessionPaneProps["onSelectIssue"]
+): IssueMenu | undefined {
+  const providerId = contribution?.issueProviderId
+  if (!providerId || !onSelectIssue) return undefined
+  const issues = issueReferencesOf(session).filter((issue) => issue.providerId === providerId)
+  if (issues.length < 2) return undefined
+  const selectedIssue = issueReferenceOf(session)
+  const selected = selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
+  return {
+    value: issueMenuValue(selected),
+    ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
+    items: issues.map((issue) => ({ value: issueMenuValue(issue), identifier: issue.identifier, title: issue.title })),
+    onSelect: (value) => {
+      const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
+      if (!issue) return
+      onSelectIssue(session.id, {
+        providerId: issue.providerId,
+        ...(issue.providerAccountId ? { providerAccountId: issue.providerAccountId } : {}),
+        id: issue.id
+      })
+    }
+  }
+}
 
 const chatTitleOf = (session: Session, chatId: string): string => {
   const index = session.chats.findIndex((chat) => chat.id === chatId)
@@ -888,15 +929,34 @@ function SessionPaneBody(props: SessionPaneProps) {
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [paneFocused, pinnedHeaderItems, selectTab])
-  const headerViewControls =
+  const issueMenu =
+    props.issueMenus?.[activeTab] ?? buildIssueMenu(active, tabs.find((c) => c.id === activeTab), props.onSelectIssue)
+  const issuePicker = issueMenu ? (
+    <LinkedIssueSelector
+      items={issueMenu.items}
+      value={issueMenu.value}
+      onValueChange={issueMenu.onSelect}
+      variant="compact"
+      ariaLabel={issueMenu.ariaLabel}
+      className="max-w-[160px]"
+    />
+  ) : null
+  const viewButtons =
     props.headerViews !== undefined && props.onHeaderViewsChange ? (
-      <div className="flex items-center gap-0.5">
+      <>
         <HeaderViewButtons
           views={pinnedHeaderItems}
           activeId={headerIdOf(activeTab)}
           onOpen={(id) => selectTab(tabIdOf(id))}
         />
         <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={(id) => selectTab(tabIdOf(id))} onPinnedChange={props.onHeaderViewsChange} />
+      </>
+    ) : null
+  const headerViewControls =
+    issuePicker || viewButtons ? (
+      <div className="flex items-center gap-0.5">
+        {issuePicker}
+        {viewButtons}
       </div>
     ) : null
 
