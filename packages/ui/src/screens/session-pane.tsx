@@ -70,7 +70,7 @@ import {
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
 import { useChatLane } from "../app/use-chat-lane.js"
-import { matchCollapseChatChord, matchFocusChatChord } from "../app/app-shortcuts.js"
+import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
@@ -941,11 +941,26 @@ function SessionPaneBody(props: SessionPaneProps) {
     ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
   }))
   const pinnedViews = props.headerViews ?? []
+  const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
+  // ⌘⇧D opens Changes; ⌥1–⌥9 open the header button at that position. Both go through
+  // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const position = matchHeaderViewChord(e)
+      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : pinnedHeaderItems[position]?.id
+      if (target === undefined) return
+      e.preventDefault()
+      selectTab(target)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [paneFocused, pinnedHeaderItems, selectTab])
   const headerViewControls =
     props.headerViews !== undefined && props.onHeaderViewsChange ? (
       <div className="flex items-center gap-0.5">
         <HeaderViewButtons
-          views={pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))}
+          views={pinnedHeaderItems}
           activeId={activeTab}
           onOpen={selectTab}
         />

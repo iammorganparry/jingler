@@ -771,6 +771,38 @@ describe("SessionPane", () => {
     expect(slot.getByTestId("view-overflow-trigger")).toBeTruthy()
   })
 
+  it("opens pinned header views on ⌥N and Changes on ⌘⇧D through the button path", () => {
+    const onRevealChanges = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onRevealChanges={onRevealChanges}
+        onToggleBrowser={vi.fn()}
+      />
+    )
+    fireEvent.keyDown(window, { key: "d", code: "KeyD", metaKey: true, shiftKey: true })
+    expect(onRevealChanges).toHaveBeenCalledWith("a")
+    const onToggleBrowser = vi.fn()
+    cleanup()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onToggleBrowser={onToggleBrowser}
+      />
+    )
+    fireEvent.keyDown(window, { key: "¡", code: "Digit1", altKey: true })
+    expect(onToggleBrowser).toHaveBeenCalledTimes(1)
+    onToggleBrowser.mockClear()
+    fireEvent.keyDown(window, { key: "£", code: "Digit3", altKey: true })
+    expect(onToggleBrowser).not.toHaveBeenCalled()
+  })
+
   it("moves group focus on mousedown", () => {
     render(
       <SessionPane

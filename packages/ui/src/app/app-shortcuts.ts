@@ -13,9 +13,21 @@ export const matchTerminalChord = (event: Chord): boolean =>
   event.ctrlKey && !event.metaKey && !event.altKey &&
   (event.code === "Backquote" || event.key === "`")
 
+/** ⌘⇧B (or ⌃⇧B off macOS). */
 export const matchBrowserChord = (event: Chord): boolean =>
-  event.ctrlKey && event.shiftKey && !event.metaKey && !event.altKey &&
-  (event.key === "B" || event.code === "KeyB")
+  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
+  (event.key.toLowerCase() === "b" || event.code === "KeyB")
+
+/** ⌘⇧D (or ⌃⇧D off macOS) opens Changes. */
+export const matchChangesChord = (event: Chord): boolean =>
+  (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
+  (event.key.toLowerCase() === "d" || event.code === "KeyD")
+
+/** ⌥1–⌥9 → zero-based position of the header view button to open, matching the physical digit key. */
+export const matchHeaderViewChord = (event: Chord): number | null =>
+  event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey && /^Digit[1-9]$/.test(event.code)
+    ? Number(event.code.slice(5)) - 1
+    : null
 
 export const matchExplorerToggleChord = (event: Chord): boolean =>
   (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
