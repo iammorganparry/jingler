@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { explorerTree } from "./explorer.js"
 import { showPullRequestDetails } from "./pull-request.js"
 import type { Page } from "@playwright/test"
 import type { SeedSession } from "./fixtures.js"
@@ -387,7 +388,7 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
 
   // No PR yet → Changes filters the Explorer to the uncommitted diff.
   const explorer = await revealChanges(window)
-  await expect(window.getByRole("tab", { name: "Uncommitted" })).toBeVisible()
+  await expect(window.getByRole("radio", { name: /^Changed/ })).toBeChecked()
 
   const search = explorer.getByRole("searchbox", { name: "Search changed files" })
   await search.fill("auth")
@@ -432,7 +433,7 @@ test("the Changes action filters the Explorer to uncommitted files and reviews o
   await expect(window.getByTestId("changed-files-explorer")).toBeVisible()
 
   // "All files" restores the full repository tree.
-  await window.getByRole("tab", { name: "All files" }).click()
+  await window.getByRole("radio", { name: "All", exact: true }).click()
   await expect(window.getByTestId("changed-files-explorer")).toHaveCount(0)
 })
 
@@ -446,9 +447,14 @@ test("renaming a session keeps the open tab and the breadcrumb follows it", asyn
   })
   await expect(appShell(window)).toBeVisible()
 
-  const files = window.getByRole("button", { name: "Files", exact: true }).first()
-  await files.click()
-  await expect(window.getByTestId("editor-tab-view-files")).toBeVisible()
+  // Files open from the Explorer sidebar now (no Files tab).
+  const tree = await explorerTree(window)
+  await tree.locator('[role="treeitem"][data-item-path="README.md"]').click()
+  const fileTab = window.getByTestId("editor-tab-file-README.md")
+  await expect(fileTab).toBeVisible()
+
+  // The session rows live in the Sessions half of the sidebar toggle.
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
 
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.getByTitle("Double-click to rename").dblclick()
@@ -456,12 +462,13 @@ test("renaming a session keeps the open tab and the breadcrumb follows it", asyn
   await input.fill("Renamed from sidebar")
   await input.press("Enter")
   await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Renamed from sidebar")
-  await expect(window.getByRole("tab", { name: "Files", exact: true })).toHaveAttribute("aria-selected", "true")
+  await expect(fileTab.getByRole("tab")).toHaveAttribute("aria-selected", "true")
 
   // Tabs live in the editor group, not the window title bar.
   await expect(window.getByTestId("title-bar").getByRole("tab")).toHaveCount(0)
   await expect(window.getByRole("button", { name: "Conversation", exact: true })).toHaveCount(0)
-  await window.getByRole("tab", { name: "Chat 1", exact: true }).first().click()
+  // The chat is a lane beside the open file now, not a "Chat 1" tab.
+  await expect(window.getByTestId("chat-lane-header").first()).toBeVisible()
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
 })
 
@@ -498,8 +505,8 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   const explorer = await revealChanges(window)
   await expect(window.getByText("Next milestone")).toHaveCount(0)
 
-  const prFilter = window.getByRole("tab", { name: "Pull request", exact: true })
-  await expect(prFilter).toHaveAttribute("aria-selected", "true", { timeout: 20_000 })
+  const prFilter = window.getByRole("radio", { name: /^PR #482/ })
+  await expect(prFilter).toBeChecked({ timeout: 20_000 })
   await explorer.locator('[data-item-path="src/auth.ts"]').click()
   const reviewDiff = window.getByTestId("review-file-diff")
   await expect(reviewDiff).toBeVisible({ timeout: 20_000 })
@@ -508,7 +515,7 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
     window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
   ).toBeVisible()
 
-  const filterBar = prFilter.locator("..").locator("..")
+  const filterBar = window.getByRole("radiogroup", { name: "Explorer filter" })
   const [filterBox, prFilterBox] = await Promise.all([filterBar.boundingBox(), prFilter.boundingBox()])
   expect(filterBox).not.toBeNull()
   expect(prFilterBox).not.toBeNull()
@@ -679,11 +686,7 @@ test("Changes falls back to the Uncommitted source and reverts a whole file", as
   await expect(appShell(window)).toBeVisible()
 
   const explorer = await revealChanges(window)
-  await expect(window.getByRole("tab", { name: "Uncommitted" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-    { timeout: 20_000 }
-  )
+  await expect(window.getByRole("radio", { name: /^Changed/ })).toBeChecked({ timeout: 20_000 })
   await explorer.locator('[data-item-path="README.md"]').click()
   const diff = window.getByTestId("review-file-diff")
   await expect(diff.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
