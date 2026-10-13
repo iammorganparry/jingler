@@ -115,7 +115,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await expect(window.locator('iframe[title="HTML preview"]')).toBeVisible()
 
   // A newly opened Browser stacks beside the current chat while both remain readable.
-  await window.getByTestId("view-tab-browser").click()
+  await window.getByTestId("header-view-browser").click()
   const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
   await expect(url).toBeVisible()
   await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
@@ -123,7 +123,7 @@ test("renders LaTeX + an opt-in HTML preview, and drives the browser pane", asyn
   await expect(window.locator(".katex").first()).toBeVisible()
   await url.fill("http://localhost:4321")
   await url.press("Enter")
-  await window.getByTestId("view-tab-browser").click()
+  await window.getByTestId("header-view-browser").click()
   await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(1)
   await expect.poll(() => app.evaluate(({ webContents }) =>
     webContents.getAllWebContents().filter((contents) => contents.getURL().startsWith("http://localhost:4321")).length
@@ -155,7 +155,7 @@ test("Cmd/Ctrl+W closes the Browser tab while its native page has focus", async 
       sessions: seededSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     const addressBar = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await addressBar.fill(url)
     await addressBar.press("Enter")
@@ -241,7 +241,7 @@ test("browser sign-in popups keep their opener without app privileges", async ({
       sessions: seededSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/opener`)
     await url.press("Enter")
@@ -316,14 +316,14 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/alpha`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/alpha-history`, { timeout: 10_000 })
 
     await sessionRow(window, "Preview Beta").click()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     await url.fill(`${origin}/beta`)
     await url.press("Enter")
     await expect(url).toHaveValue(`${origin}/beta-history`, { timeout: 10_000 })
@@ -411,13 +411,13 @@ test("two agents in one session keep independent browser state", async ({ launch
     })
     await expect(appShell(window)).toBeVisible()
     const focusedUrl = () => window.getByLabel("Preview URL").filter({ visible: true }).first()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     await focusedUrl().fill(`${origin}/alpha`)
     await focusedUrl().press("Enter")
     await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
 
     await window.getByTestId("session-tree-chat-chat-beta").getByRole("button").click()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     await focusedUrl().fill(`${origin}/beta`)
     await focusedUrl().press("Enter")
     await expect(focusedUrl()).toHaveValue(`${origin}/beta-history`)
@@ -438,7 +438,7 @@ test("two agents in one session keep independent browser state", async ({ launch
     expect(pages.every((page) => page.historyLength >= 2)).toBe(true)
 
     await window.getByTestId("session-tree-chat-chat-alpha").locator("button").first().click()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     await expect(focusedUrl()).toHaveValue(`${origin}/alpha-history`)
   } finally {
     await closeServer(server)
@@ -472,7 +472,7 @@ test("deleting a session closes its native browser resources", async ({ launchAp
       sessions: isolatedSessions
     })
     await expect(appShell(window)).toBeVisible()
-    await window.getByTestId("view-tab-browser").click()
+    await window.getByTestId("header-view-browser").click()
     const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
     await url.fill(`${origin}/owned-by-alpha`)
     await url.press("Enter")
@@ -551,7 +551,7 @@ test("retains each session browser while files occupy the content pane", async (
     await expect(appShell(window)).toBeVisible()
 
     const openBrowser = async () => {
-      await window.getByTestId("view-tab-browser").click()
+      await window.getByTestId("header-view-browser").click()
       const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
       await url.fill(origin)
       await url.press("Enter")

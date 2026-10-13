@@ -45,7 +45,7 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   await window.getByRole("button", { name: "Run Dev" }).click()
   await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()
   // The general browser remains available beside a running project command.
-  await window.getByTestId("view-tab-browser").click()
+  await window.getByTestId("header-view-browser").click()
   await expect(window.getByLabel("Preview URL").filter({ visible: true }).first()).toBeVisible()
   await expect(window.getByTestId("editor-tab-view-browser")).toBeVisible()
   await expect(window.getByRole("button", { name: "Stop Dev" })).toBeVisible()

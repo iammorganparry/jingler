@@ -74,7 +74,7 @@ test("links and shows a pull request through authenticated gh without a GitHub A
 
     await expect(appShell(window)).toBeVisible()
     await expect(window.getByText("#42", { exact: true }).first()).toBeVisible({ timeout: 20_000 })
-    await window.getByTestId("view-tab-pr").first().click()
+    await window.getByTestId("header-view-checks").first().click()
     await expect(window.getByRole("heading", { name: "CLI-only pull request" })).toBeVisible()
     await expect(window.getByText("Loaded through authenticated GitHub CLI without an App installation.")).toBeVisible()
   } finally {

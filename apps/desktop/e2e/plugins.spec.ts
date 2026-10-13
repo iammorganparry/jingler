@@ -957,7 +957,8 @@ test("bumping the version re-imports the module, so an edit is visible", async (
   await seedPlugin(home, withLabel("1.0.1", "second version"))
   await window.reload()
   await openSession(window)
-  await window.getByTestId("view-tab-e2e-tab.main").click({ timeout: 20_000 })
+  await window.getByTestId("view-overflow-trigger").click({ timeout: 20_000 })
+  await window.getByTestId("open-e2e-tab.main").click()
 
   await expect(window.getByText("second version").filter({ visible: true }).first()).toBeVisible({ timeout: 20_000 })
   await expect(window.getByText("first version")).toHaveCount(0)

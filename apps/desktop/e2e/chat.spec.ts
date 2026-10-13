@@ -24,7 +24,7 @@ const SEND_ONE_TO_AGENT = /Send 1 to agent/
 
 /** Open the Pull Request tab with its details rail showing. */
 const openPullRequestDetails = async (window: Page) => {
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   await showPullRequestDetails(window)
 }
 
@@ -498,7 +498,7 @@ test("a linked PR shows the sidebar badge, the Pull Request tab and the Changes 
   // The sidebar row badges the linked PR number.
   await expect(window.getByText(/#482/).first()).toBeVisible()
 
-  await expect(window.getByTestId("view-tab-pr").first()).toBeVisible()
+  await expect(window.getByTestId("header-view-checks").first()).toBeVisible()
   // Code Review is no longer a tab: its review lives in the Explorer's filter.
   await expect(window.getByRole("button", { name: "Code Review" })).toHaveCount(0)
   await window.setViewportSize({ width: 900, height: 700 })
@@ -551,7 +551,7 @@ test("the Pull Request tab leads with the description, in the conversation's col
     }
   })
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
 
   // The description renders as the opening comment — markdown and all.
   await expect(window.getByRole("heading", { name: "Why" })).toBeVisible({ timeout: 20_000 })

@@ -127,7 +127,7 @@ test("moves the live relay to a replacement PR created in the same session", asy
   });
 
   await openSessionByTitle(window, "Replacement review");
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click();
+  await window.getByTestId("header-view-checks").click();
   await expect.poll(() => persistedSessionIdentity(home, "s_replacement")).toMatchObject({
     branch: "fix/replacement-review",
     prNumber: 43,
