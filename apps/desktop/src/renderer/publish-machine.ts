@@ -2,16 +2,17 @@ import type { PublishCheckpoint } from "@jingler/core"
 import { assign, fromCallback, setup } from "xstate"
 
 export interface PublishMachineDependencies {
-  readonly subscribe: (listener: (checkpoint: PublishCheckpoint) => void) => () => void
+  readonly subscribe: (listener: (checkpoint: PublishCheckpoint) => void, base?: string) => () => void
   readonly onComplete: (checkpoint: PublishCheckpoint) => void
 }
 
 interface PublishContext {
   checkpoint: PublishCheckpoint | null
+  base?: string
 }
 
 type PublishEvent =
-  | { readonly type: "PUBLISH" }
+  | { readonly type: "PUBLISH"; readonly base?: string }
   | { readonly type: "RETRY" }
   | { readonly type: "CHECKPOINT"; readonly checkpoint: PublishCheckpoint }
 
@@ -24,12 +25,14 @@ export const createRendererPublishMachine = (
     events: {} as PublishEvent
   },
   actors: {
-    publish: fromCallback(({ sendBack }) =>
-      dependencies.subscribe((checkpoint) => sendBack({ type: "CHECKPOINT", checkpoint })))
+    publish: fromCallback<PublishEvent, { base?: string }>(({ input, sendBack }) =>
+      dependencies.subscribe((checkpoint) => sendBack({ type: "CHECKPOINT", checkpoint }), input?.base))
   },
   actions: {
     saveCheckpoint: assign({ checkpoint: ({ event }) =>
       event.type === "CHECKPOINT" ? event.checkpoint : null }),
+    setBase: assign({ base: ({ event }) =>
+      event.type === "PUBLISH" ? event.base : undefined }),
     notifyComplete: ({ event }) => {
       if (event.type === "CHECKPOINT") dependencies.onComplete(event.checkpoint)
     }
@@ -44,9 +47,9 @@ export const createRendererPublishMachine = (
   initial: initial?.step === "failed" ? "failed" : initial?.step === "complete" ? "complete" : "idle",
   context: { checkpoint: initial ?? null },
   states: {
-    idle: { on: { PUBLISH: "publishing" } },
+    idle: { on: { PUBLISH: { target: "publishing", actions: "setBase" } } },
     publishing: {
-      invoke: { src: "publish" },
+      invoke: { src: "publish", input: ({ context }) => ({ base: context.base }) },
       on: {
         CHECKPOINT: [
           { guard: "failed", target: "failed", actions: "saveCheckpoint" },
@@ -56,8 +59,8 @@ export const createRendererPublishMachine = (
         ]
       }
     },
-    failed: { on: { RETRY: "publishing", PUBLISH: "publishing" } },
-    complete: { on: { PUBLISH: "publishing" } },
-    "no-changes": { on: { PUBLISH: "publishing" } }
+    failed: { on: { RETRY: "publishing", PUBLISH: { target: "publishing", actions: "setBase" } } },
+    complete: { on: { PUBLISH: { target: "publishing", actions: "setBase" } } },
+    "no-changes": { on: { PUBLISH: { target: "publishing", actions: "setBase" } } }
   }
 })

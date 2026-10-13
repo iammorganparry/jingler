@@ -77,6 +77,8 @@ export function PullRequestPane({
       publish={publish.checkpoint}
       publishing={publish.publishing}
       branch={session.branch}
+      baseBranch={session.baseBranch ?? pr?.baseRefName}
+      prs={session.prs}
       sessionTitle={session.title}
       onCreatePr={
         workspaceModeOf(session) === "worktree" ? publish.publish : undefined

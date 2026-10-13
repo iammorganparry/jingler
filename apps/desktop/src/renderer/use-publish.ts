@@ -10,10 +10,10 @@ export const usePublish = (
   onCheckpoint?: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
 ) => {
   const machine = useMemo(() => createRendererPublishMachine(session.publish, {
-    subscribe: (listener) => rpc.githubPublish(session.id, (checkpoint) => {
+    subscribe: (listener, base) => rpc.githubPublish(session.id, (checkpoint) => {
       onCheckpoint?.(session.id, checkpoint)
       listener(checkpoint)
-    }),
+    }, base),
     onComplete: (checkpoint) => {
       if (checkpoint.prNumber !== undefined) onPrLinked?.(session.id, checkpoint.prNumber)
     }
@@ -22,7 +22,7 @@ export const usePublish = (
   return {
     checkpoint: snapshot.context.checkpoint,
     publishing: snapshot.matches("publishing"),
-    publish: () => send({ type: "PUBLISH" }),
+    publish: (base?: string) => send({ type: "PUBLISH", base }),
     retry: () => send({ type: "RETRY" })
   }
 }
