@@ -5,6 +5,7 @@ import {
   ProviderConnectionId,
   ProviderId
 } from "./runtime/provider-connection.js"
+import { ProviderSpend } from "./runtime/spend.js"
 
 /**
  * Provider usage / rate-limit model for the "Usage & limits" widget. Claude and
@@ -48,7 +49,9 @@ export const ProviderUsage = Schema.Struct({
   available: Schema.Boolean,
   /** Why usage is unavailable, when the provider told us (e.g. an HTTP 403). */
   unavailableReason: Schema.optional(Schema.NullOr(Schema.String)),
-  windows: Schema.Array(UsageWindow)
+  windows: Schema.Array(UsageWindow),
+  /** API-priced plans report spend instead of windows. */
+  spend: Schema.optional(Schema.NullOr(ProviderSpend))
 })
 export type ProviderUsage = Schema.Schema.Type<typeof ProviderUsage>
 

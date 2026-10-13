@@ -78,6 +78,7 @@ import {
   runPublishMachineExclusive,
   UsageService,
   UsageFactStore,
+  withApiSpend,
   fetchPiProviderUsage,
   routePeerAgentMessage,
   adoptableChatIdentities,
@@ -5454,6 +5455,15 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
                   ),
             ),
           ),
+        ),
+      ),
+      Effect.flatMap((usage) =>
+        AppPaths.pipe(
+          Effect.flatMap((paths) =>
+            Effect.tryPromise(() => new UsageFactStore(join(paths.runJournalsDir, "usage-facts.json")).list()),
+          ),
+          Effect.map((facts) => withApiSpend(usage, facts)),
+          Effect.catchAll(() => Effect.succeed(usage)),
         ),
       ),
       Effect.catchAll(() => Effect.succeed({ providers: [], fetchedAt: null })),

@@ -18,6 +18,7 @@ import type {
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
+  isClaudeCliRoute,
   JINGLER_SUBAGENT_NAMES,
   makeUsageFact
 } from "@jingler/core"
@@ -204,7 +205,7 @@ export interface PiSessionFactoryOptions {
 const usesClaudeCli = (connection: ProviderConnection): boolean =>
   connection.providerId === "anthropic" &&
   connection.authKind === "claude-setup-token" &&
-  connection.subscription.observedRoute === "claude-cli:subscription"
+  isClaudeCliRoute(connection.subscription.observedRoute)
 
 const modelIdForProvider = (spec: AgentRunSpec, connection: ProviderConnection) => {
   const qualified = String(spec.modelId)

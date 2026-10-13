@@ -283,6 +283,7 @@ export interface LaunchOptions {
       "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     >;
     readonly seedConnection?: boolean;
+    readonly apiPriced?: boolean;
     readonly modelCount?: number;
   };
   /**

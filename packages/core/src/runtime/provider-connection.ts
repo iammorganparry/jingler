@@ -72,12 +72,20 @@ export type ConfirmedBillingRoute = NonNullable<
   SubscriptionStatus["confirmedBillingRoute"]
 >
 
+/** Observed routes of a Claude CLI login: flat-rate subscription or per-token API pricing (Enterprise). */
+export const CLAUDE_CLI_SUBSCRIPTION_ROUTE = "claude-cli:subscription"
+export const CLAUDE_CLI_API_ROUTE = "claude-cli:api"
+export const isClaudeCliRoute = (observedRoute: string | undefined): boolean =>
+  observedRoute === CLAUDE_CLI_SUBSCRIPTION_ROUTE || observedRoute === CLAUDE_CLI_API_ROUTE
+
 /** The only billing route that can authenticate a credential of this kind. */
 export const expectedBillingRouteForAuthKind = (
-  authKind: AuthKind
+  authKind: AuthKind,
+  observedRoute?: string
 ): ConfirmedBillingRoute => {
   switch (authKind) {
     case "claude-setup-token":
+      return observedRoute === CLAUDE_CLI_API_ROUTE ? "api" : "subscription"
     case "openai-codex-oauth":
       return "subscription"
     case "api-key":
@@ -91,10 +99,11 @@ export const expectedBillingRouteForAuthKind = (
 export const authStatusForObservedBillingRoute = (
   authKind: AuthKind,
   entitlement: SubscriptionStatus["entitlement"],
-  confirmedBillingRoute: SubscriptionStatus["confirmedBillingRoute"]
+  confirmedBillingRoute: SubscriptionStatus["confirmedBillingRoute"],
+  observedRoute?: string
 ): AuthStatus =>
   entitlement === "active" &&
-  confirmedBillingRoute === expectedBillingRouteForAuthKind(authKind)
+  confirmedBillingRoute === expectedBillingRouteForAuthKind(authKind, observedRoute)
     ? "authenticated"
     : "entitlement-unconfirmed"
 
