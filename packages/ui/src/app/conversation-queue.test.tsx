@@ -310,3 +310,21 @@ describe("ConversationView — queued messages", () => {
     expect(onSendNow).toHaveBeenCalledWith("q1")
   })
 })
+
+describe("ConversationView — hand off all", () => {
+  it("hands every queued id off in queue order from the queue header", () => {
+    const onHandoffAllQueued = vi.fn()
+    render(<ConversationView messages={[]} mode="accept-edits" queued={queued(3)} onHandoffAllQueued={onHandoffAllQueued} />)
+    fireEvent.click(screen.getByRole("button", { name: "Hand off all · 3" }))
+    expect(onHandoffAllQueued).toHaveBeenCalledWith(["q0", "q1", "q2"])
+  })
+
+  it("is disabled while a queued message is being sent", () => {
+    const onHandoffAllQueued = vi.fn()
+    render(<ConversationView messages={[]} mode="accept-edits" queued={queued(3)} steeringId="q0" onHandoffAllQueued={onHandoffAllQueued} />)
+    const button = screen.getByRole("button", { name: "Hand off all · 3" }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(onHandoffAllQueued).not.toHaveBeenCalled()
+  })
+})
