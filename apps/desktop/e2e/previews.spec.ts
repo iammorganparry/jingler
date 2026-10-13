@@ -590,3 +590,23 @@ test("retains each session browser while files occupy the content pane", async (
     await closeServer(server)
   }
 })
+
+test("Preview ready chip opens the Browser view without duplicating its tab", async ({ launchApp }) => {
+  const { app, window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: seededSessions
+  })
+  await expect(appShell(window)).toBeVisible()
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()[0]?.webContents.send("jingler/preview/reveal", {
+      sessionId: "s_seeded",
+      chatId: "c_s_seeded_1",
+      url: "http://localhost:4321"
+    }))
+  const chip = window.getByTestId("preview-ready-chip")
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(1)
+})
