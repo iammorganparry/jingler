@@ -127,3 +127,46 @@ test("a closed chat can be reopened with its transcript after a real app restart
   await expect(chatTab(second.window, "Main workspace")).toHaveAttribute("aria-selected", "true")
   await expect(second.window.getByText("The release checklist is ready.")).toBeVisible()
 })
+
+test("switch chat thread via the lane header dropdown", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{ ...session, worktreePath: context.repoPath }],
+    transcripts: { s_multi: mainConversation }
+  })
+
+  await sessionRow(launched.window, "Multi-chat lifecycle").click()
+  
+  // Create a second chat
+  await launched.window.getByTestId("new-chat-button").click()
+  await renameInTree(launched.window, "Chat 2", "Review migrations")
+  
+  // Chat groups should not have role=tablist
+  const chatGroup = launched.window.locator('[data-testid="editor-group"][data-focused="true"]')
+  await expect(chatGroup).toBeVisible()
+  await expect(chatGroup.locator('[role="tablist"]')).toHaveCount(0)
+  
+  // Should have the chat lane header
+  await expect(launched.window.getByTestId("chat-lane-header")).toBeVisible()
+  
+  // Switch back to Chat 1 via the dropdown
+  await launched.window.getByTestId("thread-switcher").click()
+  await launched.window.getByTestId("chat-option-c_multi_1").click()
+  
+  // Chat 1 should now be active
+  await expect(launched.window.getByTestId("thread-switcher")).toContainText("Chat 1")
+  await expect(launched.window.getByText("The release checklist is ready.")).toBeVisible()
+  
+  // Switch to Review migrations
+  await launched.window.getByTestId("thread-switcher").click()
+  const chat2Id = await launched.window.evaluate(() => {
+    const sessions = JSON.parse(localStorage.getItem("sessions.v5") || "{}")
+    const session = sessions["s_multi"]
+    return session?.chats?.[1]?.id
+  })
+  await launched.window.getByTestId(`chat-option-${chat2Id}`).click()
+  
+  await expect(launched.window.getByTestId("thread-switcher")).toContainText("Review migrations")
+})
+
