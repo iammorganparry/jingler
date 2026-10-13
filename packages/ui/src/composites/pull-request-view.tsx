@@ -20,6 +20,7 @@ import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Card } from "../components/card.js"
+import { Eyebrow } from "../components/eyebrow.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
@@ -420,9 +421,8 @@ return (evidence === "checks" ? (
             </Card>
           )}
 
-          <div className="h-px bg-line" />
-
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
+          <Eyebrow>Timeline</Eyebrow>
           {feed.length === 0 ? (
             <p className="text-[13px] text-dim">No reviews or comments yet.</p>
           ) : (

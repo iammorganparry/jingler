@@ -7,6 +7,7 @@ import type {
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
+import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
 import { ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
@@ -154,6 +155,20 @@ export const ReadinessChecklistStates: Story = {
           reviewThreads: pr.reviewThreads.map((t) => ({ ...t, isResolved: true }))
         }}
       />
+    </div>
+  )
+}
+
+/** Timeline entries of every kind: neutral icon and label, no kind-coded colour. */
+export const TimelineEntries: Story = {
+  render: () => (
+    <div className="flex max-w-[760px] flex-col gap-4 bg-editor p-6">
+      {(["commented", "approved", "changes_requested"] as const).map((kind) => (
+        <PrTimelineEntry
+          key={kind}
+          item={{ id: kind, author: "dan", kind, body: `A ${kind} entry.`, createdAt: "2026-07-11T09:00:00.000Z", path: null, line: null }}
+        />
+      ))}
     </div>
   )
 }
