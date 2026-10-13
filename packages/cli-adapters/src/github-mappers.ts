@@ -531,9 +531,13 @@ export const mapPrState = (raw: unknown, checks: ReadonlyArray<PrCheck>): Sessio
           : "open"
         : null
   if (state === null) return null
+  if (state === "closed" || state === "merged" || checks.length === 0) {
+    return { state, checks: state === "closed" || state === "merged" ? null : rollupChecks(checks) }
+  }
   return {
     state,
-    checks: state === "closed" || state === "merged" ? null : rollupChecks(checks)
+    checks: rollupChecks(checks),
+    checkCounts: { passing: checks.filter((check) => check.status === "pass").length, total: checks.length }
   }
 }
 

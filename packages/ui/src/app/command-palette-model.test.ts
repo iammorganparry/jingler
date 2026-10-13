@@ -360,13 +360,13 @@ describe("viewPaletteItems", () => {
     const open = vi.fn()
     const items = viewPaletteItems(
       [
-        { id: "pr", label: "Pull Request", icon: undefined },
+        { id: "checks", label: "Checks", icon: undefined },
         { id: "linear.issues", label: "Linear", icon: undefined }
       ],
       open
     )
     expect(items.map((i) => [i.id, i.label, i.group])).toEqual([
-      ["view:pr", "Pull Request", "Open view…"],
+      ["view:checks", "Checks", "Open view…"],
       ["view:linear.issues", "Linear", "Open view…"]
     ])
     items[1]!.run()

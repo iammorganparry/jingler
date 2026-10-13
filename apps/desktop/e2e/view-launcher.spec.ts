@@ -85,9 +85,9 @@ test("PR chip opens the PR view and a second click focuses it instead of duplica
   const chip = window.getByTestId("header-link-pr")
   await expect(chip).toHaveText("PR #482")
   await chip.click()
-  await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
   await chip.click()
-  await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+  await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
 })
 
 test("⌘K → Open view… opens the chosen view and leaves one tab on repeat", async ({ launchApp }) => {
@@ -97,6 +97,6 @@ test("⌘K → Open view… opens the chosen view and leaves one tab on repeat",
     await window.keyboard.press("Meta+k")
     await window.getByTestId("palette-item-view:pr").click()
     await expect(window.getByTestId("command-palette")).toBeHidden()
-    await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+    await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
   }
 })

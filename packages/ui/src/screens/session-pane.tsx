@@ -14,7 +14,8 @@ import type {
   IssueIdentity,
   IssueReference,
   Session,
-  SessionActivity
+  SessionActivity,
+  SessionPrStatus
 } from "@jingler/core"
 import {
   issueReferenceOf,
@@ -205,6 +206,8 @@ export interface SessionPaneProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Polled PR status per session, for the Checks `a/b` badge. */
+  prStates?: Record<string, SessionPrStatus>
   /** Opens Files once when this session first stops in the debugger. */
   debugStopSequence?: number
   /** Open the Settings view — the "connect GitHub" escape hatch on empty states. */
@@ -696,7 +699,8 @@ function SessionPaneBody(props: SessionPaneProps) {
     session: active,
     hasPlan,
     hasExplanation,
-    diff: props.liveDiff?.[active.id] ?? null
+    diff: props.liveDiff?.[active.id] ?? null,
+    checkCounts: props.prStates?.[active.id]?.checkCounts ?? null
   }
   const connectGithub = props.onOpenSettings ?? noop
 
@@ -891,12 +895,9 @@ function SessionPaneBody(props: SessionPaneProps) {
     return group && activeSurface(group)
   }
 
-  // The built-in Pull Request tab is the header's Checks view (spec §3c).
-  const headerIdOf = (tabId: TabKey): string => (tabId === BUILTIN_TAB.pr ? "checks" : tabId)
-  const tabIdOf = (headerId: string): TabKey => (headerId === "checks" ? BUILTIN_TAB.pr : headerId)
   const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
-    id: headerIdOf(tab.id),
-    label: tab.id === BUILTIN_TAB.pr ? "Checks" : tab.label,
+    id: tab.id,
+    label: tab.label,
     icon: tab.icon,
     ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
     ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
@@ -910,7 +911,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (!paneFocused) return
     const onKeyDown = (e: KeyboardEvent) => {
       const position = matchHeaderViewChord(e)
-      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : (id => id === undefined ? undefined : tabIdOf(id))(pinnedHeaderItems[position]?.id)
+      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : pinnedHeaderItems[position]?.id
       if (target === undefined) return
       e.preventDefault()
       selectTab(target)
@@ -920,12 +921,12 @@ function SessionPaneBody(props: SessionPaneProps) {
   }, [paneFocused, pinnedHeaderItems, selectTab])
   // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
   const linkChips: HeaderLinkChip[] = []
-  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.pr)) {
+  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
     linkChips.push({
       id: "pr",
       label: `PR #${active.prNumber}`,
       title: "Open pull request",
-      onOpen: () => selectTab(BUILTIN_TAB.pr)
+      onOpen: () => selectTab(BUILTIN_TAB.checks)
     })
   }
   const linkedIssue = issueReferenceOf(active)
@@ -955,10 +956,10 @@ function SessionPaneBody(props: SessionPaneProps) {
       <>
         <HeaderViewButtons
           views={pinnedHeaderItems}
-          activeId={headerIdOf(activeTab)}
-          onOpen={(id) => selectTab(tabIdOf(id))}
+          activeId={activeTab}
+          onOpen={selectTab}
         />
-        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={(id) => selectTab(tabIdOf(id))} onPinnedChange={props.onHeaderViewsChange} />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
       </>
     ) : null
   const headerViewControls =

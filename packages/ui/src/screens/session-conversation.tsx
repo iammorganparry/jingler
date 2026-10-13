@@ -349,6 +349,7 @@ export function SessionConversation(props: SessionConversationProps) {
             explanationSessions={props.explanationSessions}
             liveActivity={props.liveActivity}
             liveDiff={props.liveDiff}
+            prStates={props.prStates}
             debugStopSequences={props.debugStopSequences}
             onOpenSettings={props.onOpenGithubSettings ?? props.onOpenSettings}
             onOpenProviderSettings={props.onOpenProviderSettings ?? props.onOpenSettings}
