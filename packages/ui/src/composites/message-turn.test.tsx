@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import type { Message, PlanDocument } from "@jingler/core"
-import { cleanup, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
-import { MessageTurn, PlanProgressContext } from "./message-turn.js"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { isSubagentSpawnMessage, MessageTurn, PlanProgressContext, SubagentEntryContext } from "./message-turn.js"
 
 afterEach(cleanup)
 
@@ -120,5 +120,67 @@ describe("MessageTurn streaming text", () => {
       ]
     })} />)
     expect(withProgress.container.querySelector(".jingler-streaming-text")).toBeNull()
+  })
+})
+
+describe("MessageTurn subagent entry points", () => {
+  const spawnTurn = assistant({
+    streaming: false,
+    parts: [{
+      _tag: "Tool",
+      tool: { id: "t1", name: "subagent", target: null, status: "success", meta: null, diff: null, preview: null }
+    }]
+  })
+  const child = (id: string, agent: string) =>
+    ({ id, agent, task: "task", status: "running", startedAt: 0 }) as const
+  const entry = (onOpenSubagent: (id: string) => void) => ({
+    subagents: [child("a", "Explore"), child("b", "Worker")],
+    onOpenSubagent
+  })
+
+  it("detects subagent spawn turns", () => {
+    expect(isSubagentSpawnMessage(spawnTurn)).toBe(true)
+    expect(isSubagentSpawnMessage(assistant())).toBe(false)
+  })
+
+  it("View on the subagent tool card opens the first child", () => {
+    const open = vi.fn()
+    render(
+      <SubagentEntryContext.Provider value={entry(open)}>
+        <MessageTurn message={spawnTurn} />
+      </SubagentEntryContext.Provider>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "View" }))
+    expect(open).toHaveBeenCalledWith("a")
+  })
+
+  it("renders no View without children", () => {
+    render(
+      <SubagentEntryContext.Provider value={{ subagents: [], onOpenSubagent: vi.fn() }}>
+        <MessageTurn message={spawnTurn} />
+      </SubagentEntryContext.Provider>
+    )
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull()
+  })
+
+  it("shows a Spawned N subagents row whose buttons open each child", () => {
+    const open = vi.fn()
+    render(
+      <SubagentEntryContext.Provider value={entry(open)}>
+        <MessageTurn message={spawnTurn} showSubagentRow />
+      </SubagentEntryContext.Provider>
+    )
+    expect(screen.getByTestId("subagent-spawn-row").textContent).toContain("Spawned 2 subagents")
+    fireEvent.click(screen.getByTestId("subagent-spawn-row-b"))
+    expect(open).toHaveBeenCalledWith("b")
+  })
+
+  it("omits the row unless asked", () => {
+    render(
+      <SubagentEntryContext.Provider value={entry(vi.fn())}>
+        <MessageTurn message={spawnTurn} />
+      </SubagentEntryContext.Provider>
+    )
+    expect(screen.queryByTestId("subagent-spawn-row")).toBeNull()
   })
 })

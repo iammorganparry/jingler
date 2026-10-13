@@ -34,6 +34,7 @@ import {
   BackgroundTaskOutput,
   Composer,
   ConversationView,
+  SubagentEntryContext,
   FleetAgentView,
   McpApiKeyDialog,
   McpBrand,
@@ -65,6 +66,7 @@ import {
   serializeCodeReferences
 } from "./code-reference.js"
 import { useConversation, type Conversation } from "./use-conversation.js"
+import { useSessionSubagentEntry } from "./session-chat-tabs.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from "./use-subagent-fleet.js"
 import {
   publishSubagentTabs,
@@ -765,6 +767,7 @@ export function ConversationPane({
     return () => releaseSubagentTabController(session.id, activeChat.id)
   }, [activeChat.id, session.id])
   const subagentTabSelection = useSubagentTabSelection(session.id)
+  const subagentEntry = useSessionSubagentEntry(session)
   const selectFleetRef = useRef(fleet.select)
   selectFleetRef.current = fleet.select
   useEffect(() => {
@@ -941,7 +944,8 @@ export function ConversationPane({
           </div>
         </>
       ) : (
-        renderMainConversation({
+        <SubagentEntryContext.Provider value={subagentEntry}>
+        {renderMainConversation({
                 convo,
                 addLocalMcp: localMcpConfig.add,
                 mcpServers: localMcpConfig.servers,
@@ -976,7 +980,8 @@ export function ConversationPane({
                 toggleFollowAgent,
                 onRestore,
                 onDelete
-              })
+              })}
+        </SubagentEntryContext.Provider>
       )}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
