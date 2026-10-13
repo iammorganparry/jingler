@@ -38,7 +38,8 @@ export function ReviewFileRail({
   removed,
   viewed,
   controls,
-  onSelectFile
+  onSelectFile,
+  onDiscardFile
 }: {
   readonly files: readonly PrFileChange[]
   readonly totalFiles: number
@@ -51,6 +52,7 @@ export function ReviewFileRail({
   readonly viewed: number
   readonly controls: ReturnType<typeof useCodeReviewView>
   readonly onSelectFile: (path: string) => void
+  readonly onDiscardFile?: (path: string) => void
 }) {
   return (
     <>
@@ -131,6 +133,7 @@ export function ReviewFileRail({
           statusByPath={statusByPath}
           query={controls.query}
           onSelectFile={onSelectFile}
+          onDiscardFile={onDiscardFile}
         />
       </div>
       <div className="flex h-11 flex-none items-center gap-1.5 border-t border-hairline px-[14px] font-mono text-[10.5px] text-dim">

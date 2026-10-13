@@ -180,6 +180,8 @@ export interface ChangedFilesExplorerProps {
   readonly review?: AdversarialReview | null
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
+  /** Right-click → "Discard file changes" on a row; omit when nothing local can be discarded. */
+  readonly onDiscardFile?: (path: string) => void
   /** Agent turns that changed files; the filter shows when there are any. */
   readonly turns?: readonly ReviewTurn[]
   readonly turnId?: string | null
@@ -205,6 +207,7 @@ export function ChangedFilesExplorer({
   review = null,
   activePath,
   onSelectFile,
+  onDiscardFile,
   turns = [],
   turnId = null,
   onTurnChange,
@@ -293,6 +296,7 @@ export function ChangedFilesExplorer({
             viewed={viewed}
             controls={controls}
             onSelectFile={onSelectFile}
+            onDiscardFile={onDiscardFile}
           />
         )}
         {allFiles.length > 0 && files.length === 0 ? (

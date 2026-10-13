@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
-import type { AssetPayload, DebugViewSnapshot, PrFileChange, Session } from "@jingler/core"
+import { workspaceModeOf, type AssetPayload, type DebugViewSnapshot, type PrFileChange, type Session } from "@jingler/core"
 import type { TokenEventBase } from "@pierre/diffs"
 import { isLanguageHoverPath } from "@jingler/contracts"
 import {
@@ -188,6 +188,13 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
     onOpenPath(path)
   }
 
+  const discardFile =
+    workspaceModeOf(session) === "worktree"
+      ? (path: string) => {
+          void rpc.workspaceRevertFile(session.id, path).then(browser.refreshTree).catch(() => {})
+        }
+      : undefined
+
   const localCount = source === "local" ? files.length : undefined
   const prCount = source === "pr" ? files.length : undefined
 
@@ -221,6 +228,7 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
             browser.open(path)
             onOpenPath(path)
           }}
+          onDiscardFile={discardFile}
         />
         )}
     </ExplorerPanel>
