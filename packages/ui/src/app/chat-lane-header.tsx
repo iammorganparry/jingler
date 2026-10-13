@@ -1,4 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
+import type { ReactNode } from "react"
 import { ChevronDown, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
@@ -25,6 +26,8 @@ export interface ChatLaneHeaderProps {
   readonly followAgent?: boolean
   /** Toggle the shared agent-follow mode. */
   readonly onToggleFollowAgent?: (enabled: boolean) => void
+  /** Rendered in the subagent slot, e.g. a `SubagentChip`. */
+  readonly subagentSlot?: ReactNode
 }
 
 /**
@@ -33,7 +36,7 @@ export interface ChatLaneHeaderProps {
  *
  * Replaces the chat tab strip in redesign 4.3. The header sits above the
  * transcript, consolidating thread selection into a dropdown rather than
- * horizontal pills. The subagent chip slot is reserved for issue #8.1.
+ * horizontal pills. The subagent slot hosts the SubagentChip (#460).
  */
 export function ChatLaneHeader({
   chats,
@@ -42,7 +45,8 @@ export function ChatLaneHeader({
   onCreateChat,
   onCloseChat,
   followAgent = false,
-  onToggleFollowAgent
+  onToggleFollowAgent,
+  subagentSlot
 }: ChatLaneHeaderProps) {
   const activeChat = chats.find((chat) => chat.id === activeChatId)
   const activeTitle = activeChat?.title ?? "Chat"
@@ -125,8 +129,7 @@ export function ChatLaneHeader({
         <Plus className="size-3.5" />
       </Button>
 
-      {/* Subagent chip slot reserved for issue #8.1 */}
-      <div data-testid="subagent-slot" className="flex-none" />
+      <div data-testid="subagent-slot" className="flex-none">{subagentSlot}</div>
 
       {onToggleFollowAgent && (
         <Button

@@ -1,33 +1,32 @@
-import type { Session } from "@jingler/core"
-import { SubagentTabBar } from "@jingler/ui"
+import type { Session, SubagentFleetNode } from "@jingler/core"
+import { SubagentChip, type SubagentChipItem, type SubagentChipStatus } from "@jingler/ui"
 import { selectSubagentTab, useSessionSubagentTabs } from "./subagent-tab-store.js"
+
+const chipStatus = (status: SubagentFleetNode["status"]): SubagentChipStatus =>
+  status === "queued" ? "spawning" : status === "needs-attention" ? "attention" : status === "unknown" ? "stopped" : status
+
+const chipItem = (node: SubagentFleetNode): SubagentChipItem => ({
+  id: node.id,
+  agent: node.agent,
+  task: node.task,
+  status: chipStatus(node.status),
+  startedAt: node.startedAt,
+  ...(node.completedAt === null ? {} : { endedAt: node.completedAt })
+})
 
 export function SessionSubagentTabs({
   session,
-  filesActive = false,
   onSelectConversation
 }: {
   readonly session: Session
-  readonly filesActive?: boolean
   readonly onSelectConversation: () => void
 }) {
   const snapshots = useSessionSubagentTabs(session.id)
   const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
-  const subagents = active?.active ?? []
   return (
-    <SubagentTabBar
-      previous={(active?.completed ?? []).map((node) => ({ id: node.id, title: `${node.agent} · ${node.task}` }))}
-      onOpenPrevious={(nodeId) => {
-        onSelectConversation()
-        selectSubagentTab(session.id, session.activeChatId, nodeId)
-      }}
-      subagents={subagents.map((node) => ({
-        id: node.id,
-        title: `${node.agent} · ${node.task}`,
-        status: node.status === "needs-attention" ? "attention" : "running"
-      }))}
-      activeSubagentId={filesActive ? undefined : active?.selectedId}
-      onSelectSubagent={(nodeId) => {
+    <SubagentChip
+      subagents={[...(active?.active ?? []), ...(active?.completed ?? [])].map(chipItem)}
+      onOpenSubagent={(nodeId) => {
         onSelectConversation()
         selectSubagentTab(session.id, session.activeChatId, nodeId)
       }}
