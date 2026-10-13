@@ -64,3 +64,36 @@ test("a subagent swaps into the chat lane in place; sibling switch and back keep
   await expect(window.getByPlaceholder("Message the agent…")).toHaveValue("half-written main draft")
   await expect(groups).toHaveCount(groupCount)
 })
+
+test("a peer chat is listed in the chip popover and can be messaged from there", async ({ launchApp }) => {
+  const stamp = "2026-07-26T10:00:00.000Z"
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (ctx) => [{
+      ...seededSessions(ctx)[0]!,
+      id: "s_peer_popover",
+      chats: [
+        { id: "c_peer_main", title: "Main agent", createdAt: stamp, updatedAt: stamp },
+        { id: "c_peer_other", title: "Peer agent", createdAt: stamp, updatedAt: stamp }
+      ],
+      activeChatId: "c_peer_main"
+    }]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  // Peers alone are enough for the chip; the old "Peer agents" disclosure is gone.
+  await window.getByTestId("subagent-chip").first().click()
+  const popover = window.getByTestId("subagent-chip-popover")
+  await expect(popover).toContainText("Peers · 1")
+  await expect(window.getByText("Peer agents", { exact: true })).toHaveCount(0)
+
+  await popover.getByRole("button", { name: "Message Peer agent" }).click()
+  const box = popover.getByRole("textbox", { name: "Message to Peer agent" })
+  await box.fill("heads up: touching src/a.ts")
+  await box.press("Enter")
+  // The idle peer has no live turn to steer, so the send resolves without a delivery:
+  // the box re-enables with the draft kept instead of the popover closing or erroring.
+  await expect(box).toBeEnabled()
+  await expect(box).toHaveValue("heads up: touching src/a.ts")
+})
