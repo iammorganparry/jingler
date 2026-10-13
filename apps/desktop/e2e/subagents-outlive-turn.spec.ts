@@ -40,3 +40,32 @@ test("completed compatibility-agent output remains in Previous chats", async ({
     "Legacy transcript remains visible in Fleet."
   )
 })
+
+test("spawning shows the chip and transcript row, and View and a popover row open the same subagent", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByPlaceholder("Message the agent…").fill("[[held-subagents]] survey the app")
+  await window.getByPlaceholder("Message the agent…").press("Enter")
+
+  // #460: entry points are visible without opening the fleet.
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByTestId("subagent-spawn-row")).toContainText("Spawned 2 subagents")
+  await expect(window.getByTestId("fleet-agent-transcript")).toHaveCount(0)
+
+  // The fixture emits start + end tool calls, so two cards carry View; both open the same child.
+  await window.getByRole("button", { name: "View", exact: true }).first().click()
+  const view = window.getByTestId("fleet-agent-transcript")
+  await expect(view).toContainText("Survey the tab bar")
+
+  // A popover row opens a child; opening the first row again lands on the same child View opened.
+  const popover = window.getByTestId("subagent-chip-popover")
+  await window.getByTestId("subagent-chip").first().click()
+  await popover.getByRole("menuitem", { name: /Audit the theme tokens/ }).click()
+  await expect(view).toContainText("Audit the theme tokens")
+  await window.getByTestId("subagent-chip").first().click()
+  await popover.getByRole("menuitem", { name: /Survey the tab bar/ }).click()
+  await expect(view).toContainText("Survey the tab bar")
+})

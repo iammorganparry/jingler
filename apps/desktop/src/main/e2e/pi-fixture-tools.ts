@@ -204,6 +204,8 @@ const registerReviewPauseTool = (registry: ToolRegistry): void => {
   })
 }
 
+const E2E_FLEET_EPOCH = 4_102_444_800_000
+
 const heldSubagentIds = (runId: string) => ({
   first: `e2e-subagent-a-${runId}`,
   second: `e2e-subagent-b-${runId}`
@@ -216,7 +218,9 @@ const heldSubagentEvents = (
 ): ReadonlyArray<StreamEvent> => {
   const { first, second } = heldSubagentIds(runId)
   const parentRuntimeSessionId = `e2e-parent-${runId}`
-  const at = phase === "start" ? 10 : 20
+  // Later than any real fleet snapshot, so the fixture's parent id stays the latest one
+  // (parentRuntimeSessionIdFromFleetEvents picks by occurredAt) and its nodes aren't filtered out.
+  const at = E2E_FLEET_EPOCH + (phase === "start" ? 10 : 20)
   const fleetNode = (id: string, agent: string, task: string) =>
     heldFleetNode(id, agent, task, phase, runId, parentRuntimeSessionId, at)
 
@@ -355,7 +359,7 @@ const heldFleetNode = (
       background: false,
       sessionFile: null,
       currentTool: phase === "start" ? "workspace_read_file" : null,
-      startedAt: 10,
+      startedAt: E2E_FLEET_EPOCH + 10,
       updatedAt: at,
       completedAt: phase === "start" ? null : at,
       usage: {

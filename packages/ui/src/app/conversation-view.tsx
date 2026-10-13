@@ -37,6 +37,7 @@ import { ThinkingOrb } from "../components/loading.js"
 import { QuestionCard } from "../composites/question-card.js"
 import { QueuedMessageRow } from "../composites/queued-message-row.js"
 import {
+  isSubagentSpawnMessage,
   MessageTurn,
   PlanProgressContext,
   ToolStopContext
@@ -529,6 +530,7 @@ function renderSessionAnalytics() {
   const [queueExpanded, setQueueExpanded] = useState(false)
   const queueLimit = queueExpanded ? queued.length : QUEUE_PREVIEW
   const planAnchorIndex = planTranscriptAnchorIndex(messages)
+  const latestSpawnIndex = messages.findLastIndex(isSubagentSpawnMessage)
   const planAnchorPartIndex = planAnchorIndex < 0
     ? -1
     : messages[planAnchorIndex]!.parts.findLastIndex(isPlannotatorPlanTool)
@@ -757,6 +759,7 @@ function renderSessionAnalytics() {
                       onSwitchToAuto={onSwitchToAuto}
                       onForkOntoBranch={onForkOntoBranch}
                       onAdoptBranch={onAdoptBranch}
+                      showSubagentRow={item.index === latestSpawnIndex}
                       afterPart={planDocument !== null && showPlanTranscriptCard && item.index === planAnchorIndex
                         ? {
                             index: planAnchorPartIndex,

@@ -18,6 +18,8 @@ import { DiffPeek } from "../components/diff-peek.js"
 import { FileChangeList } from "../components/file-change-list.js"
 import { Markdown } from "../components/markdown.js"
 import { ToolResult as BeUIToolResult, ToolResultOutput } from "../components/beui/tool-result.js"
+import { Button } from "../components/button.js"
+import type { SubagentChipItem } from "../app/subagent-chip.js"
 import { providerColor, providerLabel, ProviderIcon } from "../components/provider-icon.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { BranchDriftBanner } from "./branch-drift-banner.js"
@@ -219,6 +221,47 @@ function MessageText({
  */
 export const ToolStopContext = createContext<(() => void) | null>(null)
 
+/**
+ * Children of the active chat plus the callback the lane-header chip rows use
+ * to open one. Fleet nodes carry no tool-call id, so a spawn card or row cannot
+ * be tied to its own child: both open from this chat-wide list (first child for
+ * the card's View).
+ */
+export const SubagentEntryContext = createContext<{
+  readonly subagents: ReadonlyArray<SubagentChipItem>
+  readonly onOpenSubagent: (id: string) => void
+} | null>(null)
+
+const SPAWN_TOOL = /(^|_)subagents?$/
+const isSpawnTool = (name: string): boolean => SPAWN_TOOL.test(name)
+
+/** True when an assistant turn called a subagent-spawning tool. */
+export const isSubagentSpawnMessage = (message: Message): boolean =>
+  message.role === "assistant" &&
+  message.parts.some((part) => part._tag === "Tool" && isSpawnTool(part.tool.name))
+
+function SubagentSpawnRow() {
+  const entry = useContext(SubagentEntryContext)
+  if (entry === null || entry.subagents.length === 0) return null
+  const count = entry.subagents.length
+  return (
+    <div data-testid="subagent-spawn-row" className={cn("flex items-center gap-1.5 text-xs text-dim", WIDTH)}>
+      <span>Spawned {count} {count === 1 ? "subagent" : "subagents"}</span>
+      {entry.subagents.slice(0, 3).map((item) => (
+        <Button
+          key={item.id}
+          variant="ghost"
+          size="sm"
+          data-testid={`subagent-spawn-row-${item.id}`}
+          onClick={() => entry.onOpenSubagent(item.id)}
+        >
+          {item.agent}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
 /** Command tools that can hang for minutes and so earn an inline stop button. */
 const isStoppableTool = (displayName: string): boolean =>
   /^(bash|shell|terminal|command)/i.test(displayName)
@@ -286,6 +329,17 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
         </div>
       )}
       {renderLegacyPreview()}
+      {isSpawnTool(tool.name) && subagentEntry !== null && subagentEntry.subagents.length > 0 && (
+        <div className="flex justify-end px-2.5 py-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => subagentEntry.onOpenSubagent(subagentEntry.subagents[0]!.id)}
+          >
+            View
+          </Button>
+        </div>
+      )}
     </ToolCall>)
                             }
 
@@ -308,6 +362,7 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
                             }
 
   const stopTool = useContext(ToolStopContext)
+  const subagentEntry = useContext(SubagentEntryContext)
   const [expanded, setExpanded] = useState(tool.status === "running")
   const canonicalChanges = tool.fileChanges?.changes ?? []
   const legacyPreview = canonicalChanges.length === 0 ? tool.preview : null
@@ -643,7 +698,8 @@ function MessageTurnImpl({
   onSwitchToAuto,
   onForkOntoBranch,
   onAdoptBranch,
-  afterPart
+  afterPart,
+  showSubagentRow = false
 }: {
   message: Message
   /** Canonical provider identity for the assistant eyebrow. */
@@ -656,6 +712,8 @@ function MessageTurnImpl({
   onAdoptBranch?: () => void | Promise<void>
   /** Insert transcript-owned UI immediately after one absolute part index. */
   afterPart?: { readonly index: number; readonly content: ReactNode }
+  /** Show the "Spawned N subagents" row under this turn. */
+  showSubagentRow?: boolean
 }) {
   const isAssistant = message.role === "assistant"
   // From the FULL part list, not the visible slice: a mega-turn's collapsed
@@ -701,6 +759,7 @@ function MessageTurnImpl({
         keyOffset: hiddenParts,
         streamingTextIndex
       })}
+      {showSubagentRow && <SubagentSpawnRow />}
     </div>
   )
 }

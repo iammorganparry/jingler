@@ -1,4 +1,5 @@
 import type { Session, SubagentFleetNode } from "@jingler/core"
+import { useMemo } from "react"
 import { SubagentChip, type SubagentChipItem, type SubagentChipStatus } from "@jingler/ui"
 import { selectSubagentTab, useSessionSubagentTabs } from "./subagent-tab-store.js"
 
@@ -14,6 +15,18 @@ const chipItem = (node: SubagentFleetNode): SubagentChipItem => ({
   ...(node.completedAt === null ? {} : { endedAt: node.completedAt })
 })
 
+/** The active chat's children as chip items, plus the open callback shared by every entry point. */
+export function useSessionSubagentEntry(session: Session) {
+  const snapshots = useSessionSubagentTabs(session.id)
+  return useMemo(() => {
+    const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
+    return {
+      subagents: [...(active?.active ?? []), ...(active?.completed ?? [])].map(chipItem),
+      onOpenSubagent: (nodeId: string) => selectSubagentTab(session.id, session.activeChatId, nodeId)
+    }
+  }, [snapshots, session.id, session.activeChatId])
+}
+
 export function SessionSubagentTabs({
   session,
   onSelectConversation
@@ -21,14 +34,13 @@ export function SessionSubagentTabs({
   readonly session: Session
   readonly onSelectConversation: () => void
 }) {
-  const snapshots = useSessionSubagentTabs(session.id)
-  const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
+  const { subagents, onOpenSubagent } = useSessionSubagentEntry(session)
   return (
     <SubagentChip
-      subagents={[...(active?.active ?? []), ...(active?.completed ?? [])].map(chipItem)}
+      subagents={subagents}
       onOpenSubagent={(nodeId) => {
         onSelectConversation()
-        selectSubagentTab(session.id, session.activeChatId, nodeId)
+        onOpenSubagent(nodeId)
       }}
     />
   )

@@ -125,7 +125,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | MagicLinkForm | `composites/magic-link-form.tsx` | Email magic-link input and submit. | state, mode, email, name, sentEmail, onEmailChange | yes | — |
 | McpServerForm, McpServerDialog, McpAuthSetupDialog, McpApiKeyDialog, McpBrand, McpSettings | `composites/mcp-settings.tsx` | Settings › MCP servers with forms and auth dialogs. | servers, parseError, loading, statuses, probing, probe | no | — |
 | MentionMenu | `composites/mention-menu.tsx` | `@` file/session mention palette. | — | no | — |
-| PlanProgressContext, ToolStopContext, MessageTurn | `composites/message-turn.tsx` | One transcript turn: text, tool calls, thinking. | — | yes | — |
+| PlanProgressContext, ToolStopContext, SubagentEntryContext, MessageTurn | `composites/message-turn.tsx` | One transcript turn: text, tool calls, thinking. | — | yes | — |
 | ModeSwitch | `composites/mode-switch.tsx` | Plan/Build and permission-mode switch. | — | yes | — |
 | NativeEndpointLogin | `composites/native-endpoint-login.tsx` | Sign-in against a native endpoint. | — | no | — |
 | NewWorkspaceView | `composites/new-workspace-view.tsx` | New workspace screen: composer, chips, Start-from list. | open, projects, environments, providerCatalog, agentEndpointCatalog, defaultConnectionId | yes | — |
