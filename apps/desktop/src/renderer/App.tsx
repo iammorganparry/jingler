@@ -18,6 +18,7 @@ import type {
   CreateSessionInput,
   ExecutionMode,
   GitConfig,
+  ObsidianExplanationsConfig,
   IssueIdentity,
   IssueSummary,
   GithubConfig,
@@ -403,6 +404,13 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
+  // The Obsidian plugin stores one `vault:<sessionId>` key per configured session.
+  const obsidianVaultQuery = useQuery({
+    queryKey: ["obsidian-vaults"],
+    queryFn: () => rpc.pluginsStorageKeys("obsidian"),
+  });
+  const obsidianVaultConfigured =
+    obsidianVaultQuery.data?.some((key) => key.startsWith("vault:")) ?? false;
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
@@ -497,6 +505,10 @@ function AuthedApp({
     });
   const saveGitConfig = (config: GitConfig) =>
     rpc.configSetGit(config).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const saveObsidianExplanations = (config: ObsidianExplanationsConfig) =>
+    rpc.configSetObsidianExplanations(config).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveNotificationsConfig = (config: NotificationsConfig) =>
@@ -1451,6 +1463,9 @@ function AuthedApp({
         onSaveGithubConfig={saveGithubConfig}
         gitConfig={gitConfig}
         onSaveGitConfig={saveGitConfig}
+        obsidianExplanations={configQuery.data?.obsidianExplanations ?? null}
+        onSaveObsidianExplanations={saveObsidianExplanations}
+        obsidianVaultConfigured={obsidianVaultConfigured}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
         offloadCompute={offloadCompute}

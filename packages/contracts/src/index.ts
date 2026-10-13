@@ -26,6 +26,7 @@ import {
   GithubConfig,
   NotificationKind,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   Issue,
   IssueAutomations,
   IssueComment,
@@ -1426,6 +1427,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: WorkspaceConfig,
     error: ConfigError,
     payload: GitConfig
+  }),
+
+  /** Persist the Obsidian explanation auto-save preferences. */
+  Rpc.make("Config.setObsidianExplanations", {
+    success: WorkspaceConfig,
+    error: ConfigError,
+    payload: ObsidianExplanationsConfig
   }),
 
   /** Persist the user's desktop-notification preferences. */

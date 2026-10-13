@@ -5507,6 +5507,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "GitHub.disconnect": () => githubConnectionDisconnect(),
   "Config.setGithub": (github) => ConfigService.setGithub(github),
   "Config.setGit": (git) => ConfigService.setGit(git),
+  "Config.setObsidianExplanations": (config) =>
+    ConfigService.setObsidianExplanations(config),
   "Config.setNotifications": (notifications) =>
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>

@@ -38,6 +38,7 @@ import type {
   GitHubRelayConnectionUpdate,
   GitHubRelayEvent,
   GitConfig,
+  ObsidianExplanationsConfig,
   NotificationKind,
   NotificationsConfig,
   GithubConfig,
@@ -861,6 +862,10 @@ export const rpc = {
     run((c) => c.Config.setGithub(github)),
   configSetGit: (git: GitConfig): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setGit(git)),
+  configSetObsidianExplanations: (
+    config: ObsidianExplanationsConfig
+  ): Promise<WorkspaceConfig> =>
+    run((c) => c.Config.setObsidianExplanations(config)),
   configSetNotifications: (
     notifications: NotificationsConfig
   ): Promise<WorkspaceConfig> =>
