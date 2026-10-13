@@ -33,7 +33,7 @@ import {
   FolderTree,
   Globe,
   GitCompareArrows,
-  GitPullRequest,
+  ListChecks,
   MessagesSquare,
   NotebookPen,
   SquareTerminal,
@@ -61,7 +61,7 @@ export const BUILTIN_TAB = {
   issue: "issue",
   explanation: "explanation",
   plan: "plan",
-  pr: "pr",
+  checks: "checks",
   review: "review",
   changes: "changes",
   workflow: "workflow"
@@ -108,6 +108,8 @@ export interface TabContext {
   readonly hasExplanation?: boolean
   /** Live worktree diff totals for this session, if known. */
   readonly diff?: DiffStat | null
+  /** Passing/total CI checks on the session's PR, if known. */
+  readonly checkCounts?: { readonly passing: number; readonly total: number } | null
 }
 
 /** What a contribution is handed when it is the tab actually on screen. */
@@ -257,11 +259,11 @@ export const BUILTIN_TAB_META: Record<
     blurb:
       "The live plan: review and approve proposals, then watch stages, tasks and acceptance progress as the agent works."
   },
-  pr: {
-    label: "Pull Request",
-    icon: GitPullRequest,
+  checks: {
+    label: "Checks",
+    icon: ListChecks,
     order: 30,
-    blurb: "CI status, review timeline and the agent feedback loop."
+    blurb: "CI checks, review timeline and the agent feedback loop."
   },
   review: {
     label: "Code Review",
@@ -318,7 +320,7 @@ export interface BuiltinTabRenderers {
  * be deleted rather than merely moved. Two of them are worth restating because
  * they are not obvious:
  *
- * - **Pull Request shows before a PR exists** (any session with a worktree), so
+ * - **Checks shows before a PR exists** (any session with a worktree), so
  *   the "Create pull request" empty state is reachable at all.
  * - **Changes and Code Review are mutually exclusive.** Once a PR exists, Code
  *   Review covers the local diff too, and showing both would put the same diff
@@ -363,18 +365,18 @@ export const builtinTabContributions = (
       render: renderers.conversation
     },
     {
-      id: BUILTIN_TAB.pr,
-      ...meta.pr,
+      id: BUILTIN_TAB.checks,
+      ...meta.checks,
       when: ({ session }) =>
         session.prNumber != null ||
         (session.worktreePath != null &&
           workspaceModeOf(session) === "worktree"),
-      badge: ({ session }) =>
-        session.prNumber != null
-          ? { kind: "count", text: `#${session.prNumber}` }
+      badge: ({ session, checkCounts }) =>
+        session.prNumber != null && checkCounts && checkCounts.total > 0
+          ? { kind: "count", text: `${checkCounts.passing}/${checkCounts.total}` }
           : undefined,
       render: (session, ctx) =>
-        renderers.pullRequest?.(session, ctx) ?? renderers.stub("pr")
+        renderers.pullRequest?.(session, ctx) ?? renderers.stub("checks")
     },
     {
       // A rail ACTION, not a view: the Explorer is where changes are reviewed,

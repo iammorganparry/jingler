@@ -517,23 +517,25 @@ export const mapIssue = (raw: unknown): Issue => {
   }
 }
 
-export const mapPrState = (raw: unknown, checks: ReadonlyArray<PrCheck>): SessionPrStatus | null => {
-  const pr = jsonRecord(raw)
+const prStateOf = (pr: ReturnType<typeof jsonRecord>): PrState | null => {
   const rawState = text(pr.state)?.toUpperCase()
   const merged = field(pr, "mergedAt", "merged_at") !== null && field(pr, "mergedAt", "merged_at") !== undefined
-  const state: PrState | null = merged
-    ? "merged"
-    : rawState === "CLOSED"
-      ? "closed"
-      : rawState === "OPEN"
-        ? field(pr, "isDraft", "draft") === true
-          ? "draft"
-          : "open"
-        : null
+  if (merged) return "merged"
+  if (rawState === "CLOSED") return "closed"
+  if (rawState !== "OPEN") return null
+  return field(pr, "isDraft", "draft") === true ? "draft" : "open"
+}
+
+export const mapPrState = (raw: unknown, checks: ReadonlyArray<PrCheck>): SessionPrStatus | null => {
+  const state = prStateOf(jsonRecord(raw))
   if (state === null) return null
+  if (state === "closed" || state === "merged" || checks.length === 0) {
+    return { state, checks: state === "closed" || state === "merged" ? null : rollupChecks(checks) }
+  }
   return {
     state,
-    checks: state === "closed" || state === "merged" ? null : rollupChecks(checks)
+    checks: rollupChecks(checks),
+    checkCounts: { passing: checks.filter((check) => check.status === "pass").length, total: checks.length }
   }
 }
 

@@ -618,6 +618,18 @@ const migrateFilesTab = (layout: EditorLayout): EditorLayout => {
   return closeTabsWhere(layout, isFilesTab)
 }
 
+/** The Pull Request view became Checks; a persisted `pr` view tab reopens as Checks. */
+const migratePrTab = (layout: EditorLayout): EditorLayout => {
+  const isPr = (surface: SessionSurface) => surface.kind === "view" && surface.id === "pr"
+  if (!layout.root) return layout
+  const root = mapGroups(layout.root, (group) => {
+    if (!group.tabs.some(isPr)) return group
+    const tabs = uniqueTabs(group.tabs.map((tab): SessionSurface => (isPr(tab) ? { kind: "view", id: "checks" } : tab)))
+    return { ...group, tabs, active: group.active === keyOf({ kind: "view", id: "pr" }) ? keyOf({ kind: "view", id: "checks" }) : group.active }
+  })
+  return commit(layout, root)
+}
+
 /**
  * Restores a session's layout, migrating the v1 surface list on first read.
  * A live main chat that is missing (and was not explicitly closed) is restored
@@ -633,7 +645,7 @@ export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, ma
         ? parseLayout(stored)
         : migrateSurfaceLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
     if (!layout) return initial
-    layout = migrateFilesTab(layout)
+    layout = migratePrTab(migrateFilesTab(layout))
     if (layout.mainChatId === null || !main) return layout
     const withMain = { ...layout, mainChatId }
     const present = groupsOf(layout.root).some((group) =>

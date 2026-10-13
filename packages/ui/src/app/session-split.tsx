@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { DiffStat, IssueIdentity, Session, SessionActivity } from "@jingler/core"
+import type { DiffStat, IssueIdentity, Session, SessionActivity, SessionPrStatus } from "@jingler/core"
 import type { SplitGroup } from "./split-layout.js"
 import { usePaneWidth } from "../hooks/width-tier.js"
 import { effectiveDock } from "./dock-fit.js"
@@ -62,6 +62,7 @@ export interface SessionSplitProps {
   explanationSessions?: ReadonlySet<string>
   liveActivity?: Record<string, SessionActivity>
   liveDiff?: Record<string, DiffStat>
+  prStates?: Record<string, SessionPrStatus>
   debugStopSequences?: Readonly<Record<string, number>>
   onOpenSettings?: () => void
   onOpenProviderSettings?: () => void
@@ -138,6 +139,7 @@ export function SessionSplit(props: SessionSplitProps) {
       explanationSessions={props.explanationSessions}
       liveActivity={props.liveActivity}
       liveDiff={props.liveDiff}
+      prStates={props.prStates}
       debugStopSequence={props.debugStopSequences?.[session.id] ?? 0}
       onOpenSettings={props.onOpenSettings}
       onOpenProviderSettings={props.onOpenProviderSettings}

@@ -149,7 +149,7 @@ describe("visibleTabs", () => {
     expect(idsFor(session({ id: "a", issueNumber: 7 }), { hasPlan: true })).toEqual([
       "conversation",
       "plan",
-      "pr",
+      "checks",
       "changes"
     ])
   })
@@ -1040,7 +1040,7 @@ describe("SessionPane", () => {
     it("switches to the requested tab and reports it handled", () => {
       const onTabRequestHandled = vi.fn()
       render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1062,7 +1062,7 @@ describe("SessionPane", () => {
     it("does not replay a request into another session", () => {
       const onTabRequestHandled = vi.fn()
       const { unmount } = render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(1)
@@ -1085,7 +1085,7 @@ describe("SessionPane", () => {
     it("fires again for the same tab when the nonce moves", async () => {
       const onTabRequestHandled = vi.fn()
       const { rerender } = render(
-        pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
+        pane({ selectTabRequest: { tabId: "checks", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
@@ -1094,7 +1094,7 @@ describe("SessionPane", () => {
 
       // Asking for the SAME tab a second time has to work — that is what the
       // nonce is for, over and above the clearing.
-      rerender(pane({ selectTabRequest: { tabId: "pr", nonce: 2 }, onTabRequestHandled }))
+      rerender(pane({ selectTabRequest: { tabId: "checks", nonce: 2 }, onTabRequestHandled }))
       expect(screen.getByText("review view")).toBeTruthy()
       expect(onTabRequestHandled).toHaveBeenCalledTimes(2)
     })
@@ -1105,6 +1105,19 @@ describe("SessionPane", () => {
       expect(screen.getByText("transcript a")).toBeTruthy()
       expect(onTabRequestHandled).not.toHaveBeenCalled()
     })
+  })
+
+  it("⌘⇧P opens Checks without duplicating the tab", () => {
+    render(
+      <SessionPane
+        session={session({ id: "a", prNumber: 5 })}
+        renderConversation={(s) => <div>transcript {s.id}</div>}
+        renderPullRequest={() => <div>review view</div>}
+      />
+    )
+    for (let i = 0; i < 2; i++) fireEvent.keyDown(window, { key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+    expect(screen.getByText("review view")).toBeTruthy()
+    expect(screen.getAllByTestId("editor-tab-view-checks")).toHaveLength(1)
   })
 
   it("falls back to Conversation when the selected tab stops being available", async () => {
@@ -1144,7 +1157,7 @@ describe("SessionPane", () => {
     expect(screen.getByText("pr view a")).toBeTruthy()
 
     rerender(pane("b", 2))
-    expect(screen.queryByTestId("editor-tab-view-pr")).toBeNull()
+    expect(screen.queryByTestId("editor-tab-view-checks")).toBeNull()
     rerender(pane("a", 1))
     expect(screen.getByText("pr view a")).toBeTruthy()
   })

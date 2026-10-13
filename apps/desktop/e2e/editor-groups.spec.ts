@@ -139,7 +139,7 @@ test("chats stay left while files and views share a persistent right pane", asyn
   await expect(groups(window)).toHaveCount(1)
   await expect(window.getByTestId("editor-tab-chat-c_side")).toBeVisible()
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("a.ts")
   await window.getByTestId("palette-item-file:a.ts").click()
   await expect(groups(window)).toHaveCount(2)
@@ -231,7 +231,7 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
 
   const openFile = async (path: string) => {
-    await window.keyboard.press("Meta+Shift+p")
+    await window.keyboard.press("Meta+p")
     await window.getByPlaceholder("Open a file in Alpha session…").fill(path)
     await window.getByTestId(`palette-item-file:${path}`).click()
   }
@@ -275,7 +275,7 @@ test("⌘W closes the focused editor tab without closing the app window", async 
   })
   await expect(appShell(window)).toBeVisible()
   await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("close-me.ts")
   await window.getByTestId("palette-item-file:close-me.ts").click()
   await expect(window.getByTestId("editor-tab-file-close-me.ts")).toBeVisible()

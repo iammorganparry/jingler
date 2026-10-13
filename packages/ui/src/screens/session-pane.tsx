@@ -14,7 +14,8 @@ import type {
   IssueIdentity,
   IssueReference,
   Session,
-  SessionActivity
+  SessionActivity,
+  SessionPrStatus
 } from "@jingler/core"
 import {
   issueReferenceOf,
@@ -69,7 +70,7 @@ import {
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
 import { useChatLane } from "../app/use-chat-lane.js"
-import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
+import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchChecksChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
@@ -205,6 +206,8 @@ export interface SessionPaneProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
+  /** Polled PR status per session, for the Checks `a/b` badge. */
+  prStates?: Record<string, SessionPrStatus>
   /** Opens Files once when this session first stops in the debugger. */
   debugStopSequence?: number
   /** Open the Settings view — the "connect GitHub" escape hatch on empty states. */
@@ -293,6 +296,18 @@ export interface SessionPaneProps {
  * context it is itself installing, and `SessionPaneBody` has to know its own
  * width to decide whether the plan split will fit.
  */
+/** ⌘⇧D → Changes, ⌘⇧P → Checks (when present), ⌥1–⌥9 → pinned header view at that position. */
+const viewChordTarget = (
+  e: KeyboardEvent,
+  hasChecks: boolean,
+  pinned: ReadonlyArray<{ readonly id: string }>
+): string | undefined => {
+  if (matchChangesChord(e)) return BUILTIN_TAB.changes
+  if (matchChecksChord(e)) return hasChecks ? BUILTIN_TAB.checks : undefined
+  const position = matchHeaderViewChord(e)
+  return position === null ? undefined : pinned[position]?.id
+}
+
 export function SessionPane(props: SessionPaneProps) {
   return (
     <WidthTierProvider className="flex-col">
@@ -696,7 +711,8 @@ function SessionPaneBody(props: SessionPaneProps) {
     session: active,
     hasPlan,
     hasExplanation,
-    diff: props.liveDiff?.[active.id] ?? null
+    diff: props.liveDiff?.[active.id] ?? null,
+    checkCounts: props.prStates?.[active.id]?.checkCounts ?? null
   }
   const connectGithub = props.onOpenSettings ?? noop
 
@@ -891,41 +907,39 @@ function SessionPaneBody(props: SessionPaneProps) {
     return group && activeSurface(group)
   }
 
-  // The built-in Pull Request tab is the header's Checks view (spec §3c).
-  const headerIdOf = (tabId: TabKey): string => (tabId === BUILTIN_TAB.pr ? "checks" : tabId)
-  const tabIdOf = (headerId: string): TabKey => (headerId === "checks" ? BUILTIN_TAB.pr : headerId)
   const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
-    id: headerIdOf(tab.id),
-    label: tab.id === BUILTIN_TAB.pr ? "Checks" : tab.label,
+    id: tab.id,
+    label: tab.label,
     icon: tab.icon,
+    ...(tab.id === BUILTIN_TAB.checks ? { shortcut: "mod+shift+p" } : tab.id === BUILTIN_TAB.changes ? { shortcut: "mod+shift+d" } : {}),
     ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
     ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
     ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
   }))
   const pinnedViews = props.headerViews ?? []
   const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
-  // ⌘⇧D opens Changes; ⌥1–⌥9 open the header button at that position. Both go through
+  // ⌘⇧D opens Changes; ⌘⇧P opens Checks; ⌥1–⌥9 open the header button at that position. Both go through
   // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
+  const hasChecks = tabs.some((tab) => tab.id === BUILTIN_TAB.checks)
   useEffect(() => {
     if (!paneFocused) return
     const onKeyDown = (e: KeyboardEvent) => {
-      const position = matchHeaderViewChord(e)
-      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : (id => id === undefined ? undefined : tabIdOf(id))(pinnedHeaderItems[position]?.id)
+      const target = viewChordTarget(e, hasChecks, pinnedHeaderItems)
       if (target === undefined) return
       e.preventDefault()
       selectTab(target)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [paneFocused, pinnedHeaderItems, selectTab])
+  }, [paneFocused, hasChecks, pinnedHeaderItems, selectTab])
   // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
   const linkChips: HeaderLinkChip[] = []
-  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.pr)) {
+  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
     linkChips.push({
       id: "pr",
       label: `PR #${active.prNumber}`,
       title: "Open pull request",
-      onOpen: () => selectTab(BUILTIN_TAB.pr)
+      onOpen: () => selectTab(BUILTIN_TAB.checks)
     })
   }
   const linkedIssue = issueReferenceOf(active)
@@ -955,10 +969,10 @@ function SessionPaneBody(props: SessionPaneProps) {
       <>
         <HeaderViewButtons
           views={pinnedHeaderItems}
-          activeId={headerIdOf(activeTab)}
-          onOpen={(id) => selectTab(tabIdOf(id))}
+          activeId={activeTab}
+          onOpen={selectTab}
         />
-        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={(id) => selectTab(tabIdOf(id))} onPinnedChange={props.onHeaderViewsChange} />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
       </>
     ) : null
   const headerViewControls =

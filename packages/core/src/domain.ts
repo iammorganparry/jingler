@@ -1269,6 +1269,8 @@ export const SessionPrStatus = Schema.Struct({
    * with no CI look permanently mid-build.
    */
   checks: Schema.NullOr(PrCheckStatus),
+  /** Passing/total individual checks for the header `a/b` badge; absent when there are none. */
+  checkCounts: Schema.optional(Schema.Struct({ passing: Schema.Number, total: Schema.Number })),
 });
 export type SessionPrStatus = Schema.Schema.Type<typeof SessionPrStatus>;
 

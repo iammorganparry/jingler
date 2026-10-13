@@ -334,7 +334,7 @@ const isMacPlatform = (): boolean => {
 }
 
 /**
- * Does this keypress ask for the palette? **⌘K/⌘P on macOS, Ctrl+K/Ctrl+P
+ * Does this keypress ask for the palette? **⌘K on macOS, Ctrl+K
  * elsewhere** — not either-or.
  *
  * ## Why this one chord breaks the app's `meta || ctrl` rule
@@ -343,7 +343,7 @@ const isMacPlatform = (): boolean => {
  * the same physical gesture should work on macOS and elsewhere. That holds for
  * ITS chords because they are all ⌃⇧-something, and nothing else wants those.
  *
- * K and P are different. On macOS, Ctrl+K and Ctrl+P are Cocoa caret bindings
+ * K is different. On macOS, Ctrl+K (and Ctrl+P, now the file picker) are Cocoa caret bindings
  * that Chromium implements in every text field — kill-line and previous-line —
  * so accepting bare Ctrl here would take both away from the composer and pop a
  * modal instead, on the platform where ⌘ is already the palette chord and the
@@ -361,10 +361,9 @@ const isMacPlatform = (): boolean => {
  *
  * Both `code` and `key` are checked for the same reason `matchSplitShortcut`
  * does it: `code` names the physical key and survives layouts, `key` covers a
- * layout that puts K or P somewhere else.
+ * layout that puts K somewhere else.
  *
- * Shift and Alt must be ABSENT. ⌘⇧P is VS Code's palette, but here it is free
- * for something else, and a chord that fires on any modifier combination is a
+ * Shift and Alt must be ABSENT. ⌘⇧P opens Checks and ⌘P the file picker, and a chord that fires on any modifier combination is a
  * chord that fires when you meant something adjacent to it.
  *
  * @param isMac - defaults to the running platform; injected by the tests, which
@@ -381,15 +380,15 @@ export const matchPaletteChord = (
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   if (e.shiftKey || e.altKey) return false
   const key = e.key.toLowerCase()
-  return e.code === "KeyK" || key === "k" || e.code === "KeyP" || key === "p"
+  return e.code === "KeyK" || key === "k"
 }
 
-/** Focused-session file picker: ⌘⇧P (Ctrl+Shift+P elsewhere). */
+/** Focused-session file picker: ⌘P (Ctrl+P elsewhere). ⌘⇧P opens Checks. */
 export const matchFileQuickOpenChord = (
   e: PaletteChord,
   isMac: boolean = isMacPlatform()
 ): boolean => {
-  if (e.defaultPrevented || e.altKey || !e.shiftKey) return false
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return false
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   return e.code === "KeyP" || e.key.toLowerCase() === "p"
 }

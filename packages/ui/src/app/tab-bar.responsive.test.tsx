@@ -9,7 +9,7 @@ afterEach(cleanup)
 const TABS = [
   builtinDescriptor("conversation"),
   builtinDescriptor("plan"),
-  builtinDescriptor("pr"),
+  builtinDescriptor("checks"),
   builtinDescriptor("review")
 ]
 
@@ -38,7 +38,7 @@ describe("TabBar at width", () => {
     // actually read to tell two conversations apart — so the view tabs spend
     // their width only on the one you're looking at.
     expect(screen.getByText("Code Review")).toBeTruthy()
-    expect(screen.queryByText("Pull Request")).toBeNull()
+    expect(screen.queryByText("Checks")).toBeNull()
   })
 
   it("drops even the active label below the mid tier", () => {
@@ -50,7 +50,7 @@ describe("TabBar at width", () => {
     renderAt(600)
     // The aria-label survives the text being dropped, so a screen reader and a
     // by-name lookup both still find the tab.
-    expect(screen.getByRole("button", { name: "Pull Request" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Checks" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Conversation" })).toBeTruthy()
   })
 

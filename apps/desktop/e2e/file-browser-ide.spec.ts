@@ -225,7 +225,7 @@ test("shows a previously existing large worktree without a repository search bar
   })
   await expect(tree.locator('[data-file-tree-search-input]')).toHaveCount(0)
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in File browser IDE…")
     .fill("generate-brand-icons")
   await window.getByTestId("palette-item-file:scripts/generate-brand-icons.py").click()

@@ -558,7 +558,7 @@ test("retains each session browser while files occupy the content pane", async (
       await expect(url).toHaveValue(origin)
     }
     const openPdf = async (sessionTitle: string, filename: string) => {
-      await window.keyboard.press("Meta+Shift+p")
+      await window.keyboard.press("Meta+p")
       const picker = window.getByTestId("file-quick-open")
       await expect(picker).toBeVisible()
       await window.getByPlaceholder(`Open a file in ${sessionTitle}…`).fill(filename)

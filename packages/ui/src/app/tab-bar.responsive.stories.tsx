@@ -14,7 +14,7 @@ const ALL_TABS = [
   builtinDescriptor("conversation"),
   builtinDescriptor("issue"),
   builtinDescriptor("plan"),
-  builtinDescriptor("pr", { kind: "count", text: "#482" }),
+  builtinDescriptor("checks", { kind: "count", text: "#482" }),
   // The diff badge is the widest decoration the row can hold, so the ladder has
   // to include it — this is what main's story carried as a `changes` prop before
   // badges moved onto the descriptors.
@@ -146,7 +146,7 @@ export const NothingToCollapse: Story = {
         height={80}
         render={() => (
           <TabBar
-            tabs={[builtinDescriptor("conversation"), builtinDescriptor("pr")]}
+            tabs={[builtinDescriptor("conversation"), builtinDescriptor("checks")]}
             active="conversation"
             onChange={noop}
           />
