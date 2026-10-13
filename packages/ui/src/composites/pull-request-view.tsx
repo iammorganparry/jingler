@@ -31,6 +31,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from ".
 import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
+import { ReadinessChecklist } from "./readiness-checklist.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 
@@ -372,6 +373,7 @@ export function PullRequestView({
             />
           </div>
 
+          {evidence !== "commits" && <ReadinessChecklist pr={pr} />}
           {renderReviewEvidence(pr)}
           </div>
         </div>
