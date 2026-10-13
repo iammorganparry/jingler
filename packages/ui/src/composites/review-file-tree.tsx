@@ -25,6 +25,14 @@ export interface ReviewFileTreeProps {
  * Code Review's stable tree contract. Pierre owns hierarchy, search projection,
  * keyboard focus, icons, Git status, and selection; review state stays outside.
  */
+function countDecoration(additions: number, deletions: number) {
+  const parts = [
+    ...(additions > 0 ? [{ text: `+${additions}`, color: "var(--sb-diff-add-fg)" }] : []),
+    ...(deletions > 0 ? [{ text: `${additions > 0 ? " " : ""}−${deletions}`, color: "var(--sb-diff-del-fg)" }] : [])
+  ]
+  return parts.length === 0 ? null : { text: parts.map((part) => part.text).join(""), parts }
+}
+
 export function ReviewFileTree({
   files,
   activePath,
@@ -44,12 +52,7 @@ export function ReviewFileTree({
   const renderCounts = useMemo<FileTreeRowDecorationRenderer>(
     () => ({ item }) => {
       const file = countsByPath.get(item.path)
-      if (file === undefined) return null
-      const parts = [
-        ...(file.additions > 0 ? [{ text: `+${file.additions}`, color: "var(--sb-diff-add-fg)" }] : []),
-        ...(file.deletions > 0 ? [{ text: `${file.additions > 0 ? " " : ""}−${file.deletions}`, color: "var(--sb-diff-del-fg)" }] : [])
-      ]
-      return parts.length === 0 ? null : { text: parts.map((part) => part.text).join(""), parts }
+      return file === undefined ? null : countDecoration(file.additions, file.deletions)
     },
     [countsByPath]
   )
