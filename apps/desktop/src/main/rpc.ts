@@ -39,6 +39,7 @@ import {
   probeClaudeEndpoint,
   EnvironmentService,
   ExplanationStore,
+  saveExplanationToObsidian,
   RemoteSessionService,
   routeSessionOperation,
   GitHubApi,
@@ -617,6 +618,37 @@ export const explanationWatch = (sessionId: string) =>
       const store = yield* ExplanationStore;
       return store.watch(session.worktreePath, session.id);
     }),
+  );
+
+/** `Explanation.saveToObsidian` handler: one stable note per explanation, in the session's vault. */
+export const explanationSaveToObsidian = (sessionId: string) =>
+  Effect.gen(function* () {
+    const config = yield* ConfigService.get();
+    const settings = config?.obsidianExplanations;
+    if (!settings?.enabled) return null;
+    const vault = yield* pluginStorageGet("obsidian", `vault:${sessionId}`);
+    if (typeof vault !== "string" || vault.length === 0) return null;
+    const session = yield* SessionStore.get(sessionId);
+    if (!session.worktreePath) return null;
+    const document = yield* ExplanationStore.read(session.worktreePath, session.id);
+    if (document === null) return null;
+    return yield* saveExplanationToObsidian({
+      config: settings,
+      vaultRoot: vault,
+      document,
+      sessionTitle: session.title,
+      project: session.repo,
+      branch: session.branch,
+    });
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof ConfigError
+        ? cause
+        : new ConfigError({
+            message: cause instanceof Error ? cause.message : "Could not save the explanation to Obsidian.",
+            cause,
+          }),
+    ),
   );
 
 /** Resolve a session only when it has an active pull request. */
@@ -5517,6 +5549,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "GitHub.disconnect": () => githubConnectionDisconnect(),
   "Config.setGithub": (github) => ConfigService.setGithub(github),
   "Config.setGit": (git) => ConfigService.setGit(git),
+  "Config.setObsidianExplanations": (config) =>
+    ConfigService.setObsidianExplanations(config),
   "Config.setNotifications": (notifications) =>
     ConfigService.setNotifications(notifications),
   "Config.setDefaultMode": ({ defaultMode }) =>
@@ -5651,6 +5685,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       ),
       Effect.orElseSucceed(() => null),
     ),
+  "Explanation.saveToObsidian": ({ sessionId }) =>
+    explanationSaveToObsidian(sessionId),
   "Explanation.watch": ({ sessionId }) =>
     interruptOnPageGone(explanationWatch(sessionId)),
   "Review.run": ({ sessionId, force }) => reviewRun(sessionId, force),

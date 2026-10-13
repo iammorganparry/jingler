@@ -4,6 +4,7 @@ import type {
   GitConfig,
   GithubConfig,
   NotificationsConfig,
+  ObsidianExplanationsConfig,
   OffloadComputeSettings,
   PlanTemplateConfig,
   ProviderConnectionId,
@@ -33,7 +34,7 @@ const preservedSettings = (existing: WorkspaceConfig | null): Partial<WorkspaceC
   if (existing === null) return {}
   // Every unrelated section must survive this whole-object read-modify-write.
   const truthyKeys = [
-    "context", "github", "git", "starredRepos", "collapsedRepos", "lastRepoPath",
+    "context", "github", "git", "obsidianExplanations", "starredRepos", "collapsedRepos", "lastRepoPath",
     "defaultConnectionId", "defaultProviderId", "defaultModelId", "defaultMode",
     "subagentModelsByProvider", "planTemplate", "notifications", "theme", "webSearch", "offloadCompute",
     "disabledPlugins"
@@ -187,6 +188,9 @@ export class ConfigService extends Effect.Service<ConfigService>()(
 
       const setNotifications = (notifications: NotificationsConfig) => patch({ notifications })
 
+      const setObsidianExplanations = (obsidianExplanations: ObsidianExplanationsConfig) =>
+        patch({ obsidianExplanations })
+
       /** Permission mode used when creating chats across every provider model. */
       const setDefaultMode = (defaultMode: ExecutionMode) => patch({ defaultMode })
 
@@ -328,6 +332,7 @@ export class ConfigService extends Effect.Service<ConfigService>()(
         setGithub,
         setGit,
         setNotifications,
+        setObsidianExplanations,
         setDefaultMode,
         setSubagentDelegationEnabled,
         setSubagentModel,

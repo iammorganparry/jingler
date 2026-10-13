@@ -872,6 +872,22 @@ export const GitConfig = Schema.Struct({
 });
 export type GitConfig = Schema.Schema.Type<typeof GitConfig>;
 
+/** Auto-save of published agent explanations into the session's Obsidian vault. */
+export const ObsidianExplanationsConfig = Schema.Struct({
+  enabled: Schema.Boolean,
+  /** Vault-relative folder the notes are written into. */
+  folder: Schema.String,
+});
+export type ObsidianExplanationsConfig = Schema.Schema.Type<
+  typeof ObsidianExplanationsConfig
+>;
+
+/** Off until the operator opts in; the folder is pre-filled. */
+export const OBSIDIAN_EXPLANATIONS_DEFAULT: ObsidianExplanationsConfig = {
+  enabled: false,
+  folder: "Jingler/Explanations",
+};
+
 /**
  * What a desktop notification can be about.
  *
@@ -969,6 +985,8 @@ export const WorkspaceConfig = Schema.Struct({
   github: Schema.optional(GithubConfig),
   /** Git behaviour prefs; absent until configured (older configs lack it). */
   git: Schema.optional(GitConfig),
+  /** Obsidian explanation auto-save; absent means the DEFAULT (off). */
+  obsidianExplanations: Schema.optional(ObsidianExplanationsConfig),
   /**
    * Desktop-notification prefs. Absent on older configs, which means the
    * DEFAULTS apply (see `NOTIFICATIONS_DEFAULT`) rather than "off" — an operator

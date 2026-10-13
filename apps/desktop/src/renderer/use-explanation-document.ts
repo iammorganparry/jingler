@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query"
 import { rpc } from "./rpc-client.js"
 
-const EXPLANATION_QUERY_ROOT = "explanation-document"
+export const EXPLANATION_QUERY_ROOT = "explanation-document"
 
 export const explanationQueryKey = (sessionId: string) =>
   [EXPLANATION_QUERY_ROOT, sessionId] as const
