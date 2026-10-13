@@ -18,7 +18,7 @@ export function PrCheckRow({ check }: { check: PrCheck }) {
   return (
     <div className="flex items-center gap-2.5">
       <span className="flex w-3.5 flex-none items-center justify-center">
-        {check.status === "pass" && <Check size={13} className="text-green" />}
+        {check.status === "pass" && <Check size={13} className="text-muted-foreground" />}
         {check.status === "fail" && <X size={13} className="text-red" />}
         {running && <Spinner size={11} className="border-yellow border-t-transparent" />}
         {check.status === "pending" && <StatusDot tone="bg-line-strong" size={7} glow={false} />}
@@ -34,7 +34,7 @@ export function PrCheckRow({ check }: { check: PrCheck }) {
         other state gets the quiet one.
       */}
       {running ? (
-        <span className="font-mono text-[10.5px] text-yellow">running</span>
+        <span className="font-mono text-[10.5px] text-muted-foreground">running</span>
       ) : (
         check.durationMs !== null && (
           <span className="font-mono text-[10.5px] tabular-nums text-dim">

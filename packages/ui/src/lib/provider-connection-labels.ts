@@ -15,9 +15,9 @@ export const providerAuthRouteLabel = (authKind: AuthKind): string => {
 
 export const providerStatusTone = (status: AuthStatus): string =>
   status === "authenticated"
-    ? "bg-green"
+    ? "bg-line-strong"
     : status === "connecting"
-      ? "bg-yellow"
+      ? "bg-line-strong"
       : "bg-red"
 
 /** Why a connection that reached the provider is still not usable. */

@@ -82,7 +82,7 @@ export function OmittedFilesNotice({
       data-testid="review-omitted-files"
       className="flex-none border-b border-hairline bg-panel/40 p-3"
     >
-      <Callout tone="yellow">
+      <Callout tone="blue">
         {files.length === 1
           ? "One file is too large to show inline"
           : `${count.format(files.length)} files are too large to show inline`}

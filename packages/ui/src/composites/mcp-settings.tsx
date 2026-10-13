@@ -353,7 +353,7 @@ function ImportFlow({
         ))}
       </div>
       {error ? <div role="alert"><Callout tone="red">{error}</Callout></div> : null}
-      {message ? <Callout tone="green">{message}</Callout> : null}
+      {message ? <Callout tone="blue">{message}</Callout> : null}
       {candidates !== null ? (
         candidates.length === 0 ? (
           <Callout tone="blue">No MCP servers found in the {source} config.</Callout>

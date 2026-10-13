@@ -61,7 +61,7 @@ export function IssuePickerList({
             )}
           >
             <div className="flex min-w-0 items-center gap-2">
-              <CircleDot size={14} className="flex-none text-green" />
+              <CircleDot size={14} className="flex-none text-muted-foreground" />
               <span
                 className={cn(
                   "min-w-0 flex-1 truncate text-[13px] font-semibold",

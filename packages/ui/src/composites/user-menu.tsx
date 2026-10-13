@@ -143,7 +143,7 @@ export function UserMenu({
               icon={<Settings size={14} />}
               label="Settings"
               onSelect={onOpenSettings}
-              trailing={ghConnected ? <StatusDot tone="bg-green" size={6} glow /> : undefined}
+              trailing={ghConnected ? <StatusDot tone="bg-line-strong" size={6} glow={false} /> : undefined}
             />
           )}
           {onOpenUsage && (

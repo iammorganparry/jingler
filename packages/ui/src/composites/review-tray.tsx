@@ -31,7 +31,7 @@ export function ReviewTray({
       <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[15px]">
         <span className="flex-1 text-[12px] font-semibold text-text-bright">Your review</span>
         {count > 0 && (
-          <Badge tone="yellow" size="sm">
+          <Badge tone="blue" size="sm">
             {count} pending
           </Badge>
         )}

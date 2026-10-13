@@ -400,7 +400,7 @@ function Row({
           data-testid={`plugin-error-detail-${manifest.id}`}
           className="ml-7 flex items-start gap-2 rounded border border-yellow/40 bg-panel px-2.5 py-2"
         >
-          <AlertTriangle size={13} className="mt-0.5 flex-none text-yellow" />
+          <AlertTriangle size={13} className="mt-0.5 flex-none text-muted-foreground" />
           {/* The decoder's own message, verbatim. A friendlier summary would
               throw away the line number that makes it fixable. */}
           <span className="font-mono text-[11px] leading-[1.5] text-text-body">
@@ -598,7 +598,7 @@ export function PluginsSettings({
             {undecodable.map((failure) => (
               <li key={failure.dir} className="bg-panel px-3 py-2">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle size={13} className="flex-none text-yellow" />
+                  <AlertTriangle size={13} className="flex-none text-muted-foreground" />
                   <span className="font-mono text-[12px] text-text">{failure.dir}</span>
                   <Badge tone="count" size="xs">
                     {failure.kind}
