@@ -1619,6 +1619,17 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /**
+   * Write the session's current explanation into its Obsidian vault when the
+   * setting is on. Resolves the vault-relative path, or null when nothing was
+   * written (setting off, no vault, no explanation).
+   */
+  Rpc.make("Explanation.saveToObsidian", {
+    success: Schema.NullOr(Schema.String),
+    error: ConfigError,
+    payload: { sessionId: Schema.String }
+  }),
+
   /** Stream replacement revisions of the session's focused explanation. */
   Rpc.make("Explanation.watch", {
     success: Schema.NullOr(ExplanationDocument),

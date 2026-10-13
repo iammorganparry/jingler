@@ -137,6 +137,7 @@ import {
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
+import { ObsidianSaveToast } from "./obsidian-save-toast.js";
 import { useDebugSessions } from "./debug-session.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -1403,6 +1404,7 @@ function AuthedApp({
           GitHub feedback is reconnecting. {relayError}
         </div>
       )}
+      <ObsidianSaveToast />
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <JinglerApp
         onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}

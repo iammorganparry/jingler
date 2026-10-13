@@ -1297,6 +1297,8 @@ export const rpc = {
    */
   explanationCurrent: (sessionId: string): Promise<ExplanationDocument | null> =>
     run((c) => c.Explanation.current({ sessionId })),
+  explanationSaveToObsidian: (sessionId: string): Promise<string | null> =>
+    run((c) => c.Explanation.saveToObsidian({ sessionId })),
   explanationWatch: (
     sessionId: string,
     onDocument: (document: ExplanationDocument | null) => void
