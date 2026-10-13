@@ -610,6 +610,14 @@ const readJson = (key: string): unknown => {
   return raw === null ? undefined : JSON.parse(raw)
 }
 
+
+/** Filter out deprecated "files" view tabs from a restored layout. */
+const migrateFilesTab = (layout: EditorLayout): EditorLayout => {
+  const isFilesTab = (surface: SessionSurface) =>
+    surface.kind === "view" && surface.id === "files"
+  return closeTabsWhere(layout, isFilesTab)
+}
+
 /**
  * Restores a session's layout, migrating the v1 surface list on first read.
  * A live main chat that is missing (and was not explicitly closed) is restored
@@ -620,11 +628,12 @@ export const loadEditorLayout = (sessionId: string, fallback: SessionSurface, ma
   const initial = createEditorLayout(main ? [main, fallback] : [fallback], mainChatId)
   try {
     const stored = readJson(`${EDITOR_LAYOUT_STORAGE_PREFIX}${sessionId}`)
-    const layout =
+    let layout =
       stored !== undefined
         ? parseLayout(stored)
         : migrateSurfaceLayout(readJson(`${SESSION_SURFACE_STORAGE_PREFIX}${sessionId}`))
     if (!layout) return initial
+    layout = migrateFilesTab(layout)
     if (layout.mainChatId === null || !main) return layout
     const withMain = { ...layout, mainChatId }
     const present = groupsOf(layout.root).some((group) =>

@@ -336,13 +336,6 @@ export const builtinTabContributions = (
       render: renderers.conversation
     },
     {
-      id: BUILTIN_TAB.files,
-      ...meta.files,
-      when: ({ session }) => session.worktreePath != null,
-      render: (session, ctx) =>
-        renderers.files?.(session, ctx) ?? renderers.stub("files")
-    },
-    {
       id: BUILTIN_TAB.browser,
       ...meta.browser,
       when: () => renderers.browser !== undefined,

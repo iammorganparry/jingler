@@ -88,8 +88,7 @@ export interface ConversationPaneCtx {
   onOpenPlanReview: (stepId?: string) => void
   /** Open a repository path in its own editor tab. */
   onOpenFile: (path: string) => void
-  /** Present the Files workspace without requiring a path to be selected. */
-  onSelectFiles: () => void
+
   /** Reveal and focus the session browser for an operator-requested preview. */
   onSelectBrowser?: () => void
   /** Present canonical worktree changes for mutation recovery inspection. */
@@ -340,9 +339,7 @@ const surfaceOwner = (surface: SessionSurface): string | undefined =>
 const tabOf = (surface: SessionSurface): TabKey =>
   surface.kind === "view"
     ? surface.id
-    : surface.kind === "file"
-      ? BUILTIN_TAB.files
-      : BUILTIN_TAB.conversation
+    : BUILTIN_TAB.conversation
 
 function buildProviderMenus(
   session: Session,
@@ -468,7 +465,6 @@ function allowedViewKeysOf(
   return tabs.flatMap((contribution) => {
     if (
       contribution.id === BUILTIN_TAB.conversation ||
-      contribution.id === BUILTIN_TAB.files ||
       contribution.id === BUILTIN_TAB.changes
     ) return []
     if (contribution.id === BUILTIN_TAB.browser) {
@@ -588,14 +584,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     for (const path of filePaths.split("\n")) props.onTrackFile?.(sessionId, path)
   }, [filePaths, props.onTrackFile, sessionId])
 
-  const lastDebugStop = useRef(0)
-  useEffect(() => {
-    const sequence = props.debugStopSequence ?? 0
-    if (sequence > 0 && sequence !== lastDebugStop.current) {
-      openSurface({ kind: "view", id: BUILTIN_TAB.files })
-    }
-    lastDebugStop.current = sequence
-  }, [openSurface, props.debugStopSequence])
 
   // A pending deep link into Plan Review. One-shot: Plan Review reports its own
   // selection back and we drop it. Tagged with its session because step ids
@@ -734,7 +722,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             props.onTrackFile?.(session.id, path)
             openSurface({ kind: "file", id: path })
           },
-          onSelectFiles: () => ctx.onSelectTab(BUILTIN_TAB.files),
+
           onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
@@ -762,11 +750,6 @@ function SessionPaneBody(props: SessionPaneProps) {
           onConnectGithub: ctx.onConnectGithub,
           onSelectReview: () => ctx.onSelectTab(BUILTIN_TAB.changes)
         }),
-      files: (session, ctx) =>
-        props.renderFiles?.(session, {
-          onSelectConversation: () => ctx.onSelectTab(BUILTIN_TAB.conversation),
-          onOpenPath: (path) => openSurface({ kind: "file", id: path })
-        }),
       browser: (session, ctx) => props.renderBrowser?.(session, ctx.paneVisible ?? true),
       terminal: (session, ctx) => props.renderTerminal?.(session, ctx.paneVisible ?? true),
       stub: (id) => <BuiltinStubScreen tab={id} />
@@ -783,7 +766,6 @@ function SessionPaneBody(props: SessionPaneProps) {
   const allowedViewKeys = allowedViewKeysOf(tabs, active, planChatIds)
   const allowedSurfaceKeys = new Set<string>([
     ...active.chats.map((chat) => sessionSurfaceKey({ kind: "chat", id: chat.id })),
-    ...(active.worktreePath ? [sessionSurfaceKey({ kind: "view", id: BUILTIN_TAB.files })] : []),
     ...allTabs(layout).filter((surface) => surface.kind === "file").map(sessionSurfaceKey),
     ...allowedViewKeys
   ])
