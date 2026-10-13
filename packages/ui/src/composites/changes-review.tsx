@@ -31,7 +31,9 @@ import { filterReviewFiles } from "./review-file-filter.js"
 import { ReviewFileRail } from "./review-file-rail.js"
 import { ReviewFindingRow, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
+import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
+import { TurnFilter } from "./turn-filter.js"
 import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff a review shows — the PR, or the worktree's uncommitted changes. */
@@ -177,6 +179,10 @@ export interface ChangedFilesExplorerProps {
   readonly review?: AdversarialReview | null
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
+  /** Agent turns that changed files; the filter shows when there are any. */
+  readonly turns?: readonly ReviewTurn[]
+  readonly turnId?: string | null
+  readonly onTurnChange?: (turnId: string | null) => void
 }
 
 /**
@@ -184,17 +190,23 @@ export interface ChangedFilesExplorerProps {
  * feedback filters, per-file status and counts, and viewed progress.
  */
 export function ChangedFilesExplorer({
-  files: allFiles,
-  fileDiffs,
+  files: sourceFiles,
+  fileDiffs: sourceDiffs,
   omittedFiles = [],
   diffLineLimit = 0,
   drafts,
   reviewThreads = [],
   review = null,
   activePath,
-  onSelectFile
+  onSelectFile,
+  turns = [],
+  turnId = null,
+  onTurnChange
 }: ChangedFilesExplorerProps) {
   const controls = useCodeReviewView()
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
+  const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
   const feedback = useMemo(
     () =>
       feedbackCounts({
@@ -237,6 +249,11 @@ export function ChangedFilesExplorer({
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
+        {turns.length > 0 && onTurnChange ? (
+          <div className="flex-none border-b border-hairline p-2">
+            <TurnFilter turns={turns} value={turn?.id ?? null} onChange={onTurnChange} />
+          </div>
+        ) : null}
         {allFiles.length === 0 ? (
           <div className="p-4 text-[12px] text-dim">No changes to review.</div>
         ) : (

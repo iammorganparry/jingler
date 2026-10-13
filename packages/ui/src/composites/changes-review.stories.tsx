@@ -16,6 +16,7 @@ import {
   type ExplorerFilter
 } from "./changes-review.js"
 import type { ReviewDraft } from "./review-tray.js"
+import type { ReviewTurn } from "./review-turns.js"
 
 /**
  * The changes review pieces one at a time, for styling. The same components
@@ -112,6 +113,33 @@ export const ExplorerOmittedFiles: Story = {
     </Frame>
   )
 }
+
+const turns: readonly ReviewTurn[] = [
+  { id: "a1", label: "Turn 1", paths: [localChanges[0]!.file.path, localChanges[1]!.file.path] },
+  { id: "a3", label: "Turn 3", paths: [localChanges[2]!.file.path] }
+]
+
+function TurnFiltered() {
+  const [turnId, setTurnId] = useState<string | null>("a1")
+  const [active, setActive] = useState<string | null>(null)
+  return (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={files(localChanges)}
+        fileDiffs={diffs(localChanges)}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+        turns={turns}
+        turnId={turnId}
+        onTurnChange={setTurnId}
+      />
+    </Frame>
+  )
+}
+
+/** "All turns ▾" narrows the file list to what one agent turn changed. */
+export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
 
 /** Nothing to review. */
 export const ExplorerEmpty: Story = {
