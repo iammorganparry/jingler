@@ -506,6 +506,7 @@ const EditorGroup = memo(function EditorGroup({
             followAgent={api.followAgent}
             onToggleFollowAgent={api.onToggleFollowAgent}
           />
+          <Launcher api={api} />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
           {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
           {chatTabs.map((chat) => (

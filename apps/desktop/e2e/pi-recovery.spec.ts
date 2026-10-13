@@ -99,7 +99,7 @@ test("inspects and acknowledges an uncertain mutation without replay", async ({ 
   await recovery.getByRole("button", { name: "Inspect changes" }).click()
   await expect(window.getByRole("region", { name: "Changed files tree" })).toBeVisible()
   await expect(window.getByRole("treeitem", { name: /recovered-change\.ts/ })).toBeVisible()
-  await window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await expect(window.getByTestId("chat-lane-header")).toBeVisible()
   await recovery.getByRole("button", { name: /Mark inspected/ }).click()
   await expect(recovery).toHaveCount(0)
 })
