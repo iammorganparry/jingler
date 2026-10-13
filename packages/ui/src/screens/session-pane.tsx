@@ -35,6 +35,8 @@ import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
 import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
+import { HeaderViewButtons, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   sessionSurfaceKey,
@@ -255,6 +257,10 @@ export interface SessionPaneProps {
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
   viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
+  /** Pinned header view ids in order (`Config.headerViews`). Absent hides the header buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned set, from the overflow menu's "Pin to header". */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
 }
 
 /**
@@ -543,6 +549,11 @@ function SessionPaneBody(props: SessionPaneProps) {
   useLayoutEffect(() => {
     if (typeof document === "undefined") return
     setViewRailTarget(document.getElementById("session-view-rail-portal"))
+  }, [])
+  const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return
+    setHeaderViewsTarget(document.getElementById("session-header-views-portal"))
   }, [])
 
   // The layout lives in the app-wide store so the sidebar tree reads the same
@@ -921,8 +932,30 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const viewRail = <ViewRail tabs={railTabs} active={activeTab} onChange={selectTab} menus={viewRailMenus} />
 
+  const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    icon: tab.icon,
+    ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
+    ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
+    ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
+  }))
+  const pinnedViews = props.headerViews ?? []
+  const headerViewControls =
+    props.headerViews !== undefined && props.onHeaderViewsChange ? (
+      <div className="flex items-center gap-0.5">
+        <HeaderViewButtons
+          views={pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))}
+          activeId={activeTab}
+          onOpen={selectTab}
+        />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
+      </div>
+    ) : null
+
   return (
     <>
+      {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
       {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-row relative">
         {chatLane.showAskPill && (

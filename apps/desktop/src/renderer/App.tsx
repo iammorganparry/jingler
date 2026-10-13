@@ -513,7 +513,7 @@ function AuthedApp({
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
   // Absent means Auto for configs written before this preference existed.
-  const { starredRepos, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
+  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
   const usage = usageQuery.data ?? null;
 
   const contextTargets = sessions.flatMap((session) => {
@@ -631,6 +631,10 @@ function AuthedApp({
       qc.setQueryData(["config"], saved);
     });
   };
+  const saveHeaderViews = (views: ReadonlyArray<string>) =>
+    rpc.configSetHeaderViews(views).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
   // Toggle a repo's collapsed state (path-keyed; "__archived__" collapses the
   // Archived group), persist the whole list, and update the cache.
   const toggleCollapsed = (repoPath: string) => {
@@ -1513,6 +1517,8 @@ function AuthedApp({
         onSaveProjectWorkflow={async (input) => { await projectController.setWorkflow(input) }}
         starredRepos={starredRepos}
         onToggleStar={toggleStar}
+        headerViews={headerViews}
+        onHeaderViewsChange={saveHeaderViews}
         collapsedRepos={collapsedRepos}
         onToggleCollapsed={toggleCollapsed}
         defaultRepoPath={lastRepoPath}

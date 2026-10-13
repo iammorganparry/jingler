@@ -79,6 +79,10 @@ export interface SessionSplitProps {
    */
   paneContributions?: ReadonlyArray<PaneContribution>
   onRevealChanges?: (sessionId: string) => void
+  /** Pinned header view ids in order; absent hides the header view buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned header view set. */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   renderReviewTray?: (session: Session, ctx: { onConnectGithub: () => void }) => ReactNode
   renderTerminalDock?: (session: Session, visible: boolean) => ReactNode
   /**
@@ -143,6 +147,8 @@ export function SessionSplit(props: SessionSplitProps) {
       tabContributions={props.tabContributions}
       onSelectIssue={props.onSelectIssue}
       onRevealChanges={props.onRevealChanges}
+      headerViews={props.headerViews}
+      onHeaderViewsChange={props.onHeaderViewsChange}
       renderReviewTray={props.renderReviewTray}
     />
   ) : (

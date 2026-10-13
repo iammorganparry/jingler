@@ -751,6 +751,26 @@ describe("SessionPane", () => {
     expect(within(screen.getByTestId("editor-groups")).queryByTestId("view-rail")).toBeNull()
   })
 
+  it("portals pinned header view buttons and the overflow menu into the title bar", () => {
+    const onHeaderViewsChange = vi.fn()
+    render(
+      <>
+        <div id="session-header-views-portal" />
+        <SessionPane
+          session={session({ id: "a", worktreePath: "/tmp/a" })}
+          renderConversation={() => <div>transcript</div>}
+          headerViews={["browser"]}
+          onHeaderViewsChange={onHeaderViewsChange}
+        />
+      </>
+    )
+
+    const slot = within(document.getElementById("session-header-views-portal")!)
+    expect(slot.getByTestId("header-view-browser")).toBeTruthy()
+    expect(slot.queryByTestId("header-view-terminal")).toBeNull()
+    expect(slot.getByTestId("view-overflow-trigger")).toBeTruthy()
+  })
+
   it("moves group focus on mousedown", () => {
     render(
       <SessionPane
