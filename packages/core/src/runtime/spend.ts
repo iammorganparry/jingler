@@ -37,36 +37,39 @@ interface SpendTurn {
   readonly costUsd: number
 }
 
+const turnAt = (fact: UsageFact, tokens: number, costUsd: number): SpendTurn => ({
+  sessionId: fact.sessionId,
+  at: Date.parse(fact.endedAt),
+  tokens,
+  costUsd
+})
+
+const sessionTurns = (session: ReadonlyArray<UsageFact>): ReadonlyArray<SpendTurn> => {
+  let previousCost = 0
+  let previousTokens = 0
+  return [...session]
+    .sort((a, b) => Date.parse(a.endedAt) - Date.parse(b.endedAt))
+    .map((fact) => {
+      const tokens = fact.totalTokens ?? 0
+      const turnTokens = fact.runtimeId === "pi" ? step(tokens, previousTokens) : tokens
+      previousTokens = tokens
+      const turnCost = fact.costUsd === null ? 0 : step(fact.costUsd, previousCost)
+      if (fact.costUsd !== null) previousCost = fact.costUsd
+      return turnAt(fact, turnTokens, turnCost)
+    })
+}
+
 const turnsFromFacts = (facts: ReadonlyArray<UsageFact>): ReadonlyArray<SpendTurn> => {
-  const turns: SpendTurn[] = []
+  const children = facts.filter((fact) => fact.kind === "child" && fact.costUsd !== null)
   const parents = new Map<string, Array<UsageFact>>()
-  for (const fact of facts) {
-    if (fact.kind === "child") {
-      if (fact.costUsd !== null) {
-        turns.push({ sessionId: fact.sessionId, at: Date.parse(fact.endedAt), tokens: fact.totalTokens ?? 0, costUsd: fact.costUsd })
-      }
-      continue
-    }
+  for (const fact of facts.filter((candidate) => candidate.kind === "parent")) {
     const key = JSON.stringify([fact.sessionId, fact.runtimeId])
     parents.set(key, [...(parents.get(key) ?? []), fact])
   }
-  for (const session of parents.values()) {
-    let previousCost = 0
-    let previousTokens = 0
-    for (const fact of [...session].sort((a, b) => Date.parse(a.endedAt) - Date.parse(b.endedAt))) {
-      const cumulativeTokens = fact.runtimeId === "pi"
-      const tokens = fact.totalTokens ?? 0
-      const turnTokens = cumulativeTokens ? step(tokens, previousTokens) : tokens
-      if (cumulativeTokens) previousTokens = tokens
-      let turnCost = 0
-      if (fact.costUsd !== null) {
-        turnCost = step(fact.costUsd, previousCost)
-        previousCost = fact.costUsd
-      }
-      turns.push({ sessionId: fact.sessionId, at: Date.parse(fact.endedAt), tokens: turnTokens, costUsd: turnCost })
-    }
-  }
-  return turns
+  return [
+    ...children.map((fact) => turnAt(fact, fact.totalTokens ?? 0, fact.costUsd ?? 0)),
+    ...[...parents.values()].flatMap(sessionTurns)
+  ]
 }
 
 /** Spend per last session / today / this month (local calendar) from per-turn usage facts. */
@@ -75,7 +78,7 @@ export const spendFromFacts = (
   now: Date = new Date()
 ): ProviderSpend => {
   const turns = turnsFromFacts(facts)
-  const spend = { lastSession: null as { tokens: number; costUsd: number } | null, today: zero(), month: zero() }
+  const spend = { lastSession: zero(), today: zero(), month: zero() }
   const latest = turns.reduce<SpendTurn | null>((best, turn) => (best === null || turn.at > best.at ? turn : best), null)
   for (const turn of turns) {
     const at = new Date(turn.at)
@@ -83,7 +86,7 @@ export const spendFromFacts = (
       add(spend.month, turn.tokens, turn.costUsd)
       if (at.getDate() === now.getDate()) add(spend.today, turn.tokens, turn.costUsd)
     }
-    if (latest !== null && turn.sessionId === latest.sessionId) add(spend.lastSession ??= zero(), turn.tokens, turn.costUsd)
+    if (turn.sessionId === latest?.sessionId) add(spend.lastSession, turn.tokens, turn.costUsd)
   }
-  return spend
+  return { ...spend, lastSession: latest === null ? null : spend.lastSession }
 }

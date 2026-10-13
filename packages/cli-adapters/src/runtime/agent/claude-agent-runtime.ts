@@ -168,6 +168,9 @@ const streamEvents = (value: Record<string, unknown>): ReadonlyArray<StreamEvent
     : []
 }
 
+const reportedCostUsd = (result: Record<string, unknown>): number =>
+  typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0
+
 const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   let value: unknown
   try {
@@ -212,7 +215,7 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   return [
     ...(last === undefined ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
-    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: typeof value.total_cost_usd === "number" ? value.total_cost_usd : 0 }
+    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: reportedCostUsd(value) }
   ]
 }
 
