@@ -141,7 +141,33 @@ function TurnFiltered() {
 /** "All turns ▾" narrows the file list to what one agent turn changed. */
 export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
 
-/** Nothing to review. */
+/** The change list is loading: rows at real height, nothing shifts on load. */
+export const ExplorerLoading: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer files={[]} fileDiffs={[]} drafts={[]} activePath={null} onSelectFile={() => {}} loading />
+    </Frame>
+  )
+}
+
+/** The change list failed to load: message and Retry. */
+export const ExplorerError: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={[]}
+        fileDiffs={[]}
+        drafts={[]}
+        activePath={null}
+        onSelectFile={() => {}}
+        error="Couldn't read the worktree diff"
+        onRetry={() => {}}
+      />
+    </Frame>
+  )
+}
+
+/** Nothing to review: "No changes yet". */
 export const ExplorerEmpty: Story = {
   render: () => (
     <Frame width={280}>

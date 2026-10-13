@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
@@ -183,6 +184,11 @@ export interface ChangedFilesExplorerProps {
   readonly turns?: readonly ReviewTurn[]
   readonly turnId?: string | null
   readonly onTurnChange?: (turnId: string | null) => void
+  /** The change list is still loading: show placeholder rows at real height. */
+  readonly loading?: boolean
+  /** The change list failed to load; `onRetry` adds the Retry button. */
+  readonly error?: string | null
+  readonly onRetry?: () => void
 }
 
 /**
@@ -201,7 +207,10 @@ export function ChangedFilesExplorer({
   onSelectFile,
   turns = [],
   turnId = null,
-  onTurnChange
+  onTurnChange,
+  loading = false,
+  error = null,
+  onRetry
 }: ChangedFilesExplorerProps) {
   const controls = useCodeReviewView()
   const turn = turns.find((candidate) => candidate.id === turnId) ?? null
@@ -245,6 +254,21 @@ export function ChangedFilesExplorer({
   const removed = files.reduce((sum, file) => sum + file.deletions, 0)
   const viewed = files.filter((file) => file.viewed).length
 
+  if (error !== null) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <InlineError message={error} onRetry={onRetry} />
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <ListSkeleton rows={6} rowHeight={24} gap={6} />
+      </div>
+    )
+  }
+
   return (
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
@@ -255,7 +279,7 @@ export function ChangedFilesExplorer({
           </div>
         ) : null}
         {allFiles.length === 0 ? (
-          <div className="p-4 text-[12px] text-dim">No changes to review.</div>
+          <EmptyState title="No changes yet" description="Files the agent edits show up here." />
         ) : (
           <ReviewFileRail
             files={files}

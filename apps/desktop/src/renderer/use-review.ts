@@ -60,6 +60,11 @@ export interface ReviewState {
    */
   readonly reviewThreads: ReadonlyArray<PrReviewThread>
   readonly busy: boolean
+  /** The effective source's first load is in flight. */
+  readonly loading: boolean
+  /** The effective source failed to load, or null. */
+  readonly error: string | null
+  readonly retry: () => void
   readonly selectFile: (path: string) => void
   readonly toggleViewed: (path: string, viewed: boolean) => void
   readonly addDraft: (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) => void
@@ -302,6 +307,8 @@ export function useReview(session: Session): ReviewState {
     [session.id]
   )
 
+  const sourceError = (effective === "pr" ? prQuery : localQuery).error
+
   return {
     filter,
     setFilter,
@@ -319,6 +326,9 @@ export function useReview(session: Session): ReviewState {
     // lines that don't correspond, so the source decides whether they exist.
     reviewThreads: reviewThreadsFor(effective, threadsQuery.data?.reviewThreads),
     busy: prQuery.isPending || localQuery.isPending,
+    loading: (effective === "pr" ? prQuery : localQuery).isLoading,
+    error: sourceError === null ? null : sourceError.message,
+    retry: () => void (effective === "pr" ? prQuery : localQuery).refetch(),
     selectFile: setSelectedPath,
     toggleViewed,
     addDraft,

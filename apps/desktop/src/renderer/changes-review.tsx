@@ -121,6 +121,9 @@ export function ChangesExplorerPanel({
       review={review.source === "pr" ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
+      loading={review.loading}
+      error={review.error}
+      onRetry={review.retry}
     />
   )
 }
