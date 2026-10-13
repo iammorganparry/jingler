@@ -1,5 +1,23 @@
 # @jingler/desktop
 
+## 0.9.0
+
+### Minor Changes
+
+- 610d01c: Explanations and plans can now draw a system as an interactive isometric figure: stores, queues, services and gateways on layer plinths, wired together, with the subject part lit. Agents use the new `architecture-anatomy` skill; plans use an `architecture` code fence.
+- 39ab665: Claude Enterprise and Console (API-priced) logins now run agents without a billing-route error, and the Usage & limits modal shows their spend (cost and tokens for the last session, today and this month) under an "Enterprise · API pricing" plan label instead of "not available".
+- 370e769: Save agent explanations to your Obsidian vault automatically: turn on "Save explanations to Obsidian" in Settings → General (shown once a vault is configured) and each published explanation is written as a Markdown note, updated in place when re-published.
+
+### Patch Changes
+
+- c64ebcc: Messages you send, sub-agent task prompts and sub-agent final outputs now render as Markdown (code blocks, bold, lists) instead of raw text.
+- d6af7ba: Stopping an agent that's stuck inside a tool no longer locks the chat. Before, every later message (including "Sub-agent results arrived") was refused with "This chat is already running" until the stuck run eventually died.
+- 749b71e: Sub-agents can now launch up to 64 times per session (was 16), run for up to an hour before timing out (was 30 minutes), and workers start with a fresh context instead of inheriting your conversation.
+- b7ad8d8: Sub-agents that can run shell commands no longer also get the read-only command tool, so they stop picking it by mistake and failing.
+- 87ac5a0: Sub-agent results that arrive after the main agent finished its turn now start a visible turn ("Sub-agent results arrived") instead of running hidden or being dropped, so you no longer have to reprompt.
+- 54e58d1: Claude subagents no longer fail model verification on non-subscription logins, and every subagent gets the tools its role needs.
+  - @jingler/plannotator-ext@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes
