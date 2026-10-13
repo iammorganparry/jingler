@@ -160,3 +160,91 @@ test("uses the shared legacy Jingler Pierre skin in the Changes review diff", as
     window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
   ).toBeVisible()
 })
+
+const turnChange = (path: string) => ({
+  status: "M",
+  path,
+  oldPath: null,
+  added: 1,
+  removed: 1,
+  binary: false,
+  noNewlineAtEnd: false,
+  beforeBytes: 1,
+  afterBytes: 1,
+  preview: null,
+  patchArtifactId: null
+})
+
+const turnMessage = (id: string, path: string) => ({
+  id,
+  role: "assistant",
+  streaming: false,
+  createdAt: "2026-08-05T00:00:00.000Z",
+  parts: [{
+    _tag: "Tool",
+    tool: {
+      id: `tool-${id}`,
+      name: "Edit",
+      target: path,
+      status: "success",
+      meta: null,
+      diff: { added: 1, removed: 1 },
+      preview: null,
+      fileChanges: {
+        id: `changes-${id}`,
+        callId: `tool-${id}`,
+        changes: [turnChange(path)],
+        totals: { added: 1, removed: 1 },
+        authoritative: true,
+        reconciledAt: "2026-08-05T00:00:00.000Z"
+      }
+    }
+  }]
+})
+
+test("the turn filter narrows the changed-file list and the diff", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [seeded(repoPath)],
+    transcripts: {
+      s_pierre_review: [
+        turnMessage("a_turn_1", "src/auth/login.ts"),
+        turnMessage("a_turn_2", "src/store/cache.ts")
+      ]
+    },
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
+      mkdirSync(join(repoPath, "src", "store"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 1\n")
+      writeFileSync(join(repoPath, "src", "store", "cache.ts"), "export const ttl = 30\n")
+      execFileSync("git", ["add", "-A"], { cwd: repoPath })
+      execFileSync("git", ["commit", "-m", "seed turns", "--no-gpg-sign"], { cwd: repoPath })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 2\n")
+      writeFileSync(join(repoPath, "src", "store", "cache.ts"), "export const ttl = 60\n")
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1800, height: 900 })
+  await sessionRow(window, "Pierre review session").click()
+  const closeTerminal = window.getByRole("button", { name: "Close zsh" })
+  if (await closeTerminal.isVisible()) await closeTerminal.click()
+
+  const diff = await openChangedFile(window, "src/auth/login.ts")
+  const explorer = window.getByTestId("changed-files-explorer")
+  const item = (path: string) => explorer.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  await expect(item("src/store/cache.ts")).toBeVisible()
+  await expect(diff).toContainText("login = 2")
+
+  // Turn 2 changed only cache.ts: login.ts leaves the list and its diff goes with it.
+  await explorer.getByRole("button", { name: "Filter by turn" }).click()
+  await window.getByRole("option", { name: /Turn 2/ }).click()
+  await expect(item("src/store/cache.ts")).toBeVisible()
+  await expect(item("src/auth/login.ts")).toHaveCount(0)
+  await expect(window.getByTestId("review-file-diff")).toHaveCount(0)
+
+  await explorer.getByRole("button", { name: "Filter by turn" }).click()
+  await window.getByRole("option", { name: "All turns" }).click()
+  await expect(item("src/auth/login.ts")).toBeVisible()
+})

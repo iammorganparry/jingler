@@ -57,6 +57,7 @@ test("the Changes review stays responsive when one file's diff is enormous", asy
   // …and the generated file is listed with its real size, named as omitted.
   const omitted = window.getByTestId("changed-files-explorer").getByTestId("review-omitted-files")
   await expect(omitted).toBeVisible({ timeout: 30_000 })
+  await expect(omitted).toContainText("One file is too large to show inline")
   await expect(omitted).toContainText("generated.txt")
   await expect(omitted).toContainText("+100,000")
   await expect(omitted).toContainText("20,000")

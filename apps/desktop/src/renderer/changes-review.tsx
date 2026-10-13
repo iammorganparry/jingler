@@ -83,7 +83,9 @@ export const revealSessionChanges = (session: Session): void =>
 
 /** The agent turns that changed files, and which one the Changes list is narrowed to. */
 export function useReviewTurns(session: Session) {
-  const messages = useSelector(getConversationActor(session), (snapshot) => snapshot.context.messages)
+  // Memoised: getConversationActor pushes the session into the actor on every call.
+  const actor = useMemo(() => getConversationActor(session), [session.id, session.activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const messages = useSelector(actor, (snapshot) => snapshot.context.messages)
   const turns = useMemo(() => reviewTurnsOf(messages), [messages])
   const { turnId } = useSessionReviewState(session.id, session.prNumber)
   const turn = turns.find((candidate) => candidate.id === turnId) ?? null
