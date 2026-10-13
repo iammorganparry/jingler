@@ -82,8 +82,12 @@ const transcript = [
   }
 ]
 
-const conversationTab = (window: Page) =>
-  window.getByRole("tab", { name: "Chat 1", exact: true }).first()
+// The chat is a lane beside the editor group (not a "Chat 1" tab), so "going back
+// to the conversation" means the lane is still visible and its composer takes focus.
+const focusChatLane = async (window: Page): Promise<void> => {
+  await expect(window.getByTestId("chat-lane-header").first()).toBeVisible()
+  await window.getByPlaceholder("Message the agent…").click()
+}
 const fileBody = (window: Page, path: string) => window.getByTestId(`editor-body-file-${path}`)
 // The sidebar Explorer's tree; the Files view keeps a hidden one mounted too.
 const tree = (window: Page) =>
@@ -142,26 +146,26 @@ test("routes every transcript file gesture to an editor tab and keeps Browser se
   await showTree(window)
 
   // Inline code path → another file tab.
-  await conversationTab(window).click()
+  await focusChatLane(window)
   await window.getByTitle("Open out/results.csv").click()
   await expect(window.getByRole("textbox", { name: "out/results.csv" })).toBeVisible({
     timeout: 15_000
   })
 
   // Relative markdown link → the existing file tab.
-  await conversationTab(window).click()
+  await focusChatLane(window)
   await window.getByRole("link", { name: "the spec" }).click()
   await expect(window.getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
     timeout: 15_000
   })
 
   // Untracked files remain navigable; ignored files do not become gestures.
-  await conversationTab(window).click()
+  await focusChatLane(window)
   await window.getByTitle("Open notes.md").click()
   await expect(window.getByRole("textbox", { name: "notes.md" })).toBeVisible({
     timeout: 15_000
   })
-  await conversationTab(window).click()
+  await focusChatLane(window)
   await expect(window.getByTitle("Open ignored.md")).toHaveCount(0)
 
   // The internet browser is a separate session tab, with its own address bar
@@ -200,7 +204,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   await window.keyboard.insertText("export const editable = 43\n")
 
   // Switching the session tab unmounts the view, but not its session actor.
-  await conversationTab(window).click()
+  await focusChatLane(window)
   await window.getByTestId("editor-tab-file-src/edit.ts").getByRole("tab").click()
   editor = fileBody(window, "src/edit.ts").getByRole("textbox", { name: "src/edit.ts" })
   await expect(editor).toContainText("export const editable = 43", { timeout: 15_000 })
