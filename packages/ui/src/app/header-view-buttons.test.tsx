@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { FileDiff, Globe, ListChecks, SquareTerminal } from "lucide-react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { HeaderViewButtons, type HeaderViewItem } from "./header-view-buttons.js"
+import { HeaderLinkChips, HeaderViewButtons, type HeaderViewItem } from "./header-view-buttons.js"
 
 afterEach(cleanup)
 
@@ -34,5 +34,24 @@ describe("HeaderViewButtons", () => {
     expect(checks.getAttribute("aria-pressed")).toBe("true")
     expect(screen.getByTestId("header-view-changes").getAttribute("aria-pressed")).toBe("false")
     expect(checks.className).not.toMatch(/blue/)
+  })
+})
+
+describe("HeaderLinkChips", () => {
+  it("draws one chip per link and opens the clicked one", () => {
+    const onPr = vi.fn()
+    const onIssue = vi.fn()
+    render(
+      <HeaderLinkChips
+        chips={[
+          { id: "pr", label: "PR #482", title: "Open pull request", onOpen: onPr },
+          { id: "issue", label: "LIN-482", title: "Open LIN-482", onOpen: onIssue }
+        ]}
+      />
+    )
+    fireEvent.click(screen.getByTestId("header-link-issue"))
+    expect(onIssue).toHaveBeenCalledOnce()
+    expect(onPr).not.toHaveBeenCalled()
+    expect(screen.getByTestId("header-link-pr").textContent).toBe("PR #482")
   })
 })

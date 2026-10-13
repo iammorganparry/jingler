@@ -35,7 +35,7 @@ import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
 import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
-import { HeaderViewButtons, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { HeaderLinkChips, HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
 import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
@@ -643,29 +643,6 @@ function SessionPaneBody(props: SessionPaneProps) {
     openSurface({ kind: "view", id: BUILTIN_TAB.plan, chatId: pending })
   }, [openSurface, props.planSessions])
 
-  // An outside request to switch tabs (the command palette). The nonce is the
-  // trigger, and reporting it handled stops a remount replaying it.
-  const tabRequestNonce = props.selectTabRequest?.nonce
-  const tabRequestId = props.selectTabRequest?.tabId
-  const onTabRequestHandled = props.onTabRequestHandled
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the one-shot trigger; see the prop contract.
-  useEffect(() => {
-    if (tabRequestId === undefined) return
-    if (tabRequestId === BUILTIN_TAB.plan) openPlanReview()
-    else if (tabRequestId === BUILTIN_TAB.conversation) openSurface({ kind: "chat", id: active.activeChatId })
-    else {
-      if (tabRequestId === BUILTIN_TAB.browser && !props.isBrowserActive?.(sessionId, active.activeChatId)) {
-        props.onToggleBrowser?.(sessionId, active.activeChatId)
-      }
-      openSurface({
-        kind: "view",
-        id: tabRequestId,
-        ...(tabRequestId === BUILTIN_TAB.browser ? { chatId: active.activeChatId } : {})
-      })
-    }
-    onTabRequestHandled?.()
-  }, [tabRequestNonce])
-
   const browserActive = props.isBrowserActive?.(sessionId, active.activeChatId) ?? false
   const previousBrowser = useRef({ chatId: active.activeChatId, active: browserActive })
   useEffect(() => {
@@ -711,6 +688,18 @@ function SessionPaneBody(props: SessionPaneProps) {
     },
     [active, browserActive, onRevealChanges, openPlanReview, openSurface, props.onToggleBrowser, props.tabContributions]
   )
+  // An outside request to switch tabs (the command palette). The nonce is the
+  // trigger, and reporting it handled stops a remount replaying it. It goes
+  // through selectTab, exactly like the header buttons.
+  const tabRequestNonce = props.selectTabRequest?.nonce
+  const tabRequestId = props.selectTabRequest?.tabId
+  const onTabRequestHandled = props.onTabRequestHandled
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the nonce is the one-shot trigger; see the prop contract.
+  useEffect(() => {
+    if (tabRequestId === undefined) return
+    selectTab(tabRequestId)
+    onTabRequestHandled?.()
+  }, [tabRequestNonce])
   const tabCtx: TabContext = {
     session: active,
     hasPlan,
@@ -937,15 +926,36 @@ function SessionPaneBody(props: SessionPaneProps) {
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [paneFocused, pinnedHeaderItems, selectTab])
+  // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
+  const linkChips: HeaderLinkChip[] = []
+  if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.pr)) {
+    linkChips.push({
+      id: "pr",
+      label: `PR #${active.prNumber}`,
+      title: "Open pull request",
+      onOpen: () => selectTab(BUILTIN_TAB.pr)
+    })
+  }
+  const linkedIssue = issueReferenceOf(active)
+  const issueTab = tabs.find((tab) => linkedIssue !== undefined && tab.issueProviderId === linkedIssue.providerId)
+  if (linkedIssue && issueTab) {
+    linkChips.push({
+      id: "issue",
+      label: linkedIssue.identifier,
+      title: `Open ${linkedIssue.identifier}`,
+      onOpen: () => selectTab(issueTab.id)
+    })
+  }
   const headerViewControls =
-    props.headerViews !== undefined && props.onHeaderViewsChange ? (
+    (props.headerViews !== undefined && props.onHeaderViewsChange) || linkChips.length > 0 ? (
       <div className="flex items-center gap-0.5">
-        <HeaderViewButtons
-          views={pinnedHeaderItems}
-          activeId={activeTab}
-          onOpen={selectTab}
-        />
-        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
+        <HeaderLinkChips chips={linkChips} />
+        {props.headerViews !== undefined && props.onHeaderViewsChange ? (
+          <>
+            <HeaderViewButtons views={pinnedHeaderItems} activeId={activeTab} onOpen={selectTab} />
+            <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
+          </>
+        ) : null}
       </div>
     ) : null
 

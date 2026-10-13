@@ -117,3 +117,29 @@ test("repeated queued handoffs never hide main", async ({ launchApp }) => {
   await window.getByTestId(`chat-close-${mainChatId}`).click()
   await expect(mainTab).toHaveCount(0)
 })
+
+test("Hand off all forks every queued message into its own chat and empties the queue", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+  await parkABusyRun(window)
+
+  const busyComposer = window.getByPlaceholder("Queue a message while the agent works…")
+  const handoffAll = window.getByRole("button", { name: /^Hand off all/ })
+  for (const text of ["first job", "second job", "third job"]) {
+    await busyComposer.fill(text)
+    await busyComposer.press("Enter")
+  }
+  await expect(handoffAll).toHaveText("Hand off all · 3")
+  await expect(handoffAll).toBeEnabled()
+
+  await handoffAll.click()
+
+  // Three queued messages become three new chats beside Chat 1, and nothing stays queued.
+  await expect(window.getByText("3 messages handed off")).toBeVisible({ timeout: 15_000 })
+  await expect(window.getByText("Queued", { exact: true })).toHaveCount(0)
+  await expect(handoffAll).toHaveCount(0)
+
+  // Toast "View" opens the thread switcher, which lists the original chat plus the three forks.
+  await window.getByRole("region", { name: "Notifications" }).getByRole("button", { name: "View", exact: true }).click()
+  await expect(window.locator('[data-testid^="chat-option-"]')).toHaveCount(4)
+})

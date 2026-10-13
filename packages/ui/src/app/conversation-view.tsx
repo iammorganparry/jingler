@@ -27,7 +27,7 @@ import type {
 } from "@jingler/core"
 import { type VirtualItem, useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { ArrowUp, Lock, RotateCcw } from "lucide-react"
+import { ArrowUp, Globe, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
@@ -241,6 +241,12 @@ export interface ConversationViewProps {
    * separate job that shouldn't inherit 200k tokens of unrelated context".
    */
   onHandoffQueued?: (id: string) => void
+  /**
+   * Fork every queued message (ids in queue order) into its own fresh chat.
+   * Drives the queue header's `Hand off all · N`, disabled while a queued
+   * message is being sent (`steeringId`).
+   */
+  onHandoffAllQueued?: (ids: ReadonlyArray<string>) => void
   /** Rewrite a queued message in place, before it is ever sent. */
   onEditQueued?: (id: string, text: string) => void
   /** What the hand-off targets, for its tooltip (e.g. "a new chat on Opus 4.6"). */
@@ -262,6 +268,8 @@ export interface ConversationViewProps {
   onAnswerQuestion?: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** Open the full read-only native plan projection. */
   onOpenPlanReview?: (stepId?: string) => void
+  /** An agent revealed the browser preview: shows `Preview ready · Open browser` after the transcript. */
+  previewReady?: { readonly onOpen: () => void } | null
   /** Fork a drifted direct session's work onto a new worktree session (BranchDrift banner). */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session (BranchDrift banner). */
@@ -314,7 +322,7 @@ export interface ConversationViewProps {
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
     loadingHistory: false,
     skills: [],
@@ -447,6 +455,17 @@ function renderSessionAnalytics() {
                     running turn — which throws away the text of a row the operator
                     is part-way through editing, at a moment they did not cause.
                   */}
+                  {onHandoffAllQueued && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="self-end"
+                      disabled={steeringId != null}
+                      onClick={() => onHandoffAllQueued(queued.map((item) => item.id))}
+                    >
+                      Hand off all · {queued.length}
+                    </Button>
+                  )}
                   {queued.slice(0, queueLimit).map(renderQueuedMessage)}
                   {queued.length > QUEUE_PREVIEW && (
                     <button
@@ -793,6 +812,14 @@ function renderSessionAnalytics() {
           </div>
           </ToolStopContext.Provider>
           </PlanProgressContext.Provider>
+          {props.previewReady ? (
+            <div className="mx-auto mt-2 flex w-full max-w-[760px] justify-start">
+              <Button variant="secondary" size="sm" data-testid="preview-ready-chip" onClick={props.previewReady.onOpen}>
+                <Globe size={12} aria-hidden />
+                Preview ready · Open browser
+              </Button>
+            </div>
+          ) : null}
           {busy ? (
             <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">
               <ThinkingOrb />

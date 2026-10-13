@@ -41,9 +41,11 @@ import {
   ResizeHandle,
   RuntimeRecoveryCard,
   PlanReview,
-  useContainerWidth
+  useContainerWidth,
+  OPEN_THREAD_SWITCHER_EVENT
 } from "@jingler/ui"
 import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
+import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
@@ -249,6 +251,7 @@ export function ConversationPane({
   providerCatalog,
   agentEndpointCatalog,
   onSelectChanges,
+  onSelectBrowser,
   onOpenProviderSettings,
   onAddMcp,
   mcpServers,
@@ -292,6 +295,8 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
 /** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
+  /** Open the Browser view; the `Preview ready · Open browser` chip's path. */
+  onSelectBrowser?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
   /** Add or repair global MCP connections from the composer/chat. */
@@ -308,6 +313,15 @@ export function ConversationPane({
   paneFocused?: boolean
 }) {
   const activeChat = activeChatFor(session)
+  // An agent drove the embedded browser for THIS chat: offer the transcript link.
+  const [previewRevealed, setPreviewRevealed] = useState(false)
+  useEffect(
+    () =>
+      window.jingler?.onPreviewReveal?.(({ sessionId, chatId }) => {
+        if (sessionId === session.id && chatId === activeChat.id) setPreviewRevealed(true)
+      }),
+    [session.id, activeChat.id]
+  )
   const localMcpConfig = localMcp(
     session.environmentId,
     mcpServers,
@@ -614,7 +628,7 @@ export function ConversationPane({
    * `createChat` left the operator's text deleted with nothing on screen to say
    * so. Nothing is dropped until there is somewhere for it to land.
    */
-  const handoffQueued = (id: string) => {
+  const handoffQueued = (id: string, onHandedOff?: () => void) => {
     if (!convo.queued.some((queued) => queued.id === id)) return
     queueSessionChatMutation(
       session.id,
@@ -634,9 +648,20 @@ export function ConversationPane({
           agentContext: item.agentContext
         })
         convo.unqueue(id)
+        onHandedOff?.()
       }
     )
   }
+  /** Hand off the whole queue, one fresh chat each, then offer to open the thread switcher. */
+  const handoffAllQueued = (ids: ReadonlyArray<string>) =>
+    handoffEachQueued(ids, handoffQueued, (count) =>
+      onPushToast?.({
+        key: `handoff-all-${session.id}`,
+        variant: "success",
+        title: `${count} ${count === 1 ? "message" : "messages"} handed off`,
+        action: { label: "View", onAction: () => window.dispatchEvent(new Event(OPEN_THREAD_SWITCHER_EVENT)) }
+      })
+    )
   const selectChat = (chatId: string) => {
     queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
@@ -985,12 +1010,14 @@ export function ConversationPane({
                 setRequested,
                 activeChat,
                 handoffQueued,
+                handoffAllQueued,
                 handoffModel,
                 providerCatalog,
                 agentEndpointCatalog: sessionEndpointCatalog,
                 composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
                 onOpenPlanReview,
+                previewReady: previewRevealed && onSelectBrowser ? { onOpen: onSelectBrowser } : null,
                 onForkOntoBranchStable,
                 onAdoptBranchStable,
                 plannotatorDocument,
@@ -1200,12 +1227,14 @@ function renderMainConversation({
   setRequested,
   activeChat,
   handoffQueued,
+  handoffAllQueued,
   handoffModel,
   providerCatalog,
   agentEndpointCatalog,
   composerDisabledReason,
   sendPrompt,
   onOpenPlanReview,
+  previewReady,
   onForkOntoBranchStable,
   onAdoptBranchStable,
   plannotatorDocument,
@@ -1235,12 +1264,14 @@ function renderMainConversation({
   setRequested: (value: boolean) => void;
   activeChat: Session["chats"][number];
   handoffQueued: (id: string) => void;
+  handoffAllQueued: (ids: ReadonlyArray<string>) => void;
   handoffModel: string | null;
   providerCatalog: ProviderCatalog | null | undefined;
   agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
   composerDisabledReason: string | undefined;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
+  previewReady: { readonly onOpen: () => void } | null;
   onForkOntoBranchStable: () => Promise<void>;
   onAdoptBranchStable: () => Promise<void>;
   plannotatorDocument: import("@jingler/core").PlanDocument | null;
@@ -1306,6 +1337,7 @@ function renderMainConversation({
     onSendNow={convo.sendNow}
     onEditQueued={convo.editQueued}
     onHandoffQueued={handoffQueued}
+    onHandoffAllQueued={handoffAllQueued}
     steeringId={convo.steeringId}
     handoffHint={handoffModel
       ? `Hand off — run this in a new chat on ${handoffModel}`
@@ -1331,6 +1363,7 @@ function renderMainConversation({
     question={convo.question}
     onAnswerQuestion={convo.answerQuestion}
     onOpenPlanReview={onOpenPlanReview}
+    previewReady={previewReady}
     onForkOntoBranch={onForkOntoBranchStable}
     onAdoptBranch={onAdoptBranchStable}
     planDocument={plannotatorDocument}
