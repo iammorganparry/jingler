@@ -147,6 +147,25 @@ function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
   return <Stepper className="mt-2" steps={PUBLISH_PHASES.map((phase) => PUBLISH_PHASE_LABELS[phase])} current={current} />
 }
 
+/** Loading skeleton or retryable error while there is no PR yet; null once the Create-PR / PR views can render. */
+function renderLoadState(pr: PullRequest | null, busy: boolean, loadError: string | null | undefined, onRetryLoad?: () => void) {
+  if (pr !== null) return null
+  // Avoid flashing the "Create PR" empty state before the PR resolves.
+  if (busy) {
+    return (
+      <div aria-label="Loading pull request" className="flex flex-1 flex-col gap-[18px] px-[30px] py-[26px]">
+        <ListSkeleton rows={5} rowHeight={28} gap={12} />
+      </div>
+    )
+  }
+  if (!loadError) return null
+  return (
+    <div className="flex flex-1 flex-col px-[30px] py-[26px]">
+      <InlineError message={loadError} onRetry={onRetryLoad} />
+    </div>
+  )
+}
+
 export interface PullRequestViewProps {
   pr: PullRequest | null
   connected: boolean
@@ -608,21 +627,8 @@ return (evidence === "checks" ? (
     return () => window.removeEventListener("keydown", close)
   }, [railOpen])
 
-  // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
-  if (pr === null && busy) {
-    return (
-      <div aria-label="Loading pull request" className="flex flex-1 flex-col gap-[18px] px-[30px] py-[26px]">
-        <ListSkeleton rows={5} rowHeight={28} gap={12} />
-      </div>
-    )
-  }
-  if (pr === null && loadError) {
-    return (
-      <div className="flex flex-1 flex-col px-[30px] py-[26px]">
-        <InlineError message={loadError} onRetry={onRetryLoad} />
-      </div>
-    )
-  }
+  const loadView = renderLoadState(pr, busy, loadError, onRetryLoad)
+  if (loadView) return loadView
   if (pr === null) {
     return (
       renderCreatePullRequest()
