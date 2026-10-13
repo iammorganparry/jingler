@@ -6,10 +6,10 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
-  CommandList,
-  CommandShortcut
+  CommandList
 } from "../components/command.js"
 import { Kbd } from "../components/kbd.js"
+import { StatusDot } from "../components/status-dot.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import {
   groupPaletteItems,
@@ -174,7 +174,13 @@ export function CommandPalette({
                       {item.detail}
                     </span>
                   )}
-                  {item.hint && <CommandShortcut>{item.hint}</CommandShortcut>}
+                  {item.status && (
+                    <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <StatusDot tone="bg-line-strong" size={6} />
+                      {item.status}
+                    </span>
+                  )}
+                  {item.hint && <Kbd className="ml-auto">{item.hint}</Kbd>}
                 </CommandItem>
               )
             })}

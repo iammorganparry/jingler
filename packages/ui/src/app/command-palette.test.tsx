@@ -155,4 +155,10 @@ describe("CommandPalette", () => {
     fireEvent.keyDown(input(), { key: "Tab" })
     await waitFor(() => expect(screen.getByText("refactor auth")).toBeTruthy())
   })
+
+  it("shows a workspace's status word and renders the hint as a Kbd chip", () => {
+    open({ items: [item({ id: "ws", kind: "session", label: "Alpha", group: "Workspaces", status: "Idle", hint: "⌘N" })] })
+    expect(screen.getByText("Idle")).toBeTruthy()
+    expect(screen.getByText("⌘N").className).toContain("font-mono")
+  })
 })

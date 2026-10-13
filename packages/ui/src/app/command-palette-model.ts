@@ -47,6 +47,8 @@ export interface PaletteItem {
   readonly detail?: string
   /** The heading this row sits under. Groups render in first-seen order. */
   readonly group: string
+  /** A status word (e.g. "Idle") shown after the label with a neutral dot. Display only. */
+  readonly status?: string
   /** A chord to show right-aligned, e.g. `"⌘N"`. Display only. */
   readonly hint?: string
   /**
@@ -218,7 +220,7 @@ export interface PluginPaletteCommand {
  * name stops being reserved.
  */
 export const PALETTE_GROUP = {
-  sessions: "Sessions",
+  sessions: "Workspaces",
   actions: "Actions",
   tabs: "Go to tab",
   views: "Open view…",
