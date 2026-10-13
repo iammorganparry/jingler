@@ -35,6 +35,8 @@ import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
 import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
+import { HeaderViewButtons, type HeaderViewItem } from "../app/header-view-buttons.js"
+import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
   SESSION_SURFACE_COMMAND_EVENT,
   sessionSurfaceKey,
@@ -68,7 +70,7 @@ import {
 } from "../app/editor-layout-machine.js"
 import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
 import { useChatLane } from "../app/use-chat-lane.js"
-import { matchCollapseChatChord, matchFocusChatChord } from "../app/app-shortcuts.js"
+import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
@@ -254,6 +256,10 @@ export interface SessionPaneProps {
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
   viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
+  /** Pinned header view ids in order (`Config.headerViews`). Absent hides the header buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned set, from the overflow menu's "Pin to header". */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   /** Whether the file browser follows this chat's agent edits. */
   followAgent?: boolean
   /** Toggle the shared agent-follow mode. */
@@ -543,6 +549,11 @@ function SessionPaneBody(props: SessionPaneProps) {
   useLayoutEffect(() => {
     if (typeof document === "undefined") return
     setViewRailTarget(document.getElementById("session-view-rail-portal"))
+  }, [])
+  const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return
+    setHeaderViewsTarget(document.getElementById("session-header-views-portal"))
   }, [])
 
   // The layout lives in the app-wide store so the sidebar tree reads the same
@@ -907,8 +918,45 @@ function SessionPaneBody(props: SessionPaneProps) {
 
   const viewRail = <ViewRail tabs={railTabs} active={activeTab} onChange={selectTab} menus={viewRailMenus} />
 
+  const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    icon: tab.icon,
+    ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
+    ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
+    ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
+  }))
+  const pinnedViews = props.headerViews ?? []
+  const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
+  // ⌘⇧D opens Changes; ⌥1–⌥9 open the header button at that position. Both go through
+  // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
+  useEffect(() => {
+    if (!paneFocused) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const position = matchHeaderViewChord(e)
+      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : pinnedHeaderItems[position]?.id
+      if (target === undefined) return
+      e.preventDefault()
+      selectTab(target)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [paneFocused, pinnedHeaderItems, selectTab])
+  const headerViewControls =
+    props.headerViews !== undefined && props.onHeaderViewsChange ? (
+      <div className="flex items-center gap-0.5">
+        <HeaderViewButtons
+          views={pinnedHeaderItems}
+          activeId={activeTab}
+          onOpen={selectTab}
+        />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
+      </div>
+    ) : null
+
   return (
     <>
+      {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
       {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-row relative">
         {chatLane.showAskPill && (

@@ -30,6 +30,7 @@ export function TitleBar({
         id="session-tab-bar-portal"
         className="flex h-full min-w-0 flex-1 items-center overflow-hidden"
       />
+      <div id="session-header-views-portal" style={noDrag} className="flex flex-none items-center" />
       {actions ? (
         <div style={noDrag} className="relative flex flex-none justify-end">
           {actions}

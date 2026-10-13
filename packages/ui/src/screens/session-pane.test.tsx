@@ -753,6 +753,58 @@ describe("SessionPane", () => {
     expect(within(screen.getByTestId("editor-groups")).queryByTestId("view-rail")).toBeNull()
   })
 
+  it("portals pinned header view buttons and the overflow menu into the title bar", () => {
+    const onHeaderViewsChange = vi.fn()
+    render(
+      <>
+        <div id="session-header-views-portal" />
+        <SessionPane
+          session={session({ id: "a", worktreePath: "/tmp/a" })}
+          renderConversation={() => <div>transcript</div>}
+          headerViews={["browser"]}
+          onHeaderViewsChange={onHeaderViewsChange}
+        />
+      </>
+    )
+
+    const slot = within(document.getElementById("session-header-views-portal")!)
+    expect(slot.getByTestId("header-view-browser")).toBeTruthy()
+    expect(slot.queryByTestId("header-view-terminal")).toBeNull()
+    expect(slot.getByTestId("view-overflow-trigger")).toBeTruthy()
+  })
+
+  it("opens pinned header views on ⌥N and Changes on ⌘⇧D through the button path", () => {
+    const onRevealChanges = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onRevealChanges={onRevealChanges}
+        onToggleBrowser={vi.fn()}
+      />
+    )
+    fireEvent.keyDown(window, { key: "d", code: "KeyD", metaKey: true, shiftKey: true })
+    expect(onRevealChanges).toHaveBeenCalledWith("a")
+    const onToggleBrowser = vi.fn()
+    cleanup()
+    render(
+      <SessionPane
+        session={session({ id: "a", worktreePath: "/tmp/a" })}
+        renderConversation={() => <div>transcript</div>}
+        headerViews={["browser", "terminal"]}
+        onHeaderViewsChange={vi.fn()}
+        onToggleBrowser={onToggleBrowser}
+      />
+    )
+    fireEvent.keyDown(window, { key: "¡", code: "Digit1", altKey: true })
+    expect(onToggleBrowser).toHaveBeenCalledTimes(1)
+    onToggleBrowser.mockClear()
+    fireEvent.keyDown(window, { key: "£", code: "Digit3", altKey: true })
+    expect(onToggleBrowser).not.toHaveBeenCalled()
+  })
+
   it("moves group focus on mousedown", () => {
     render(
       <SessionPane

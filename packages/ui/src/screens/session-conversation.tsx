@@ -203,6 +203,10 @@ export interface SessionConversationProps {
    * the Explorer itself; the host owns which diff (PR or uncommitted) it shows.
    */
   onRevealChanges?: (sessionId: string) => void
+  /** Pinned header view ids in order; absent hides the header view buttons. */
+  headerViews?: ReadonlyArray<string>
+  /** Persist a new pinned header view set. */
+  onHeaderViewsChange?: (views: ReadonlyArray<string>) => void
   /** Review Focus: hold the sidebar collapsed so only the diff has the width. */
   sidebarCollapsed?: boolean
   /** Which sidebar view mounts first; stories and restored layouts can start on Explorer. */
@@ -351,6 +355,8 @@ export function SessionConversation(props: SessionConversationProps) {
             onSelectIssue={props.onSelectIssue}
             paneContributions={props.paneContributions}
             onRevealChanges={revealChanges}
+            headerViews={props.headerViews}
+            onHeaderViewsChange={props.onHeaderViewsChange}
             renderReviewTray={props.renderReviewTray}
             renderTerminalDock={props.renderTerminalDock}
             selectTabRequest={props.selectTabRequest}
