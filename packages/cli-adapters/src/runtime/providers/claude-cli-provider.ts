@@ -52,6 +52,7 @@ const ClaudeResult = Schema.Struct({
   subtype: Schema.String,
   is_error: Schema.Boolean,
   result: Schema.optional(Schema.String),
+  total_cost_usd: Schema.optional(Schema.Number),
   usage: Schema.optional(ClaudeTurnUsage)
 })
 
@@ -176,7 +177,8 @@ const usageFrom = (result: typeof ClaudeResult.Type): Usage => {
     cacheRead,
     cacheWrite,
     totalTokens: input + output + cacheRead + cacheWrite,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+    // The CLI reports the turn's spend as `total_cost_usd`; pi sums it into the session's cost.
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.total_cost_usd ?? 0 }
   }
 }
 

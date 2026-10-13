@@ -212,7 +212,7 @@ const decodeLine = (line: string): ReadonlyArray<StreamEvent> => {
   return [
     ...(last === undefined ? [] : [usageEvent(last)]),
     // Done carries the turn's spend, so it keeps the summed usage.
-    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: 0 }
+    { _tag: "Done", tokens: claudeUsageTokens(usage), costUsd: typeof value.total_cost_usd === "number" ? value.total_cost_usd : 0 }
   ]
 }
 
