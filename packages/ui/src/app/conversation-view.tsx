@@ -428,6 +428,7 @@ function renderSessionAnalytics() {
             <QuestionCard
               request={question}
               onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
+              onSwitchToAuto={mode === "auto" ? undefined : onSwitchToAuto}
             />
           ) : (
             <>
