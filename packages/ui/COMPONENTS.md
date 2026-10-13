@@ -184,7 +184,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 
 | Component | File | Purpose | Key props | Story | Redesign |
 |---|---|---|---|---|---|
-| AgentRoster | `app/agent-roster.tsx` | Peer-agents disclosure with message box. | — | no | — |
+| PeerAgentRow | `app/agent-roster.tsx` | One peer agent row in the SubagentChip popover: status, task, touched files, ghost `Message` button with inline send box. | agent, onMessage | no | #465 (8.6) |
 | AppShell | `app/app-shell.tsx` | Window frame: title bar plus routed content. | — | no | — |
 | HeaderViewButtons | `app/header-view-buttons.tsx` | Pinned view launchers in the workspace header (Changes N, Checks a/b, Terminal, Browser); neutral pressed state, one-line count badges, shortcut tooltips. | views, activeId, onOpen | yes | #383 (3.1) |
 | ViewOverflowMenu | `app/view-overflow-menu.tsx` | ⋯ menu listing every view and plugin view, each with "Pin to header"; a sixth pin is refused with a tooltip. | views, pinned, onOpen, onPinnedChange | yes | #383 (3.1) |
@@ -201,7 +201,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionSplit | `app/session-split.tsx` | Chat + content split layout. | onOpenCheckpoints, group, sessions, emptyState, renderConversation, session | no | — |
 | SessionTree | `app/session-tree.tsx` | Session chats, views and open files tree. | — | no | — |
 | SubagentTabBar | `app/subagent-tab-bar.tsx` | Subagent chip strip. | — | no | — |
-| SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, row opens that child. | subagents, onOpenSubagent | no | #460 (8.1) |
+| SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
 | TabBar | `app/tab-bar.tsx` | Content tab strip. | — | yes | — |
 | TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock and panel. | dock, onDockChange, visible, onToggle, tabs, activeId | yes | — |

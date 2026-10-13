@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { SessionSubagentTabs } from "./session-chat-tabs.js"
 import { clearSubagentTabs, publishSubagentTabs, useSubagentViewSelections } from "./subagent-tab-store.js"
 
+vi.mock("./rpc-client.js", () => ({ rpc: { agentMessagePeer: vi.fn() } }))
+
 const session = {
   id: "session-1",
   repo: "jingler",

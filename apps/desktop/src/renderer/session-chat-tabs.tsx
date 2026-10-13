@@ -7,6 +7,8 @@ import {
   type SubagentChipItem,
   type SubagentChipStatus
 } from "@jingler/ui"
+import { useAgentRoster } from "./agent-roster.js"
+import { rpc } from "./rpc-client.js"
 import {
   selectSubagentTab,
   subagentViewActor,
@@ -47,9 +49,12 @@ export function SessionSubagentTabs({
   readonly onSelectConversation: () => void
 }) {
   const { subagents, onOpenSubagent } = useSessionSubagentEntry(session)
+  const peers = useAgentRoster(session).filter((agent) => agent.chatId !== session.activeChatId)
   return (
     <SubagentChip
       subagents={subagents}
+      peers={peers}
+      onMessagePeer={(toChatId, text) => rpc.agentMessagePeer(session.id, session.activeChatId, toChatId, text)}
       onOpenSubagent={(nodeId) => {
         onSelectConversation()
         onOpenSubagent(nodeId)
