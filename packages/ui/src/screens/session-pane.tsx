@@ -296,6 +296,18 @@ export interface SessionPaneProps {
  * context it is itself installing, and `SessionPaneBody` has to know its own
  * width to decide whether the plan split will fit.
  */
+/** ⌘⇧D → Changes, ⌘⇧P → Checks (when present), ⌥1–⌥9 → pinned header view at that position. */
+const viewChordTarget = (
+  e: KeyboardEvent,
+  hasChecks: boolean,
+  pinned: ReadonlyArray<{ readonly id: string }>
+): string | undefined => {
+  if (matchChangesChord(e)) return BUILTIN_TAB.changes
+  if (matchChecksChord(e)) return hasChecks ? BUILTIN_TAB.checks : undefined
+  const position = matchHeaderViewChord(e)
+  return position === null ? undefined : pinned[position]?.id
+}
+
 export function SessionPane(props: SessionPaneProps) {
   return (
     <WidthTierProvider className="flex-col">
@@ -908,18 +920,18 @@ function SessionPaneBody(props: SessionPaneProps) {
   const pinnedHeaderItems = pinnedViews.flatMap((id) => headerItems.filter((item) => item.id === id))
   // ⌘⇧D opens Changes; ⌘⇧P opens Checks; ⌥1–⌥9 open the header button at that position. Both go through
   // selectTab, exactly like clicking the button. ⌃` and ⌘⇧B are routed by JinglerApp.
+  const hasChecks = tabs.some((tab) => tab.id === BUILTIN_TAB.checks)
   useEffect(() => {
     if (!paneFocused) return
     const onKeyDown = (e: KeyboardEvent) => {
-      const position = matchHeaderViewChord(e)
-      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : matchChecksChord(e) ? (tabs.some((tab) => tab.id === BUILTIN_TAB.checks) ? BUILTIN_TAB.checks : undefined) : position === null ? undefined : pinnedHeaderItems[position]?.id
+      const target = viewChordTarget(e, hasChecks, pinnedHeaderItems)
       if (target === undefined) return
       e.preventDefault()
       selectTab(target)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [paneFocused, pinnedHeaderItems, selectTab])
+  }, [paneFocused, hasChecks, pinnedHeaderItems, selectTab])
   // Context links (spec §3c): the PR and the linked issue open their view through selectTab.
   const linkChips: HeaderLinkChip[] = []
   if (active.prNumber != null && tabs.some((tab) => tab.id === BUILTIN_TAB.checks)) {
