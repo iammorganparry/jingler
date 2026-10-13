@@ -1,4 +1,4 @@
-import { Search } from "lucide-react"
+import { ArrowRight, Search } from "lucide-react"
 import type { ReactNode } from "react"
 import { Badge } from "../components/badge.js"
 import { BannerShell } from "../components/banner-shell.js"
@@ -42,7 +42,7 @@ export function RuntimeRecoveryCard({
 }: RuntimeRecoveryCardProps) {
   const actionButton = (
     <Button key="action" variant="secondary" size="sm" disabled={actionDisabled} onClick={onAction}>
-      {actionLabel}
+      {actionLabel} <ArrowRight size={12} />
     </Button>
   )
 
