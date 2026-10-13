@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { ChevronDown, MessagesSquare, MousePointer2, Plus } from "lucide-react"
+import { ChevronDown, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
@@ -19,6 +19,8 @@ export interface ChatLaneHeaderProps {
   readonly onSelectChat: (id: string) => void
   /** Create a new chat thread. */
   readonly onCreateChat: () => void
+  /** Close a chat tab. Omit to hide the per-chat close items. */
+  readonly onCloseChat?: (id: string) => void
   /** Whether the file browser follows this chat's agent edits. */
   readonly followAgent?: boolean
   /** Toggle the shared agent-follow mode. */
@@ -38,6 +40,7 @@ export function ChatLaneHeader({
   activeChatId,
   onSelectChat,
   onCreateChat,
+  onCloseChat,
   followAgent = false,
   onToggleFollowAgent
 }: ChatLaneHeaderProps) {
@@ -77,21 +80,32 @@ export function ChatLaneHeader({
             {chats.map((chat) => {
               const active = chat.id === activeChatId
               return (
-                <DropdownMenu.Item
-                  key={chat.id}
-                  data-testid={`chat-option-${chat.id}`}
-                  onSelect={() => onSelectChat(chat.id)}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
-                >
-                  <StatusDot
-                    tone={chat.running ? "bg-yellow" : active ? "bg-text-bright" : "bg-dim"}
-                    pulse={chat.running ?? false}
-                    size={7}
-                  />
-                  <span className={cn("min-w-0 flex-1 truncate", active ? "text-text-bright" : "text-text-body")}>
-                    {chat.title}
-                  </span>
-                </DropdownMenu.Item>
+                <div key={chat.id} className="flex items-center gap-0.5">
+                  <DropdownMenu.Item
+                    data-testid={`chat-option-${chat.id}`}
+                    onSelect={() => onSelectChat(chat.id)}
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                  >
+                    <StatusDot
+                      tone={chat.running ? "bg-yellow" : active ? "bg-text-bright" : "bg-dim"}
+                      pulse={chat.running ?? false}
+                      size={7}
+                    />
+                    <span className={cn("min-w-0 flex-1 truncate", active ? "text-text-bright" : "text-text-body")}>
+                      {chat.title}
+                    </span>
+                  </DropdownMenu.Item>
+                  {onCloseChat && (
+                    <DropdownMenu.Item
+                      data-testid={`chat-close-${chat.id}`}
+                      aria-label={`Close ${chat.title}`}
+                      onSelect={() => onCloseChat(chat.id)}
+                      className="flex flex-none cursor-pointer items-center rounded-md p-2 text-dim outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+                    >
+                      <X className="size-3" />
+                    </DropdownMenu.Item>
+                  )}
+                </div>
               )
             })}
           </DropdownMenu.Content>

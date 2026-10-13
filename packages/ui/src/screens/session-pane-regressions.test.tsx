@@ -26,7 +26,7 @@ const clickChat = (chatId: string, title?: string) => {
     }
   }
   // Fall back to thread switcher (chat-only)
-  fireEvent.click(screen.getByTestId("thread-switcher"))
+  fireEvent.pointerDown(screen.getByTestId("thread-switcher"), { button: 0, ctrlKey: false })
   fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
 }
 

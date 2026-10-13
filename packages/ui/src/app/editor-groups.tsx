@@ -499,6 +499,10 @@ const EditorGroup = memo(function EditorGroup({
               if (chat) api.onActivate(group.id, chat)
             }}
             onCreateChat={() => api.onCreateChat?.(api.sessionId)}
+            onCloseChat={(id) => {
+              const chat = chatTabs.find((c) => c.id === id)
+              if (chat) api.onClose(group.id, chat)
+            }}
             followAgent={api.followAgent}
             onToggleFollowAgent={api.onToggleFollowAgent}
           />
@@ -516,14 +520,6 @@ const EditorGroup = memo(function EditorGroup({
               className="pointer-events-none absolute inset-0"
               aria-hidden
             >
-              <button
-                type="button"
-                aria-label={`Close ${api.describe(chat).label}`}
-                onClick={() => api.onClose(group.id, chat)}
-                className="pointer-events-auto absolute right-0 top-0 opacity-0"
-              >
-                Close {api.describe(chat).label}
-              </button>
             </div>
           ))}
           {tabStripDrop.overlay}
