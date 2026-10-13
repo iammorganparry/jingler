@@ -1,5 +1,6 @@
 import { Search } from "lucide-react"
 import type { ReactNode } from "react"
+import { Badge } from "../components/badge.js"
 import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 
@@ -66,9 +67,9 @@ export function RuntimeRecoveryCard({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-1.5">
             {kind && (
-              <span className="flex-none rounded border border-line px-1.5 py-px font-mono text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground">
+              <Badge tone="neutral" size="xs">
                 {kind}
-              </span>
+              </Badge>
             )}
             <span className="truncate text-[11.5px] font-semibold">{title}</span>
           </div>
