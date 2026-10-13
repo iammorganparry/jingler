@@ -49,6 +49,7 @@ import type { TabBadge } from "./tab-contributions.js"
 import { matchNewTabChord } from "./app-shortcuts.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
+import { ChatLaneHeader, type ChatLaneHeaderChat } from "./chat-lane-header.js"
 
 export interface EditorTabMeta {
   readonly label: string
@@ -76,6 +77,9 @@ export interface EditorGroupsProps {
   /** The "+" menu at the end of each tab strip. */
   readonly launcherItems?: ReadonlyArray<TabLauncherItem>
   readonly emptyState?: ReactNode
+  readonly onCreateChat?: (sessionId: string) => void
+  readonly followAgent?: boolean
+  readonly onToggleFollowAgent?: (enabled: boolean) => void
 }
 
 type Api = Omit<EditorGroupsProps, "sessionId" | "layout" | "revision" | "emptyState">
@@ -454,6 +458,14 @@ const EditorGroup = memo(function EditorGroup({
     }
   }
   const crumbs = api.describe(active).crumbs ?? []
+  
+  // Check if all tabs are chats
+  const allChats = group.tabs.every(tab => tab.kind === "chat")
+  const chatTabs = useMemo(() => 
+    allChats ? group.tabs.filter((tab): tab is Extract<SessionSurface, { kind: "chat" }> => tab.kind === "chat") : [],
+    [allChats, group.tabs]
+  )
+  
   return (
     <section
       ref={sectionRef}
@@ -469,6 +481,23 @@ const EditorGroup = memo(function EditorGroup({
       {...groupDrop.handlers}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-editor"
     >
+      {allChats ? (
+        <ChatLaneHeader
+          chats={chatTabs.map((chat): ChatLaneHeaderChat => ({
+            id: chat.id,
+            title: api.describe(chat).label,
+            running: false
+          }))}
+          activeChatId={(active as Extract<SessionSurface, { kind: "chat" }>).id}
+          onSelectChat={(id) => {
+            const chat = chatTabs.find(c => c.id === id)
+            if (chat) api.onActivate(group.id, chat)
+          }}
+          onCreateChat={() => api.onCreateChat?.(mime.replace("application/x-jingler-editor-tab-", ""))}
+          followAgent={api.followAgent}
+          onToggleFollowAgent={api.onToggleFollowAgent}
+        />
+      ) : (
       <div
         data-testid="editor-tab-strip"
         {...tabStripHandlers}
@@ -492,6 +521,7 @@ const EditorGroup = memo(function EditorGroup({
         {active.kind === "chat" && api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
         {tabStripDrop.overlay}
       </div>
+      )}
       {!collapsed && crumbs.length > 0 && (
         <nav aria-label="Breadcrumb" className="flex h-6 flex-none items-center gap-1 px-3 text-[11px] text-dim">
           {crumbs.map((crumb, index) => (
