@@ -72,7 +72,6 @@ export function useChangesReview(session: Session, connected: boolean) {
     sendComment,
     focused,
     toggleFocus,
-    revertLines: worktree ? review.revertLines : undefined,
     revertFile: worktree ? review.revertFile : undefined
   }
 }

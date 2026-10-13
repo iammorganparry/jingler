@@ -1559,36 +1559,6 @@ export const workspaceRevertFile = (input: {
   });
 
 /**
- * `Workspace.revertLines` handler — revert just the uncommitted changes in a
- * line range of `path` in the session's worktree. No-op for an unknown session.
- */
-export const workspaceRevertLines = (input: {
-  sessionId: string;
-  path: string;
-  startLine: number;
-  endLine: number;
-}) =>
-  Effect.gen(function* () {
-    const session = yield* resolveSession(input.sessionId);
-    if (!session?.worktreePath) return;
-    if (session.checkpointSafeMode) return yield* Effect.fail(new GitError({ message: "Direct Git mutations are unsupported in checkpoint-safe mode. Use the checkpoint restore preview." }));
-    if (workspaceModeOf(session) === "direct") {
-      return yield* Effect.fail(
-        new GitError({
-          message:
-            "Revert is disabled for direct sessions because this checkout may contain unrelated developer edits.",
-        }),
-      );
-    }
-    yield* WorkspaceService.revertRange(
-      session.worktreePath,
-      input.path,
-      input.startLine,
-      input.endLine,
-    );
-  });
-
-/**
  * `Github.pr` handler. Returns the linked PR via GitHub APIs or null when the
  * session has no worktree or no linked PR. Exported for tests.
  */
@@ -4975,7 +4945,6 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         )
       : WorkspaceService.files(repoPath),
   "Workspace.revertFile": (input) => workspaceRevertFile(input),
-  "Workspace.revertLines": (input) => workspaceRevertLines(input),
   // Migrated sessions whose runtime identity could not be resolved at
   // migration time adopt one here, the moment an authenticated connection can
   // satisfy them — so a pre-PI conversation continues without the operator

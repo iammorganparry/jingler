@@ -5,7 +5,7 @@ import type {
   ReviewFinding
 } from "@jingler/core"
 import type { CodeViewItem, FileDiffMetadata } from "@pierre/diffs"
-import { BrushCleaning, EyeOff, Trash2, Undo2 } from "lucide-react"
+import { BrushCleaning, EyeOff, Trash2 } from "lucide-react"
 import { useCallback, useMemo, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
@@ -265,7 +265,6 @@ interface ReviewCodeViewProps {
   readonly sentFindingIds?: ReadonlySet<string>
   readonly connected: boolean
   readonly routeTargetSession: string | null
-  readonly local: boolean
   readonly compactActions: boolean
   readonly collapseViewed: boolean
   readonly onSelectionChange: (selection: JinglerLineSelection | null) => void
@@ -279,12 +278,6 @@ interface ReviewCodeViewProps {
   }) => void
   readonly onRemoveDraft: (id: string) => void
   readonly onToggleViewed: (path: string, viewed: boolean) => void
-  readonly onRevertLines?: (range: {
-    path: string
-    startLine: number
-    endLine: number
-  }) => void
-  readonly onRevertFile?: (path: string) => void
   readonly onDeslopFile?: (path: string) => void
   readonly onSendFindingToAgent?: (findingId: string) => void
   /** Send one comment straight to the agent, bypassing the review drafts. */
@@ -310,7 +303,6 @@ export function ReviewCodeView({
   sentFindingIds,
   connected,
   routeTargetSession,
-  local,
   compactActions,
   collapseViewed,
   onSelectionChange,
@@ -318,8 +310,6 @@ export function ReviewCodeView({
   onAddDraft,
   onRemoveDraft,
   onToggleViewed,
-  onRevertLines,
-  onRevertFile,
   onDeslopFile,
   onSendFindingToAgent,
   onSendComment,
@@ -365,21 +355,12 @@ export function ReviewCodeView({
           review={review}
           sentFindingIds={sentFindingIds}
           routeTargetSession={routeTargetSession}
-          local={local}
           compactActions={compactActions}
           collapsed={collapseViewed && entry.file.viewed}
           onToggleViewed={(viewed) => {
             if (viewed && selection?.path === entry.file.path) clearSelection()
             onToggleViewed(entry.file.path, viewed)
           }}
-          onRevertFile={
-            onRevertFile === undefined
-              ? undefined
-              : () => {
-                  if (selection?.path === entry.file.path) clearSelection()
-                  onRevertFile(entry.file.path)
-                }
-          }
           onDeslopFile={
             onDeslopFile === undefined
               ? undefined
@@ -395,9 +376,7 @@ export function ReviewCodeView({
       compactActions,
       entryByPath,
       findingsByPath,
-      local,
       onDeslopFile,
-      onRevertFile,
       onSendFindingToAgent,
       onToggleViewed,
       review,
@@ -466,18 +445,6 @@ export function ReviewCodeView({
                 onCancel={clearSelection}
                 onAddToReview={submit}
                 onCommentAndSend={sendNow}
-                onRevert={
-                  local && onRevertLines !== undefined && newSideRange !== null
-                    ? () => {
-                        onRevertLines({
-                          path: selected.path,
-                          startLine: newSideRange.startLine,
-                          endLine: newSideRange.endLine
-                        })
-                        clearSelection()
-                      }
-                    : undefined
-                }
               />
             </PierreAnnotationRegion>
           )
@@ -508,10 +475,8 @@ export function ReviewCodeView({
     [
       clearSelection,
       entryByPath,
-      local,
       onAddDraft,
       onRemoveDraft,
-      onRevertLines,
       onSendComment
     ]
   )
@@ -544,11 +509,9 @@ function ReviewCodeHeader({
   review,
   sentFindingIds,
   routeTargetSession,
-  local,
   compactActions,
   collapsed,
   onToggleViewed,
-  onRevertFile,
   onDeslopFile,
   onSendFindingToAgent
 }: {
@@ -557,11 +520,9 @@ function ReviewCodeHeader({
   readonly review: AdversarialReview | null
   readonly sentFindingIds?: ReadonlySet<string>
   readonly routeTargetSession: string | null
-  readonly local: boolean
   readonly compactActions: boolean
   readonly collapsed: boolean
   readonly onToggleViewed: (viewed: boolean) => void
-  readonly onRevertFile?: () => void
   readonly onDeslopFile?: () => void
   readonly onSendFindingToAgent?: (findingId: string) => void
 }) {
@@ -592,17 +553,6 @@ function ReviewCodeHeader({
           >
             <BrushCleaning size={15} />
             <span className="sr-only">Deslop</span>
-          </Button>
-        )}
-        {local && onRevertFile && (
-          <Button
-            variant="danger"
-            size="sm"
-            className={cn("gap-1.5", compactActions && "size-7 p-0")}
-            onClick={onRevertFile}
-          >
-            <Undo2 size={13} />
-            <span className={cn(compactActions && "sr-only")}>Revert file</span>
           </Button>
         )}
         <button

@@ -136,8 +136,6 @@ describe("DiffView Pierre selection", () => {
 
   it("uses Pierre click and Shift-selection, renders actions as an annotation, and clears them", async () => {
     const actions: DiffActions = {
-      onRevertLines: vi.fn(),
-      onRevertFile: vi.fn(),
       onComment: vi.fn()
     }
     render(<DiffView patch={patch} fill={false} actions={actions} />)
@@ -158,14 +156,9 @@ describe("DiffView Pierre selection", () => {
     )
 
     select(await gutter(1, "change-deletion"))
-    fireEvent.click(screen.getByRole("button", { name: "Revert" }))
-    expect(actions.onRevertLines).toHaveBeenCalledExactlyOnceWith({
-      path,
-      side: "old",
-      startLine: 1,
-      endLine: 1,
-      endSide: "old"
-    })
+    expect(await screen.findByPlaceholderText("Ask the agent to fix this…")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel selected range" }))
     await waitFor(() =>
       expect(screen.queryByPlaceholderText("Ask the agent to fix this…")).toBeNull()
     )
@@ -187,17 +180,12 @@ describe("DiffView Pierre selection", () => {
     await waitFor(() => expect(screen.queryByText("sample.ts new L1")).toBeNull())
   })
 
-  it("keeps whole-file actions accessible independently of line selection", () => {
-    const actions: DiffActions = {
-      onRevertLines: vi.fn(),
-      onRevertFile: vi.fn(),
-      onComment: vi.fn()
-    }
+  it("renders no per-file revert control", () => {
+    const actions: DiffActions = { onComment: vi.fn() }
     render(<DiffView patch={patch} fill={false} actions={actions} />)
 
-    fireEvent.click(screen.getByRole("button", { name: `Revert ${path}` }))
-    expect(actions.onRevertFile).toHaveBeenCalledExactlyOnceWith(path)
-    expect(screen.getByRole("toolbar", { name: "File diff actions" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: `Revert ${path}` })).toBeNull()
+    expect(screen.queryByRole("toolbar", { name: "File diff actions" })).toBeNull()
   })
 
   it("gives a bounded standalone diff exactly one vertical scroll owner", async () => {
@@ -235,8 +223,6 @@ describe("DiffView Pierre selection", () => {
 
   it("updates live content without remounting the viewer and clears stale selection", async () => {
     const actions: DiffActions = {
-      onRevertLines: vi.fn(),
-      onRevertFile: vi.fn(),
       onComment: vi.fn()
     }
     const rendered = render(<DiffView patch={patch} fill={false} actions={actions} />)

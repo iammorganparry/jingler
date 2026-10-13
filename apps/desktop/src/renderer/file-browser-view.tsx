@@ -862,8 +862,6 @@ function ReviewDiffCanvas({
         onSendComment={changes.sendComment}
         onRemoveDraft={review.removeDraft}
         onToggleViewed={review.toggleViewed}
-        onRevertLines={changes.revertLines}
-        onRevertFile={changes.revertFile}
         onDeslopFile={changes.deslopFile}
         onSendFindingToAgent={adversarial.sendFindingToAgent}
         onTokenEnter={onTokenEnter}

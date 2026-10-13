@@ -326,8 +326,6 @@ export interface ReviewFileDiffProps {
   readonly onSendComment?: (comment: ReviewDraftInput) => void
   readonly onRemoveDraft: (id: string) => void
   readonly onToggleViewed: (path: string, viewed: boolean) => void
-  readonly onRevertLines?: (range: { path: string; startLine: number; endLine: number }) => void
-  readonly onRevertFile?: (path: string) => void
   readonly onDeslopFile?: (path: string) => void
   readonly onSendFindingToAgent?: (findingId: string) => void
   readonly onTokenEnter?: PierreCodeViewProps["onTokenEnter"]
@@ -338,7 +336,7 @@ export interface ReviewFileDiffProps {
 
 /**
  * One changed file's review diff: inline drafts, PR threads, anchored findings,
- * viewed toggle, reverts and deslop — everything the stacked Changes view did,
+ * viewed toggle and deslop — everything the stacked Changes view did,
  * scoped to the file the Explorer opened.
  */
 export function ReviewFileDiff({
@@ -357,8 +355,6 @@ export function ReviewFileDiff({
   onSendComment,
   onRemoveDraft,
   onToggleViewed,
-  onRevertLines,
-  onRevertFile,
   onDeslopFile,
   onSendFindingToAgent,
   onTokenEnter,
@@ -420,7 +416,6 @@ export function ReviewFileDiff({
           sentFindingIds={sentFindingIds}
           connected={connected}
           routeTargetSession={routeTargetSession}
-          local={local}
           compactActions={false}
           collapseViewed={false}
           onSelectionChange={setSelection}
@@ -429,8 +424,6 @@ export function ReviewFileDiff({
           onSendComment={onSendComment}
           onRemoveDraft={onRemoveDraft}
           onToggleViewed={onToggleViewed}
-          onRevertLines={local ? onRevertLines : undefined}
-          onRevertFile={local ? onRevertFile : undefined}
           onDeslopFile={onDeslopFile}
           onSendFindingToAgent={onSendFindingToAgent}
           onTokenEnter={onTokenEnter}

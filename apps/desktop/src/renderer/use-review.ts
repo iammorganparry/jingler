@@ -70,7 +70,6 @@ export interface ReviewState {
   readonly addDraft: (d: { path: string; line: number; endLine: number | null; body: string; routeToAgent: boolean }) => void
   readonly removeDraft: (id: string) => void
   readonly finishReview: (mode: "comment_only" | "send_to_agent") => void
-  readonly revertLines: (range: { path: string; startLine: number; endLine: number }) => void
   readonly revertFile: (path: string) => void
 }
 
@@ -299,16 +298,6 @@ export function useReview(session: Session): ReviewState {
   )
 
   const refetchLocal = () => qc.invalidateQueries({ queryKey: localKey(session.id) })
-  const revertLines = useCallback(
-    (range: { path: string; startLine: number; endLine: number }) => {
-      void rpc
-        .workspaceRevertLines(session.id, range.path, range.startLine, range.endLine)
-        .then(refetchLocal)
-        .catch(() => {})
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [session.id]
-  )
   const revertFile = useCallback(
     (path: string) => {
       void rpc.workspaceRevertFile(session.id, path).then(refetchLocal).catch(() => {})
@@ -342,7 +331,6 @@ export function useReview(session: Session): ReviewState {
     addDraft,
     removeDraft,
     finishReview,
-    revertLines,
     revertFile
   }
 }

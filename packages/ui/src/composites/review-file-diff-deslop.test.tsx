@@ -5,7 +5,7 @@ import { WidthTierValue } from "../hooks/width-tier.js"
 import { ReviewFileDiff } from "./changes-review.js"
 
 /**
- * The per-file "Deslop" button sits in each file's sticky header, beside Revert.
+ * The per-file "Deslop" button sits in each file's sticky header, beside Viewed.
  * It hands that file to the session's agent for an in-place cleanup pass — so it
  * must call back with the file's path, and appear only when a handler is supplied.
  */
