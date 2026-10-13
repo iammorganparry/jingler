@@ -75,8 +75,9 @@ describe("ChatLaneHeader", () => {
     )
 
     const switcher = screen.getByTestId("thread-switcher")
-    const statusDot = switcher.querySelector(".bg-yellow")
-    expect(statusDot).toBeTruthy()
+    // Spec §6.3: running is a neutral pulsing dot, never yellow.
+    expect(switcher.querySelector(".bg-muted-foreground")).toBeTruthy()
+    expect(switcher.querySelector(".bg-yellow")).toBeNull()
   })
 
   it("toggles follow-agent mode when the button is clicked", () => {

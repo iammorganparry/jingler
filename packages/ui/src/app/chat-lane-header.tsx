@@ -54,21 +54,22 @@ export function ChatLaneHeader({
     >
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             data-testid="thread-switcher"
             aria-label="Switch chat thread"
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors hover:bg-panel"
+            className="min-w-0 flex-1 justify-start gap-2 px-2 text-xs"
           >
             <MessagesSquare className="size-3.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-left font-medium text-text-bright">
               {activeTitle}
             </span>
             {activeChat?.running && (
-              <StatusDot tone="bg-yellow" pulse size={7} />
+              <StatusDot tone="bg-muted-foreground" pulse size={7} />
             )}
             <ChevronDown className="size-3 flex-none text-dim" />
-          </button>
+          </Button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content
@@ -87,7 +88,7 @@ export function ChatLaneHeader({
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
                   >
                     <StatusDot
-                      tone={chat.running ? "bg-yellow" : active ? "bg-text-bright" : "bg-dim"}
+                      tone={chat.running ? "bg-muted-foreground" : active ? "bg-text-bright" : "bg-dim"}
                       pulse={chat.running ?? false}
                       size={7}
                     />
