@@ -28,8 +28,7 @@ test("dragging the chat lane below 320px collapses it to the Ask pill and the pi
   await launched.window.getByTestId("session-row-s_chat_lane").click()
   
   // Open a file to create the chat/content split
-  await launched.window.getByRole("button", { name: "New tab" }).last().click()
-  await launched.window.getByTestId("new-tab-option-file").click()
+  await launched.window.keyboard.press("Meta+Shift+p")
   const palette = launched.window.getByRole("dialog", { name: "Command palette" })
   await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")
@@ -85,8 +84,7 @@ test("chat lane width clamps between 360-560px", async ({ launchApp }) => {
   await launched.window.getByTestId("session-row-s_chat_lane").click()
   
   // Open a file to create the chat/content split
-  await launched.window.getByRole("button", { name: "New tab" }).last().click()
-  await launched.window.getByTestId("new-tab-option-file").click()
+  await launched.window.keyboard.press("Meta+Shift+p")
   const palette = launched.window.getByRole("dialog", { name: "Command palette" })
   await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")
@@ -128,8 +126,7 @@ test("chat lane snaps to 1/3 and 1/2 within tolerance", async ({ launchApp }) =>
   await launched.window.getByTestId("session-row-s_chat_lane").click()
   
   // Open a file to create the chat/content split
-  await launched.window.getByRole("button", { name: "New tab" }).last().click()
-  await launched.window.getByTestId("new-tab-option-file").click()
+  await launched.window.keyboard.press("Meta+Shift+p")
   const palette = launched.window.getByRole("dialog", { name: "Command palette" })
   await expect(palette.getByRole("option", { name: "README.md" })).toBeVisible()
   await launched.window.keyboard.press("Enter")

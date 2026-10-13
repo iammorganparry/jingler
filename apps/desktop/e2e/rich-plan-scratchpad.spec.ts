@@ -97,7 +97,7 @@ test("a structured plan renders stages natively and ticks live progress", async 
   // the drawer badge counts completed STAGES over total stages.
   // Plan sits over the chat in the first group; bring the transcript forward.
   // The chat is auto-titled from its first prompt, so find its tab by kind.
-  await launched.window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab").click()
+  await expect(launched.window.getByTestId("chat-lane-header").first()).toBeVisible()
   await expect(
     launched.window.getByTestId("composer").filter({ visible: true }).first().getByRole("tab", { name: /Plan/ })
   ).toContainText("0/2", { timeout: 20_000 })

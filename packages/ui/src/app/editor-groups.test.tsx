@@ -231,9 +231,9 @@ describe("EditorGroups rendering", () => {
     }
 
     fireEvent.dragOver(screen.getAllByTestId("editor-group")[1]!, { clientX: 0, clientY: 0, dataTransfer })
-    fireEvent.dragOver(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+    fireEvent.dragOver(screen.getAllByTestId("editor-tab-strip")[0]!, { altKey: true, dataTransfer })
     expect(screen.getAllByTestId("editor-drop-overlay")).toHaveLength(1)
-    fireEvent.drop(screen.getAllByTestId("editor-tab-strip")[1]!, { altKey: true, dataTransfer })
+    fireEvent.drop(screen.getAllByTestId("editor-tab-strip")[0]!, { altKey: true, dataTransfer })
 
     expect(onDrop).toHaveBeenCalledOnce()
     expect(onDrop).toHaveBeenCalledWith(drag, "right", "center", false)

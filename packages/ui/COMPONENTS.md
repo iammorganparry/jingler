@@ -187,6 +187,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | AgentRoster | `app/agent-roster.tsx` | Peer-agents disclosure with message box. | — | no | — |
 | AppShell | `app/app-shell.tsx` | Window frame: title bar plus routed content. | — | no | — |
 | ChatTabBar | `app/chat-tab-bar.tsx` | Chat tab strip. | chats, closedChats, activeChatId, onSelectChat, onCreateChat, onRenameChat | yes | — |
+| ChatLaneHeader | `app/chat-lane-header.tsx` | Thread switcher dropdown, new chat, and follow-agent toggle replacing the chat tab strip in redesign 4.3. | chats, activeChatId, onSelectChat, onCreateChat, followAgent, onToggleFollowAgent | yes | #398 (4.3) |
 | PALETTE, CommandPalette | `app/command-palette.tsx` | Global ⌘K palette. | — | yes | — |
 | ConversationView | `app/conversation-view.tsx` | Chat transcript, composer and queue. | messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills | no | — |
 | DiffPanel | `app/diff-panel.tsx` | Right-hand worktree diff rail. | — | no | — |

@@ -163,8 +163,8 @@ test("Cmd/Ctrl+W closes the Browser tab while its native page has focus", async 
     await expect.poll(() => app.evaluate(({ webContents }, expectedUrl) =>
       webContents.getAllWebContents().some((contents) => contents.getURL().startsWith(expectedUrl)), url
     )).toBe(true)
-    const chatTab = window.locator('[data-testid^="editor-tab-chat-"]').first().getByRole("tab")
-    await chatTab.click()
+    const chatHeader = window.getByTestId("chat-lane-header")
+    await window.getByTestId("composer").getByRole("textbox").click()
 
     await app.evaluate(({ webContents }, expectedUrl) => {
       const browser = webContents.getAllWebContents().find((contents) => contents.getURL().startsWith(expectedUrl))
@@ -177,7 +177,7 @@ test("Cmd/Ctrl+W closes the Browser tab while its native page has focus", async 
     }, url)
 
     await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(0)
-    await expect(chatTab).toBeVisible()
+    await expect(chatHeader).toBeVisible()
     await expect(window.getByTestId("editor-group")).toHaveCount(1)
   } finally {
     await closeServer(server)
@@ -359,7 +359,7 @@ test("restores each session's URL, history, scroll, visibility, and cookies", as
 
     // Open Browser surfaces are session state too. Focusing Chat does not close
     // the adjacent Browser pane, and switching sessions restores each pane.
-    await window.getByRole("tab", { name: "Chat 1", exact: true }).click()
+    await window.getByTestId("composer").getByRole("textbox").click()
     await expect(url).toHaveValue(`${origin}/beta-history`)
     await sessionRow(window, "Preview Alpha").click()
     await window.getByTestId("editor-tab-view-browser").getByRole("tab", { name: "Browser", exact: true }).click()

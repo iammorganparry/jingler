@@ -254,6 +254,10 @@ export interface SessionPaneProps {
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
   /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
   viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
+  /** Whether the file browser follows this chat's agent edits. */
+  followAgent?: boolean
+  /** Toggle the shared agent-follow mode. */
+  onToggleFollowAgent?: (enabled: boolean) => void
 }
 
 /**
@@ -941,6 +945,9 @@ function SessionPaneBody(props: SessionPaneProps) {
             else update((current) => resizeSplit(current, splitId, index, delta, containerWidth))
           }}
           launcherItems={launcherItems}
+          onCreateChat={props.onCreateChat}
+          followAgent={props.followAgent}
+          onToggleFollowAgent={props.onToggleFollowAgent}
         />
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
         {viewRailTarget === null ? viewRail : null}
