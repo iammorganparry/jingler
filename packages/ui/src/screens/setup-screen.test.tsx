@@ -341,6 +341,21 @@ describe("SetupScreen", () => {
     expect(screen.getByText("https://example.test/device")).toBeTruthy();
   });
 
+  it("renders the import-sessions step and skips it with its own handler", () => {
+    const onSkipImportSessions = vi.fn();
+    const onSkipResources = vi.fn();
+    render(
+      <SetupScreen
+        {...props({ step: "importSessions", onSkipImportSessions, onSkipResources })}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Import existing sessions?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onSkipImportSessions).toHaveBeenCalledOnce();
+    expect(onSkipResources).not.toHaveBeenCalled();
+  });
+
   it("imports every detected resource with one action", () => {
     const onImportResources = vi.fn();
     render(

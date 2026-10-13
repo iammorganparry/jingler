@@ -42,6 +42,11 @@ const finishProviderSetup = async (window: Page): Promise<void> => {
     window.getByRole("heading", { name: "Import agent resources" })
   ).toBeVisible()
   await window.getByRole("button", { name: "Skip for now" }).click()
+  // #613 added an optional "Import existing sessions?" step before the shell.
+  await expect(
+    window.getByRole("heading", { name: "Import existing sessions?" })
+  ).toBeVisible()
+  await window.getByRole("button", { name: "Skip for now" }).click()
   await expect(appShell(window)).toBeVisible()
 }
 

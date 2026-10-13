@@ -255,6 +255,9 @@ return (<ProviderSetupStep
             onRetry={onRetryProvider}
           />)
 }
+case "importSessions": {
+return (renderImportSessionsSetup())
+}
 }
            return (<ResourceSetupStep
             detection={resourceDetection}
