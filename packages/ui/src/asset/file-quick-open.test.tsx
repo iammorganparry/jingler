@@ -91,4 +91,10 @@ describe("FileQuickOpen", () => {
     )
     expect(screen.getByText("Loading repository files…")).toBeTruthy()
   })
+
+  it("has no scope switch, since it only ever lists files", () => {
+    render(<FileQuickOpen open onOpenChange={() => {}} entries={entries} onOpenPath={() => {}} />)
+    expect(screen.queryByRole("tab", { name: "Chat" })).toBeNull()
+    expect(screen.getByText("file-browser-machine.ts")).toBeTruthy()
+  })
 })
