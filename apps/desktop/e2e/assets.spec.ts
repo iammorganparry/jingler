@@ -82,7 +82,6 @@ const transcript = [
   }
 ]
 
-const filesTab = (window: Page) => window.getByTestId("view-tab-files")
 const conversationTab = (window: Page) =>
   window.getByRole("tab", { name: "Chat 1", exact: true }).first()
 const fileBody = (window: Page, path: string) => window.getByTestId(`editor-body-file-${path}`)
@@ -188,7 +187,7 @@ test("edits and saves text, retains drafts across tabs, and preserves conflicts"
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   const source = tree(window).locator('[data-item-path="src/edit.ts"]')
   await expect(source).toBeVisible({ timeout: 15_000 })
@@ -256,7 +255,7 @@ test("quick-open fills the session with the repository tree and a changed-file d
 
   const browser = window.getByTestId("asset-browser").filter({ visible: true }).first()
   await expect(browser).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await expect(
     tree(window).filter({ visible: true }).locator('[data-item-path="src/edit.ts"]')
@@ -287,7 +286,7 @@ test("keeps the repository tree visible while opening focusing and closing file 
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await selectTreePath(window, "src/edit.ts")
   await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toBeVisible({ timeout: 15_000 })
@@ -297,7 +296,7 @@ test("keeps the repository tree visible while opening focusing and closing file 
   await selectTreePath(window, "docs/spec.md")
   await expect(window.getByTestId("editor-tab-file-docs/spec.md")).toBeVisible({ timeout: 15_000 })
   await expect(window.getByTestId("editor-tab-file-src/edit.ts")).toHaveCount(1)
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
 
   await window.getByTestId("editor-tab-file-src/edit.ts").getByRole("tab").click()
@@ -312,7 +311,7 @@ test("keeps the repository tree visible while opening focusing and closing file 
   await expect(fileBody(window, "docs/spec.md").getByRole("textbox", { name: "docs/spec.md" })).toBeVisible({
     timeout: 15_000
   })
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
 })
 
@@ -325,7 +324,7 @@ test("places the editable file caret where the user clicks", async ({ launchApp 
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await window.keyboard.press("Meta+Shift+p")
   await window.getByPlaceholder("Open a file in Edit repository files…").fill("edit.ts")
   await window.getByTestId("palette-item-file:src/edit.ts").click()
@@ -366,7 +365,7 @@ test("switches a changed file between diff and edit and saves the edited revisio
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await selectTreePath(window, "src/main.ts")
 
@@ -409,7 +408,7 @@ test("forwards selected current-buffer lines to the active chat with Cmd-J", asy
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await selectTreePath(window, "src/edit.ts")
   const editor = window.getByRole("textbox", { name: "src/edit.ts" })
@@ -463,7 +462,7 @@ test("loads a real large repository tree without leaving Files blank", async ({ 
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await expect(
     tree(window).getByRole("treeitem", { name: "packages", exact: true })
@@ -482,7 +481,7 @@ test("edits UTF-8 files with unknown extensions and refuses binary data", async 
   })
 
   await expect(appShell(window)).toBeVisible()
-  await filesTab(window).click()
+  await window.getByRole("tab", { name: "Explorer", exact: true }).click()
   await showTree(window)
   await selectTreePath(window, "README.custom")
   await expect(window.getByRole("textbox", { name: "README.custom" })).toContainText(

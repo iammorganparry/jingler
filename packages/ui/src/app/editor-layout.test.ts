@@ -215,6 +215,20 @@ describe("editor layout persistence", () => {
   })
 })
 
+  it("filters out deprecated files view tabs on restore", () => {
+    const layout = createEditorLayout([
+      chat("main"),
+      file("a.ts"),
+      view("files"),
+      view("terminal")
+    ], "main")
+    saveEditorLayout("s", layout)
+    const loaded = loadEditorLayout("s", chat("main"), "main")
+    expect(shape(loaded)).toEqual([["chat:main"], ["file:a.ts", "view:terminal"]])
+    const viewIds = allTabs(loaded).filter(t => t.kind === "view").map(t => t.id)
+    expect(viewIds).not.toContain("files")
+  })
+
 describe("chat lane pixel sizing", () => {
   it("clamps initial ratio to 360-560px", () => {
     expect(chatLaneRatio(900)).toBeCloseTo(360 / 900) // 360px at 900px window
