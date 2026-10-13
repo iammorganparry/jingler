@@ -142,6 +142,11 @@ export const materializePiSubagentProfiles = async (
 ): Promise<void> => {
   const target = join(agentDir, "agents")
   await mkdir(target, { recursive: true, mode: 0o700 })
+  // A host that knows no tools (native-sidecar recovery) keeps the tool list a
+  // full host already wrote; the profile files are shared by every session.
+  const keptTools = async (agent: string): Promise<string | undefined> =>
+    readFile(join(target, `${agent}.md`), "utf8")
+      .then((existing) => existing.match(/^tools: (.*)$/m)?.[1], () => undefined)
   await Promise.all(BUILTIN_AGENTS.map(async (agent) => {
     const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
     await writeFile(
@@ -150,7 +155,9 @@ export const materializePiSubagentProfiles = async (
         source,
         childToolsPath,
         claudeProviderPath,
-        profileTools(tools[agent]),
+        tools[agent] === undefined
+          ? (await keptTools(agent)) ?? profileTools()
+          : profileTools(tools[agent]),
         models[agent]
       ),
       { encoding: "utf8", mode: 0o600 }
@@ -173,7 +180,9 @@ export const materializePiSubagentProfiles = async (
       ),
     childToolsPath,
     claudeProviderPath,
-    profileTools(tools.fanout, true),
+    tools.fanout === undefined
+      ? (await keptTools("fanout")) ?? profileTools(undefined, true)
+      : profileTools(tools.fanout, true),
     models.fanout
   )
   await writeFile(join(target, "fanout.md"), fanout, {

@@ -1,3 +1,4 @@
+import { concreteClaudeModels } from "../providers/claude-cli-models.js"
 import { workspaceCheckpointMode } from "../../workspace-admission.js"
 import {
   createAgentSession,
@@ -633,13 +634,20 @@ const createSessionHandle = (
           }))
         )
       : { enabled: true, models: {}, connections: [] }
-    const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.map((agent) => [
-      agent,
-      subagentProfileToolIds(registry, agent)
-    ])) as PiSubagentProfileTools
+    // A registry with only supervisor_state (the native-sidecar recovery host)
+    // must not overwrite the shared profiles with a toolless list.
+    const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.flatMap((agent) => {
+      const ids = subagentProfileToolIds(registry, agent)
+      return ids.some((id) => id !== "supervisor_state") ? [[agent, ids]] : []
+    })) as PiSubagentProfileTools
+    const childAnthropic = childProviderConnections(connection, subagentConfig.connections)
+      .find(({ providerId }) => providerId === "anthropic")
     yield* preparePiSubagentsRuntime(
       options.agentDir,
-      subagentConfig.models,
+      concreteClaudeModels(
+        subagentConfig.models,
+        childAnthropic === undefined || usesClaudeCli(childAnthropic)
+      ),
       profileTools
     ).pipe(
       Effect.mapError(
