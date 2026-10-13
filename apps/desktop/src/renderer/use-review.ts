@@ -116,6 +116,16 @@ const reviewThreadsFor = (
   threads: ReadonlyArray<PrReviewThread> | undefined
 ): ReadonlyArray<PrReviewThread> => source === "pr" ? (threads ?? []) : []
 
+const loadStateOf = (query: {
+  readonly isLoading: boolean
+  readonly error: Error | null
+  readonly refetch: () => unknown
+}): Pick<ReviewState, "loading" | "error" | "retry"> => ({
+  loading: query.isLoading,
+  error: query.error?.message ?? null,
+  retry: () => void query.refetch()
+})
+
 export function useReview(session: Session): ReviewState {
   const qc = useQueryClient()
   // Filter, drafts and viewed markers are shared across the Explorer, the Files
@@ -307,7 +317,7 @@ export function useReview(session: Session): ReviewState {
     [session.id]
   )
 
-  const sourceError = (effective === "pr" ? prQuery : localQuery).error
+  const activeQuery = effective === "pr" ? prQuery : localQuery
 
   return {
     filter,
@@ -326,9 +336,7 @@ export function useReview(session: Session): ReviewState {
     // lines that don't correspond, so the source decides whether they exist.
     reviewThreads: reviewThreadsFor(effective, threadsQuery.data?.reviewThreads),
     busy: prQuery.isPending || localQuery.isPending,
-    loading: (effective === "pr" ? prQuery : localQuery).isLoading,
-    error: sourceError === null ? null : sourceError.message,
-    retry: () => void (effective === "pr" ? prQuery : localQuery).refetch(),
+    ...loadStateOf(activeQuery),
     selectFile: setSelectedPath,
     toggleViewed,
     addDraft,
