@@ -409,6 +409,8 @@ function AuthedApp({
   const obsidianVaultQuery = useQuery({
     queryKey: ["obsidian-vaults"],
     queryFn: () => rpc.pluginsStorageKeys("obsidian"),
+    // A vault can be saved at any time from the plugin tab; keep Settings in step.
+    refetchInterval: 5_000,
   });
   const obsidianVaultConfigured =
     obsidianVaultQuery.data?.some((key) => key.startsWith("vault:")) ?? false;
