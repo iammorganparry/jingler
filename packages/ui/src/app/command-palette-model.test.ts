@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   fuzzyScore,
   groupPaletteItems,
@@ -8,7 +8,8 @@ import {
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
-  scoreItem
+  scoreItem,
+  subagentPaletteItems
 } from "./command-palette-model.js"
 
 /** Real `KeyboardEvent`s, for the reason `split-shortcuts.test.ts` gives. */
@@ -332,5 +333,24 @@ describe("matchPaletteChord", () => {
     // jsdom's navigator reports a non-Mac UA, so the Ctrl branch is the live one
     // here. The assertion is that the default is READ at all, not what it says.
     expect(matchPaletteChord(chord({ code: "KeyK", key: "k", ctrlKey: true }))).toBe(true)
+  })
+})
+
+describe("subagentPaletteItems", () => {
+  it("lists agent + task under Go to subagent… and opens the chosen node", () => {
+    const open = vi.fn()
+    const items = subagentPaletteItems(
+      [
+        { id: "a", agent: "worker", task: "Survey the tab bar" },
+        { id: "b", agent: "scout", task: "Audit the theme tokens" }
+      ],
+      open
+    )
+    expect(items.map((i) => [i.label, i.detail, i.group])).toEqual([
+      ["worker", "Survey the tab bar", "Go to subagent…"],
+      ["scout", "Audit the theme tokens", "Go to subagent…"]
+    ])
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
   })
 })

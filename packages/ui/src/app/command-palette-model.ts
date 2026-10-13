@@ -221,9 +221,24 @@ export const PALETTE_GROUP = {
   sessions: "Sessions",
   actions: "Actions",
   tabs: "Go to tab",
+  subagents: "Go to subagent…",
   files: "Files",
   archived: "Archived sessions"
 } as const
+
+/** "Go to subagent…" rows for the active session; `open` is the chip rows' open path. */
+export const subagentPaletteItems = (
+  subagents: ReadonlyArray<{ readonly id: string; readonly agent: string; readonly task: string }>,
+  open: (nodeId: string) => void
+): ReadonlyArray<PaletteItem> =>
+  subagents.map((subagent) => ({
+    id: `subagent:${subagent.id}`,
+    kind: "action",
+    label: subagent.agent,
+    detail: subagent.task,
+    group: PALETTE_GROUP.subagents,
+    run: () => open(subagent.id)
+  }))
 
 const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
 

@@ -69,3 +69,23 @@ test("spawning shows the chip and transcript row, and View and a popover row ope
   await popover.getByRole("menuitem", { name: /Survey the tab bar/ }).click()
   await expect(view).toContainText("Survey the tab bar")
 })
+
+test("sidebar shows the running agent count and ⌘K Go to subagent… opens a child", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByPlaceholder("Message the agent…").fill("[[held-subagents]] survey the app")
+  await window.getByPlaceholder("Message the agent…").press("Enter")
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+
+  await expect(window.getByTestId("session-subagent-count-s_subagents")).toHaveText("· 2 agents")
+  await expect(window.getByTestId("fleet-agent-transcript")).toHaveCount(0)
+
+  await window.keyboard.press("ControlOrMeta+k")
+  const palette = window.getByRole("dialog", { name: "Command palette" })
+  await palette.getByPlaceholder(/Jump to a session/).fill("Go to subagent")
+  await palette.getByRole("option", { name: /Survey the tab bar/ }).click()
+  await expect(window.getByTestId("fleet-agent-transcript")).toContainText("Survey the tab bar")
+})

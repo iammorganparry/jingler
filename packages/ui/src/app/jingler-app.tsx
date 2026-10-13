@@ -86,7 +86,8 @@ import {
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
-  type PluginPaletteCommand
+  type PluginPaletteCommand,
+  subagentPaletteItems
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
 import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
@@ -216,6 +217,12 @@ export interface JinglerAppProps {
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
+  /** Running subagent count per session id, shown as `· N agents` on sidebar rows. */
+  subagentCounts?: Readonly<Record<string, number>>
+  /** Each session's active-chat subagents, listed under ⌘K "Go to subagent…". */
+  subagentEntries?: Readonly<Record<string, ReadonlyArray<{ readonly id: string; readonly agent: string; readonly task: string }>>>
+  /** Open one subagent's transcript; the same path the lane-header chip rows use. */
+  onOpenSubagent?: (sessionId: string, nodeId: string) => void
   /** Live per-session worktree diff totals, for the Changes tab badge. */
   liveDiff?: Record<string, DiffStat>
   /** Loaded per-file worktree diff counts, keyed by session and path. */
@@ -550,6 +557,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         liveActivity={liveActivity}
         chatActivities={chatActivities}
         prStates={prStates}
+        subagentCounts={subagentCounts}
         repoOwners={repoOwners}
         liveDiff={liveDiff}
         fileDiffs={props.fileDiffs}
@@ -749,7 +757,7 @@ function getActiveTabContext(active: Session) {
           ) : undefined)
   }
 
-  const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView } = defaultProps(props, {
+  const { sessions, user, update, releaseNotes, whatsNew, onSignOut, onSignIn, repos, projects, onBrowseProject, onBrowseCloneDestination, onListProjectDirectories, onListGitHubRepositories, onRegisterProject, onCreateProjectDirectory, onCloneProject, onCloneProjectFromGitHub, onEnsureProjectOnEnvironment, onSaveProjectWorkflow, routines, starredRepos, onToggleStar, collapsedRepos, onToggleCollapsed, defaultRepoPath, githubConnection, githubBusy, onGithubConnect, onGithubManage, onGithubRefresh, onGithubDisconnect, liveActivity, chatActivities, prStates, subagentCounts, subagentEntries, onOpenSubagent, liveDiff, debugStopSequences, usage, usageReport, onLoadUsage, onExportUsage, githubConfig, onSaveGithubConfig, contextConfig, onSaveContextConfig, contextSessions, gitConfig, onSaveGitConfig, notificationsConfig, onSaveNotificationsConfig, offloadCompute, onSaveOffloadCompute, offloadStatus, webSearch, defaultMode, onSaveDefaultMode, planAutoRun, onSavePlanAutoRun, adhdMode, themes, plugins, devices, providerConnections, agentEndpointCatalog, agents, runtimeInspector, onSaveAdhdMode, fontScale, onSaveFontScale, mcp, renderPullRequest, tabContributions, onSelectIssue, paneContributions, onRevealChanges, headerViews, onHeaderViewsChange, sidebarCollapsed, renderReviewTray, renderTerminalDock, pluginCommands, onRunPluginCommand, renderBrowser, onFocusChat, onToggleBrowser, isBrowserActive, activeSessionId, selectSessionRequest, newSessionRequest, onVisibleSessionsChange, patch, renderConversation, renderExplanation, renderFiles, renderExplorer, onTrackFile, onRequestCloseFile, renderFileQuickOpen, renderSubagentTabs, planSessions, explanationSessions, loadBranches, environments, loadEnvironmentDiscovery, onCreateSession, issueProviders, loadPullRequests, loadGithubIssues, loadProviderIssues, onCreateSessionFromPr, onCreateSessionFromIssue, onRenameSession, onCreateChat, onCloseUntouchedChat, chatActions, onArchiveSession, onRestoreSession, onDeleteSession, version, pullRequestsView, issuesView } = defaultProps(props, {
     repos: [],
     projects: [],
     starredRepos: [],
@@ -1170,6 +1178,16 @@ function getActiveTabContext(active: Session) {
 
   }
 
+  function appendSubagentActions(items: PaletteItem[]) {
+    if (!active || !onOpenSubagent) return
+    items.push(
+      ...subagentPaletteItems(subagentEntries?.[active.id] ?? [], (nodeId) => {
+        setTabRequest((prev) => ({ tabId: BUILTIN_TAB.conversation, nonce: (prev?.nonce ?? 0) + 1 }))
+        onOpenSubagent(active.id, nodeId)
+      })
+    )
+  }
+
   function appendPluginCommands(items: PaletteItem[]) {
     if (onRunPluginCommand) {
       for (const command of pluginCommands ?? []) {
@@ -1263,6 +1281,7 @@ function getActiveTabContext(active: Session) {
      * would close, nothing would change, and there is no error to read.
      */
     appendTabActions(items)
+    appendSubagentActions(items)
 
     // Grouped by the manifest's `category`, falling back to the plugin's name —
     // a heading of "Commands" over two plugins' rows would hide which one is
@@ -1291,6 +1310,8 @@ function getActiveTabContext(active: Session) {
     tabContributions,
     pluginCommands,
     onRunPluginCommand,
+    subagentEntries,
+    onOpenSubagent,
     openNewSession
   ])
 

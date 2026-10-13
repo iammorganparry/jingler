@@ -110,6 +110,8 @@ export interface SessionSidebarProps {
   liveActivity?: Record<string, SessionActivity>
   /** Live linked-PR state per session id, badged onto the row (never auto-archives). */
   prStates?: Record<string, SessionPrStatus>
+  /** Running subagent count per session id, shown as `· N agents` on the row. */
+  subagentCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars. */
   repoOwners?: Readonly<Record<string, string>>
   /** Open the New Session view (header "+" / ⌘N). */
@@ -345,6 +347,7 @@ function SidebarBody({
   fileDiffs,
   liveActivity,
   prStates,
+  subagentCounts,
   repoOwners,
   onNewSession,
   user,
@@ -692,6 +695,7 @@ return (renderExpandedGroupHeading())
         repoOwner={repoOwners?.[s.id]}
         activity={liveActivity?.[s.id]}
         prState={prStates?.[s.id]}
+        subagentCount={subagentCounts?.[s.id]}
         active={s.id === activeSessionId}
         onSelect={onSelect}
         onRename={onRename}

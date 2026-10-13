@@ -60,6 +60,7 @@ export function SessionRow({
   repoOwner,
   activity,
   prState,
+  subagentCount = 0,
   active = false,
   onSelect,
   onRename,
@@ -90,6 +91,8 @@ export function SessionRow({
    * (or null) for a session with no PR, which renders a hollow ring.
    */
   prState?: SessionPrStatus | null
+  /** Running subagents in this session; the `· N agents` hint is hidden at zero. */
+  subagentCount?: number
   active?: boolean
   onSelect?: (id: string) => void
   /** Manual rename (double-click the title) — pins the auto-generated name. */
@@ -137,6 +140,14 @@ export function SessionRow({
             {label}
             {age ? ` ${age}` : ""}
           </span>
+          {subagentCount > 0 && (
+            <span
+              data-testid={`session-subagent-count-${session.id}`}
+              className="shrink-0 whitespace-nowrap font-medium tabular-nums text-muted-foreground"
+            >
+              · {subagentCount} {subagentCount === 1 ? "agent" : "agents"}
+            </span>
+          )}
         </div>
         {renderEditableSessionTitle()}
         {renderActiveMetadata()}

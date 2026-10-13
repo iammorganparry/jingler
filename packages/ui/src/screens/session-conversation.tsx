@@ -138,6 +138,8 @@ export interface SessionConversationProps {
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
   prStates?: Record<string, SessionPrStatus>
+  /** Running subagent count per session id, shown on sidebar rows. */
+  subagentCounts?: Readonly<Record<string, number>>
   /** GitHub owner login per session, used for repository avatars in the sidebar. */
   repoOwners?: Readonly<Record<string, string>>
   /** Live per-session worktree diff totals, for the Changes tab badge. */
@@ -427,6 +429,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onDelete={props.onDeleteSession}
         liveActivity={props.liveActivity}
         prStates={props.prStates}
+        subagentCounts={props.subagentCounts}
         repoOwners={props.repoOwners}
         onNewSession={openNewSession}
         user={props.user}

@@ -230,6 +230,23 @@ describe("SessionSidebar archived sessions", () => {
   })
 })
 
+describe("SessionSidebar subagent count", () => {
+  it("shows `· N agents` for a session with running subagents and hides it at zero", () => {
+    render(
+      <SessionSidebar
+        activeSessionId={null}
+        onSelect={() => {}}
+        sessions={[session({ id: "busy" }), session({ id: "quiet" }), session({ id: "solo" })]}
+        subagentCounts={{ busy: 2, quiet: 0, solo: 1 }}
+      />
+    )
+
+    expect(screen.getByTestId("session-subagent-count-busy").textContent).toBe("· 2 agents")
+    expect(screen.getByTestId("session-subagent-count-solo").textContent).toBe("· 1 agent")
+    expect(screen.queryByTestId("session-subagent-count-quiet")).toBeNull()
+  })
+})
+
 describe("SessionSidebar global destinations", () => {
   it("opens and marks Pull Requests active", () => {
     const open = vi.fn()
