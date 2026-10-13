@@ -1,7 +1,17 @@
 import type { PrFileChange } from "@jingler/core"
-import { useMemo } from "react"
+import type { FileTreeRowDecorationRenderer } from "@pierre/trees"
+import { useMemo, type CSSProperties } from "react"
 import { PierreFileTree } from "../components/pierre-file-tree.js"
 import type { JinglerFileStatus } from "../diff/pierre-model.js"
+
+/** Status letters stay neutral: the +/− counts carry the only colour, and those are diff tokens. */
+const NEUTRAL_STATUS_STYLE = {
+  "--trees-git-added-color-override": "var(--sb-muted)",
+  "--trees-git-deleted-color-override": "var(--sb-muted)",
+  "--trees-git-modified-color-override": "var(--sb-muted)",
+  "--trees-git-renamed-color-override": "var(--sb-muted)",
+  "--trees-git-untracked-color-override": "var(--sb-muted)"
+} as CSSProperties
 
 export interface ReviewFileTreeProps {
   readonly files: readonly PrFileChange[]
@@ -15,6 +25,14 @@ export interface ReviewFileTreeProps {
  * Code Review's stable tree contract. Pierre owns hierarchy, search projection,
  * keyboard focus, icons, Git status, and selection; review state stays outside.
  */
+function countDecoration(additions: number, deletions: number) {
+  const parts = [
+    ...(additions > 0 ? [{ text: `+${additions}`, color: "var(--sb-diff-add-fg)" }] : []),
+    ...(deletions > 0 ? [{ text: `${additions > 0 ? " " : ""}−${deletions}`, color: "var(--sb-diff-del-fg)" }] : [])
+  ]
+  return parts.length === 0 ? null : { text: parts.map((part) => part.text).join(""), parts }
+}
+
 export function ReviewFileTree({
   files,
   activePath,
@@ -29,6 +47,14 @@ export function ReviewFileTree({
       status: statusByPath.get(path) ?? "modified" as const
     })),
     [filePaths, statusByPath]
+  )
+  const countsByPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files])
+  const renderCounts = useMemo<FileTreeRowDecorationRenderer>(
+    () => ({ item }) => {
+      const file = countsByPath.get(item.path)
+      return file === undefined ? null : countDecoration(file.additions, file.deletions)
+    },
+    [countsByPath]
   )
   const selectablePaths = useMemo(() => new Set(filePaths), [filePaths])
 
@@ -46,6 +72,8 @@ export function ReviewFileTree({
       density="compact"
       ariaLabel="Changed files tree"
       className="min-h-0 flex-1"
+      style={NEUTRAL_STATUS_STYLE}
+      renderRowDecoration={renderCounts}
       onSelectionChange={(paths) => {
         const selected = paths.findLast((path) => selectablePaths.has(path))
         if (selected !== undefined) onSelectFile(selected)

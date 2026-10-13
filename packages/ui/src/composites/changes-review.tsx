@@ -18,7 +18,9 @@ import { jinglerDark, toTokens } from "@jingler/themes"
 import { Maximize2, Minimize2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "../components/button.js"
+import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import { PierreProvider, type PierreCodeViewProps } from "../diff/pierre-provider.js"
@@ -30,7 +32,9 @@ import { filterReviewFiles } from "./review-file-filter.js"
 import { ReviewFileRail } from "./review-file-rail.js"
 import { ReviewFindingRow, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
+import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
+import { TurnFilter } from "./turn-filter.js"
 import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff a review shows — the PR, or the worktree's uncommitted changes. */
@@ -176,6 +180,15 @@ export interface ChangedFilesExplorerProps {
   readonly review?: AdversarialReview | null
   readonly activePath: string | null
   readonly onSelectFile: (path: string) => void
+  /** Agent turns that changed files; the filter shows when there are any. */
+  readonly turns?: readonly ReviewTurn[]
+  readonly turnId?: string | null
+  readonly onTurnChange?: (turnId: string | null) => void
+  /** The change list is still loading: show placeholder rows at real height. */
+  readonly loading?: boolean
+  /** The change list failed to load; `onRetry` adds the Retry button. */
+  readonly error?: string | null
+  readonly onRetry?: () => void
 }
 
 /**
@@ -183,17 +196,26 @@ export interface ChangedFilesExplorerProps {
  * feedback filters, per-file status and counts, and viewed progress.
  */
 export function ChangedFilesExplorer({
-  files: allFiles,
-  fileDiffs,
+  files: sourceFiles,
+  fileDiffs: sourceDiffs,
   omittedFiles = [],
   diffLineLimit = 0,
   drafts,
   reviewThreads = [],
   review = null,
   activePath,
-  onSelectFile
+  onSelectFile,
+  turns = [],
+  turnId = null,
+  onTurnChange,
+  loading = false,
+  error = null,
+  onRetry
 }: ChangedFilesExplorerProps) {
   const controls = useCodeReviewView()
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
+  const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
   const feedback = useMemo(
     () =>
       feedbackCounts({
@@ -232,12 +254,32 @@ export function ChangedFilesExplorer({
   const removed = files.reduce((sum, file) => sum + file.deletions, 0)
   const viewed = files.filter((file) => file.viewed).length
 
+  if (error !== null) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <InlineError message={error} onRetry={onRetry} />
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <ListSkeleton rows={6} rowHeight={24} gap={6} />
+      </div>
+    )
+  }
+
   return (
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
+        {turns.length > 0 && onTurnChange ? (
+          <div className="flex-none border-b border-hairline p-2">
+            <TurnFilter turns={turns} value={turn?.id ?? null} onChange={onTurnChange} />
+          </div>
+        ) : null}
         {allFiles.length === 0 ? (
-          <div className="p-4 text-[12px] text-dim">No changes to review.</div>
+          <EmptyState title="No changes yet" description="Files the agent edits show up here." />
         ) : (
           <ReviewFileRail
             files={files}
@@ -350,9 +392,7 @@ export function ReviewFileDiff({
     <div data-testid="review-file-diff" className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
         {toolbar}
-        <span className="rounded bg-sunken px-1.5 py-px text-[10px] font-medium text-dim">
-          {local ? "Uncommitted" : "Pull request"}
-        </span>
+        <Badge size="xs">{local ? "Uncommitted" : "Pull request"}</Badge>
         <div className="flex-1" />
         <Button
           type="button"

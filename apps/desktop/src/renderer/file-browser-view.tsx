@@ -19,16 +19,17 @@ import {
   FileQuickOpen,
   parsePierreFileDiffs,
   PierreEditor,
+  narrowToTurn,
   ReviewFileDiff
 } from "@jingler/ui"
-import type { PierreAnnotationMetadata } from "@jingler/ui"
+import type { PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
 import { useReview } from "./use-review.js"
-import { ChangesExplorerPanel, useChangesReview } from "./changes-review.js"
+import { ChangesExplorerPanel, useChangesReview, useReviewTurns } from "./changes-review.js"
 import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
@@ -310,6 +311,7 @@ export function FileBrowserView({
   )
   const debug = useDebugSessionModel(session.id, debugSnapshot)
   const changes = useChangesReview(session, connected)
+  const { turn } = useReviewTurns(session)
   const debugFrame = debug.snapshot.session?.status === "stopped"
     ? (debug.snapshot.session.frame ?? null)
     : null
@@ -446,6 +448,7 @@ export function FileBrowserView({
                 sessionId={session.id}
                 sessionTitle={session.title}
                 changes={changes}
+                turn={turn}
                 connected={connected}
                 browser={browser}
                 nativeAvailable={nativeAvailable}
@@ -517,6 +520,7 @@ function FileCanvas({
   sessionId,
   sessionTitle,
   changes,
+  turn,
   connected,
   browser,
   nativeAvailable,
@@ -533,6 +537,7 @@ function FileCanvas({
   readonly sessionId: string
   readonly sessionTitle: string
   readonly changes: ChangesReview
+  readonly turn: ReviewTurn | null
   readonly connected: boolean
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
@@ -602,7 +607,7 @@ function FileCanvas({
   if (browser.selectedPath === null) {
     return <AssetCanvas selectedPath={null} />
   }
-  const reviewFile = reviewFileFor(browser, changes)
+  const reviewFile = reviewFileFor(browser, changes, turn)
   if (reviewFile !== null) {
     return renderDiffContainer(
       browser,
@@ -806,10 +811,11 @@ type ChangesReview = ReturnType<typeof useChangesReview>
  */
 const reviewFileFor = (
   browser: FileBrowserController,
-  changes: ChangesReview
+  changes: ChangesReview,
+  turn: ReviewTurn | null
 ): PrFileChange | null =>
   browser.viewMode === "diff" && changes.review.filter !== "all"
-    ? (changes.review.files.find((file) => file.path === browser.selectedPath) ?? null)
+    ? (narrowToTurn(changes.review.files, turn).find((file) => file.path === browser.selectedPath) ?? null)
     : null
 
 function ReviewDiffCanvas({
