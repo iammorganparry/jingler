@@ -392,6 +392,7 @@ test("follows the selected chat agent through edited and newly created files", a
   await expect(workspaceFollow).toHaveClass(/is-active/)
   await expect(workspaceFollow.locator("svg")).toHaveClass(/lucide-mouse-pointer-2/)
 
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await sessionRow(window, "Other file browser session").click()
   await expect(window.getByText("Other file browser session", { exact: true }).last()).toBeVisible()
   await sessionRow(window, "File browser IDE").click()
@@ -583,6 +584,7 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   await comment.fill("[[expect-code-context]] Keep the new mode but document it.")
   await followed.getByRole("button", { name: "Send to agent" }).click()
 
+  await window.getByRole("tab", { name: "Sessions", exact: true }).click()
   await sessionRow(window, "Other file browser session").click()
   await sessionRow(window, "File browser IDE").click()
   // Explorer mode is active (files tab removed in redesign 3.6)

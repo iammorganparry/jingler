@@ -256,8 +256,11 @@ export function FileBrowserQuickOpen({
   )
 }
 
-function FileBrowserToolbar({ browser }: { browser: FileBrowserController }) {
+function FileBrowserToolbar({ browser, session }: { browser: FileBrowserController; session: Session }) {
   const path = browser.selectedPath
+  // Follow is session state: file tabs own per-file actors, but the toggle mirrors the composer's.
+  const sessionBrowser = useFileBrowser(session.id, session.worktreePath)
+  const followEnabled = sessionBrowser.followEnabled
   return (
     <>
       {path === null ? (
@@ -275,10 +278,10 @@ function FileBrowserToolbar({ browser }: { browser: FileBrowserController }) {
           type="button"
           className={[
             "jingler-mode-toggle inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium outline-none transition-colors active:scale-[0.96]",
-            browser.followEnabled ? "is-active" : "text-muted-foreground hover:text-text"
+            followEnabled ? "is-active" : "text-muted-foreground hover:text-text"
           ].join(" ")}
-          aria-pressed={browser.followEnabled}
-          onClick={browser.followEnabled ? browser.disableFollow : browser.enableFollow}
+          aria-pressed={followEnabled}
+          onClick={followEnabled ? sessionBrowser.disableFollow : sessionBrowser.enableFollow}
           title="Follow files edited by the active chat's agent"
         >
           <MousePointer2 className="jingler-mode-toggle__mark size-3" aria-hidden />
@@ -433,7 +436,7 @@ export function FileBrowserView({
         treeLoading={browser.treeLoading}
         treeError={browser.treeError}
         hideTree
-        toolbar={<FileBrowserToolbar browser={browser} />}
+        toolbar={<FileBrowserToolbar browser={browser} session={session} />}
         onRetryTree={browser.refreshTree}
         onSelectPath={browser.open}
         renderCanvas={(nativeAvailable) => (
