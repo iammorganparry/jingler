@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { matchBrowserChord, matchChangesChord, matchChecksChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord } from "./app-shortcuts.js"
+import { matchBrowserChord, matchChangesChord, matchChecksChord, matchHeaderViewChord, matchSplitEditorChord, matchTerminalChord, tabShortcutHint } from "./app-shortcuts.js"
 
 const chord = (over: Partial<Parameters<typeof matchSplitEditorChord>[0]>) => ({
   key: "\\",
@@ -49,6 +49,12 @@ describe("header view chords", () => {
     expect(matchChecksChord(key({ metaKey: true, key: "p", code: "KeyP" }))).toBe(false)
     expect(matchChecksChord(key({ metaKey: true, shiftKey: true, altKey: true, key: "P", code: "KeyP" }))).toBe(false)
     expect(matchChecksChord(key({ metaKey: true, shiftKey: true, key: "D", code: "KeyD" }))).toBe(false)
+  })
+
+  it("shows ⌘⇧D beside Changes only, since Code Review merged into it", () => {
+    expect(tabShortcutHint("changes")).toBe("⌘⇧D")
+    expect(tabShortcutHint("review")).toBeUndefined()
+    expect(tabShortcutHint("checks")).toBe("⌘⇧P")
   })
 
   it("opens Terminal on ⌃`", () => {

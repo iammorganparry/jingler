@@ -157,6 +157,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | RepoPicker | `composites/repo-picker.tsx` | Repo picker for new workspace. | — | no | — |
 | ReviewCodeView | `composites/review-code-view.tsx` | Code Review diff view. | entries, selection, scrollRequest, drafts, reviewThreads, findingsByPath | no | — |
 | ReviewFileRail | `composites/review-file-rail.tsx` | Review file rail. | — | yes | — |
+| TurnFilter, reviewTurnsOf, narrowToTurn | `composites/turn-filter.tsx`, `composites/review-turns.ts` | "All turns ▾" select over the agent turns that changed files; narrowToTurn narrows the file list and diff. | turns, value, onChange | yes | #423 (6.1) |
 | ReviewFileTree | `composites/review-file-tree.tsx` | Review file tree. | files, activePath, statusByPath, query, onSelectFile | no | — |
 | ReviewFindingRow, ReviewFindings | `composites/review-findings.tsx` | Review findings list and rows. | finding, sent, canRoute, review, onSendToAgent | yes | — |
 | ReviewTray | `composites/review-tray.tsx` | Pending inline comments tray. | — | yes | — |

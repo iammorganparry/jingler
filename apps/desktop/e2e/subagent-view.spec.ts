@@ -97,3 +97,25 @@ test("a peer chat is listed in the chip popover and can be messaged from there",
   await expect(box).toBeEnabled()
   await expect(box).toHaveValue("heads up: touching src/a.ts")
 })
+
+test("Follow in the subagent view opens a file the viewed child edited", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[legacy-agent]] inspect compatibility")
+  await composer.press("Enter")
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  await window.getByTestId("subagent-chip").first().click()
+  await window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Legacy Scout/ }).click()
+  await expect(window.getByTestId("fleet-agent-transcript")).toBeVisible()
+
+  // The breadcrumb header carries the same Follow toggle as the composer.
+  const follow = window.getByTestId("chat-lane-header").getByTestId("follow-agent-toggle")
+  await expect(follow).toHaveAttribute("aria-pressed", "false")
+  await follow.click()
+  await expect(follow).toHaveAttribute("aria-pressed", "true")
+  await expect(window.getByTestId("editor-tab-file-src/delegated.ts").getByRole("tab")).toBeVisible({
+    timeout: 15_000
+  })
+})

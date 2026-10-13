@@ -51,6 +51,34 @@ export interface ChatLaneHeaderProps {
   readonly subagentView?: ChatLaneHeaderSubagentView | null
 }
 
+/** The shared agent-follow toggle: in the lane header, or in its subagent slot via the host. */
+export function FollowAgentToggle({
+  followAgent,
+  onToggleFollowAgent
+}: {
+  readonly followAgent: boolean
+  readonly onToggleFollowAgent: (enabled: boolean) => void
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      data-testid="follow-agent-toggle"
+      aria-label="Follow agent"
+      aria-pressed={followAgent}
+      title={
+        followAgent
+          ? "Stop following files edited by this chat's agent"
+          : "Follow files edited by this chat's agent"
+      }
+      onClick={() => onToggleFollowAgent(!followAgent)}
+      className={cn("flex-none px-1.5", followAgent && "bg-surface text-text-bright")}
+    >
+      <MousePointer2 className="size-3.5" />
+    </Button>
+  )
+}
+
 function SubagentBreadcrumb({ title, view }: { readonly title: string; readonly view: ChatLaneHeaderSubagentView }) {
   const current = view.siblings.find((sibling) => sibling.id === view.selectedId)
   return (
@@ -234,25 +262,7 @@ export function ChatLaneHeader({
       <div data-testid="subagent-slot" className="flex-none">{subagentSlot}</div>
 
       {onToggleFollowAgent && (
-        <Button
-          variant="ghost"
-          size="sm"
-          data-testid="follow-agent-toggle"
-          aria-label="Follow agent"
-          aria-pressed={followAgent}
-          title={
-            followAgent
-              ? "Stop following files edited by this chat's agent"
-              : "Follow files edited by this chat's agent"
-          }
-          onClick={() => onToggleFollowAgent(!followAgent)}
-          className={cn(
-            "flex-none px-1.5",
-            followAgent && "bg-surface text-text-bright"
-          )}
-        >
-          <MousePointer2 className="size-3.5" />
-        </Button>
+        <FollowAgentToggle followAgent={followAgent} onToggleFollowAgent={onToggleFollowAgent} />
       )}
     </div>
   )

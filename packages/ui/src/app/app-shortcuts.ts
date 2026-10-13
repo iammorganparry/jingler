@@ -1,5 +1,6 @@
 import type { Chord, SplitShortcut } from "./split-shortcuts.js"
 import type { SessionSurfaceCommand } from "./session-surface-layout.js"
+import { BUILTIN_TAB, type TabKey } from "./tab-contributions.js"
 
 export const matchNewTabChord = (event: Chord): boolean =>
   (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey &&
@@ -27,6 +28,14 @@ export const matchChangesChord = (event: Chord): boolean =>
 export const matchChecksChord = (event: Chord): boolean =>
   (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey &&
   (event.key.toLowerCase() === "p" || event.code === "KeyP")
+/** The shortcut shown beside a built-in tab in the palette. Changes also covers the retired Code Review tab. */
+export const tabShortcutHint = (tabId: TabKey): string | undefined => {
+  if (tabId === BUILTIN_TAB.browser) return "⌃⇧B"
+  if (tabId === BUILTIN_TAB.terminal) return "⌃`"
+  if (tabId === BUILTIN_TAB.changes) return "⌘⇧D"
+  if (tabId === BUILTIN_TAB.checks) return "⌘⇧P"
+  return undefined
+}
 
 /** ⌥1–⌥9 → zero-based position of the header view button to open, matching the physical digit key. */
 export const matchHeaderViewChord = (event: Chord): number | null =>

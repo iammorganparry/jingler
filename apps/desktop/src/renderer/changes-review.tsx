@@ -5,11 +5,18 @@
  * review diff, and the review tray beside the panes.
  */
 import { useCallback, useMemo } from "react"
+import { useSelector } from "@xstate/react"
 import type { Session } from "@jingler/core"
 import { workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, ReviewSidebar } from "@jingler/ui"
+import { ChangedFilesExplorer, ReviewSidebar, reviewTurnsOf } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
-import { setReviewFilter, setReviewFocused, useReviewFocused } from "./review-store.js"
+import {
+  setReviewFilter,
+  setReviewFocused,
+  setReviewTurn,
+  useReviewFocused,
+  useSessionReviewState
+} from "./review-store.js"
 import { reviewCommentsContext } from "./review-references.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { useReview } from "./use-review.js"
@@ -74,6 +81,21 @@ export function useChangesReview(session: Session, connected: boolean) {
 export const revealSessionChanges = (session: Session): void =>
   setReviewFilter(session.id, session.prNumber, session.prNumber != null ? "pr" : "local")
 
+/** The agent turns that changed files, and which one the Changes list is narrowed to. */
+export function useReviewTurns(session: Session) {
+  // Memoised: getConversationActor pushes the session into the actor on every call.
+  const actor = useMemo(() => getConversationActor(session), [session.id, session.activeChatId]) // eslint-disable-line react-hooks/exhaustive-deps
+  const messages = useSelector(actor, (snapshot) => snapshot.context.messages)
+  const turns = useMemo(() => reviewTurnsOf(messages), [messages])
+  const { turnId } = useSessionReviewState(session.id, session.prNumber)
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const setTurn = useCallback(
+    (next: string | null) => setReviewTurn(session.id, session.prNumber, next),
+    [session.id, session.prNumber]
+  )
+  return { turns, turn, setTurn }
+}
+
 export function ChangesExplorerPanel({
   session,
   connected,
@@ -86,8 +108,12 @@ export function ChangesExplorerPanel({
   readonly onOpenPath: (path: string) => void
 }) {
   const { review, adversarial } = useChangesReview(session, connected)
+  const { turns, turn, setTurn } = useReviewTurns(session)
   return (
     <ChangedFilesExplorer
+      turns={turns}
+      turnId={turn?.id ?? null}
+      onTurnChange={setTurn}
       files={review.files}
       fileDiffs={review.fileDiffs}
       omittedFiles={review.omittedFiles}
@@ -97,6 +123,9 @@ export function ChangesExplorerPanel({
       review={review.source === "pr" ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
+      loading={review.loading}
+      error={review.error}
+      onRetry={review.retry}
     />
   )
 }
