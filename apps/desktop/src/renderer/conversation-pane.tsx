@@ -41,9 +41,11 @@ import {
   ResizeHandle,
   RuntimeRecoveryCard,
   PlanReview,
-  useContainerWidth
+  useContainerWidth,
+  OPEN_THREAD_SWITCHER_EVENT
 } from "@jingler/ui"
 import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, mcpRecoveryKey } from "./mcp-recovery-dismissals.js"
+import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
@@ -614,7 +616,7 @@ export function ConversationPane({
    * `createChat` left the operator's text deleted with nothing on screen to say
    * so. Nothing is dropped until there is somewhere for it to land.
    */
-  const handoffQueued = (id: string) => {
+  const handoffQueued = (id: string, onHandedOff?: () => void) => {
     if (!convo.queued.some((queued) => queued.id === id)) return
     queueSessionChatMutation(
       session.id,
@@ -634,9 +636,20 @@ export function ConversationPane({
           agentContext: item.agentContext
         })
         convo.unqueue(id)
+        onHandedOff?.()
       }
     )
   }
+  /** Hand off the whole queue, one fresh chat each, then offer to open the thread switcher. */
+  const handoffAllQueued = (ids: ReadonlyArray<string>) =>
+    handoffEachQueued(ids, handoffQueued, (count) =>
+      onPushToast?.({
+        key: `handoff-all-${session.id}`,
+        variant: "success",
+        title: `${count} ${count === 1 ? "message" : "messages"} handed off`,
+        action: { label: "View", onAction: () => window.dispatchEvent(new Event(OPEN_THREAD_SWITCHER_EVENT)) }
+      })
+    )
   const selectChat = (chatId: string) => {
     queueSessionChatMutation(session.id, () => rpc.sessionsSelectChat(session.id, chatId))
   }
@@ -985,6 +998,7 @@ export function ConversationPane({
                 setRequested,
                 activeChat,
                 handoffQueued,
+                handoffAllQueued,
                 handoffModel,
                 providerCatalog,
                 agentEndpointCatalog: sessionEndpointCatalog,
@@ -1200,6 +1214,7 @@ function renderMainConversation({
   setRequested,
   activeChat,
   handoffQueued,
+  handoffAllQueued,
   handoffModel,
   providerCatalog,
   agentEndpointCatalog,
@@ -1235,6 +1250,7 @@ function renderMainConversation({
   setRequested: (value: boolean) => void;
   activeChat: Session["chats"][number];
   handoffQueued: (id: string) => void;
+  handoffAllQueued: (ids: ReadonlyArray<string>) => void;
   handoffModel: string | null;
   providerCatalog: ProviderCatalog | null | undefined;
   agentEndpointCatalog: AgentEndpointCatalog | null | undefined;
@@ -1306,6 +1322,7 @@ function renderMainConversation({
     onSendNow={convo.sendNow}
     onEditQueued={convo.editQueued}
     onHandoffQueued={handoffQueued}
+    onHandoffAllQueued={handoffAllQueued}
     steeringId={convo.steeringId}
     handoffHint={handoffModel
       ? `Hand off — run this in a new chat on ${handoffModel}`

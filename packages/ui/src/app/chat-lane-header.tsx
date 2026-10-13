@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { createContext, useEffect, useRef, type ReactNode } from "react"
+import { createContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { ArrowLeft, ChevronDown, ChevronRight, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Kbd } from "../components/kbd.js"
@@ -21,6 +21,9 @@ export interface ChatLaneHeaderSubagentView {
   /** Back to the main transcript. */
   readonly onBack: () => void
 }
+
+/** Window event that opens the focused lane's thread switcher (e.g. a toast's "View"). */
+export const OPEN_THREAD_SWITCHER_EVENT = "jingler:open-thread-switcher"
 
 /** Host-provided lookup so lane headers deep in the editor tree can show the breadcrumb. */
 export const SubagentLaneViewContext = createContext<(chatId: string) => ChatLaneHeaderSubagentView | null>(
@@ -133,6 +136,17 @@ export function ChatLaneHeader({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [onBack])
 
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  useEffect(() => {
+    const onOpen = () => {
+      const group = rootRef.current?.closest('[data-testid="editor-group"]')
+      if (group && !group.hasAttribute("data-focused")) return
+      setSwitcherOpen(true)
+    }
+    window.addEventListener(OPEN_THREAD_SWITCHER_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_THREAD_SWITCHER_EVENT, onOpen)
+  }, [])
+
   const activeChat = chats.find((chat) => chat.id === activeChatId)
   const activeTitle = activeChat?.title ?? "Chat"
 
@@ -143,7 +157,7 @@ export function ChatLaneHeader({
       className="flex h-10 flex-none items-center gap-2 border-b border-hairline bg-sunken/70 px-3"
     >
       {subagentView ? <SubagentBreadcrumb title={activeTitle} view={subagentView} /> : (
-      <DropdownMenu.Root>
+      <DropdownMenu.Root open={switcherOpen} onOpenChange={setSwitcherOpen}>
         <DropdownMenu.Trigger asChild>
           <Button
             variant="ghost"
