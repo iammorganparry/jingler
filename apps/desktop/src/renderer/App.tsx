@@ -79,7 +79,7 @@ import {
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionSubagentTabs } from "./session-chat-tabs.js";
-import { selectSubagentTab } from "./subagent-tab-store.js";
+import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
 import {
@@ -1237,6 +1237,28 @@ function AuthedApp({
       return stacks;
     },
   });
+  const subagentTabs = useAllSessionSubagentTabs();
+  const subagentCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(subagentTabs).map(([id, chats]) => [
+          id,
+          chats.reduce((total, chat) => total + chat.active.length, 0),
+        ]),
+      ),
+    [subagentTabs],
+  );
+  const subagentEntries = useMemo(
+    () =>
+      Object.fromEntries(
+        sessions.map((s) => {
+          const chat = subagentTabs[s.id]?.find(({ chatId }) => chatId === s.activeChatId);
+          const nodes = [...(chat?.active ?? []), ...(chat?.completed ?? [])];
+          return [s.id, nodes.map(({ id, agent, task }) => ({ id, agent, task }))] as const;
+        }),
+      ),
+    [sessions, subagentTabs],
+  );
   // What the sidebar shows per session: the worst layer of its stack.
   const prStates = useMemo(
     () =>
@@ -1531,6 +1553,12 @@ function AuthedApp({
         liveActivity={liveActivity}
         chatActivities={chatActivities}
         prStates={prStates}
+        subagentCounts={subagentCounts}
+        subagentEntries={subagentEntries}
+        onOpenSubagent={(sessionId, nodeId) => {
+          const s = sessions.find(({ id }) => id === sessionId);
+          if (s) selectSubagentTab(sessionId, s.activeChatId, nodeId);
+        }}
         liveDiff={liveDiff}
         fileDiffs={fileDiffs}
         usage={usage}

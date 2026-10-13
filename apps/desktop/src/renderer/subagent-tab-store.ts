@@ -29,6 +29,8 @@ const actorSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
 const controllerSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
 const controllerMounts = new Map<string, Map<string, number>>()
 const sessionSnapshots = new Map<string, ReadonlyArray<SubagentTabSnapshot>>()
+// Immutable mirror of `sessionSnapshots` so one hook can subscribe to every session.
+let allSessionSnapshots: Readonly<Record<string, ReadonlyArray<SubagentTabSnapshot>>> = {}
 const selections = new Map<string, SelectionRequest>()
 const listeners = new Set<() => void>()
 const EMPTY: ReadonlyArray<SubagentTabSnapshot> = []
@@ -43,10 +45,9 @@ const refreshSession = (sessionId: string): void => {
   const actors = actorSnapshots.get(sessionId) ?? new Map()
   const controllers = controllerSnapshots.get(sessionId) ?? new Map()
   const chatIds = new Set([...actors.keys(), ...controllers.keys()])
-  sessionSnapshots.set(
-    sessionId,
-    [...chatIds].map((chatId) => controllers.get(chatId) ?? actors.get(chatId)!)
-  )
+  const snapshots = [...chatIds].map((chatId) => controllers.get(chatId) ?? actors.get(chatId)!)
+  sessionSnapshots.set(sessionId, snapshots)
+  allSessionSnapshots = { ...allSessionSnapshots, [sessionId]: snapshots }
   publish()
 }
 
@@ -216,6 +217,18 @@ export const useSessionSubagentTabs = (
     () => sessionSnapshots.get(sessionId) ?? EMPTY
   )
 
+export const useAllSessionSubagentTabs = (): Readonly<
+  Record<string, ReadonlyArray<SubagentTabSnapshot>>
+> =>
+  useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => allSessionSnapshots,
+    () => allSessionSnapshots
+  )
+
 export const useSubagentTabSelection = (
   sessionId: string
 ): SelectionRequest | null =>
@@ -233,6 +246,8 @@ export const clearSubagentTabs = (sessionId: string): void => {
   controllerSnapshots.delete(sessionId)
   controllerMounts.delete(sessionId)
   sessionSnapshots.delete(sessionId)
+  const { [sessionId]: _removed, ...rest } = allSessionSnapshots
+  allSessionSnapshots = rest
   selections.delete(sessionId)
   publish()
 }
