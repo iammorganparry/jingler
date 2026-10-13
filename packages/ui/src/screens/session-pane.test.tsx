@@ -225,6 +225,85 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issues body")).toBeTruthy()
   })
 
+  it("passes a header picker through to a plugin tab", () => {
+    const onSelect = vi.fn()
+    render(
+      <SessionPane
+        session={session({ id: "linear-menu" })}
+        renderConversation={() => <div>transcript</div>}
+        tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark })]}
+        issueMenus={{
+          "linear.issue": {
+            value: "issue-1",
+            ariaLabel: "Select linked Linear issue",
+            onSelect,
+            items: [
+              { value: "issue-1", identifier: "ENG-1", title: "First issue" },
+              { value: "issue-2", identifier: "ENG-2", title: "Second issue" }
+            ]
+          }
+        }}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
+    fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
+    expect(onSelect).toHaveBeenCalledWith("issue-2")
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+  })
+
+  it("derives a provider issue picker and persists the chosen issue", () => {
+    const onSelectIssue = vi.fn()
+    render(
+      <SessionPane
+        session={session({
+          id: "linear-derived-menu",
+          linkedIssues: [
+            {
+              providerId: "linear",
+              providerAccountId: "work",
+              id: "issue-1",
+              identifier: "ENG-1",
+              title: "First issue",
+              url: "https://linear.app/issue/ENG-1",
+              labels: []
+            },
+            {
+              providerId: "linear",
+              providerAccountId: "personal",
+              id: "issue-2",
+              identifier: "ENG-2",
+              title: "Second issue",
+              url: "https://linear.app/issue/ENG-2",
+              labels: []
+            }
+          ],
+          selectedIssue: { providerId: "linear", id: "issue-1" }
+        })}
+        renderConversation={() => <div>transcript</div>}
+        tabContributions={[
+          pluginTab("linear.issue", {
+            label: "Linear",
+            icon: LinearMark,
+            issueProviderId: "linear"
+          })
+        ]}
+        onSelectIssue={onSelectIssue}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
+    fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
+    expect(onSelectIssue).toHaveBeenCalledWith("linear-derived-menu", {
+      providerId: "linear",
+      providerAccountId: "personal",
+      id: "issue-2"
+    })
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+  })
+
   it("opens a provider tab directly when it has only one linked issue", () => {
     render(
       <SessionPane
