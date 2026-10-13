@@ -1,3 +1,4 @@
+import { agentFileActivityOf, applySubagentEvent } from "@jingler/core"
 import { afterEach, describe, expect, it } from "vitest"
 import {
   clearAgentFileActivitySession,
@@ -23,6 +24,20 @@ describe("followedAgentFile", () => {
 
     publishFleetAgentFileActivity("s1", null)
     expect(followed()?.path).toBe("src/main.ts")
+  })
+
+  it("follows the file a viewed child's own transcript edited", () => {
+    const [child] = [
+      { _tag: "SubagentStarted", id: "k1", name: "Scout", description: "d", parentId: null },
+      { _tag: "ToolStart", id: "w1", name: "Write", target: "src/child.ts", agentId: "k1" },
+      { _tag: "ToolEnd", id: "w1", status: "success", meta: null, diff: null, preview: null, agentId: "k1" }
+    ].reduce<ReturnType<typeof applySubagentEvent>>(
+      (agents, event) => applySubagentEvent(agents, event as never),
+      []
+    )
+    publishAgentFileActivity("s1", "c1", edit("main-1", "/wt/src/main.ts"))
+    publishFleetAgentFileActivity("s1", agentFileActivityOf([child!.message], "settling"))
+    expect(followed()).toMatchObject({ path: "src/child.ts", eventId: "w1", completed: true })
   })
 
   it("ignores edits outside the worktree", () => {

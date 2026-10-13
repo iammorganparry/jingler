@@ -134,6 +134,17 @@ const startLegacyAgent = (
       _tag: "Assistant",
       text: "Legacy transcript remains visible in Fleet.",
       agentId: toolUseId
+    },
+    // The child edits a file so Follow in the subagent view has something to open.
+    { _tag: "ToolStart", id: `${toolUseId}-edit`, name: "Write", target: "src/delegated.ts", agentId: toolUseId },
+    {
+      _tag: "ToolEnd",
+      id: `${toolUseId}-edit`,
+      status: "success",
+      meta: null,
+      diff: null,
+      preview: null,
+      agentId: toolUseId
     }
   ]).pipe(
     Effect.tap(() => Effect.sync(() => {
