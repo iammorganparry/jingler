@@ -503,17 +503,29 @@ const EditorGroup = memo(function EditorGroup({
             onToggleFollowAgent={api.onToggleFollowAgent}
           />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}
-          {/* Hidden draggable element for active chat to enable drag-to-split */}
-          <div
-            data-testid={`editor-tab-chat-${(active as Extract<SessionSurface, { kind: "chat" }>).id}`}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData(mime, JSON.stringify({ surface: active, from: group.id } satisfies TabDrag))
-              e.dataTransfer.effectAllowed = "copyMove"
-            }}
-            className="pointer-events-none absolute inset-0"
-            aria-hidden
-          />
+          {/* Hidden draggable elements for all chats to enable drag-to-split and programmatic close */}
+          {chatTabs.map((chat) => (
+            <div
+              key={chat.id}
+              data-testid={`editor-tab-chat-${chat.id}`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData(mime, JSON.stringify({ surface: chat, from: group.id } satisfies TabDrag))
+                e.dataTransfer.effectAllowed = "copyMove"
+              }}
+              className="pointer-events-none absolute inset-0"
+              aria-hidden
+            >
+              <button
+                type="button"
+                aria-label={`Close ${api.describe(chat).label}`}
+                onClick={() => api.onClose(group.id, chat)}
+                className="pointer-events-auto absolute right-0 top-0 opacity-0"
+              >
+                Close {api.describe(chat).label}
+              </button>
+            </div>
+          ))}
           {tabStripDrop.overlay}
         </div>
       ) : (

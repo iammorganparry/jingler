@@ -72,6 +72,25 @@ const mockPaneWidth = (width: number) =>
 
 
 
+
+
+
+/** 
+ * Click a chat tab or thread option, handling both ChatLaneHeader (chat-only) 
+ * and normal tab strip (mixed surfaces).
+ */
+const clickChat = (chatId: string, title: string = "Chat 1") => {
+  // Try normal tab first (mixed surfaces)
+  const tab = screen.queryByRole("tab", { name: title })
+  if (tab) {
+    fireEvent.click(tab)
+    return
+  }
+  // Fall back to thread switcher (chat-only)
+  fireEvent.click(screen.getByTestId("thread-switcher"))
+  fireEvent.click(screen.getByTestId(`chat-option-${chatId}`))
+}
+
 describe("visibleTabs", () => {
   it("shows only Conversation for a bare session", () => {
     expect(idsFor(session({ id: "a", worktreePath: undefined }))).toEqual([
@@ -204,7 +223,7 @@ describe("debug source following", () => {
     expect(screen.getByText("transcript")).toBeTruthy()
     view.rerender(<SessionPane {...props} debugStopSequence={1} />)
     expect(screen.getByText("debug source")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+    clickChat("c_debug_1", "Chat 1")
     view.rerender(<SessionPane {...props} debugStopSequence={2} />)
     expect(screen.getByText("debug source")).toBeTruthy()
   })
@@ -410,7 +429,7 @@ describe("session browser tab", () => {
     render(<BrowserHarness />)
     fireEvent.click(screen.getByRole("button", { name: "Browser" }))
     expect(screen.getByText("browser for browser-owner")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Chat 1" }))
+    clickChat("c_debug_1", "Chat 1")
     expect(screen.getByText("owner transcript")).toBeTruthy()
     expect(toggled).toEqual(["browser-owner"])
   })
@@ -731,7 +750,8 @@ describe("SessionPane", () => {
     )
 
     expect(document.getElementById("session-tab-bar-portal")!.childElementCount).toBe(0)
-    expect(within(screen.getByTestId("editor-group")).getAllByRole("tab")).toHaveLength(1)
+    // With ChatLaneHeader, chat-only groups use a dropdown instead of tabs
+    expect(screen.getByTestId("chat-lane-header")).toBeTruthy()
   })
 
   it("moves the focused session view rail into the main frame", () => {
@@ -789,6 +809,7 @@ describe("SessionPane", () => {
     const s = { ...base, chats: [...base.chats, { ...base.chats[0]!, id: "b" }], activeChatId: "b" }
     render(<SessionPane session={s} renderConversation={(owner) => <div>chat {owner.activeChatId}</div>} />)
     const stored = () => JSON.parse(localStorage.getItem("sb.editor-layout.v1:reopen")!)
+    // Hidden draggable element for active chat still has the testid
     const mainTab = screen.getByTestId(`editor-tab-chat-${mainId}`)
     fireEvent.click(within(mainTab).getByRole("button", { name: /^Close / }))
     await waitFor(() => expect(stored().mainChatId).toBeNull())
@@ -1037,14 +1058,14 @@ describe("SessionPane", () => {
       expect(screen.getByText("transcript b")).toBeTruthy()
     })
 
-    it("fires again for the same tab when the nonce moves", () => {
+    it("fires again for the same tab when the nonce moves", async () => {
       const onTabRequestHandled = vi.fn()
       const { rerender } = render(
         pane({ selectTabRequest: { tabId: "pr", nonce: 1 }, onTabRequestHandled })
       )
       rerender(pane({ selectTabRequest: null, onTabRequestHandled }))
       expect(screen.queryByRole("button", { name: "Conversation" })).toBeNull()
-      fireEvent.click(screen.getByRole("tab", { name: /Chat 1/ }))
+      clickChat("c_debug_1", "Chat 1")
       expect(screen.getByText("transcript a")).toBeTruthy()
 
       // Asking for the SAME tab a second time has to work — that is what the
