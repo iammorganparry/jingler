@@ -79,6 +79,8 @@ describe("managed pi-subagent profiles", () => {
       "workspace_read_file"
     ])
     expect(scout.contract.inheritProjectContext).toBe(false)
+    expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
+      .toMatch(/^defaultContext: fresh$/m)
     expect(scout.contract.roots.outputPath).toContain(
       join("subagent-artifacts", "outputs", "preflight", "context.md")
     )

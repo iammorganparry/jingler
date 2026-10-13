@@ -122,6 +122,7 @@ const rewriteAgentProfile = (
   .replace(/^tools:.*$/m, `tools: ${tools}`)
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
   .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
+  .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
   .replace(
     /^---\n/u,
     `---\nextensions: ${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`

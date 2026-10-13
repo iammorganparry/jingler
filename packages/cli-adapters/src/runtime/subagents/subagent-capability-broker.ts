@@ -149,13 +149,20 @@ export const subagentCapabilityTools = (
   SUPERVISOR_STATE_TOOL
 ]
 
-export const subagentCapabilityToolIds = (
+/**
+ * Tool ceiling for the shared on-disk agent profile. Every parent session
+ * rewrites the same profile file, so it must not depend on the parent's
+ * role/mode — otherwise a read-only parent strips write tools from every later
+ * child. Per-parent narrowing is enforced by the broker's grantedToolIds.
+ */
+export const subagentProfileToolIds = (
   registry: ToolRegistry,
-  spec: SubagentParentSpec,
   agent: string
 ): ReadonlyArray<string> => {
-  const profile = childExecutionProfile(spec, agent)
-  return subagentCapabilityTools(registry, profile.role, profile.mode).map(({ id }) => id)
+  const tools = READ_ONLY_AGENTS.has(agent)
+    ? subagentCapabilityTools(registry, "review", "read-only")
+    : subagentCapabilityTools(registry, "conversation", "auto")
+  return tools.map(({ id }) => id)
 }
 
 const readBody = (request: IncomingMessage): Effect.Effect<string, Error> =>

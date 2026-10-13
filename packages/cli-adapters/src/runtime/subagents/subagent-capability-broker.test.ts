@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
 import {
   makeSubagentCapabilityBroker,
+  subagentProfileToolIds,
   SubagentCapabilityBrokerLive,
   SubagentCapabilityBrokerService,
   type SubagentCapabilityBroker,
@@ -84,6 +85,32 @@ const register = (
     generatedAt: 1
   })
 }))
+
+describe("subagentProfileToolIds", () => {
+  it("lists the write ceiling for workers regardless of the parent and keeps reviewers read-only", () => {
+    const registry = new ToolRegistry()
+    for (const [id, risk] of [["inspect", "read"], ["command_execute", "execute"], ["workspace_write", "mutate"]] as const) {
+      registry.register({
+        id,
+        version: "1",
+        description: id,
+        input: Schema.Struct({}),
+        risk,
+        roles: ["conversation", "review"],
+        modes: ["auto", "read-only"],
+        timeoutMs: 1_000,
+        outputBudget: 1_000,
+        cancellable: true,
+        idempotency: "safe",
+        execute: () => Promise.resolve("ok")
+      })
+    }
+
+    expect(subagentProfileToolIds(registry, "worker"))
+      .toEqual(["inspect", "command_execute", "workspace_write", "supervisor_state"])
+    expect(subagentProfileToolIds(registry, "reviewer")).toEqual(["inspect", "supervisor_state"])
+  })
+})
 
 describe("SubagentCapabilityBroker", () => {
   const brokers: SubagentCapabilityBroker[] = []
