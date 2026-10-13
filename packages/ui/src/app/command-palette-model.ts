@@ -221,6 +221,7 @@ export const PALETTE_GROUP = {
   sessions: "Sessions",
   actions: "Actions",
   tabs: "Go to tab",
+  views: "Open view…",
   subagents: "Go to subagent…",
   files: "Files",
   archived: "Archived sessions"
@@ -238,6 +239,20 @@ export const subagentPaletteItems = (
     detail: subagent.task,
     group: PALETTE_GROUP.subagents,
     run: () => open(subagent.id)
+  }))
+
+/** "Open view…" rows: every view the active session can show, opened through the header buttons' path. */
+export const viewPaletteItems = (
+  views: ReadonlyArray<{ readonly id: string; readonly label: string; readonly icon: PaletteItem["icon"] }>,
+  open: (viewId: string) => void
+): ReadonlyArray<PaletteItem> =>
+  views.map((view) => ({
+    id: `view:${view.id}`,
+    kind: "tab",
+    label: view.label,
+    group: PALETTE_GROUP.views,
+    icon: view.icon,
+    run: () => open(view.id)
   }))
 
 const BUILTIN_GROUP_NAMES: ReadonlySet<string> = new Set(Object.values(PALETTE_GROUP))
