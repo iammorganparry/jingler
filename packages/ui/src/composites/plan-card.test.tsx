@@ -75,7 +75,7 @@ describe("PlanApprovalCard projection", () => {
     expect(screen.getByTestId("plan-approval-card")).toBeTruthy()
     expect(screen.getByText("1").textContent).toBe(String(plan.steps.length))
     expect(screen.getByText("Implement it")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "View Plan" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open plan" }))
     expect(onOpenReview).toHaveBeenCalledOnce()
 
     expect(screen.queryByRole("button", { name: /^Approve$/ })).toBeNull()

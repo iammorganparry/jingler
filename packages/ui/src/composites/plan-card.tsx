@@ -221,7 +221,7 @@ export function PlanApprovalCard({
       <footer className="flex min-h-12 flex-wrap items-center gap-2 bg-sunken/60 px-3.5 py-2.5">
         <span className="flex-1" />
         {onOpenReview && (
-          <Button variant="ghost" size="sm" onClick={onOpenReview}>View Plan</Button>
+          <Button variant="ghost" size="sm" onClick={onOpenReview}>Open plan</Button>
         )}
       </footer>
     </section>

@@ -87,7 +87,8 @@ import {
   type PaletteItem,
   pluginGroupName,
   type PluginPaletteCommand,
-  subagentPaletteItems
+  subagentPaletteItems,
+  viewPaletteItems
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
 import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
@@ -1178,6 +1179,23 @@ function getActiveTabContext(active: Session) {
 
   }
 
+  // ⌘K "Open view…": the same views the header buttons open, through the same selectTabRequest path.
+  function appendViewActions(items: PaletteItem[]) {
+    if (!active) return
+    const views = visibleTabs(getActiveTabContext(active), [...TAB_SHAPES, ...(tabContributions ?? [])]).filter(
+      (tab) =>
+        tab.id !== BUILTIN_TAB.conversation &&
+        tab.id !== BUILTIN_TAB.files &&
+        !(tab.id === BUILTIN_TAB.browser && !renderBrowser) &&
+        !(tab.id === BUILTIN_TAB.terminal && !renderTerminalDock)
+    )
+    items.push(
+      ...viewPaletteItems(views, (viewId) =>
+        setTabRequest((prev) => ({ tabId: viewId, nonce: (prev?.nonce ?? 0) + 1 }))
+      )
+    )
+  }
+
   function appendSubagentActions(items: PaletteItem[]) {
     if (!active || !onOpenSubagent) return
     items.push(
@@ -1281,6 +1299,7 @@ function getActiveTabContext(active: Session) {
      * would close, nothing would change, and there is no error to read.
      */
     appendTabActions(items)
+    appendViewActions(items)
     appendSubagentActions(items)
 
     // Grouped by the manifest's `category`, falling back to the plugin's name —
