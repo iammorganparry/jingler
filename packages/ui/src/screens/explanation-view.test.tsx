@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import type { ExplanationDocument } from "@jingler/core"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ExplanationView } from "./explanation-view.js"
 
 const document: ExplanationDocument = {
@@ -40,5 +40,19 @@ describe("ExplanationView", () => {
     expect(screen.getByText("Loading explanation…")).toBeTruthy()
     rerender(<ExplanationView document={null} />)
     expect(screen.getByText("No explanation yet.")).toBeTruthy()
+  })
+
+  it("shows an error with Retry that calls onRetry", () => {
+    const onRetry = vi.fn()
+    render(<ExplanationView document={null} error="Could not load." onRetry={onRetry} />)
+    expect(screen.getByRole("alert").textContent).toContain("Could not load.")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("renders a contents rail for multi-section documents", () => {
+    const second = { ...document.sections[0]!, id: "second", title: "Second" }
+    render(<ExplanationView document={{ ...document, sections: [...document.sections, second] }} />)
+    expect(screen.getByRole("navigation", { name: "Explanation contents" })).toBeTruthy()
   })
 })

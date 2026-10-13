@@ -2,6 +2,8 @@ import type { ExplanationDocument } from "@jingler/core"
 import { Sparkles } from "lucide-react"
 import type { ReactNode } from "react"
 import { Button } from "../components/button.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
+import { Skeleton } from "../components/loading.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
 
 export interface ExplanationViewProps {
@@ -18,16 +20,25 @@ export function ExplanationView({
   error = null,
   onRetry
 }: ExplanationViewProps) {
-  if (loading) return <Empty>Loading explanation…</Empty>
+  if (loading) return <ExplanationSkeleton />
   if (error) {
     return (
-      <Empty>
-        <span>{error}</span>
-        {onRetry && <Button size="sm" onClick={onRetry}>Retry</Button>}
-      </Empty>
+      <Centered>
+        <InlineError message={error} onRetry={onRetry} className="max-w-md" />
+      </Centered>
     )
   }
-  if (document === null) return <Empty>No explanation yet.</Empty>
+  if (document === null) {
+    return (
+      <Centered>
+        <EmptyState
+          icon={<Sparkles className="size-8" />}
+          title="No explanation yet."
+          description="Ask the agent to explain how something works and it will publish a visual explanation here."
+        />
+      </Centered>
+    )
+  }
 
   return <ExplanationArticle document={document} />
 }
@@ -85,11 +96,32 @@ function ExplanationArticle({ document }: { readonly document: ExplanationDocume
   )
 }
 
-function Empty({ children }: { readonly children: ReactNode }) {
+function Centered({ children }: { readonly children: ReactNode }) {
+  return <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-editor px-4">{children}</div>
+}
+
+/** Skeleton shaped like the loaded article: title, lead, then heading + paragraph groups. */
+function ExplanationSkeleton() {
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-editor px-4 text-center text-[13px] text-muted-foreground">
-      <Sparkles className="size-8 text-line-strong" />
-      {children}
+    <div aria-busy="true" className="@container min-h-0 min-w-0 flex-1 overflow-auto bg-editor">
+      <span className="sr-only">Loading explanation…</span>
+      <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-10">
+        <div className="hidden w-52 flex-none @min-[1000px]:block">
+          <ListSkeleton rows={5} rowHeight={24} gap={8} />
+        </div>
+        <div className="flex min-w-0 max-w-[760px] flex-1 flex-col gap-10">
+          <div className="flex flex-col gap-3 border-b border-hairline pb-8">
+            <Skeleton className="h-6 w-2/3" />
+            <ListSkeleton rows={2} rowHeight={16} gap={8} />
+          </div>
+          {[0, 1, 2].map((group) => (
+            <div key={group} className="flex flex-col gap-4">
+              <Skeleton className="h-6 w-1/3" />
+              <ListSkeleton rows={3} rowHeight={16} gap={10} />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
