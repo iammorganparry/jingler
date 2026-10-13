@@ -55,7 +55,8 @@ test("spawning shows the chip and transcript row, and View and a popover row ope
   await expect(window.getByTestId("subagent-spawn-row")).toContainText("Spawned 2 subagents")
   await expect(window.getByTestId("fleet-agent-transcript")).toHaveCount(0)
 
-  await window.getByRole("button", { name: "View", exact: true }).click()
+  // The fixture emits start + end tool calls, so two cards carry View; both open the same child.
+  await window.getByRole("button", { name: "View", exact: true }).first().click()
   const view = window.getByTestId("fleet-agent-transcript")
   await expect(view).toContainText("Survey the tab bar")
 
