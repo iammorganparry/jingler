@@ -51,7 +51,7 @@ test("⌘⇧D opens Changes in the focused content group", async ({ launchApp })
 test("with five views pinned, pinning a sixth is refused", async ({ launchApp }) => {
   const { window } = await launch(launchApp, ["changes", "checks", "files", "plan", "explanation"])
   await window.getByTestId("session-row-s_view_launcher").click()
-  await expect(window.locator('[data-testid^="header-view-"]:not([data-testid="header-view-buttons"])')).toHaveCount(1)
+  await expect(window.locator('[data-testid^="header-view-"]:not([data-testid="header-view-buttons"])')).toHaveCount(2)
 
   await window.getByTestId("view-overflow-trigger").click()
   const refused = window.getByTestId("pin-terminal")
@@ -61,5 +61,16 @@ test("with five views pinned, pinning a sixth is refused", async ({ launchApp })
   await expect(window.getByText("Header is full (5 pinned). Unpin a view first.").first()).toBeVisible()
 
   await refused.click({ force: true })
-  await expect(window.locator('[data-testid^="header-view-"]:not([data-testid="header-view-buttons"])')).toHaveCount(1)
+  await expect(window.locator('[data-testid^="header-view-"]:not([data-testid="header-view-buttons"])')).toHaveCount(2)
+})
+
+test("no right view rail renders at narrow or wide widths", async ({ launchApp }) => {
+  const { window } = await launch(launchApp)
+  await window.getByTestId("session-row-s_view_launcher").click()
+  await expect(window.getByTestId("header-view-buttons")).toBeVisible()
+
+  for (const width of [700, 1600]) {
+    await window.setViewportSize({ width, height: 800 })
+    await expect(window.getByTestId("view-rail")).toHaveCount(0)
+  }
 })
