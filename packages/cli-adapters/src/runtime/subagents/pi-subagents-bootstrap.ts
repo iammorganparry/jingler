@@ -26,13 +26,17 @@ export type PiSubagentProfileTools = Partial<
   Record<JinglerSubagentName, ReadonlyArray<string>>
 >
 
+// command_inspect is a read-only subset of command_execute; offering both lets
+// write-capable children pick the restricted one and fail.
 const profileTools = (
   brokered: ReadonlyArray<string> = [],
   fanout = false
 ): string => [...new Set([
   ...(fanout ? ["subagent"] : []),
   "contact_supervisor",
-  ...brokered
+  ...(brokered.includes("command_execute")
+    ? brokered.filter((tool) => tool !== "command_inspect")
+    : brokered)
 ])].join(", ")
 
 const PiSubagentConfig = Schema.Struct({

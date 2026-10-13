@@ -102,6 +102,28 @@ describe("managed pi-subagent profiles", () => {
     ])
   })
 
+  it("drops command_inspect only where command_execute is offered", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {}, {
+      worker: ["command_inspect", "command_execute", "workspace_edit"],
+      fanout: ["command_inspect", "command_execute"],
+      reviewer: ["command_inspect", "workspace_read_file"]
+    })
+    const toolsOf = async (agent: string) =>
+      (await readFile(join(root, "agents", `${agent}.md`), "utf8"))
+        .match(/^tools: (.*)$/m)?.[1]
+    expect(await toolsOf("worker")).toBe(
+      "contact_supervisor, command_execute, workspace_edit"
+    )
+    expect(await toolsOf("fanout")).toBe(
+      "subagent, contact_supervisor, command_execute"
+    )
+    expect(await toolsOf("reviewer")).toBe(
+      "contact_supervisor, command_inspect, workspace_read_file"
+    )
+  })
+
   it("does not admit a project-defined agent outside the agent ceiling", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-subagent-ceiling-"))
     roots.push(root)
