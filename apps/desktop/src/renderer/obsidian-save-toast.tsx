@@ -1,9 +1,20 @@
 import type { ExplanationDocument } from "@jingler/core"
-import { useQueryClient, type Query } from "@tanstack/react-query"
+import { useQuery, useQueryClient, type Query } from "@tanstack/react-query"
 import { Button } from "@jingler/ui"
 import { useEffect, useRef, useState } from "react"
 import { EXPLANATION_QUERY_ROOT } from "./use-explanation-document.js"
 import { rpc } from "./rpc-client.js"
+
+/** True once any session has an Obsidian vault (the plugin stores a `vault:<sessionId>` key each). */
+export function useObsidianVaultConfigured(): boolean {
+  const query = useQuery({
+    queryKey: ["obsidian-vaults"],
+    queryFn: () => rpc.pluginsStorageKeys("obsidian"),
+    // A vault can be saved at any time from the plugin tab; keep Settings in step.
+    refetchInterval: 5_000,
+  })
+  return query.data?.some((key) => key.startsWith("vault:")) ?? false
+}
 
 const keyOf = (document: ExplanationDocument | null | undefined): string =>
   document ? `${document.id}:${document.revision}` : ""

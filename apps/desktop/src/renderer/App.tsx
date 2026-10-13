@@ -137,7 +137,7 @@ import {
   usePluginTabs,
 } from "./plugin-registry.js";
 import { usePlugins } from "./use-plugins.js";
-import { ObsidianSaveToast } from "./obsidian-save-toast.js";
+import { ObsidianSaveToast, useObsidianVaultConfigured } from "./obsidian-save-toast.js";
 import { useDebugSessions } from "./debug-session.js";
 import { repositoryAccess } from "./github-connection-machine.js";
 import { useGitHubConnection } from "./use-github-connection.js";
@@ -405,15 +405,7 @@ function AuthedApp({
     queryKey: ["config"],
     queryFn: () => rpc.configGet(),
   });
-  // The Obsidian plugin stores one `vault:<sessionId>` key per configured session.
-  const obsidianVaultQuery = useQuery({
-    queryKey: ["obsidian-vaults"],
-    queryFn: () => rpc.pluginsStorageKeys("obsidian"),
-    // A vault can be saved at any time from the plugin tab; keep Settings in step.
-    refetchInterval: 5_000,
-  });
-  const obsidianVaultConfigured =
-    obsidianVaultQuery.data?.some((key) => key.startsWith("vault:")) ?? false;
+  const obsidianVaultConfigured = useObsidianVaultConfigured();
   const webSearchQuery = useQuery({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
@@ -452,7 +444,7 @@ function AuthedApp({
     enabled: false,
   });
 
-  const { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
+  const { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId, defaultModelId } = appStoredPreferences(configQuery.data);
   useEffect(() => {
     if (persistedOffloadCompute !== null) {
       sendOffloadSettings({ type: "SYNC", settings: persistedOffloadCompute });
@@ -1467,7 +1459,7 @@ function AuthedApp({
         onSaveGithubConfig={saveGithubConfig}
         gitConfig={gitConfig}
         onSaveGitConfig={saveGitConfig}
-        obsidianExplanations={configQuery.data?.obsidianExplanations ?? null}
+        obsidianExplanations={obsidianExplanations}
         onSaveObsidianExplanations={saveObsidianExplanations}
         obsidianVaultConfigured={obsidianVaultConfigured}
         notificationsConfig={notificationsConfig}
@@ -2343,9 +2335,10 @@ function deleteSessionDescription(pendingDelete: Session | null) {
 function appStoredPreferences(config: Awaited<ReturnType<typeof rpc.configGet>> | undefined) {
   const githubConfig = config?.github ?? null;
   const gitConfig = config?.git ?? null;
+  const obsidianExplanations = config?.obsidianExplanations ?? null;
   const notificationsConfig = config?.notifications ?? null;
   const persistedOffloadCompute = config?.offloadCompute ?? null;
-  return { githubConfig, gitConfig, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
+  return { githubConfig, gitConfig, obsidianExplanations, notificationsConfig, persistedOffloadCompute, defaultConnectionId: config?.defaultConnectionId ?? null, defaultModelId: config?.defaultModelId ?? null };
 }
 
 function hasEnabledDebugPlugin(catalog: ReturnType<typeof usePluginCatalog>): boolean {
