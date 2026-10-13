@@ -69,7 +69,7 @@ import {
   type PiChildCredentials
 } from "../subagents/pi-child-credentials.js"
 import {
-  subagentCapabilityToolIds,
+  subagentProfileToolIds,
   type SubagentCapabilityBroker
 } from "../subagents/subagent-capability-broker.js"
 import {
@@ -635,7 +635,7 @@ const createSessionHandle = (
       : { enabled: true, models: {}, connections: [] }
     const profileTools = Object.fromEntries(JINGLER_SUBAGENT_NAMES.map((agent) => [
       agent,
-      subagentCapabilityToolIds(registry, spec, agent)
+      subagentProfileToolIds(registry, agent)
     ])) as PiSubagentProfileTools
     yield* preparePiSubagentsRuntime(
       options.agentDir,
