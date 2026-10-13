@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { plannotatorProjectionToPlanDocument, type Message } from "@jingler/core"
 import {
@@ -133,5 +133,16 @@ describe("ConversationView Plannotator projection", () => {
       message("1", "plannotator_submit_plan"),
       message("2", "plannotator_submit_plan", "running")
     ])).toBe(1)
+  })
+})
+
+describe("ConversationView preview chip", () => {
+  it("offers Preview ready · Open browser only when a preview was revealed", () => {
+    const onOpen = vi.fn()
+    const view = render(<ConversationView mode="auto" messages={[]} />)
+    expect(screen.queryByTestId("preview-ready-chip")).toBeNull()
+    view.rerender(<ConversationView mode="auto" messages={[]} previewReady={{ onOpen }} />)
+    fireEvent.click(screen.getByRole("button", { name: /Preview ready · Open browser/ }))
+    expect(onOpen).toHaveBeenCalledOnce()
   })
 })

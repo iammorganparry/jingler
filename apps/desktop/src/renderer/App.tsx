@@ -1810,6 +1810,7 @@ function AuthedApp({
             onInitialPromptConsumed={consumeInitialPrompt}
             onOpenFile={(_sessionId, path) => ctx.onOpenFile(path)}
             onSelectChanges={ctx.onSelectChanges}
+            onSelectBrowser={ctx.onSelectBrowser}
             onOpenProviderSettings={ctx.onOpenProviderSettings}
             onAddMcp={mcp.add}
             mcpServers={mcp.servers}

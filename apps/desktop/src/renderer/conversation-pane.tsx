@@ -249,6 +249,7 @@ export function ConversationPane({
   providerCatalog,
   agentEndpointCatalog,
   onSelectChanges,
+  onSelectBrowser,
   onOpenProviderSettings,
   onAddMcp,
   mcpServers,
@@ -292,6 +293,8 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
 /** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
+  /** Open the Browser view; the `Preview ready · Open browser` chip's path. */
+  onSelectBrowser?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
   onOpenProviderSettings?: () => void
   /** Add or repair global MCP connections from the composer/chat. */
@@ -308,6 +311,15 @@ export function ConversationPane({
   paneFocused?: boolean
 }) {
   const activeChat = activeChatFor(session)
+  // An agent drove the embedded browser for THIS chat: offer the transcript link.
+  const [previewRevealed, setPreviewRevealed] = useState(false)
+  useEffect(
+    () =>
+      window.jingler?.onPreviewReveal?.(({ sessionId, chatId }) => {
+        if (sessionId === session.id && chatId === activeChat.id) setPreviewRevealed(true)
+      }),
+    [session.id, activeChat.id]
+  )
   const localMcpConfig = localMcp(
     session.environmentId,
     mcpServers,
@@ -991,6 +1003,7 @@ export function ConversationPane({
                 composerDisabledReason: effectiveComposerDisabledReason,
                 sendPrompt,
                 onOpenPlanReview,
+                previewReady: previewRevealed && onSelectBrowser ? { onOpen: onSelectBrowser } : null,
                 onForkOntoBranchStable,
                 onAdoptBranchStable,
                 plannotatorDocument,
@@ -1206,6 +1219,7 @@ function renderMainConversation({
   composerDisabledReason,
   sendPrompt,
   onOpenPlanReview,
+  previewReady,
   onForkOntoBranchStable,
   onAdoptBranchStable,
   plannotatorDocument,
@@ -1241,6 +1255,7 @@ function renderMainConversation({
   composerDisabledReason: string | undefined;
   sendPrompt: (text: string, images?: ReadonlyArray<{ readonly id: string; readonly name: string; readonly mediaType: string; readonly data: string }>, agentContext?: string) => void;
   onOpenPlanReview: ((stepId?: string) => void) | undefined;
+  previewReady: { readonly onOpen: () => void } | null;
   onForkOntoBranchStable: () => Promise<void>;
   onAdoptBranchStable: () => Promise<void>;
   plannotatorDocument: import("@jingler/core").PlanDocument | null;
@@ -1331,6 +1346,7 @@ function renderMainConversation({
     question={convo.question}
     onAnswerQuestion={convo.answerQuestion}
     onOpenPlanReview={onOpenPlanReview}
+    previewReady={previewReady}
     onForkOntoBranch={onForkOntoBranchStable}
     onAdoptBranch={onAdoptBranchStable}
     planDocument={plannotatorDocument}
