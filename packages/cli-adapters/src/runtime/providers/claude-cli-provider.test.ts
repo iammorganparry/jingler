@@ -98,6 +98,13 @@ console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firs
     )
   })
 
+  it.each(["pro", "max", "team", "enterprise"])("accepts a %s subscription login", async (plan) => {
+    const login = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"${plan}"}))
+`)
+    await expect(checkClaudeSubscription(login, process.env)).resolves.toBeUndefined()
+  })
+
   it("distinguishes a missing CLI from a signed-out CLI", async () => {
     await expect(checkClaudeSubscription("/nonexistent/claude", process.env)).rejects.toThrow(
       "Claude CLI is not installed"
