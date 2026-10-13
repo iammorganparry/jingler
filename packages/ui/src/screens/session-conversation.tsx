@@ -463,7 +463,6 @@ export function SessionConversation(props: SessionConversationProps) {
         )}
         {!props.newSessionViewActive && (getProps())}
       </div>
-      <div id="session-view-rail-portal" className="flex min-h-0 flex-none" />
     </div>
   )
 }

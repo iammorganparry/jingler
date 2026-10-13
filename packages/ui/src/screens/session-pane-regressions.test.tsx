@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { editorTabMime } from "../app/editor-groups.js"
 import { resetEditorLayouts } from "../app/editor-layout-machine.js"
 import { testSession as session } from "../test-support.js"
-import { SessionPane } from "./session-pane.js"
+import { SessionPane as BareSessionPane } from "./session-pane.js"
+import { SessionPaneWithHeaderViews as SessionPane } from "./session-pane-header-views-host.js"
 
 beforeEach(() => {
   localStorage.clear()
