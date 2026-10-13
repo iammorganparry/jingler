@@ -70,12 +70,12 @@ test("⌘K opens the palette and jumps to a session", async ({ launchApp }) => {
   await expect(window.getByRole("navigation", { name: "Breadcrumb" }).first()).toContainText("Beta session")
 })
 
-test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) => {
+test("⌘K reopens the palette, and Escape closes it", async ({ launchApp }) => {
   const { window } = await launchApp({ configured: true, sessions: seededSessions })
 
   await expect(appShell(window)).toBeVisible()
 
-  await window.keyboard.press("Meta+p")
+  await window.keyboard.press("Meta+k")
   await expect(window.getByTestId("command-palette")).toBeVisible()
 
   await window.keyboard.press("Escape")
@@ -86,7 +86,7 @@ test("⌘P opens the same palette, and Escape closes it", async ({ launchApp }) 
   await expect(window.getByPlaceholder(PLACEHOLDER)).toHaveValue("")
 })
 
-test("⌘⇧P searches only the active session and opens its file as a tab", async ({
+test("⌘P searches only the active session and opens its file as a tab", async ({
   launchApp
 }) => {
   const gadgetPath = (reposDir: string) => join(reposDir, "gadget")
@@ -120,7 +120,7 @@ test("⌘⇧P searches only the active session and opens its file as a tab", asy
   await expect(appShell(window)).toBeVisible()
   await sessionRow(window, "Beta session").first().click()
 
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   const picker = window.getByTestId("file-quick-open")
   await expect(picker).toBeVisible()
   const input = window.getByPlaceholder("Open a file in Beta session…")
@@ -141,7 +141,7 @@ test("⌘⇧P searches only the active session and opens its file as a tab", asy
   // Alpha's picker cannot see Beta's worktree, and Alpha has its own layout.
   await sessionRow(window, "Alpha session").first().click()
   await expect(window.getByTestId("editor-tab-file-beta-only.custom")).toHaveCount(0)
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Alpha session…").fill("beta-only")
   await expect(window.getByText("No matching files in this session", { exact: true })).toBeVisible({
     timeout: 15_000

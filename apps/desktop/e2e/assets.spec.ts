@@ -249,7 +249,7 @@ test("quick-open fills the session with the repository tree and a changed-file d
   })
 
   await expect(appShell(window)).toBeVisible()
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Edit repository files…").fill("main")
   await window.getByTestId("palette-item-file:src/main.ts").click()
 
@@ -325,7 +325,7 @@ test("places the editable file caret where the user clicks", async ({ launchApp 
 
   await expect(appShell(window)).toBeVisible()
   await window.getByRole("tab", { name: "Explorer", exact: true }).click()
-  await window.keyboard.press("Meta+Shift+p")
+  await window.keyboard.press("Meta+p")
   await window.getByPlaceholder("Open a file in Edit repository files…").fill("edit.ts")
   await window.getByTestId("palette-item-file:src/edit.ts").click()
 

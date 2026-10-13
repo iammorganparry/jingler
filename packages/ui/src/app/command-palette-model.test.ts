@@ -131,24 +131,24 @@ describe("fuzzyScore", () => {
 })
 
 describe("matchFileQuickOpenChord", () => {
-  it("matches Cmd+Shift+P on macOS without colliding with the ordinary palette", () => {
-    const event = chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true })
+  it("matches Cmd+P on macOS without colliding with the ordinary palette", () => {
+    const event = chord({ key: "p", code: "KeyP", metaKey: true })
     expect(matchFileQuickOpenChord(event, true)).toBe(true)
     expect(matchPaletteChord(event, true)).toBe(false)
   })
 
-  it("matches Ctrl+Shift+P off macOS and refuses the other platform modifier", () => {
+  it("matches Ctrl+P off macOS and refuses the other platform modifier", () => {
     expect(
-      matchFileQuickOpenChord(
-        chord({ key: "P", code: "KeyP", ctrlKey: true, shiftKey: true }),
-        false
-      )
+      matchFileQuickOpenChord(chord({ key: "p", code: "KeyP", ctrlKey: true }), false)
     ).toBe(true)
     expect(
-      matchFileQuickOpenChord(
-        chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true }),
-        false
-      )
+      matchFileQuickOpenChord(chord({ key: "p", code: "KeyP", metaKey: true }), false)
+    ).toBe(false)
+  })
+
+  it("leaves Cmd+Shift+P to Checks", () => {
+    expect(
+      matchFileQuickOpenChord(chord({ key: "P", code: "KeyP", metaKey: true, shiftKey: true }), true)
     ).toBe(false)
   })
 })
@@ -253,12 +253,11 @@ describe("matchPaletteChord", () => {
   const MAC = true
   const PC = false
 
-  it.each([
-    ["KeyK", "k"],
-    ["KeyP", "p"]
-  ])("matches ⌘%s on macOS and Ctrl+%s elsewhere", (code, key) => {
-    expect(matchPaletteChord(chord({ code, key, metaKey: true }), MAC)).toBe(true)
-    expect(matchPaletteChord(chord({ code, key, ctrlKey: true }), PC)).toBe(true)
+  it("matches ⌘K on macOS and Ctrl+K elsewhere, and leaves ⌘P to the file picker", () => {
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", metaKey: true }), MAC)).toBe(true)
+    expect(matchPaletteChord(chord({ code: "KeyK", key: "k", ctrlKey: true }), PC)).toBe(true)
+    expect(matchPaletteChord(chord({ code: "KeyP", key: "p", metaKey: true }), MAC)).toBe(false)
+    expect(matchPaletteChord(chord({ code: "KeyP", key: "p", ctrlKey: true }), PC)).toBe(false)
   })
 
   /**
