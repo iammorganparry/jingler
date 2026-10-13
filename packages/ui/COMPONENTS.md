@@ -199,6 +199,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionSplit | `app/session-split.tsx` | Chat + content split layout. | onOpenCheckpoints, group, sessions, emptyState, renderConversation, session | no | — |
 | SessionTree | `app/session-tree.tsx` | Session chats, views and open files tree. | — | no | — |
 | SubagentTabBar | `app/subagent-tab-bar.tsx` | Subagent chip strip. | — | no | — |
+| SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, row opens that child. | subagents, onOpenSubagent | no | #460 (8.1) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
 | TabBar | `app/tab-bar.tsx` | Content tab strip. | — | yes | — |
 | TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock and panel. | dock, onDockChange, visible, onToggle, tabs, activeId | yes | — |
