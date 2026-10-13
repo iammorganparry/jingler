@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { createActor, type ActorRefFrom } from "xstate"
 import type {
   Subagent,
   SubagentFleetEvent,
@@ -11,6 +12,7 @@ import {
   projectLegacySubagents,
   projectSubagentFleetEvents
 } from "./subagent-fleet-machine.js"
+import { subagentViewMachine } from "./subagent-view-machine.js"
 
 export interface SubagentTabSnapshot {
   readonly chatId: string
@@ -19,19 +21,17 @@ export interface SubagentTabSnapshot {
   readonly selectedId: string
 }
 
-interface SelectionRequest {
-  readonly chatId: string
-  readonly nodeId: string
-  readonly nonce: number
-}
-
 const actorSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
 const controllerSnapshots = new Map<string, Map<string, SubagentTabSnapshot>>()
 const controllerMounts = new Map<string, Map<string, number>>()
 const sessionSnapshots = new Map<string, ReadonlyArray<SubagentTabSnapshot>>()
 // Immutable mirror of `sessionSnapshots` so one hook can subscribe to every session.
 let allSessionSnapshots: Readonly<Record<string, ReadonlyArray<SubagentTabSnapshot>>> = {}
-const selections = new Map<string, SelectionRequest>()
+// One in-place subagent view actor per chat lane, keyed by chatId.
+const viewActors = new Map<string, ActorRefFrom<typeof subagentViewMachine>>()
+const mainViewReaders = new Map<string, () => { draft: string; scrollTop: number }>()
+// Immutable chatId → open subagent id mirror, so one hook can subscribe to every lane.
+let viewSelectedIds: Readonly<Record<string, string>> = {}
 const listeners = new Set<() => void>()
 const EMPTY: ReadonlyArray<SubagentTabSnapshot> = []
 const ACTIVE = new Set(["queued", "running", "paused", "needs-attention"])
@@ -191,18 +191,50 @@ export const releaseSubagentTabController = (
   refreshSession(sessionId)
 }
 
+export const subagentViewActor = (chatId: string) => {
+  let actor = viewActors.get(chatId)
+  if (actor === undefined) {
+    actor = createActor(subagentViewMachine, { input: { chatId } })
+    actor.subscribe((snapshot) => {
+      const id = snapshot.context.selectedId
+      if ((viewSelectedIds[chatId] ?? null) === id) return
+      const { [chatId]: _previous, ...rest } = viewSelectedIds
+      viewSelectedIds = id === null ? rest : { ...rest, [chatId]: id }
+      publish()
+    })
+    actor.start()
+    viewActors.set(chatId, actor)
+  }
+  return actor
+}
+
+/** The mounted main transcript lets the swap capture its draft and scroll before it unmounts. */
+export const registerMainViewReader = (
+  chatId: string,
+  read: () => { draft: string; scrollTop: number }
+): (() => void) => {
+  mainViewReaders.set(chatId, read)
+  return () => {
+    if (mainViewReaders.get(chatId) === read) mainViewReaders.delete(chatId)
+  }
+}
+
+/** Every entry point (chip, View, transcript row, ⌘K, sidebar) swaps the chat lane through here. */
 export const selectSubagentTab = (
-  sessionId: string,
+  _sessionId: string,
   chatId: string,
   nodeId: string
 ): void => {
-  const previous = selections.get(sessionId)
-  selections.set(sessionId, {
-    chatId,
-    nodeId,
-    nonce: (previous?.nonce ?? 0) + 1
-  })
-  publish()
+  const actor = subagentViewActor(chatId)
+  if (nodeId === MAIN_FLEET_AGENT) {
+    actor.send({ type: "BACK" })
+    return
+  }
+  if (actor.getSnapshot().value === "main") {
+    const view = mainViewReaders.get(chatId)?.()
+    if (view) actor.send({ type: "SAVE_MAIN_VIEW", draft: view.draft, scrollTop: view.scrollTop })
+  }
+  actor.send({ type: "OPEN_SUBAGENT", id: nodeId })
 }
 
 export const useSessionSubagentTabs = (
@@ -229,25 +261,32 @@ export const useAllSessionSubagentTabs = (): Readonly<
     () => allSessionSnapshots
   )
 
-export const useSubagentTabSelection = (
-  sessionId: string
-): SelectionRequest | null =>
+export const useSubagentViewSelections = (): Readonly<Record<string, string>> =>
   useSyncExternalStore(
     (listener) => {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
-    () => selections.get(sessionId) ?? null,
-    () => selections.get(sessionId) ?? null
+    () => viewSelectedIds,
+    () => viewSelectedIds
   )
 
 export const clearSubagentTabs = (sessionId: string): void => {
+  const chatIds = new Set([
+    ...(actorSnapshots.get(sessionId)?.keys() ?? []),
+    ...(controllerSnapshots.get(sessionId)?.keys() ?? [])
+  ])
+  for (const chatId of chatIds) {
+    viewActors.get(chatId)?.stop()
+    viewActors.delete(chatId)
+    const { [chatId]: _removedView, ...rest } = viewSelectedIds
+    viewSelectedIds = rest
+  }
   actorSnapshots.delete(sessionId)
   controllerSnapshots.delete(sessionId)
   controllerMounts.delete(sessionId)
   sessionSnapshots.delete(sessionId)
   const { [sessionId]: _removed, ...rest } = allSessionSnapshots
   allSessionSnapshots = rest
-  selections.delete(sessionId)
   publish()
 }

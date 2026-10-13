@@ -1,7 +1,19 @@
 import type { Session, SubagentFleetNode } from "@jingler/core"
-import { useMemo } from "react"
-import { SubagentChip, type SubagentChipItem, type SubagentChipStatus } from "@jingler/ui"
-import { selectSubagentTab, useSessionSubagentTabs } from "./subagent-tab-store.js"
+import { useCallback, useMemo, type ReactNode } from "react"
+import {
+  SubagentChip,
+  SubagentLaneViewContext,
+  type ChatLaneHeaderSubagentView,
+  type SubagentChipItem,
+  type SubagentChipStatus
+} from "@jingler/ui"
+import {
+  selectSubagentTab,
+  subagentViewActor,
+  useAllSessionSubagentTabs,
+  useSessionSubagentTabs,
+  useSubagentViewSelections
+} from "./subagent-tab-store.js"
 
 const chipStatus = (status: SubagentFleetNode["status"]): SubagentChipStatus =>
   status === "queued" ? "spawning" : status === "needs-attention" ? "attention" : status === "unknown" ? "stopped" : status
@@ -44,4 +56,28 @@ export function SessionSubagentTabs({
       }}
     />
   )
+}
+
+/** Feeds every chat lane header its breadcrumb while a subagent is swapped into that lane. */
+export function SubagentLaneViewProvider({ children }: { readonly children: ReactNode }) {
+  const selections = useSubagentViewSelections()
+  const tabs = useAllSessionSubagentTabs()
+  const resolve = useCallback(
+    (chatId: string): ChatLaneHeaderSubagentView | null => {
+      const selectedId = selections[chatId]
+      if (selectedId === undefined) return null
+      const snapshot = Object.values(tabs).flat().find((tab) => tab.chatId === chatId)
+      const actor = subagentViewActor(chatId)
+      return {
+        selectedId,
+        siblings: [...(snapshot?.active ?? []), ...(snapshot?.completed ?? [])].map(
+          ({ id, agent, task }) => ({ id, agent, task })
+        ),
+        onSwitch: (id) => actor.send({ type: "SWITCH_SIBLING", id }),
+        onBack: () => actor.send({ type: "BACK" })
+      }
+    },
+    [selections, tabs]
+  )
+  return <SubagentLaneViewContext.Provider value={resolve}>{children}</SubagentLaneViewContext.Provider>
 }

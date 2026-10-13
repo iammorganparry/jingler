@@ -71,10 +71,11 @@ import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from
 import {
   publishSubagentTabs,
   recentSubagentNodes,
+  registerMainViewReader,
   releaseSubagentTabController,
-  retainSubagentTabController,
-  useSubagentTabSelection
+  retainSubagentTabController
 } from "./subagent-tab-store.js"
+import { useSubagentView } from "./use-subagent-view.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
 import { openSessionFileDiff, useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
 import { useFollowAgentFiles } from "./use-follow-agent-files.js"
@@ -766,15 +767,35 @@ export function ConversationPane({
     retainSubagentTabController(session.id, activeChat.id)
     return () => releaseSubagentTabController(session.id, activeChat.id)
   }, [activeChat.id, session.id])
-  const subagentTabSelection = useSubagentTabSelection(session.id)
   const subagentEntry = useSessionSubagentEntry(session)
+  // The chat lane's view machine owns which transcript this lane shows; the fleet follows it.
+  const subagentView = useSubagentView(activeChat.id)
+  const mainColumnRef = useRef<HTMLDivElement>(null)
   const selectFleetRef = useRef(fleet.select)
   selectFleetRef.current = fleet.select
+  const fleetSelectedIdRef = useRef(fleet.selectedId)
+  fleetSelectedIdRef.current = fleet.selectedId
+  useEffect(() => registerMainViewReader(activeChat.id, () => ({
+    draft: getDraft(activeChat.id).text,
+    scrollTop: mainColumnRef.current?.querySelector<HTMLElement>('[data-testid="conversation-scroll"]')?.scrollTop ?? 0
+  })), [activeChat.id])
+  const wasSubagentViewRef = useRef(false)
   useEffect(() => {
-    if (subagentTabSelection?.chatId === activeChat.id) {
-      selectFleetRef.current(subagentTabSelection.nodeId)
+    if (subagentView.selectedId !== null) {
+      wasSubagentViewRef.current = true
+      selectFleetRef.current(subagentView.selectedId)
+      return
     }
-  }, [activeChat.id, subagentTabSelection?.chatId, subagentTabSelection?.nodeId, subagentTabSelection?.nonce])
+    if (fleetSelectedIdRef.current !== MAIN_FLEET_AGENT) selectFleetRef.current(MAIN_FLEET_AGENT)
+    if (!wasSubagentViewRef.current) return
+    wasSubagentViewRef.current = false
+    // The main transcript remounts on return; put it back where the operator left it.
+    const frame = requestAnimationFrame(() => {
+      const viewport = mainColumnRef.current?.querySelector<HTMLElement>('[data-testid="conversation-scroll"]')
+      if (viewport) viewport.scrollTop = subagentView.mainScrollTop
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [subagentView.selectedId, subagentView.mainScrollTop])
 
   // Live agent status + Plan-tab presence are published by the conversation
   // registry (from the actor's own subscription), so they stay correct even
@@ -858,7 +879,7 @@ export function ConversationPane({
         the strip's own `overflow-x-auto` take over. The inner column already had
         it; this outer row did not, so the constraint stopped one level short. */}
     <div ref={planSplitRowRef} className="flex min-h-0 min-w-0 flex-1" style={{ "--sb-font-scale": fontScale } as CSSProperties}>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={mainColumnRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
       {renderEnvironmentNotices({
               convo,
               continuationEnvironmentId,
