@@ -199,20 +199,20 @@ test("closing an untouched chat tab removes it from the sidebar", async ({ launc
 
   // Chat-only groups use ChatLaneHeader with a dedicated "New chat" button
   await window.getByTestId("new-chat-button").click()
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toBeVisible()
+  await expect(window.getByTestId("thread-switcher")).toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toBeVisible()
 
-  // Close via the hidden draggable element's close button
-  await window.getByTestId("editor-tab-chat-c_untouched_2").getByRole("button", { name: "Close Chat 2" }).click()
+  // Close via the thread switcher's per-chat close item
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 2" }).click()
 
-  await expect(window.getByRole("tab", { name: "Chat 2" })).toHaveCount(0)
+  await expect(window.getByTestId("thread-switcher")).not.toContainText("Chat 2")
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 2")).toHaveCount(0)
   await expect(window.getByTestId("session-tree-s_beta").getByText(/^Closed/)).toHaveCount(0)
 
   // Closing a chat with history only closes its tab; its sidebar entry remains.
-  // Close Chat 1 via its hidden draggable element
-  await window.getByTestId("editor-tab-chat-c_beta_1").getByRole("button", { name: "Close Chat 1" }).click()
-  await expect(window.getByTestId("editor-tab-chat-c_beta_1")).toHaveCount(0)
+  await window.getByTestId("thread-switcher").click()
+  await window.getByRole("menuitem", { name: "Close Chat 1" }).click()
   await expect(window.getByTestId("session-tree-s_beta").getByText("Chat 1")).toBeVisible()
 })
 
