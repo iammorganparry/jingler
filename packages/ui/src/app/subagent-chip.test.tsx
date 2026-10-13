@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { formatElapsed, SubagentChip, type SubagentChipItem } from "./subagent-chip.js"
 
@@ -66,6 +66,37 @@ describe("SubagentChip", () => {
     openChip()
     expect(screen.getByText("+2 more")).toBeTruthy()
     expect(screen.queryByTestId("subagent-chip-row-w9")).toBeNull()
+  })
+})
+
+const peer = (chatId: string, title: string) => ({
+  chatId,
+  title,
+  status: "running" as const,
+  task: `Doing ${title}`,
+  planStage: null,
+  touchedFiles: ["src/shared.ts"],
+  updatedAt: "now"
+})
+
+describe("SubagentChip peers", () => {
+  it("renders for peers alone and lists them under Peers · N after Finished", () => {
+    render(<SubagentChip subagents={[]} onOpenSubagent={vi.fn()} peers={[peer("p1", "Agent B"), peer("p2", "Agent C")]} onMessagePeer={vi.fn()} />)
+    expect(screen.getByTestId("subagent-chip").textContent).toContain("2 peers")
+    openChip()
+    expect(screen.getByText("Peers · 2")).toBeTruthy()
+    expect(screen.getByTestId("peer-agent-row-p1").textContent).toContain("Agent B")
+    expect(screen.getByTestId("peer-agent-row-p1").textContent).toContain("src/shared.ts")
+  })
+
+  it("Message on a peer sends through onMessagePeer", async () => {
+    const onMessagePeer = vi.fn(async (chatId: string) => ({ status: "delivered" as const, targetChatId: chatId }))
+    render(<SubagentChip subagents={[item({ id: "a" })]} onOpenSubagent={vi.fn()} peers={[peer("p1", "Agent B")]} onMessagePeer={onMessagePeer} />)
+    openChip()
+    fireEvent.click(screen.getByRole("button", { name: "Message Agent B" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "Message to Agent B" }), { target: { value: "heads up" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(onMessagePeer).toHaveBeenCalledWith("p1", "heads up"))
   })
 })
 

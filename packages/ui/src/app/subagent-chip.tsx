@@ -1,8 +1,10 @@
+import type { AgentRosterEntry, PeerAgentMessageResult } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
+import { PeerAgentRow } from "./agent-roster.js"
 import { StatusDot } from "../components/status-dot.js"
 
 export type SubagentChipStatus =
@@ -30,6 +32,10 @@ export interface SubagentChipProps {
   readonly subagents: ReadonlyArray<SubagentChipItem>
   /** Open one child's transcript. */
   readonly onOpenSubagent: (id: string) => void
+  /** Other chats in the session, listed under `Peers · N`. */
+  readonly peers?: ReadonlyArray<AgentRosterEntry>
+  /** Send a message to one peer chat. Required to show a `Message` button per peer. */
+  readonly onMessagePeer?: (chatId: string, text: string) => Promise<PeerAgentMessageResult>
 }
 
 /** Rows shown per popover section before the rest collapse into `+N more`. */
@@ -95,9 +101,10 @@ function Rows({ items, now, onOpen }: { items: ReadonlyArray<SubagentChipItem>; 
 /**
  * Lane-header chip for the active chat's child agents: `N subagents ▾`, pulsing
  * while any child is spawning or running. Opens a popover of running children
- * then a `Finished · N` section; a row opens that child's transcript.
+ * then a `Finished · N` section, then `Peers · N`; a row opens that child's
+ * transcript and a peer's `Message` sends it a note.
  */
-export function SubagentChip({ subagents, onOpenSubagent }: SubagentChipProps) {
+export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessagePeer }: SubagentChipProps) {
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const running = subagents.filter((item) => !FINISHED.has(item.status))
@@ -112,11 +119,13 @@ export function SubagentChip({ subagents, onOpenSubagent }: SubagentChipProps) {
     return () => clearInterval(timer)
   }, [ticking])
 
-  if (subagents.length === 0) return null
+  if (subagents.length === 0 && peers.length === 0) return null
   const label =
     running.length > 0
       ? `${running.length} ${running.length === 1 ? "subagent" : "subagents"}`
-      : `${finished.length} finished`
+      : finished.length > 0
+        ? `${finished.length} finished`
+        : `${peers.length} ${peers.length === 1 ? "peer" : "peers"}`
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={setOpen}>
@@ -148,6 +157,16 @@ export function SubagentChip({ subagents, onOpenSubagent }: SubagentChipProps) {
                 Finished · {finished.length}
               </DropdownMenu.Label>
               <Rows items={finished} now={now} onOpen={onOpenSubagent} />
+            </>
+          )}
+          {peers.length > 0 && onMessagePeer !== undefined && (
+            <>
+              <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-dim">
+                Peers · {peers.length}
+              </DropdownMenu.Label>
+              {peers.map((agent) => (
+                <PeerAgentRow key={agent.chatId} agent={agent} onMessage={onMessagePeer} />
+              ))}
             </>
           )}
         </DropdownMenu.Content>
