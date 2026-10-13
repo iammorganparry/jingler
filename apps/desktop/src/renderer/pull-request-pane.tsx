@@ -77,7 +77,7 @@ export function PullRequestPane({
       publish={publish.checkpoint}
       publishing={publish.publishing}
       branch={session.branch}
-      baseBranch={pr?.baseRefName}
+      baseBranch={session.baseBranch ?? pr?.baseRefName}
       prs={session.prs}
       sessionTitle={session.title}
       onCreatePr={

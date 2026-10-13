@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import type { PublishCheckpoint, PullRequest } from "@jingler/core"
+import type { PublishCheckpoint, PullRequest, SessionPr } from "@jingler/core"
+import { userEvent } from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import { PullRequestView } from "./pull-request-view.js"
@@ -151,5 +152,93 @@ describe("PullRequestView publish stepper", () => {
       </WidthTierValue>
     )
     expect(screen.getByText("Nothing to publish")).toBeTruthy()
+  })
+})
+
+const basePrs: ReadonlyArray<SessionPr> = [
+  { number: 100, branch: "feat/layer-1", base: "main", state: "open", checks: null },
+  { number: 101, branch: "feat/layer-2", base: "feat/layer-1", state: "open", checks: null }
+]
+
+describe("PullRequestView base selector", () => {
+  it("defaults to top of stack when stack is non-empty", () => {
+    const onCreatePr = vi.fn()
+    render(
+      <PullRequestView
+        pr={null}
+        connected={true}
+        baseBranch="main"
+        prs={basePrs}
+        onCreatePr={onCreatePr}
+      />
+    )
+
+    expect(screen.getByText("feat/layer-2")).toBeTruthy()
+  })
+
+  it("defaults to baseBranch when stack is empty", () => {
+    const onCreatePr = vi.fn()
+    render(
+      <PullRequestView
+        pr={null}
+        connected={true}
+        baseBranch="main"
+        prs={[]}
+        onCreatePr={onCreatePr}
+      />
+    )
+
+    expect(screen.getByLabelText("Select base branch for pull request").textContent).toContain("main")
+  })
+
+  it("passes selected base to onCreatePr when publish button clicked", async () => {
+    const user = userEvent.setup()
+    const onCreatePr = vi.fn()
+    
+    render(
+      <PullRequestView
+        pr={null}
+        connected={true}
+        baseBranch="main"
+        branch="feat/layer-3"
+        prs={basePrs}
+        onCreatePr={onCreatePr}
+      />
+    )
+
+    const publishButton = screen.getByRole("button", { name: /publish pull request/i })
+    await user.click(publishButton)
+
+    expect(onCreatePr).toHaveBeenCalledWith("feat/layer-2")
+  })
+
+  it("allows choosing a different base and passes it to onCreatePr", async () => {
+    const user = userEvent.setup()
+    const onCreatePr = vi.fn()
+    
+    render(
+      <PullRequestView
+        pr={null}
+        connected={true}
+        baseBranch="main"
+        branch="feat/layer-3"
+        prs={basePrs}
+        onCreatePr={onCreatePr}
+      />
+    )
+
+    // Open the selector
+    const trigger = screen.getByLabelText("Select base branch for pull request")
+    await user.click(trigger)
+
+    // Select the base branch option
+    const mainOption = await screen.findByRole("option", { name: "main" })
+    await user.click(mainOption)
+
+    // Click publish
+    const publishButton = screen.getByRole("button", { name: /publish pull request/i })
+    await user.click(publishButton)
+
+    expect(onCreatePr).toHaveBeenCalledWith("main")
   })
 })
