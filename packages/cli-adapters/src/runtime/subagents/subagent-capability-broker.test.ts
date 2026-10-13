@@ -6,6 +6,9 @@ import {
 import { Effect, Schema } from "effect"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ToolRegistry } from "../tools/tool-registry.js"
+import { registerWorkspaceInspectionTools, type WorkspaceInspectionPort } from "../tools/workspace-tools.js"
+import { registerWorkspaceMutationTools, type WorkspaceMutationPort } from "../tools/workspace-mutation-tools.js"
+import { JINGLER_SUBAGENT_NAMES } from "@jingler/core"
 import {
   makeSubagentCapabilityBroker,
   subagentProfileToolIds,
@@ -109,6 +112,27 @@ describe("subagentProfileToolIds", () => {
     expect(subagentProfileToolIds(registry, "worker"))
       .toEqual(["inspect", "command_execute", "workspace_write", "supervisor_state"])
     expect(subagentProfileToolIds(registry, "reviewer")).toEqual(["inspect", "supervisor_state"])
+  })
+})
+
+describe("subagentProfileToolIds for the production workspace tools", () => {
+  const registry = new ToolRegistry()
+  registerWorkspaceInspectionTools(registry, "/w", {} as WorkspaceInspectionPort)
+  registerWorkspaceMutationTools(registry, "/w", {} as WorkspaceMutationPort)
+  const writers = ["command_execute", "workspace_write", "workspace_edit", "workspace_delete", "workspace_rename", "workspace_read_file"]
+
+  it.each(JINGLER_SUBAGENT_NAMES.filter((agent) => !["oracle", "reviewer"].includes(agent)))(
+    "gives %s every implementation tool",
+    (agent) => {
+      expect(subagentProfileToolIds(registry, agent)).toEqual(expect.arrayContaining(writers))
+    }
+  )
+
+  it.each(["oracle", "reviewer"])("keeps %s read-only", (agent) => {
+    const ids = subagentProfileToolIds(registry, agent)
+    expect(ids).toEqual(expect.arrayContaining(["workspace_read_file", "command_inspect"]))
+    expect(ids).not.toEqual(expect.arrayContaining(["workspace_write"]))
+    expect(ids).not.toContain("command_execute")
   })
 })
 

@@ -1,4 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai"
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all"
+import { ProviderModelId, type SubagentModelAssignments } from "@jingler/core"
 
 /**
  * The Anthropic catalog plus the ids Claude CLI accepts that pi's static
@@ -23,3 +25,37 @@ export const claudeCliModels = (models: ReadonlyArray<Model<Api>>): ReadonlyArra
     : [{ ...opus5, id: "claude-opus-5-5", name: "Claude Opus 5.5" }]
   return [...models, ...aliases, ...opus55]
 }
+
+const ALIAS_PREFIX: Readonly<Record<string, string>> = {
+  opus: "claude-opus",
+  sonnet: "claude-sonnet",
+  haiku: "claude-haiku"
+}
+
+/** The newest undated catalogue id for an alias, which is what a child without the alias resolves. */
+const latestConcrete = (alias: string): string | undefined =>
+  getBuiltinModels("anthropic")
+    .map(({ id }) => id)
+    .filter((id) => id.startsWith(ALIAS_PREFIX[alias]!) && !/-\d{8}$/u.test(id))
+    .sort((left, right) => left.localeCompare(right, "en", { numeric: true }))
+    .at(-1)
+
+/**
+ * Only the Claude CLI route registers the aliases in a child. On any other
+ * Anthropic route the child fuzzy-resolves `sonnet` to a concrete id and
+ * pi-subagents fails the run with `model_verification_failed`, so the parent
+ * writes the concrete id into the profile instead.
+ */
+export const concreteClaudeModels = (
+  models: SubagentModelAssignments,
+  cliRoute: boolean
+): SubagentModelAssignments =>
+  cliRoute
+    ? models
+    : Object.fromEntries(Object.entries(models).map(([agent, model]) => {
+        const alias = String(model).replace(/^anthropic\//u, "")
+        const concrete = String(model).startsWith("anthropic/") && alias in ALIAS_PREFIX
+          ? latestConcrete(alias)
+          : undefined
+        return [agent, concrete === undefined ? model : ProviderModelId.make(`anthropic/${concrete}`)]
+      }))

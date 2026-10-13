@@ -99,6 +99,13 @@ console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firs
     )
   })
 
+  it.each(["pro", "max", "team", "enterprise"])("accepts a %s subscription login", async (plan) => {
+    const login = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"${plan}"}))
+`)
+    await expect(checkClaudeSubscription(login, process.env)).resolves.toBeUndefined()
+  })
+
   it("confirms the api billing route for Enterprise and Console logins instead of failing", async () => {
     // Shape of `claude auth status` (Claude Code 2.1.x) for an Enterprise seat.
     const enterprise = await executable(`

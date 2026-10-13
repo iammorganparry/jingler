@@ -126,6 +126,19 @@ describe("managed pi-subagent profiles", () => {
     )
   })
 
+  it("keeps the profile tool lists when a toolless host rewrites the profiles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {}, {
+      worker: ["command_execute", "workspace_write", "workspace_edit"]
+    })
+    // The native-sidecar recovery host has an empty registry and passes no tools.
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs", {})
+    const tools = (await readFile(join(root, "agents", "worker.md"), "utf8"))
+      .match(/^tools: (.*)$/m)?.[1]
+    expect(tools).toBe("contact_supervisor, command_execute, workspace_write, workspace_edit")
+  })
+
   it("does not admit a project-defined agent outside the agent ceiling", async () => {
     const root = await mkdtemp(join(tmpdir(), "jingler-subagent-ceiling-"))
     roots.push(root)
