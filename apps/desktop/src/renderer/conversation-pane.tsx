@@ -74,7 +74,8 @@ import {
   useSubagentTabSelection
 } from "./subagent-tab-store.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
-import { useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { openSessionFileDiff, useFileBrowser, type FileBrowserController } from "./use-file-browser.js"
+import { useFollowAgentFiles } from "./use-follow-agent-files.js"
 import {
   clampedPlanSplitRatio,
   DEFAULT_PLAN_SPLIT_RATIO,
@@ -325,6 +326,18 @@ export function ConversationPane({
     },
     [fileBrowser.disableFollow, fileBrowser.enableFollow]
   )
+  // Follow opens each edited file as a file tab; the viewed subagent's edits win.
+  useFollowAgentFiles({
+    sessionId: session.id,
+    chatId: activeChat.id,
+    worktreePath: session.worktreePath,
+    enabled: fileBrowser.followEnabled,
+    onFollow: ({ path, eventId, preview, completed }) => {
+      fileBrowser.followAgentTarget(path, eventId, preview, completed)
+      openSessionFileDiff(session.id, session.worktreePath, path, { eventId, preview, completed })
+      onOpenFile?.(session.id, path)
+    }
+  })
   const presentedPlannotatorReview = useRef<string | null>(null)
   useEffect(() => {
     const reviewId = plannotatorReviewId(convo.plannotator)
