@@ -46,6 +46,7 @@ const PiSubagentConfig = Schema.Struct({
   maxSubagentSpawnsPerRun: Schema.Number,
   maxSubagentSpawnsPerSession: Schema.Number,
   missions: Schema.Struct({ enabled: Schema.Boolean }),
+  timeoutMs: Schema.Number,
   toolDescriptionMode: Schema.Literal("compact")
 })
 
@@ -63,8 +64,9 @@ const CONFIG = {
   globalConcurrencyLimit: 4,
   maxActiveAsyncRunsPerSession: 4,
   maxSubagentSpawnsPerRun: 8,
-  maxSubagentSpawnsPerSession: 16,
+  maxSubagentSpawnsPerSession: 64,
   missions: { enabled: false },
+  timeoutMs: 3_600_000,
   toolDescriptionMode: "compact"
 } as const
 
@@ -115,6 +117,7 @@ const rewriteAgentProfile = (
 ): string => source
   .replace(/^tools:.*$/m, `tools: ${tools}`)
   .replace(/^inheritProjectContext:.*$/m, "inheritProjectContext: false")
+  .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
   .replace(
     /^---\n/u,
     `---\nextensions: ${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
