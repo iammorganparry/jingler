@@ -1,5 +1,6 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { ChevronDown, MessagesSquare, MousePointer2, Plus } from "lucide-react"
+import { Button } from "../components/button.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 
@@ -56,7 +57,7 @@ export function ChatLaneHeader({
             aria-label="Switch chat thread"
             className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-none transition-colors hover:bg-panel"
           >
-            <MessagesSquare className="size-3.5 flex-none text-blue" />
+            <MessagesSquare className="size-3.5 flex-none text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-left font-medium text-text-bright">
               {activeTitle}
             </span>
@@ -83,7 +84,7 @@ export function ChatLaneHeader({
                   className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
                 >
                   <StatusDot
-                    tone={chat.running ? "bg-yellow" : active ? "bg-blue" : "bg-dim"}
+                    tone={chat.running ? "bg-yellow" : active ? "bg-text-bright" : "bg-dim"}
                     pulse={chat.running ?? false}
                     size={7}
                   />
@@ -97,23 +98,25 @@ export function ChatLaneHeader({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="sm"
         data-testid="new-chat-button"
         aria-label="New chat"
         title="New chat"
         onClick={onCreateChat}
-        className="flex flex-none items-center rounded-md px-1.5 py-1.5 text-dim outline-none transition-colors hover:bg-panel hover:text-text"
+        className="flex-none px-1.5"
       >
         <Plus className="size-3.5" />
-      </button>
+      </Button>
 
       {/* Subagent chip slot reserved for issue #8.1 */}
       <div data-testid="subagent-slot" className="flex-none" />
 
       {onToggleFollowAgent && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           data-testid="follow-agent-toggle"
           aria-label="Follow agent"
           aria-pressed={followAgent}
@@ -124,14 +127,12 @@ export function ChatLaneHeader({
           }
           onClick={() => onToggleFollowAgent(!followAgent)}
           className={cn(
-            "flex flex-none items-center rounded-md px-1.5 py-1.5 outline-none transition-colors",
-            followAgent
-              ? "bg-panel text-blue"
-              : "text-dim hover:bg-panel hover:text-text"
+            "flex-none px-1.5",
+            followAgent && "bg-surface text-text-bright"
           )}
         >
           <MousePointer2 className="size-3.5" />
-        </button>
+        </Button>
       )}
     </div>
   )
