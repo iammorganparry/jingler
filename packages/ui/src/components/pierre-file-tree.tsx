@@ -6,6 +6,7 @@ import {
   type FileTreeDensity,
   type FileTreeIcons,
   type FileTreePreparedInput,
+  type FileTreeRowDecorationRenderer,
   type FileTreeSearchMode
 } from "@pierre/trees"
 import {
@@ -82,6 +83,8 @@ export interface PierreFileTreeProps {
   readonly id?: string
   readonly className?: string
   readonly style?: CSSProperties
+  /** Extra per-row text (e.g. +/− counts) beside Pierre's git status letter. */
+  readonly renderRowDecoration?: FileTreeRowDecorationRenderer
   readonly onSelectionChange?: (paths: readonly string[]) => void
   readonly onSearchChange?: (query: string | null) => void
 }
@@ -89,6 +92,7 @@ export interface PierreFileTreeProps {
 interface TreeCallbacks {
   readonly selection: RefObject<PierreFileTreeProps["onSelectionChange"]>
   readonly search: RefObject<PierreFileTreeProps["onSearchChange"]>
+  readonly decoration: RefObject<PierreFileTreeProps["renderRowDecoration"]>
   readonly syncingSelection: RefObject<boolean>
 }
 
@@ -128,6 +132,7 @@ const usePierreFileTreeModel = (
     itemHeight: props.itemHeight,
     overscan: props.overscan ?? 12,
     stickyFolders: props.stickyFolders ?? true,
+    renderRowDecoration: (context) => callbacks.decoration.current?.(context) ?? null,
     onSelectionChange: (next) => {
       if (!callbacks.syncingSelection.current) {
         callbacks.selection.current?.(next)
@@ -240,13 +245,16 @@ export function PierreFileTree(props: PierreFileTreeProps) {
   const renderer = usePierreRenderer()
   const selectionCallback = useRef(props.onSelectionChange)
   const searchCallback = useRef(props.onSearchChange)
+  const decorationCallback = useRef(props.renderRowDecoration)
   const syncingSelection = useRef(false)
   selectionCallback.current = props.onSelectionChange
   searchCallback.current = props.onSearchChange
+  decorationCallback.current = props.renderRowDecoration
 
   const model = usePierreFileTreeModel(props, {
     selection: selectionCallback,
     search: searchCallback,
+    decoration: decorationCallback,
     syncingSelection
   })
   useTreeDataUpdates(model, props, syncingSelection)

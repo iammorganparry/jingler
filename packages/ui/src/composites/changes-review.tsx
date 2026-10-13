@@ -18,6 +18,7 @@ import { jinglerDark, toTokens } from "@jingler/themes"
 import { Maximize2, Minimize2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { Button } from "../components/button.js"
+import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { SegmentedControl } from "../components/segmented-control.js"
@@ -350,9 +351,7 @@ export function ReviewFileDiff({
     <div data-testid="review-file-diff" className="flex h-full min-h-0 flex-col bg-editor">
       <div className="flex h-8 flex-none items-center gap-2 border-b border-hairline bg-panel px-2">
         {toolbar}
-        <span className="rounded bg-sunken px-1.5 py-px text-[10px] font-medium text-dim">
-          {local ? "Uncommitted" : "Pull request"}
-        </span>
+        <Badge size="xs">{local ? "Uncommitted" : "Pull request"}</Badge>
         <div className="flex-1" />
         <Button
           type="button"
