@@ -74,3 +74,29 @@ test("no right view rail renders at narrow or wide widths", async ({ launchApp }
     await expect(window.getByTestId("view-rail")).toHaveCount(0)
   }
 })
+
+test("PR chip opens the PR view and a second click focuses it instead of duplicating", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{ ...session, prNumber: 482, worktreePath: context.repoPath }]
+  })
+  await window.getByTestId("session-row-s_view_launcher").click()
+  const chip = window.getByTestId("header-link-pr")
+  await expect(chip).toHaveText("PR #482")
+  await chip.click()
+  await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+  await chip.click()
+  await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+})
+
+test("⌘K → Open view… opens the chosen view and leaves one tab on repeat", async ({ launchApp }) => {
+  const { window } = await launch(launchApp)
+  await window.getByTestId("session-row-s_view_launcher").click()
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await window.keyboard.press("Meta+k")
+    await window.getByTestId("palette-item-view:pr").click()
+    await expect(window.getByTestId("command-palette")).toBeHidden()
+    await expect(window.getByTestId("editor-tab-view-pr")).toHaveCount(1)
+  }
+})

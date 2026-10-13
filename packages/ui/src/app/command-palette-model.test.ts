@@ -9,7 +9,8 @@ import {
   type PaletteItem,
   pluginGroupName,
   scoreItem,
-  subagentPaletteItems
+  subagentPaletteItems,
+  viewPaletteItems
 } from "./command-palette-model.js"
 
 /** Real `KeyboardEvent`s, for the reason `split-shortcuts.test.ts` gives. */
@@ -352,5 +353,24 @@ describe("subagentPaletteItems", () => {
     ])
     items[1]!.run()
     expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+})
+
+describe("viewPaletteItems", () => {
+  it("lists every view under Open view… and opens the chosen one by id", () => {
+    const open = vi.fn()
+    const items = viewPaletteItems(
+      [
+        { id: "pr", label: "Pull Request", icon: undefined },
+        { id: "linear.issues", label: "Linear", icon: undefined }
+      ],
+      open
+    )
+    expect(items.map((i) => [i.id, i.label, i.group])).toEqual([
+      ["view:pr", "Pull Request", "Open view…"],
+      ["view:linear.issues", "Linear", "Open view…"]
+    ])
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("linear.issues")
   })
 })

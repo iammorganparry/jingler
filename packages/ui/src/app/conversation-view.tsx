@@ -27,7 +27,7 @@ import type {
 } from "@jingler/core"
 import { type VirtualItem, useVirtualizer } from "@tanstack/react-virtual"
 import { useHotkeys } from "react-hotkeys-hook"
-import { ArrowUp, Lock, RotateCcw } from "lucide-react"
+import { ArrowUp, Globe, Lock, RotateCcw } from "lucide-react"
 import type { ArchiveReason, ContextPhase } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
@@ -268,6 +268,8 @@ export interface ConversationViewProps {
   onAnswerQuestion?: (requestId: string, answers: ReadonlyArray<QuestionAnswer>) => void
   /** Open the full read-only native plan projection. */
   onOpenPlanReview?: (stepId?: string) => void
+  /** An agent revealed the browser preview: shows `Preview ready · Open browser` after the transcript. */
+  previewReady?: { readonly onOpen: () => void } | null
   /** Fork a drifted direct session's work onto a new worktree session (BranchDrift banner). */
   onForkOntoBranch?: () => void | Promise<void>
   /** Adopt the drifted checkout's branch into this session (BranchDrift banner). */
@@ -810,6 +812,14 @@ function renderSessionAnalytics() {
           </div>
           </ToolStopContext.Provider>
           </PlanProgressContext.Provider>
+          {props.previewReady ? (
+            <div className="mx-auto mt-2 flex w-full max-w-[760px] justify-start">
+              <Button variant="secondary" size="sm" data-testid="preview-ready-chip" onClick={props.previewReady.onOpen}>
+                <Globe size={12} aria-hidden />
+                Preview ready · Open browser
+              </Button>
+            </div>
+          ) : null}
           {busy ? (
             <div className="mx-auto mt-1 flex w-full max-w-[760px] justify-start" data-testid="chat-thinking-orb">
               <ThinkingOrb />

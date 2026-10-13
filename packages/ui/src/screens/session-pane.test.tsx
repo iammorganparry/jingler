@@ -304,6 +304,45 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issue body")).toBeTruthy()
   })
 
+  it("opens the PR view from the header PR chip without duplicating the tab", () => {
+    render(
+      <>
+        <div id="session-header-views-portal" />
+        <SessionPane
+          session={session({ id: "chip-pr", prNumber: 482 })}
+          renderConversation={() => <div>transcript</div>}
+          renderPullRequest={() => <div>pr body</div>}
+        />
+      </>
+    )
+    const chip = within(document.getElementById("session-header-views-portal")!).getByTestId("header-link-pr")
+    expect(chip.textContent).toBe("PR #482")
+    fireEvent.click(chip)
+    fireEvent.click(chip)
+    expect(screen.getAllByText("pr body")).toHaveLength(1)
+  })
+
+  it("opens the linked issue view from the header issue chip", () => {
+    render(
+      <>
+        <div id="session-header-views-portal" />
+        <SessionPane
+          session={session({
+            id: "chip-issue",
+            linkedIssues: [{ providerId: "linear", id: "issue-1", identifier: "LIN-482", title: "Only issue", url: "https://linear.app/issue/LIN-482", labels: [] }],
+            selectedIssue: { providerId: "linear", id: "issue-1" }
+          })}
+          renderConversation={() => <div>transcript</div>}
+          tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark, issueProviderId: "linear" })]}
+        />
+      </>
+    )
+    const chip = within(document.getElementById("session-header-views-portal")!).getByTestId("header-link-issue")
+    expect(chip.textContent).toBe("LIN-482")
+    fireEvent.click(chip)
+    expect(screen.getByText("linear.issue body")).toBeTruthy()
+  })
+
   it("opens a provider tab directly when it has only one linked issue", () => {
     render(
       <SessionPane
