@@ -1,7 +1,8 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import type { ReactNode } from "react"
-import { ChevronDown, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
+import { createContext, useEffect, useRef, type ReactNode } from "react"
+import { ArrowLeft, ChevronDown, ChevronRight, MessagesSquare, MousePointer2, Plus, X } from "lucide-react"
 import { Button } from "../components/button.js"
+import { Kbd } from "../components/kbd.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 
@@ -10,6 +11,21 @@ export interface ChatLaneHeaderChat {
   readonly title: string
   readonly running?: boolean
 }
+
+/** A subagent's transcript is swapped into this lane; the header shows where we are. */
+export interface ChatLaneHeaderSubagentView {
+  readonly selectedId: string
+  /** Every subagent of this chat, including the selected one. */
+  readonly siblings: ReadonlyArray<{ readonly id: string; readonly agent: string; readonly task: string }>
+  readonly onSwitch: (id: string) => void
+  /** Back to the main transcript. */
+  readonly onBack: () => void
+}
+
+/** Host-provided lookup so lane headers deep in the editor tree can show the breadcrumb. */
+export const SubagentLaneViewContext = createContext<(chatId: string) => ChatLaneHeaderSubagentView | null>(
+  () => null
+)
 
 export interface ChatLaneHeaderProps {
   /** Open chats in this session. */
@@ -28,6 +44,58 @@ export interface ChatLaneHeaderProps {
   readonly onToggleFollowAgent?: (enabled: boolean) => void
   /** Rendered in the subagent slot, e.g. a `SubagentChip`. */
   readonly subagentSlot?: ReactNode
+  /** When set, the header shows `<chat> › <agent> ▾` with a `← Main` button; Esc also goes back. */
+  readonly subagentView?: ChatLaneHeaderSubagentView | null
+}
+
+function SubagentBreadcrumb({ title, view }: { readonly title: string; readonly view: ChatLaneHeaderSubagentView }) {
+  const current = view.siblings.find((sibling) => sibling.id === view.selectedId)
+  return (
+    <div data-testid="subagent-breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 text-xs">
+      <span className="min-w-0 max-w-[40%] truncate text-muted-foreground">{title}</span>
+      <ChevronRight className="size-3 flex-none text-dim" />
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="subagent-crumb"
+            aria-label="Switch subagent"
+            className="min-w-0 justify-start gap-1 px-2 text-xs"
+          >
+            <span className="min-w-0 truncate font-medium text-text-bright">{current?.agent ?? "Subagent"}</span>
+            <ChevronDown className="size-3 flex-none text-dim" />
+          </Button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="start"
+            sideOffset={6}
+            collisionPadding={8}
+            className="z-50 flex min-w-[220px] max-w-[calc(100vw-1rem)] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
+          >
+            {view.siblings.map((sibling) => (
+              <DropdownMenu.Item
+                key={sibling.id}
+                data-testid={`subagent-crumb-option-${sibling.id}`}
+                onSelect={() => view.onSwitch(sibling.id)}
+                className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+              >
+                <span className={cn("min-w-0 flex-1 truncate", sibling.id === view.selectedId ? "text-text-bright" : "text-text-body")}>
+                  {sibling.agent} · {sibling.task}
+                </span>
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <span className="flex-1" />
+      {/* Board 20a: bordered "← Main" pill with an Esc hint on the right. */}
+      <Button variant="outline" size="sm" data-testid="subagent-back" onClick={view.onBack} className="flex-none gap-1.5 px-2">
+        <ArrowLeft className="size-3" /> Main <Kbd>Esc</Kbd>
+      </Button>
+    </div>
+  )
 }
 
 /**
@@ -46,16 +114,35 @@ export function ChatLaneHeader({
   onCloseChat,
   followAgent = false,
   onToggleFollowAgent,
-  subagentSlot
+  subagentSlot,
+  subagentView
 }: ChatLaneHeaderProps) {
+  const rootRef = useRef<HTMLDivElement>(null)
+  const onBack = subagentView?.onBack
+  // Esc returns to main unless something (composer menu, open dropdown) already consumed it,
+  // and only for the focused editor group so sibling lanes are left alone.
+  useEffect(() => {
+    if (!onBack) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      const group = rootRef.current?.closest('[data-testid="editor-group"]')
+      if (group && !group.hasAttribute("data-focused")) return
+      onBack()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [onBack])
+
   const activeChat = chats.find((chat) => chat.id === activeChatId)
   const activeTitle = activeChat?.title ?? "Chat"
 
   return (
     <div
+      ref={rootRef}
       data-testid="chat-lane-header"
       className="flex h-10 flex-none items-center gap-2 border-b border-hairline bg-sunken/70 px-3"
     >
+      {subagentView ? <SubagentBreadcrumb title={activeTitle} view={subagentView} /> : (
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <Button
@@ -116,6 +203,7 @@ export function ChatLaneHeader({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      )}
 
       <Button
         variant="ghost"

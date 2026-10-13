@@ -141,4 +141,50 @@ describe("ChatLaneHeader", () => {
 
     expect(screen.getByTestId("subagent-slot")).toBeTruthy()
   })
+
+  describe("subagent breadcrumb", () => {
+    const siblings = [
+      { id: "a", agent: "Scout", task: "Survey the tab bar" },
+      { id: "b", agent: "Auditor", task: "Audit the theme tokens" }
+    ]
+    const renderCrumb = (over: { onSwitch?: () => void; onBack?: () => void } = {}) =>
+      render(
+        <ChatLaneHeader
+          chats={[{ id: "chat-1", title: "Main workspace" }]}
+          activeChatId="chat-1"
+          onSelectChat={vi.fn()}
+          onCreateChat={vi.fn()}
+          subagentView={{
+            selectedId: "a",
+            siblings,
+            onSwitch: over.onSwitch ?? vi.fn(),
+            onBack: over.onBack ?? vi.fn()
+          }}
+        />
+      )
+
+    it("shows chat title and agent instead of the thread switcher", () => {
+      renderCrumb()
+      expect(screen.getByTestId("subagent-breadcrumb").textContent).toContain("Main workspace")
+      expect(screen.getByTestId("subagent-crumb").textContent).toContain("Scout")
+      expect(screen.queryByTestId("thread-switcher")).toBeNull()
+    })
+
+    it("goes back from the ← Main button and on Escape", () => {
+      const onBack = vi.fn()
+      renderCrumb({ onBack })
+      fireEvent.click(screen.getByTestId("subagent-back"))
+      expect(onBack).toHaveBeenCalledTimes(1)
+      fireEvent.keyDown(window, { key: "Escape" })
+      expect(onBack).toHaveBeenCalledTimes(2)
+    })
+
+    it("switches to a sibling from the ▾ menu", () => {
+      const onSwitch = vi.fn()
+      renderCrumb({ onSwitch })
+      fireEvent.pointerDown(screen.getByTestId("subagent-crumb"), { button: 0, ctrlKey: false })
+      fireEvent.click(screen.getByTestId("subagent-crumb-option-b"))
+      expect(onSwitch).toHaveBeenCalledWith("b")
+    })
+  })
 })

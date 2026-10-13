@@ -18,6 +18,7 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
   memo,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -49,7 +50,7 @@ import type { TabBadge } from "./tab-contributions.js"
 import { matchNewTabChord } from "./app-shortcuts.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
-import { ChatLaneHeader, type ChatLaneHeaderChat } from "./chat-lane-header.js"
+import { ChatLaneHeader, SubagentLaneViewContext, type ChatLaneHeaderChat } from "./chat-lane-header.js"
 
 export interface EditorTabMeta {
   readonly label: string
@@ -435,6 +436,7 @@ const EditorGroup = memo(function EditorGroup({
 }) {
   const [width, setWidth] = useState(0)
   const sectionRef = useRef<HTMLElement>(null)
+  const resolveSubagentView = useContext(SubagentLaneViewContext)
   
   useEffect(() => {
     const section = sectionRef.current
@@ -509,6 +511,7 @@ const EditorGroup = memo(function EditorGroup({
             followAgent={api.followAgent}
             onToggleFollowAgent={api.onToggleFollowAgent}
             subagentSlot={api.renderSubagentChip?.((active as Extract<SessionSurface, { kind: "chat" }>).id)}
+            subagentView={resolveSubagentView((active as Extract<SessionSurface, { kind: "chat" }>).id)}
           />
           <Launcher api={api} />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}

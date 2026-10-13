@@ -78,7 +78,7 @@ import {
   useExplanationSessions,
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
-import { SessionSubagentTabs } from "./session-chat-tabs.js";
+import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-tabs.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -1498,6 +1498,7 @@ function AuthedApp({
         </div>
       )}
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
+      <SubagentLaneViewProvider>
       <JinglerApp
         onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
         tabContributions={pluginTabs}
@@ -1923,7 +1924,6 @@ function AuthedApp({
           <TerminalDockView session={session} visible={visible} embedded />
         )}
         onFocusChat={(sessionId, chatId) => {
-          selectSubagentTab(sessionId, chatId, "main");
           const session = sessions.find((candidate) => candidate.id === sessionId);
           if (!session || session.activeChatId === chatId) return;
           queueSessionChatMutation(sessionId, () => rpc.sessionsSelectChat(sessionId, chatId));
@@ -1941,6 +1941,7 @@ function AuthedApp({
         )}
         version={window.jingler.appVersion}
       />
+      </SubagentLaneViewProvider>
       {sessionMutationError !== null && (
         <div
           role="alert"

@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-li
 import type { Session, SubagentFleetNode } from "@jingler/core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { SessionSubagentTabs } from "./session-chat-tabs.js"
-import { clearSubagentTabs, publishSubagentTabs, useSubagentTabSelection } from "./subagent-tab-store.js"
+import { clearSubagentTabs, publishSubagentTabs, useSubagentViewSelections } from "./subagent-tab-store.js"
 
 const session = {
   id: "session-1",
@@ -89,17 +89,17 @@ describe("SessionSubagentTabs", () => {
     }))
     const onSelectConversation = vi.fn()
     render(<SessionSubagentTabs session={session} onSelectConversation={onSelectConversation} />)
-    const selection = renderHook(() => useSubagentTabSelection(session.id))
+    const selection = renderHook(() => useSubagentViewSelections())
     expect(screen.getByTestId("subagent-chip").textContent).toContain("1 subagent")
 
     openChip()
     fireEvent.click(screen.getByTestId(`subagent-chip-row-${worker.id}`))
-    expect(selection.result.current).toMatchObject({ chatId: "chat-1", nodeId: worker.id })
+    expect(selection.result.current).toEqual({ "chat-1": worker.id })
     expect(onSelectConversation).toHaveBeenCalledOnce()
 
     openChip()
     fireEvent.click(screen.getByTestId(`subagent-chip-row-${reviewer.id}`))
-    expect(selection.result.current).toMatchObject({ chatId: "chat-1", nodeId: reviewer.id })
+    expect(selection.result.current).toEqual({ "chat-1": reviewer.id })
   })
 
   it("shows only children of the active chat", () => {
