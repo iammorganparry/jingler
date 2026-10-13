@@ -17,7 +17,8 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 }]
 
 const openPreviousChats = async (window: Parameters<typeof appShell>[0]) => {
-  await window.getByRole("button", { name: "Previous subagents" }).click()
+  // #460: finished children live in the lane-header chip's popover ("Finished · N").
+  await window.getByTestId("subagent-chip").first().click()
 }
 
 test("completed compatibility-agent output remains in Previous chats", async ({
@@ -28,11 +29,11 @@ test("completed compatibility-agent output remains in Previous chats", async ({
 
   await window.getByPlaceholder("Message the agent…").fill("[[legacy-agent]] inspect compatibility")
   await window.getByPlaceholder("Message the agent…").press("Enter")
-  await expect(window.getByRole("button", { name: "Previous subagents" })).toBeVisible({
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({
     timeout: 15_000
   })
   await openPreviousChats(window)
-  const previous = window.getByRole("menuitem", { name: /Open Legacy Scout/ })
+  const previous = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Legacy Scout/ })
   await expect(previous).toBeVisible()
   await previous.click()
   await expect(window.getByTestId("fleet-agent-transcript")).toContainText(

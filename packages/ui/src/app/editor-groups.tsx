@@ -80,6 +80,8 @@ export interface EditorGroupsProps {
   readonly onCreateChat?: (sessionId: string) => void
   readonly followAgent?: boolean
   readonly onToggleFollowAgent?: (enabled: boolean) => void
+  /** Subagent chip for one chat, rendered in that chat group's lane header. */
+  readonly renderSubagentChip?: (chatId: string) => ReactNode
 }
 
 type Api = Omit<EditorGroupsProps, "layout" | "revision" | "emptyState"> & { readonly sessionId: string }
@@ -138,7 +140,8 @@ export function EditorGroups(props: EditorGroupsProps) {
       },
       get followAgent() { return latest.current.followAgent },
       get onToggleFollowAgent() { return latest.current.onToggleFollowAgent },
-      get onCreateChat() { return latest.current.onCreateChat }
+      get onCreateChat() { return latest.current.onCreateChat },
+      get renderSubagentChip() { return latest.current.renderSubagentChip }
     }),
     [props.sessionId]
   )
@@ -505,6 +508,7 @@ const EditorGroup = memo(function EditorGroup({
             }}
             followAgent={api.followAgent}
             onToggleFollowAgent={api.onToggleFollowAgent}
+            subagentSlot={api.renderSubagentChip?.((active as Extract<SessionSurface, { kind: "chat" }>).id)}
           />
           <Launcher api={api} />
           {api.onOpenCheckpoints ? <ConversationActions onOpen={api.onOpenCheckpoints} /> : null}

@@ -181,7 +181,7 @@ export interface SessionPaneProps {
    * `renderConversation` is wired. Falls back again to the seeded transcript.
    */
   conversationPane?: ReactNode
-  /** Render children of the selected top-level agent in a second tab row. */
+  /** Render the subagent chip for one chat in the lane header. */
   renderSubagentTabs?: (
     session: Session,
     ctx: {
@@ -445,11 +445,6 @@ function renderEditorBody(
     surface.kind === "chat" ? conversationContribution : contributions.find((candidate) => candidate.id === surface.id)
   return (
     <>
-      {surface.kind === "chat" &&
-        props.renderSubagentTabs?.(paneSession, {
-          activeTabId: BUILTIN_TAB.conversation,
-          onSelectConversation: () => openSurface(surface)
-        })}
       <SurfaceContent
         session={active}
         chatId={chatId}
@@ -996,6 +991,11 @@ function SessionPaneBody(props: SessionPaneProps) {
           onCreateChat={props.onCreateChat}
           followAgent={props.followAgent}
           onToggleFollowAgent={props.onToggleFollowAgent}
+          renderSubagentChip={(chatId) =>
+            props.renderSubagentTabs?.(chatId === active.activeChatId ? active : { ...active, activeChatId: chatId }, {
+              activeTabId: BUILTIN_TAB.conversation,
+              onSelectConversation: () => openSurface({ kind: "chat", id: chatId })
+            })}
         />
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
         {viewRailTarget === null ? viewRail : null}

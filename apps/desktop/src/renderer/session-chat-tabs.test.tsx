@@ -61,15 +61,15 @@ afterEach(() => {
   clearSubagentTabs(session.id)
 })
 
+const openChip = () => fireEvent.pointerDown(screen.getByTestId("subagent-chip"), { button: 0, ctrlKey: false })
+
 describe("SessionSubagentTabs", () => {
-  it("does not mark a subagent selected while Files owns the pane", () => {
-    const worker = subagentNode()
-    act(() => publishSubagentTabs(session.id, { chatId: "chat-1", active: [worker], completed: [], selectedId: worker.id }))
-    render(<SessionSubagentTabs session={session} filesActive onSelectConversation={vi.fn()} />)
-    expect(screen.getByRole("button", { name: "worker · Implement tabs" }).getAttribute("aria-current")).toBeNull()
+  it("renders nothing when the active chat has no subagents", () => {
+    render(<SessionSubagentTabs session={session} onSelectConversation={vi.fn()} />)
+    expect(screen.queryByTestId("subagent-chip")).toBeNull()
   })
 
-  it("selects live and completed workers for the active chat", () => {
+  it("opens live and completed workers for the active chat from the chip popover", () => {
     const worker = subagentNode()
     const reviewer = subagentNode({
       id: "parent/reviewer-1",
@@ -90,13 +90,15 @@ describe("SessionSubagentTabs", () => {
     const onSelectConversation = vi.fn()
     render(<SessionSubagentTabs session={session} onSelectConversation={onSelectConversation} />)
     const selection = renderHook(() => useSubagentTabSelection(session.id))
+    expect(screen.getByTestId("subagent-chip").textContent).toContain("1 subagent")
 
-    fireEvent.click(screen.getByRole("button", { name: "worker · Implement tabs" }))
+    openChip()
+    fireEvent.click(screen.getByTestId(`subagent-chip-row-${worker.id}`))
     expect(selection.result.current).toMatchObject({ chatId: "chat-1", nodeId: worker.id })
     expect(onSelectConversation).toHaveBeenCalledOnce()
 
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Previous subagents" }), { button: 0, ctrlKey: false })
-    fireEvent.click(screen.getByRole("menuitem", { name: "Open reviewer · Review tabs" }))
+    openChip()
+    fireEvent.click(screen.getByTestId(`subagent-chip-row-${reviewer.id}`))
     expect(selection.result.current).toMatchObject({ chatId: "chat-1", nodeId: reviewer.id })
   })
 
@@ -108,11 +110,14 @@ describe("SessionSubagentTabs", () => {
     })
     const both = { ...session, chats: [...session.chats, second] }
     const view = render(<SessionSubagentTabs session={both} onSelectConversation={vi.fn()} />)
-    expect(screen.getByRole("button", { name: /Agent A task/ })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /Agent B task/ })).toBeNull()
+    openChip()
+    expect(screen.getByTestId("subagent-chip-row-worker-a")).toBeTruthy()
+    expect(screen.queryByTestId("subagent-chip-row-worker-b")).toBeNull()
+    view.unmount()
 
-    view.rerender(<SessionSubagentTabs session={{ ...both, activeChatId: "chat-2" }} onSelectConversation={vi.fn()} />)
-    expect(screen.queryByRole("button", { name: /Agent A task/ })).toBeNull()
-    expect(screen.getByRole("button", { name: /Agent B task/ })).toBeTruthy()
+    render(<SessionSubagentTabs session={{ ...both, activeChatId: "chat-2" }} onSelectConversation={vi.fn()} />)
+    openChip()
+    expect(screen.queryByTestId("subagent-chip-row-worker-a")).toBeNull()
+    expect(screen.getByTestId("subagent-chip-row-worker-b")).toBeTruthy()
   })
 })
