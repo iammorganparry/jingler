@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest"
 import {
   checkClaudeSubscription,
   claudeCliArguments,
+  readClaudeLogin,
   createClaudeCliStreamSimple
 } from "./claude-cli-provider.js"
 
@@ -96,6 +97,25 @@ console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firs
     await expect(checkClaudeSubscription(api, process.env)).rejects.toThrow(
       "not authenticated with a subscription"
     )
+  })
+
+  it("confirms the api billing route for Enterprise and Console logins instead of failing", async () => {
+    // Shape of `claude auth status` (Claude Code 2.1.x) for an Enterprise seat.
+    const enterprise = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",orgName:"Acme",subscriptionType:"enterprise"}))
+`)
+    await expect(readClaudeLogin(enterprise, process.env)).resolves.toEqual({
+      route: "api",
+      planLabel: "Enterprise · API pricing"
+    })
+    const consoleLogin = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"api_key",apiProvider:"firstParty",apiKeySource:"/login managed key"}))
+`)
+    await expect(readClaudeLogin(consoleLogin, process.env)).resolves.toMatchObject({ route: "api" })
+    const max = await executable(`
+console.log(JSON.stringify({loggedIn:true,authMethod:"claude.ai",apiProvider:"firstParty",subscriptionType:"max"}))
+`)
+    await expect(readClaudeLogin(max, process.env)).resolves.toMatchObject({ route: "subscription" })
   })
 
   it("distinguishes a missing CLI from a signed-out CLI", async () => {

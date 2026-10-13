@@ -29,10 +29,13 @@ import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
   loggedIn: Schema.Boolean,
-  authMethod: Schema.Literal("claude.ai"),
+  authMethod: Schema.Literal("claude.ai", "api_key"),
   apiProvider: Schema.Literal("firstParty"),
-  subscriptionType: Schema.Literal("pro", "max", "team", "enterprise")
+  subscriptionType: Schema.optional(Schema.Literal("pro", "max", "team", "enterprise")),
+  apiKeySource: Schema.optional(Schema.String)
 })
+/** `claude auth login --console` stores its key under this source (not ANTHROPIC_API_KEY). */
+const CONSOLE_LOGIN_KEY_SOURCE = "/login managed key"
 const ClaudeStreamDelta = Schema.Struct({
   type: Schema.Literal("stream_event"),
   event: Schema.Struct({
@@ -81,11 +84,20 @@ const subscriptionEnvironment = (
   return sanitized
 }
 
-export const checkClaudeSubscription = async (
+export interface ClaudeLogin {
+  readonly route: "subscription" | "api"
+  readonly planLabel: string
+}
+
+/**
+ * Reads `claude auth status`. Enterprise logins are billed per token at API
+ * rates and report no subscription windows, so they confirm the `api` route.
+ */
+export const readClaudeLogin = async (
   binary: string,
   environment: NodeJS.ProcessEnv,
   signal?: AbortSignal
-): Promise<void> => {
+): Promise<ClaudeLogin> => {
   let stdout: string
   try {
     stdout = await execFileText(binary, ["auth", "status"], { env: environment, timeout: 5_000, signal })
@@ -103,15 +115,33 @@ export const checkClaudeSubscription = async (
   }
   const status = Option.getOrNull(decodeAuthStatus(parsed))
   if (status === null || !status.loggedIn) throw new Error("Claude CLI is not authenticated with a subscription")
+  if (status.authMethod === "api_key") {
+    if (status.apiKeySource !== CONSOLE_LOGIN_KEY_SOURCE) {
+      throw new Error("Claude CLI is not authenticated with a subscription")
+    }
+    return { route: "api", planLabel: "Console · API pricing" }
+  }
+  if (status.subscriptionType === undefined) throw new Error("Claude CLI is not authenticated with a subscription")
+  return status.subscriptionType === "enterprise"
+    ? { route: "api", planLabel: "Enterprise · API pricing" }
+    : { route: "subscription", planLabel: "Claude subscription" }
+}
+
+export const checkClaudeSubscription = async (
+  binary: string,
+  environment: NodeJS.ProcessEnv,
+  signal?: AbortSignal
+): Promise<void> => {
+  await readClaudeLogin(binary, environment, signal)
 }
 
 export const verifyLocalClaudeSubscription = (
   options: Pick<ClaudeCliProviderOptions, "binary" | "environment"> & {
     readonly signal?: AbortSignal
   } = {}
-): Promise<void> => {
+): Promise<ClaudeLogin> => {
   const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
-  return checkClaudeSubscription(
+  return readClaudeLogin(
     binary,
     subscriptionEnvironment(options.environment ?? process.env),
     options.signal
