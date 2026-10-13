@@ -48,7 +48,7 @@ test("Create PR shows the Base selector and publishes against the chosen base", 
     return s[0]?.semanticBranchPending
   }, { timeout: 25_000 }).toBe(false)
 
-  await window.getByTestId("view-tab-pr").click()
+  await window.getByTestId("header-view-checks").click()
   // No stack yet: the Base selector defaults to the session's base branch.
   await expect(window.getByLabel("Select base branch for pull request")).toContainText("main")
   await window.getByRole("button", { name: /publish pull request/i }).click()

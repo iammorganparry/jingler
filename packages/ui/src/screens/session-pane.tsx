@@ -34,7 +34,6 @@ import {
 import { ConversationView } from "../app/conversation-view.js"
 import { SEED_CONVERSATION } from "../seed.js"
 import { BuiltinStubScreen } from "./stub-screen.js"
-import { ViewRail, type ViewRailMenu } from "../app/view-rail.js"
 import { HeaderLinkChips, HeaderViewButtons, type HeaderLinkChip, type HeaderViewItem } from "../app/header-view-buttons.js"
 import { ViewOverflowMenu } from "../app/view-overflow-menu.js"
 import {
@@ -74,6 +73,7 @@ import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchHe
 import { AskPill } from "../components/ask-pill.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
+import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
 
 const issueMenuValue = (issue: IssueReference): string =>
   `${issue.providerId}:${issue.providerAccountId ?? ""}:${issue.id}`
@@ -252,10 +252,10 @@ export interface SessionPaneProps {
   onCloseUntouchedChat?: (sessionId: string, chatId: string) => void
   /** Open the repository file picker for this session (the "+" menu's File entry). */
   onOpenFilePicker?: (sessionId: string) => void
-  /** Persist selection of a provider-scoped issue from the right view rail. */
+  /** Persist selection of a provider-scoped issue from the header issue picker. */
   onSelectIssue?: (sessionId: string, issue: IssueIdentity) => void
-  /** Optional pickers anchored to right-rail view icons, keyed by tab id. */
-  viewRailMenus?: Readonly<Record<TabKey, ViewRailMenu | undefined>>
+  /** Plugin-supplied linked-issue pickers shown in the header, keyed by tab id; overrides the derived ones. */
+  issueMenus?: Readonly<Record<TabKey, IssueMenu | undefined>>
   /** Pinned header view ids in order (`Config.headerViews`). Absent hides the header buttons. */
   headerViews?: ReadonlyArray<string>
   /** Persist a new pinned set, from the overflow menu's "Pin to header". */
@@ -347,42 +347,39 @@ const tabOf = (surface: SessionSurface): TabKey =>
     ? surface.id
     : BUILTIN_TAB.conversation
 
-function buildProviderMenus(
+/** A linked-issue picker for one issue-provider tab: derived from the session's linked issues, or supplied by a plugin. */
+export interface IssueMenu {
+  readonly value: string
+  readonly ariaLabel: string
+  readonly items: ReadonlyArray<LinkedIssueSelectorItem>
+  readonly onSelect: (value: string) => void
+}
+
+function buildIssueMenu(
   session: Session,
-  tabs: ReadonlyArray<TabContribution>,
+  contribution: TabContribution | undefined,
   onSelectIssue: SessionPaneProps["onSelectIssue"]
-): Record<TabKey, ViewRailMenu | undefined> {
-  const providerMenus: Record<TabKey, ViewRailMenu | undefined> = {}
-  if (!onSelectIssue) return providerMenus
+): IssueMenu | undefined {
+  const providerId = contribution?.issueProviderId
+  if (!providerId || !onSelectIssue) return undefined
+  const issues = issueReferencesOf(session).filter((issue) => issue.providerId === providerId)
+  if (issues.length < 2) return undefined
   const selectedIssue = issueReferenceOf(session)
-  for (const contribution of tabs) {
-    const providerId = contribution.issueProviderId
-    if (!providerId) continue
-    const issues = issueReferencesOf(session).filter((issue) => issue.providerId === providerId)
-    if (issues.length < 2) continue
-    const selected = selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
-    providerMenus[contribution.id] = {
-      value: issueMenuValue(selected),
-      ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
-      options: issues.map((issue) => ({
-        value: issueMenuValue(issue),
-        label: issue.identifier,
-        description: issue.title,
-        ariaLabel: `${issue.identifier} ${issue.title}`,
-        searchText: `${issue.identifier} ${issue.title}`
-      })),
-      onSelect: (value) => {
-        const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
-        if (!issue) return
-        onSelectIssue(session.id, {
-          providerId: issue.providerId,
-          ...(issue.providerAccountId ? { providerAccountId: issue.providerAccountId } : {}),
-          id: issue.id
-        })
-      }
+  const selected = selectedIssue?.providerId === providerId ? selectedIssue : issues[0]!
+  return {
+    value: issueMenuValue(selected),
+    ariaLabel: `Select linked ${providerId[0]?.toUpperCase() ?? ""}${providerId.slice(1)} issue`,
+    items: issues.map((issue) => ({ value: issueMenuValue(issue), identifier: issue.identifier, title: issue.title })),
+    onSelect: (value) => {
+      const issue = issues.find((candidate) => issueMenuValue(candidate) === value)
+      if (!issue) return
+      onSelectIssue(session.id, {
+        providerId: issue.providerId,
+        ...(issue.providerAccountId ? { providerAccountId: issue.providerAccountId } : {}),
+        id: issue.id
+      })
     }
   }
-  return providerMenus
 }
 
 const chatTitleOf = (session: Session, chatId: string): string => {
@@ -540,11 +537,6 @@ function SessionPaneBody(props: SessionPaneProps) {
   const sessionId = active.id
   const mainChatId = active.chats[0]?.id
   const fallbackChatSurface: SessionSurface = { kind: "chat", id: active.activeChatId }
-  const [viewRailTarget, setViewRailTarget] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    if (typeof document === "undefined") return
-    setViewRailTarget(document.getElementById("session-view-rail-portal"))
-  }, [])
   const [headerViewsTarget, setHeaderViewsTarget] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     if (typeof document === "undefined") return
@@ -785,7 +777,6 @@ function SessionPaneBody(props: SessionPaneProps) {
         contribution.id !== BUILTIN_TAB.conversation
     )
     .map((contribution) => describeTab(contribution, tabCtx))
-  const viewRailMenus = { ...buildProviderMenus(active, tabs, props.onSelectIssue), ...props.viewRailMenus }
 
   
 
@@ -900,11 +891,12 @@ function SessionPaneBody(props: SessionPaneProps) {
     return group && activeSurface(group)
   }
 
-  const viewRail = <ViewRail tabs={railTabs} active={activeTab} onChange={selectTab} menus={viewRailMenus} />
-
+  // The built-in Pull Request tab is the header's Checks view (spec §3c).
+  const headerIdOf = (tabId: TabKey): string => (tabId === BUILTIN_TAB.pr ? "checks" : tabId)
+  const tabIdOf = (headerId: string): TabKey => (headerId === "checks" ? BUILTIN_TAB.pr : headerId)
   const headerItems: ReadonlyArray<HeaderViewItem> = railTabs.map((tab) => ({
-    id: tab.id,
-    label: tab.label,
+    id: headerIdOf(tab.id),
+    label: tab.id === BUILTIN_TAB.pr ? "Checks" : tab.label,
     icon: tab.icon,
     ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
     ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
@@ -918,7 +910,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     if (!paneFocused) return
     const onKeyDown = (e: KeyboardEvent) => {
       const position = matchHeaderViewChord(e)
-      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : pinnedHeaderItems[position]?.id
+      const target = matchChangesChord(e) ? BUILTIN_TAB.changes : position === null ? undefined : (id => id === undefined ? undefined : tabIdOf(id))(pinnedHeaderItems[position]?.id)
       if (target === undefined) return
       e.preventDefault()
       selectTab(target)
@@ -946,23 +938,41 @@ function SessionPaneBody(props: SessionPaneProps) {
       onOpen: () => selectTab(issueTab.id)
     })
   }
+  const issueMenu =
+    props.issueMenus?.[activeTab] ?? buildIssueMenu(active, tabs.find((c) => c.id === activeTab), props.onSelectIssue)
+  const issuePicker = issueMenu ? (
+    <LinkedIssueSelector
+      items={issueMenu.items}
+      value={issueMenu.value}
+      onValueChange={issueMenu.onSelect}
+      variant="compact"
+      ariaLabel={issueMenu.ariaLabel}
+      className="max-w-[160px]"
+    />
+  ) : null
+  const viewButtons =
+    props.headerViews !== undefined && props.onHeaderViewsChange ? (
+      <>
+        <HeaderViewButtons
+          views={pinnedHeaderItems}
+          activeId={headerIdOf(activeTab)}
+          onOpen={(id) => selectTab(tabIdOf(id))}
+        />
+        <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={(id) => selectTab(tabIdOf(id))} onPinnedChange={props.onHeaderViewsChange} />
+      </>
+    ) : null
   const headerViewControls =
-    (props.headerViews !== undefined && props.onHeaderViewsChange) || linkChips.length > 0 ? (
+    issuePicker || viewButtons || linkChips.length > 0 ? (
       <div className="flex items-center gap-0.5">
         <HeaderLinkChips chips={linkChips} />
-        {props.headerViews !== undefined && props.onHeaderViewsChange ? (
-          <>
-            <HeaderViewButtons views={pinnedHeaderItems} activeId={activeTab} onOpen={selectTab} />
-            <ViewOverflowMenu views={headerItems} pinned={pinnedViews} onOpen={selectTab} onPinnedChange={props.onHeaderViewsChange} />
-          </>
-        ) : null}
+        {issuePicker}
+        {viewButtons}
       </div>
     ) : null
 
   return (
     <>
       {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
-      {viewRailTarget !== null && paneFocused ? createPortal(viewRail, viewRailTarget) : null}
       <div className="flex min-h-0 min-w-0 flex-1 flex-row relative">
         {chatLane.showAskPill && (
           <AskPill
@@ -1008,7 +1018,6 @@ function SessionPaneBody(props: SessionPaneProps) {
             })}
         />
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
-        {viewRailTarget === null ? viewRail : null}
       </div>
     </>
   )

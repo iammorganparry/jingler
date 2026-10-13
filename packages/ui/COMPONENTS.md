@@ -208,7 +208,6 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | TitleBar | `app/title-bar.tsx` | Window title bar; draws WindowControls when platform is set and not darwin. | title, actions, platform, windowControls | yes | #394 (3.11) |
 | WindowControls | `app/window-controls.tsx` | Minimize / maximize-restore / close for Windows and Linux; red hover on Close only. | maximized, onMinimize, onToggleMaximize, onClose | yes | #394 (3.11) |
 | TitleSearch | `app/title-search.tsx` | Global sidebar search. | — | no | — |
-| ViewRail | `app/view-rail.tsx` | Right view rail. | — | no | — |
 
 ## Planned (not built yet)
 

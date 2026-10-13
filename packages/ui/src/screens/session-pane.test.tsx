@@ -3,7 +3,8 @@ import { useEffect, useState } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Boxes } from "lucide-react"
 import type { Session } from "@jingler/core"
-import { SessionPane } from "./session-pane.js"
+import { SessionPane as BareSessionPane } from "./session-pane.js"
+import { SessionPaneWithHeaderViews as SessionPane } from "./session-pane-header-views-host.js"
 import { LinearMark } from "../components/linear-mark.js"
 import {
   builtinTabContributions,
@@ -224,28 +225,29 @@ describe("plugin tab contributions", () => {
     expect(screen.getByText("linear.issues body")).toBeTruthy()
   })
 
-  it("passes a right-rail picker through to a plugin tab", () => {
+  it("passes a header picker through to a plugin tab", () => {
     const onSelect = vi.fn()
     render(
       <SessionPane
         session={session({ id: "linear-menu" })}
         renderConversation={() => <div>transcript</div>}
         tabContributions={[pluginTab("linear.issue", { label: "Linear", icon: LinearMark })]}
-        viewRailMenus={{
+        issueMenus={{
           "linear.issue": {
             value: "issue-1",
             ariaLabel: "Select linked Linear issue",
             onSelect,
-            options: [
-              { value: "issue-1", label: "ENG-1", description: "First issue", ariaLabel: "ENG-1 First issue" },
-              { value: "issue-2", label: "ENG-2", description: "Second issue", ariaLabel: "ENG-2 Second issue" }
+            items: [
+              { value: "issue-1", identifier: "ENG-1", title: "First issue" },
+              { value: "issue-2", identifier: "ENG-2", title: "Second issue" }
             ]
           }
         }}
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
     fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
     expect(onSelect).toHaveBeenCalledWith("issue-2")
     expect(screen.getByText("linear.issue body")).toBeTruthy()
@@ -291,7 +293,8 @@ describe("plugin tab contributions", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Select linked Linear issue" }))
+    fireEvent.click(screen.getByRole("button", { name: "Linear" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Select linked Linear issue/ }))
     fireEvent.click(screen.getByRole("option", { name: SECOND_LINEAR_ISSUE }))
     expect(onSelectIssue).toHaveBeenCalledWith("linear-derived-menu", {
       providerId: "linear",
@@ -720,11 +723,11 @@ describe("mount groups", () => {
         renderPullRequest={() => <Body />}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(onMount).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }))
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(onMount).toHaveBeenCalledTimes(1)
   })
 })
@@ -775,21 +778,15 @@ describe("SessionPane", () => {
     expect(screen.getByTestId("chat-lane-header")).toBeTruthy()
   })
 
-  it("moves the focused session view rail into the main frame", () => {
+  it("renders no right view rail", () => {
     render(
-      <>
-        <div id="session-view-rail-portal" />
-        <SessionPane
-          session={session({ id: "a" })}
-          renderConversation={() => <div>transcript</div>}
-        />
-      </>
+      <SessionPane
+        session={session({ id: "a" })}
+        renderConversation={() => <div>transcript</div>}
+      />
     )
 
-    expect(
-      within(document.getElementById("session-view-rail-portal")!).getByTestId("view-rail")
-    ).toBeTruthy()
-    expect(within(screen.getByTestId("editor-groups")).queryByTestId("view-rail")).toBeNull()
+    expect(screen.queryByTestId("view-rail")).toBeNull()
   })
 
   it("portals pinned header view buttons and the overflow menu into the title bar", () => {
@@ -1011,7 +1008,7 @@ describe("SessionPane", () => {
           />
         </div>
         <div data-testid="pane-b">
-          <SessionPane
+          <BareSessionPane
             session={session({ id: "b", prNumber: 2 })}
             renderConversation={(s) => <div>transcript {s.id}</div>}
             renderPullRequest={(s) => <div>pr view {s.id}</div>}
@@ -1022,7 +1019,7 @@ describe("SessionPane", () => {
 
     // Move pane A to its Pull Request tab; pane B must stay on Conversation.
     const paneA = screen.getByTestId("pane-a")
-    fireEvent.click(within(paneA).getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(within(paneA).getByRole("button", { name: /^Checks/ }))
 
     expect(within(paneA).getByText("pr view a")).toBeTruthy()
     expect(within(screen.getByTestId("pane-b")).getByText("transcript b")).toBeTruthy()
@@ -1116,7 +1113,7 @@ describe("SessionPane", () => {
         renderPullRequest={() => <div>review view</div>}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(screen.getByText("review view")).toBeTruthy()
 
     // The PR goes away (merged and unlinked, no worktree) — the tab is no longer visible,
@@ -1141,7 +1138,7 @@ describe("SessionPane", () => {
       />
     )
     const { rerender } = render(pane("a", 1))
-    fireEvent.click(screen.getByRole("button", { name: "Pull Request" }))
+    fireEvent.click(screen.getByRole("button", { name: /^Checks/ }))
     expect(screen.getByText("pr view a")).toBeTruthy()
 
     rerender(pane("b", 2))

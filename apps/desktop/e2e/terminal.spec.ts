@@ -41,7 +41,7 @@ test("opens Terminal as a view tab and its `+` button adds another shell", async
 
   await expect(appShell(window)).toBeVisible()
   await expect(window.locator(".xterm")).toHaveCount(0)
-  await window.getByTestId("view-tab-terminal").click()
+  await window.getByTestId("header-view-terminal").click()
   await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
 
@@ -61,7 +61,7 @@ test("does not respawn a shell after the last terminal and its view tab are clos
   })
 
   await expect(appShell(window)).toBeVisible()
-  await window.getByTestId("view-tab-terminal").click()
+  await window.getByTestId("header-view-terminal").click()
   await expect(window.locator(".xterm").first()).toBeVisible({ timeout: 20_000 })
   await window
     .getByRole("button", { name: "New terminal" })
@@ -70,7 +70,7 @@ test("does not respawn a shell after the last terminal and its view tab are clos
     .click()
   await expect(window.locator(".xterm")).toHaveCount(0)
   await window.getByRole("button", { name: "Close Terminal", exact: true }).click()
-  await window.getByTestId("view-tab-terminal").click()
+  await window.getByTestId("header-view-terminal").click()
   await expect(window.locator(".xterm")).toHaveCount(0)
   await expect(window.getByLabel("New terminal")).toBeVisible()
 })

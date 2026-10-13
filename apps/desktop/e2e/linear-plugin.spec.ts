@@ -88,7 +88,7 @@ const openLinearIssueTab = async (window: Page): Promise<void> => {
   await expect(window.getByTestId("linear-issue-body")).toBeVisible({ timeout: 15_000 })
 }
 
-test("selects and removes one of several linked Linear issues from the right rail", async ({
+test("selects and removes one of several linked Linear issues from the header", async ({
   launchApp
 }) => {
   const linear = await startFakeLinearServer()
@@ -96,6 +96,7 @@ test("selects and removes one of several linked Linear issues from the right rai
     const launched = await launchApp({
       configured: true,
       withRepo: true,
+      config: { headerViews: ["linear.issue"] },
       sessions: ({ repoPath }) => [{
         id: "linear-multi",
         repo: "widget",
@@ -133,6 +134,7 @@ test("selects and removes one of several linked Linear issues from the right rai
     })
     await configureLinear(launched.window)
 
+    await openLinearIssueTab(launched.window)
     await launched.window.getByRole("button", { name: "Select linked Linear issue" }).click()
     await launched.window.getByRole("option", { name: /ENG-124 Document retry policy/ }).click()
     await expect(launched.window.getByRole("heading", { name: "Document retry policy" })).toBeVisible({
@@ -168,6 +170,7 @@ test("links an existing Linear issue and creates a new one from workspace Issue 
     const launched = await launchApp({
       configured: true,
       withRepo: true,
+      config: { headerViews: ["linear.issue"] },
       e2eEnv: { JINGLER_LINEAR_API_URL: linear.url }
     })
 

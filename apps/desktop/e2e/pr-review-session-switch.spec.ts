@@ -23,7 +23,7 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   await window.evaluate(() => localStorage.setItem("jingler:mcp-import-prompt:v1", "done"))
   await window.reload()
   await sessionRow(window, "review session").click()
-  await window.getByRole("button", { name: "Pull Request", exact: true }).click()
+  await window.getByTestId("header-view-checks").click()
   await showPullRequestDetails(window)
   await window.getByRole("button", { name: /Adversarial review/ }).click()
   const running = window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
