@@ -4,6 +4,7 @@ import { Gauge, RefreshCw } from "lucide-react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"
+import { KpiTile, StackedMiniBar } from "../components/kpi-tile.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 
@@ -94,6 +95,50 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
   )
 }
 
+type Groups = UsageReport["groups"]
+
+const sumBy = (groups: Groups, pick: (group: Groups[number]) => number): number =>
+  groups.reduce((sum, group) => sum + pick(group), 0)
+
+/** Run-weighted success rate over groups that report one; null when none do (never invented). */
+const successRateOf = (groups: Groups): number | null => {
+  const rated = groups.filter((group) => group.successRate !== null)
+  const runs = sumBy(rated, (group) => group.runCount)
+  return runs === 0 ? null : sumBy(rated, (group) => (group.successRate ?? 0) * group.runCount) / runs
+}
+
+const percent = (fraction: number): string => `${Math.round(fraction * 100)}%`
+
+/** Runs, Success rate, Tokens and Known cost; cost is "partial" unless every run priced. */
+function KpiStrip({ groups }: { groups: Groups }) {
+  const runs = sumBy(groups, (group) => group.runCount)
+  const success = successRateOf(groups)
+  const coverage = runs === 0 ? 0 : sumBy(groups, (group) => group.costCoverage * group.runCount) / runs
+  const tokenSplit = [
+    sumBy(groups, (group) => group.inputTokens),
+    sumBy(groups, (group) => group.outputTokens),
+    sumBy(groups, (group) => group.cacheReadTokens + group.cacheWriteTokens),
+    sumBy(groups, (group) => group.reasoningTokens)
+  ]
+  return (
+    <div className="mb-3 grid grid-cols-4 gap-2" data-testid="usage-kpis">
+      <KpiTile label="Runs" value={runs} />
+      <KpiTile label="Success rate" value={success === null ? null : percent(success)} />
+      <KpiTile
+        label="Tokens"
+        value={sumBy(groups, (group) => group.totalTokens).toLocaleString()}
+        delta={<StackedMiniBar label="Tokens: input, output, cache, reasoning" values={tokenSplit} width={80} />}
+      />
+      <KpiTile
+        label="Known cost"
+        value={`$${sumBy(groups, (group) => group.knownCostUsd).toFixed(2)}`}
+        partial={coverage < 1}
+        delta={coverage < 1 ? `cost known for ${percent(coverage)} of runs` : undefined}
+      />
+    </div>
+  )
+}
+
 function ReportSection({ report, onExport }: { report: UsageReport; onExport?: () => Promise<void> | void }) {
   return (
     <div className="border-t border-hairline py-[14px]">
@@ -103,7 +148,8 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
       </div>
       {report.groups.length === 0 ? (
         <div className="text-[11px] text-muted-foreground">No completed parent or child runs recorded.</div>
-      ) : report.groups.map((group) => (
+      ) : <KpiStrip groups={report.groups} />}
+      {report.groups.map((group) => (
         <div key={`${group.runtimeId}:${group.providerId}:${group.modelId}:${group.kind}`} className="flex items-center justify-between py-1 text-[11px] text-muted-foreground">
           <span>{group.runtimeId} · {group.modelId} · {group.kind}</span>
           <span>{group.runCount} runs · {Math.round((group.successRate ?? 0) * 100)}% ok · {group.totalTokens} tokens · {group.toolCalls} tools · {group.costCoverage === 1 ? `$${group.knownCostUsd.toFixed(2)}` : "cost partial"}</span>
