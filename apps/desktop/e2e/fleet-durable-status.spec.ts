@@ -250,7 +250,7 @@ test("durable native status appears as a live subagent tab", async ({
 
     await expect(childView.getByRole("button", { name: /pnpm test exit 0 Bash/ })).toBeVisible()
     await expect(childView.getByText(/Tool result \(command_execute\)/)).toHaveCount(0)
-    await childView.getByRole("button", { expanded: false }).click()
+    await childView.getByRole("button", { name: /pnpm test exit 0 Bash/, expanded: false }).click()
     await expect(childView.getByText("18 tests passed")).toBeVisible()
     const transcriptScroll = childView.getByTestId("fleet-agent-transcript-scroll")
     const bottom = await transcriptScroll.evaluate((element) => {
