@@ -153,8 +153,10 @@ function VirtualListRow<T>({
       id={id}
       role="option"
       aria-selected={active}
-      className={cn("absolute inset-x-0 top-0 cursor-default", active && "bg-surface")}
+      className={cn("absolute inset-x-0 top-0 flex cursor-default items-center", active && "bg-surface")}
       style={style}
+      // Keep focus where it is (e.g. the composer textarea) when a row is pressed.
+      onMouseDown={(event) => event.preventDefault()}
       onMouseMove={() => onActivate(row.key)}
       onClick={() => {
         onActivate(row.key)

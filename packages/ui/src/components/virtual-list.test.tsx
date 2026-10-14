@@ -45,6 +45,9 @@ const pressKey = (key: string, times = 1) => {
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(VIEWPORT)
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(300)
+  // virtual-core clamps scrollTo targets to scrollHeight - clientHeight, both 0 in jsdom.
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(VIEWPORT)
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(40_000)
   // jsdom has no layout: emulate the browser scrolling the element and firing `scroll`.
   Object.defineProperty(HTMLElement.prototype, "scrollTo", {
     configurable: true,
