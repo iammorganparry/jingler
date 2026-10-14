@@ -1,4 +1,4 @@
-import type { Session, SessionDisplayStatus } from "@jingler/core"
+import type { PrState, Session, SessionDisplayStatus } from "@jingler/core"
 
 /**
  * How the sidebar's session list is narrowed and arranged.
@@ -22,6 +22,12 @@ import type { Session, SessionDisplayStatus } from "@jingler/core"
  */
 export type StatusFilter = "active" | "archived" | "all"
 
+/**
+ * Which linked-PR state the list is narrowed to. `any` is no narrowing; `none`
+ * is sessions with no PR at all.
+ */
+export type PrFilter = "any" | PrState | "none"
+
 /** How rows are bucketed. `none` is a flat list with no headers at all. */
 export type GroupBy = "none" | "repo" | "status"
 
@@ -32,6 +38,7 @@ export interface SessionFilters {
   readonly status: StatusFilter
   /** A repo name, or null for "every repository". */
   readonly repo: string | null
+  readonly pr: PrFilter
   readonly groupBy: GroupBy
   readonly sortBy: SortBy
 }
@@ -46,6 +53,7 @@ export interface SessionFilters {
 export const DEFAULT_FILTERS: SessionFilters = {
   status: "active",
   repo: null,
+  pr: "any",
   groupBy: "status",
   sortBy: "status"
 }
@@ -54,6 +62,15 @@ export const STATUS_LABEL: Record<StatusFilter, string> = {
   active: "Active",
   archived: "Archived",
   all: "All"
+}
+
+export const PR_LABEL: Record<PrFilter, string> = {
+  any: "Any",
+  open: "Open",
+  draft: "Draft",
+  merged: "Merged",
+  closed: "Closed",
+  none: "No PR"
 }
 
 export const GROUP_BY_LABEL: Record<GroupBy, string> = {
@@ -103,6 +120,31 @@ const matchesQuery = (s: Session, q: string): boolean =>
   s.repo.toLowerCase().includes(q)
 
 /**
+ * The state of a session's linked PR as the persisted record knows it.
+ *
+ * A PR whose state hasn't been read yet counts as "open": it exists and nothing
+ * has said it merged or closed. Callers holding live PR state (the sidebar's
+ * `prStates`) pass their own resolver to `filterSessions` instead.
+ */
+export const sessionPrState = (s: Session): PrState | "none" => {
+  if (s.prNumber === null && !s.prs?.length) return "none"
+  return s.prs?.at(-1)?.state ?? "open"
+}
+
+const keeps = (
+  s: Session,
+  q: string,
+  filters: SessionFilters,
+  prStateOf: (s: Session) => PrState | "none"
+): boolean => {
+  if (filters.status === "active" && s.archived) return false
+  if (filters.status === "archived" && !s.archived) return false
+  if (filters.repo !== null && s.repo !== filters.repo) return false
+  if (filters.pr !== "any" && prStateOf(s) !== filters.pr) return false
+  return !q || matchesQuery(s, q)
+}
+
+/**
  * Narrow `sessions` by the query and the filter set.
  *
  * Order of the two is irrelevant (both are predicates) but keeping them in one
@@ -111,16 +153,11 @@ const matchesQuery = (s: Session, q: string): boolean =>
 export const filterSessions = (
   sessions: ReadonlyArray<Session>,
   query: string,
-  filters: SessionFilters
+  filters: SessionFilters,
+  prStateOf: (s: Session) => PrState | "none" = sessionPrState
 ): ReadonlyArray<Session> => {
   const q = query.trim().toLowerCase()
-  return sessions.filter((s) => {
-    if (filters.status === "active" && s.archived) return false
-    if (filters.status === "archived" && !s.archived) return false
-    if (filters.repo !== null && s.repo !== filters.repo) return false
-    if (q && !matchesQuery(s, q)) return false
-    return true
-  })
+  return sessions.filter((s) => keeps(s, q, filters, prStateOf))
 }
 
 /**
@@ -226,30 +263,41 @@ export const groupSessions = (
 
 export const FILTERS_STORAGE_KEY = "sb.sidebar.filters.v2"
 
+/** Per-project key; no project is the shared (legacy) key. */
+const filtersKey = (projectId: string | undefined): string =>
+  projectId === undefined ? FILTERS_STORAGE_KEY : `${FILTERS_STORAGE_KEY}.${projectId}`
+
 const isStatus = (v: unknown): v is StatusFilter =>
   v === "active" || v === "archived" || v === "all"
 const isGroupBy = (v: unknown): v is GroupBy => v === "none" || v === "repo" || v === "status"
 const isSortBy = (v: unknown): v is SortBy => v === "recency" || v === "name" || v === "status"
+const isPr = (v: unknown): v is PrFilter => typeof v === "string" && v in PR_LABEL
 
 /**
- * Read the persisted filters, falling back per-FIELD rather than wholesale.
+ * Read the persisted filters for a project, falling back per-FIELD rather than
+ * wholesale.
  *
  * A stored object with one unrecognised value (a filter removed in a later
  * version, a hand-edited store) should lose that one field, not silently reset
- * the other three. Same defensive posture as `split-layout`'s `load`.
+ * the others. Same defensive posture as `split-layout`'s `load`.
+ *
+ * A project with nothing saved yet starts from the shared key (what the sidebar
+ * persisted before choices were per-project), then the defaults.
  *
  * `repo` is validated as a string but NOT checked against the repos that
  * currently exist — that check belongs at render time, where the session list is
  * known. See `reconcileRepo`.
  */
-export const loadFilters = (): SessionFilters => {
+export const loadFilters = (projectId?: string): SessionFilters => {
   try {
-    const raw = localStorage.getItem(FILTERS_STORAGE_KEY)
+    const raw =
+      localStorage.getItem(filtersKey(projectId)) ?? localStorage.getItem(FILTERS_STORAGE_KEY)
     if (raw === null) return DEFAULT_FILTERS
     const parsed = JSON.parse(raw) as Partial<SessionFilters>
     return {
       status: isStatus(parsed.status) ? parsed.status : DEFAULT_FILTERS.status,
       repo: typeof parsed.repo === "string" && parsed.repo !== "" ? parsed.repo : null,
+      pr: isPr(parsed.pr) ? parsed.pr : DEFAULT_FILTERS.pr,
       groupBy: isGroupBy(parsed.groupBy) ? parsed.groupBy : DEFAULT_FILTERS.groupBy,
       sortBy: isSortBy(parsed.sortBy) ? parsed.sortBy : DEFAULT_FILTERS.sortBy
     }
@@ -258,10 +306,10 @@ export const loadFilters = (): SessionFilters => {
   }
 }
 
-/** Persist the filters. Best-effort: a full or absent store is not an error. */
-export const saveFilters = (filters: SessionFilters): void => {
+/** Persist a project's filters. Best-effort: a full or absent store is not an error. */
+export const saveFilters = (filters: SessionFilters, projectId?: string): void => {
   try {
-    localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify(filters))
+    localStorage.setItem(filtersKey(projectId), JSON.stringify(filters))
   } catch {
     /* private mode / quota — the filters are still live for this session */
   }
@@ -288,7 +336,7 @@ export const reconcileRepo = (
 
 /** Whether anything is narrowed — drives the button's "active" dot. */
 export const isNarrowed = (filters: SessionFilters): boolean =>
-  filters.status !== DEFAULT_FILTERS.status || filters.repo !== null
+  filters.status !== DEFAULT_FILTERS.status || filters.repo !== null || filters.pr !== "any"
 
 // ---------------------------------------------------------------------------
 // Menu model
@@ -315,15 +363,15 @@ export interface FilterAxisModel {
 export const ALL_REPOS = "__all__"
 
 /**
- * The four axes, built from the sessions that actually exist.
+ * The five axes, built from the sessions that actually exist.
  *
  * Pure and returned as DATA rather than JSX so the menu's contents can be
  * asserted in a unit test without mounting Radix — which portals, animates, and
  * needs a pointer to open a flyout. The component that renders these is dumb by
  * construction.
  *
- * `separated` splits the menu in two: the first pair NARROW the list (what is
- * shown), the second pair ARRANGE it (how what's shown is laid out). Those are
+ * `separated` splits the menu in two: the first three NARROW the list (what is
+ * shown), the last two ARRANGE it (how what's shown is laid out). Those are
  * different questions and the hairline says so.
  *
  * Counts come from `sessions`, which callers pass already narrowed by the search
@@ -333,7 +381,8 @@ export const ALL_REPOS = "__all__"
 export const sessionFilterAxes = (
   filters: SessionFilters,
   onChange: (next: SessionFilters) => void,
-  sessions: ReadonlyArray<Session>
+  sessions: ReadonlyArray<Session>,
+  prStateOf: (s: Session) => PrState | "none" = sessionPrState
 ): ReadonlyArray<FilterAxisModel> => {
   const repos = repoOptions(sessions)
   const archived = sessions.filter((s) => s.archived).length
@@ -367,6 +416,17 @@ export const sessionFilterAxes = (
         }))
       ],
       onSelect: (v) => onChange({ ...filters, repo: v === ALL_REPOS ? null : v })
+    },
+    {
+      id: "pr",
+      label: "Pull request",
+      value: filters.pr,
+      options: (Object.keys(PR_LABEL) as ReadonlyArray<PrFilter>).map((value) => ({
+        value,
+        label: PR_LABEL[value],
+        count: value === "any" ? sessions.length : sessions.filter((s) => prStateOf(s) === value).length
+      })),
+      onSelect: (v) => onChange({ ...filters, pr: v as PrFilter })
     },
     {
       id: "groupBy",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import type { ReactNode } from "react"
+import type { KeyboardEvent, ReactNode } from "react"
 import { motion } from "motion/react"
 import { SPRING } from "../lib/motion.js"
 import type { Environment, SessionPrStatus, Session, SessionActivity } from "@jingler/core"
@@ -9,8 +9,11 @@ import {
   ArchiveRestore,
   ChevronRight,
   Cloud,
+  Copy,
   GitMerge,
   Monitor,
+  Pencil,
+  SquareTerminal,
   type LucideIcon,
   Trash2
 } from "lucide-react"
@@ -67,6 +70,7 @@ export function SessionRow({
   onArchive,
   onRestore,
   onDelete,
+  onOpenInTerminal,
   expanded,
   onToggleExpanded,
   className
@@ -103,6 +107,8 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Open the session's worktree in its terminal (context menu). */
+  onOpenInTerminal?: (id: string) => void
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
@@ -117,6 +123,8 @@ export function SessionRow({
       <div
         data-testid={`session-row-${session.id}`}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
+        tabIndex={0}
+        onKeyDown={selectOnEnter}
         aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[7px] rounded-lg border px-2.5 py-2 transition-colors",
@@ -330,39 +338,14 @@ export function SessionRow({
          }
 
          function getSessionActions() {
-           if (pendingAction !== null) return ([])
-return ([
-    ...(session.archived
-      ? onRestore
-        ? [
-            {
-              label: "Restore",
-              icon: ArchiveRestore,
-              onSelect: () => onRestore(session.id)
-            }
-          ]
-        : []
-      : onArchive
-        ? [
-            {
-              label: "Archive",
-              icon: Archive,
-              onSelect: runArchive
-            }
-          ]
-        : []),
-    ...(onDelete
-      ? [
-          {
-            label: "Delete",
-            icon: Trash2,
-            tone: "danger" as const,
-            separated: true,
-            onSelect: () => onDelete(session.id)
-          }
-        ]
-      : [])
-  ])
+           if (pendingAction !== null) return []
+           return sessionMenuItems(session, {
+             rename: onRename ? () => setDraft(session.title) : undefined,
+             archive: onArchive ? runArchive : undefined,
+             restore: onRestore ? () => onRestore(session.id) : undefined,
+             openInTerminal: onOpenInTerminal ? () => onOpenInTerminal(session.id) : undefined,
+             remove: onDelete ? () => onDelete(session.id) : undefined
+           })
          }
 
          function getTitle() {
@@ -414,6 +397,11 @@ return ([
   const withMenu = (node: ReactNode) =>
     actions.length > 0 ? <ContextMenu items={actions}>{node}</ContextMenu> : node
 
+  // The row is focusable so its context menu opens from the keyboard (Menu / Shift+F10).
+  const selectOnEnter = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.target === e.currentTarget && e.key === "Enter") onSelect?.(session.id)
+  }
+
   const commit = () => {
     if (draft === null) return
     const next = draft.trim()
@@ -429,6 +417,8 @@ return ([
       <div
         data-testid={`session-row-${session.id}`}
         onClick={() => pendingAction === null && onSelect?.(session.id)}
+        tabIndex={0}
+        onKeyDown={selectOnEnter}
         aria-busy={pendingAction !== null}
         className={cn(
           "group relative flex cursor-pointer flex-col gap-[6px] rounded-lg border px-2.5 py-2 transition-colors",
@@ -459,6 +449,29 @@ return ([
     // drag.
     renderActiveRow()
   )
+}
+
+type SessionMenuHandlers = Record<
+  "rename" | "archive" | "restore" | "openInTerminal" | "remove",
+  (() => void) | undefined
+>
+
+/** The row's context-menu items; an item is present only when its handler is. */
+function sessionMenuItems(session: Session, h: SessionMenuHandlers): ContextMenuItem[] {
+  const items: Array<ContextMenuItem | false | undefined> = [
+    !session.archived && h.rename && { label: "Rename", icon: Pencil, onSelect: h.rename },
+    session.archived
+      ? h.restore && { label: "Restore", icon: ArchiveRestore, onSelect: h.restore }
+      : h.archive && { label: "Archive", icon: Archive, onSelect: h.archive },
+    {
+      label: "Copy branch",
+      icon: Copy,
+      onSelect: () => void navigator.clipboard?.writeText(session.branch)
+    },
+    h.openInTerminal && { label: "Open in terminal", icon: SquareTerminal, onSelect: h.openInTerminal },
+    h.remove && { label: "Delete", icon: Trash2, tone: "danger", separated: true, onSelect: h.remove }
+  ]
+  return items.filter((item): item is ContextMenuItem => Boolean(item))
 }
 
 const idleStatus = (status: ReturnType<typeof displayStatusOf>): boolean =>

@@ -18,6 +18,37 @@ const rowOrder = () =>
     el.getAttribute("data-testid")!.replace("session-row-", "")
   )
 
+describe("SessionSidebar row context menu", () => {
+  it("offers Rename, Archive, Copy branch and Open in terminal and wires them", () => {
+    const openInTerminal = vi.fn()
+    const writeText = vi.fn()
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    render(<SessionSidebar activeSessionId={null} onSelect={() => {}} onRename={() => {}}
+      onArchive={() => {}} onOpenInTerminal={openInTerminal}
+      sessions={[session({ id: "m", branch: "feat/m" })]} defaultFilters={DEFAULT_FILTERS} />)
+    fireEvent.contextMenu(screen.getByTestId("session-row-m"))
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "Rename", "Archive", "Copy branch", "Open in terminal"
+    ])
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy branch" }))
+    expect(writeText).toHaveBeenCalledWith("feat/m")
+    fireEvent.contextMenu(screen.getByTestId("session-row-m"))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open in terminal" }))
+    expect(openInTerminal).toHaveBeenCalledWith("m")
+  })
+
+  it("restores per-project filter choices when the project changes", () => {
+    localStorage.clear()
+    localStorage.setItem("sb.sidebar.filters.v2.b", JSON.stringify({ ...DEFAULT_FILTERS, sortBy: "name", groupBy: "none" }))
+    const list = [session({ id: "z", title: "Zed", updatedAt: "2026-07-17T00:00:00.000Z" }), session({ id: "a", title: "Ace" })]
+    const { rerender } = render(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={list} projectId="a" />)
+    expect(rowOrder()).toEqual(["z", "a"])
+    rerender(<SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={list} projectId="b" />)
+    expect(rowOrder()).toEqual(["a", "z"])
+    localStorage.clear()
+  })
+})
+
 describe("SessionSidebar session identity", () => {
   it("renders persistent data as an ordinary session without pin controls", () => {
     const select = vi.fn()

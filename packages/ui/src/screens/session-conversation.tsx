@@ -42,6 +42,12 @@ export interface SessionConversationProps {
   onAddProject?: () => void
   onImportSessions?: () => void
   onNewSessionForProject?: (projectId: string) => void
+  /** Open a project's settings (rail tile context menu). */
+  onOpenProjectSettings?: (projectId: string) => void
+  /** Unregister a project (rail tile context menu; the caller's promise settles the confirm dialog). */
+  onRemoveProject?: (projectId: string) => void | Promise<void>
+  /** Open a session's terminal (row context menu). */
+  onOpenSessionTerminal?: (sessionId: string) => void
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
   environments?: ReadonlyArray<Environment>
   activeSessionId: string | null
@@ -395,6 +401,8 @@ export function SessionConversation(props: SessionConversationProps) {
           onSelect={selectProject}
           onAddProject={props.onAddProject}
           onImportSessions={props.onImportSessions}
+          onOpenSettings={props.onOpenProjectSettings}
+          onRemove={props.onRemoveProject}
         />
       ) : null}
       <SessionSidebar
@@ -411,6 +419,8 @@ export function SessionConversation(props: SessionConversationProps) {
             : <div className="p-4 text-[12px] text-dim">Select a session to explore its worktree.</div>
         }
         sessions={projectSessions}
+        projectId={selectedProjectId}
+        onOpenInTerminal={props.onOpenSessionTerminal}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
         onSelect={props.onSelectSession}

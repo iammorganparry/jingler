@@ -1,7 +1,7 @@
 import { Spin } from "../components/spin.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
-import type { DiffStat, Environment, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
@@ -49,6 +49,7 @@ import {
   reconcileRepo,
   saveFilters,
   sessionFilterAxes,
+  sessionPrState,
   type SessionFilters
 } from "./session-filters.js"
 
@@ -163,6 +164,10 @@ export interface SessionSidebarProps {
    * used by the app — there, the persisted set IS the right starting point.
    */
   defaultFilters?: SessionFilters
+  /** The project whose sessions this lists — filter and sort choices persist per project. */
+  projectId?: string
+  /** Open a session's worktree in a terminal (row context menu). */
+  onOpenInTerminal?: (sessionId: string) => void
 }
 
 const updateAccessibleLabel = (update: SidebarUpdate): string => {
@@ -365,6 +370,8 @@ function SidebarBody({
   releaseNotes,
   whatsNew,
   defaultFilters,
+  projectId,
+  onOpenInTerminal,
   pullRequestsActive = false,
   onOpenPullRequests,
   issuesActive = false,
@@ -599,13 +606,31 @@ return (renderExpandedGroupHeading())
   }
 
   const [filters, setFiltersState] = React.useState<SessionFilters>(
-    () => defaultFilters ?? loadFilters()
+    () => defaultFilters ?? loadFilters(projectId)
+  )
+  // Choices are per project: switching project swaps in that project's saved set
+  // (adjusting state during render, so no frame shows the old project's filters).
+  const [filtersProject, setFiltersProject] = React.useState(projectId)
+  if (filtersProject !== projectId) {
+    setFiltersProject(projectId)
+    setFiltersState(defaultFilters ?? loadFilters(projectId))
+  }
+
+  const setFilters = React.useCallback(
+    (next: SessionFilters) => {
+      setFiltersState(next)
+      saveFilters(next, projectId)
+    },
+    [projectId]
   )
 
-  const setFilters = React.useCallback((next: SessionFilters) => {
-    setFiltersState(next)
-    saveFilters(next)
-  }, [])
+  // The PR state a session shows on its row: live read when we have one, else
+  // the persisted record.
+  const prStateOf = React.useCallback(
+    (s: Session): PrState | "none" =>
+      s.prNumber === null && !s.prs?.length ? "none" : (prStates?.[s.id]?.state ?? sessionPrState(s)),
+    [prStates]
+  )
 
   // A persisted repo filter outlives the sessions that justified it. Left alone
   // it would empty the sidebar with no visible cause — the filter naming the
@@ -635,8 +660,8 @@ return (renderExpandedGroupHeading())
   )
 
   const filtered = React.useMemo(
-    () => filterSessions(sessions, "", filters),
-    [sessions, filters]
+    () => filterSessions(sessions, "", filters, prStateOf),
+    [sessions, filters, prStateOf]
   )
 
   const groups = React.useMemo(
@@ -654,13 +679,13 @@ return (renderExpandedGroupHeading())
   // than the whole store: while you're typing, "Archived 3" should mean three
   // matches, not three in existence.
   const searched = React.useMemo(
-    () => filterSessions(sessions, "", { ...filters, status: "all", repo: null }),
+    () => filterSessions(sessions, "", { ...filters, status: "all", repo: null, pr: "any" }),
     [sessions, filters]
   )
 
   const axes = React.useMemo(
-    () => sessionFilterAxes(filters, setFilters, searched),
-    [filters, setFilters, searched]
+    () => sessionFilterAxes(filters, setFilters, searched, prStateOf),
+    [filters, setFilters, searched, prStateOf]
   )
 
   const narrowed = isNarrowed(filters)
@@ -702,6 +727,7 @@ return (renderExpandedGroupHeading())
         onArchive={onArchive}
         onRestore={onRestore}
         onDelete={onDelete}
+        onOpenInTerminal={onOpenInTerminal}
         expanded={open}
         onToggleExpanded={s.id === activeSessionId ? undefined : toggleExpanded}
       />
