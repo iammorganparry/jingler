@@ -139,6 +139,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | STEP, PlanStepList | `composites/plan-step-list.tsx` | Legacy plan step list. | — | no | — |
 | PluginsSettings | `composites/plugins-settings.tsx` | Settings › Plugins. | catalog, loadErrors, pluginIcons, actionError, onDismissActionError, onSetEnabled | no | — |
 | PrCheckRow | `composites/pr-check-row.tsx` | One CI check row. | — | no | — |
+| PrStackRail | `composites/pr-stack-rail.tsx` | Checks-tab stack rail (Graphite style): h36 layer rows joined by a 1px line, base first, selected layer marked neutrally. | layers, selected, onSelect | yes | #431 (6.9) |
 | PrStatusGlyph | `composites/pr-glyph.tsx` | PR state glyph (PrStatusGlyph). | — | yes | #381 (2.16) |
 | PrPickerList | `composites/pr-picker-list.tsx` | Open-PR results list for new-session-from-PR. | — | yes | — |
 | PrReviewComposer | `composites/pr-review-composer.tsx` | Sticky PR review composer. | — | no | — |
