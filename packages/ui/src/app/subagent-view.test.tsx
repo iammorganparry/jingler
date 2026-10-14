@@ -1,4 +1,4 @@
-import type { Message, SubagentFleetNode } from "@jingler/core"
+import type { Message, ProviderId, SubagentFleetNode } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { FleetAgentView } from "./subagent-view.js"
@@ -246,5 +246,70 @@ describe("FleetAgentView workflow nodes", () => {
       "Workflow completed: Reviewed the PR across 3 step agents."
     )
     expect(screen.getByText(ORCHESTRATES)).toBeDefined()
+  })
+})
+
+describe("SubagentMetaStrip", () => {
+  const full = fleetNode({
+    phase: "scanning",
+    usage: { inputTokens: 12_400, outputTokens: 900, totalTokens: 13_300, costUsd: 0.42, durationMs: 10_000, toolCalls: 7 },
+    artifacts: [{ kind: "report", path: "/tmp/out/report.md", label: "report.md" }]
+  })
+
+  it("renders every field from the node", () => {
+    const onOpen = vi.fn()
+    render(<FleetAgentView node={full} messages={[]} providerId={"anthropic" as ProviderId} onOpenArtifact={onOpen} />)
+    const identity = screen.getByTestId("subagent-meta-identity").textContent
+    expect(identity).toContain("anthropic/claude-test")
+    expect(identity).toContain("running · scanning")
+    const usage = screen.getByTestId("subagent-meta-usage").textContent
+    expect(usage).toContain("workspace_read_file")
+    expect(usage).toContain("12.4k in / 900 out")
+    expect(usage).toContain("7 tool calls")
+    expect(usage).toContain("$0.42")
+    expect(usage).toContain("Background")
+    fireEvent.click(screen.getByRole("button", { name: "report.md" }))
+    expect(onOpen).toHaveBeenCalledWith("/tmp/out/report.md")
+  })
+
+  it("omits null and zero fields instead of showing a dash", () => {
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          model: null,
+          currentTool: null,
+          background: false,
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0, costUsd: 0, durationMs: 0, toolCalls: 0 }
+        })}
+        messages={[]}
+      />
+    )
+    const strip = screen.getByTestId("subagent-meta-strip")
+    expect(screen.queryByTestId("subagent-meta-usage")).toBeNull()
+    expect(screen.queryByTestId("subagent-meta-artifacts")).toBeNull()
+    expect(strip.textContent).not.toContain("—")
+    expect(strip.textContent).not.toContain("$")
+    expect(strip.textContent).not.toContain("Background")
+  })
+
+  it("keeps the cost out of the strip when it is zero", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} />)
+    expect(screen.getByTestId("subagent-meta-usage").textContent).not.toContain("$")
+  })
+
+  it("expands Details with run id and started time", () => {
+    render(<FleetAgentView node={full} messages={[]} />)
+    expect(screen.queryByTestId("subagent-meta-details")).toBeNull()
+    fireEvent.click(screen.getByTestId("subagent-meta-details-toggle"))
+    const details = screen.getByTestId("subagent-meta-details").textContent
+    expect(details).toContain("Run")
+    expect(details).toContain("run-1")
+    expect(details).toContain("Started")
+  })
+
+  it("truncates tool text but never the pills", () => {
+    render(<FleetAgentView node={full} messages={[]} />)
+    expect(screen.getByText("workspace_read_file").className).toContain("truncate")
+    expect(screen.getByText("Background").closest(".whitespace-nowrap")).not.toBeNull()
   })
 })
