@@ -10,7 +10,7 @@ import { cn } from "../lib/cn.js"
 import { PierreProvider } from "../diff/pierre-provider.js"
 import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
 import { assetBrowserMachine, assetBrowserTreeLimits } from "./asset-browser-machine.js"
-import { AssetFileTree } from "./asset-file-tree.js"
+import { AssetFileTree, type AssetAgentActivity } from "./asset-file-tree.js"
 
 const ROOMY_MIN_WIDTH = 680
 const MIN_CANVAS_WIDTH = 360
@@ -40,6 +40,7 @@ export interface AssetRepositoryTreeProps {
   readonly onRetryTree?: () => void
   readonly onSelectPath: (path: string) => void
   readonly onDiscardFile?: (path: string) => void
+  readonly agentActivity?: AssetAgentActivity
 }
 
 function RepositoryTree({
@@ -49,11 +50,12 @@ function RepositoryTree({
   treeError = null,
   onRetryTree,
   onSelectPath,
-  onDiscardFile
+  onDiscardFile,
+  agentActivity
 }: AssetRepositoryTreeProps) {
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-panel">
-      <AssetFileTree entries={entries} selectedPath={selectedPath} onSelectPath={onSelectPath} onDiscardFile={onDiscardFile} className="h-full" />
+      <AssetFileTree entries={entries} selectedPath={selectedPath} onSelectPath={onSelectPath} onDiscardFile={onDiscardFile} agentActivity={agentActivity} className="h-full" />
       {treeLoading && entries.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
           <Spinner size={12} /> Loading files…

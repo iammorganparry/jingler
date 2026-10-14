@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { appShell, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 import { PIERRE_HOST_CLASS, verticalScrollOwner } from "./pierre-helpers.js"
-import { openChangedFile } from "./explorer.js"
+import { explorerTree, openChangedFile } from "./explorer.js"
 
 
 const seeded = (worktreePath: string): SeedSession => ({
@@ -285,4 +285,39 @@ test("no Keep/Revert controls render; right-click Discard file changes removes t
   await window.getByRole("button", { name: "Discard", exact: true }).click()
   await expect(item("src/store/cache.ts")).toHaveCount(0, { timeout: 20_000 })
   await expect(item("src/auth/login.ts")).toBeVisible()
+})
+
+test("Explorer marks a file the scripted agent edits within 1s, and its parent folder as changed", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{ ...seeded(repoPath), mode: "auto" }],
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "config.ts"), "export const mode = 'legacy'\n")
+      writeFileSync(join(repoPath, "src", "other.ts"), "export const other = true\n")
+      execFileSync("git", ["add", "-A"], { cwd: repoPath })
+      execFileSync("git", ["commit", "-m", "seed explorer marks", "--no-gpg-sign"], { cwd: repoPath })
+    },
+    piFixture: { scenarioId: "follow-stability", authRoute: "api-key" }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await sessionRow(window, "Pierre review session").click()
+  const tree = await explorerTree(window)
+  const row = (path: string) => tree.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  await expect(row("src/config.ts")).toBeVisible()
+  await expect(row("src/config.ts").locator('[title="Edited by agent"], [title="Agent editing"]')).toHaveCount(0)
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[follow-stability]] first")
+  await composer.press("Enter")
+
+  await expect(
+    row("src/config.ts").locator('[title="Edited by agent"], [title="Agent editing"]')
+  ).toBeVisible({ timeout: 15_000 })
+  await expect(row("src/").locator('[title="Contains agent edits"], [title="Contains git status items"]')).toBeVisible({ timeout: 15_000 })
 })
