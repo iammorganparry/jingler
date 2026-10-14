@@ -523,16 +523,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
         onImportSessions={props.onImportSessions}
-        onOpenProjectSettings={onSaveProjectWorkflow ? () => openSettings("projects") : undefined}
-        onRemoveProject={
-          props.onRemoveProject
-            ? async (projectId) => {
-                await props.onRemoveProject?.(projectId)
-                if (selectedProjectId === projectId) setSelectedProjectId(null)
-              }
-            : undefined
-        }
-        onOpenSessionTerminal={renderTerminalDock ? openSessionTerminal : undefined}
+        {...getProjectMenuProps()}
         onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}
         renderExplorer={renderExplorer}
         environments={environments}
@@ -628,6 +619,20 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         version={version}
       />)
          }
+
+function getProjectMenuProps() {
+    const remove = props.onRemoveProject
+    return {
+      onOpenProjectSettings: onSaveProjectWorkflow ? () => openSettings("projects") : undefined,
+      onRemoveProject: remove
+        ? async (projectId: string) => {
+            await remove(projectId)
+            if (selectedProjectId === projectId) setSelectedProjectId(null)
+          }
+        : undefined,
+      onOpenSessionTerminal: renderTerminalDock ? openSessionTerminal : undefined
+    }
+  }
 
 function getAddProjectAction() {
     return (onBrowseProject && onBrowseCloneDestination && onListProjectDirectories && onListGitHubRepositories && onRegisterProject && onCreateProjectDirectory && onCloneProject && onCloneProjectFromGitHub
