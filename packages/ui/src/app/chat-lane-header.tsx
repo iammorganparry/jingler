@@ -182,7 +182,7 @@ export function ChatLaneHeader({
     <div
       ref={rootRef}
       data-testid="chat-lane-header"
-      className="flex h-10 flex-none items-center gap-2 border-b border-hairline bg-sunken/70 px-3"
+      className="flex h-10 min-w-0 flex-1 items-center gap-2 border-b border-hairline bg-sunken/70 px-3"
     >
       {subagentView ? <SubagentBreadcrumb title={activeTitle} view={subagentView} /> : (
       <DropdownMenu.Root open={switcherOpen} onOpenChange={setSwitcherOpen}>
