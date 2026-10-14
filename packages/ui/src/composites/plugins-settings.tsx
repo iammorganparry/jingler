@@ -41,6 +41,9 @@ import type {
 } from "@jingler/core"
 import { cn } from "../lib/cn.js"
 import { Badge } from "../components/badge.js"
+import { Button } from "../components/button.js"
+import { Input } from "../components/input.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { Toggle } from "../components/toggle.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { pluginSecretSettingMachine } from "./plugin-secret-setting-machine.js"
@@ -105,30 +108,27 @@ const contributionCount = (plugin: LoadedPlugin): number => {
   )
 }
 
-const fieldClass =
-  "h-8 min-w-0 rounded border border-line bg-panel px-2.5 text-[12px] text-text outline-none placeholder:text-dim focus:border-blue/50 focus:ring-2 focus:ring-ring/40"
-
-const buttonClass =
-  "rounded border border-line px-2.5 py-1.5 text-[11.5px] text-text-body transition-colors hover:border-blue hover:text-text-bright disabled:cursor-not-allowed disabled:opacity-50"
+/** Compact 32px geometry shared by every generated setting control. */
+const controlClass = "h-8 w-[220px] rounded-[6px] px-2.5 text-[13px]"
 
 const SettingHelp = ({ setting }: { setting: SettingContribution }) => (
   <>
-    {setting.description && (
-      <p className="mt-0.5 text-[11.5px] leading-[1.45] text-dim">
-        {setting.description}
-      </p>
-    )}
+    {setting.description && <p>{setting.description}</p>}
     {setting.documentationUrl && (
       <a
         href={setting.documentationUrl}
         target="_blank"
         rel="noreferrer"
-        className="mt-1 inline-block text-[11.5px] text-blue hover:underline"
+        className="mt-1 inline-block text-blue hover:underline"
       >
         Documentation
       </a>
     )}
   </>
+)
+
+const SettingLabel = ({ setting }: { setting: SettingContribution }) => (
+  <label htmlFor={`plugin-setting-input-${setting.id}`}>{setting.label}</label>
 )
 
 function OrdinarySettingControl({
@@ -154,61 +154,67 @@ function OrdinarySettingControl({
       (typeof draft === "number" && Number.isFinite(draft)))
 
   return (
-    <div data-testid={`plugin-setting-${setting.id}`} className="grid gap-2 sm:grid-cols-[1fr_240px_auto] sm:items-start">
-      <div className="min-w-0">
-        <label htmlFor={`plugin-setting-input-${setting.id}`} className="text-[12px] font-medium text-text">
-          {setting.label}
-        </label>
-        <SettingHelp setting={setting} />
-      </div>
-      {setting.type === "boolean" ? (
-        <div className="flex h-8 items-center">
-          <Toggle
-            checked={Boolean(draft)}
-            onCheckedChange={setDraft}
-            aria-label={setting.label}
-          />
-        </div>
-      ) : setting.type === "enum" ? (
-        <Select value={stringDraft} onValueChange={setDraft}>
-          <SelectTrigger ariaLabel={setting.label} className={fieldClass}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(setting.options ?? []).map((option) => (
-              <SelectItem key={option} value={option}>
-                {option}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <input
-          id={`plugin-setting-input-${setting.id}`}
-          aria-label={setting.label}
-          type={setting.type === "number" ? "number" : "text"}
-          value={stringDraft}
-          placeholder={setting.placeholder}
-          pattern={setting.validation?.pattern}
-          title={setting.validation?.message}
-          onChange={(event) =>
-            setDraft(
-              setting.type === "number"
-                ? event.currentTarget.valueAsNumber
-                : event.currentTarget.value
-            )
-          }
-          className={fieldClass}
-        />
-      )}
-      <button
-        type="button"
-        disabled={!valid}
-        onClick={() => void onSave(pluginId, setting.id, draft)}
-        className={buttonClass}
-      >
-        Save
-      </button>
+    <div data-testid={`plugin-setting-${setting.id}`}>
+      <SettingsRow
+        label={<SettingLabel setting={setting} />}
+        help={<SettingHelp setting={setting} />}
+        control={
+          <div className="flex items-center gap-2">
+            {setting.type === "boolean" ? (
+              <Toggle
+                checked={Boolean(draft)}
+                onCheckedChange={setDraft}
+                aria-label={setting.label}
+              />
+            ) : setting.type === "enum" ? (
+              <Select value={stringDraft} onValueChange={setDraft}>
+                <SelectTrigger
+                  ariaLabel={setting.label}
+                  className={cn(
+                    controlClass,
+                    "border border-line bg-panel text-text outline-none focus:border-blue/50 focus:ring-2 focus:ring-ring/40"
+                  )}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(setting.options ?? []).map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id={`plugin-setting-input-${setting.id}`}
+                aria-label={setting.label}
+                type={setting.type === "number" ? "number" : "text"}
+                value={stringDraft}
+                placeholder={setting.placeholder}
+                pattern={setting.validation?.pattern}
+                title={setting.validation?.message}
+                onChange={(event) =>
+                  setDraft(
+                    setting.type === "number"
+                      ? event.currentTarget.valueAsNumber
+                      : event.currentTarget.value
+                  )
+                }
+                className={controlClass}
+              />
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!valid}
+              onClick={() => void onSave(pluginId, setting.id, draft)}
+            >
+              Save
+            </Button>
+          </div>
+        }
+      />
     </div>
   )
 }
@@ -241,71 +247,65 @@ function SecretSettingControl({
     (!setting.validation || new RegExp(setting.validation.pattern).test(draft))
 
   return (
-    <div data-testid={`plugin-setting-${setting.id}`} className="grid gap-2 sm:grid-cols-[1fr_240px_auto] sm:items-start">
-      <div className="min-w-0">
-        <label htmlFor={`plugin-setting-input-${setting.id}`} className="text-[12px] font-medium text-text">
-          {setting.label}
-        </label>
-        <SettingHelp setting={setting} />
-      </div>
-      {editing ? (
-        <input
-          id={`plugin-setting-input-${setting.id}`}
-          aria-label={setting.label}
-          type="password"
-          autoComplete="off"
-          value={draft}
-          placeholder={setting.placeholder}
-          pattern={setting.validation?.pattern}
-          title={setting.validation?.message}
-          disabled={busy}
-          onChange={(event) => send({ type: "CHANGE", value: event.currentTarget.value })}
-          className={fieldClass}
-        />
-      ) : (
-        <input
-          id={`plugin-setting-input-${setting.id}`}
-          aria-label={setting.label}
-          type="password"
-          value="configured"
-          readOnly
-          className={fieldClass}
-        />
-      )}
-      <div className="flex items-center gap-1.5">
-        {editing ? (
-          <>
-            <button type="button" disabled={!valid || busy} onClick={() => send({ type: "SAVE" })} className={buttonClass}>
-              {snapshot.matches("saving") ? "Saving…" : "Save"}
-            </button>
-            {configured && (
-              <button
-                type="button"
-                onClick={() => {
-                  send({ type: "CANCEL" })
-                }}
-                className={buttonClass}
-              >
-                Cancel
-              </button>
+    <div data-testid={`plugin-setting-${setting.id}`}>
+      <SettingsRow
+        label={<SettingLabel setting={setting} />}
+        help={<SettingHelp setting={setting} />}
+        control={
+          <div className="flex items-center gap-2">
+            {editing ? (
+              <Input
+                id={`plugin-setting-input-${setting.id}`}
+                aria-label={setting.label}
+                type="password"
+                autoComplete="off"
+                value={draft}
+                placeholder={setting.placeholder}
+                pattern={setting.validation?.pattern}
+                title={setting.validation?.message}
+                disabled={busy}
+                onChange={(event) => send({ type: "CHANGE", value: event.currentTarget.value })}
+                className={controlClass}
+              />
+            ) : (
+              <Input
+                id={`plugin-setting-input-${setting.id}`}
+                aria-label={setting.label}
+                type="password"
+                value="configured"
+                readOnly
+                className={controlClass}
+              />
             )}
-          </>
-        ) : (
-          <>
-            <button type="button" disabled={busy} onClick={() => send({ type: "REPLACE" })} className={buttonClass}>
-              Replace
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => send({ type: "REMOVE" })}
-              className="text-[11.5px] text-dim transition-colors hover:text-red"
-            >
-              Remove
-            </button>
-          </>
-        )}
-      </div>
+            {editing ? (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!valid || busy}
+                  onClick={() => send({ type: "SAVE" })}
+                >
+                  {snapshot.matches("saving") ? "Saving…" : "Save"}
+                </Button>
+                {configured && (
+                  <Button variant="ghost" size="sm" onClick={() => send({ type: "CANCEL" })}>
+                    Cancel
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Button variant="secondary" size="sm" disabled={busy} onClick={() => send({ type: "REPLACE" })}>
+                  Replace
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => send({ type: "REMOVE" })}>
+                  Remove
+                </Button>
+              </>
+            )}
+          </div>
+        }
+      />
     </div>
   )
 }
@@ -339,140 +339,124 @@ function Row({
   const PluginIcon = pluginIcon ?? Boxes
 
   return (
-    <li
-      data-testid={`plugin-row-${manifest.id}`}
-      className="flex flex-col gap-2 border-b border-hairline px-3 py-3 last:border-b-0"
-    >
-      <div className="flex items-start gap-3">
-        <PluginIcon
-          size={16}
-          className={cn("mt-0.5 flex-none", plugin.enabled ? "text-blue" : "text-line")}
+    <li data-testid={`plugin-row-${manifest.id}`}>
+      <SettingsCard>
+        <SettingsRow
+          label={
+            <span className="flex items-baseline gap-2">
+              <PluginIcon
+                size={16}
+                className={cn("flex-none self-center", plugin.enabled ? "text-text-bright" : "text-muted-foreground")}
+              />
+              <span className="truncate">{manifest.name}</span>
+              <span className="flex-none font-mono text-[11px] font-normal text-muted-foreground">
+                {manifest.version}
+              </span>
+              {plugin.builtin && (
+                <Badge tone="count" size="xs">
+                  built-in
+                </Badge>
+              )}
+            </span>
+          }
+          help={
+            <>
+              <div className="truncate font-mono text-[11px]">{manifest.id}</div>
+              {manifest.description && (
+                <p className="mt-1 text-text-body">{manifest.description}</p>
+              )}
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                <span>
+                  {contributionCount(plugin)} contribution
+                  {contributionCount(plugin) === 1 ? "" : "s"}
+                </span>
+                {/* No activation events means the host half never starts — worth
+                    saying plainly, because "does this run code?" is the question an
+                    operator actually has about an installed plugin. */}
+                <span>
+                  {manifest.activationEvents?.length
+                    ? `activates on ${manifest.activationEvents.join(", ")}`
+                    : "no background process"}
+                </span>
+              </div>
+            </>
+          }
+          control={
+            <Toggle
+              checked={plugin.enabled}
+              onCheckedChange={(next: boolean) => void onSetEnabled(manifest.id, next)}
+              aria-label={`Enable ${manifest.name}`}
+            />
+          }
         />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="truncate text-[13px] font-medium text-text">
-              {manifest.name}
-            </span>
-            <span className="flex-none font-mono text-[11px] text-dim">
-              {manifest.version}
-            </span>
-            {plugin.builtin && (
-              <Badge tone="count" size="xs">
-                built-in
-              </Badge>
-            )}
-          </div>
-          <div className="mt-0.5 truncate font-mono text-[11px] text-dim">
-            {manifest.id}
-          </div>
-          {manifest.description && (
-            <p className="mt-1 text-[12px] leading-[1.5] text-text-body">
-              {manifest.description}
-            </p>
-          )}
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-dim">
-            <span>
-              {contributionCount(plugin)} contribution
-              {contributionCount(plugin) === 1 ? "" : "s"}
-            </span>
-            {/* No activation events means the host half never starts — worth
-                saying plainly, because "does this run code?" is the question an
-                operator actually has about an installed plugin. */}
-            <span>
-              {manifest.activationEvents?.length
-                ? `activates on ${manifest.activationEvents.join(", ")}`
-                : "no background process"}
+
+        {broken && (
+          <div
+            data-testid={`plugin-error-detail-${manifest.id}`}
+            className="flex items-start gap-2 px-4 py-3"
+          >
+            <AlertTriangle size={13} className="mt-0.5 flex-none text-muted-foreground" />
+            {/* The decoder's own message, verbatim. A friendlier summary would
+                throw away the line number that makes it fixable. */}
+            <span className="font-mono text-[11px] leading-[1.5] text-text-body">
+              {broken}
             </span>
           </div>
-        </div>
+        )}
 
-        <div className="flex flex-none items-center gap-2">
-          <Toggle
-            checked={plugin.enabled}
-            onCheckedChange={(next: boolean) => void onSetEnabled(manifest.id, next)}
-            aria-label={`Enable ${manifest.name}`}
-          />
-        </div>
-      </div>
+        {manifest.contributes?.settings?.map((setting) =>
+          setting.type === "secret" && onSetSecret && onClearSecret ? (
+            <SecretSettingControl
+              key={`${setting.id}:${settings?.secrets[setting.id] ?? false}`}
+              pluginId={manifest.id}
+              setting={setting}
+              configured={settings?.secrets[setting.id] ?? false}
+              onSave={onSetSecret}
+              onClear={onClearSecret}
+            />
+          ) : setting.type !== "secret" && onSetSetting ? (
+            <OrdinarySettingControl
+              key={`${setting.id}:${String(settings?.values[setting.id] ?? "")}`}
+              pluginId={manifest.id}
+              setting={setting}
+              value={settings?.values[setting.id] ?? null}
+              onSave={onSetSetting}
+            />
+          ) : null
+        )}
 
-      {broken && (
-        <div
-          data-testid={`plugin-error-detail-${manifest.id}`}
-          className="ml-7 flex items-start gap-2 rounded border border-yellow/40 bg-panel px-2.5 py-2"
-        >
-          <AlertTriangle size={13} className="mt-0.5 flex-none text-muted-foreground" />
-          {/* The decoder's own message, verbatim. A friendlier summary would
-              throw away the line number that makes it fixable. */}
-          <span className="font-mono text-[11px] leading-[1.5] text-text-body">
-            {broken}
-          </span>
-        </div>
-      )}
-
-      {(manifest.contributes?.settings?.length ?? 0) > 0 && (
-        <div className="ml-7 flex flex-col gap-3 border-t border-hairline pt-3">
-          {manifest.contributes?.settings?.map((setting) =>
-            setting.type === "secret" && onSetSecret && onClearSecret ? (
-              <SecretSettingControl
-                key={`${setting.id}:${settings?.secrets[setting.id] ?? false}`}
-                pluginId={manifest.id}
-                setting={setting}
-                configured={settings?.secrets[setting.id] ?? false}
-                onSave={onSetSecret}
-                onClear={onClearSecret}
-              />
-            ) : setting.type !== "secret" && onSetSetting ? (
-              <OrdinarySettingControl
-                key={`${setting.id}:${String(settings?.values[setting.id] ?? "")}`}
-                pluginId={manifest.id}
-                setting={setting}
-                value={settings?.values[setting.id] ?? null}
-                onSave={onSetSetting}
-              />
-            ) : null
-          )}
-        </div>
-      )}
-
-      <div className="ml-7 flex items-center gap-3 text-[11.5px]">
-        <button
-          type="button"
-          onClick={() => void onReveal(manifest.id)}
-          className="flex items-center gap-1 text-dim transition-colors hover:text-text-bright"
-        >
-          <FolderOpen size={12} /> Reveal
-        </button>
-        {!plugin.builtin &&
-          (confirming ? (
-            <span className="flex items-center gap-2">
-              <span className="text-text-body">Remove this plugin&rsquo;s folder?</span>
-              <button
-                type="button"
-                data-testid={`plugin-uninstall-confirm-${manifest.id}`}
-                onClick={() => void onUninstall(manifest.id)}
-                className="text-red transition-colors hover:text-text-bright"
+        <div className="flex items-center gap-2 px-4 py-2">
+          <Button variant="ghost" size="sm" onClick={() => void onReveal(manifest.id)}>
+            <FolderOpen size={12} /> Reveal
+          </Button>
+          {!plugin.builtin &&
+            (confirming ? (
+              <span className="flex items-center gap-2 text-[12px]">
+                <span className="text-text-body">Remove this plugin&rsquo;s folder?</span>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  data-testid={`plugin-uninstall-confirm-${manifest.id}`}
+                  onClick={() => void onUninstall(manifest.id)}
+                >
+                  Delete
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
+                  Cancel
+                </Button>
+              </span>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                data-testid={`plugin-uninstall-${manifest.id}`}
+                onClick={() => setConfirming(true)}
               >
-                Delete
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirming(false)}
-                className="text-dim transition-colors hover:text-text-bright"
-              >
-                Cancel
-              </button>
-            </span>
-          ) : (
-            <button
-              type="button"
-              data-testid={`plugin-uninstall-${manifest.id}`}
-              onClick={() => setConfirming(true)}
-              className="flex items-center gap-1 text-dim transition-colors hover:text-red"
-            >
-              <Trash2 size={12} /> Uninstall
-            </button>
-          ))}
-      </div>
+                <Trash2 size={12} /> Uninstall
+              </Button>
+            ))}
+        </div>
+      </SettingsCard>
     </li>
   )
 }
@@ -514,14 +498,15 @@ export function PluginsSettings({
           </p>
         </div>
         {onInstallFromFolder && (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             data-testid="plugin-install-folder"
             onClick={() => void onInstallFromFolder()}
-            className="flex flex-none items-center gap-1.5 rounded border border-line px-2.5 py-1.5 text-[12px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
+            className="flex-none"
           >
             <Plus size={13} /> Install from folder…
-          </button>
+          </Button>
         )}
       </div>
 
@@ -532,21 +517,22 @@ export function PluginsSettings({
         <div
           data-testid="plugin-action-error"
           role="alert"
-          className="flex items-start gap-2 rounded border border-red/50 bg-panel px-3 py-2.5"
+          className="flex items-start gap-2 rounded-xl border border-state-failed/50 bg-panel px-3 py-2.5"
         >
-          <AlertTriangle size={14} className="mt-0.5 flex-none text-red" />
+          <AlertTriangle size={14} className="mt-0.5 flex-none text-state-failed" />
           <span className="flex-1 text-[12.5px] leading-[1.6] text-text-body">
             {actionError}
           </span>
           {onDismissActionError && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               data-testid="plugin-action-error-dismiss"
               onClick={onDismissActionError}
-              className="flex-none text-[11.5px] text-dim transition-colors hover:text-text-bright"
+              className="flex-none"
             >
               Dismiss
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -554,9 +540,9 @@ export function PluginsSettings({
       {plugins.length === 0 && undecodable.length === 0 ? (
         <div
           data-testid="plugins-empty"
-          className="rounded border border-dashed border-line px-4 py-8 text-center"
+          className="rounded-xl border border-dashed border-line px-4 py-8 text-center"
         >
-          <Boxes size={28} className="mx-auto text-line" strokeWidth={1.5} />
+          <Boxes size={28} className="mx-auto text-muted-foreground" strokeWidth={1.5} />
           <div className="mt-2 text-[13px] text-text">No plugins installed</div>
           <div className="mt-1 text-[12px] text-dim">
             Copy a plugin folder into{" "}
@@ -564,7 +550,7 @@ export function PluginsSettings({
           </div>
         </div>
       ) : (
-        <ul className="overflow-hidden rounded border border-line bg-sunken">
+        <ul className="flex flex-col gap-4">
           {plugins.map((plugin) => (
             <Row
               key={plugin.manifest.id}
@@ -591,25 +577,26 @@ export function PluginsSettings({
             <code className="font-mono">jingler.plugin.json</code> could not be
             decoded, so they contribute nothing.
           </p>
-          <ul
-            data-testid="plugins-undecodable"
-            className="flex flex-col gap-px overflow-hidden rounded border border-line"
-          >
-            {undecodable.map((failure) => (
-              <li key={failure.dir} className="bg-panel px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle size={13} className="flex-none text-muted-foreground" />
-                  <span className="font-mono text-[12px] text-text">{failure.dir}</span>
-                  <Badge tone="count" size="xs">
-                    {failure.kind}
-                  </Badge>
-                </div>
-                <div className="mt-1 pl-5 font-mono text-[11px] leading-[1.5] text-dim">
-                  {failure.message}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div data-testid="plugins-undecodable">
+            <SettingsCard>
+              {undecodable.map((failure) => (
+                <SettingsRow
+                  key={failure.dir}
+                  label={
+                    <span className="flex items-center gap-2">
+                      <AlertTriangle size={13} className="flex-none text-muted-foreground" />
+                      <span className="font-mono text-[12px]">{failure.dir}</span>
+                      <Badge tone="count" size="xs">
+                        {failure.kind}
+                      </Badge>
+                    </span>
+                  }
+                  help={<span className="font-mono text-[11px]">{failure.message}</span>}
+                  control={null}
+                />
+              ))}
+            </SettingsCard>
+          </div>
         </div>
       )}
 
@@ -624,46 +611,49 @@ export function PluginsSettings({
         {authSessions.length === 0 ? (
           <div
             data-testid="plugin-auth-empty"
-            className="rounded border border-line bg-panel px-3 py-2.5 text-[12px] text-dim"
+            className="rounded-xl border border-line px-4 py-3 text-[12px] text-dim"
           >
             No plugin has been granted access to an account.
           </div>
         ) : (
-          <ul className="flex flex-col gap-px overflow-hidden rounded border border-line">
+          <SettingsCard>
             {authSessions.map((granted) => (
-              <li
+              <div
                 key={`${granted.pluginId}:${granted.providerId}`}
                 data-testid={`plugin-auth-${granted.pluginId}-${granted.providerId}`}
-                className="flex items-center gap-3 bg-panel px-3 py-2"
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline gap-2">
-                    <span className="truncate font-mono text-[12px] text-text">
-                      {granted.pluginId}
+                <SettingsRow
+                  label={
+                    <span className="flex items-baseline gap-2">
+                      <span className="truncate font-mono text-[12px]">{granted.pluginId}</span>
+                      <span className="text-[11.5px] font-normal text-dim">→ {granted.providerId}</span>
+                      {granted.account && (
+                        <span className="text-[11.5px] font-normal text-text-body">
+                          as {granted.account}
+                        </span>
+                      )}
                     </span>
-                    <span className="text-[11.5px] text-dim">→ {granted.providerId}</span>
-                    {granted.account && (
-                      <span className="text-[11.5px] text-text-body">
-                        as {granted.account}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 font-mono text-[11px] text-dim">
-                    {granted.scopes.length > 0 ? granted.scopes.join(", ") : "no scopes"}
-                  </div>
-                </div>
-                {onRevokeAuth && (
-                  <button
-                    type="button"
-                    onClick={() => void onRevokeAuth(granted.pluginId, granted.providerId)}
-                    className="flex-none text-[11.5px] text-dim transition-colors hover:text-red"
-                  >
-                    Revoke
-                  </button>
-                )}
-              </li>
+                  }
+                  help={
+                    <span className="font-mono text-[11px]">
+                      {granted.scopes.length > 0 ? granted.scopes.join(", ") : "no scopes"}
+                    </span>
+                  }
+                  control={
+                    onRevokeAuth ? (
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => void onRevokeAuth(granted.pluginId, granted.providerId)}
+                      >
+                        Revoke
+                      </Button>
+                    ) : null
+                  }
+                />
+              </div>
             ))}
-          </ul>
+          </SettingsCard>
         )}
       </div>
     </div>

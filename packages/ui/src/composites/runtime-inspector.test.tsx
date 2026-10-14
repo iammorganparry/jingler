@@ -37,4 +37,15 @@ describe("RuntimeInspector", () => {
     expect(onRefresh).toHaveBeenCalledOnce()
     expect(onExport).toHaveBeenCalledOnce()
   })
+
+  it("lays diagnostics out as SettingsRows and keeps Export disabled without a snapshot", () => {
+    const { rerender } = render(<RuntimeInspector snapshot={snapshot} loading={false} exported onRefresh={() => {}} onExport={() => {}} />)
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeDefined()
+    expect(screen.getAllByTestId("settings-row").length).toBeGreaterThan(9)
+    expect(screen.getByRole("status").textContent).toBe("Redacted diagnostic bundle prepared.")
+    rerender(<RuntimeInspector snapshot={null} loading={false} error="boom" onRefresh={() => {}} onExport={() => {}} />)
+    expect(screen.queryByRole("heading", { name: "Diagnostics" })).toBeNull()
+    expect((screen.getByRole("button", { name: "Export diagnostics" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole("alert").textContent).toBe("boom")
+  })
 })

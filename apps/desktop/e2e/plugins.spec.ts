@@ -314,6 +314,37 @@ test("Settings saves, masks, replaces and removes a manifest-declared plugin sec
     .not.toContain(uninstallSecret)
 })
 
+test("Plannotator shows no key input while another plugin keeps its secret field", async ({
+  launchApp
+}) => {
+  const { window, home } = await launchApp({ configured: true })
+  // Plannotator is Jingler's own plugin and declares no secret setting, so the
+  // generated form must not invent an API key field for it.
+  await seedPlugin(home, {
+    id: "plannotator",
+    manifest: { id: "plannotator", name: "Plannotator", version: "1.0.0" }
+  })
+  await seedPlugin(home, {
+    manifest: {
+      id: "e2e-tab",
+      name: "E2E Tab",
+      version: "1.0.0",
+      contributes: {
+        settings: [{ id: "e2e-tab.api-key", label: "Personal API key", type: "secret" }]
+      }
+    }
+  })
+  await openPluginSettings(window)
+
+  const plannotator = window.getByTestId("plugin-row-plannotator")
+  await expect(plannotator).toBeVisible({ timeout: 15_000 })
+  await expect(plannotator.locator("input[type=password]")).toHaveCount(0)
+  await expect(plannotator.getByLabel(/api key|secret/i)).toHaveCount(0)
+
+  const other = window.getByTestId("plugin-row-e2e-tab")
+  await expect(other.getByLabel("Personal API key")).toHaveAttribute("type", "password")
+})
+
 test("a plugin whose manifest will not decode is reported, not silently absent", async ({
   launchApp
 }) => {
