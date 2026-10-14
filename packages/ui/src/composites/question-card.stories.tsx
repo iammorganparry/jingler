@@ -40,3 +40,12 @@ export const Docked: Story = {
     </div>
   )
 }
+
+/** With the tertiary "Switch session to Auto" link (hidden when the session is already in Auto). */
+export const WithSwitchToAuto: Story = {
+  render: () => (
+    <div className="w-[560px] bg-editor p-8">
+      <QuestionCard request={request} onSubmit={(a) => console.log("answers", a)} onSwitchToAuto={() => console.log("auto")} />
+    </div>
+  )
+}
