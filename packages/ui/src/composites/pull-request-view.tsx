@@ -20,10 +20,11 @@ import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Card } from "../components/card.js"
+import { Eyebrow } from "../components/eyebrow.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
-import { Spinner } from "../components/loading.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { StatusDot } from "../components/status-dot.js"
 import { MotionTabs } from "../components/beui/controls.js"
@@ -31,6 +32,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from ".
 import { PrCheckRow } from "./pr-check-row.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
+import { ReadinessChecklist } from "./readiness-checklist.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 
@@ -145,6 +147,25 @@ function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
   return <Stepper className="mt-2" steps={PUBLISH_PHASES.map((phase) => PUBLISH_PHASE_LABELS[phase])} current={current} />
 }
 
+/** Loading skeleton or retryable error while there is no PR yet; null once the Create-PR / PR views can render. */
+function renderLoadState(pr: PullRequest | null, busy: boolean, loadError: string | null | undefined, onRetryLoad?: () => void) {
+  if (pr !== null) return null
+  // Avoid flashing the "Create PR" empty state before the PR resolves.
+  if (busy) {
+    return (
+      <div aria-label="Loading pull request" className="flex flex-1 flex-col gap-[18px] px-[30px] py-[26px]">
+        <ListSkeleton rows={5} rowHeight={28} gap={12} />
+      </div>
+    )
+  }
+  if (!loadError) return null
+  return (
+    <div className="flex flex-1 flex-col px-[30px] py-[26px]">
+      <InlineError message={loadError} onRetry={onRetryLoad} />
+    </div>
+  )
+}
+
 export interface PullRequestViewProps {
   pr: PullRequest | null
   connected: boolean
@@ -152,6 +173,9 @@ export interface PullRequestViewProps {
   connectionMessage?: string
   connectionActionLabel?: string
   busy?: boolean
+  /** The PR failed to load — shown with Retry instead of the Create PR empty state. */
+  loadError?: string | null
+  onRetryLoad?: () => void
   /** The authenticated GitHub login — to detect the viewer's own PR (no self-approve). */
   viewerLogin?: string | null
   /** Authoritative main-process publish progress. */
@@ -218,6 +242,8 @@ export function PullRequestView({
   connectionMessage,
   connectionActionLabel = "Connect GitHub",
   busy = false,
+  loadError,
+  onRetryLoad,
   viewerLogin,
   publish,
   publishing = false,
@@ -372,6 +398,7 @@ export function PullRequestView({
             />
           </div>
 
+          {evidence !== "commits" && <ReadinessChecklist pr={pr} />}
           {renderReviewEvidence(pr)}
           </div>
         </div>
@@ -418,11 +445,10 @@ return (evidence === "checks" ? (
             </Card>
           )}
 
-          <div className="h-px bg-line" />
-
           {/* Timeline — top-level reviews/comments and inline thread groups, interleaved */}
+          <Eyebrow>Timeline</Eyebrow>
           {feed.length === 0 ? (
-            <p className="text-[13px] text-dim">No reviews or comments yet.</p>
+            <EmptyState title="No reviews or comments yet" description="Reviews and comments on this pull request will appear here." />
           ) : (
             feed.map((entry) =>
               entry.kind === "item" ? (
@@ -601,15 +627,8 @@ return (evidence === "checks" ? (
     return () => window.removeEventListener("keydown", close)
   }, [railOpen])
 
-  // Loading — avoid flashing the "Create PR" empty state before the PR resolves.
-  if (pr === null && busy) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Spinner size={20} />
-        <span className="text-[13px]">Loading pull request…</span>
-      </div>
-    )
-  }
+  const loadView = renderLoadState(pr, busy, loadError, onRetryLoad)
+  if (loadView) return loadView
   if (pr === null) {
     return (
       renderCreatePullRequest()
@@ -703,7 +722,7 @@ function CommitEvidence({ pr }: { pr: PullRequest }) {
 
 function CheckEvidence({ pr }: { pr: PullRequest }) {
   if (pr.checks.length === 0) {
-    return <p className="text-[13px] text-dim">No checks reported.</p>
+    return <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
   }
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">

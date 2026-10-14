@@ -77,6 +77,13 @@ test("links and shows a pull request through authenticated gh without a GitHub A
     await window.getByTestId("header-view-checks").first().click()
     await expect(window.getByRole("heading", { name: "CLI-only pull request" })).toBeVisible()
     await expect(window.getByText("Loaded through authenticated GitHub CLI without an App installation.")).toBeVisible()
+    // Restyled Checks view (#428): readiness checklist + timeline section, no green/red fill for a PR with no failures.
+    const readiness = window.getByRole("region", { name: "Readiness" })
+    await expect(readiness).toBeVisible()
+    await expect(readiness.getByText("No conflicts with main")).toBeVisible()
+    await expect(readiness.getByText("No checks reported")).toBeVisible()
+    await expect(window.getByText("Timeline", { exact: true })).toBeVisible()
+    await expect(window.getByText("No reviews or comments yet")).toBeVisible()
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

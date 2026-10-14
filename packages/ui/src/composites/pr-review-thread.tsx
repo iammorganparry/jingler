@@ -69,12 +69,12 @@ function ThreadComment({
         <Avatar
           initial={comment.author.charAt(0).toUpperCase()}
           src={comment.authorAvatarUrl ?? githubAvatarUrl(comment.author)}
-          tone={comment.isBot ? "purple" : "orange"}
+          tone="dim"
           size={22}
         />
         <span className="text-[13px] font-semibold text-text-bright">{comment.author}</span>
         {comment.isBot && (
-          <Badge tone="purple" size="xs">
+          <Badge tone="neutral" size="xs">
             Bot
           </Badge>
         )}
@@ -270,7 +270,7 @@ export function PrReviewThreadView({
           {thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}
         </span>
         {thread.isResolved && (
-          <Badge tone="blue" size="xs">
+          <Badge tone="neutral" size="xs">
             Resolved
           </Badge>
         )}

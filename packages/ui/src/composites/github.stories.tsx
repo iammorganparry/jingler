@@ -7,6 +7,9 @@ import type {
   ReviewSeverity
 } from "@jingler/core"
 import { PullRequestView } from "./pull-request-view.js"
+import { PrReviewGroup } from "./pr-review-group.js"
+import { PrTimelineEntry } from "./pr-timeline-entry.js"
+import { ReadinessChecklist } from "./readiness-checklist.js"
 import { ReviewFindingRow } from "./review-findings.js"
 import { SettingsView } from "./settings-view.js"
 
@@ -137,6 +140,57 @@ const pr: PullRequestData = {
   mergeable: "CONFLICTING",
   mergeStateStatus: "BLOCKED",
   mergeBlockers: ["1 failing check (lint)", "1 change requested"]
+}
+
+/** Readiness checklist: blocked PR (failing lint, conflicts, unresolved thread) vs a clean one. */
+export const ReadinessChecklistStates: Story = {
+  render: () => (
+    <div className="flex max-w-[760px] flex-col gap-4 bg-editor p-6">
+      <ReadinessChecklist pr={pr} />
+      <ReadinessChecklist
+        pr={{
+          ...pr,
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          checks: pr.checks.filter((c) => c.status === "pass"),
+          reviewThreads: pr.reviewThreads.map((t) => ({ ...t, isResolved: true }))
+        }}
+      />
+    </div>
+  )
+}
+
+/** Timeline entries of every kind: neutral icon and label, no kind-coded colour. */
+export const TimelineEntries: Story = {
+  render: () => (
+    <div className="flex max-w-[760px] flex-col gap-4 bg-editor p-6">
+      {(["commented", "approved", "changes_requested"] as const).map((kind) => (
+        <PrTimelineEntry
+          key={kind}
+          item={{ id: kind, author: "dan", kind, body: `A ${kind} entry.`, createdAt: "2026-07-11T09:00:00.000Z", path: null, line: null }}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** Review threads grouped under one review: open + outdated, and resolved (collapsed), neutral chrome. */
+export const ReviewThreads: Story = {
+  render: () => (
+    <div className="max-w-[760px] bg-editor p-6">
+      <PrReviewGroup threads={pr.reviewThreads} prAuthor="claude-agent" onResolve={() => {}} onReply={() => {}} />
+    </div>
+  )
+}
+
+/** Loading (skeleton at real row height) and load-error (Retry) states of the Checks view. */
+export const ChecksLoadingAndError: Story = {
+  render: () => (
+    <div className="flex h-screen flex-col bg-editor">
+      <PullRequestView pr={null} connected busy />
+      <PullRequestView pr={null} connected loadError="Couldn't reach GitHub." onRetryLoad={() => {}} />
+    </div>
+  )
 }
 
 /** The Pull Request tab — open PR with checks, reviewers, and a blocked merge. */
