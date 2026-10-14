@@ -5,6 +5,7 @@ import { isLanguageHoverPath } from "@jingler/contracts"
 import {
   AssetBrowser,
   AssetRepositoryTree,
+  type AssetAgentActivity,
   AssetCanvas,
   AssetError,
   AssetTooLarge,
@@ -34,6 +35,7 @@ import { useNativeViewBounds } from "./use-native-view-bounds.js"
 import { rpc } from "./rpc-client.js"
 import { captureCodeReference, type CodeReference } from "./code-reference.js"
 import {
+  getAgentTouchedFiles,
   normalizeAgentFileTarget,
   useAgentFileActivity
 } from "./agent-file-activity.js"
@@ -172,8 +174,24 @@ export interface FileBrowserExplorerProps {
   readonly onOpenPath: (path: string) => void
 }
 
+/** Files the agent edited this session; the one still being written pulses until the run ends. */
+function useExplorerAgentActivity(session: Session): AssetAgentActivity {
+  const activity = useAgentFileActivity(session.id, session.activeChatId)
+  const { id, activeChatId, worktreePath, status } = session
+  return useMemo(() => {
+    const normalize = (raw: string) => normalizeAgentFileTarget(raw, worktreePath)
+    const editedPaths = getAgentTouchedFiles(id, activeChatId)
+      .map(normalize)
+      .filter((path): path is string => path !== null)
+    const current = activity?.phase === "editing" && status === "running" ? normalize(activity.path) : null
+    return { editedPaths, editingPath: current }
+    // `activity` (a new object per event) is the signal that the touched list changed.
+  }, [activity, id, activeChatId, worktreePath, status])
+}
+
 export function FileBrowserExplorer({ session, connected = false, onOpenPath }: FileBrowserExplorerProps) {
   const browser = useFileBrowser(session.id, session.worktreePath)
+  const agentActivity = useExplorerAgentActivity(session)
   const { filter } = useSessionReviewState(session.id, session.prNumber)
   // Show the diff actually listed: a PR with nothing fetchable (GitHub offline)
   // falls back to the uncommitted changes, and the control must not claim "PR".
@@ -229,6 +247,7 @@ export function FileBrowserExplorer({ session, connected = false, onOpenPath }: 
             onOpenPath(path)
           }}
           onDiscardFile={discardFile}
+          agentActivity={agentActivity}
         />
         )}
     </ExplorerPanel>

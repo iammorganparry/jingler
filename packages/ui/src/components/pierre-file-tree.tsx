@@ -85,6 +85,8 @@ export interface PierreFileTreeProps {
   readonly style?: CSSProperties
   /** Extra per-row text (e.g. +/− counts) beside Pierre's git status letter. */
   readonly renderRowDecoration?: FileTreeRowDecorationRenderer
+  /** Extra CSS injected into the tree's shadow root (e.g. keyframes the page stylesheet cannot share). */
+  readonly unsafeCSS?: string
   readonly onSelectionChange?: (paths: readonly string[]) => void
   readonly onSearchChange?: (query: string | null) => void
 }
@@ -132,6 +134,7 @@ const usePierreFileTreeModel = (
     itemHeight: props.itemHeight,
     overscan: props.overscan ?? 12,
     stickyFolders: props.stickyFolders ?? true,
+    unsafeCSS: props.unsafeCSS,
     renderRowDecoration: (context) => callbacks.decoration.current?.(context) ?? null,
     onSelectionChange: (next) => {
       if (!callbacks.syncingSelection.current) {
@@ -196,9 +199,10 @@ const useTreeDataUpdates = (
     model.setIcons(props.icons ?? DEFAULT_ICONS)
   }, [model, props.icons])
 
+  // Re-rendering the root is also how a new decoration renderer (fresh agent marks) reaches mounted rows.
   useLayoutEffect(() => {
     model.setComposition(props.composition)
-  }, [model, props.composition])
+  }, [model, props.composition, props.renderRowDecoration])
 
   useLayoutEffect(() => {
     if (props.searchQuery === undefined) return
