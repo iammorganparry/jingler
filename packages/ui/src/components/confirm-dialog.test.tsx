@@ -19,7 +19,7 @@ describe("ConfirmDialog", () => {
         onOpenChange={onOpenChange}
         title="Delete session?"
         confirmLabel="Delete"
-        tone="danger"
+        destructive
         onConfirm={confirm}
       />
     )
@@ -47,9 +47,9 @@ it("leaves closing to the machine after a synchronous confirmation", async () =>
   expect(onOpenChange).toHaveBeenCalledWith(false)
 })
 
-describe("ConfirmDialog tone (spec §6.10)", () => {
+describe("ConfirmDialog destructive (spec §6.10)", () => {
   it("makes the destructive confirm the solid red button and focuses Cancel first", async () => {
-    render(<ConfirmDialog open onOpenChange={() => {}} title="Discard changes?" confirmLabel="Discard" tone="danger" onConfirm={() => {}} />)
+    render(<ConfirmDialog open onOpenChange={() => {}} title="Discard changes?" confirmLabel="Discard" destructive onConfirm={() => {}} />)
     expect(screen.getByRole("button", { name: "Discard" }).className).toContain("bg-state-failed")
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Cancel" })))
   })
@@ -63,8 +63,27 @@ describe("ConfirmDialog tone (spec §6.10)", () => {
 
   it("cancels on Esc", async () => {
     const onOpenChange = vi.fn()
-    render(<ConfirmDialog open onOpenChange={onOpenChange} title="Delete?" tone="danger" onConfirm={() => {}} />)
+    render(<ConfirmDialog open onOpenChange={onOpenChange} title="Delete?" destructive onConfirm={() => {}} />)
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
+  it("styles Cancel as the secondary button in both modes", () => {
+    for (const destructive of [true, false]) {
+      render(<ConfirmDialog open onOpenChange={() => {}} title="Sure?" destructive={destructive} onConfirm={() => {}} />)
+      const cancel = screen.getByRole("button", { name: "Cancel" })
+      expect(cancel.className).toContain("border-line-strong")
+      expect(cancel.className).not.toContain("bg-state-failed")
+      cleanup()
+    }
+  })
+
+  it("cancels on Esc without confirming for a non-destructive dialog", async () => {
+    const onOpenChange = vi.fn()
+    const onConfirm = vi.fn()
+    render(<ConfirmDialog open onOpenChange={onOpenChange} title="Rename?" onConfirm={onConfirm} />)
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" })
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(onConfirm).not.toHaveBeenCalled()
   })
 })

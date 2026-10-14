@@ -1982,7 +1982,7 @@ function AuthedApp({
         title="Delete session?"
         description={deleteSessionDescription(pendingDelete)}
         confirmLabel="Delete"
-        tone="danger"
+        destructive
         onConfirm={async () => {
           if (!pendingDelete) return;
           setSessionMutationError(null);

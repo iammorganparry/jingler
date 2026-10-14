@@ -31,7 +31,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | ChipMenu | `components/chip-menu.tsx` | Compact Command picker anchored to a composer control. | — | no | — |
 | CodeChip | `components/code-chip.tsx` | Rendered code reference chip (file, range). One line; label truncates. | — | no | — |
 | Command, CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandSeparator, CommandShortcut | `components/command.tsx` | cmdk primitives: Command, CommandDialog, Input, List, Item… | — | yes | — |
-| ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal; neutral confirm by default, `tone="danger"` = the only solid red button, Cancel focused first, Esc cancels. | open, onOpenChange, title, tone, onConfirm | no | #375 (2.10) |
+| ConfirmDialog | `components/confirm-dialog.tsx` | Yes/no modal; neutral confirm by default, `destructive` = the only solid red button, Cancel focused first, Esc cancels. | open, onOpenChange, title, destructive, onConfirm | no | #375 (2.10) |
 | ContextMenu | `components/context-menu.tsx` | Right-click menu. | — | yes | — |
 | Dialog, DialogTrigger, DialogPortal, DialogClose, DialogOverlay, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription, DialogBody | `components/dialog.tsx` | Modal dialog primitives (Dialog, Header, Body, Footer…). | — | no | #373 (2.8) |
 | Drawer, DrawerTrigger, DrawerContent, DrawerClose, DrawerTitle, DrawerDescription | `components/drawer.tsx` | 480px right sheet on the Dialog primitive; full-window scrim, focus trap, Esc, focus return. | open, onOpenChange, defaultOpen | yes | #373 (2.8) |

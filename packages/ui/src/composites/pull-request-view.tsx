@@ -596,7 +596,7 @@ return (evidence === "checks" ? (
           title={`Close pull request #${pr.number}?`}
           description="The pull request can be reopened later on GitHub."
           confirmLabel="Close pull request"
-          tone="danger"
+          destructive
           onConfirm={async () => {
             try {
               await onClosePr()
