@@ -62,6 +62,8 @@ export interface SidebarUpdate {
   readonly version: string
   readonly kind: SidebarUpdateKind
   readonly percent?: number
+  /** One explanatory line: the download error, or why a build can't update itself. */
+  readonly detail?: string
   /** Agents mid-run; restarting to update stops them, so the restart asks first. */
   readonly runningAgents?: number
   readonly dismissed: boolean
@@ -281,6 +283,9 @@ function UpdateButton({ update, compact = false }: { update: SidebarUpdate; comp
               <X size={14} />
             </Button>
           </div>
+          {update.detail && (
+            <span className="text-[11.5px] leading-[1.45] text-muted-foreground">{update.detail}</span>
+          )}
           {progress}
           {action && (
             <Button size="sm" className="w-full" onClick={act}>

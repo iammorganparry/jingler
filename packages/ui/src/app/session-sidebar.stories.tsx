@@ -103,7 +103,7 @@ export const UpgradeDownloading: Story = updateStory({ kind: "downloading", perc
 export const UpgradeReady: Story = updateStory({ kind: "downloaded", runningAgents: 0 })
 
 /** The download failed: Retry. */
-export const UpgradeFailed: Story = updateStory({ kind: "failed" })
+export const UpgradeFailed: Story = updateStory({ kind: "failed", detail: "Download failed. Try again." })
 
 /** Dismissed: the row collapses to a compact icon button. */
 export const UpgradeDismissed: Story = updateStory({ kind: "available", dismissed: true })

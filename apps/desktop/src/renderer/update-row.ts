@@ -5,7 +5,11 @@ export interface UpdateRowView {
   readonly version: string
   readonly kind: SidebarUpdateKind
   readonly percent?: number
+  readonly detail?: string
 }
+
+const MANUAL_DETAIL = "This build can't update itself. Open the installer and drag Jingler into Applications."
+
 
 /** Map the updater's published state onto the sidebar row's five visual states. */
 export const updateRowView = (state: UpdateState): UpdateRowView => {
@@ -15,9 +19,8 @@ export const updateRowView = (state: UpdateState): UpdateRowView => {
     case "downloaded":
       return { version: state.version, kind: "downloaded" }
     case "available":
-      return {
-        version: state.version,
-        kind: state.error !== undefined ? "failed" : state.manual === true ? "manual" : "available"
-      }
+      if (state.error !== undefined) return { version: state.version, kind: "failed", detail: state.error }
+      if (state.manual === true) return { version: state.version, kind: "manual", detail: MANUAL_DETAIL }
+      return { version: state.version, kind: "available" }
   }
 }

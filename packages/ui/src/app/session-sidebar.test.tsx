@@ -479,9 +479,10 @@ describe("SessionSidebar manual updates", () => {
         sessions={[]}
         activeSessionId={null}
         onSelect={() => {}}
-        update={{ version: "0.3.4", kind: "manual", dismissed: false, onAction, onDismiss: () => {} }}
+        update={{ version: "0.3.4", kind: "manual", detail: "This build can't update itself. Open the installer.", dismissed: false, onAction, onDismiss: () => {} }}
       />
     )
+    expect(screen.getByText(/can't update itself/)).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Open installer" }))
     expect(onAction).toHaveBeenCalledOnce()
   })
