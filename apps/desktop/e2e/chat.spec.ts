@@ -1021,7 +1021,11 @@ test("an adversarial review runs beside an active conversation and appears as a 
   ).toBeVisible({ timeout: 20_000 })
 
   // …and the reviewer is watchable in the still-visible conversation, mid-run.
-  await expect(window.getByRole("button", { name: /Reviewer/ })).toBeVisible()
+  // The reviewer is a child agent: it shows in the lane header's subagent chip.
+  await window.getByTestId("subagent-chip").first().click()
+  await expect(
+    window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })
+  ).toBeVisible()
 })
 
 /**
@@ -1048,8 +1052,8 @@ test("a finished reviewer's tab is restored after a restart", async ({ launchApp
   await expect(appShell(window)).toBeVisible()
 
   // The completed reviewer is back in its chat's subagent history, readable.
-  await window.getByRole("button", { name: "Previous subagents" }).click()
-  const reviewerTab = window.getByRole("menuitem", { name: /Open Reviewer/ })
+  await window.getByTestId("subagent-chip").first().click()
+  const reviewerTab = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ })
   await expect(reviewerTab).toBeVisible()
   await reviewerTab.click()
   await expect(window.getByText(/stale token can be reused/)).toBeVisible()

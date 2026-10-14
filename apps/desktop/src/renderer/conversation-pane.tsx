@@ -820,7 +820,7 @@ export function ConversationPane({
       if (viewport) viewport.scrollTop = subagentView.mainScrollTop
     })
     return () => cancelAnimationFrame(frame)
-  }, [subagentView.selectedId, subagentView.mainScrollTop])
+  }, [subagentView.selectedId, subagentView.mainScrollTop, fleet.selectedId])
 
   // Live agent status + Plan-tab presence are published by the conversation
   // registry (from the actor's own subscription), so they stay correct even
