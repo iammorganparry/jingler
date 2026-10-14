@@ -10,8 +10,8 @@ const worker = resolve(import.meta.dirname, "fake-subagent-process-worker.mjs")
 const launchPrompt = "Launch the retained native workflow"
 const modelButton = /^Model:/
 // Chip rows are menuitems named "<status> <agent> <task> <elapsed>" (#460).
-const activeWorker = /^(spawning|running|paused|needs you) worker/
-const previousWorker = /^(done|failed|stopped) worker/
+const activeWorker = /^(spawning|running|paused|needs you) \S*worker/
+const previousWorker = /^(done|failed|stopped) \S*worker/
 const terminalJobState = /failed|stopped/
 const stopText = /stop/i
 const stoppedText = /stopped|no longer active/i
