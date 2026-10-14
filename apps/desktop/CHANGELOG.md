@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.9.1
+
+### Patch Changes
+
+- 837ef23: Fix subagents such as `reviewer` failing with "child tools were unavailable". The parent's tool limit is now found under the session file id that subagents look it up by.
+  - @jingler/plannotator-ext@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
