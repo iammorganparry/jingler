@@ -66,6 +66,7 @@ import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
 import { Spinner } from "../components/loading.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 import { Input } from "../components/input.js"
 import {
@@ -1275,31 +1276,53 @@ function GithubSection({
   onSaveGit?: (config: GitConfig) => void
 }) {
   function renderConnectionStatus() {
-    return (<div className="flex items-center gap-2.5 rounded-lg border border-line bg-sunken px-3 py-2.5">
-          <StatusDot
-            tone={
-              getTone()
-            }
-            size={8}
-            glow={connection.mode === "connected"}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="text-[12.5px] font-medium text-text-body">
-              {connection.mode === "connecting"
-                ? "Waiting for GitHub authorization"
-                : connected
-                  ? `Connected as @${connection.user?.login ?? "user"}`
-                  : connection.mode === "error"
-                    ? "GitHub connection needs attention"
-                    : "GitHub is not connected"}
+    const title =
+      connection.mode === "connecting"
+        ? "Waiting for GitHub authorization"
+        : connected
+          ? `Connected as @${connection.user?.login ?? "user"}`
+          : connection.mode === "error"
+            ? "GitHub connection needs attention"
+            : "GitHub is not connected"
+    return (
+      <SettingsCard title="Connection">
+        <SettingsRow
+          label={
+            <span className="flex items-center gap-2">
+              <StatusDot tone={getTone()} size={8} glow={connection.mode === "connected"} />
+              <span>{title}</span>
+            </span>
+          }
+          help={connection.user?.name}
+          control={
+            <div className="flex flex-wrap justify-end gap-2">
+              {!connected ? (
+                <Button variant="primary" size="sm" onClick={onConnect} disabled={busy}>
+                  Install / Connect GitHub
+                </Button>
+              ) : (
+                <>
+                  <Button variant="primary" size="sm" onClick={onManage} disabled={busy}>
+                    Manage repositories
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={onRefresh} disabled={busy}>
+                    Refresh
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmDisconnect(true)} disabled={busy}>
+                    Disconnect
+                  </Button>
+                </>
+              )}
+              {connection.mode === "connecting" && (
+                <Button variant="secondary" size="sm" onClick={onRefresh}>
+                  Cancel / check status
+                </Button>
+              )}
             </div>
-            {connection.user?.name && (
-              <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
-                {connection.user.name}
-              </div>
-            )}
-          </div>
-        </div>)
+          }
+        />
+      </SettingsCard>
+    )
   }
 
   function getTone() {
@@ -1321,6 +1344,7 @@ return ("bg-line-strong")
     github ?? DEFAULT_GITHUB
   )
   const [gitDraft, setGitDraft] = React.useState<GitConfig>(git ?? DEFAULT_GIT)
+  const [confirmDisconnect, setConfirmDisconnect] = React.useState(false)
 
   React.useEffect(() => setDraft(github ?? DEFAULT_GITHUB), [github])
   React.useEffect(() => setGitDraft(git ?? DEFAULT_GIT), [git])
@@ -1369,186 +1393,122 @@ return ("bg-line-strong")
         )}
 
         {connection.installations.length > 0 && (
-          <div
-            className="flex flex-col gap-2"
-            aria-label="GitHub installations"
-          >
+          <SettingsCard title="GitHub installations">
             {connection.installations.map((installation) => (
-              <div
+              <SettingsRow
                 key={installation.id}
-                className="flex items-center gap-2.5 rounded-lg border border-line bg-hover px-3 py-2.5"
-              >
-                <StatusDot
-                  tone={
-                    installation.status === "active" ? "bg-line-strong" : "bg-red"
-                  }
-                  size={7}
-                  glow={false}
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[12px] font-medium text-text-body">
-                    @{installation.account.login}
-                  </div>
-                  <div className="mt-0.5 text-[10.5px] text-muted-foreground">
-                    {installation.status === "suspended"
-                      ? "Suspended"
-                      : installation.repositorySelection === "all"
-                        ? "All repositories"
-                        : "Selected repositories only"}
-                  </div>
-                </div>
-                <span className="font-mono text-[10px] text-dim">
-                  {installation.account.type}
-                </span>
-              </div>
+                label={
+                  <span className="flex items-center gap-2">
+                    <StatusDot
+                      tone={installation.status === "active" ? "bg-line-strong" : "bg-red"}
+                      size={7}
+                      glow={false}
+                    />
+                    <span>@{installation.account.login}</span>
+                  </span>
+                }
+                help={
+                  installation.status === "suspended"
+                    ? "Suspended"
+                    : installation.repositorySelection === "all"
+                      ? "All repositories"
+                      : "Selected repositories only"
+                }
+                control={<span className="font-mono text-[10px] text-dim">{installation.account.type}</span>}
+              />
             ))}
-          </div>
+          </SettingsCard>
         )}
 
-        <div className="flex flex-wrap gap-2">
-          {!connected ? (
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={onConnect}
-              disabled={busy}
-            >
-              Install / Connect GitHub
-            </Button>
-          ) : (
-            <>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={onManage}
-                disabled={busy}
-              >
-                Manage repositories
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={onRefresh}
-                disabled={busy}
-              >
-                Refresh
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onDisconnect}
-                disabled={busy}
-              >
-                Disconnect
-              </Button>
-            </>
-          )}
-          {connection.mode === "connecting" && (
-            <Button variant="secondary" size="sm" onClick={onRefresh}>
-              Cancel / check status
-            </Button>
-          )}
-        </div>
-
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Pull requests">
+          <GeneralToggleRow
             label="Enable pull-request features"
             description="Show the Pull Request & Code Review tabs and allow posting reviews to GitHub."
             checked={draft.enabled}
             onChange={(enabled) => setGithub({ ...draft, enabled })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Auto-detect pull requests"
             description="Link a PR automatically when one is already open on a session's branch."
             checked={draft.autoDetectPr}
             disabled={!draft.enabled}
             onChange={(autoDetectPr) => setGithub({ ...draft, autoDetectPr })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Auto-create pull requests"
             description="Open a PR automatically once a session's branch has pushable commits."
             checked={draft.autoCreatePr}
             disabled={!draft.enabled}
             onChange={(autoCreatePr) => setGithub({ ...draft, autoCreatePr })}
           />
-        </div>
+        </SettingsCard>
 
-        {/* Adversarial review */}
-        <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Adversarial review
-          </span>
-        </div>
-        {agentEndpointCatalog && (
-          <div className="flex items-center gap-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="text-[12.5px] font-medium text-text-body">Review model</div>
-              <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-                Desktop harness and model used for read-only adversarial reviews.
-              </div>
-            </div>
-            <ProviderModelBrowser
-              catalog={{
-                ...agentEndpointCatalog,
-                endpoints: agentEndpointCatalog.endpoints.filter(
-                  ({ endpoint }) => endpoint.targetId === "desktop"
-                )
-              }}
-              endpointId={draft.adversarialReviewModel?.endpointId}
-              connectionId={null}
-              providerId={draft.adversarialReviewModel?.providerId}
-              modelId={draft.adversarialReviewModel?.modelId ?? null}
-              onSelect={({ runtimeId, endpointId, providerId, modelId }) =>
-                setGithub({
-                  ...draft,
-                  adversarialReviewModel: { runtimeId, endpointId, providerId, modelId }
-                })
+        <SettingsCard title="Adversarial review">
+          {agentEndpointCatalog && (
+            <SettingsRow
+              label="Review model"
+              help="Desktop harness and model used for read-only adversarial reviews."
+              control={
+                <ProviderModelBrowser
+                  catalog={{
+                    ...agentEndpointCatalog,
+                    endpoints: agentEndpointCatalog.endpoints.filter(
+                      ({ endpoint }) => endpoint.targetId === "desktop"
+                    )
+                  }}
+                  endpointId={draft.adversarialReviewModel?.endpointId}
+                  connectionId={null}
+                  providerId={draft.adversarialReviewModel?.providerId}
+                  modelId={draft.adversarialReviewModel?.modelId ?? null}
+                  onSelect={({ runtimeId, endpointId, providerId, modelId }) =>
+                    setGithub({
+                      ...draft,
+                      adversarialReviewModel: { runtimeId, endpointId, providerId, modelId }
+                    })
+                  }
+                  className="max-w-[220px]"
+                />
               }
-              className="max-w-[220px]"
             />
-          </div>
-        )}
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+          )}
+          <GeneralToggleRow
             label="Auto-run on new commits"
             description="Review a pull request automatically when it opens and each time its head advances. Runs at most once per commit."
             checked={draft.autoAdversarialReview ?? false}
             disabled={!draft.enabled}
-            onChange={(autoAdversarialReview) =>
-              setGithub({ ...draft, autoAdversarialReview })
-            }
+            onChange={(autoAdversarialReview) => setGithub({ ...draft, autoAdversarialReview })}
           />
-          <ToggleRow
+          <GeneralToggleRow
             label="Post low-severity findings to the pull request"
             description="Turn off to keep adversarial feedback local and send every finding to the session agent instead."
             checked={draft.postAdversarialReviewComments ?? true}
             disabled={!draft.enabled}
-            onChange={(postAdversarialReviewComments) =>
-              setGithub({ ...draft, postAdversarialReviewComments })
-            }
+            onChange={(postAdversarialReviewComments) => setGithub({ ...draft, postAdversarialReviewComments })}
           />
-        </div>
+        </SettingsCard>
         <p className="text-[11px] leading-[1.6] text-muted-foreground">
           Reviews run read-only on the selected desktop harness. Until you choose
           one, Jingler uses each session&apos;s pinned model.
         </p>
 
-        <div className="mt-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Git
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Git">
+          <GeneralToggleRow
             label="Open PRs whose branch is checked out elsewhere"
             description="Start a session from a PR even when its branch is already checked out in another worktree. The worktrees then share the branch."
             checked={gitDraft.shareCheckedOutBranches}
-            onChange={(shareCheckedOutBranches) =>
-              setGitCfg({ shareCheckedOutBranches })
-            }
+            onChange={(shareCheckedOutBranches) => setGitCfg({ shareCheckedOutBranches })}
           />
-        </div>
+        </SettingsCard>
       </div>
+      <ConfirmDialog
+        open={confirmDisconnect}
+        onOpenChange={setConfirmDisconnect}
+        title="Disconnect GitHub?"
+        description="Pull-request features stop working until you reconnect. Your GitHub App installation stays in place on GitHub."
+        confirmLabel="Disconnect"
+        destructive
+        onConfirm={() => onDisconnect?.()}
+      />
     </div>
   )
 }

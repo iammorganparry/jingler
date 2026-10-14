@@ -172,6 +172,10 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
   await expect(window.getByText("Connected as @octocat")).toBeVisible()
   await expect(window.getByText("@acme")).toBeVisible()
   await expect(window.getByText("All repositories")).toBeVisible()
+  // Restyled GitHub section: connection, installation and preference rows sit on SettingsRow.
+  await expect(window.getByTestId("settings-row").filter({ hasText: "Connected as @octocat" })).toBeVisible()
+  await expect(window.getByTestId("settings-row").filter({ hasText: "@acme" })).toBeVisible()
+  await expect(window.getByTestId("settings-row").filter({ hasText: "Enable pull-request features" })).toBeVisible()
   await expect(window.getByText(/GitHub CLI|gh auth|Recheck/i)).toHaveCount(0)
 
   // Manage goes through the same state-bound install endpoint and callback bridge.
@@ -219,7 +223,14 @@ test("GitHub onboarding resumes after callback and Settings repairs live access"
   await expect(window.getByRole("button", { name: "Manage repositories" })).toBeVisible()
 
   await window.getByRole("button", { name: "Manage repositories" }).click()
+  // Disconnect is confirmed first (ConfirmDialog, destructive); Cancel keeps the connection.
   await window.getByRole("button", { name: "Disconnect" }).click()
+  const confirmDisconnect = window.getByRole("dialog")
+  await expect(confirmDisconnect.getByText("Disconnect GitHub?")).toBeVisible()
+  await confirmDisconnect.getByRole("button", { name: "Cancel" }).click()
+  await expect(window.getByText("Connected as @octocat")).toBeVisible()
+  await window.getByRole("button", { name: "Disconnect" }).click()
+  await window.getByRole("dialog").getByRole("button", { name: "Disconnect" }).click()
   await expect(window.getByText("GitHub is not connected")).toBeVisible()
   await expect(window.getByRole("button", { name: "Install / Connect GitHub" })).toBeVisible()
 })
