@@ -258,6 +258,31 @@ const backgroundResponse = (
 /** Waits (~400ms each) before a [[held-settles]] fixture finishes its children. */
 const HELD_SETTLE_AFTER_WAITS = 10
 
+/** [[held-settles]] finishes the children on their own after a few waits, so a spec can
+ * watch a child settle while its view is open (the composer is gone there, no steer possible). */
+const heldUnsteeredResponse = (
+  prompt: string,
+  resultsAfterLatestPrompt: number,
+  direct: boolean
+): ReturnType<typeof fauxAssistantMessage> => {
+  const settles = prompt.includes("[[held-settles]]")
+  if (settles && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
+    return fauxAssistantMessage("Both agents reported back.")
+  }
+  const waitPhase = settles && resultsAfterLatestPrompt === HELD_SETTLE_AFTER_WAITS ? "settle" : "wait"
+  const toolCall = fauxToolCall(
+    E2E_HELD_SUBAGENTS_TOOL,
+    { phase: resultsAfterLatestPrompt === 0 ? (direct ? "direct-start" : "start") : waitPhase },
+    { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
+  )
+  return fauxAssistantMessage(
+    resultsAfterLatestPrompt === 0
+      ? [fauxText(direct ? "Delegated to one direct child." : "Delegated to two agents."), toolCall]
+      : toolCall,
+    { stopReason: "toolUse" }
+  )
+}
+
 const heldSubagentsResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> | null => {
@@ -269,32 +294,7 @@ const heldSubagentsResponse = (
   const prompt = latestOperatorText(context)
   const steered = !prompt.includes(marker)
   const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
-  const startPhase = direct ? "direct-start" : "start"
-  if (!steered) {
-    // [[held-settles]] finishes the children on their own after a few waits, so a spec can
-    // watch a child settle while its view is open (the composer is gone there, no steer possible).
-    const settles = prompt.includes("[[held-settles]]")
-    if (settles && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
-      return fauxAssistantMessage("Both agents reported back.")
-    }
-    const toolCall = fauxToolCall(
-      E2E_HELD_SUBAGENTS_TOOL,
-      {
-        phase: resultsAfterLatestPrompt === 0
-          ? startPhase
-          : settles && resultsAfterLatestPrompt === HELD_SETTLE_AFTER_WAITS
-            ? "settle"
-            : "wait"
-      },
-      { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
-    )
-    return fauxAssistantMessage(
-      resultsAfterLatestPrompt === 0
-        ? [fauxText(direct ? "Delegated to one direct child." : "Delegated to two agents."), toolCall]
-        : toolCall,
-      { stopReason: "toolUse" }
-    )
-  }
+  if (!steered) return heldUnsteeredResponse(prompt, resultsAfterLatestPrompt, direct)
   return steeredSubagentResponse(context, resultsAfterLatestPrompt, direct)
 }
 
