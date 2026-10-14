@@ -43,6 +43,14 @@ test("durable native status appears as a live subagent tab", async ({
       model: "openai-codex/gpt-5.6-sol:low",
       runId: "child-run",
       sessionFile: childSessionFile
+    }, {
+      agent: "worker",
+      label: "broken",
+      workflowKey: "broken",
+      status: "failed",
+      startedAt: Date.now(),
+      runId: "failed-child-run",
+      sessionFile: childSessionFile
     }]
   }))
   try {
@@ -212,20 +220,32 @@ test("durable native status appears as a live subagent tab", async ({
     await expect(composer).toBeVisible({ timeout: 30_000 })
     await composer.fill("Confirm the Fleet projection is active.")
     await composer.press("Enter")
-    const subagentTab = window.getByRole("button", { name: /scout ·/ })
-    await expect(subagentTab).toBeVisible({ timeout: 30_000 })
+    // The lane-header chip popover is the subagent entry point (the tab bar is gone).
+    const chip = window.getByTestId("subagent-chip")
+    const popover = window.getByTestId("subagent-chip-popover")
+    await expect(chip).toBeVisible({ timeout: 30_000 })
+    const openScout = async () => {
+      await chip.click()
+      await popover.locator('[data-testid^="subagent-chip-row-"]').filter({ hasText: "main" }).click()
+    }
     await expect(window.getByRole("button", { name: "Stop", exact: true })).toHaveCount(0)
+    await chip.click()
+    await expect(popover.locator('[data-depth="0"]')).toHaveCount(1)
+    await expect(popover.locator('[data-depth="1"]')).toHaveCount(2)
+    await expect(popover.locator('[data-testid^="subagent-chip-view-error-"]')).toHaveCount(1)
+    await window.keyboard.press("Escape")
+    await expect(popover).toHaveCount(0)
     const sessionRow = window.getByTestId("session-row-s_fleet_durable_qa")
     await expect(sessionRow.getByRole("status", { name: "Running", exact: true })).toBeVisible()
-    await subagentTab.click()
+    await openScout()
     const childView = window.getByTestId("fleet-agent-transcript")
     await expect(childView).toBeVisible()
 
-    const mainChat = window.getByRole("tab", { name: "Fleet DOM QA", exact: true })
+    const mainChat = window.getByRole("button", { name: /^Main/ })
     await mainChat.click()
     await expect(childView).toHaveCount(0)
     await expect(composer).toBeVisible()
-    await subagentTab.click()
+    await openScout()
     await expect(childView).toBeVisible()
 
     await expect(childView.getByRole("button", { name: /pnpm test exit 0 Bash/ })).toBeVisible()
@@ -251,7 +271,11 @@ test("durable native status appears as a live subagent tab", async ({
 
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     await window.evaluate(() => window.dispatchEvent(new Event("focus")))
-    await expect(subagentTab).toHaveCount(0, { timeout: 15_000 })
+    // The chip keeps settled children under Finished; the scout row must stop running.
+    await chip.click()
+    await expect(
+      popover.locator('[data-testid^="subagent-chip-row-"]').filter({ hasText: "main" })
+    ).toContainText("stopped", { timeout: 15_000 })
   } finally {
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     rmSync(join(asyncRoot, runId), { recursive: true, force: true })

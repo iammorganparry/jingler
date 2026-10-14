@@ -60,6 +60,49 @@ describe("SubagentChip", () => {
     expect(onOpenSubagent).toHaveBeenCalledWith("b")
   })
 
+  it("indents children by tree depth with no coloured row fill", () => {
+    render(
+      <SubagentChip
+        subagents={[
+          item({ id: "orch" }),
+          item({ id: "kid", parentId: "orch" }),
+          item({ id: "grand", parentId: "kid" })
+        ]}
+        onOpenSubagent={vi.fn()}
+      />
+    )
+    openChip()
+    const depths = ["orch", "kid", "grand"].map((id) => screen.getByTestId(`subagent-chip-row-${id}`).getAttribute("data-depth"))
+    expect(depths).toEqual(["0", "1", "2"])
+    expect(screen.getByTestId("subagent-chip-row-grand").parentElement?.style.paddingLeft).toBe("28px")
+    expect(screen.getByTestId("subagent-chip-row-kid").className).not.toMatch(/(^|\s)bg-/)
+  })
+
+  it("keeps a finished child indented under its running parent", () => {
+    render(
+      <SubagentChip
+        subagents={[item({ id: "orch" }), item({ id: "kid", parentId: "orch", status: "completed", endedAt: 1000 })]}
+        onOpenSubagent={vi.fn()}
+      />
+    )
+    openChip()
+    expect(screen.getByTestId("subagent-chip-row-kid").getAttribute("data-depth")).toBe("1")
+  })
+
+  it("shows View error only on failed rows and opens that child", () => {
+    const onOpenSubagent = vi.fn()
+    render(
+      <SubagentChip
+        subagents={[item({ id: "ok" }), item({ id: "bad", parentId: "ok", status: "failed", endedAt: 2000 })]}
+        onOpenSubagent={onOpenSubagent}
+      />
+    )
+    openChip()
+    expect(screen.queryByTestId("subagent-chip-view-error-ok")).toBeNull()
+    fireEvent.click(screen.getByTestId("subagent-chip-view-error-bad"))
+    expect(onOpenSubagent).toHaveBeenCalledWith("bad")
+  })
+
   it("collapses rows past the cap into +N more", () => {
     const many = Array.from({ length: 10 }, (_, index) => item({ id: `w${index}` }))
     render(<SubagentChip subagents={many} onOpenSubagent={vi.fn()} />)

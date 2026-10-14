@@ -18,6 +18,8 @@ export interface SubagentTabSnapshot {
   readonly chatId: string
   readonly active: ReadonlyArray<SubagentFleetNode>
   readonly completed: ReadonlyArray<SubagentFleetNode>
+  /** Live workflow roots: the orchestrators the chip popover nests agents under. */
+  readonly orchestrators?: ReadonlyArray<SubagentFleetNode>
   readonly selectedId: string
 }
 
@@ -61,6 +63,16 @@ const setSnapshot = (
   target.set(sessionId, chats)
   refreshSession(sessionId)
 }
+
+/** Workflow roots that still have a live agent under them; a root with only settled steps is not shown. */
+export const activeOrchestratorNodes = (
+  nodes: ReadonlyArray<SubagentFleetNode>
+): ReadonlyArray<SubagentFleetNode> => nodes.filter((root) =>
+  root.nodeKind === "workflow" &&
+  nodes.some((node) =>
+    node.parentId === root.id && node.nodeKind === "agent" && ACTIVE.has(node.status)
+  )
+)
 
 export const recentSubagentNodes = (
   nodes: ReadonlyArray<SubagentFleetNode>
@@ -146,6 +158,7 @@ export const projectSubagentTabs = (input: {
       node.nodeKind === "agent" && ACTIVE.has(node.status)
     ),
     completed: completedSubagentNodes(events),
+    orchestrators: activeOrchestratorNodes(nodes),
     selectedId: MAIN_FLEET_AGENT
   }
 }

@@ -71,6 +71,7 @@ import { useConversation, type Conversation } from "./use-conversation.js"
 import { useSessionSubagentEntry } from "./session-chat-tabs.js"
 import { MAIN_FLEET_AGENT, useSubagentFleet, type SubagentFleetController } from "./use-subagent-fleet.js"
 import {
+  activeOrchestratorNodes,
   publishSubagentTabs,
   recentSubagentNodes,
   registerMainViewReader,
@@ -770,6 +771,10 @@ export function ConversationPane({
     ),
     [fleet.nodes]
   )
+  const orchestratorFleetNodes = useMemo(
+    () => activeOrchestratorNodes(fleet.nodes),
+    [fleet.nodes]
+  )
   const completedFleetNodes = useMemo(() => {
     const completed = new Map(fleet.completedNodes.map((node) => [node.id, node]))
     for (const node of fleet.nodes) {
@@ -785,9 +790,10 @@ export function ConversationPane({
       chatId: activeChat.id,
       active: activeFleetNodes,
       completed: completedFleetNodes,
+      orchestrators: orchestratorFleetNodes,
       selectedId: fleet.selectedId
     })
-  }, [activeChat.id, activeFleetNodes, completedFleetNodes, fleet.selectedId, session.id])
+  }, [activeChat.id, activeFleetNodes, completedFleetNodes, orchestratorFleetNodes, fleet.selectedId, session.id])
   useEffect(() => {
     retainSubagentTabController(session.id, activeChat.id)
     return () => releaseSubagentTabController(session.id, activeChat.id)

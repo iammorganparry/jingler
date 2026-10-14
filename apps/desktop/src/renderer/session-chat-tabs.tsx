@@ -27,6 +27,7 @@ const chipItem = (node: SubagentFleetNode): SubagentChipItem => ({
   agent: node.agent,
   task: node.task,
   status: chipStatus(node.status),
+  parentId: node.parentId,
   startedAt: node.startedAt,
   ...(node.completedAt === null ? {} : { endedAt: node.completedAt })
 })
@@ -37,7 +38,7 @@ export function useSessionSubagentEntry(session: Session) {
   return useMemo(() => {
     const active = snapshots.find(({ chatId }) => chatId === session.activeChatId)
     return {
-      subagents: [...(active?.active ?? []), ...(active?.completed ?? [])].map(chipItem),
+      subagents: [...(active?.orchestrators ?? []), ...(active?.active ?? []), ...(active?.completed ?? [])].map(chipItem),
       onOpenSubagent: (nodeId: string) => selectSubagentTab(session.id, session.activeChatId, nodeId)
     }
   }, [snapshots, session.id, session.activeChatId])
