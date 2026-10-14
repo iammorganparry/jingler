@@ -1070,9 +1070,7 @@ export function Composer(props: ComposerProps) {
   const fileMatches = useMemo(
     () =>
       menu?.kind === "mention"
-        ? files
-            .filter((f) => f.toLowerCase().includes(menu.query.toLowerCase()))
-            .slice(0, 50)
+        ? files.filter((f) => f.toLowerCase().includes(menu.query.toLowerCase()))
         : [],
     [menu, files],
   );

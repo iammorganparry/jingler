@@ -71,6 +71,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | StatusRow, Stepper | `components/status-row.tsx` | Neutral status line (red only when failed); numbered done/current/upcoming stepper with aria-current. | icon, failed, steps, current | yes | #370 (2.5) |
 | SettingsCard, SettingsRow | `components/settings-row.tsx` | Bordered card of rows; row = label + wrapping help left, fixed control right. | title, label, help, control | yes | #372 (2.7) |
 | Toast, ToastRegion | `components/toast.tsx` | Bottom-right notification stack (success, error + Retry, Needs you + Jump, info); queue, 6 s timeout and hover-pause live in `components/toast-machine.ts`. | variant, title, description, action, onDismiss | yes | #369 (2.4) |
+| VirtualList | `components/virtual-list.tsx` | Windowed, searchable list with fixed row height: only visible rows mount, ↑/↓/Home/End move the active row and scroll it into view, Enter selects, sticky group headers, selection kept while the `query` filters. | items, getKey, getText, getGroup, renderRow, onSelect, query, activeKey, onActiveKeyChange | yes | #377 (2.12) |
 | Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
 | Tooltip | `components/tooltip.tsx` | Tooltip (BeUI Tooltip). | — | no | #374 (2.9) |
 | Toggle | `components/toggle.tsx` | Switch toggle. | checked, defaultChecked, onCheckedChange, disabled, label, ariaLabel | yes | #372 (2.7) |
@@ -125,7 +126,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | LinkedIssueSelector | `composites/linked-issue-selector.tsx` | Pick the issue linked to a workspace. | items, value, onValueChange, icon, variant, disabled | yes | — |
 | MagicLinkForm | `composites/magic-link-form.tsx` | Email magic-link input and submit. | state, mode, email, name, sentEmail, onEmailChange | yes | — |
 | McpServerForm, McpServerDialog, McpAuthSetupDialog, McpApiKeyDialog, McpBrand, McpSettings | `composites/mcp-settings.tsx` | Settings › MCP servers with forms and auth dialogs. | servers, parseError, loading, statuses, probing, probe | no | — |
-| MentionMenu | `composites/mention-menu.tsx` | `@` file/session mention palette. | — | no | — |
+| MentionMenu | `composites/mention-menu.tsx` | `@` file/session mention palette on VirtualList. | — | no | #377 (2.12) |
 | PlanProgressContext, ToolStopContext, SubagentEntryContext, MessageTurn | `composites/message-turn.tsx` | One transcript turn: text, tool calls, thinking. | — | yes | — |
 | ModeSwitch | `composites/mode-switch.tsx` | Plan/Build and permission-mode switch. | — | yes | — |
 | NativeEndpointLogin | `composites/native-endpoint-login.tsx` | Sign-in against a native endpoint. | — | no | — |
