@@ -12,6 +12,7 @@ import type {
   AgentEndpointCatalog,
   Attachment,
   ContextConfig,
+  PlanTemplateConfig,
   VsCodeTheme,
   CreateSessionFromIssueInput,
   CreateSessionFromPrInput,
@@ -513,7 +514,7 @@ function AuthedApp({
   }, [persistedOffloadCompute, sendOffloadSettings]);
   const offloadCompute = offloadSettingsState.context.settings;
   // Absent means Auto for configs written before this preference existed.
-  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
+  const { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig } = appDisplayPreferences(configQuery);
   const usage = usageQuery.data ?? null;
 
   const contextTargets = sessions.flatMap((session) => {
@@ -588,6 +589,10 @@ function AuthedApp({
     });
   const savePlanAutoRun = (value: boolean) =>
     rpc.configSetPlanAutoRun(value).then((saved) => {
+      qc.setQueryData(["config"], saved);
+    });
+  const savePlanTemplate = (template: PlanTemplateConfig) =>
+    rpc.configSetPlanTemplate(template).then((saved) => {
       qc.setQueryData(["config"], saved);
     });
   const saveAdhdMode = (value: boolean) =>
@@ -1603,6 +1608,8 @@ function AuthedApp({
         onSaveDefaultMode={saveDefaultMode}
         planAutoRun={planAutoRun}
         onSavePlanAutoRun={savePlanAutoRun}
+        planTemplate={planTemplate}
+        onSavePlanTemplate={savePlanTemplate}
         adhdMode={adhdMode}
         onSaveAdhdMode={saveAdhdMode}
         fontScale={fontScale}
@@ -2093,6 +2100,7 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const defaultMode = configQuery.data?.defaultMode ?? "auto";
   // Absent means on — plan mode's commands are read-only.
   const planAutoRun = configQuery.data?.planAutoRun ?? true;
+  const planTemplate = configQuery.data?.planTemplate ?? null;
   // Absent means off — ADHD mode shapes completion summaries, so it remains an
   // opt-in preference rather than a default the operator has to undo.
   const adhdMode = configQuery.data?.adhdMode ?? false;
@@ -2105,7 +2113,7 @@ function appDisplayPreferences(configQuery: { data: Awaited<ReturnType<typeof rp
   const collapsedRepos = configQuery.data?.collapsedRepos ?? [];
   const headerViews = normalizeHeaderViews(configQuery.data?.headerViews);
   const lastRepoPath = configQuery.data?.lastRepoPath ?? null;
-  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, adhdMode, fontScale, contextConfig };
+  return { starredRepos, headerViews, collapsedRepos, lastRepoPath, defaultMode, planAutoRun, planTemplate, adhdMode, fontScale, contextConfig };
 }
 
 function renderIssueInbox(

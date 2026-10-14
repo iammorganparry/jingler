@@ -202,3 +202,55 @@ export const SettingsGeneralOffloadFailed: Story = {
   name: "Settings · General · Offload failed + Retry (10.2)",
   render: () => <GeneralOffload status="failed" />
 }
+
+const CONTEXT_SESSIONS = [
+  {
+    id: "s1",
+    title: "Fix PR inbox pagination",
+    snapshot: {
+      sessionId: "s1", tokens: 180_000, window: 1_000_000, budget: 300_000, triggerAt: 300_000,
+      phase: "idle", preparing: false, digestReady: false, stalled: false
+    }
+  },
+  {
+    id: "s2",
+    title: "Untracked scratch chat",
+    snapshot: {
+      sessionId: "s2", tokens: 0, window: null, budget: 300_000, triggerAt: null,
+      phase: "unknown", preparing: false, digestReady: false, stalled: false
+    }
+  }
+] as never
+
+export const SettingsContext: Story = {
+  name: "Settings · Context (10.16)",
+  render: () => (
+    <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
+      <SettingsView
+        initialSection="context"
+        githubConnection={DEMO_GITHUB}
+        context={{ auto: true, budgetTokens: 300_000 }}
+        contextSessions={CONTEXT_SESSIONS}
+        onSaveContext={() => {}}
+        onClose={() => {}}
+      />
+    </div>
+  )
+}
+
+export const SettingsPlan: Story = {
+  name: "Settings · Plan (10.16)",
+  render: () => (
+    <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
+      <SettingsView
+        initialSection="plan"
+        githubConnection={DEMO_GITHUB}
+        planAutoRun
+        planTemplate={{ source: "" }}
+        onSavePlanAutoRun={() => {}}
+        onSavePlanTemplate={() => {}}
+        onClose={() => {}}
+      />
+    </div>
+  )
+}

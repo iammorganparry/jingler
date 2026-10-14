@@ -587,3 +587,29 @@ for (const recoveryCase of [
     await expect(review(reopened)).toHaveCount(0)
   })
 }
+
+test("plan settings persist auto-run and the plan template", async ({ launchApp }) => {
+  const { window } = await launchPlanMode(launchApp)
+  const openPlanSettings = async () => {
+    await window.getByRole("button", { name: "Account menu" }).click()
+    await window.getByRole("menuitem", { name: "Settings" }).click()
+    await window.getByRole("button", { name: /^Plan/ }).click()
+  }
+  await openPlanSettings()
+
+  // Auto-run + template live on cataloged SettingsRows.
+  await expect(window.getByTestId("settings-row")).toHaveCount(2)
+  const autoRun = window.getByRole("switch", { name: "Plan auto-run" })
+  await expect(autoRun).toBeChecked()
+  await autoRun.click()
+  await expect(autoRun).not.toBeChecked()
+
+  await window.getByRole("textbox", { name: "Plan template" }).fill("")
+  await window.getByRole("button", { name: "Save template" }).click()
+  await expect(window.getByRole("button", { name: "Saved" })).toBeVisible()
+
+  // Both survive closing and reopening Settings (read back from persisted config).
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await openPlanSettings()
+  await expect(window.getByRole("switch", { name: "Plan auto-run" })).not.toBeChecked()
+})

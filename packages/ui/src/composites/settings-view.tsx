@@ -9,7 +9,8 @@ import type {
   ContextConfig,
   ContextSnapshot,
   Environment,
-  ExecutionMode
+  ExecutionMode,
+  PlanTemplateConfig
 } from "@jingler/core"
 import {
   BUDGET_RANGE,
@@ -54,7 +55,7 @@ import {
 import { SearchField } from "../components/search-input.js"
 import { Badge } from "../components/badge.js"
 import { JinglerWordmark } from "../brand/jingler-mark.js"
-import { Eyebrow } from "../components/eyebrow.js"
+import { AsyncButton } from "../components/async-button.js"
 import { GithubMark } from "../components/github-mark.js"
 import { ThemesSettings, type ThemesSettingsProps } from "./themes-settings.js"
 import {
@@ -230,6 +231,9 @@ export interface SettingsViewProps {
   /** Whether plan mode runs commands unattended; absent means on. */
   planAutoRun?: boolean | null
   onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
+  /** Custom starting plan structure; absent or empty means the built-in draft. */
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => void | Promise<void>
   /** Whether final completion summaries are shaped for an ADHD reader. */
   adhdMode?: boolean | null
   onSaveAdhdMode?: (adhdMode: boolean) => void | Promise<void>
@@ -289,6 +293,10 @@ export function SettingsView({
   onRetryOffload,
   defaultMode,
   onSaveDefaultMode,
+  planAutoRun,
+  onSavePlanAutoRun,
+  planTemplate,
+  onSavePlanTemplate,
   adhdMode,
   onSaveAdhdMode,
   fontScale,
@@ -337,19 +345,12 @@ return (<ContextSection
         />)
 }
 case "plan": {
-return (<div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-          <div className="mx-auto w-full max-w-[760px] rounded-xl border border-line bg-panel p-5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-purple">
-              Plannotator
-            </p>
-            <h2 className="mt-1 text-[19px] font-semibold text-text-bright">Plan mode</h2>
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              Plans are Markdown files reviewed and revised in Plannotator. Jingler&apos;s todo list,
-              Plan drawer, progress dock, composer summary, and transcript card are read-only views
-              of that plan.
-            </p>
-          </div>
-        </div>)
+return (<PlanSection
+          planAutoRun={planAutoRun}
+          onSavePlanAutoRun={onSavePlanAutoRun}
+          planTemplate={planTemplate}
+          onSavePlanTemplate={onSavePlanTemplate}
+        />)
 }
 case "agents": {
 return (renderOptionalSection(agents, (props) => <AgentsSettings {...props} />, "Agents & skills"))
@@ -769,8 +770,8 @@ function ContextSection({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor">
-      <div className="flex max-w-[560px] flex-col gap-4 p-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
         <div className="flex items-center gap-2 border-b border-hairline pb-2.5">
           <Gauge size={14} className="text-text-bright" />
           <span className="text-[13px] font-semibold text-text-bright">
@@ -785,63 +786,53 @@ function ContextSection({
           transcript is never truncated.
         </Callout>
 
-        <div className="divide-y divide-hairline">
-          <ToggleRow
+        <SettingsCard title="Auto-compaction">
+          <GeneralToggleRow
             label="Compact sessions automatically"
             description="Summarise and reseed in the background when a session outgrows its budget. Off leaves the selected provider model to enforce its own limit."
             checked={draft.auto}
             onChange={(auto) => save({ ...draft, auto })}
           />
-        </div>
-
-        {/* ── The budget ── */}
-        <div className={draft.auto ? "" : "pointer-events-none opacity-50"}>
-          <div className="flex items-baseline justify-between">
-            <span className="text-[12.5px] font-medium text-text-body">
-              Working-set budget
-            </span>
-            <span className="font-mono text-[12px] tabular-nums text-text-bright">
-              {fmtK(draft.budgetTokens)} tokens
-            </span>
-          </div>
-          <p className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-            How much conversation a session carries before it is compacted.
-            Lower keeps answers sharper; higher keeps more raw history in play.
-          </p>
-          <input
-            type="range"
-            min={BUDGET_RANGE.min}
-            max={BUDGET_RANGE.max}
-            step={8_000}
-            value={draft.budgetTokens}
-            disabled={!draft.auto}
-            onChange={(e) =>
-              save({ ...draft, budgetTokens: Number(e.target.value) })
+          <SettingsRow
+            className={draft.auto ? undefined : "pointer-events-none opacity-50"}
+            label="Working-set budget"
+            help="How much conversation a session carries before it is compacted. Lower keeps answers sharper; higher keeps more raw history in play."
+            control={
+              <div className="flex w-[240px] flex-col gap-1">
+                <span className="self-end font-mono text-[12px] tabular-nums text-text-bright">
+                  {fmtK(draft.budgetTokens)} tokens
+                </span>
+                <input
+                  type="range"
+                  min={BUDGET_RANGE.min}
+                  max={BUDGET_RANGE.max}
+                  step={8_000}
+                  value={draft.budgetTokens}
+                  disabled={!draft.auto}
+                  onChange={(e) =>
+                    save({ ...draft, budgetTokens: Number(e.target.value) })
+                  }
+                  aria-label="Working-set budget"
+                  className="w-full accent-blue"
+                />
+                <div className="flex justify-between font-mono text-[10px] text-dim">
+                  <span>{fmtK(BUDGET_RANGE.min)}</span>
+                  <span>sharper ← → more history</span>
+                  <span>{fmtK(BUDGET_RANGE.max)}</span>
+                </div>
+              </div>
             }
-            aria-label="Working-set budget"
-            className="mt-2.5 w-full accent-blue"
           />
-          <div className="flex justify-between font-mono text-[10px] text-dim">
-            <span>{fmtK(BUDGET_RANGE.min)}</span>
-            <span>sharper ← → more history</span>
-            <span>{fmtK(BUDGET_RANGE.max)}</span>
-          </div>
-        </div>
+        </SettingsCard>
 
-        {/* ── Live sessions ── */}
         {sessions !== undefined && sessions.length > 0 && (
-          <div className="rounded-lg border border-line bg-sunken p-3">
-            <Eyebrow>Your sessions right now</Eyebrow>
-            <div className="mt-1.5 space-y-1.5">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className="flex items-center justify-between gap-3"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12px] text-text-body">
-                    {s.title}
-                  </span>
-                  {s.snapshot.triggerAt === null ? (
+          <SettingsCard title="Your sessions right now">
+            {sessions.map((s) => (
+              <SettingsRow
+                key={s.id}
+                label={<span className="block truncate text-[12px] font-normal">{s.title}</span>}
+                control={
+                  s.snapshot.triggerAt === null ? (
                     <span className="font-mono text-[10.5px] text-dim">
                       not measurable
                     </span>
@@ -854,12 +845,91 @@ function ContextSection({
                       digestReady={s.snapshot.digestReady}
                       stalled={s.snapshot.stalled}
                     />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+                  )
+                }
+              />
+            ))}
+          </SettingsCard>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Plan section ─────────────────────────────────────────────────────────────
+
+/** Settings → Plan: plan-mode auto-run and the starting plan template. */
+function PlanSection({
+  planAutoRun,
+  onSavePlanAutoRun,
+  planTemplate,
+  onSavePlanTemplate
+}: {
+  planAutoRun?: boolean | null
+  onSavePlanAutoRun?: (planAutoRun: boolean) => void | Promise<void>
+  planTemplate?: PlanTemplateConfig | null
+  onSavePlanTemplate?: (template: PlanTemplateConfig) => void | Promise<void>
+}) {
+  // Absent means ON, matching the renderer's default.
+  const [autoRun, setAutoRun] = React.useState<boolean>(planAutoRun ?? true)
+  React.useEffect(() => setAutoRun(planAutoRun ?? true), [planAutoRun])
+  const [source, setSource] = React.useState<string>(planTemplate?.source ?? "")
+  React.useEffect(() => setSource(planTemplate?.source ?? ""), [planTemplate])
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        <div className="flex items-center gap-2 border-b border-hairline pb-2.5">
+          <Sparkles size={14} className="text-text-bright" />
+          <span className="text-[13px] font-semibold text-text-bright">
+            Plan mode
+          </span>
+        </div>
+
+        <Callout tone="blue">
+          Plans are Markdown files reviewed and revised in Plannotator.
+          Jingler&apos;s todo list, Plan drawer, progress dock, composer summary,
+          and transcript card are read-only views of that plan.
+        </Callout>
+
+        <SettingsCard title="Execution">
+          <GeneralToggleRow
+            label="Plan auto-run"
+            description="Let plan mode run its read-only commands without asking for approval each time."
+            checked={autoRun}
+            onChange={(next) => {
+              setAutoRun(next)
+              void onSavePlanAutoRun?.(next)
+            }}
+          />
+        </SettingsCard>
+
+        <SettingsCard title="Plan template">
+          <SettingsRow
+            label="Starting plan structure"
+            help="A structured plan (JSON) injected into every planning turn. Leave empty to use the built-in blank draft."
+            control={
+              <AsyncButton
+                variant="secondary"
+                pendingLabel="Saving…"
+                successLabel="Saved"
+                onClick={() => onSavePlanTemplate?.({ source })}
+              >
+                Save template
+              </AsyncButton>
+            }
+          />
+          <div className="px-4 py-3">
+            <textarea
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              rows={8}
+              spellCheck={false}
+              aria-label="Plan template"
+              className="w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 font-mono text-[11px] text-text outline-none focus:border-text-bright/40 focus:ring-2 focus:ring-ring/40"
+            />
+          </div>
+        </SettingsCard>
       </div>
     </div>
   )
@@ -874,38 +944,6 @@ const DEFAULT_GITHUB: GithubConfig = {
   postAdversarialReviewComments: true
 }
 const DEFAULT_GIT: GitConfig = { shareCheckedOutBranches: true }
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  disabled,
-  onChange
-}: {
-  label: string
-  description: string
-  checked: boolean
-  disabled?: boolean
-  onChange: (v: boolean) => void
-}) {
-  return (
-    <div className="flex items-start gap-3 py-2.5">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium text-text-body">{label}</div>
-        <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-          {description}
-        </div>
-      </div>
-      <Toggle
-        aria-label={label}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        className="mt-0.5"
-      />
-    </div>
-  )
-}
 
 /**
  * The four conversation text-size steps. Stored as the raw multiplier the
