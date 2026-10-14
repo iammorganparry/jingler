@@ -1,5 +1,7 @@
 # @jingler/github-relay
 
+## 0.9.2
+
 ## 0.9.1
 
 ## 0.9.0

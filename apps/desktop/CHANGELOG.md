@@ -1,5 +1,13 @@
 # @jingler/desktop
 
+## 0.9.2
+
+### Patch Changes
+
+- 8a4c7fc: Fix Claude Enterprise / API-priced spend showing far too low. Each Claude Code run reports its own cost, so every turn is now kept and summed instead of only the last one.
+- 67780dd: Fix adversarial review findings not reaching the agent when a review is run again on the same PR head. Critical and major findings are now sent to the session's chat for every fresh review, not just the first.
+  - @jingler/plannotator-ext@0.9.2
+
 ## 0.9.1
 
 ### Patch Changes
