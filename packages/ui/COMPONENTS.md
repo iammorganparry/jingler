@@ -206,7 +206,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
 | TabBar | `app/tab-bar.tsx` | Content tab strip. | — | yes | — |
-| TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock and panel. | dock, onDockChange, visible, onToggle, tabs, activeId | yes | — |
+| TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock, and the Terminal view's resizable panel (drag handle default 240, height persisted per session, tab strip, "No terminals" empty state, exited shell Restart). | dock, onDockChange, visible, onToggle, tabs, activeId; panel: sessionId, tabs, activeId, onNew, onRestart | yes | #469 (8.10) |
 | TitleBar | `app/title-bar.tsx` | Window title bar; draws WindowControls when platform is set and not darwin. | title, actions, platform, windowControls | yes | #394 (3.11) |
 | WindowControls | `app/window-controls.tsx` | Minimize / maximize-restore / close for Windows and Linux; red hover on Close only. | maximized, onMinimize, onToggleMaximize, onClose | yes | #394 (3.11) |
 | TitleSearch | `app/title-search.tsx` | Global sidebar search. | — | no | — |

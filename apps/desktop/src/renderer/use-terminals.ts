@@ -70,6 +70,8 @@ export interface UseTerminals {
   create: () => Promise<void>
   /** Kill a terminal and drop its tab. */
   close: (id: string) => Promise<void>
+  /** Replace a terminal with a fresh shell (spawn the new one first, then drop the old). */
+  restart: (id: string) => Promise<void>
   /** Focus a tab. */
   select: (id: string) => void
   /** Mark a tab exited (its shell process ended) — keeps it until closed. */
@@ -113,6 +115,14 @@ export function useTerminals(sessionId: string | null, cwd?: string): UseTermina
     [qc, sessionId]
   )
 
+  const restart = useCallback(
+    async (id: string) => {
+      await create()
+      await close(id)
+    },
+    [create, close]
+  )
+
   const select = useCallback(
     (id: string) => {
       if (!sessionId) return
@@ -139,6 +149,7 @@ export function useTerminals(sessionId: string | null, cwd?: string): UseTermina
     hydrated: sessionId !== null && query.isFetched,
     create,
     close,
+    restart,
     select,
     markExited
   }

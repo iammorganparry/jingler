@@ -1922,7 +1922,7 @@ function AuthedApp({
           );
         }}
         renderTerminalDock={(session, visible) => (
-          <TerminalDockView session={session} visible={visible} embedded />
+          <TerminalDockView session={session} visible={visible} />
         )}
         onFocusChat={(sessionId, chatId) => {
           const session = sessions.find((candidate) => candidate.id === sessionId);
