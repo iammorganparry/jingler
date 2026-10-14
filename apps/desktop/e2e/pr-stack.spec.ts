@@ -65,3 +65,57 @@ test("Create PR shows the Base selector and publishes against the chosen base", 
     head: expect.stringMatching(/^acme:/)
   })
 })
+
+test("PR stack rail orders layers base-up and ⌥] moves to the next PR with Checks following", async ({ launchApp }) => {
+  const pr = (number: number, headRefName: string, baseRefName: string, check: string) => ({
+    number, title: `Layer ${number}`, headRefName, baseRefName, author: { login: "e2e-user" },
+    checks: [{ name: check, conclusion: "success" }]
+  })
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{
+      id: "s_stack", repo: "widget", branch: "stack/ui", title: "Stack session", status: "idle",
+      diff: { added: 0, removed: 0 }, prNumber: 482, costUsd: 0, tokens: 0, updatedAt: "2026-10-12T10:00:00.000Z",
+      prs: [
+        { number: 480, branch: "stack/model", base: "main" },
+        { number: 481, branch: "stack/api", base: "stack/model" },
+        { number: 482, branch: "stack/ui", base: "stack/api" }
+      ],
+      githubInstallationId: "101", githubRepositoryId: "301", worktreePath: context.repoPath
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [
+        pr(480, "stack/model", "main", "check-480"),
+        pr(481, "stack/api", "stack/model", "check-481"),
+        pr(482, "stack/ui", "stack/api", "check-482")
+      ]
+    }
+  })
+  await window.getByTestId("session-row-s_stack").click()
+  await window.getByTestId("header-link-pr").click()
+  await window.getByRole("tablist", { name: "Pull request sections" }).getByRole("tab", { name: /^Checks/ }).click()
+
+  // Rail lists the layers bottom (base) first.
+  const rail = window.getByTestId("pr-stack-rail")
+  await expect(rail.getByRole("button")).toHaveCount(3)
+  await expect(rail.getByRole("button").nth(0)).toContainText("#480")
+  await expect(rail.getByRole("button").nth(2)).toContainText("#482")
+
+  // The session's own PR (top of the stack) is selected first.
+  await expect(window.getByTestId("pr-switcher")).toContainText("PR #482")
+  await expect(window.getByTestId("pr-switcher")).toContainText("3/3")
+  await expect(window.getByText("check-482").first()).toBeVisible()
+
+  // ⌥[ goes down the stack, ⌥] back up; Checks follows the selection.
+  await window.keyboard.press("Alt+BracketLeft")
+  await expect(window.getByTestId("pr-switcher")).toContainText("PR #481")
+  await expect(window.getByText("check-481").first()).toBeVisible()
+  await window.keyboard.press("Alt+BracketLeft")
+  await expect(window.getByText("check-480").first()).toBeVisible()
+  await window.keyboard.press("Alt+BracketRight")
+  await expect(window.getByTestId("pr-switcher")).toContainText("PR #481")
+  await expect(window.getByText("check-481").first()).toBeVisible()
+})

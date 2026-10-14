@@ -189,6 +189,8 @@ export interface SeedSession {
   readonly environmentId?: string;
   readonly diff: { added: number; removed: number };
   readonly prNumber: number | null;
+  /** The PR stack, bottom layer first. */
+  readonly prs?: ReadonlyArray<{ number: number; branch?: string; base?: string }>;
   readonly githubInstallationId?: string;
   readonly githubRepositoryId?: string;
   readonly githubFeedbackDeliveryIds?: ReadonlyArray<string>;
