@@ -58,6 +58,7 @@ export function FileQuickOpen({
           : error ?? "No matching files in this session"
       }
       testId="file-quick-open"
+      showScopes={false}
     />
   )
 }

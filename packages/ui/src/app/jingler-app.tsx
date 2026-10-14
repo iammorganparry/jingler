@@ -40,7 +40,8 @@ import type {
   UsageReport,
   User,
 } from "@jingler/core"
-import { UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
+import { displayStatusLabel } from "../tokens.js"
 import type { SessionCreationPhase } from "@jingler/contracts"
 import { useMachine } from "@xstate/react"
 import { AppShell } from "./app-shell.js"
@@ -1224,6 +1225,7 @@ function getActiveTabContext(active: Session) {
       kind: "session",
       label: s.title || UNTITLED_SESSION,
       detail: `${s.repo} · ${s.branch}`,
+      status: displayStatusLabel[displayStatusOf(null, s.status)],
       group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
       run: () => selectSession(s.id)
     })

@@ -320,3 +320,22 @@ test("archives the active session from the palette", async ({ launchApp }) => {
   // sidebar IS the outcome.
   await expect(sessionRow(window, "Alpha session")).toBeHidden()
 })
+
+test("the Chat scope narrows results and Tab cycles back to Workspace", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{ ...seededSessions[0]!, worktreePath: repoPath }, seededSessions[1]!]
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.keyboard.press("Meta+k")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
+
+  await window.getByRole("tab", { name: "Chat", exact: true }).click()
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeHidden()
+  await expect(window.getByTestId("palette-item-tab:terminal")).toBeVisible()
+
+  await window.getByPlaceholder(PLACEHOLDER).press("Tab")
+  await expect(window.getByTestId("palette-item-session:sess-beta")).toBeVisible()
+})

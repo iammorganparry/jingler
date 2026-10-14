@@ -3,8 +3,10 @@ import {
   fuzzyScore,
   groupPaletteItems,
   itemKeywords,
+  itemsInScope,
   matchFileQuickOpenChord,
   matchPaletteChord,
+  nextScope,
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
@@ -371,5 +373,28 @@ describe("viewPaletteItems", () => {
     ])
     items[1]!.run()
     expect(open).toHaveBeenCalledExactlyOnceWith("linear.issues")
+  })
+})
+
+describe("palette scopes", () => {
+  const rows = [
+    item({ id: "s", group: PALETTE_GROUP.sessions }),
+    item({ id: "a", group: PALETTE_GROUP.actions }),
+    item({ id: "t", group: PALETTE_GROUP.tabs }),
+    item({ id: "v", group: PALETTE_GROUP.views }),
+    item({ id: "g", group: PALETTE_GROUP.subagents })
+  ]
+
+  it("Workspace keeps every row", () => {
+    expect(itemsInScope(rows, "workspace")).toHaveLength(rows.length)
+  })
+
+  it("Chat keeps only the active chat's tabs, views and subagents", () => {
+    expect(itemsInScope(rows, "chat").map((i) => i.id)).toEqual(["t", "v", "g"])
+  })
+
+  it("Tab cycles Workspace → Chat → Workspace", () => {
+    expect(nextScope("workspace")).toBe("chat")
+    expect(nextScope("chat")).toBe("workspace")
   })
 })
