@@ -46,3 +46,34 @@ describe("LoginScreen waiting", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull()
   })
 })
+
+describe("LoginScreen error", () => {
+  it("shows the cause in state-failed with Retry and Use a different method", () => {
+    const h = renderLogin({ state: "error", errorMessage: "Boom happened" })
+    expect(screen.getByRole("alert").textContent).toBe("Boom happened")
+    expect(screen.getByRole("alert").className).toContain("text-state-failed")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(h.onRetry).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole("button", { name: "Use a different method" }))
+    expect(h.onReset).toHaveBeenCalledOnce()
+  })
+})
+
+describe("LoginScreen sent", () => {
+  it("confirms the address and resends with a 30s cooldown", () => {
+    vi.useFakeTimers()
+    const h = renderLogin({ state: "sent", sentEmail: "morgan@example.com" })
+    expect(screen.getByText(/link\s+expires in 15 min/)).toBeTruthy()
+    expect(screen.getByText("morgan@example.com")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Resend" }))
+    expect(h.onSendMagicLink).toHaveBeenCalledWith("morgan@example.com", undefined)
+    const sentAgain = screen.getByRole("button", { name: "Sent again ✓" })
+    expect((sentAgain as HTMLButtonElement).disabled).toBe(true)
+    act(() => void vi.advanceTimersByTime(29_999))
+    expect(screen.queryByRole("button", { name: "Resend" })).toBeNull()
+    act(() => void vi.advanceTimersByTime(1))
+    expect(screen.getByRole("button", { name: "Resend" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Use a different email" }))
+    expect(h.onReset).toHaveBeenCalledOnce()
+  })
+})

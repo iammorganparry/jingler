@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react"
-import { AlertCircle } from "lucide-react"
 import { TitleBar } from "../app/title-bar.js"
 import { AuthDivider } from "../components/auth-divider.js"
 import { Button } from "../components/button.js"
-import { Callout } from "../components/callout.js"
 import { Spinner } from "../components/loading.js"
 import { OAuthButton } from "../components/oauth-button.js"
 import { AuthCard } from "../composites/auth-card.js"
@@ -13,6 +11,9 @@ export type LoginState = "default" | "loading" | "waiting" | "sent" | "error"
 
 /** How long the browser hand-off may stay unanswered before we offer "Try again". */
 const STILL_WAITING_MS = 120_000
+
+/** Minimum gap between magic-link resends. */
+const RESEND_COOLDOWN_MS = 30_000
 
 /** Which side of the wall we're showing: sign in to an account, or create one. */
 export type AuthMode = "signin" | "signup"
@@ -59,6 +60,30 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
  * name. Composed from the auth atoms/molecules; states come from `Login.dc.html`.
  * Stateless except for the local mode + input; all actions lifted to props.
  */
+function ErrorPanel({
+  message = "We couldn't sign you in. Please try again.",
+  onRetry,
+  onReset
+}: {
+  message?: string
+  onRetry: () => void
+  onReset: () => void
+}) {
+  return (
+    <div className="flex w-full flex-col items-center gap-3">
+      <p role="alert" className="w-full text-center text-[12px] leading-snug text-state-failed">
+        {message}
+      </p>
+      <Button className="w-full" onClick={onRetry}>
+        Retry
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onReset}>
+        Use a different method
+      </Button>
+    </div>
+  )
+}
+
 function WaitingPanel({
   signInUrl,
   onCancel,
@@ -135,13 +160,26 @@ export function LoginScreen({
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const loading = state === "loading"
+  const [resent, setResent] = useState(false)
   const signup = mode === "signup"
 
-  /** Clear local inputs and any in-flight machine state, then flip modes. */
-  const toggleMode = () => {
+  // Resend is locked for the cooldown, then offered again.
+  useEffect(() => {
+    if (!resent) return
+    const timer = setTimeout(() => setResent(false), RESEND_COOLDOWN_MS)
+    return () => clearTimeout(timer)
+  }, [resent])
+
+  /** Clear local inputs, the resend cooldown and any in-flight machine state. */
+  const clearAndReset = () => {
     setEmail("")
     setName("")
+    setResent(false)
     onReset()
+  }
+
+  const toggleMode = () => {
+    clearAndReset()
     setMode(signup ? "signin" : "signup")
   }
 
@@ -169,42 +207,39 @@ export function LoginScreen({
         }
       >
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
-          {state === "error" ? (
-            <Callout tone="red" glyph={<AlertCircle className="size-3.5" />} className="w-full">
-              {errorMessage ?? "We couldn't sign you in. Please try again."}
-            </Callout>
-          ) : null}
-
           {state === "waiting" ? (
             <WaitingPanel signInUrl={signInUrl} onCancel={onCancel} onRetry={onRetry} />
+          ) : state === "error" ? (
+            <ErrorPanel message={errorMessage} onRetry={onRetry} onReset={clearAndReset} />
           ) : (
             <>
-            {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
-            <div
-              className="flex w-full flex-col gap-2"
-              style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
-            >
-              <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
-              <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
-            </div>
+              {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
+              <div
+                className="flex w-full flex-col gap-2"
+                style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
+              >
+                <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
+                <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
+              </div>
 
-            <AuthDivider />
+              <AuthDivider />
 
-            <MagicLinkForm
-              state={state}
-              mode={mode}
-              email={email}
-              name={name}
-              sentEmail={sentEmail}
-              onEmailChange={setEmail}
-              onNameChange={setName}
-              onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
-              onReset={() => {
-                setEmail("")
-                setName("")
-                onReset()
-              }}
-            />
+              <MagicLinkForm
+                state={state}
+                mode={mode}
+                email={email}
+                name={name}
+                sentEmail={sentEmail}
+                onEmailChange={setEmail}
+                onNameChange={setName}
+                onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
+                onReset={clearAndReset}
+                onResend={() => {
+                  setResent(true)
+                  onSendMagicLink(sentEmail || email, signup ? name : undefined)
+                }}
+                resent={resent}
+              />
             </>
           )}
 

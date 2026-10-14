@@ -27,6 +27,10 @@ export interface MagicLinkFormProps {
   onSubmit: () => void
   /** Return from the `sent` state to re-enter details. */
   onReset: () => void
+  /** Send the link again from `sent`. Omit to hide Resend. */
+  onResend?: () => void
+  /** True during the resend cooldown: Resend reads "Sent again ✓" and is disabled. */
+  resent?: boolean
 }
 
 /**
@@ -44,24 +48,27 @@ export function MagicLinkForm({
   onEmailChange,
   onNameChange,
   onSubmit,
-  onReset
+  onReset,
+  onResend,
+  resent = false
 }: MagicLinkFormProps) {
   const signup = mode === "signup"
 
   if (state === "sent") {
     return (
       <div className="flex w-full flex-col items-center gap-2.5">
-        <Callout tone="blue" glyph={<MailCheck className="size-3.5" />}>
-          {signup ? "Confirm your account with the link we sent to" : "Sign-in link sent to"}{" "}
-          <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong>.
+        <Callout tone="blue" glyph={<MailCheck className="size-3.5" />} className="w-full">
+          Check <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong> — link
+          expires in 15 min
         </Callout>
-        <button
-          type="button"
-          onClick={onReset}
-          className="text-[12px] text-text transition-colors hover:text-text-bright"
-        >
+        {onResend ? (
+          <Button variant="secondary" size="sm" className="w-full" disabled={resent} onClick={onResend}>
+            {resent ? "Sent again ✓" : "Resend"}
+          </Button>
+        ) : null}
+        <Button variant="ghost" size="sm" onClick={onReset}>
           Use a different email
-        </button>
+        </Button>
       </div>
     )
   }

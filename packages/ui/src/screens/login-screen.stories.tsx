@@ -18,9 +18,9 @@ type Story = StoryObj<typeof LoginScreen>
 const noop = () => {}
 
 /** Interactive: send fakes the loading→sent transition so both modes are drivable. */
-const Interactive = ({ initial = "default" }: { initial?: LoginState }) => {
+const Interactive = ({ initial = "default", sentEmail: initialEmail }: { initial?: LoginState; sentEmail?: string }) => {
   const [state, setState] = useState<LoginState>(initial)
-  const [sentEmail, setSentEmail] = useState<string>()
+  const [sentEmail, setSentEmail] = useState<string | undefined>(initialEmail)
   return (
     <div className="h-screen">
       <LoginScreen
@@ -35,6 +35,7 @@ const Interactive = ({ initial = "default" }: { initial?: LoginState }) => {
         }}
         onCancel={() => setState("default")}
         onRetry={() => setState("waiting")}
+        errorMessage="We couldn't send the sign-in link. Please try again."
         signInUrl="https://jingler.dev/sign-in?code=demo"
         onReset={() => {
           setState("default")
@@ -51,4 +52,4 @@ export const Default: Story = { render: () => <Interactive /> }
 export const ErrorState: Story = { name: "Error", render: () => <Interactive initial="error" /> }
 export const Loading: Story = { render: () => <Interactive initial="loading" /> }
 export const Waiting: Story = { render: () => <Interactive initial="waiting" /> }
-export const Sent: Story = { render: () => <Interactive initial="sent" /> }
+export const Sent: Story = { render: () => <Interactive initial="sent" sentEmail="morgan@example.com" /> }
