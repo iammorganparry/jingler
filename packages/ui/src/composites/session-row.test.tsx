@@ -88,6 +88,18 @@ describe("SessionRow metadata line (no wrapping)", () => {
     expect(stat.className).toContain("whitespace-nowrap")
   })
 
+  it("shows the stack glyph with its layer count when the session has several PRs", () => {
+    render(
+      <SessionRow
+        session={testSession({ id: "stack", prNumber: 482, prs: [{ number: 480 }, { number: 481 }, { number: 482 }] })}
+        prState={{ state: "open", checks: "fail" }}
+      />
+    )
+    const glyph = screen.getByTestId("pr-glyph-stack")
+    expect(glyph.textContent).toContain("3")
+    expect(glyph.dataset.checks).toBe("fail")
+  })
+
   it("never lets the status word wrap or shrink", () => {
     render(<SessionRow session={testSession({ id: "status", status: "idle" })} />)
 

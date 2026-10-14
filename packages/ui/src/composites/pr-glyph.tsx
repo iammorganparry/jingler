@@ -128,7 +128,8 @@ export function PrStatusGlyph({
   className?: string
 }) {
   if (stack && stack.length > 1) {
-    const worst = worstPrOf(stack)
+    // A live worst-layer status from the caller beats the persisted layers, which may lack state.
+    const worst = pr ?? worstPrOf(stack)
     const { tone, label } = prGlyphOf(worst)
     return (
       <span
