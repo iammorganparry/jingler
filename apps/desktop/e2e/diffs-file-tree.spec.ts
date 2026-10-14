@@ -248,3 +248,41 @@ test("the turn filter narrows the changed-file list and the diff", async ({ laun
   await window.getByRole("option", { name: "All turns" }).click()
   await expect(item("src/auth/login.ts")).toBeVisible()
 })
+
+test("no Keep/Revert controls render; right-click Discard file changes removes the file from Changes", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [seeded(repoPath)],
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
+      mkdirSync(join(repoPath, "src", "store"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 1\n")
+      writeFileSync(join(repoPath, "src", "store", "cache.ts"), "export const ttl = 30\n")
+      execFileSync("git", ["add", "-A"], { cwd: repoPath })
+      execFileSync("git", ["commit", "-m", "seed discard", "--no-gpg-sign"], { cwd: repoPath })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 2\n")
+      writeFileSync(join(repoPath, "src", "store", "cache.ts"), "export const ttl = 60\n")
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1800, height: 900 })
+  await sessionRow(window, "Pierre review session").click()
+  const closeTerminal = window.getByRole("button", { name: "Close zsh" })
+  if (await closeTerminal.isVisible()) await closeTerminal.click()
+
+  const diff = await openChangedFile(window, "src/auth/login.ts")
+  await expect(diff).toContainText("login = 2")
+  await expect(window.getByRole("button", { name: /Keep|Revert/ })).toHaveCount(0)
+
+  const explorer = window.getByTestId("changed-files-explorer")
+  const item = (path: string) => explorer.locator(`[role="treeitem"][data-item-path="${path}"]`)
+  await item("src/store/cache.ts").click({ button: "right" })
+  await window.getByRole("menuitem", { name: "Discard file changes" }).click()
+  await window.getByRole("button", { name: "Discard", exact: true }).click()
+  await expect(item("src/store/cache.ts")).toHaveCount(0, { timeout: 20_000 })
+  await expect(item("src/auth/login.ts")).toBeVisible()
+})

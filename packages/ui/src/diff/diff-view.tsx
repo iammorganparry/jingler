@@ -4,7 +4,7 @@ import type {
   FileDiffMetadata
 } from "@pierre/diffs"
 import { jinglerDark, toTokens } from "@jingler/themes"
-import { MessageSquarePlus, Undo2, X } from "lucide-react"
+import { MessageSquarePlus, X } from "lucide-react"
 import {
   useCallback,
   useEffect,
@@ -49,10 +49,6 @@ const FALLBACK_TOKENS = toTokens(jinglerDark)
 
 /** Optional interactions for a live worktree diff (the Changes rail). */
 export interface DiffActions {
-  /** Revert the uncommitted changes in Pierre's side-aware inclusive range. */
-  onRevertLines?: (selection: JinglerLineSelection) => void
-  /** Revert all uncommitted changes to a file. */
-  onRevertFile?: (path: string) => void
   /** Attach a selected range to the active chat's next message. */
   onAddToChat?: (selection: JinglerLineSelection) => void
   /** Send a comment about Pierre's side-aware inclusive range to the agent. */
@@ -133,9 +129,6 @@ const selectedActionsPayload = (
   kind: "selected-range-actions",
   selection,
   actions: [
-    ...(actions.onRevertLines === undefined
-      ? []
-      : [{ id: "revert", label: "Revert", intent: "danger" as const }]),
     ...(actions.onAddToChat === undefined
       ? []
       : [{ id: "add-to-chat", label: "Add to chat", intent: "default" as const }]),
@@ -284,10 +277,6 @@ function useSelectedRangeRenderer(
           body={body}
           onBodyChange={setBody}
           onCancel={clear}
-          onRevert={() => {
-            actions.onRevertLines?.(candidate.selection)
-            clear()
-          }}
           onAddToChat={() => {
             actions.onAddToChat?.(candidate.selection)
             clear()
@@ -351,11 +340,6 @@ function DiffViewContent({
         className
       )}
     >
-      <FileDiffActions
-        fileDiffs={fileDiffs}
-        actions={actions}
-        onActionComplete={state.clear}
-      />
       <PierreDiffRenderer
         label={label}
         fill={fill}
@@ -370,41 +354,6 @@ function DiffViewContent({
         onTokenEnter={onTokenEnter}
         onTokenLeave={onTokenLeave}
       />
-    </div>
-  )
-}
-
-function FileDiffActions({
-  fileDiffs,
-  actions,
-  onActionComplete
-}: {
-  readonly fileDiffs: readonly FileDiffMetadata[]
-  readonly actions: DiffActions | undefined
-  readonly onActionComplete: () => void
-}) {
-  if (actions?.onRevertFile === undefined || fileDiffs.length === 0) return null
-  return (
-    <div
-      role="toolbar"
-      aria-label="File diff actions"
-      className="flex flex-none items-center gap-1 overflow-x-auto border-b border-hairline bg-surface px-2 py-1"
-    >
-      {fileDiffs.map((candidate) => (
-        <button
-          key={candidate.name}
-          type="button"
-          aria-label={`Revert ${candidate.name}`}
-          onClick={() => {
-            actions.onRevertFile?.(candidate.name)
-            onActionComplete()
-          }}
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] text-red opacity-80 hover:bg-red/10"
-        >
-          <Undo2 size={11} />
-          Revert {candidate.name.split("/").at(-1)}
-        </button>
-      ))}
     </div>
   )
 }
@@ -492,7 +441,6 @@ function SelectedRangeActions({
   body,
   onBodyChange,
   onCancel,
-  onRevert,
   onAddToChat,
   onComment
 }: {
@@ -500,7 +448,6 @@ function SelectedRangeActions({
   readonly body: string
   readonly onBodyChange: (body: string) => void
   readonly onCancel: () => void
-  readonly onRevert: () => void
   readonly onAddToChat: () => void
   readonly onComment: () => void
 }) {
@@ -538,12 +485,6 @@ function SelectedRangeActions({
         className="w-full resize-none rounded-md border border-line bg-sunken px-2 py-1.5 font-sans text-[12px] text-text-body outline-none placeholder:text-dim focus-visible:border-blue"
       />
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {payload.actions.some((action) => action.id === "revert") ? (
-          <Button variant="danger" size="sm" className="gap-1.5" onClick={onRevert}>
-            <Undo2 size={12} />
-            Revert
-          </Button>
-        ) : null}
         {payload.actions.some((action) => action.id === "add-to-chat") ? (
           <Button variant="secondary" size="sm" className="gap-1.5" onClick={onAddToChat}>
             <MessageSquarePlus size={12} />

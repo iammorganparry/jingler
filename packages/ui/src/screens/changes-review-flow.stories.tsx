@@ -283,8 +283,6 @@ function FlowFiles({ flow, path }: { readonly flow: FlowState; readonly path: st
       onSendComment={(comment) => flow.setLog(`Sent to the agent: ${comment.path} L${comment.line} — ${comment.body}`)}
       onRemoveDraft={flow.removeDraft}
       onToggleViewed={flow.toggleViewed}
-      onRevertLines={(range) => flow.setLog(`Reverted ${range.path} L${range.startLine}–${range.endLine}`)}
-      onRevertFile={flow.revertFile}
       onDeslopFile={(target) => flow.setLog(`Asked the agent to deslop ${target}`)}
       onSendFindingToAgent={flow.sendFinding}
     />

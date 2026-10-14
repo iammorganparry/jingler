@@ -36,6 +36,15 @@ describe("QuestionCard (spec §6.10, 7.8)", () => {
     expect(screen.getByTestId("needs-you-tick").className).toContain("bg-state-needs")
     expect(container.innerHTML).not.toMatch(/(bg|text|border)-(blue|purple|green|red)/)
   })
+
+  it("offers Switch session to Auto only when a handler is given", () => {
+    const onSwitchToAuto = vi.fn()
+    const { rerender } = render(<QuestionCard request={request} onSubmit={() => {}} />)
+    expect(screen.queryByText("Switch session to Auto")).toBeNull()
+    rerender(<QuestionCard request={request} onSubmit={() => {}} onSwitchToAuto={onSwitchToAuto} />)
+    fireEvent.click(screen.getByText("Switch session to Auto"))
+    expect(onSwitchToAuto).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("ApprovalGate", () => {

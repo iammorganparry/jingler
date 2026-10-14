@@ -28,7 +28,9 @@ test("switch sessions with PR view and a running reviewer visible", async ({ lau
   await window.getByRole("button", { name: /Adversarial review/ }).click()
   const running = window.getByRole("button", { name: /Reading the code…|Thinking…|Writing findings…/ })
   await expect(running).toBeVisible({ timeout: 20_000 })
-  await window.getByRole("button", { name: /Reviewer/ }).click()
+  // The reviewer is a child agent now: it opens from the lane header's subagent chip.
+  await window.getByTestId("subagent-chip").first().click()
+  await window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Reviewer/ }).click()
   await expect(window.getByRole("textbox", { name: "Inline agents are watch-only — steer them through the main chat." })).toBeVisible()
   await expect(running).toBeVisible()
 

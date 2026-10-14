@@ -72,7 +72,6 @@ export function useChangesReview(session: Session, connected: boolean) {
     sendComment,
     focused,
     toggleFocus,
-    revertLines: worktree ? review.revertLines : undefined,
     revertFile: worktree ? review.revertFile : undefined
   }
 }
@@ -107,7 +106,7 @@ export function ChangesExplorerPanel({
   readonly activePath: string | null
   readonly onOpenPath: (path: string) => void
 }) {
-  const { review, adversarial } = useChangesReview(session, connected)
+  const { review, adversarial, revertFile } = useChangesReview(session, connected)
   const { turns, turn, setTurn } = useReviewTurns(session)
   return (
     <ChangedFilesExplorer
@@ -123,6 +122,7 @@ export function ChangesExplorerPanel({
       review={review.source === "pr" ? adversarial.review : null}
       activePath={activePath}
       onSelectFile={onOpenPath}
+      onDiscardFile={review.source === "local" ? revertFile : undefined}
       loading={review.loading}
       error={review.error}
       onRetry={review.retry}
