@@ -7,7 +7,7 @@ import {
 } from "@jingler/core"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { PlanTaskList, planProgressStatus } from "./plan-progress-dock.js"
+import { PlanProgressRow, PlanTaskList, planProgressStatus, planStageActionMessage, type PlanProgressStatus } from "./plan-progress-dock.js"
 
 const stage = (
   id: string,
@@ -121,5 +121,58 @@ describe("PlanTaskList task list", () => {
       }
     }} />)
     expect(screen.getByRole("button", { name: "Plan tasks: 3 of 3 done" })).toBeTruthy()
+  })
+
+  const withStage = (extra: PlanPrdStage): PlanDocument => ({
+    ...document,
+    plan: { ...document.plan, stages: [stage("01", "Inspect the code", "completed", "passed"), extra] }
+  })
+
+  it("draws a failed step with a red icon, 'Step N failed', Retry step and Ask agent", () => {
+    const onStageAction = vi.fn()
+    render(<PlanTaskList document={withStage(stage("02", "Build the dock", "pending", "failed"))} onStageAction={onStageAction} />)
+    expect(screen.getByTestId("plan-progress-status-02").textContent).toContain("Step 2 failed")
+    expect(screen.getByTestId("plan-progress-status-02").querySelector(".text-state-failed")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry step" }))
+    fireEvent.click(screen.getByRole("button", { name: "Ask agent" }))
+    expect(onStageAction).toHaveBeenNthCalledWith(1, "retry", { id: "02", step: 2, title: "Build the dock" })
+    expect(onStageAction).toHaveBeenNthCalledWith(2, "ask", { id: "02", step: 2, title: "Build the dock" })
+  })
+
+  it("draws a blocked step with Ask agent but no red", () => {
+    render(<PlanTaskList document={withStage(stage("02", "Build the dock", "blocked"))} onStageAction={vi.fn()} />)
+    const line = screen.getByTestId("plan-progress-status-02")
+    expect(line.textContent).toContain("Step 2 blocked")
+    expect(line.querySelector(".text-state-failed")).toBeNull()
+    expect(screen.getByRole("button", { name: "Ask agent" })).toBeTruthy()
+  })
+
+  it("draws an interrupted step as 'Stopped by you' with Resume", () => {
+    const onStageAction = vi.fn()
+    render(<PlanProgressRow status="interrupted" step={2} stage={{ id: "02", title: "Build the dock" }} onStageAction={onStageAction} />)
+    expect(screen.getByTestId("plan-progress-status-02").textContent).toContain("Stopped by you")
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }))
+    expect(onStageAction).toHaveBeenCalledWith("resume", { id: "02", step: 2, title: "Build the dock" })
+  })
+
+  it("renders every PlanProgressStatus; only failed/interrupted/blocked draw a status line", () => {
+    const all: ReadonlyArray<PlanProgressStatus> = ["todo", "in-progress", "done", "blocked", "failed", "interrupted"]
+    for (const status of all) {
+      const view = render(<PlanProgressRow status={status} step={1} stage={{ id: status, title: status }} />)
+      expect(screen.getByTestId(`plan-progress-stage-${status}`).getAttribute("data-status")).toBe(status)
+      expect(screen.queryByTestId(`plan-progress-status-${status}`) !== null).toBe(["blocked", "failed", "interrupted"].includes(status))
+      view.unmount()
+    }
+  })
+
+  it("hides action buttons when the host does not wire onStageAction", () => {
+    render(<PlanTaskList document={withStage(stage("02", "Build the dock", "pending", "failed"))} />)
+    expect(screen.queryByRole("button", { name: "Retry step" })).toBeNull()
+  })
+
+  it("words each stage action as a chat message", () => {
+    expect(planStageActionMessage("retry", { step: 3, title: "Verify" })).toContain('Retry step 3 ("Verify")')
+    expect(planStageActionMessage("resume", { step: 3, title: "Verify" })).toContain("Resume")
+    expect(planStageActionMessage("ask", { step: 3, title: "Verify" })).toContain("step 3")
   })
 })

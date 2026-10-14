@@ -135,7 +135,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PlanApprovalCard, PlanCard | `composites/plan-card.tsx` | Plan card and approval card in the transcript. | — | yes | — |
 | PlanChangeBlock, PlanRevisionDiff | `composites/plan-change-block.tsx` | Proposed per-file diff in a plan. | path, patch | no | — |
 | PlanCommentLayer | `composites/plan-comment-layer.tsx` | Margin comment threads over plan text. | container, content, comments, editable, onReply, onResolve | no | — |
-| PlanTaskList, PlanProgressDock | `composites/plan-progress-dock.tsx` | Plan task list / progress dock. | — | yes | — |
+| PlanTaskList, PlanProgressDock, PlanProgressRow | `composites/plan-progress-dock.tsx` | Plan task list / progress dock; neutral icon rows, failed row red with `Step N failed` + `Retry step` / `Ask agent`, interrupted `Stopped by you` + `Resume`, blocked line. | document, onOpenStage, onStageAction | yes | #454 (7.5) |
 | PlanStageCard | `composites/plan-stage-card.tsx` | Plan stage card with SCM-style change letters. | stage, number, stages, onComment | no | — |
 | STEP, PlanStepList | `composites/plan-step-list.tsx` | Legacy plan step list. | — | no | — |
 | PluginsSettings | `composites/plugins-settings.tsx` | Settings › Plugins. | catalog, loadErrors, pluginIcons, actionError, onDismissActionError, onSetEnabled | no | — |
