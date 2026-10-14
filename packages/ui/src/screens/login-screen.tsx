@@ -189,7 +189,7 @@ export function LoginScreen({
       <button
         type="button"
         onClick={toggleMode}
-        className="text-brand hover:underline"
+        className="text-text-bright hover:underline"
       >
         {signup ? "Sign in" : "Create an account"}
       </button>
@@ -246,11 +246,11 @@ export function LoginScreen({
           {signup ? (
             <p className="mt-2 text-center text-[11px] leading-normal text-dim">
               By continuing you agree to our{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-text-bright hover:underline">
                 Terms
               </a>{" "}
               &amp;{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-text-bright hover:underline">
                 Privacy Policy
               </a>
               .
