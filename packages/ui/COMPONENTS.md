@@ -204,6 +204,8 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionTree | `app/session-tree.tsx` | Session chats, views and open files tree. | — | no | — |
 | SubagentTabBar | `app/subagent-tab-bar.tsx` | Subagent chip strip. | — | no | — |
 | SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
+| SubagentMetaStrip | `app/subagent-meta-strip.tsx` | Up to 3-row strip under the subagent breadcrumb: provider, model, status · phase, elapsed, `Details ▾` key/value grid (run id, started), current tool, usage, Background pill, artifact chips. Null fields omitted; pills never truncate. | node, providerId, onOpenArtifact | yes | #462 (8.3) |
+| SubagentReadOnlyBar | `app/subagent-readonly-bar.tsx` | Replaces the composer in a subagent view: `Subagent of <main> · read-only` + Stop (pending then stopped line); attention message + Reply; terminal summary + Retry. | node, mainTitle, onStop, onReply, onRetry | yes | #462 (8.3) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
 | TabBar | `app/tab-bar.tsx` | Content tab strip. | — | yes | — |
 | TerminalDock, TerminalPanel | `app/terminal-panel.tsx` | Terminal dock, and the Terminal view's resizable panel (drag handle default 240, height persisted per session, tab strip, "No terminals" empty state, exited shell Restart). | dock, onDockChange, visible, onToggle, tabs, activeId; panel: sessionId, tabs, activeId, onNew, onRestart | yes | #469 (8.10) |
