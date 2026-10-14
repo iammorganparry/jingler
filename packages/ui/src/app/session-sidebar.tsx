@@ -8,6 +8,7 @@ import {
   CircleAlert,
   Cloud,
   Download,
+  ExternalLink,
   GitBranch,
   CircleDot,
   GitPullRequest,
@@ -15,6 +16,7 @@ import {
   LoaderCircle,
   PanelLeft,
   Plus,
+  RotateCw,
   Search,
   Server,
   SlidersHorizontal,
@@ -28,6 +30,7 @@ import { sidebarIsRail, usePaneWidth } from "../hooks/width-tier.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { StatusDot } from "../components/status-dot.js"
 import { FilterMenu } from "../components/filter-menu.js"
 import { HoverCard } from "../components/hover-card.js"
@@ -53,13 +56,16 @@ import {
   type SessionFilters
 } from "./session-filters.js"
 
+export type SidebarUpdateKind = "available" | "downloading" | "downloaded" | "failed" | "manual"
+
 export interface SidebarUpdate {
   readonly version: string
-  readonly status: "available" | "downloading" | "downloaded"
+  readonly kind: SidebarUpdateKind
   readonly percent?: number
-  readonly error?: string
-  /** This build cannot install updates itself; the action opens the installer. */
-  readonly manual?: boolean
+  /** One explanatory line: the download error, or why a build can't update itself. */
+  readonly detail?: string
+  /** Agents mid-run; restarting to update stops them, so the restart asks first. */
+  readonly runningAgents?: number
   readonly dismissed: boolean
   readonly onAction: () => void
   readonly onDismiss: () => void
@@ -172,105 +178,132 @@ export interface SessionSidebarProps {
   onOpenInTerminal?: (sessionId: string) => void
 }
 
+const UPDATE_ACTION: Record<SidebarUpdateKind, string | null> = {
+  available: "Download",
+  downloading: null,
+  downloaded: "Restart to update",
+  failed: "Retry",
+  manual: "Open installer"
+}
+
+const UPDATE_ICON = {
+  available: Download,
+  downloading: Download,
+  downloaded: RotateCw,
+  failed: CircleAlert,
+  manual: ExternalLink
+} as const
+
+const updateText = (update: SidebarUpdate): string => {
+  const percent = Math.round(update.percent ?? 0)
+  if (update.kind === "downloading") return `Downloading ${percent}%`
+  if (update.kind === "downloaded") return `v${update.version} ready`
+  if (update.kind === "failed") return "Update failed"
+  return `v${update.version} available`
+}
+
 const updateAccessibleLabel = (update: SidebarUpdate): string => {
-  if (update.status === "downloaded") return `Restart to install Jingler ${update.version}`
-  if (update.status === "downloading") return `Downloading Jingler ${update.version}, ${Math.round(update.percent ?? 0)}%`
-  if (update.manual) return `Download the Jingler ${update.version} installer`
-  return `Download Jingler ${update.version}`
-}
-
-const updateActionLabel = (update: SidebarUpdate): string => {
-  if (update.status === "downloaded") return "Restart to update"
-  if (update.status === "downloading") return `Downloading ${Math.round(update.percent ?? 0)}%`
-  if (update.manual) return "Download installer"
-  return update.error ? "Try download again" : "Upgrade now"
-}
-
-const updateDescription = (update: SidebarUpdate): string => {
-  if (update.error) return update.error
-  if (update.status === "downloaded") return "The update is downloaded and ready to install."
-  if (update.status === "downloading") return "Downloading the update in the background."
-  if (update.manual) return "This build can't update itself. Open the installer and drag Jingler into Applications."
-  return "A new version is available."
-}
-
-function UpdateButton({ update, compact = false }: { update: SidebarUpdate; compact?: boolean }) {
-  const downloading = update.status === "downloading"
-  const label = updateAccessibleLabel(update)
-
-  if (compact) {
-    return (
-      <div className="relative flex size-8 flex-none">
-        <button
-          type="button"
-          aria-label={label}
-          title={label}
-          disabled={downloading}
-          onClick={update.onAction}
-          className="flex size-8 items-center justify-center rounded-md text-blue outline-none transition-colors hover:bg-surface focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait"
-        >
-          <Download size={16} />
-        </button>
-        {downloading && (
-          <span
-            role="progressbar"
-            aria-label="Update download progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(update.percent ?? 0)}
-            className="pointer-events-none absolute bottom-0.5 left-1 right-1 h-0.5 overflow-hidden rounded-full bg-line"
-          >
-            <span className="block h-full bg-blue" style={{ width: `${update.percent ?? 0}%` }} />
-          </span>
-        )}
-      </div>
-    )
+  const name = `Jingler ${update.version}`
+  switch (update.kind) {
+    case "downloading": return `Downloading ${name}, ${Math.round(update.percent ?? 0)}%`
+    case "downloaded": return `Restart to install ${name}`
+    case "failed": return `Update to ${name} failed. Retry`
+    case "manual": return `Open the ${name} installer`
+    default: return `Download ${name}`
   }
+}
+
+const agentsRunningTitle = (agents: number): string =>
+  agents === 1 ? "1 agent is running. Restarting stops it." : `${agents} agents are running. Restarting stops them.`
+
+/**
+ * The account-menu update row, one of five states (available, downloading,
+ * downloaded, failed, manual installer). Dismissed, or in the collapsed rail, it
+ * is the compact icon button. Restarting with agents running asks first.
+ */
+function UpdateButton({ update, compact = false }: { update: SidebarUpdate; compact?: boolean }) {
+  const [confirming, setConfirming] = React.useState(false)
+  const agents = update.runningAgents ?? 0
+  const downloading = update.kind === "downloading"
+  const label = updateAccessibleLabel(update)
+  const Icon = UPDATE_ICON[update.kind]
+  const act = () => (update.kind === "downloaded" && agents > 0 ? setConfirming(true) : update.onAction())
+  const progress = downloading && (
+    <span
+      role="progressbar"
+      aria-label="Update download progress"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(update.percent ?? 0)}
+      className={cn(
+        "pointer-events-none overflow-hidden rounded-full bg-line",
+        compact ? "absolute bottom-0.5 left-1 right-1 h-0.5" : "h-1 w-full"
+      )}
+    >
+      <span className="block h-full bg-blue transition-[width]" style={{ width: `${update.percent ?? 0}%` }} />
+    </span>
+  )
+  const action = UPDATE_ACTION[update.kind]
 
   return (
-    <div className="relative mx-2 mb-2 aspect-square overflow-hidden rounded-xl border border-blue/30 bg-gradient-to-br from-blue/15 via-surface to-panel shadow-sm">
-      <button
-        type="button"
-        aria-label={label}
-        disabled={downloading}
-        onClick={update.onAction}
-        className="flex size-full flex-col items-start justify-between p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-wait"
-      >
-        <span className="flex size-10 items-center justify-center rounded-xl bg-blue text-white shadow-sm">
-          <Download size={20} />
-        </span>
-        <span>
-          <strong className="block text-[15px] font-semibold text-text-bright">Jingler {update.version}</strong>
-          <span className="mt-1 block text-[12px] leading-5 text-muted-foreground">
-            {updateDescription(update)}
-          </span>
-        </span>
-        <span className="w-full rounded-lg bg-blue px-3 py-2 text-center text-[12px] font-semibold text-white">
-          {updateActionLabel(update)}
-        </span>
-      </button>
-      {downloading && (
-        <span
-          role="progressbar"
-          aria-label="Update download progress"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(update.percent ?? 0)}
-          className="pointer-events-none absolute bottom-14 left-4 right-4 h-1 overflow-hidden rounded-full bg-line"
+    <>
+      {compact ? (
+        <div className="relative flex size-8 flex-none">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={label}
+            title={label}
+            disabled={downloading}
+            onClick={act}
+            className={update.kind === "failed" ? "text-state-failed" : "text-blue"}
+          >
+            <Icon size={16} />
+          </Button>
+          {progress}
+        </div>
+      ) : (
+        <div
+          role="region"
+          aria-label="Jingler update"
+          className="mx-2 mb-2 flex flex-col gap-2 rounded-xl border border-blue/30 bg-surface p-3 shadow-sm"
         >
-          <span className="block h-full bg-blue transition-[width]" style={{ width: `${update.percent ?? 0}%` }} />
-        </span>
+          <div className="flex items-center gap-2">
+            <Icon size={14} className={cn("flex-none", update.kind === "failed" ? "text-state-failed" : "text-blue")} />
+            <span aria-live="polite" className="min-w-0 flex-1 truncate text-[12px] font-medium text-text-bright">
+              {updateText(update)}
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={`Dismiss Jingler ${update.version} update`}
+              onClick={update.onDismiss}
+            >
+              <X size={14} />
+            </Button>
+          </div>
+          {update.detail && (
+            <span className="text-[11.5px] leading-[1.45] text-muted-foreground">{update.detail}</span>
+          )}
+          {progress}
+          {action && (
+            <Button size="sm" className="w-full" onClick={act}>
+              {action}
+            </Button>
+          )}
+        </div>
       )}
-      <span className="sr-only" aria-live="polite">Update status: {updateActionLabel(update)}</span>
-      <button
-        type="button"
-        aria-label={`Dismiss Jingler ${update.version} update`}
-        onClick={update.onDismiss}
-        className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-md text-dim outline-none hover:bg-surface hover:text-text focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <X size={14} />
-      </button>
-    </div>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={agentsRunningTitle(agents)}
+        confirmLabel="Restart anyway"
+        cancelLabel="Wait"
+        destructive
+        onConfirm={update.onAction}
+      />
+    </>
   )
 }
 

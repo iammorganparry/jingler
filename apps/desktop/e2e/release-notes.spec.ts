@@ -62,3 +62,65 @@ test("What's new reopens from the account menu after dismissal", async ({ launch
   await expect(dialog).toContainText(`v${appVersion}`)
   await expect(dialog).toContainText(firstNoteFor(appVersion))
 })
+
+test("restarting to update asks first while an agent is running", async ({ launchApp }) => {
+  const { app, window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [
+      {
+        id: "s_update",
+        repo: "widget",
+        branch: "main",
+        title: "Update guard",
+        status: "idle",
+        diff: { added: 0, removed: 0 },
+        prNumber: null,
+        costUsd: 0,
+        tokens: 0,
+        updatedAt: "2026-08-07T12:00:00.000Z",
+        worktreePath: repoPath,
+        mode: "accept-edits"
+      }
+    ]
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1500, height: 860 })
+  // The updater only runs in packaged builds; publish its states from main the way it does.
+  const publish = (state: object) =>
+    app.evaluate(({ BrowserWindow }, next) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.send("jingler/update-state", next)
+    }, state)
+  const row = window.getByRole("region", { name: "Jingler update" })
+
+  await publish({ status: "available", version: "9.9.9" })
+  await expect(row).toContainText("v9.9.9 available")
+  await expect(row.getByRole("button", { name: "Download" })).toBeVisible()
+  await publish({ status: "downloading", version: "9.9.9", percent: 42 })
+  await expect(row).toContainText("Downloading 42%")
+  await publish({ status: "available", version: "9.9.9", error: "Download failed. Try again." })
+  await expect(row).toContainText("Update failed")
+  await expect(row.getByRole("button", { name: "Retry" })).toBeVisible()
+  await publish({ status: "available", version: "9.9.9", manual: true })
+  await expect(row.getByRole("button", { name: "Open installer" })).toBeVisible()
+  await publish({ status: "downloaded", version: "9.9.9" })
+
+  // Nothing running: no confirm to dismiss.
+  const restart = row.getByRole("button", { name: "Restart to update" })
+  await expect(restart).toBeVisible()
+
+  // An agent mid-run turns the restart into a confirm.
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[queue-hold]] keep this agent running")
+  await composer.press("Enter")
+  await expect(window.getByText("Holding the active turn for queue actions.")).toBeVisible({
+    timeout: 15_000
+  })
+  await restart.click()
+  const dialog = window.getByRole("dialog")
+  await expect(dialog).toContainText("1 agent is running. Restarting stops it.")
+  await dialog.getByRole("button", { name: "Wait" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(restart).toBeVisible()
+})

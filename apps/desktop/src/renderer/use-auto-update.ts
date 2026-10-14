@@ -1,6 +1,8 @@
 import type { SidebarUpdate } from "@jingler/ui"
 import { useEffect, useState } from "react"
 import type { UpdateState } from "../shared/update.js"
+import { useSessionActivities } from "./session-activity.js"
+import { updateRowView } from "./update-row.js"
 
 const DISMISSED_UPDATE_KEY = "jingler.dismissed-update-version"
 
@@ -14,6 +16,8 @@ const readDismissedVersion = (): string | null => {
 
 export function useAutoUpdate(): SidebarUpdate | undefined {
   const [state, setState] = useState<UpdateState | null>(null)
+  // Every live activity is a running agent that a restart would stop.
+  const runningAgents = Object.keys(useSessionActivities()).length
   const [dismissedVersion, setDismissedVersion] = useState(readDismissedVersion)
 
   useEffect(() => {
@@ -33,7 +37,8 @@ export function useAutoUpdate(): SidebarUpdate | undefined {
   if (state === null) return undefined
 
   return {
-    ...state,
+    ...updateRowView(state),
+    runningAgents,
     dismissed: dismissedVersion === state.version,
     onAction: () => {
       if (state.status === "available") void window.jingler.downloadUpdate()
