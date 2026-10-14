@@ -1,11 +1,12 @@
 import type { AgentRosterEntry, PeerAgentMessageResult } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, CircleAlert } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { PeerAgentRow } from "./agent-roster.js"
 import { StatusDot } from "../components/status-dot.js"
+import { buildSubagentTree, type SubagentTreeRow } from "./subagent-tree.js"
 
 export type SubagentChipStatus =
   | "spawning"
@@ -21,6 +22,8 @@ export interface SubagentChipItem {
   readonly agent: string
   readonly task: string
   readonly status: SubagentChipStatus
+  /** Owning fleet node id; the popover indents this row under it. */
+  readonly parentId?: string | null
   /** Epoch ms the child started. */
   readonly startedAt: number
   /** Epoch ms the child finished; elapsed freezes here. */
@@ -62,36 +65,62 @@ export function formatElapsed(ms: number): string {
   return `${seconds}s`
 }
 
-function Row({ item, now, onOpen }: { item: SubagentChipItem; now: number; onOpen: (id: string) => void }) {
+type ChipRow = SubagentTreeRow<SubagentChipItem>
+
+/** Pixels of indent per tree level. */
+const INDENT_PX = 14
+
+function Row({ row, now, onOpen }: { row: ChipRow; now: number; onOpen: (id: string) => void }) {
+  const { item, depth } = row
   const failed = item.status === "failed"
   return (
-    <DropdownMenu.Item
-      data-testid={`subagent-chip-row-${item.id}`}
-      onSelect={() => onOpen(item.id)}
-      className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
-    >
-      <StatusDot
-        tone={failed ? "bg-state-failed" : FINISHED.has(item.status) ? "bg-dim" : "bg-muted-foreground"}
-        pulse={item.status === "spawning" || item.status === "running"}
-        size={7}
-      />
-      <span className={failed ? "flex-none text-state-failed" : "flex-none text-dim"}>{STATUS_WORD[item.status]}</span>
-      <span className="flex-none font-medium text-text-bright">{item.agent}</span>
-      <span className="min-w-0 flex-1 truncate text-text-body">{item.task}</span>
-      <span className="flex-none tabular-nums text-dim">{formatElapsed((item.endedAt ?? now) - item.startedAt)}</span>
-    </DropdownMenu.Item>
+    <div className="flex items-center gap-1" style={{ paddingLeft: depth * INDENT_PX }}>
+      <DropdownMenu.Item
+        data-testid={`subagent-chip-row-${item.id}`}
+        data-depth={depth}
+        onSelect={() => onOpen(item.id)}
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
+      >
+        {failed ? (
+          <CircleAlert aria-hidden className="size-[7px] flex-none scale-[1.6] text-state-failed" />
+        ) : (
+          <StatusDot
+            tone={FINISHED.has(item.status) ? "bg-dim" : "bg-muted-foreground"}
+            pulse={item.status === "spawning" || item.status === "running"}
+            size={7}
+          />
+        )}
+        <span className={failed ? "flex-none text-state-failed" : "flex-none text-dim"}>{STATUS_WORD[item.status]}</span>
+        <span className="flex-none font-medium text-text-bright">{item.agent}</span>
+        <span className="min-w-0 flex-1 truncate text-text-body">{item.task}</span>
+        <span className="flex-none tabular-nums text-dim">{formatElapsed((item.endedAt ?? now) - item.startedAt)}</span>
+      </DropdownMenu.Item>
+      {failed && (
+        <DropdownMenu.Item asChild onSelect={() => onOpen(item.id)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid={`subagent-chip-view-error-${item.id}`}
+            aria-label={`View error for ${item.agent}`}
+            className="flex-none px-2 text-xs"
+          >
+            View error
+          </Button>
+        </DropdownMenu.Item>
+      )}
+    </div>
   )
 }
 
-function Rows({ items, now, onOpen }: { items: ReadonlyArray<SubagentChipItem>; now: number; onOpen: (id: string) => void }) {
+function Rows({ rows, now, onOpen }: { rows: ReadonlyArray<ChipRow>; now: number; onOpen: (id: string) => void }) {
   return (
     <>
-      {items.slice(0, MAX_ROWS).map((item) => (
-        <Row key={item.id} item={item} now={now} onOpen={onOpen} />
+      {rows.slice(0, MAX_ROWS).map((row) => (
+        <Row key={row.item.id} row={row} now={now} onOpen={onOpen} />
       ))}
-      {items.length > MAX_ROWS && (
+      {rows.length > MAX_ROWS && (
         <div className="px-2.5 py-1">
-          <Badge tone="count" size="xs">+{items.length - MAX_ROWS} more</Badge>
+          <Badge tone="count" size="xs">+{rows.length - MAX_ROWS} more</Badge>
         </div>
       )}
     </>
@@ -102,14 +131,18 @@ function Rows({ items, now, onOpen }: { items: ReadonlyArray<SubagentChipItem>; 
  * Lane-header chip for the active chat's child agents: `N subagents ▾`, pulsing
  * while any child is spawning or running. Opens a popover of running children
  * then a `Finished · N` section, then `Peers · N`; a row opens that child's
- * transcript and a peer's `Message` sends it a note.
+ * transcript and a peer's `Message` sends it a note. Rows indent by tree depth
+ * (orchestrator → children, status word only); a failed row shows a red icon
+ * and a `View error` action that opens that child.
  */
 export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessagePeer }: SubagentChipProps) {
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(() => Date.now())
-  const running = subagents.filter((item) => !FINISHED.has(item.status))
-  const finished = subagents.filter((item) => FINISHED.has(item.status))
-  const pulsing = running.some((item) => item.status === "spawning" || item.status === "running")
+  // Depth comes from the whole fleet so a finished child still indents under a running parent.
+  const rows = buildSubagentTree(subagents)
+  const running = rows.filter(({ item }) => !FINISHED.has(item.status))
+  const finished = rows.filter(({ item }) => FINISHED.has(item.status))
+  const pulsing = running.some(({ item }) => item.status === "spawning" || item.status === "running")
   const ticking = open && running.length > 0
 
   useEffect(() => {
@@ -150,13 +183,13 @@ export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessageP
           data-testid="subagent-chip-popover"
           className="z-50 flex w-[360px] max-w-[calc(100vw-1rem)] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
         >
-          <Rows items={running} now={now} onOpen={onOpenSubagent} />
+          <Rows rows={running} now={now} onOpen={onOpenSubagent} />
           {finished.length > 0 && (
             <>
               <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-dim">
                 Finished · {finished.length}
               </DropdownMenu.Label>
-              <Rows items={finished} now={now} onOpen={onOpenSubagent} />
+              <Rows rows={finished} now={now} onOpen={onOpenSubagent} />
             </>
           )}
           {peers.length > 0 && onMessagePeer !== undefined && (

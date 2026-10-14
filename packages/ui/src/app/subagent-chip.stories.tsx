@@ -30,3 +30,15 @@ export const AllFinished: Story = {
 }
 
 export const None: Story = { args: { subagents: [] } }
+
+export const WorkflowFleetTree: Story = {
+  args: {
+    subagents: [
+      { id: "orch", agent: "orchestrator", task: "Ship the redesign", status: "running", startedAt: now - 400_000 },
+      { id: "w1", parentId: "orch", agent: "worker", task: "Implement the tree", status: "running", startedAt: now - 300_000 },
+      { id: "r1", parentId: "w1", agent: "reviewer", task: "Review the diff", status: "spawning", startedAt: now - 3_000 },
+      { id: "w2", parentId: "orch", agent: "worker", task: "Run e2e", status: "failed", startedAt: now - 200_000, endedAt: now - 150_000 },
+      { id: "s1", parentId: "orch", agent: "scout", task: "Map the lane header", status: "completed", startedAt: now - 300_000, endedAt: now - 120_000 }
+    ]
+  }
+}

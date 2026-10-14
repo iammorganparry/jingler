@@ -27,6 +27,7 @@ const chipItem = (node: SubagentFleetNode): SubagentChipItem => ({
   agent: node.agent,
   task: node.task,
   status: chipStatus(node.status),
+  parentId: node.parentId,
   startedAt: node.startedAt,
   ...(node.completedAt === null ? {} : { endedAt: node.completedAt })
 })
