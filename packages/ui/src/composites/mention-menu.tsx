@@ -1,11 +1,26 @@
-import { cn } from "../lib/cn.js"
-import { Command, CommandItem, CommandList } from "../components/command.js"
 import { FileIcon } from "../components/file-icon.js"
+import { VirtualList } from "../components/virtual-list.js"
+import { cn } from "../lib/cn.js"
+
+const pathKey = (path: string) => path
+
+function MentionRow(path: string) {
+  const name = path.split("/").pop() ?? path
+  const dir = path.slice(0, path.length - name.length)
+  return (
+    <span className="flex min-w-0 items-center gap-2 px-3">
+      <FileIcon path={path} />
+      <span className="font-mono text-[12px] text-text-bright">{name}</span>
+      {dir && <span className="truncate font-mono text-[10.5px] text-dim">{dir}</span>}
+    </span>
+  )
+}
 
 /**
  * The `@` code-reference palette — lists the session's worktree files so the
  * operator can reference code in a prompt. Presentational + controlled (the
- * composer owns the query/active index and filtering).
+ * composer owns the query/active index and filtering); the list is windowed so
+ * every matching file is reachable, not just the first few.
  */
 export function MentionMenu({
   files,
@@ -22,34 +37,17 @@ export function MentionMenu({
 }) {
   if (files.length === 0) return null
   return (
-    <Command
-      shouldFilter={false}
-      className={cn(
-        "rounded-xl border border-line shadow-2xl",
-        className
-      )}
-    >
-      <CommandList className="max-h-[260px]">
-        {files.map((path, i) => {
-          const name = path.split("/").pop() ?? path
-          const dir = path.slice(0, path.length - name.length)
-          return (
-            <CommandItem
-              key={path}
-              value={path}
-              aria-selected={i === activeIndex}
-              onMouseDown={(event) => event.preventDefault()}
-              onSelect={() => onSelect(path)}
-              onMouseEnter={() => onHover?.(i)}
-              className={cn(i === activeIndex && "bg-surface")}
-            >
-              <FileIcon path={path} />
-              <span className="font-mono text-[12px] text-text-bright">{name}</span>
-              {dir && <span className="truncate font-mono text-[10.5px] text-dim">{dir}</span>}
-            </CommandItem>
-          )
-        })}
-      </CommandList>
-    </Command>
+    <div className={cn("overflow-hidden rounded-xl border border-line bg-panel shadow-2xl", className)}>
+      <VirtualList
+        items={files}
+        getKey={pathKey}
+        getText={pathKey}
+        renderRow={MentionRow}
+        onSelect={onSelect}
+        activeKey={files[activeIndex] ?? null}
+        onActiveKeyChange={(path) => onHover?.(files.indexOf(path))}
+        ariaLabel="Files"
+      />
+    </div>
   )
 }
