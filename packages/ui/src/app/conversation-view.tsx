@@ -314,6 +314,10 @@ export interface ConversationViewProps {
   onToggleFollowAgent?: (enabled: boolean) => void
 }
 
+/** Auto sessions already skip approvals, so the question card only offers the switch from other modes. */
+const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: ConversationViewProps["onSwitchToAuto"]) =>
+  mode === "auto" ? undefined : onSwitchToAuto
+
 /**
  * The session workspace pane: the mode bar + interleaved transcript + composer,
  * with the live Changes rail (the worktree's real diff). Purely presentational —
@@ -428,7 +432,7 @@ function renderSessionAnalytics() {
             <QuestionCard
               request={question}
               onSubmit={(answers) => onAnswerQuestion?.(question.id, answers)}
-              onSwitchToAuto={mode === "auto" ? undefined : onSwitchToAuto}
+              onSwitchToAuto={autoSwitchLink(mode, onSwitchToAuto)}
             />
           ) : (
             <>
