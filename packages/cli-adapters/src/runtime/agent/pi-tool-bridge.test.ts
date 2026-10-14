@@ -6,7 +6,7 @@ import {
 } from "../tools/tool-registry.js"
 import { registerWorkspaceInspectionTools } from "../tools/workspace-tools.js"
 import { inactiveRuntimeActivity, type AgentRuntimeContext } from "./agent-runtime.js"
-import { createPiTools } from "./pi-tool-bridge.js"
+import { createPiTools, parseStringifiedArguments } from "./pi-tool-bridge.js"
 
 const spec = {
   role: "conversation",
@@ -130,5 +130,31 @@ describe("pi tool permission denial", () => {
       status: "error",
       error: { code: "forbidden" }
     })
+  })
+})
+
+describe("parseStringifiedArguments", () => {
+  const schema = {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      questions: { type: "array" },
+      config: { anyOf: [{ type: "object" }, { type: "string" }] }
+    }
+  }
+
+  it("parses a JSON-string array where the schema wants an array", () => {
+    expect(parseStringifiedArguments(schema, { id: "q", questions: '[{"question":"x"}]' }))
+      .toEqual({ id: "q", questions: [{ question: "x" }] })
+  })
+
+  it("parses a JSON-string object where a union allows an object", () => {
+    expect(parseStringifiedArguments(schema, { config: '{"a":1}' })).toEqual({ config: { a: 1 } })
+  })
+
+  it("leaves real strings, non-JSON and mismatched shapes alone", () => {
+    const args = { id: "[1]", questions: "not json", config: "plain" }
+    expect(parseStringifiedArguments(schema, args)).toBe(args)
+    expect(parseStringifiedArguments(schema, { questions: '{"a":1}' })).toEqual({ questions: '{"a":1}' })
   })
 })
