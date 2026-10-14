@@ -9,8 +9,9 @@ const opencodeBinary = resolve(import.meta.dirname, "../../../packages/cli-adapt
 const worker = resolve(import.meta.dirname, "fake-subagent-process-worker.mjs")
 const launchPrompt = "Launch the retained native workflow"
 const modelButton = /^Model:/
-const activeWorker = /worker ·/
-const previousWorker = /Open .*worker/
+// Chip rows are menuitems named "<status> <agent> <task> <elapsed>" (#460).
+const activeWorker = /^(spawning|running|paused|needs you) worker/
+const previousWorker = /^(done|failed|stopped) worker/
 const terminalJobState = /failed|stopped/
 const stopText = /stop/i
 const stoppedText = /stopped|no longer active/i
@@ -94,27 +95,28 @@ const selectRuntime = async (window: Page, entry: RuntimeCase) => {
   await window.getByRole("option", { name: entry.option }).click()
 }
 
-const activeChild = (window: Page) =>
-  window.getByRole("button", { name: activeWorker }).first()
+const chipPopover = (window: Page) => window.getByTestId("subagent-chip-popover")
 
-const openPreviousChild = async (window: Page) => {
-  // Finished children live in the lane header's subagent chip (#460).
+const openChip = async (window: Page) => {
   await window.getByTestId("subagent-chip").first().click()
-  const previous = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: previousWorker }).first()
-  await expect(previous).toBeVisible({ timeout: 30_000 })
-  await previous.click()
+  return chipPopover(window)
+}
+
+// Children live in the lane header's subagent chip (#460): open it, find the row.
+const findChild = async (window: Page, name: RegExp) => {
+  const row = (await openChip(window)).getByRole("menuitem", { name }).first()
+  await expect(row).toBeVisible({ timeout: 30_000 })
+  return row
 }
 
 const stopDetachedChild = async (window: Page) => {
-  const child = activeChild(window)
-  await expect(child).toBeVisible({ timeout: 30_000 })
-  await child.click()
+  await (await findChild(window, activeWorker)).click()
   const transcript = window.getByTestId("fleet-agent-transcript")
   await expect(transcript).toBeVisible()
   await expect(transcript.getByTestId("fleet-agent-live")).toContainText("Working…")
   await window.getByRole("button", { name: "Stop" }).click()
   await expect(window.getByTestId("subagent-control-outcome")).toContainText(stopText, { timeout: 30_000 })
-  await openPreviousChild(window)
+  await (await findChild(window, previousWorker)).click()
   await expect(window.getByTestId("fleet-agent-transcript")).toContainText(stoppedText, { timeout: 30_000 })
 }
 
@@ -128,7 +130,8 @@ const launchWorkflow = async (
   await send(launched.window, launchPrompt)
   await expect(launched.window.getByText(entry.parentSettled, { exact: true }))
     .toBeVisible({ timeout: 45_000 })
-  await expect(activeChild(launched.window)).toBeVisible({ timeout: 30_000 })
+  await findChild(launched.window, activeWorker)
+  await launched.window.keyboard.press("Escape")
   await send(launched.window, entry.secondPrompt)
   await expect(launched.window.getByText(entry.secondSettled, { exact: true }))
     .toBeVisible({ timeout: 45_000 })
