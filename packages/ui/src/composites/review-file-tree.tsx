@@ -2,6 +2,7 @@ import type { PrFileChange } from "@jingler/core"
 import type { FileTreeRowDecorationRenderer } from "@pierre/trees"
 import { useMemo, type CSSProperties } from "react"
 import { PierreFileTree } from "../components/pierre-file-tree.js"
+import { DiscardFileMenu } from "./discard-file-menu.js"
 import type { JinglerFileStatus } from "../diff/pierre-model.js"
 
 /** Status letters stay neutral: the +/− counts carry the only colour, and those are diff tokens. */
@@ -19,6 +20,8 @@ export interface ReviewFileTreeProps {
   readonly statusByPath: ReadonlyMap<string, JinglerFileStatus>
   readonly query: string
   readonly onSelectFile: (path: string) => void
+  /** Right-click → "Discard file changes". Omit for sources with nothing local to discard. */
+  readonly onDiscardFile?: (path: string) => void
 }
 
 /**
@@ -38,7 +41,8 @@ export function ReviewFileTree({
   activePath,
   statusByPath,
   query,
-  onSelectFile
+  onSelectFile,
+  onDiscardFile
 }: ReviewFileTreeProps) {
   const filePaths = useMemo(() => files.map((file) => file.path), [files])
   const gitStatus = useMemo(
@@ -57,8 +61,13 @@ export function ReviewFileTree({
     [countsByPath]
   )
   const selectablePaths = useMemo(() => new Set(filePaths), [filePaths])
+  // Added/untracked files have no HEAD version to restore.
+  const discardablePaths = useMemo(
+    () => new Set(filePaths.filter((path) => !["added", "untracked"].includes(statusByPath.get(path) ?? ""))),
+    [filePaths, statusByPath]
+  )
 
-  return (
+  const tree = (
     <PierreFileTree
       paths={filePaths}
       gitStatus={gitStatus}
@@ -79,5 +88,12 @@ export function ReviewFileTree({
         if (selected !== undefined) onSelectFile(selected)
       }}
     />
+  )
+  return onDiscardFile === undefined ? (
+    tree
+  ) : (
+    <DiscardFileMenu paths={discardablePaths} onDiscard={onDiscardFile}>
+      {tree}
+    </DiscardFileMenu>
   )
 }

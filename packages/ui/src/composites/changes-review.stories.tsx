@@ -211,8 +211,6 @@ function Diff({
         onAddDraft={(draft) => setDrafts((current) => [...current, { id: `d${current.length}`, ...draft }])}
         onRemoveDraft={(id) => setDrafts((current) => current.filter((draft) => draft.id !== id))}
         onToggleViewed={(_path, next) => setViewed(next)}
-        onRevertLines={() => {}}
-        onRevertFile={() => {}}
         onDeslopFile={() => {}}
         onSendFindingToAgent={() => {}}
       />

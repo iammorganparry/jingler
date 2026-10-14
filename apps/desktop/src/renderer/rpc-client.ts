@@ -748,15 +748,6 @@ export const rpc = {
     run((c) => c.Asset.hidePdf({ sessionId })),
   workspaceRevertFile: (sessionId: string, path: string): Promise<void> =>
     run((c) => c.Workspace.revertFile({ sessionId, path })),
-  workspaceRevertLines: (
-    sessionId: string,
-    path: string,
-    startLine: number,
-    endLine: number
-  ): Promise<void> =>
-    run((c) =>
-      c.Workspace.revertLines({ sessionId, path, startLine, endLine })
-    ),
   skillsList: (sessionId: string): Promise<ReadonlyArray<Skill>> =>
     run((c) => c.Skills.list({ sessionId })),
   usageGet: (): Promise<Usage> => run((c) => c.Usage.get()),

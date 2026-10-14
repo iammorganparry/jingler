@@ -668,17 +668,6 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, path: Schema.String }
   }),
 
-  /** Revert just the uncommitted changes in a NEW-file line range (reverse-apply). */
-  Rpc.make("Workspace.revertLines", {
-    error: GitError,
-    payload: {
-      sessionId: Schema.String,
-      path: Schema.String,
-      startLine: Schema.Number,
-      endLine: Schema.Number
-    }
-  }),
-
   /** List all agent sessions for the sidebar. */
   Rpc.make("Sessions.list", {
     success: Schema.Array(Session)

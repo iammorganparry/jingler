@@ -10,7 +10,7 @@ import {
 /**
  * Right-hand review rail: the virtualized worktree diff. The agent's edits are
  * already applied to the worktree, so this is a live view of what's on disk —
- * when `actions` is wired, lines can be selected to revert or to comment on
+ * when `actions` is wired, lines can be selected to comment on
  * (routed to the session's agent).
  */
 export function DiffPanel({
