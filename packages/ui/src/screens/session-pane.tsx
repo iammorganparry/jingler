@@ -48,6 +48,7 @@ import {
   applyEditorCommand,
   activeSurface,
   allTabs,
+  chatLaneOnly,
   closeSurfaceEverywhere,
   closeTab,
   dropTab,
@@ -72,6 +73,7 @@ import { EditorGroups, type EditorTabMeta } from "../app/editor-groups.js"
 import { useChatLane } from "../app/use-chat-lane.js"
 import { matchCollapseChatChord, matchFocusChatChord, matchChangesChord, matchChecksChord, matchHeaderViewChord } from "../app/app-shortcuts.js"
 import { AskPill } from "../components/ask-pill.js"
+import { ChatDrawer } from "../app/chat-drawer.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
 import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
@@ -569,6 +571,7 @@ function SessionPaneBody(props: SessionPaneProps) {
   useLayoutEffect(() => initEditorLayout(sessionId, initialLayout), [sessionId, initialLayout])
   const layout = useEditorLayout(sessionId) ?? initialLayout
   // Chat lane mode: collapsed shows the Ask pill; Focus hides (but keeps mounted) the content tabs.
+  const [laneHost, setLaneHost] = useState<HTMLDivElement | null>(null)
   const chatLane = useChatLane(allTabs(layout).some((tab) => tab.kind !== "chat"))
   const update = useCallback(
     (fn: (current: EditorLayout) => EditorLayout) => updateEditorLayout(sessionId, fn),
@@ -984,20 +987,11 @@ function SessionPaneBody(props: SessionPaneProps) {
       </div>
     ) : null
 
-  return (
-    <>
-      {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-row relative">
-        {chatLane.showAskPill && (
-          <AskPill
-            onClick={() => chatLane.toggleCollapse()}
-            className="absolute bottom-4 left-4 z-10"
-          />
-        )}
+  const renderGroups = (groupLayout: EditorLayout) => (
         <EditorGroups
           onOpenCheckpoints={props.onOpenCheckpoints ? (trigger) => props.onOpenCheckpoints?.(sessionId, trigger) : undefined}
           sessionId={sessionId}
-          layout={chatLane.showAskPill ? withoutChatLane(layout) : layout}
+          layout={groupLayout}
           // Layout-only updates keep this token, while render dependencies replace it.
           revision={renderRevision}
           describe={describeSurface}
@@ -1031,6 +1025,26 @@ function SessionPaneBody(props: SessionPaneProps) {
               onSelectConversation: () => openSurface({ kind: "chat", id: chatId })
             })}
         />
+  )
+  const drawerLane = chatLane.mode === "drawer" ? chatLaneOnly(layout) : null
+  const contentLayout = chatLane.showAskPill || chatLane.mode === "drawer" ? withoutChatLane(layout) : layout
+
+  return (
+    <>
+      {headerViewsTarget !== null && paneFocused && headerViewControls ? createPortal(headerViewControls, headerViewsTarget) : null}
+      <div ref={setLaneHost} className="flex min-h-0 min-w-0 flex-1 flex-row relative">
+        {(chatLane.showAskPill || drawerLane) && (
+          <AskPill
+            onClick={() => chatLane.toggleCollapse()}
+            className="absolute bottom-4 left-4 z-10"
+          />
+        )}
+        {renderGroups(contentLayout)}
+        {drawerLane && laneHost && (
+          <ChatDrawer open={chatLane.drawerOpen} onOpenChange={(open) => open !== chatLane.drawerOpen && chatLane.toggleCollapse()} container={laneHost}>
+            {renderGroups(drawerLane)}
+          </ChatDrawer>
+        )}
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
       </div>
     </>

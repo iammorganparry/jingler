@@ -24,7 +24,7 @@ import {
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
-import { usePaneWidth } from "../hooks/width-tier.js"
+import { sidebarIsRail, usePaneWidth } from "../hooks/width-tier.js"
 import { ResizeHandle, useResizableWidth } from "../components/resizable.js"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
@@ -895,9 +895,6 @@ return (renderExpandedGroupHeading())
 /** Docked width bounds. `initial` is the 266px the sidebar was hard-coded to. */
 const SIDEBAR_WIDTH = { storageKey: "sb.sidebar.width", initial: 266, min: 200, max: 380 } as const
 
-/** Below this much room for the whole shell, the sidebar becomes a rail. */
-const RAIL_THRESHOLD = 1000
-
 const EXPANDED_STORAGE_KEY = "sb.sidebar.expanded"
 const readExpanded = (): ReadonlySet<string> => {
   try {
@@ -1152,7 +1149,7 @@ function SessionRail({
 /**
  * The session sidebar, at whatever width the shell can spare.
  *
- * Above `RAIL_THRESHOLD` this is the docked, drag-resizable column it has always
+ * Above `SHELL_BREAKPOINTS.sidebarRailBelow` this is the docked, drag-resizable column it has always
  * been. Below it, the column becomes a 52px rail whose cells each carry a
  * `SessionHoverCard` — so collapsing costs REACH (one hover, one click) rather
  * than information.
@@ -1181,7 +1178,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
 
   // `shellWidth === 0` is the pre-measurement frame; treat it as roomy so the
   // sidebar doesn't flash a rail on every launch before the observer reports.
-  const cramped = shellWidth !== 0 && shellWidth < RAIL_THRESHOLD
+  const cramped = sidebarIsRail(shellWidth)
   const expanded = !props.forceCollapsed && (pinned ?? !cramped)
 
   const setPin = React.useCallback((next: boolean) => {

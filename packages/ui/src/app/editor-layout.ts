@@ -476,6 +476,14 @@ export const withoutChatLane = (layout: EditorLayout): EditorLayout => {
   return content ? { ...layout, root: content } : layout
 }
 
+/** Just the chat lane of a chat/content split (what the narrow-window drawer shows), or null when the layout has no such split. */
+export const chatLaneOnly = (layout: EditorLayout): EditorLayout | null => {
+  const root = layout.root
+  if (!root || root.type !== "split" || !isChatContentSplit(root)) return null
+  const chat = root.children[0]
+  return chat ? { ...layout, root: chat } : null
+}
+
 /** Apply chat lane resize or generic pair resize based on split type. */
 const applyResize = (
   node: EditorSplit,
