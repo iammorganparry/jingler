@@ -174,3 +174,31 @@ export const Settings: Story = {
     </div>
   )
 }
+
+const GeneralOffload = ({ status }: { status: "disabled" | "priming" | "ready" | "failed" }) => (
+  <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
+    <SettingsView
+      initialSection="general"
+      githubConnection={DEMO_GITHUB}
+      offloadCompute={{ enabled: status !== "disabled", target: { kind: "cloud" }, explicitCommands: [] }}
+      offloadStatus={status}
+      onRetryOffload={() => {}}
+      onClose={() => {}}
+    />
+  </div>
+)
+
+export const SettingsGeneralOffloadPriming: Story = {
+  name: "Settings · General · Offload priming (10.2)",
+  render: () => <GeneralOffload status="priming" />
+}
+
+export const SettingsGeneralOffloadReady: Story = {
+  name: "Settings · General · Offload ready (10.2)",
+  render: () => <GeneralOffload status="ready" />
+}
+
+export const SettingsGeneralOffloadFailed: Story = {
+  name: "Settings · General · Offload failed + Retry (10.2)",
+  render: () => <GeneralOffload status="failed" />
+}

@@ -1579,6 +1579,7 @@ function AuthedApp({
         offloadCompute={offloadCompute}
         onSaveOffloadCompute={saveOffloadCompute}
         offloadStatus={offloadSettingsStatus(offloadSettingsState, offloadCompute.enabled)}
+        onRetryOffload={() => sendOffloadSettings({ type: "RETRY" })}
         webSearch={{
           status: webSearchQuery.data ?? null,
           loading: webSearchQuery.isLoading,

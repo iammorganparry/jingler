@@ -89,6 +89,36 @@ describe("General settings", () => {
   });
 });
 
+describe("General settings · offload status", () => {
+  const renderGeneral = (offloadStatus: "priming" | "ready" | "failed", onRetryOffload = vi.fn()) => {
+    render(
+      <SettingsView
+        initialSection="general"
+        githubConnection={githubDisconnected}
+        offloadCompute={{ enabled: true, target: { kind: "cloud" }, explicitCommands: [] }}
+        offloadStatus={offloadStatus}
+        onRetryOffload={onRetryOffload}
+      />,
+    );
+    return onRetryOffload;
+  };
+
+  it("shows Priming… and Ready labels", () => {
+    renderGeneral("priming");
+    expect(screen.getByText("Priming…")).toBeTruthy();
+    cleanup();
+    renderGeneral("ready");
+    expect(screen.getByText("Ready")).toBeTruthy();
+  });
+
+  it("shows Failed · Retry and calls onRetryOffload", () => {
+    const onRetryOffload = renderGeneral("failed");
+    expect(screen.getByText(/Failed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetryOffload).toHaveBeenCalledOnce();
+  });
+});
+
 describe("GitHub settings", () => {
   it("persists the selected desktop harness and model for adversarial reviews", () => {
     const providerId = ProviderId.make("anthropic");
