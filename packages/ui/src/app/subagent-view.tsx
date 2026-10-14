@@ -189,6 +189,14 @@ export function FleetAgentView({
       )}
       <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
+          {node && (
+            <blockquote
+              data-testid="subagent-task"
+              className="whitespace-pre-wrap border-l-2 border-line-strong pl-3 text-[12px] leading-[1.55] text-text-body"
+            >
+              {node.task}
+            </blockquote>
+          )}
           {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
           {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
           {node?.attention && (

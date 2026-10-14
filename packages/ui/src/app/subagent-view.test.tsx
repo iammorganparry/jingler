@@ -313,3 +313,27 @@ describe("SubagentMetaStrip", () => {
     expect(screen.getByText("Background").closest(".whitespace-nowrap")).not.toBeNull()
   })
 })
+
+describe("FleetAgentView task", () => {
+  it("renders the task as the first, quoted item in the transcript", () => {
+    const message: Message = {
+      id: "child-1",
+      role: "assistant",
+      streaming: false,
+      createdAt: "2026-08-16T11:14:28.000Z",
+      parts: [{ _tag: "Text", text: "Reviewing the code." }]
+    }
+    render(<FleetAgentView node={fleetNode({ task: "Map the UI" })} messages={[message]} />)
+    const scroll = screen.getByTestId("fleet-agent-transcript-scroll")
+    const task = screen.getByTestId("subagent-task")
+    expect(task.tagName).toBe("BLOCKQUOTE")
+    expect(task.textContent).toBe("Map the UI")
+    expect(scroll.querySelector("blockquote")).toBe(task)
+    expect(task.compareDocumentPosition(screen.getByText("Reviewing the code.")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("omits the quoted task when there is no fleet node", () => {
+    render(<FleetAgentView messages={[]} />)
+    expect(screen.queryByTestId("subagent-task")).toBeNull()
+  })
+})
