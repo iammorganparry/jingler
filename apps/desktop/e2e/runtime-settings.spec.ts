@@ -96,6 +96,8 @@ test("manages approved resources and inspects a redacted real-pi run", async ({ 
   await expect(inspector.getByText(
     `prompt ${CURRENT_RUNTIME_CONTRACTS.prompt} · tools ${CURRENT_RUNTIME_CONTRACTS.tools} · diff ${CURRENT_RUNTIME_CONTRACTS.diff} · pi ${CURRENT_RUNTIME_CONTRACTS.piSdk}`
   )).toBeVisible()
+  await expect(inspector.getByRole("heading", { name: "Diagnostics" })).toBeVisible()
+  await expect(inspector.getByTestId("settings-row").filter({ hasText: "Terminal cause" })).toContainText("done")
   await inspector.getByRole("button", { name: "Export diagnostics" }).click()
   await expect(inspector.getByRole("status")).toHaveText("Redacted diagnostic bundle prepared.")
   await expect(inspector).not.toContainText("Record a runtime diagnostic")
