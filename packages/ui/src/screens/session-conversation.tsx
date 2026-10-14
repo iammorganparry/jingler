@@ -14,7 +14,7 @@ import type {
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
 import type { WhatsNewEntry } from "../composites/whats-new-dialog.js"
 import { SessionSidebar, type SidebarReleaseNotes, type SidebarUpdate } from "../app/session-sidebar.js"
-import { ProjectSidebar } from "../app/project-sidebar.js"
+import { MissingFolderBanner, ProjectSidebar } from "../app/project-sidebar.js"
 import { projectIdForSession, sessionsForProject, UNASSIGNED_PROJECT_ID } from "../app/project-navigation.js"
 import { SessionSplit } from "../app/session-split.js"
 import type { SplitGroup } from "../app/split-layout.js"
@@ -46,6 +46,8 @@ export interface SessionConversationProps {
   onOpenProjectSettings?: (projectId: string) => void
   /** Unregister a project (rail tile context menu; the caller's promise settles the confirm dialog). */
   onRemoveProject?: (projectId: string) => void | Promise<void>
+  /** Re-point a project whose folder is missing (rail tile menu and sidebar banner). */
+  onLocateProject?: (projectId: string) => void | Promise<void>
   /** Open a session's terminal (row context menu). */
   onOpenSessionTerminal?: (sessionId: string) => void
   renderExplorer?: (session: Session, onOpenPath: (path: string) => void) => ReactNode
@@ -258,6 +260,7 @@ export function SessionConversation(props: SessionConversationProps) {
     () => activeSessionProjectId ?? projects[0]?.id ?? UNASSIGNED_PROJECT_ID
   )
   const selectedProjectId = props.selectedProjectId ?? localProjectId
+  const selectedProject = projects.find((project) => project.id === selectedProjectId)
   const setSelectedProjectId = props.onSelectProject ?? setLocalProjectId
   const [workspaceView, setWorkspaceViewState] = useState<"sessions" | "explorer">(
     props.initialWorkspaceView ?? "sessions"
@@ -403,6 +406,7 @@ export function SessionConversation(props: SessionConversationProps) {
           onImportSessions={props.onImportSessions}
           onOpenSettings={props.onOpenProjectSettings}
           onRemove={props.onRemoveProject}
+          onLocate={props.onLocateProject}
         />
       ) : null}
       <SessionSidebar
@@ -420,6 +424,7 @@ export function SessionConversation(props: SessionConversationProps) {
         }
         sessions={projectSessions}
         projectId={selectedProjectId}
+        notice={<MissingFolderBanner project={selectedProject} onLocate={props.onLocateProject} />}
         onOpenInTerminal={props.onOpenSessionTerminal}
         environments={props.environments}
         activeSessionId={props.activeSessionId}

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
 import { testSession } from "../test-support.js"
-import { ProjectSidebar } from "./project-sidebar.js"
+import { MissingFolderBanner, ProjectSidebar } from "./project-sidebar.js"
 
 const projects: ReadonlyArray<Project> = [
   { id: "alpha", name: "Alpha", path: "/repos/alpha", availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" },
@@ -175,5 +175,49 @@ describe("ProjectSidebar", () => {
     render(<ProjectSidebar projects={projects} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} />)
     fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
     expect(screen.queryByRole("menuitem")).toBeNull()
+  })
+
+  it("shows a neutral Folder not found row with Locate and a confirmed Remove for a missing project", async () => {
+    const onLocate = vi.fn()
+    const onRemove = vi.fn()
+    const missing = [{ ...projects[1]!, availability: "missing" as const }, projects[0]!]
+    render(
+      <ProjectSidebar projects={missing} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} onLocate={onLocate} onRemove={onRemove} />
+    )
+    expect(screen.getByRole("button", { name: "Beta" }).innerHTML).not.toMatch(/state-needs|yellow/)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect((screen.getByRole("menuitem", { name: "Folder not found" }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole("menuitem", { name: "Locate folder…" }))
+    expect(onLocate).toHaveBeenCalledWith("beta")
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove project" }))
+    expect(onRemove).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove project" }))
+    expect(onRemove).toHaveBeenCalledWith("beta")
+  })
+
+  it("omits the missing-folder rows for available projects", () => {
+    render(<ProjectSidebar projects={projects} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} onLocate={vi.fn()} onOpenSettings={vi.fn()} />)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect(screen.queryByRole("menuitem", { name: "Folder not found" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Locate folder…" })).toBeNull()
+  })
+})
+
+describe("MissingFolderBanner", () => {
+  it("renders a neutral BannerShell whose Locate action calls the handler", () => {
+    const onLocate = vi.fn()
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "missing" }} onLocate={onLocate} />)
+    const banner = screen.getByTestId("banner-shell")
+    expect(banner.textContent).toContain("Beta: folder not found")
+    expect(banner.getAttribute("role")).toBe("status")
+    fireEvent.click(within(banner).getByRole("button", { name: "Locate folder…" }))
+    expect(onLocate).toHaveBeenCalledWith("beta")
+  })
+
+  it("renders nothing for an available project", () => {
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "available" }} />)
+    expect(screen.queryByTestId("banner-shell")).toBeNull()
   })
 })

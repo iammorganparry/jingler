@@ -620,6 +620,18 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
       />)
          }
 
+async function locateProject(projectId: string) {
+    const project = projects.find((candidate) => candidate.id === projectId)
+    const path = await onBrowseProject?.()
+    if (!project || !path) return
+    const located = await onRegisterProject?.({ path, name: project.name })
+    // Project ids derive from the path, so a different folder registers a new project; drop the stale one.
+    if (located && located.id !== projectId) {
+      await props.onRemoveProject?.(projectId)
+      setSelectedProjectId(located.id)
+    }
+  }
+
 function getProjectMenuProps() {
     const remove = props.onRemoveProject
     return {
@@ -630,6 +642,7 @@ function getProjectMenuProps() {
             if (selectedProjectId === projectId) setSelectedProjectId(null)
           }
         : undefined,
+      onLocateProject: onBrowseProject && onRegisterProject ? locateProject : undefined,
       onOpenSessionTerminal: renderTerminalDock ? openSessionTerminal : undefined
     }
   }

@@ -19,6 +19,8 @@ export interface ContextMenuItem {
   onSelect: () => void
   tone?: "default" | "danger"
   separated?: boolean
+  /** Shown dimmed and not selectable, e.g. a status row. */
+  disabled?: boolean
   submenu?: ReadonlyArray<ContextMenuItem>
 }
 
@@ -163,7 +165,7 @@ function Row({
   const Icon = item.icon
   const triggerRef = useRef<HTMLButtonElement>(null)
   const hasSubmenu = item.submenu !== undefined
-  const disabled = hasSubmenu && item.submenu!.length === 0
+  const disabled = item.disabled === true || (hasSubmenu && item.submenu!.length === 0)
   const openSubmenu = (focusFirst: boolean) => {
     if (!triggerRef.current || disabled) return
     setSubmenu({ item, anchor: triggerRef.current, focusFirst })
