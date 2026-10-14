@@ -242,3 +242,25 @@ describe("PullRequestView base selector", () => {
     expect(onCreatePr).toHaveBeenCalledWith("main")
   })
 })
+
+describe("PullRequestView load states", () => {
+  it("shows a skeleton while loading and a retryable error when the read fails", () => {
+    const { unmount } = render(<PullRequestView pr={null} connected busy />)
+    expect(screen.getByLabelText("Loading pull request")).toBeTruthy()
+    expect(screen.queryByText("No pull request yet for this branch")).toBeNull()
+    unmount()
+
+    const onRetryLoad = vi.fn()
+    render(<PullRequestView pr={null} connected loadError="GitHub is down" onRetryLoad={onRetryLoad} />)
+    expect(screen.getByText("GitHub is down")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetryLoad).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows an empty state for a PR with no checks or timeline", () => {
+    render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, checks: [] }} connected /></WidthTierValue>)
+    expect(screen.getByText("No reviews or comments yet")).toBeTruthy()
+    fireEvent.click(screen.getByRole("tab", { name: "Checks 0" }))
+    expect(screen.getByText("CI results will appear here once a run starts.")).toBeTruthy()
+  })
+})

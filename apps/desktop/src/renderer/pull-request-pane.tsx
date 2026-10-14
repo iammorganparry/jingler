@@ -37,6 +37,8 @@ export function PullRequestPane({
   const {
     pr,
     busy,
+    loadError,
+    retryLoad,
     mergePr,
     merging,
     mergeError,
@@ -73,6 +75,8 @@ export function PullRequestPane({
       connectionMessage={connectionMessage}
       connectionActionLabel={connectionActionLabel}
       busy={busy}
+      loadError={loadError}
+      onRetryLoad={retryLoad}
       viewerLogin={viewerLogin}
       publish={publish.checkpoint}
       publishing={publish.publishing}
