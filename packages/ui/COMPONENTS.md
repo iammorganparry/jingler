@@ -189,6 +189,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 
 | Component | File | Purpose | Key props | Story | Redesign |
 |---|---|---|---|---|---|
+| DropZoneOverlay, resolveDropEdge | `app/drop-zone-overlay.tsx` | Drag-to-split overlay for an editor group: five labelled zones (left, right, top, bottom, centre) in the `--sb-brand` tint, hovered zone filled and outlined; `resolveDropEdge` maps pointer position to a zone. | edge, rejected, zones | yes | #402 (4.7) |
 | PeerAgentRow | `app/agent-roster.tsx` | One peer agent row in the SubagentChip popover: status, task, touched files, ghost `Message` button with inline send box. | agent, onMessage | no | #465 (8.6) |
 | AppShell | `app/app-shell.tsx` | Window frame: title bar plus routed content. | — | no | — |
 | HeaderViewButtons | `app/header-view-buttons.tsx` | Pinned view launchers in the workspace header (Changes N, Checks a/b, Terminal, Browser); neutral pressed state, one-line count badges, shortcut tooltips. | views, activeId, onOpen | yes | #383 (3.1) |
