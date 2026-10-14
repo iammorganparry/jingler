@@ -33,6 +33,30 @@ export interface MagicLinkFormProps {
   resent?: boolean
 }
 
+function SentPanel({
+  sentEmail,
+  onReset,
+  onResend,
+  resent
+}: Pick<MagicLinkFormProps, "sentEmail" | "onReset" | "onResend" | "resent">) {
+  return (
+    <div className="flex w-full flex-col items-center gap-2.5">
+      <Callout tone="blue" glyph={<MailCheck className="size-3.5" />} className="w-full">
+        Check <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong> — link
+        expires in 15 min
+      </Callout>
+      {onResend ? (
+        <Button variant="secondary" size="sm" className="w-full" disabled={resent} onClick={onResend}>
+          {resent ? "Sent again ✓" : "Resend"}
+        </Button>
+      ) : null}
+      <Button variant="ghost" size="sm" onClick={onReset}>
+        Use a different email
+      </Button>
+    </div>
+  )
+}
+
 /**
  * The email magic-link control: an input + submit button that also covers the
  * loading, sent, and error states. A molecule so it can be storybooked in every
@@ -55,22 +79,7 @@ export function MagicLinkForm({
   const signup = mode === "signup"
 
   if (state === "sent") {
-    return (
-      <div className="flex w-full flex-col items-center gap-2.5">
-        <Callout tone="blue" glyph={<MailCheck className="size-3.5" />} className="w-full">
-          Check <strong className="font-semibold text-text-bright">{sentEmail || "your email"}</strong> — link
-          expires in 15 min
-        </Callout>
-        {onResend ? (
-          <Button variant="secondary" size="sm" className="w-full" disabled={resent} onClick={onResend}>
-            {resent ? "Sent again ✓" : "Resend"}
-          </Button>
-        ) : null}
-        <Button variant="ghost" size="sm" onClick={onReset}>
-          Use a different email
-        </Button>
-      </div>
-    )
+    return <SentPanel sentEmail={sentEmail} onReset={onReset} onResend={onResend} resent={resent} />
   }
 
   const loading = state === "loading"
