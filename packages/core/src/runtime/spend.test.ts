@@ -21,16 +21,16 @@ const fact = (over: Partial<Parameters<typeof makeUsageFact>[0]> & { id: string 
 const now = new Date("2026-10-13T12:00:00Z")
 
 describe("spendFromFacts", () => {
-  it("rolls session cost up from cumulative CLI totals and splits today / month", () => {
+  it("sums per-invocation Claude CLI cost across --resume and splits today / month", () => {
     const spend = spendFromFacts([
       fact({ id: "a", endedAt: Date.parse("2026-09-02T12:00:00Z"), totalTokens: 100, costUsd: 1 }),
       fact({ id: "b", sessionId: "s2", endedAt: Date.parse("2026-10-10T12:00:00Z"), totalTokens: 200, costUsd: 2 }),
-      // s2 resumed today: the CLI reports the conversation total (2 -> 5), so this turn cost 3.
-      fact({ id: "c", sessionId: "s2", endedAt: Date.parse("2026-10-13T12:00:00Z"), totalTokens: 50, costUsd: 5 })
+      // s2 resumed today: the CLI reports this invocation's cost (not a running total).
+      fact({ id: "c", sessionId: "s2", endedAt: Date.parse("2026-10-13T12:00:00Z"), totalTokens: 50, costUsd: 2.1 })
     ], now)
-    expect(spend.today).toEqual({ tokens: 50, costUsd: 3 })
-    expect(spend.month).toEqual({ tokens: 250, costUsd: 5 })
-    expect(spend.lastSession).toEqual({ tokens: 250, costUsd: 5 })
+    expect(spend.today).toEqual({ tokens: 50, costUsd: 2.1 })
+    expect(spend.month).toEqual({ tokens: 250, costUsd: 4.1 })
+    expect(spend.lastSession).toEqual({ tokens: 250, costUsd: 4.1 })
   })
 
   it("treats pi session stats as running totals and a counter reset as a fresh start", () => {
