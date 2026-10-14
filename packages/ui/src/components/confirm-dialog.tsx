@@ -14,7 +14,8 @@ import {
  * A small yes/no confirmation modal for destructive or irreversible actions
  * (e.g. deleting a session). Controlled via `open`/`onOpenChange`; `onConfirm`
  * fires then the dialog closes unless `closeOnConfirm={false}` leaves closing to
- * the caller. `tone="danger"` gives the confirm button the solid destructive fill (the only place one is allowed).
+ * the caller. `destructive` gives the confirm button the solid red fill (the only place one is allowed),
+ * moves initial focus to Cancel, and Esc always cancels.
  */
 export function ConfirmDialog({
   open,
@@ -23,7 +24,7 @@ export function ConfirmDialog({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  tone = "default",
+  destructive = false,
   onConfirm,
   closeOnConfirm = true
 }: {
@@ -33,7 +34,7 @@ export function ConfirmDialog({
   description?: ReactNode
   confirmLabel?: string
   cancelLabel?: string
-  tone?: "default" | "danger"
+  destructive?: boolean
   closeOnConfirm?: boolean
   onConfirm: () => void | Promise<void>
 }) {
@@ -52,7 +53,7 @@ export function ConfirmDialog({
       <DialogContent
         className="w-[420px]"
         // Destructive dialogs start on the safe button so Enter can't confirm by accident.
-        onOpenAutoFocus={tone === "danger" ? (event) => { event.preventDefault(); cancelRef.current?.focus() } : undefined}
+        onOpenAutoFocus={destructive ? (event) => { event.preventDefault(); cancelRef.current?.focus() } : undefined}
       >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
@@ -67,7 +68,7 @@ export function ConfirmDialog({
             {cancelLabel}
           </Button>
           <Button
-            variant={tone === "danger" ? "destructive-solid" : "primary"}
+            variant={destructive ? "destructive-solid" : "primary"}
             size="sm"
             disabled={pending}
             aria-busy={pending}

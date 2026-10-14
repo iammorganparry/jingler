@@ -55,7 +55,7 @@ export function DiscardFileMenu({
         title={`Discard changes to ${pending?.split("/").pop() ?? "this file"}?`}
         description="All uncommitted changes to this file are permanently discarded. This can't be undone."
         confirmLabel="Discard"
-        tone="danger"
+        destructive
         onConfirm={() => {
           if (pending !== null) onDiscard(pending)
         }}

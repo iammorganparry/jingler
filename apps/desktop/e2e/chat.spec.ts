@@ -902,6 +902,24 @@ test("sidebar quick-actions: right-click → Delete removes a session after conf
   await expect(sessionRow(window, "First session")).toBeVisible()
 })
 
+test("destructive confirm dialog focuses Cancel first and Esc dismisses it without deleting", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: twoSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByTestId("session-row-s_act").click({ button: "right" })
+  await window.getByRole("menuitem", { name: "Delete" }).click()
+
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByText("Delete session?")).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
+
+  await window.keyboard.press("Escape")
+  await expect(dialog).toHaveCount(0)
+  await expect(window.getByTestId("session-row-s_act")).toBeVisible()
+})
+
 test("a merged PR badges its linked session but never archives it", async ({ launchApp }) => {
   // This used to assert the opposite — the sweep auto-archived a session as soon
   // as its linked PR merged. That was wrong: a session record holds ONE
