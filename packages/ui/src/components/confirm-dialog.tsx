@@ -60,7 +60,7 @@ export function ConfirmDialog({
         </DialogHeader>
         {description && (
           <DialogBody>
-            <DialogDescription>{description}</DialogDescription>
+            <DialogDescription asChild><div>{description}</div></DialogDescription>
           </DialogBody>
         )}
         <DialogFooter>
