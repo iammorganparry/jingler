@@ -54,7 +54,7 @@ import { SignalBars } from "../components/signal-bars.js";
 import { CommandMenu } from "./command-menu.js";
 import { MentionMenu } from "./mention-menu.js";
 import { McpApiKeyDialog, McpAuthSetupDialog, McpBrand, McpServerDialog } from "./mcp-settings.js";
-import { planTaskCounts, PlanTaskList } from "./plan-progress-dock.js";
+import { planTaskCounts, PlanTaskList, type PlanStageActionHandler } from "./plan-progress-dock.js";
 import { PromptInputSurface } from "./beui/work.js";
 import {
   ProviderModelBrowser,
@@ -291,6 +291,8 @@ type ComposerProps =  {
   planDocument?: PlanDocument;
   /** Open Plan Review at a selected canonical stage. */
   onOpenPlanStage?: (stageId: string) => void;
+  /** Retry / Ask agent / Resume on a failed, interrupted or blocked plan row. */
+  onPlanStageAction?: PlanStageActionHandler;
   /** New-session-only controls rendered instead of static repository metadata. */
   contextControls?: ReactNode;
   /** Canonical certified model surface. */
@@ -709,7 +711,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, contextControls, className } = defaultProps(props, {
+  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -804,7 +806,7 @@ export function Composer(props: ComposerProps) {
             </div>
             {drawerOpen && (
               <div className="max-h-[280px] overflow-y-auto">
-                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} />
+                <PlanTaskList bare overview={planExtended} document={planDocument} onOpenStage={onOpenPlanStage} onStageAction={onPlanStageAction} />
               </div>
             )}
           </div>

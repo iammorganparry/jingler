@@ -43,6 +43,7 @@ import {
   ToolStopContext
 } from "../composites/message-turn.js"
 import { PlanApprovalCard } from "../composites/plan-card.js"
+import { sendPlanStageAction } from "../composites/plan-progress-dock.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import type { PreviewRailItem } from "../components/beui/overlays.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
@@ -531,6 +532,7 @@ function renderSessionAnalytics() {
                 onCodeReferencesClear={onDraftCodeReferencesClear}
                 planDocument={planDocument ?? undefined}
                 onOpenPlanStage={(stageId) => onOpenPlanReview?.(stageId)}
+                onPlanStageAction={sendPlanStageAction(onSend)}
                 autoFocus={autoFocusComposer}
                 focusKey={focusKey}
               />
