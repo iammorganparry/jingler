@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Page } from "@playwright/test"
@@ -360,3 +360,42 @@ for (const entry of ["sidebar", "shortcut", "palette"] as const) {
     })
   })
 }
+
+test("a renamed project folder shows the missing-folder state until it is located", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    isolateSystemHome: true,
+    seed: ({ home, repoPath }) => {
+      mkdirSync(join(home, "jingler"), { recursive: true })
+      writeFileSync(join(home, "jingler", "projects.json"), JSON.stringify([
+        { id: "imported-widget", name: "widget", path: repoPath, imported: true, availability: "available", createdAt: "2026-01-01", updatedAt: "2026-01-01" }
+      ]))
+    }
+  })
+  const projects = launched.window.getByRole("navigation", { name: "Projects" })
+  const tile = projects.getByRole("button", { name: "widget", exact: true })
+  await expect(tile).toBeVisible()
+  const renamed = `${launched.repoPath}-moved`
+  renameSync(launched.repoPath, renamed)
+
+  // The project list is read on load; reload so availability is re-checked.
+  await launched.window.reload()
+  await expect(tile).toBeVisible()
+  await tile.click()
+  await expect(launched.window.getByTestId("banner-shell")).toContainText("widget: folder not found")
+  await tile.click({ button: "right" })
+  await expect(launched.window.getByRole("menuitem", { name: "Folder not found" })).toBeDisabled()
+  await expect(launched.window.getByRole("menuitem", { name: "Locate folder…" })).toBeVisible()
+  await expect(launched.window.getByRole("menuitem", { name: "Remove project" })).toBeVisible()
+  await launched.window.keyboard.press("Escape")
+
+  await launched.app.evaluate(({ dialog }, selected) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] })
+  }, renamed)
+  await launched.window.getByTestId("banner-shell").getByRole("button", { name: "Locate folder…" }).click()
+  await expect(launched.window.getByTestId("banner-shell")).toHaveCount(0)
+  await expect(projects.getByRole("button", { name: "widget", exact: true })).toHaveCount(1)
+  await projects.getByRole("button", { name: "widget", exact: true }).click({ button: "right" })
+  await expect(launched.window.getByRole("menuitem", { name: "Locate folder…" })).toHaveCount(0)
+})
