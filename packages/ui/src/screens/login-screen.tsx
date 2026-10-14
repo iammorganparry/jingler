@@ -1,13 +1,18 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { AlertCircle } from "lucide-react"
 import { TitleBar } from "../app/title-bar.js"
 import { AuthDivider } from "../components/auth-divider.js"
+import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
+import { Spinner } from "../components/loading.js"
 import { OAuthButton } from "../components/oauth-button.js"
 import { AuthCard } from "../composites/auth-card.js"
 import { MagicLinkForm } from "../composites/magic-link-form.js"
 
-export type LoginState = "default" | "loading" | "sent" | "error"
+export type LoginState = "default" | "loading" | "waiting" | "sent" | "error"
+
+/** How long the browser hand-off may stay unanswered before we offer "Try again". */
+const STILL_WAITING_MS = 120_000
 
 /** Which side of the wall we're showing: sign in to an account, or create one. */
 export type AuthMode = "signin" | "signup"
@@ -23,6 +28,12 @@ export interface LoginScreenProps {
   onGoogle: () => void
   /** Request a magic link. `name` is passed only from the sign-up form. */
   onSendMagicLink: (email: string, name?: string) => void
+  /** Abandon the browser hand-off (`waiting`). */
+  onCancel: () => void
+  /** Re-run the last failed or stalled attempt. */
+  onRetry: () => void
+  /** The provider sign-in URL, copyable from `waiting` when the browser did not open. */
+  signInUrl?: string
   /** Return from the `sent` state to enter different details. */
   onReset: () => void
   /**
@@ -48,6 +59,65 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
  * name. Composed from the auth atoms/molecules; states come from `Login.dc.html`.
  * Stateless except for the local mode + input; all actions lifted to props.
  */
+function WaitingPanel({
+  signInUrl,
+  onCancel,
+  onRetry
+}: {
+  signInUrl?: string
+  onCancel: () => void
+  onRetry: () => void
+}) {
+  const [stalled, setStalled] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // Restarts after "Try again" because `stalled` flips back to false.
+  useEffect(() => {
+    if (stalled) return
+    const timer = setTimeout(() => setStalled(true), STILL_WAITING_MS)
+    return () => clearTimeout(timer)
+  }, [stalled])
+  const copy = () => {
+    if (!signInUrl) return
+    void navigator.clipboard
+      ?.writeText(signInUrl)
+      .then(() => setCopied(true))
+      .catch(() => {})
+  }
+  return (
+    <div className="flex w-full flex-col items-center gap-3">
+      <div className="flex items-center gap-2 text-[13px] text-text">
+        <Spinner size={14} />
+        Finish signing in in your browser…
+      </div>
+      {stalled ? (
+        <div className="flex items-center gap-1 text-[12px] text-muted-foreground">
+          Still waiting?
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setStalled(false)
+              onRetry()
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : null}
+      <div className="flex w-full gap-2">
+        <Button variant="secondary" className="flex-1" onClick={onCancel}>
+          Cancel
+        </Button>
+        {signInUrl ? (
+          <Button variant="secondary" className="flex-1" onClick={copy}>
+            {copied ? "Copied" : "Copy sign-in link"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function LoginScreen({
   state = "default",
   sentEmail,
@@ -55,6 +125,9 @@ export function LoginScreen({
   onGithub,
   onGoogle,
   onSendMagicLink,
+  onCancel,
+  onRetry,
+  signInUrl,
   onReset,
   embedded = false
 }: LoginScreenProps) {
@@ -102,32 +175,38 @@ export function LoginScreen({
             </Callout>
           ) : null}
 
-          {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
-          <div
-            className="flex w-full flex-col gap-2"
-            style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
-          >
-            <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
-            <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
-          </div>
+          {state === "waiting" ? (
+            <WaitingPanel signInUrl={signInUrl} onCancel={onCancel} onRetry={onRetry} />
+          ) : (
+            <>
+            {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
+            <div
+              className="flex w-full flex-col gap-2"
+              style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
+            >
+              <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
+              <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
+            </div>
 
-          <AuthDivider />
+            <AuthDivider />
 
-          <MagicLinkForm
-            state={state}
-            mode={mode}
-            email={email}
-            name={name}
-            sentEmail={sentEmail}
-            onEmailChange={setEmail}
-            onNameChange={setName}
-            onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
-            onReset={() => {
-              setEmail("")
-              setName("")
-              onReset()
-            }}
-          />
+            <MagicLinkForm
+              state={state}
+              mode={mode}
+              email={email}
+              name={name}
+              sentEmail={sentEmail}
+              onEmailChange={setEmail}
+              onNameChange={setName}
+              onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
+              onReset={() => {
+                setEmail("")
+                setName("")
+                onReset()
+              }}
+            />
+            </>
+          )}
 
           {signup ? (
             <p className="mt-2 text-center text-[11px] leading-normal text-dim">

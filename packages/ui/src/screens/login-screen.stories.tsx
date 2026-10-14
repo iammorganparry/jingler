@@ -26,13 +26,16 @@ const Interactive = ({ initial = "default" }: { initial?: LoginState }) => {
       <LoginScreen
         state={state}
         sentEmail={sentEmail}
-        onGithub={noop}
-        onGoogle={noop}
+        onGithub={() => setState("waiting")}
+        onGoogle={() => setState("waiting")}
         onSendMagicLink={(email) => {
           setSentEmail(email)
           setState("loading")
           setTimeout(() => setState("sent"), 900)
         }}
+        onCancel={() => setState("default")}
+        onRetry={() => setState("waiting")}
+        signInUrl="https://jingler.dev/sign-in?code=demo"
         onReset={() => {
           setState("default")
           setSentEmail(undefined)
@@ -46,4 +49,6 @@ export const Default: Story = { render: () => <Interactive /> }
 // Named `ErrorState` because a module-scope `Error` shadows the global; `name`
 // keeps the story reading as "Error" in the sidebar.
 export const ErrorState: Story = { name: "Error", render: () => <Interactive initial="error" /> }
+export const Loading: Story = { render: () => <Interactive initial="loading" /> }
+export const Waiting: Story = { render: () => <Interactive initial="waiting" /> }
 export const Sent: Story = { render: () => <Interactive initial="sent" /> }
