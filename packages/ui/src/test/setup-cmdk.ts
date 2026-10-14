@@ -5,3 +5,5 @@ globalThis.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 }
+// jsdom's default 1024px window is under the 1100px chat-drawer breakpoint; tests assume a desktop window.
+if (typeof window !== "undefined") window.innerWidth = 1280

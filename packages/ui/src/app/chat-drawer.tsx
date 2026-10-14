@@ -19,12 +19,21 @@ export interface ChatDrawerProps {
  * returns to the opener (the Ask pill or ⌘L).
  */
 export function ChatDrawer({ open, onOpenChange, container, children, className }: ChatDrawerProps) {
+  // No DrawerTrigger here (the opener is the Ask pill or ⌘L), so Radix has nothing to refocus: remember it ourselves.
+  const opener = React.useRef<HTMLElement | null>(null)
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DialogPortal container={container}>
         <DialogOverlay data-testid="chat-drawer-scrim" className="absolute" />
         <DialogPrimitive.Content
           data-testid="chat-drawer"
+          onOpenAutoFocus={() => {
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            opener.current?.focus()
+          }}
           className={cn(
             "absolute inset-y-0 left-0 z-50 flex w-[400px] max-w-full min-w-0 flex-col border-r border-line bg-panel shadow-[0_16px_48px_var(--sb-shadow-strong)] outline-none",
             className

@@ -195,6 +195,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | ViewOverflowMenu | `app/view-overflow-menu.tsx` | ⋯ menu listing every view and plugin view, each with "Pin to header"; a sixth pin is refused with a tooltip. | views, pinned, onOpen, onPinnedChange | yes | #383 (3.1) |
 | ChatTabBar | `app/chat-tab-bar.tsx` | Chat tab strip. | chats, closedChats, activeChatId, onSelectChat, onCreateChat, onRenameChat | yes | — |
 | ChatLaneHeader | `app/chat-lane-header.tsx` | Thread switcher dropdown, new chat, and follow-agent toggle replacing the chat tab strip in redesign 4.3. | chats, activeChatId, onSelectChat, onCreateChat, followAgent, onToggleFollowAgent | yes | #398 (4.3) |
+| ChatDrawer | `app/chat-drawer.tsx` | Narrow-window (<1100px) chat lane: 400px overlay on the content area only (never the sidebar or rail), scrim, Esc/scrim close, focus returns to opener. Built on Drawer. | open, onOpenChange, container | yes | #400 (4.5) |
 | PALETTE, CommandPalette | `app/command-palette.tsx` | Global ⌘K palette. | — | yes | — |
 | ConversationView | `app/conversation-view.tsx` | Chat transcript, composer and queue. | messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills | no | — |
 | DiffPanel | `app/diff-panel.tsx` | Right-hand worktree diff rail. | — | no | — |
