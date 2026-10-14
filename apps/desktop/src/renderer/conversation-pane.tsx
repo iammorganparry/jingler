@@ -1097,6 +1097,7 @@ function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: 
     controlOutcome={subagentControlOutcome}
     onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
     loading={fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading}
+    onRetry={() => void childTranscriptQuery.refetch()}
     error={fleet.selectedLegacyAgent === null && childTranscriptQuery.error
       ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
       : null} />
