@@ -41,17 +41,17 @@ describe("PullRequestView evidence navigation", () => {
     expect(screen.getByText("fix error")).toBeTruthy()
     expect(screen.getByText("abcdef1")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("tab", { name: "Checks 1" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Checks 1/1" }))
     expect(screen.getAllByText("Typecheck").length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Overview" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
     expect(screen.getByText("A focused error-handling fix.")).toBeTruthy()
   })
 
   it("routes Files changed through the supplied callback", () => {
     const onOpenFiles = vi.fn()
     render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected onOpenFiles={onOpenFiles} /></WidthTierValue>)
-    fireEvent.click(screen.getByRole("tab", { name: "Files changed 3" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files 3" }))
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
   })
 
@@ -260,7 +260,7 @@ describe("PullRequestView load states", () => {
   it("shows an empty state for a PR with no checks or timeline", () => {
     render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, checks: [] }} connected /></WidthTierValue>)
     expect(screen.getByText("No reviews or comments yet")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Checks 0" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }))
     expect(screen.getByText("CI results will appear here once a run starts.")).toBeTruthy()
   })
 })
@@ -353,5 +353,45 @@ describe("PullRequestView header actions", () => {
     await open({})
     await userEvent.click(screen.getByRole("menuitem", { name: "Copy branch" }))
     expect(writeText).toHaveBeenCalledWith("fix/error")
+  })
+})
+
+describe("PullRequestView sub-tabs", () => {
+  const mixed: PullRequest = {
+    ...pr,
+    commits: 2,
+    changedFiles: 5,
+    checks: [
+      { name: "Typecheck", status: "pass", detailsUrl: null, durationMs: 1 },
+      { name: "Lint", status: "fail", detailsUrl: null, durationMs: 1 },
+      { name: "E2E", status: "running", detailsUrl: null, durationMs: null }
+    ]
+  }
+
+  it("labels tabs with counts from the data, in order", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected onOpenFiles={() => {}} /></WidthTierValue>)
+    const names = screen.getAllByRole("tab").map((tab) => tab.textContent)
+    expect(names).toEqual(["Conversation", "Commits 2", "Files 5", "Checks 1/3"])
+  })
+
+  it("is a 28px underline strip", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    expect(screen.getByRole("tab", { name: "Commits 2" }).className).toContain("h-7")
+  })
+
+  it("renders commitItems under Commits", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("tab", { name: "Commits 2" }))
+    expect(screen.getByText("fix error")).toBeTruthy()
+  })
+
+  it("switches tabs with the arrow keys", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    const conversation = screen.getByRole("tab", { name: "Conversation" })
+    conversation.focus()
+    fireEvent.keyDown(conversation, { key: "ArrowRight" })
+    expect(screen.getByRole("tab", { name: "Commits 2" }).getAttribute("aria-selected")).toBe("true")
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Commits 2" }), { key: "ArrowLeft" })
+    expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("true")
   })
 })

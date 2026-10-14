@@ -323,16 +323,18 @@ export function PullRequestView({
             <MotionTabs
               className="pt-1"
               variant="underline"
+              size="sm"
+              ariaLabel="Pull request sections"
               value={evidence}
               onChange={(value) => {
                 if (value === "files") onOpenFiles?.()
                 else setEvidence(value)
               }}
               items={[
-                { value: "overview", label: "Overview" },
+                { value: "overview", label: "Conversation" },
                 { value: "commits", label: `Commits ${pr.commits}` },
-                { value: "checks", label: `Checks ${pr.checks.length}` },
-                { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
+                { value: "files", label: `Files ${pr.changedFiles}`, disabled: !onOpenFiles },
+                { value: "checks", label: checksLabel(pr) }
               ]}
             />
           </div>
@@ -630,6 +632,10 @@ return (evidence === "checks" ? (
     </div>
   )
 }
+
+/** `Checks 3/4` (passed/total), or bare `Checks` when none are reported. */
+const checksLabel = (pr: PullRequest) =>
+  pr.checks.length === 0 ? "Checks" : `Checks ${pr.checks.filter((c) => c.status === "pass").length}/${pr.checks.length}`
 
 function CommitEvidence({ pr }: { pr: PullRequest }) {
   const commits = pr.commitItems ?? []

@@ -18,7 +18,7 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
   value: T
   onChange?: (value: T) => void
   variant?: "pill" | "underline" | "segment"
-  /** Segment only: md = 28px (spec §3e), sm = 24px. */
+  /** Segment: md = 28px (spec §3e), sm = 24px. Underline: sm = 28px tall tabs (PR sub-tabs). */
   size?: "sm" | "md"
   /** Segment only: segments share the full width equally. */
   fullWidth?: boolean
@@ -73,7 +73,8 @@ export function MotionTabs<T extends string>({ items, value, onChange, variant =
     aria-selected={active} disabled={item.disabled}
     onClick={() => onChange?.(item.value)}
     className={cn(
-      "relative isolate -mb-px inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-3 pb-2.5 pt-1 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      "relative isolate -mb-px inline-flex shrink-0 items-center whitespace-nowrap font-medium transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      size === "sm" ? "h-7 px-3 text-[12.5px]" : "min-h-11 px-3 pb-2.5 pt-1 text-sm",
       active ? "text-text-bright" : "text-muted-foreground hover:text-text-bright",
       item.disabled && "cursor-not-allowed opacity-50"
     )}

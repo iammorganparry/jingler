@@ -254,7 +254,7 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     await expect(scope).toBeEnabled()
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
-    await inbox.getByRole("tab", { name: /Files changed/ }).click()
+    await inbox.getByRole("tab", { name: /^Files \d+/ }).click()
     await expect(inbox).not.toBeVisible()
     // Files accessed via Explorer (files tab removed in redesign 3.6)
     await expect(window.getByRole("tab", { name: "Explorer", exact: true })).toBeVisible()

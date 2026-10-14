@@ -190,7 +190,7 @@ describe("PullRequestInbox", () => {
     const sessionButton = screen.getByRole("button", { name: "Create session" })
     expect(sessionButton.getAttribute("data-slot")).toBe("button")
     expect(sessionButton.querySelector(".lucide-download")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Files changed 1" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files 1" }))
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
 
     fireEvent.change(screen.getByPlaceholderText("Leave a comment…"), {
