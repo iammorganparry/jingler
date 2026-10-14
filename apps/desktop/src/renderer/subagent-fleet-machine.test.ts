@@ -199,4 +199,40 @@ describe("subagentFleetMachine", () => {
   })
 
 
+  it("keeps an open child selected when SYNC reports it finished", () => {
+    const actor = createActor(subagentFleetMachine, {
+      input: { parentRuntimeSessionId: "parent" }
+    }).start()
+    actor.send({
+      type: "SYNC",
+      events: [{ _tag: "Upsert", version: 2, eventId: "start-1", occurredAt: 10, node }]
+    })
+    actor.send({ type: "SELECT", id: node.id })
+    actor.send({
+      type: "SYNC",
+      events: [
+        { _tag: "Upsert", version: 2, eventId: "start-1", occurredAt: 10, node },
+        {
+          _tag: "Upsert",
+          version: 2,
+          eventId: "done-1",
+          occurredAt: 20,
+          node: {
+            ...node,
+            registryRevision: 11,
+            status: "completed",
+            updatedAt: 20,
+            completedAt: 20,
+            terminal: { reason: "completed", summary: "Done", at: 20, retryable: false }
+          }
+        }
+      ]
+    })
+    const { selectedId, tree } = actor.getSnapshot().context
+    expect(selectedId).toBe(node.id)
+    expect(tree.nodes.find((n) => n.id === node.id)?.status).toBe("completed")
+    actor.stop()
+  })
+
+
 })

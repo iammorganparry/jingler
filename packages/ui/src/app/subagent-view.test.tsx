@@ -337,3 +337,29 @@ describe("FleetAgentView task", () => {
     expect(screen.queryByTestId("subagent-task")).toBeNull()
   })
 })
+
+describe("FleetAgentView states", () => {
+  it("shows a loading skeleton while the child transcript loads", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} loading />)
+    expect(screen.getAllByRole("status", { name: "Loading" }).length).toBe(3)
+    expect(screen.queryByTestId("fleet-agent-live")).toBeNull()
+  })
+
+  it("names an orchestrator as having no transcript", () => {
+    render(<FleetAgentView node={fleetNode({ nodeKind: "workflow", agent: "workflow", currentTool: null })} messages={[]} />)
+    expect(screen.getByText("This agent has no transcript (orchestrator)")).toBeDefined()
+  })
+
+  it("shows the load error with a working Retry", () => {
+    const onRetry = vi.fn()
+    render(<FleetAgentView node={fleetNode()} messages={[]} error="Could not load the child transcript." onRetry={onRetry} />)
+    expect(screen.getByRole("alert").textContent).toContain("Could not load the child transcript.")
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("omits Retry when no handler is given", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} error="boom" />)
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+  })
+})

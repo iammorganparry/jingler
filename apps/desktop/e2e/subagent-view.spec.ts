@@ -157,3 +157,27 @@ test("the subagent view shows the meta strip, Details, the quoted task and a rea
   await expect(bar).toContainText("Stopping Explore…")
   await expect(bar.getByRole("button", { name: "Stop" })).toBeDisabled()
 })
+
+test("a child that finishes while its view is open stays open and shows its terminal line", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[held-subagents]] [[held-settles]] survey the app")
+  await composer.press("Enter")
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "View", exact: true }).first().click()
+
+  const view = window.getByTestId("fleet-agent-transcript")
+  const bar = window.getByTestId("subagent-readonly-bar")
+  await expect(view).toContainText("Survey the tab bar")
+  await expect(bar).toContainText("read-only")
+
+  // The fixture settles both children a few seconds in; the open view must not snap to Main.
+  await expect(bar).toContainText("Fixture child completed", { timeout: 30_000 })
+  await expect(view).toContainText("Survey the tab bar")
+  await expect(window.getByTestId("subagent-breadcrumb")).toBeVisible()
+  await expect(window.getByTestId("conversation-scroll")).toHaveCount(0)
+})

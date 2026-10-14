@@ -7,6 +7,7 @@ import type {
   SubagentFleetStatus
 } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
+import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { StatusDot } from "../components/status-dot.js"
 import { SubagentMetaStrip } from "./subagent-meta-strip.js"
 
@@ -105,6 +106,7 @@ export interface FleetAgentViewProps {
   readonly error?: string | null
   readonly controlOutcome?: SubagentFleetControlOutcome | null
   readonly onOpenArtifact?: (path: string) => void
+  readonly onRetry?: () => void
 }
 
 /** Full read-only child session selected from its chat-row tab. */
@@ -115,7 +117,8 @@ export function FleetAgentView({
   loading = false,
   error = null,
   controlOutcome = null,
-  onOpenArtifact
+  onOpenArtifact,
+  onRetry
 }: FleetAgentViewProps) {
          function renderAgentHeader() {
            return (<div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
@@ -140,10 +143,10 @@ export function FleetAgentView({
                     Workflow {node.terminal.reason}: {node.terminal.summary}
                   </p>
                 )}
-                <p className="text-[12px] text-dim">
-                  This workflow orchestrates other agents and has no transcript of
-                  its own — select one of its step agents to see their output.
-                </p>
+                <EmptyState
+                  title="This agent has no transcript (orchestrator)"
+                  description="This workflow orchestrates other agents and has no transcript of its own — select one of its step agents to see their output."
+                />
               </div>
             ) : node ? (
               <LiveAgentActivity node={node} />
@@ -197,8 +200,8 @@ export function FleetAgentView({
               {node.task}
             </blockquote>
           )}
-          {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
-          {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
+          {loading && <ListSkeleton rows={3} rowHeight={48} />}
+          {error && <InlineError message={error} onRetry={onRetry} />}
           {node?.attention && (
             <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
               {node.attention.message}
