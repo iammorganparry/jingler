@@ -309,6 +309,9 @@ export function PullRequestView({
               sessionActionLabel={sessionActionLabel}
               sessionActionDisabledReason={sessionActionDisabledReason}
               onOpenOnGithub={onOpenOnGithub}
+              onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
+              markingReady={markingReady}
+              onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
             />
             {pr.labels.length > 0 && (
               <div className="flex flex-wrap gap-[7px]">

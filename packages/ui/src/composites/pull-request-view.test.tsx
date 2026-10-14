@@ -309,3 +309,49 @@ describe("PullRequestView header", () => {
     expect(writeText).toHaveBeenCalledWith("fix/error")
   })
 })
+
+describe("PullRequestView header actions", () => {
+  const open = async (props: Partial<React.ComponentProps<typeof PullRequestView>>, value: PullRequest = pr) => {
+    render(<WidthTierValue width={900}><PullRequestView pr={value} connected {...props} /></WidthTierValue>)
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }))
+  }
+
+  it("opens on GitHub and the session from their header buttons", () => {
+    const onOpenOnGithub = vi.fn()
+    const onOpenSession = vi.fn()
+    render(<WidthTierValue width={900}><PullRequestView pr={pr} connected onOpenOnGithub={onOpenOnGithub} onOpenSession={onOpenSession} sessionActionLabel="Open session" /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("button", { name: "Open on GitHub" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open session" }))
+    expect(onOpenOnGithub).toHaveBeenCalledTimes(1)
+    expect(onOpenSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks a draft ready from the menu", async () => {
+    const onMarkReady = vi.fn()
+    await open({ onMarkReady }, { ...pr, state: "draft" })
+    await userEvent.click(screen.getByRole("menuitem", { name: "Mark ready" }))
+    expect(onMarkReady).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no Mark ready on a non-draft PR", async () => {
+    await open({ onMarkReady: vi.fn() })
+    expect(screen.queryByRole("menuitem", { name: "Mark ready" })).toBeNull()
+  })
+
+  it("closes only after the confirm dialog", async () => {
+    const onClosePr = vi.fn()
+    await open({ onClosePr })
+    await userEvent.click(screen.getByRole("menuitem", { name: "Close PR" }))
+    expect(onClosePr).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole("button", { name: "Close pull request" }))
+    expect(onClosePr).toHaveBeenCalledTimes(1)
+  })
+
+  it("copies the branch from the menu", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    await open({})
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy branch" }))
+    expect(writeText).toHaveBeenCalledWith("fix/error")
+  })
+})
