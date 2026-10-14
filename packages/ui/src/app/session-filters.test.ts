@@ -193,7 +193,7 @@ describe("groupSessions", () => {
 
 describe("persistence", () => {
   it("round-trips", () => {
-    const filters: SessionFilters = { status: "all", repo: "jingler", groupBy: "none", sortBy: "name" }
+    const filters: SessionFilters = { status: "all", repo: "jingler", pr: "merged", groupBy: "none", sortBy: "name" }
     saveFilters(filters)
     expect(loadFilters()).toStrictEqual(filters)
   })
@@ -208,9 +208,25 @@ describe("persistence", () => {
     expect(loadFilters()).toStrictEqual({
       status: DEFAULT_FILTERS.status,
       repo: "jingler",
+      pr: DEFAULT_FILTERS.pr,
       groupBy: "none",
       sortBy: "name"
     })
+  })
+
+  it("keeps each project's choices separate", () => {
+    const a: SessionFilters = { ...DEFAULT_FILTERS, status: "all", sortBy: "name" }
+    const b: SessionFilters = { ...DEFAULT_FILTERS, pr: "open", sortBy: "recency" }
+    saveFilters(a, "proj-a")
+    saveFilters(b, "proj-b")
+    expect(loadFilters("proj-a")).toStrictEqual(a)
+    expect(loadFilters("proj-b")).toStrictEqual(b)
+  })
+
+  it("starts an unseen project from the shared choices, then the defaults", () => {
+    expect(loadFilters("fresh")).toStrictEqual(DEFAULT_FILTERS)
+    saveFilters({ ...DEFAULT_FILTERS, sortBy: "name" })
+    expect(loadFilters("fresh").sortBy).toBe("name")
   })
 
   it("survives junk on disk", () => {
@@ -224,6 +240,39 @@ describe("persistence", () => {
     })
     expect(() => saveFilters(DEFAULT_FILTERS)).not.toThrow()
     spy.mockRestore()
+  })
+})
+
+describe("PR filter", () => {
+  const withPr = [
+    s({ id: "p1", prNumber: 1, prs: [{ number: 1, state: "merged" }] }),
+    s({ id: "p2", prNumber: 2, prs: [{ number: 2, state: "draft" }] }),
+    s({ id: "p3", prNumber: 3 }),
+    s({ id: "p4" })
+  ]
+  const ids = (pr: SessionFilters["pr"]) =>
+    filterSessions(withPr, "", { ...DEFAULT_FILTERS, pr }).map((x) => x.id)
+
+  it("narrows to one PR state", () => {
+    expect(ids("merged")).toStrictEqual(["p1"])
+    expect(ids("draft")).toStrictEqual(["p2"])
+  })
+
+  it("treats a PR with unread state as open, and no PR as none", () => {
+    expect(ids("open")).toStrictEqual(["p3"])
+    expect(ids("none")).toStrictEqual(["p4"])
+    expect(ids("any")).toHaveLength(4)
+  })
+
+  it("prefers a caller-supplied live PR state", () => {
+    const out = filterSessions(withPr, "", { ...DEFAULT_FILTERS, pr: "closed" }, (x) =>
+      x.id === "p4" ? "closed" : "none"
+    )
+    expect(out.map((x) => x.id)).toStrictEqual(["p4"])
+  })
+
+  it("marks the menu button narrowed", () => {
+    expect(isNarrowed({ ...DEFAULT_FILTERS, pr: "open" })).toBe(true)
   })
 })
 
@@ -261,7 +310,7 @@ describe("isNarrowed", () => {
 describe("sessionFilterAxes", () => {
   it("offers the four axes, split into narrowing and arranging", () => {
     const axes = sessionFilterAxes(DEFAULT_FILTERS, () => {}, SESSIONS)
-    expect(axes.map((a) => a.id)).toStrictEqual(["status", "repo", "groupBy", "sortBy"])
+    expect(axes.map((a) => a.id)).toStrictEqual(["status", "repo", "pr", "groupBy", "sortBy"])
     expect(axes.find((a) => a.id === "groupBy")!.separated).toBe(true)
   })
 
