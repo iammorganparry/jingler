@@ -247,6 +247,29 @@ describe("PluginsSettings", () => {
     expect(onClearSecret).toHaveBeenCalledWith("hello-tab", "hello-tab.api-key")
   })
 
+  it("renders no key or secret input for Plannotator, which declares no secret setting", () => {
+    // Plannotator is Jingler's own built-in; its settings come from its manifest
+    // (none are secrets), so the generated form must never invent a key field.
+    const plannotator = plugin({
+      builtin: true,
+      manifest: { ...plugin().manifest, id: "plannotator", name: "Plannotator" }
+    } as Partial<LoadedPlugin>)
+    const { container } = render(
+      <PluginsSettings
+        catalog={{ plugins: [plannotator], failed: [] }}
+        {...base}
+        settings={{ plannotator: { values: {}, secrets: {} } }}
+        onSetSetting={async () => undefined}
+        onSetSecret={async () => undefined}
+        onClearSecret={async () => undefined}
+      />
+    )
+    expect(screen.getByTestId("plugin-row-plannotator")).toBeTruthy()
+    expect(container.querySelector("input[type=password]")).toBeNull()
+    expect(screen.queryByLabelText(/api key|secret/i)).toBeNull()
+    expect(screen.queryByText("Replace")).toBeNull()
+  })
+
   it("saves an enum setting selected through BeUI", () => {
     const onSetSetting = vi.fn(async () => undefined)
     const withSetting = plugin({
