@@ -8,6 +8,7 @@ import type {
 } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
 import { StatusDot } from "../components/status-dot.js"
+import { SubagentMetaStrip } from "./subagent-meta-strip.js"
 
 const ACTIVE_STATUSES: ReadonlySet<SubagentFleetStatus> = new Set([
   "queued",
@@ -122,16 +123,6 @@ export function FleetAgentView({
           <strong className="text-text-bright">{node?.agent ?? "Agent"}</strong>
           {node && <span> · {node.task}</span>}
         </div>
-        {node?.artifacts.map((artifact) => (
-          <button
-            key={artifact.path}
-            type="button"
-            onClick={() => onOpenArtifact?.(artifact.path)}
-            className="flex-none rounded border border-line px-1.5 py-0.5 text-[10px] text-blue hover:bg-panel"
-          >
-            {artifact.label ?? artifact.path.split("/").at(-1)}
-          </button>
-        ))}
       </div>)
          }
 
@@ -184,6 +175,7 @@ export function FleetAgentView({
   return (
     <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
       {renderAgentHeader()}
+      {node && <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} />}
       {controlOutcome && (
         <div
           data-testid="subagent-control-outcome"
@@ -197,6 +189,14 @@ export function FleetAgentView({
       )}
       <div ref={scrollRef} data-testid="fleet-agent-transcript-scroll" className="flex-1 overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
         <div className="mx-auto w-full max-w-[760px] space-y-6">
+          {node && (
+            <blockquote
+              data-testid="subagent-task"
+              className="whitespace-pre-wrap border-l-2 border-line-strong pl-3 text-[12px] leading-[1.55] text-text-body"
+            >
+              {node.task}
+            </blockquote>
+          )}
           {loading && <p className="text-[12px] text-dim">Loading child session…</p>}
           {error && <p role="alert" className="text-[12px] text-red">{error}</p>}
           {node?.attention && (

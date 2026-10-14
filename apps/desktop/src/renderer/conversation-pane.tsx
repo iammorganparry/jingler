@@ -35,6 +35,7 @@ import {
   Composer,
   ConversationView,
   SubagentEntryContext,
+  SubagentReadOnlyBar,
   FleetAgentView,
   McpApiKeyDialog,
   McpBrand,
@@ -977,19 +978,11 @@ export function ConversationPane({
               a full-bleed composer read as a different surface entirely. */}
           <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
           <div className="mx-auto w-full max-w-[760px]">
-          {renderFleetComposer({
-                      session,
-                      addLocalMcp: localMcpConfig.add,
-                      mcpServers: localMcpConfig.servers,
-                      onSetMcpApiKey: localMcpConfig.setApiKey,
-                      onSetMcpAuth: localMcpConfig.setAuth,
-                      onAuthorizeMcp: localMcpConfig.authorize,
+          {renderFleetReadOnlyBar({
+                      mainTitle: activeChat.title ?? session.title,
                       fleet,
                       controlSubagent,
                       convo,
-                      fileBrowser,
-                      toggleFollowAgent,
-                      paneFocused,
                       onPushToast
                     })}
           </div>
@@ -1115,96 +1108,46 @@ function handoffModelLabel(providerCatalog: ProviderCatalog | null | undefined, 
     .find(({ id }) => id === convo.modelId)?.label ?? null
 }
 
-function renderFleetComposer({
-  session,
-  addLocalMcp,
-  mcpServers,
-  onSetMcpApiKey,
-  onSetMcpAuth,
-  onAuthorizeMcp,
+function renderFleetReadOnlyBar({
+  mainTitle,
   fleet,
   controlSubagent,
   convo,
-  fileBrowser,
-  toggleFollowAgent,
-  paneFocused,
   onPushToast
 }: {
-  session: Session;
-  addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
-  mcpServers: ReadonlyArray<McpServer>;
-  onSetMcpApiKey: ((name: string, apiKey: string) => Promise<void>) | undefined;
-  onSetMcpAuth: ((name: string, auth: McpRemoteAuth) => Promise<void>) | undefined;
-  onAuthorizeMcp: ((name: string) => Promise<void>) | undefined;
+  mainTitle: string;
   fleet: SubagentFleetController;
   controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>;
   convo: Conversation;
-  fileBrowser: FileBrowserController;
-  toggleFollowAgent: (enabled: boolean) => void;
-  paneFocused: boolean;
   onPushToast?: (toast: ToastInput) => void;
 }) {
-  return <Composer
-    repo={session.repo}
-    branch={session.branch}
-    onAddMcp={addLocalMcp}
-    mcpServers={mcpServers}
-    onSetMcpApiKey={onSetMcpApiKey}
-    onSetMcpAuth={onSetMcpAuth}
-    onAuthorizeMcp={onAuthorizeMcp}
-    branchPending={session.semanticBranchPending === true}
-    busy={fleet.selectedNode!.status === "queued" ||
-      fleet.selectedNode!.status === "running" ||
-      fleet.selectedNode!.status === "paused" ||
-      fleet.selectedNode!.status === "needs-attention"}
-    placeholder={fleet.selectedNode!.status === "paused"
-      ? `Resume ${fleet.selectedNode!.agent} with a continuation…`
-      : fleet.selectedNode!.attention
-        ? `Reply to ${fleet.selectedNode!.agent}…`
-        : `Steer ${fleet.selectedNode!.agent}…`}
-    disabledReason={fleet.selectedLegacyAgent !== null
-      ? "Inline agents are watch-only — steer them through the main chat."
-      : undefined}
-    onSend={(text) => {
-      const node = fleet.selectedNode
-      if (node === null || fleet.selectedLegacyAgent !== null) return
-      controlSubagent(
-        node,
-        node.status === "paused"
-          ? "resume"
-          : node.attention
-            ? "reply"
-            : "steer",
-        text,
-        node.attention?.requestId
-      ).catch(() => { })
-    }}
-    onStop={() => {
-      const node = fleet.selectedNode
-      if (node === null) return
-      const legacy = fleet.legacyAgentFor(node)
-      if (legacy !== null) {
-        if (legacy.status === "working") convo.stopSubagent(legacy.id)
-        return
-      }
-      controlSubagent(node, "stop").catch(() => {
-        onPushToast?.({
-          key: `stop-failed-${node.id}`,
-          variant: "error",
-          title: `Couldn't stop ${node.agent}`,
-          action: {
-            label: "Retry",
-            onAction: () => {
-              void controlSubagent(node, "stop")
-            }
-          }
-        })
+  const node = fleet.selectedNode!
+  const stop = async () => {
+    const legacy = fleet.legacyAgentFor(node)
+    if (legacy !== null) {
+      if (legacy.status === "working") convo.stopSubagent(legacy.id)
+      return { acknowledged: true }
+    }
+    const outcome = await controlSubagent(node, "stop")
+    if (!outcome.acknowledged) {
+      onPushToast?.({
+        key: `stop-failed-${node.id}`,
+        variant: "error",
+        title: `Couldn't stop ${node.agent}`,
+        action: { label: "Retry", onAction: () => { void controlSubagent(node, "stop") } }
       })
+    }
+    return outcome
+  }
+  return <SubagentReadOnlyBar
+    node={node}
+    mainTitle={mainTitle}
+    onStop={stop}
+    onReply={(text) => {
+      if (node.attention) void controlSubagent(node, "reply", text, node.attention.requestId)
     }}
-    followAgent={fileBrowser.followEnabled}
-    onToggleFollowAgent={toggleFollowAgent}
-    autoFocus={paneFocused}
-    focusKey={fleet.selectedNode!.id} />
+    // Restart = resume the child with its original task as the continuation.
+    onRetry={() => { void controlSubagent(node, "resume", node.task) }} />
 }
 
 const availableRetryPrompt = (
