@@ -127,8 +127,8 @@ test("a long branch name truncates while the status word and diff stat stay on o
   const branch = row.locator("div.font-mono > span.truncate").first()
 
   // The branch is the only thing that gives way.
-  const truncated = await branch.evaluate((el) => el.scrollWidth > el.clientWidth)
-  expect(truncated).toBe(true)
+  // Polled: per-project filters load after first paint, so the row can be measured mid-layout.
+  await expect.poll(() => branch.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
 
   // The status word is a single line (not wrapped to a second one).
   const statusBox = await status.boundingBox()
