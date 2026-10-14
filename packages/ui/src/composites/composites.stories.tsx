@@ -175,6 +175,22 @@ export const Settings: Story = {
   )
 }
 
+const ComingSoon = ({ section }: { section: "permissions" | "keybindings" }) => (
+  <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
+    <SettingsView initialSection={section} githubConnection={DEMO_GITHUB} onClose={() => {}} />
+  </div>
+)
+
+export const SettingsPermissionsComingSoon: Story = {
+  name: "Settings · Permissions · Coming soon (10.20)",
+  render: () => <ComingSoon section="permissions" />
+}
+
+export const SettingsKeybindingsComingSoon: Story = {
+  name: "Settings · Keybindings · Coming soon (10.20)",
+  render: () => <ComingSoon section="keybindings" />
+}
+
 const GeneralOffload = ({ status }: { status: "disabled" | "priming" | "ready" | "failed" }) => (
   <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
     <SettingsView
