@@ -3,6 +3,7 @@
  * and the narrow-window overlay Drawer. The lane keeps a remembered pixel width, not a ratio.
  */
 import { assign, setup, type SnapshotFrom } from "xstate"
+import { chatLaneIsDrawer, SHELL_BREAKPOINTS } from "../hooks/width-tier.js"
 
 export const CHAT_LANE_WIDTH_KEY = "sb.chat-lane.width"
 /** Hard floor: dragging below this collapses the lane instead of squashing it. */
@@ -12,7 +13,7 @@ export const CHAT_LANE_DEFAULT_MIN = 360
 export const CHAT_LANE_DEFAULT_MAX = 560
 export const CHAT_LANE_DRAWER_WIDTH = 400
 /** Windows narrower than this swap Docked for the overlay Drawer. */
-export const CHAT_LANE_NARROW_BELOW = 1100
+export const CHAT_LANE_NARROW_BELOW = SHELL_BREAKPOINTS.chatDrawerBelow
 export const CHAT_LANE_SNAP_RATIOS = [1 / 3, 1 / 2] as const
 export const CHAT_LANE_SNAP_TOLERANCE = 16
 
@@ -43,7 +44,7 @@ export type ChatLaneEvent =
   | { readonly type: "RESET_WIDTH" }
   | { readonly type: "WINDOW_RESIZE"; readonly width: number }
 
-export const isNarrowWindow = (windowWidth: number): boolean => windowWidth < CHAT_LANE_NARROW_BELOW
+export const isNarrowWindow = chatLaneIsDrawer
 
 export const defaultLaneWidth = (windowWidth: number): number =>
   Math.min(CHAT_LANE_DEFAULT_MAX, Math.max(CHAT_LANE_DEFAULT_MIN, Math.round(windowWidth / 3)))

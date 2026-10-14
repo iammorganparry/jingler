@@ -117,3 +117,34 @@ test("nothing non-scrollable overflows its box at the window minimum", async ({ 
   )
   expect(offenders).toEqual({})
 })
+
+test("at 1024px the chat lane is an overlay drawer: Esc closes it and it never covers the sidebar", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: (context) => [{ ...SESSIONS[0]!, worktreePath: context.repoPath }]
+  })
+  await sessionRow(window, "Alpha session").click()
+
+  // Open a file so the chat lane has content beside it, then narrow below 1100px.
+  await window.keyboard.press("Meta+p")
+  const palette = window.getByRole("dialog", { name: "Command palette" })
+  await palette.getByRole("option", { name: "README.md" }).click()
+  await setWindowSize(window, 1024, 700)
+
+  const drawer = window.getByTestId("chat-drawer")
+  await expect(drawer).toHaveCount(0)
+  await window.getByRole("button", { name: "Show chat lane" }).click()
+  await expect(drawer).toBeVisible()
+  await expect(window.getByTestId("chat-drawer-scrim")).toBeVisible()
+
+  const drawerBox = await drawer.boundingBox()
+  const sidebarBox = await window.getByTestId("session-sidebar").boundingBox()
+  expect(drawerBox!.width).toBeLessThanOrEqual(400)
+  expect(drawerBox!.x).toBeGreaterThanOrEqual(sidebarBox!.x + sidebarBox!.width - 1)
+
+  await window.keyboard.press("Escape")
+  await expect(drawer).toHaveCount(0)
+})

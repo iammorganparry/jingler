@@ -14,6 +14,8 @@ import {
 
 const store = new Map<string, string>()
 beforeEach(() => {
+  // jsdom's 1024px default is under the 1100px chat-drawer breakpoint; these tests assume a docked lane.
+  window.innerWidth = 1280
   store.clear()
   resetEditorLayouts()
   Object.defineProperty(globalThis, "localStorage", {
