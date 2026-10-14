@@ -24,3 +24,25 @@ it("requires preview confirmation and retains its exact token", async () => {
   actor.send({ type: "CONFIRM" }); await waitFor(actor, (s) => s.matches("ready"))
   expect(api.restore).toHaveBeenCalledWith("test", "cp", "exact"); actor.stop()
 })
+it("cancelling the revert confirm never calls restore and drops the preview", async () => {
+  const preview = { checkpointId: "cp", token: "t", operations: [{ path: "a.txt", action: "overwrite" as const }], indexOperations: [], diff: "", indexDiff: "" }
+  const api = { setMode: vi.fn(), list: vi.fn().mockResolvedValue([]), capture: vi.fn(), preview: vi.fn().mockResolvedValue(preview), restore: vi.fn() }
+  const actor = createActor(workspaceCheckpointsMachine, { input: { session, api, onSession: vi.fn() } }).start()
+  actor.send({ type: "OPEN" }); await waitFor(actor, (s) => s.matches("ready"))
+  actor.send({ type: "PREVIEW", id: "cp" }); await waitFor(actor, (s) => s.matches("confirming"))
+  expect(actor.getSnapshot().context.preview?.operations).toEqual(preview.operations)
+  actor.send({ type: "CANCEL" })
+  expect(actor.getSnapshot().matches("ready")).toBe(true); expect(actor.getSnapshot().context.preview).toBeNull()
+  expect(api.restore).not.toHaveBeenCalled(); actor.stop()
+})
+it("a failed restore keeps the previewed file list and Retry restores with the same token", async () => {
+  const preview = { checkpointId: "cp", token: "exact", operations: [{ path: "a.txt", action: "overwrite" as const }], indexOperations: [], diff: "", indexDiff: "" }
+  const api = { setMode: vi.fn(), list: vi.fn().mockResolvedValue([]), capture: vi.fn(), preview: vi.fn().mockResolvedValue(preview), restore: vi.fn().mockRejectedValueOnce(new Error("Workspace changed before restore. Preview again.")).mockResolvedValue({}) }
+  const actor = createActor(workspaceCheckpointsMachine, { input: { session, api, onSession: vi.fn() } }).start()
+  actor.send({ type: "OPEN" }); await waitFor(actor, (s) => s.matches("ready"))
+  actor.send({ type: "PREVIEW", id: "cp" }); await waitFor(actor, (s) => s.matches("confirming"))
+  actor.send({ type: "CONFIRM" }); await waitFor(actor, (s) => s.matches("restoreFailed"))
+  expect(actor.getSnapshot().context.error).toContain("Workspace changed"); expect(actor.getSnapshot().context.preview).toEqual(preview)
+  actor.send({ type: "RETRY" }); await waitFor(actor, (s) => s.matches("ready"))
+  expect(api.restore).toHaveBeenCalledTimes(2); expect(api.restore).toHaveBeenLastCalledWith("test", "cp", "exact"); actor.stop()
+})

@@ -7,6 +7,7 @@ export interface CheckpointApi {
   preview(id: string, checkpoint: string): Promise<WorkspaceCheckpointPreview>
   restore(id: string, checkpoint: string, token: string): Promise<WorkspaceCheckpoint>
 }
+const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 interface Input { session: Session; api: CheckpointApi; onSession(session: Session): void }
 export const workspaceCheckpointsMachine = setup({
   types: {
@@ -51,10 +52,15 @@ export const workspaceCheckpointsMachine = setup({
           { guard: ({ event }) => event.output.preview !== null, target: "confirming", actions: assign(({ event }) => event.output) },
           { target: "ready", actions: assign(({ event }) => event.output) }
         ],
-        onError: { target: "failed", actions: assign({ error: ({ event }) => event.error instanceof Error ? event.error.message : String(event.error) }) }
+        onError: [
+          { guard: ({ context }) => context.action === "restore", target: "restoreFailed", actions: assign({ error: ({ event }) => message(event.error) }) },
+          { target: "failed", actions: assign({ error: ({ event }) => message(event.error) }) }
+        ]
       }
     },
     confirming: { on: { CONFIRM: { target: "working", actions: assign({ action: "restore" }) }, CANCEL: { target: "ready", actions: assign({ preview: null }) } } },
+    // A failed restore keeps its preview, so the revert dialog stays on the same file list and RETRY re-runs restore with the same token.
+    restoreFailed: { on: { RETRY: "working", CANCEL: { target: "ready", actions: assign({ preview: null }) } } },
     failed: { on: { RETRY: "working", CANCEL: "ready" } }
   }
 })
