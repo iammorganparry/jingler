@@ -48,6 +48,7 @@ import { isSurface, sessionSurfaceKey, type SessionSurface } from "./session-sur
 import type { TabLauncherItem } from "./chat-tab-bar.js"
 import type { TabBadge } from "./tab-contributions.js"
 import { matchNewTabChord } from "./app-shortcuts.js"
+import { DropZoneOverlay, resolveDropEdge } from "./drop-zone-overlay.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
 import { ChatLaneHeader, SubagentLaneViewContext, type ChatLaneHeaderChat } from "./chat-lane-header.js"
@@ -101,25 +102,6 @@ const readDrag = (e: DragEvent, mime: string): TabDrag | null => {
   } catch {
     return null
   }
-}
-
-/** The nearest edge within the outer fifth, else the middle. */
-const edgeAt = (e: DragEvent<HTMLElement>): DropEdge => {
-  const rect = e.currentTarget.getBoundingClientRect()
-  if (rect.width === 0 || rect.height === 0) return "center"
-  const x = (e.clientX - rect.left) / rect.width
-  const y = (e.clientY - rect.top) / rect.height
-  const edges: ReadonlyArray<[DropEdge, number]> = [["left", x], ["right", 1 - x], ["top", y], ["bottom", 1 - y]]
-  const [edge, distance] = edges.reduce((best, next) => (next[1] < best[1] ? next : best))
-  return distance < 0.2 ? edge : "center"
-}
-
-const OVERLAY: Record<DropEdge, string> = {
-  left: "inset-y-0 left-0 w-1/2",
-  right: "inset-y-0 right-0 w-1/2",
-  top: "inset-x-0 top-0 h-1/2",
-  bottom: "inset-x-0 bottom-0 h-1/2",
-  center: "inset-0"
 }
 
 export function EditorGroups(props: EditorGroupsProps) {
@@ -353,7 +335,7 @@ function useDropZone(
   const [edge, setEdge] = useState<DropEdge | null>(null)
   const [rejected, setRejected] = useState(false)
   const edgeFor = (event: DragEvent<HTMLElement>): DropEdge =>
-    fixedEdge ?? (groupId === null ? "center" : edgeAt(event))
+    fixedEdge ?? (groupId === null ? "center" : resolveDropEdge(event.currentTarget.getBoundingClientRect(), event.clientX, event.clientY))
   const clear = useCallback(() => {
     setEdge(null)
     setRejected(false)
@@ -395,19 +377,7 @@ function useDropZone(
       api.onDrop(drag, groupId, next, fixedEdge ? false : event.altKey)
     }
   }
-  const overlay = edge ? (
-    <div
-      data-testid="editor-drop-overlay"
-      data-edge={edge}
-      data-rejected={rejected || undefined}
-      aria-hidden
-      className={cn(
-        "pointer-events-none absolute z-20 ring-2 ring-inset",
-        rejected ? "bg-red/15 ring-red" : "bg-blue/15 ring-blue",
-        OVERLAY[edge]
-      )}
-    />
-  ) : null
+  const overlay = edge ? <DropZoneOverlay edge={edge} rejected={rejected} zones={!fixedEdge && groupId !== null} /> : null
   return { handlers, overlay, clear }
 }
 
