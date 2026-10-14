@@ -16,6 +16,7 @@ import {
 import { createJiti } from "jiti"
 import type {
   RegisterSubagentCapabilityCeilingOptions,
+  SubagentCapabilityCeiling,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
@@ -793,6 +794,7 @@ function* bindSubagentCapabilities(
       )
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+    let ceiling: SubagentCapabilityCeiling | undefined
     if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,
@@ -827,21 +829,19 @@ function* bindSubagentCapabilities(
           }))
         ))
       )
+      ceiling = {
+        allowedTools: [
+          ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
+          "contact_supervisor",
+          "subagent"
+        ],
+        allowedAgents: [...JINGLER_SUBAGENT_NAMES],
+        denyExtensions: false
+      }
       subagentCeiling = registerParentCapabilityCeiling(capabilityCeiling, [
         parentRuntimeSessionId,
         embedded.result.session.sessionFile
-      ], {
-        source: "jingler-runtime",
-        ceiling: {
-          allowedTools: [
-            ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
-            "contact_supervisor",
-            "subagent"
-          ],
-          allowedAgents: [...JINGLER_SUBAGENT_NAMES],
-          denyExtensions: false
-        }
-      })
+      ], { source: "jingler-runtime", ceiling })
       const childConnections = childProviderConnections(
         embedded.connection,
         assignedConnections
@@ -890,6 +890,13 @@ function* bindSubagentCapabilities(
         context
       }).pipe(Effect.onError(() => rollbackSession))
     : undefined
+  // Native Codex/OpenCode job profiles get per-binding names; the ceiling must allow them.
+  if (subagentCeiling && ceiling && nativeAsyncSubagents) {
+    subagentCeiling.update({
+      ...ceiling,
+      allowedAgents: [...JINGLER_SUBAGENT_NAMES, ...Object.values(nativeAsyncSubagents.agentNames)]
+    })
+  }
   return yield* observeSessionDiagnostics(
     spec,
     connection,
