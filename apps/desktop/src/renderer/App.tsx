@@ -1531,6 +1531,10 @@ function AuthedApp({
         onListGitHubRepositories={projectController.listGitHubRepositories}
         onRegisterProject={projectController.register}
         onImportSessions={() => setImportSessionsDialogOpen(true)}
+        onRemoveProject={async (projectId) => {
+          const project = projectController.projects.find((candidate) => candidate.id === projectId);
+          if (project) await projectController.remove(project);
+        }}
         onCreateProjectDirectory={projectController.createDirectory}
         onCloneProject={projectController.clone}
         onCloneProjectFromGitHub={projectController.cloneFromGitHub}

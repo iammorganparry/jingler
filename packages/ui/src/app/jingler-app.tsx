@@ -174,6 +174,8 @@ export interface JinglerAppProps {
   projectsLoading?: boolean
   /** Opens the "Import sessions…" dialog (Claude/Codex sessions found on disk). */
   onImportSessions?: () => void
+  /** Unregister a project from the rail tile's context menu. */
+  onRemoveProject?: (projectId: string) => void | Promise<void>
   onBrowseProject?: () => Promise<string | null>
   onBrowseCloneDestination?: (repositoryName: string) => Promise<string | null>
   onListProjectDirectories?: (path?: string) => Promise<ProjectDirectoryListing>
@@ -521,6 +523,16 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         projectOwners={projectOwners}
         onAddProject={getAddProjectAction()}
         onImportSessions={props.onImportSessions}
+        onOpenProjectSettings={onSaveProjectWorkflow ? () => openSettings("projects") : undefined}
+        onRemoveProject={
+          props.onRemoveProject
+            ? async (projectId) => {
+                await props.onRemoveProject?.(projectId)
+                if (selectedProjectId === projectId) setSelectedProjectId(null)
+              }
+            : undefined
+        }
+        onOpenSessionTerminal={renderTerminalDock ? openSessionTerminal : undefined}
         onNewSessionForProject={onCreateSession ? openNewSessionForProject : undefined}
         renderExplorer={renderExplorer}
         environments={environments}
@@ -899,7 +911,7 @@ function getActiveTabContext(active: Session) {
   const [usageLoading, setUsageLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsSection, setSettingsSection] = useState<
-    "providers" | "github" | "agents" | "runtime"
+    "providers" | "github" | "agents" | "runtime" | "projects"
   >("providers")
   const openSettings = useCallback(
     (section: typeof settingsSection = settingsSection) => {
@@ -930,6 +942,14 @@ function getActiveTabContext(active: Session) {
     nonce: number
   } | null>(null)
   const clearTabRequest = useCallback(() => setTabRequest(null), [])
+  // Row context menu "Open in terminal": select the session, then ask its pane for the Terminal tab.
+  const openSessionTerminal = useCallback(
+    (id: string) => {
+      selectSession(id)
+      setTabRequest((previous) => ({ tabId: BUILTIN_TAB.terminal, nonce: (previous?.nonce ?? 0) + 1 }))
+    },
+    [selectSession]
+  )
   const openNewSession = useCallback(() => {
     setPullRequestsOpen(false)
     setSettingsOpen(false)

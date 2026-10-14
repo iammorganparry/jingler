@@ -9,8 +9,11 @@ import {
   ArchiveRestore,
   ChevronRight,
   Cloud,
+  Copy,
   GitMerge,
   Monitor,
+  Pencil,
+  SquareTerminal,
   type LucideIcon,
   Trash2
 } from "lucide-react"
@@ -67,6 +70,7 @@ export function SessionRow({
   onArchive,
   onRestore,
   onDelete,
+  onOpenInTerminal,
   expanded,
   onToggleExpanded,
   className
@@ -103,6 +107,8 @@ export function SessionRow({
   onRestore?: (id: string) => void
   /** Permanently delete a session (the caller confirms first). */
   onDelete?: (id: string) => void | Promise<void>
+  /** Open the session's worktree in its terminal (context menu). */
+  onOpenInTerminal?: (id: string) => void
   /** Whether the row's chat tree is shown. Absent hides the chevron. */
   expanded?: boolean
   onToggleExpanded?: (id: string) => void
@@ -332,6 +338,9 @@ export function SessionRow({
          function getSessionActions() {
            if (pendingAction !== null) return ([])
 return ([
+    ...(onRename && !session.archived
+      ? [{ label: "Rename", icon: Pencil, onSelect: () => setDraft(session.title) }]
+      : []),
     ...(session.archived
       ? onRestore
         ? [
@@ -351,6 +360,10 @@ return ([
             }
           ]
         : []),
+    { label: "Copy branch", icon: Copy, onSelect: () => void navigator.clipboard?.writeText(session.branch) },
+    ...(onOpenInTerminal
+      ? [{ label: "Open in terminal", icon: SquareTerminal, onSelect: () => onOpenInTerminal(session.id) }]
+      : []),
     ...(onDelete
       ? [
           {

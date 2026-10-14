@@ -1,6 +1,9 @@
 import { displayStatusOf, type Project, type Session, type SessionActivity } from "@jingler/core"
-import { Import, Plus } from "lucide-react"
+import { useState } from "react"
+import { FolderCog, Import, Plus, Trash2 } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
+import { ConfirmDialog } from "../components/confirm-dialog.js"
+import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
 import { HoverCard } from "../components/hover-card.js"
 import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
@@ -15,7 +18,9 @@ function ProjectAvatar({
   active,
   sessionCount,
   activeSessionCount,
-  onSelect
+  onSelect,
+  onOpenSettings,
+  onRemove
 }: {
   project: ProjectItem
   owner?: string
@@ -23,8 +28,25 @@ function ProjectAvatar({
   sessionCount: number
   activeSessionCount: number
   onSelect: () => void
+  onOpenSettings?: () => void
+  onRemove?: () => void | Promise<void>
 }) {
-  return (
+  const [confirmingRemove, setConfirmingRemove] = useState(false)
+  const items: ContextMenuItem[] = [
+    ...(onOpenSettings ? [{ label: "Settings", icon: FolderCog, onSelect: onOpenSettings }] : []),
+    ...(onRemove
+      ? [
+          {
+            label: "Remove project",
+            icon: Trash2,
+            tone: "danger" as const,
+            separated: true,
+            onSelect: () => setConfirmingRemove(true)
+          }
+        ]
+      : [])
+  ]
+  const tile = (
     <HoverCard
       delayMs={120}
       content={
@@ -76,6 +98,35 @@ function ProjectAvatar({
       </button>
     </HoverCard>
   )
+  if (items.length === 0) return tile
+  return (
+    <>
+      {/* A real box (not `contents`) so the keyboard-opened menu anchors to the tile; focus
+          returning to it is handed straight to the button. */}
+      <ContextMenu items={items}>
+        <div
+          tabIndex={-1}
+          className="flex-none outline-none"
+          onFocus={(event) => {
+            if (event.target === event.currentTarget) event.currentTarget.querySelector("button")?.focus()
+          }}
+        >
+          {tile}
+        </div>
+      </ContextMenu>
+      {onRemove ? (
+        <ConfirmDialog
+          open={confirmingRemove}
+          onOpenChange={setConfirmingRemove}
+          destructive
+          title={`Remove ${project.name}?`}
+          description="This unregisters the project from Jingler. Files on disk are not deleted."
+          confirmLabel="Remove project"
+          onConfirm={onRemove}
+        />
+      ) : null}
+    </>
+  )
 }
 
 export function ProjectSidebar({
@@ -87,7 +138,9 @@ export function ProjectSidebar({
   loading = false,
   onSelect,
   onAddProject,
-  onImportSessions
+  onImportSessions,
+  onOpenSettings,
+  onRemove
 }: {
   projects: ReadonlyArray<Project>
   sessions: ReadonlyArray<Session>
@@ -98,6 +151,10 @@ export function ProjectSidebar({
   onSelect: (projectId: string) => void
   onAddProject?: () => void
   onImportSessions?: () => void
+  /** Rail tile context menu: open that project's settings. */
+  onOpenSettings?: (projectId: string) => void
+  /** Rail tile context menu: unregister the project (confirmed first). */
+  onRemove?: (projectId: string) => void | Promise<void>
 }) {
   const openSessions = sessions.filter((session) => !session.archived)
   const hasUnassigned = openSessions.some(
@@ -143,6 +200,16 @@ export function ProjectSidebar({
                   ["running", "thinking"].includes(displayStatusOf(liveActivity?.[session.id], session.status))
                 ).length}
                 onSelect={() => onSelect(project.id)}
+                onOpenSettings={
+                  onOpenSettings && project.id !== UNASSIGNED_PROJECT_ID
+                    ? () => onOpenSettings(project.id)
+                    : undefined
+                }
+                onRemove={
+                  onRemove && project.id !== UNASSIGNED_PROJECT_ID
+                    ? () => onRemove(project.id)
+                    : undefined
+                }
               />
             ))}
       </div>
