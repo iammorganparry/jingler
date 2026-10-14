@@ -209,8 +209,6 @@ export function LoginScreen({
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
           {state === "waiting" ? (
             <WaitingPanel signInUrl={signInUrl} onCancel={onCancel} onRetry={onRetry} />
-          ) : state === "error" ? (
-            <ErrorPanel message={errorMessage} onRetry={onRetry} onReset={clearAndReset} />
           ) : (
             <>
               {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
@@ -240,6 +238,11 @@ export function LoginScreen({
                 }}
                 resent={resent}
               />
+
+              {/* Under the input, so the email path stays usable while the cause is shown. */}
+              {state === "error" ? (
+                <ErrorPanel message={errorMessage} onRetry={onRetry} onReset={clearAndReset} />
+              ) : null}
             </>
           )}
 

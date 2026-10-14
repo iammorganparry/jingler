@@ -63,7 +63,7 @@ test("requesting a magic link shows the sent confirmation", async ({ launchApp }
   await openSignIn(window)
   await window.getByPlaceholder("you@company.com").fill("founder@example.com")
   await window.getByRole("button", { name: /send magic link/i }).click()
-  await expect(window.getByText(/sign-in link sent to/i)).toBeVisible()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
   await expect(window.getByText("founder@example.com")).toBeVisible()
   expect(authServer.sentEmails).toContain("founder@example.com")
 })
@@ -157,4 +157,41 @@ test("the account menu shows the user and signs out", async ({ launchApp }) => {
   await expect(window.getByRole("menuitem", { name: "Sign in" })).toBeVisible()
   await expect(appShell(window)).toBeVisible()
   await expect(signInHeading(window)).toHaveCount(0)
+})
+
+test("Cancel leaves the browser hand-off and returns to the sign-in options", async ({ launchApp }) => {
+  const { window, app } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await app.evaluate(({ shell }) => {
+    shell.openExternal = async () => {}
+  })
+  await window.getByRole("button", { name: /continue with github/i }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toBeVisible()
+  await expect(window.getByRole("button", { name: /continue with github/i })).toHaveCount(0)
+  await window.getByRole("button", { name: "Cancel" }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toHaveCount(0)
+  await expect(window.getByRole("button", { name: /continue with github/i })).toBeVisible()
+})
+
+test("Retry re-sends after a rejected magic link and reaches the sent state", async ({ launchApp }) => {
+  const { window, authServer } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByPlaceholder("you@company.com").fill("flaky@example.com")
+  await window.getByRole("button", { name: /send magic link/i }).click()
+  await expect(window.getByText(/couldn't send the sign-in link/i)).toBeVisible()
+  expect(authServer.sentEmails).toEqual([])
+  await window.getByRole("button", { name: "Retry" }).click()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
+  expect(authServer.sentEmails).toEqual(["flaky@example.com"])
+})
+
+test("Resend sends the magic link again and locks for the cooldown", async ({ launchApp }) => {
+  const { window, authServer } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByPlaceholder("you@company.com").fill("founder@example.com")
+  await window.getByRole("button", { name: /send magic link/i }).click()
+  await expect(window.getByText(/link\s+expires in 15 min/i)).toBeVisible()
+  await window.getByRole("button", { name: "Resend" }).click()
+  await expect(window.getByRole("button", { name: "Sent again ✓" })).toBeDisabled()
+  await expect.poll(() => authServer.sentEmails).toEqual(["founder@example.com", "founder@example.com"])
 })
