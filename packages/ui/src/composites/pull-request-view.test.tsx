@@ -41,17 +41,17 @@ describe("PullRequestView evidence navigation", () => {
     expect(screen.getByText("fix error")).toBeTruthy()
     expect(screen.getByText("abcdef1")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("tab", { name: "Checks 1" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Checks 1/1" }))
     expect(screen.getAllByText("Typecheck").length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByRole("tab", { name: "Overview" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Conversation" }))
     expect(screen.getByText("A focused error-handling fix.")).toBeTruthy()
   })
 
   it("routes Files changed through the supplied callback", () => {
     const onOpenFiles = vi.fn()
     render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected onOpenFiles={onOpenFiles} /></WidthTierValue>)
-    fireEvent.click(screen.getByRole("tab", { name: "Files changed 3" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Files 3" }))
     expect(onOpenFiles).toHaveBeenCalledTimes(1)
   })
 
@@ -260,7 +260,138 @@ describe("PullRequestView load states", () => {
   it("shows an empty state for a PR with no checks or timeline", () => {
     render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, checks: [] }} connected /></WidthTierValue>)
     expect(screen.getByText("No reviews or comments yet")).toBeTruthy()
-    fireEvent.click(screen.getByRole("tab", { name: "Checks 0" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }))
     expect(screen.getByText("CI results will appear here once a run starts.")).toBeTruthy()
+  })
+})
+
+describe("PullRequestView header", () => {
+  const renderPr = (value: PullRequest) =>
+    render(<WidthTierValue width={600}><PullRequestView pr={value} connected /></WidthTierValue>)
+
+  it("renders title, grey number, and every meta field on one line", () => {
+    renderPr(pr)
+    expect(screen.getByRole("heading", { name: /Surface the actual API error/ }).textContent).toContain("#1838")
+    const meta = screen.getByTestId("pr-meta-line")
+    expect(meta.textContent).toContain("Open")
+    expect(meta.textContent).toContain("morgan")
+    expect(meta.textContent).toContain("fix/error → main")
+    expect(meta.textContent).toContain("1 commit")
+    expect(meta.textContent).toContain("3 files")
+    expect(meta.textContent).toContain("+10")
+    expect(meta.className).toContain("whitespace-nowrap")
+    expect(meta.className).not.toContain("flex-wrap")
+  })
+
+  it("labels draft and merged states", () => {
+    renderPr({ ...pr, state: "draft" })
+    expect(screen.getByTestId("pr-meta-line").textContent).toContain("Draft")
+    cleanup()
+    renderPr({ ...pr, state: "merged" })
+    expect(screen.getByTestId("pr-meta-line").textContent).toContain("Merged")
+  })
+
+  it("omits missing fields instead of showing a dash", () => {
+    renderPr({ ...pr, commits: 0, changedFiles: 0, additions: 0, deletions: 0, headRefName: "", createdAt: "not a date" })
+    const text = screen.getByTestId("pr-meta-line").textContent ?? ""
+    expect(text).not.toContain("—")
+    expect(text).not.toContain("commit")
+    expect(text).not.toContain("file")
+    expect(text).not.toContain("→")
+    expect(screen.queryByRole("button", { name: "Copy branch name" })).toBeNull()
+  })
+
+  it("copies the head branch", () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    renderPr(pr)
+    fireEvent.click(screen.getByRole("button", { name: "Copy branch name" }))
+    expect(writeText).toHaveBeenCalledWith("fix/error")
+  })
+})
+
+describe("PullRequestView header actions", () => {
+  const open = async (props: Partial<React.ComponentProps<typeof PullRequestView>>, value: PullRequest = pr) => {
+    render(<WidthTierValue width={900}><PullRequestView pr={value} connected {...props} /></WidthTierValue>)
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }))
+  }
+
+  it("opens on GitHub and the session from their header buttons", () => {
+    const onOpenOnGithub = vi.fn()
+    const onOpenSession = vi.fn()
+    render(<WidthTierValue width={900}><PullRequestView pr={pr} connected onOpenOnGithub={onOpenOnGithub} onOpenSession={onOpenSession} sessionActionLabel="Open session" /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("button", { name: "Open on GitHub" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open session" }))
+    expect(onOpenOnGithub).toHaveBeenCalledTimes(1)
+    expect(onOpenSession).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks a draft ready from the menu", async () => {
+    const onMarkReady = vi.fn()
+    await open({ onMarkReady }, { ...pr, state: "draft" })
+    await userEvent.click(screen.getByRole("menuitem", { name: "Mark ready" }))
+    expect(onMarkReady).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no Mark ready on a non-draft PR", async () => {
+    await open({ onMarkReady: vi.fn() })
+    expect(screen.queryByRole("menuitem", { name: "Mark ready" })).toBeNull()
+  })
+
+  it("closes only after the confirm dialog", async () => {
+    const onClosePr = vi.fn()
+    await open({ onClosePr })
+    await userEvent.click(screen.getByRole("menuitem", { name: "Close PR" }))
+    expect(onClosePr).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole("button", { name: "Close pull request" }))
+    expect(onClosePr).toHaveBeenCalledTimes(1)
+  })
+
+  it("copies the branch from the menu", async () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    await open({})
+    await userEvent.click(screen.getByRole("menuitem", { name: "Copy branch" }))
+    expect(writeText).toHaveBeenCalledWith("fix/error")
+  })
+})
+
+describe("PullRequestView sub-tabs", () => {
+  const mixed: PullRequest = {
+    ...pr,
+    commits: 2,
+    changedFiles: 5,
+    checks: [
+      { name: "Typecheck", status: "pass", detailsUrl: null, durationMs: 1 },
+      { name: "Lint", status: "fail", detailsUrl: null, durationMs: 1 },
+      { name: "E2E", status: "running", detailsUrl: null, durationMs: null }
+    ]
+  }
+
+  it("labels tabs with counts from the data, in order", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected onOpenFiles={() => {}} /></WidthTierValue>)
+    const names = screen.getAllByRole("tab").map((tab) => tab.textContent)
+    expect(names).toEqual(["Conversation", "Commits 2", "Files 5", "Checks 1/3"])
+  })
+
+  it("is a 28px underline strip", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    expect(screen.getByRole("tab", { name: "Commits 2" }).className).toContain("h-7")
+  })
+
+  it("renders commitItems under Commits", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    fireEvent.click(screen.getByRole("tab", { name: "Commits 2" }))
+    expect(screen.getByText("fix error")).toBeTruthy()
+  })
+
+  it("switches tabs with the arrow keys", () => {
+    render(<WidthTierValue width={600}><PullRequestView pr={mixed} connected /></WidthTierValue>)
+    const conversation = screen.getByRole("tab", { name: "Conversation" })
+    conversation.focus()
+    fireEvent.keyDown(conversation, { key: "ArrowRight" })
+    expect(screen.getByRole("tab", { name: "Commits 2" }).getAttribute("aria-selected")).toBe("true")
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Commits 2" }), { key: "ArrowLeft" })
+    expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("true")
   })
 })

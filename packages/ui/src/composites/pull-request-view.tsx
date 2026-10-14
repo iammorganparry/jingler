@@ -4,14 +4,13 @@ import type {
   PrMergeMethod,
   SessionPr,
   PrReviewThread,
-  PrState,
   PrTimelineItem,
   PublishCheckpoint,
   PublishStep,
   PullRequest,
   ReviewSubmitKind
 } from "@jingler/core"
-import { Download, GitCommit, GitPullRequest, PanelRight } from "lucide-react"
+import { GitCommit, GitPullRequest, PanelRight } from "lucide-react"
 import { Stepper } from "../components/status-row.js"
 import { cn } from "../lib/cn.js"
 import { atLeast, useWidthTier } from "../hooks/width-tier.js"
@@ -25,8 +24,6 @@ import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { Markdown } from "../components/markdown.js"
 import { Callout } from "../components/callout.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
-import { DiffStat } from "../components/diff-stat.js"
-import { StatusDot } from "../components/status-dot.js"
 import { MotionTabs } from "../components/beui/controls.js"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "../components/beui/select.js"
 import { PrCheckRow } from "./pr-check-row.js"
@@ -35,34 +32,9 @@ import { PrReviewGroup } from "./pr-review-group.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
+import { PrViewHeader } from "./pr-view-header.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
-
-/** Per-state colouring for the header status lozenge. */
-const stateMeta: Record<PrState, { label: string; text: string; bg: string; border: string; dot: string }> = {
-  open: { label: "Open", text: "text-green", bg: "bg-green/[0.13]", border: "border-green/30", dot: "bg-green" },
-  merged: { label: "Merged", text: "text-purple", bg: "bg-purple/[0.13]", border: "border-purple/30", dot: "bg-purple" },
-  closed: { label: "Closed", text: "text-red", bg: "bg-red/[0.08]", border: "border-red/30", dot: "bg-red" },
-  draft: { label: "Draft", text: "text-dim", bg: "bg-hover", border: "border-line", dot: "bg-line-strong" }
-}
-
-/** The bordered status lozenge (green Open / purple Merged / red Closed / neutral Draft). */
-function StatePill({ state }: { state: PrState }) {
-  const m = stateMeta[state]
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-lg border px-[11px] py-1 text-[12px] font-semibold",
-        m.text,
-        m.bg,
-        m.border
-      )}
-    >
-      <StatusDot tone={m.dot} size={7} glow={false} />
-      {m.label}
-    </span>
-  )
-}
 
 /** A single PR label chip, tinted with the label's own colour when known. */
 function LabelChip({ label }: { label: PrLabel }) {
@@ -331,49 +303,16 @@ export function PullRequestView({
             )}
           {/* PR header */}
           <div className="flex flex-col gap-[11px]">
-            <div className="flex items-center gap-[9px]">
-              <StatePill state={pr.state} />
-              <span className="font-mono text-[12px] text-dim">#{pr.number}</span>
-              <div className="flex-1" />
-              {onOpenSession && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={Boolean(sessionActionDisabledReason)}
-                  title={sessionActionDisabledReason}
-                  onClick={onOpenSession}
-                >
-                  <Download size={14} aria-hidden />
-                  {sessionActionLabel}
-                </Button>
-              )}
-              {onOpenOnGithub && (
-                <button
-                  type="button"
-                  onClick={onOpenOnGithub}
-                  className="font-mono text-[11px] text-dim hover:text-text"
-                >
-                  Open on GitHub ↗
-                </button>
-              )}
-            </div>
-            <h2 className="text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
-              {pr.title}
-            </h2>
-            <div className="flex flex-wrap items-center gap-x-[10px] gap-y-1.5 font-mono text-[11.5px] text-muted-foreground">
-              <Badge tone="neutral" size="sm">
-                {pr.headRefName} → {pr.baseRefName}
-              </Badge>
-              <DiffStat added={pr.additions} removed={pr.deletions} />
-              <span className="text-line">|</span>
-              <span>{pr.commits} commits</span>
-              <span className="text-line">·</span>
-              <span>{pr.changedFiles} files</span>
-              <span className="text-line">·</span>
-              <span>
-                opened {relativeTime(pr.createdAt)} by {pr.author.login}
-              </span>
-            </div>
+            <PrViewHeader
+              pr={pr}
+              onOpenSession={onOpenSession}
+              sessionActionLabel={sessionActionLabel}
+              sessionActionDisabledReason={sessionActionDisabledReason}
+              onOpenOnGithub={onOpenOnGithub}
+              onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
+              markingReady={markingReady}
+              onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
+            />
             {pr.labels.length > 0 && (
               <div className="flex flex-wrap gap-[7px]">
                 {pr.labels.map((label) => (
@@ -384,16 +323,18 @@ export function PullRequestView({
             <MotionTabs
               className="pt-1"
               variant="underline"
+              size="sm"
+              ariaLabel="Pull request sections"
               value={evidence}
               onChange={(value) => {
                 if (value === "files") onOpenFiles?.()
                 else setEvidence(value)
               }}
               items={[
-                { value: "overview", label: "Overview" },
+                { value: "overview", label: "Conversation" },
                 { value: "commits", label: `Commits ${pr.commits}` },
-                { value: "checks", label: `Checks ${pr.checks.length}` },
-                { value: "files", label: `Files changed ${pr.changedFiles}`, disabled: !onOpenFiles }
+                { value: "files", label: `Files ${pr.changedFiles}`, disabled: !onOpenFiles },
+                { value: "checks", label: checksLabel(pr) }
               ]}
             />
           </div>
@@ -691,6 +632,10 @@ return (evidence === "checks" ? (
     </div>
   )
 }
+
+/** `Checks 3/4` (passed/total), or bare `Checks` when none are reported. */
+const checksLabel = (pr: PullRequest) =>
+  pr.checks.length === 0 ? "Checks" : `Checks ${pr.checks.filter((c) => c.status === "pass").length}/${pr.checks.length}`
 
 function CommitEvidence({ pr }: { pr: PullRequest }) {
   const commits = pr.commitItems ?? []

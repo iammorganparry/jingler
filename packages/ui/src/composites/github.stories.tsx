@@ -202,6 +202,24 @@ export const PullRequestOpen: Story = {
   )
 }
 
+/** PR header at a 600px tab width: title + #number, one-line meta, actions. */
+export const PullRequestHeader600: Story = {
+  render: () => (
+    <div className="flex h-[480px] w-[600px] bg-editor">
+      <PullRequestView pr={pr} connected onOpenSession={() => {}} onOpenOnGithub={() => {}} sessionActionLabel="Open session" />
+    </div>
+  )
+}
+
+/** Draft PR with no commit/file counts or head branch: those fields are omitted. */
+export const PullRequestHeaderSparse: Story = {
+  render: () => (
+    <div className="flex h-[480px] w-[600px] bg-editor">
+      <PullRequestView pr={{ ...pr, state: "draft", commits: 0, changedFiles: 0, additions: 0, deletions: 0, headRefName: "" }} connected />
+    </div>
+  )
+}
+
 const adversarialReview: AdversarialReview = {
   sessionId: "s1",
   prNumber: 482,
