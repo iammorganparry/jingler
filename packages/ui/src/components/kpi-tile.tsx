@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 import { cn } from "../lib/cn.js"
 
-/** One usage metric: label (+ optional "partial" marker on the same line), value and delta. */
+/** One usage metric: label (+ optional "partial" marker on the same line), value and delta. A missing value renders the labelled "No data" placeholder, never a made-up number. */
 export function KpiTile({
   label,
   value,
@@ -22,7 +22,9 @@ export function KpiTile({
         <span className="truncate">{label}</span>
         {partial && <span className="shrink-0 rounded-sm border border-line px-1 text-[11px] leading-4 text-dim">partial</span>}
       </div>
-      <div className="text-[20px] font-semibold leading-tight text-text-bright tabular-nums">{value}</div>
+      <div className="text-[20px] font-semibold leading-tight text-text-bright tabular-nums">
+        {value == null ? <span className="text-[13px] font-normal text-dim">No data</span> : value}
+      </div>
       {delta && <div className="text-[11px] text-muted-foreground tabular-nums">{delta}</div>}
     </div>
   )
