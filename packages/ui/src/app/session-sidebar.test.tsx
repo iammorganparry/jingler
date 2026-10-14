@@ -303,7 +303,7 @@ describe("SessionSidebar updates", () => {
     const onDismiss = vi.fn()
     const update = {
       version: "1.2.3",
-      status: "available" as const,
+      kind: "available" as const,
       dismissed: false,
       onAction,
       onDismiss
@@ -313,7 +313,8 @@ describe("SessionSidebar updates", () => {
         defaultFilters={DEFAULT_FILTERS} update={update} />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Download Jingler 1.2.3" }))
+    expect(screen.getByText("v1.2.3 available")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Download" }))
     expect(onAction).toHaveBeenCalledOnce()
     fireEvent.click(screen.getByRole("button", { name: "Dismiss Jingler 1.2.3 update" }))
     expect(onDismiss).toHaveBeenCalledOnce()
@@ -331,17 +332,58 @@ describe("SessionSidebar updates", () => {
     const base = { version: "1.2.3", dismissed: false, onAction: () => {}, onDismiss: () => {} }
     const { rerender } = render(
       <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloading", percent: 42 }} />
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, kind: "downloading", percent: 42 }} />
     )
     expect(screen.getByText("Downloading 42%")).toBeTruthy()
     expect(screen.getByRole("progressbar", { name: "Update download progress" }).getAttribute("aria-valuenow")).toBe("42")
-    expect(screen.getByText("Downloading the update in the background.")).toBeTruthy()
 
     rerender(
       <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
-        defaultFilters={DEFAULT_FILTERS} update={{ ...base, status: "downloaded" }} />
+        defaultFilters={DEFAULT_FILTERS} update={{ ...base, kind: "downloaded" }} />
     )
-    expect(screen.getByText("Restart to update")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Restart to update" })).toBeTruthy()
+  })
+
+  it("offers Retry after a failed download", () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "failed", dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    expect(screen.getByText("Update failed")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onAction).toHaveBeenCalledOnce()
+  })
+
+  it("restarts straight away with no agents running", () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "downloaded", runningAgents: 0, dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    expect(onAction).toHaveBeenCalledOnce()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("confirms before restarting over running agents", async () => {
+    const onAction = vi.fn()
+    render(
+      <SessionSidebar activeSessionId={null} onSelect={() => {}} sessions={[]}
+        defaultFilters={DEFAULT_FILTERS}
+        update={{ version: "1.2.3", kind: "downloaded", runningAgents: 3, dismissed: false, onAction, onDismiss: () => {} }} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    expect(onAction).not.toHaveBeenCalled()
+    expect(screen.getByText("3 agents are running. Restarting stops them.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Wait" }))
+    expect(onAction).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole("button", { name: "Restart to update" }))
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }))
+    await waitFor(() => expect(onAction).toHaveBeenCalledOnce())
   })
 })
 
@@ -429,8 +471,6 @@ describe("SessionSidebar release notes", () => {
   })
 })
 
-const CANNOT_SELF_UPDATE = /can't update itself/
-
 describe("SessionSidebar manual updates", () => {
   it("offers the installer when the build cannot update itself", () => {
     const onAction = vi.fn()
@@ -439,12 +479,10 @@ describe("SessionSidebar manual updates", () => {
         sessions={[]}
         activeSessionId={null}
         onSelect={() => {}}
-        update={{ version: "0.3.4", status: "available", manual: true, dismissed: false, onAction, onDismiss: () => {} }}
+        update={{ version: "0.3.4", kind: "manual", dismissed: false, onAction, onDismiss: () => {} }}
       />
     )
-    expect(screen.getByText("Download installer")).toBeTruthy()
-    expect(screen.getByText(CANNOT_SELF_UPDATE)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Download the Jingler 0.3.4 installer" }))
+    fireEvent.click(screen.getByRole("button", { name: "Open installer" }))
     expect(onAction).toHaveBeenCalledOnce()
   })
 })

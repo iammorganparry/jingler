@@ -47,6 +47,7 @@ describe("useAutoUpdate", () => {
     expect(localStorage.getItem("jingler.dismissed-update-version")).toBe("1.2.3")
 
     act(() => listener?.({ status: "downloaded", version: "1.2.3" }))
+    expect(result.current?.kind).toBe("downloaded")
     act(() => result.current?.onAction())
     expect(installUpdate).toHaveBeenCalledOnce()
 

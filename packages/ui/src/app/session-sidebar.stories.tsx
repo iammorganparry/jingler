@@ -3,7 +3,7 @@ import type { ProviderId, Session, SessionActivity } from "@jingler/core"
 import { useState } from "react"
 import { createEditorLayout } from "./editor-layout.js"
 import { initEditorLayout, resetEditorLayouts } from "./editor-layout-machine.js"
-import { SessionSidebar } from "./session-sidebar.js"
+import { SessionSidebar, type SidebarUpdate } from "./session-sidebar.js"
 
 const meta = {
   title: "App/SessionSidebar",
@@ -68,7 +68,7 @@ export const UpgradeAvailable: Story = {
     version: "0.2.1",
     update: {
       version: "0.3.0",
-      status: "available",
+      kind: "available",
       dismissed: false,
       onAction: () => {},
       onDismiss: () => {}
@@ -81,6 +81,42 @@ export const UpgradeAvailable: Story = {
   )
 }
 
+const updateStory = (update: Pick<SidebarUpdate, "kind"> & Partial<SidebarUpdate>): Story => ({
+  args: {
+    sessions: SESSIONS,
+    activeSessionId: "s1",
+    onSelect: () => {},
+    version: "0.2.1",
+    update: { version: "0.3.0", dismissed: false, onAction: () => {}, onDismiss: () => {}, ...update }
+  },
+  render: (args) => (
+    <div className="flex h-screen bg-editor">
+      <SessionSidebar {...args} />
+    </div>
+  )
+})
+
+/** The download is running: percent in the row and a progress bar. */
+export const UpgradeDownloading: Story = updateStory({ kind: "downloading", percent: 42 })
+
+/** Downloaded: Restart to update, with nothing running so it goes straight through. */
+export const UpgradeReady: Story = updateStory({ kind: "downloaded", runningAgents: 0 })
+
+/** The download failed: Retry. */
+export const UpgradeFailed: Story = updateStory({ kind: "failed" })
+
+/** Dismissed: the row collapses to a compact icon button. */
+export const UpgradeDismissed: Story = updateStory({ kind: "available", dismissed: true })
+
+/** Restarting with agents running asks first: Restart anyway / Wait. */
+export const UpgradeRestartConfirm: Story = {
+  ...updateStory({ kind: "downloaded", runningAgents: 3 }),
+  play: async () => {
+    const restart = [...document.querySelectorAll<HTMLElement>("button")].find((b) => b.textContent === "Restart to update")
+    restart?.click()
+  }
+}
+
 /** An unsigned build: the update opens the installer instead of restarting. */
 export const UpgradeManual: Story = {
   args: {
@@ -90,8 +126,7 @@ export const UpgradeManual: Story = {
     version: "0.3.3",
     update: {
       version: "0.3.4",
-      status: "available",
-      manual: true,
+      kind: "manual",
       dismissed: false,
       onAction: () => {},
       onDismiss: () => {}
