@@ -16,6 +16,7 @@ import {
 import { createJiti } from "jiti"
 import type {
   RegisterSubagentCapabilityCeilingOptions,
+  SubagentCapabilityCeiling,
   SubagentCapabilityCeilingHandle
 } from "pi-subagents/capability-ceiling"
 import {
@@ -160,6 +161,29 @@ const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
     "pi-subagents/capability-ceiling"
   )
   return capabilityCeilingModule
+}
+
+/**
+ * pi-subagents looks a parent's ceiling up by `resolveCurrentSessionId`, which
+ * prefers the session FILE over the session id. Registering under the id alone
+ * misses that lookup, and the child then requires every tool its shared profile
+ * lists, failing with "child tools were unavailable". Register under both.
+ */
+export const registerParentCapabilityCeiling = (
+  module: CapabilityCeilingModule,
+  sessionIds: ReadonlyArray<string | undefined>,
+  options: Omit<RegisterSubagentCapabilityCeilingOptions, "sessionId">
+): SubagentCapabilityCeilingHandle => {
+  const handles = [...new Set(sessionIds.filter((id): id is string => Boolean(id)))]
+    .map((sessionId) => module.registerSubagentCapabilityCeiling({ ...options, sessionId }))
+  return {
+    update: (ceiling) => {
+      for (const handle of handles) handle.update(ceiling)
+    },
+    dispose: () => {
+      for (const handle of handles) handle.dispose()
+    }
+  }
 }
 
 export interface PiSessionFactoryOptions {
@@ -770,6 +794,7 @@ function* bindSubagentCapabilities(
       )
     }
     let subagentCeiling: SubagentCapabilityCeilingHandle | undefined
+    let ceiling: SubagentCapabilityCeiling | undefined
     if (nativeSubagentsEnabled && options.childCredentials && options.subagentBroker) {
       const capability = yield* options.subagentBroker.register({
         parentRuntimeSessionId,
@@ -804,19 +829,19 @@ function* bindSubagentCapabilities(
           }))
         ))
       )
-      subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
-        sessionId: parentRuntimeSessionId,
-        source: "jingler-runtime",
-        ceiling: {
-          allowedTools: [
-            ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
-            "contact_supervisor",
-            "subagent"
-          ],
-          allowedAgents: [...JINGLER_SUBAGENT_NAMES],
-          denyExtensions: false
-        }
-      })
+      ceiling = {
+        allowedTools: [
+          ...new Set(capability.flatMap(({ tools }) => tools.map(({ id }) => id))),
+          "contact_supervisor",
+          "subagent"
+        ],
+        allowedAgents: [...JINGLER_SUBAGENT_NAMES],
+        denyExtensions: false
+      }
+      subagentCeiling = registerParentCapabilityCeiling(capabilityCeiling, [
+        parentRuntimeSessionId,
+        embedded.result.session.sessionFile
+      ], { source: "jingler-runtime", ceiling })
       const childConnections = childProviderConnections(
         embedded.connection,
         assignedConnections
@@ -865,6 +890,13 @@ function* bindSubagentCapabilities(
         context
       }).pipe(Effect.onError(() => rollbackSession))
     : undefined
+  // Native Codex/OpenCode job profiles get per-binding names; the ceiling must allow them.
+  if (subagentCeiling && ceiling && nativeAsyncSubagents) {
+    subagentCeiling.update({
+      ...ceiling,
+      allowedAgents: [...JINGLER_SUBAGENT_NAMES, ...Object.values(nativeAsyncSubagents.agentNames)]
+    })
+  }
   return yield* observeSessionDiagnostics(
     spec,
     connection,
