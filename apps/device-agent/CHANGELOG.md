@@ -1,5 +1,14 @@
 # @jingler/device-agent
 
+## 0.9.3
+
+### Patch Changes
+
+- Updated dependencies [c3531bb]
+- Updated dependencies [28eefd7]
+  - @jingler/cli-adapters@0.9.3
+  - @jingler/core@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes

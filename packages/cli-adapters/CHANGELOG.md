@@ -1,5 +1,15 @@
 # @jingler/cli-adapters
 
+## 0.9.3
+
+### Patch Changes
+
+- c3531bb: **Fixed: a reviewer subagent stayed broken for a day after one connection error.** A single failed request made subagents skip that model for 24 hours ("skipped because of a cache exclusion"). Jingler now caps that skip at 5 minutes, and existing longer skips shrink to match on the next launch.
+- 28eefd7: **Fixed: agents failing to ask you a question.** Some models send a list argument (like the questions in an Ask card) as JSON text instead of a list, and the tool call failed with "must be array" until you nudged the agent. Jingler now reads that text as the list it was meant to be, for every tool.
+  - @jingler/core@0.9.3
+  - @jingler/plannotator-ext@0.9.3
+  - @jingler/themes@0.9.3
+
 ## 0.9.2
 
 ### Patch Changes
