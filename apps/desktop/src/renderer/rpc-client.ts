@@ -560,6 +560,9 @@ export const rpc = {
     run((c) => c.Environment.revoke({ deviceId })),
   sessionsList: (): Promise<ReadonlyArray<Session>> =>
     run((c) => c.Sessions.list()),
+  sessionsInterruptedChats: (): Promise<
+    ReadonlyArray<{ readonly sessionId: string; readonly chatId: string }>
+  > => run((c) => c.Sessions.interruptedChats()),
   sessionsGet: (id: string): Promise<Session> =>
     run((c) => c.Sessions.get({ id })),
   sessionsScanImportable: (): Promise<ReadonlyArray<ImportableSession>> =>

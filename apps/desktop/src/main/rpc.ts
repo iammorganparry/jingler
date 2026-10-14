@@ -23,6 +23,7 @@ import { probeCodexEndpoint, codexEndpointLogin } from "@jingler/cli-adapters"
 import {
   EMPTY_REVIEW_DIFF,
   AgentRunner,
+  findInterruptedChats,
   AgentRuntime,
   runtimeOwnerForSession,
   AppPaths,
@@ -4959,6 +4960,14 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     Effect.andThen(SessionStore.reconcileInterruptedWorkspaceLifecycles().pipe(Effect.ignore)),
     Effect.andThen(SessionStore.list()),
   ),
+  "Sessions.interruptedChats": () =>
+    Effect.gen(function* () {
+      const runner = yield* AgentRunner;
+      return yield* findInterruptedChats(
+        yield* SessionStore.list(),
+        runner.chatBusy,
+      );
+    }),
   "Sessions.get": ({ id }) => SessionStore.get(id),
   "Sessions.create": ({ requestedSessionId: _internalSessionId, ...input }) =>
     createSessionRouted(input),
