@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Enterprise seat: per-token billing. Emits NO rate_limit_event, but reports spend on the result.
 const args = process.argv.slice(2)
+if (args.includes("--version")) {
+  console.log("2.1.300 (Claude Code)")
+  process.exit(0)
+}
 if (args[0] === "auth" && args[1] === "status") {
   console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", subscriptionType: "enterprise" }))
   process.exit(0)

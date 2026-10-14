@@ -23,10 +23,10 @@ const add = (total: { tokens: number; costUsd: number }, tokens: number, costUsd
 }
 
 /**
- * Parent facts carry the session's running total (the CLI's `total_cost_usd` is
- * cumulative across `--resume`, and pi reports session stats), so a turn's spend
- * is the step from the previous fact. A drop means the counter restarted.
- * The native Claude runtime reports tokens per turn already.
+ * pi parent facts carry session stats (running totals), so a pi turn's spend is
+ * the step from the previous fact; a drop means the counter restarted. The
+ * native Claude runtime reports tokens AND `total_cost_usd` per invocation, even
+ * across `--resume` (verified against the CLI), so those are summed as-is.
  */
 const step = (value: number, previous: number): number => (value >= previous ? value - previous : value)
 
@@ -50,10 +50,12 @@ const sessionTurns = (session: ReadonlyArray<UsageFact>): ReadonlyArray<SpendTur
   return [...session]
     .sort((a, b) => Date.parse(a.endedAt) - Date.parse(b.endedAt))
     .map((fact) => {
+      const cumulative = fact.runtimeId === "pi"
       const tokens = fact.totalTokens ?? 0
-      const turnTokens = fact.runtimeId === "pi" ? step(tokens, previousTokens) : tokens
+      const turnTokens = cumulative ? step(tokens, previousTokens) : tokens
       previousTokens = tokens
-      const turnCost = fact.costUsd === null ? 0 : step(fact.costUsd, previousCost)
+      const cost = fact.costUsd ?? 0
+      const turnCost = cumulative && fact.costUsd !== null ? step(cost, previousCost) : cost
       if (fact.costUsd !== null) previousCost = fact.costUsd
       return turnAt(fact, turnTokens, turnCost)
     })

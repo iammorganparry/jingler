@@ -55,7 +55,10 @@ const usageFactFor = (
 ): UsageFact | null => {
   if (event._tag !== "Done" && event._tag !== "Failed") return null
   return makeUsageFact({
-    id: `${runId}:parent`,
+    // runId is the chat id, so one fact per chat. pi reports running totals, so
+    // the latest replaces the rest; the Claude CLI reports each run's own cost
+    // and tokens, so every turn needs its own fact or earlier spend is lost.
+    id: spec.runtimeId === "claude" ? `${runId}:parent:${startedAt}` : `${runId}:parent`,
     runId,
     sessionId: spec.sessionId,
     chatId: spec.chatId,
