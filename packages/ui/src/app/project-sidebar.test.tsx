@@ -144,4 +144,36 @@ describe("ProjectSidebar", () => {
       expect(button.innerHTML).not.toMatch(/bg-(blue|green|yellow|red|brand)\b|text-brand/)
     }
   })
+
+  it("opens a tile context menu with Settings and a destructive, confirmed Remove", async () => {
+    const onOpenSettings = vi.fn()
+    const onRemove = vi.fn()
+    render(
+      <ProjectSidebar
+        projects={projects}
+        sessions={sessions}
+        activeProjectId="alpha"
+        onSelect={() => {}}
+        onOpenSettings={onOpenSettings}
+        onRemove={onRemove}
+      />
+    )
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }))
+    expect(onOpenSettings).toHaveBeenCalledWith("beta")
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove project" }))
+    // Nothing is removed until the confirm dialog is accepted.
+    expect(onRemove).not.toHaveBeenCalled()
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove project" }))
+    expect(onRemove).toHaveBeenCalledWith("beta")
+  })
+
+  it("has no tile menu without handlers", () => {
+    render(<ProjectSidebar projects={projects} sessions={sessions} activeProjectId="alpha" onSelect={() => {}} />)
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Beta" }))
+    expect(screen.queryByRole("menuitem")).toBeNull()
+  })
 })
