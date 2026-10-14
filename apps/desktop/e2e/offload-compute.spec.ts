@@ -75,6 +75,9 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     .toContain("prime")
   await expect(app.window.getByText("Cloud compute is enabled", { exact: false }))
     .toBeVisible()
+  await expect(app.window.getByRole("status").filter({ hasText: "Ready" }))
+    .toBeVisible()
+  await expect(app.window.getByRole("button", { name: "Retry" })).toHaveCount(0)
 
   await app.window.getByRole("button", { name: "Close settings" }).click()
   await sendOffloadPrompt(app.window)

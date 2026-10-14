@@ -64,6 +64,8 @@ import {
 import { SegmentedControl } from "../components/segmented-control.js"
 import { StatusDot } from "../components/status-dot.js"
 import { Toggle } from "../components/toggle.js"
+import { Spinner } from "../components/loading.js"
+import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { McpSettings, type McpSettingsProps } from "./mcp-settings.js"
 import { Input } from "../components/input.js"
 import {
@@ -219,6 +221,8 @@ export interface SettingsViewProps {
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Re-run Offload Compute priming after a failed save. */
+  onRetryOffload?: () => void
   /** Permission mode used for new chats across every provider model. */
   defaultMode?: ExecutionMode | null
   onSaveDefaultMode?: (defaultMode: ExecutionMode) => void | Promise<void>
@@ -281,6 +285,7 @@ export function SettingsView({
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  onRetryOffload,
   defaultMode,
   onSaveDefaultMode,
   adhdMode,
@@ -306,6 +311,7 @@ return (<GeneralSection
           offloadCompute={offloadCompute}
           onSaveOffloadCompute={onSaveOffloadCompute}
           offloadStatus={offloadStatus}
+          onRetryOffload={onRetryOffload}
           offloadEnvironments={devices?.environments.filter((environment) =>
             environment.kind === "owned"
           ) ?? []}
@@ -931,25 +937,91 @@ function FontSizeRow({
   onChange: (v: number) => void
 }) {
   return (
-    <div className="flex items-start gap-3 py-2.5">
-      <div className="flex-1">
-        <div className="text-[12.5px] font-medium text-text-body">
-          Text size
-        </div>
-        <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-          Scale the conversation and code text. The rest of the app stays put.
-        </div>
-      </div>
-      <SegmentedControl
-        className="mt-0.5 flex-none"
-        value={String(value)}
-        items={FONT_SCALE_PRESETS.map((preset) => ({
-          value: String(preset.value),
-          label: preset.label
-        }))}
-        onChange={(next) => onChange(Number(next))}
-      />
-    </div>
+    <SettingsRow
+      label="Text size"
+      help="Scale the conversation and code text. The rest of the app stays put."
+      control={
+        <SegmentedControl
+          value={String(value)}
+          items={FONT_SCALE_PRESETS.map((preset) => ({
+            value: String(preset.value),
+            label: preset.label
+          }))}
+          onChange={(next) => onChange(Number(next))}
+        />
+      }
+    />
+  )
+}
+
+/** A General-section toggle on the cataloged SettingsRow. */
+function GeneralToggleRow({
+  label,
+  description,
+  checked,
+  disabled,
+  onChange
+}: {
+  label: string
+  description: string
+  checked: boolean
+  disabled?: boolean
+  onChange: (v: boolean) => void
+}) {
+  return (
+    <SettingsRow
+      label={label}
+      help={description}
+      control={<Toggle aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />}
+    />
+  )
+}
+
+const OFFLOAD_STATUS_HELP = {
+  priming: "Saving Offload Compute settings…",
+  failed: "Offload Compute settings could not be saved.",
+  readyCloud: "Cloud compute is enabled; eligible sessions prime in the background.",
+  readyDevice: "Owned-device compute is enabled and will fail closed if that device is unavailable."
+} as const
+
+/** Offload row status: Priming… / Ready / Failed · Retry. Retry re-saves, which re-runs priming. */
+function OffloadStatusRow({
+  status,
+  targetKind,
+  onRetry
+}: {
+  status?: "disabled" | "priming" | "ready" | "failed"
+  targetKind: "cloud" | "owned-device"
+  onRetry?: () => void
+}) {
+  if (status !== "priming" && status !== "ready" && status !== "failed") return null
+  const help =
+    status === "ready"
+      ? targetKind === "cloud" ? OFFLOAD_STATUS_HELP.readyCloud : OFFLOAD_STATUS_HELP.readyDevice
+      : OFFLOAD_STATUS_HELP[status]
+  return (
+    <SettingsRow
+      label="Status"
+      help={<span role={status === "failed" ? "alert" : undefined}>{help}</span>}
+      control={
+        status === "failed" ? (
+          <span className="flex items-center gap-1 text-[12px] text-state-failed">
+            Failed <span aria-hidden>·</span>
+            <Button variant="ghost" size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </span>
+        ) : status === "priming" ? (
+          <span role="status" className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Spinner size={12} /> Priming…
+          </span>
+        ) : (
+          <span role="status" className="text-[12px] text-state-ready">
+            Ready
+          </span>
+        )
+      }
+    />
   )
 }
 
@@ -970,6 +1042,7 @@ function GeneralSection({
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
+  onRetryOffload,
   offloadEnvironments,
   onRefreshOffloadEnvironments,
   defaultMode,
@@ -985,6 +1058,8 @@ function GeneralSection({
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
+  /** Re-run Offload Compute priming after a failed save. */
+  onRetryOffload?: () => void
   offloadEnvironments: ReadonlyArray<Environment>
   onRefreshOffloadEnvironments?: () => void | Promise<void>
   defaultMode?: ExecutionMode | null
@@ -995,29 +1070,6 @@ function GeneralSection({
   onSaveFontScale?: (fontScale: number) => void | Promise<void>
   webSearch?: WebSearchSettingsProps
 }) {
-  function getOffloadStatus() {
-    switch (offloadStatus) {
-case "priming": {
-return (<p className="px-1 py-2 text-[11px] text-muted-foreground" role="status">
-              Saving Offload Compute settings…
-            </p>)
-}
-case "ready": {
-return (<p className="px-1 py-2 text-[11px] text-success" role="status">
-              {offloadTarget.kind === "cloud"
-                ? "Cloud compute is enabled; eligible sessions prime in the background."
-                : "Owned-device compute is enabled and will fail closed if that device is unavailable."}
-            </p>)
-}
-case "failed": {
-return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
-              Offload Compute settings could not be saved.
-            </p>)
-}
-}
-    return (null)
-  }
-
   const [offloadDraft, setOffloadDraft] = React.useState<boolean>(
     offloadCompute?.enabled ?? false
   )
@@ -1067,129 +1119,108 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
     void onSaveNotifications?.(next)
   }
 
+  const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
+    <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
+  )
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
-      <div className="mx-auto w-full max-w-[560px]">
-        <div className="mb-1 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Compute
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="Offload Compute"
-            description="When this machine is under sustained CPU or memory pressure, automatically run eligible lint, typecheck, test, build, and allowlisted argv on your preferred Cloud Sandbox or owned device. Interactive, stateful, shell-composed, and unknown commands stay local."
-            checked={offloadDraft}
-            onChange={(enabled) => {
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        <SettingsCard title="Compute">
+          {toggle(
+            "Offload Compute",
+            "When this machine is under sustained CPU or memory pressure, automatically run eligible lint, typecheck, test, build, and allowlisted argv on your preferred Cloud Sandbox or owned device. Interactive, stateful, shell-composed, and unknown commands stay local.",
+            offloadDraft,
+            (enabled) => {
               setOffloadDraft(enabled)
               saveOffload({ enabled })
-            }}
-          />
-          <div className="space-y-2 px-1 py-3">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-medium text-muted-foreground" htmlFor="offload-target">
-                  Compute target
-                </label>
-                <button
-                  type="button"
-                  className="text-[10px] text-blue hover:underline"
-                  onClick={() => void onRefreshOffloadEnvironments?.()}
-                >
-                  Refresh devices
-                </button>
-              </div>
-              <Select
-                value={offloadTarget.kind}
-                onValueChange={(value) => {
-                  if (value === "cloud") saveOffload({ target: { kind: "cloud" } })
-                  else if (offloadEnvironments[0]) {
-                    saveOffload({
-                      target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
-                    })
-                  }
-                }}
-              >
-                <SelectTrigger ariaLabel="Offload Compute target" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cloud">Cloud Sandbox</SelectItem>
-                  <SelectItem value="owned-device" disabled={offloadEnvironments.length === 0}>
-                    Owned device
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              {offloadTarget.kind === "owned-device" && (
+            }
+          )}
+          <SettingsRow
+            label="Compute target"
+            help="The selected target is fail-closed; unavailable devices never fall back to cloud or local execution."
+            control={
+              <div className="flex w-[200px] flex-col items-stretch gap-2">
                 <Select
-                  value={offloadTarget.deviceId}
-                  onValueChange={(deviceId) => saveOffload({
-                    target: { kind: "owned-device", deviceId }
-                  })}
+                  value={offloadTarget.kind}
+                  onValueChange={(value) => {
+                    if (value === "cloud") saveOffload({ target: { kind: "cloud" } })
+                    else if (offloadEnvironments[0]) {
+                      saveOffload({
+                        target: { kind: "owned-device", deviceId: offloadEnvironments[0].id }
+                      })
+                    }
+                  }}
                 >
-                  <SelectTrigger ariaLabel="Owned device for Offload Compute" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                  <SelectTrigger ariaLabel="Offload Compute target" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {offloadEnvironments.map((environment) => (
-                      <SelectItem key={environment.id} value={environment.id}>
-                        {environment.name}{environment.state === "online" ? " · online" : " · offline"}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="cloud">Cloud Sandbox</SelectItem>
+                    <SelectItem value="owned-device" disabled={offloadEnvironments.length === 0}>
+                      Owned device
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-              )}
-              <p className="text-[10px] text-dim">
-                The selected target is fail-closed; unavailable devices never fall back to cloud or local execution.
-              </p>
-          </div>
-          {getOffloadStatus()}
-        </div>
-
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Agent defaults
-          </span>
-        </div>
-        <div className="flex items-start gap-3 py-2.5">
-          <div className="flex-1">
-            <div className="text-[12.5px] font-medium text-text-body">
-              Default mode
-            </div>
-            <div className="mt-0.5 text-[11px] leading-[1.5] text-muted-foreground">
-              Start new chats in this permission mode for every model.
-            </div>
-          </div>
-          <SegmentedControl
-            className="mt-0.5 flex-none"
-            value={defaultModeDraft}
-            items={[
-              { value: "ask", label: "Ask" },
-              { value: "accept-edits", label: "Accept Edits" },
-              { value: "auto", label: "Auto" }
-            ]}
-            onChange={(next) => {
-              const mode = next as ExecutionMode
-              setDefaultModeDraft(mode)
-              void onSaveDefaultMode?.(mode)
-            }}
+                {offloadTarget.kind === "owned-device" && (
+                  <Select
+                    value={offloadTarget.deviceId}
+                    onValueChange={(deviceId) => saveOffload({
+                      target: { kind: "owned-device", deviceId }
+                    })}
+                  >
+                    <SelectTrigger ariaLabel="Owned device for Offload Compute" className="h-8 bg-sunken px-2 py-1.5 text-[12px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {offloadEnvironments.map((environment) => (
+                        <SelectItem key={environment.id} value={environment.id}>
+                          {environment.name}{environment.state === "online" ? " · online" : " · offline"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => void onRefreshOffloadEnvironments?.()}>
+                  Refresh devices
+                </Button>
+              </div>
+            }
           />
-        </div>
+          <OffloadStatusRow status={offloadStatus} targetKind={offloadTarget.kind} onRetry={onRetryOffload} />
+        </SettingsCard>
 
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Responses
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="ADHD mode"
-            description="Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural."
-            checked={adhdDraft}
-            onChange={(next) => {
+        <SettingsCard title="Agent defaults">
+          <SettingsRow
+            label="Default mode"
+            help="Start new chats in this permission mode for every model."
+            control={
+              <SegmentedControl
+                value={defaultModeDraft}
+                items={[
+                  { value: "ask", label: "Ask" },
+                  { value: "accept-edits", label: "Accept Edits" },
+                  { value: "auto", label: "Auto" }
+                ]}
+                onChange={(next) => {
+                  const mode = next as ExecutionMode
+                  setDefaultModeDraft(mode)
+                  void onSaveDefaultMode?.(mode)
+                }}
+              />
+            }
+          />
+        </SettingsCard>
+
+        <SettingsCard title="Responses">
+          {toggle(
+            "ADHD mode",
+            "Only final completion summaries lead with the action, number multi-step work, state progress, and end with one next step. Working updates, planning, and questions stay natural.",
+            adhdDraft,
+            (next) => {
               setAdhdDraft(next)
               void onSaveAdhdMode?.(next)
-            }}
-          />
+            }
+          )}
           <FontSizeRow
             value={fontScaleDraft}
             onChange={(next) => {
@@ -1197,59 +1228,19 @@ return (<p className="px-1 py-2 text-[11px] text-danger" role="alert">
               void onSaveFontScale?.(next)
             }}
           />
-        </div>
+        </SettingsCard>
 
         {webSearch ? <WebSearchSettings {...webSearch} /> : null}
 
-        <div className="mb-1 mt-6 flex items-center gap-2 border-b border-hairline pb-2.5">
-          <span className="text-[13px] font-semibold text-text-bright">
-            Notifications
-          </span>
-        </div>
-        <div className="divide-y divide-hairline">
-          <ToggleRow
-            label="Desktop notifications"
-            description="Tell me when a session needs me or stops, while Jingler is in the background."
-            checked={draft.enabled}
-            onChange={(enabled) => set({ enabled })}
-          />
-          <ToggleRow
-            label="Needs input"
-            description="An agent is blocked waiting on your approval or an answer."
-            checked={draft.needsInput}
-            disabled={!draft.enabled}
-            onChange={(needsInput) => set({ needsInput })}
-          />
-          <ToggleRow
-            label="Run finished"
-            description="An agent completed its turn."
-            checked={draft.done}
-            disabled={!draft.enabled}
-            onChange={(done) => set({ done })}
-          />
-          <ToggleRow
-            label="Run failed"
-            description="An agent's run ended in an error."
-            checked={draft.failed}
-            disabled={!draft.enabled}
-            onChange={(failed) => set({ failed })}
-          />
-          <ToggleRow
-            label="Pull request resolved"
-            description="A session's pull request was merged or closed on GitHub."
-            checked={draft.pr}
-            disabled={!draft.enabled}
-            onChange={(pr) => set({ pr })}
-          />
-          <ToggleRow
-            label="Play a sound"
-            description="Use the system notification sound instead of showing them silently."
-            checked={draft.sound}
-            disabled={!draft.enabled}
-            onChange={(sound) => set({ sound })}
-          />
-        </div>
-        <p className="mt-4 text-[11px] leading-[1.6] text-muted-foreground">
+        <SettingsCard title="Notifications">
+          {toggle("Desktop notifications", "Tell me when a session needs me or stops, while Jingler is in the background.", draft.enabled, (enabled) => set({ enabled }))}
+          {toggle("Needs input", "An agent is blocked waiting on your approval or an answer.", draft.needsInput, (needsInput) => set({ needsInput }), !draft.enabled)}
+          {toggle("Run finished", "An agent completed its turn.", draft.done, (done) => set({ done }), !draft.enabled)}
+          {toggle("Run failed", "An agent's run ended in an error.", draft.failed, (failed) => set({ failed }), !draft.enabled)}
+          {toggle("Pull request resolved", "A session's pull request was merged or closed on GitHub.", draft.pr, (pr) => set({ pr }), !draft.enabled)}
+          {toggle("Play a sound", "Use the system notification sound instead of showing them silently.", draft.sound, (sound) => set({ sound }), !draft.enabled)}
+        </SettingsCard>
+        <p className="text-[11px] leading-[1.6] text-muted-foreground">
           Notifications are suppressed for the session you already have open and
           focused — you can see that one for yourself.
         </p>
