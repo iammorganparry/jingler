@@ -208,11 +208,16 @@ describe("ProjectSidebar", () => {
 describe("MissingFolderBanner", () => {
   it("renders a neutral BannerShell whose Locate action calls the handler", () => {
     const onLocate = vi.fn()
-    render(<MissingFolderBanner project={{ id: "beta", name: "Beta" }} onLocate={onLocate} />)
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "missing" }} onLocate={onLocate} />)
     const banner = screen.getByTestId("banner-shell")
     expect(banner.textContent).toContain("Beta: folder not found")
     expect(banner.getAttribute("role")).toBe("status")
     fireEvent.click(within(banner).getByRole("button", { name: "Locate folder…" }))
     expect(onLocate).toHaveBeenCalledWith("beta")
+  })
+
+  it("renders nothing for an available project", () => {
+    render(<MissingFolderBanner project={{ id: "beta", name: "Beta", availability: "available" }} />)
+    expect(screen.queryByTestId("banner-shell")).toBeNull()
   })
 })

@@ -35,9 +35,10 @@ export function MissingFolderBanner({
   project,
   onLocate
 }: {
-  project: Pick<Project, "id" | "name">
+  project?: Pick<Project, "id" | "name" | "availability">
   onLocate?: (projectId: string) => void | Promise<void>
 }) {
+  if (project?.availability !== "missing") return null
   return (
     <BannerShell
       placement="lane"

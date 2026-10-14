@@ -424,11 +424,7 @@ export function SessionConversation(props: SessionConversationProps) {
         }
         sessions={projectSessions}
         projectId={selectedProjectId}
-        notice={
-          selectedProject?.availability === "missing" ? (
-            <MissingFolderBanner project={selectedProject} onLocate={props.onLocateProject} />
-          ) : null
-        }
+        notice={<MissingFolderBanner project={selectedProject} onLocate={props.onLocateProject} />}
         onOpenInTerminal={props.onOpenSessionTerminal}
         environments={props.environments}
         activeSessionId={props.activeSessionId}
