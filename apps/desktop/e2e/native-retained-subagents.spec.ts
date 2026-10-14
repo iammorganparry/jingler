@@ -98,8 +98,9 @@ const activeChild = (window: Page) =>
   window.getByRole("button", { name: activeWorker }).first()
 
 const openPreviousChild = async (window: Page) => {
-  await window.getByRole("button", { name: "Previous subagents" }).click()
-  const previous = window.getByRole("menuitem", { name: previousWorker }).first()
+  // Finished children live in the lane header's subagent chip (#460).
+  await window.getByTestId("subagent-chip").first().click()
+  const previous = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: previousWorker }).first()
   await expect(previous).toBeVisible({ timeout: 30_000 })
   await previous.click()
 }
