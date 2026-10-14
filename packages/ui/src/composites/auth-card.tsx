@@ -13,16 +13,15 @@ export interface AuthCardProps {
 }
 
 /**
- * The sign-in card chrome: the brand mark, heading + subtitle, and a brand-tinted
- * halo, wrapping whatever auth controls are slotted in. A molecule so the same
+ * The sign-in card chrome: the brand mark, heading + subtitle, and a neutral
+ * lift shadow, wrapping whatever auth controls are slotted in. A molecule so the same
  * shell can host sign-in, sign-up, or recovery bodies later.
  *
  * Opaque, on a flat canvas. It briefly sat translucent over an animated
  * backdrop; with nothing behind it to show through, a blur is pure cost and a
  * translucent panel just makes the border read as smudged.
  *
- * The brand halo below is doing the work the backdrop used to: it is what stops
- * the card looking like a rectangle floating in an empty window.
+ * The brand mark is the only rose on the card: buttons and links stay neutral.
  */
 export function AuthCard({ title, subtitle, children, className }: AuthCardProps) {
   return (
@@ -31,13 +30,7 @@ export function AuthCard({ title, subtitle, children, className }: AuthCardProps
         "relative z-10 flex w-[328px] flex-col items-center rounded-xl border border-line bg-panel px-7 pb-6 pt-7",
         className
       )}
-      style={{
-        // Two brand glows over one lift shadow. `color-mix` rather than a baked
-        // rgba so the halo follows `--sb-brand` — a hardcoded hex would still be
-        // glowing Jingler red on an imported theme whose accent is green.
-        boxShadow:
-          "0 0 64px -14px color-mix(in srgb, var(--sb-brand) 50%, transparent),0 0 22px -6px color-mix(in srgb, var(--sb-brand) 35%, transparent),0 10px 30px -12px var(--sb-shadow-strong)"
-      }}
+      style={{ boxShadow: "0 10px 30px -12px var(--sb-shadow-strong)" }}
     >
       {/*
         No tile behind the mark. The card is already a rounded rectangle on a

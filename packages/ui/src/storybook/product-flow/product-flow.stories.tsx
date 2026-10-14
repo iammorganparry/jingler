@@ -251,6 +251,8 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
         onGithub={() => send({ type: "AUTHENTICATE" })}
         onGoogle={() => send({ type: "AUTHENTICATE" })}
         onSendMagicLink={() => send({ type: "AUTHENTICATE" })}
+        onCancel={noop}
+        onRetry={noop}
         onReset={noop}
       />
     )

@@ -72,6 +72,8 @@ const loginProps = {
   onGithub: noop,
   onGoogle: noop,
   onSendMagicLink: noop,
+  onCancel: noop,
+  onRetry: noop,
   onReset: noop
 }
 

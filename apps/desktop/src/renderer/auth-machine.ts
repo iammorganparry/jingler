@@ -44,6 +44,8 @@ export interface AuthContext {
   readonly session: AuthSession | null
   /** What `RETRY` re-runs from `error`. */
   readonly lastAttempt: AuthAttempt | null
+  /** The provider URL opened for the in-flight OAuth hand-off, so the wall can copy it. */
+  readonly signInUrl: string | null
 }
 
 export type AuthEvent =
@@ -61,9 +63,10 @@ const sendMagicLink = fromPromise<void, { email: string; name: string | null }>(
   rpc.authSendMagicLink(input.email, input.name ?? undefined)
 )
 
-const startOAuth = fromPromise<void, { provider: AuthProvider }>(async ({ input }) => {
+const startOAuth = fromPromise<string, { provider: AuthProvider }>(async ({ input }) => {
   const url = await rpc.authStartSignIn(input.provider)
   await window.jingler.openExternal(url)
+  return url
 })
 
 const signOut = fromPromise<void>(() => rpc.authSignOut())
@@ -82,7 +85,7 @@ export const authMachine = setup({
 }).createMachine({
   id: "auth",
   initial: "checking",
-  context: { email: "", name: null, sentEmail: null, error: null, session: null, lastAttempt: null },
+  context: { email: "", name: null, sentEmail: null, error: null, session: null, lastAttempt: null, signInUrl: null },
   states: {
     checking: {
       invoke: {
@@ -107,6 +110,7 @@ export const authMachine = setup({
           target: ".oauthPending",
           actions: assign({
             error: () => null,
+            signInUrl: () => null,
             lastAttempt: ({ event }): AuthAttempt => ({ kind: "oauth", provider: event.provider })
           })
         },
@@ -153,6 +157,7 @@ export const authMachine = setup({
             input: ({ context }) => ({
               provider: context.lastAttempt?.kind === "oauth" ? context.lastAttempt.provider : "github"
             }),
+            onDone: { actions: assign({ signInUrl: ({ event }) => event.output }) },
             onError: {
               target: "error",
               actions: assign({
@@ -162,7 +167,12 @@ export const authMachine = setup({
             }
           },
           // The browser may be closed without ever calling back; never strand the wall.
-          on: { CANCEL: "idle", RESET: "idle" },
+          // RETRY is the wall's "Still waiting? Try again": re-open the hand-off.
+          on: {
+            CANCEL: "idle",
+            RESET: "idle",
+            RETRY: { target: "oauthPending", reenter: true, actions: assign({ error: () => null, signInUrl: () => null }) }
+          },
           after: {
             [OAUTH_TIMEOUT_MS]: {
               target: "error",

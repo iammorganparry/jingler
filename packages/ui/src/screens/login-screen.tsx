@@ -1,13 +1,19 @@
-import { useState } from "react"
-import { AlertCircle } from "lucide-react"
+import { useEffect, useState } from "react"
 import { TitleBar } from "../app/title-bar.js"
 import { AuthDivider } from "../components/auth-divider.js"
-import { Callout } from "../components/callout.js"
+import { Button } from "../components/button.js"
+import { Spinner } from "../components/loading.js"
 import { OAuthButton } from "../components/oauth-button.js"
 import { AuthCard } from "../composites/auth-card.js"
 import { MagicLinkForm } from "../composites/magic-link-form.js"
 
-export type LoginState = "default" | "loading" | "sent" | "error"
+export type LoginState = "default" | "loading" | "waiting" | "sent" | "error"
+
+/** How long the browser hand-off may stay unanswered before we offer "Try again". */
+const STILL_WAITING_MS = 120_000
+
+/** Minimum gap between magic-link resends. */
+const RESEND_COOLDOWN_MS = 30_000
 
 /** Which side of the wall we're showing: sign in to an account, or create one. */
 export type AuthMode = "signin" | "signup"
@@ -23,6 +29,12 @@ export interface LoginScreenProps {
   onGoogle: () => void
   /** Request a magic link. `name` is passed only from the sign-up form. */
   onSendMagicLink: (email: string, name?: string) => void
+  /** Abandon the browser hand-off (`waiting`). */
+  onCancel: () => void
+  /** Re-run the last failed or stalled attempt. */
+  onRetry: () => void
+  /** The provider sign-in URL, copyable from `waiting` when the browser did not open. */
+  signInUrl?: string
   /** Return from the `sent` state to enter different details. */
   onReset: () => void
   /**
@@ -48,6 +60,89 @@ const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
  * name. Composed from the auth atoms/molecules; states come from `Login.dc.html`.
  * Stateless except for the local mode + input; all actions lifted to props.
  */
+function ErrorPanel({
+  message = "We couldn't sign you in. Please try again.",
+  onRetry,
+  onReset
+}: {
+  message?: string
+  onRetry: () => void
+  onReset: () => void
+}) {
+  return (
+    <div className="flex w-full flex-col items-center gap-3">
+      <p role="alert" className="w-full text-center text-[12px] leading-snug text-state-failed">
+        {message}
+      </p>
+      <Button className="w-full" onClick={onRetry}>
+        Retry
+      </Button>
+      <Button variant="ghost" size="sm" onClick={onReset}>
+        Use a different method
+      </Button>
+    </div>
+  )
+}
+
+function WaitingPanel({
+  signInUrl,
+  onCancel,
+  onRetry
+}: {
+  signInUrl?: string
+  onCancel: () => void
+  onRetry: () => void
+}) {
+  const [stalled, setStalled] = useState(false)
+  const [copied, setCopied] = useState(false)
+  // Restarts after "Try again" because `stalled` flips back to false.
+  useEffect(() => {
+    if (stalled) return
+    const timer = setTimeout(() => setStalled(true), STILL_WAITING_MS)
+    return () => clearTimeout(timer)
+  }, [stalled])
+  const copy = () => {
+    if (!signInUrl) return
+    void navigator.clipboard
+      ?.writeText(signInUrl)
+      .then(() => setCopied(true))
+      .catch(() => {})
+  }
+  return (
+    <div className="flex w-full flex-col items-center gap-3">
+      <div className="flex items-center gap-2 text-[13px] text-text">
+        <Spinner size={14} />
+        Finish signing in in your browser…
+      </div>
+      {stalled ? (
+        <div className="flex items-center gap-1 text-[12px] text-muted-foreground">
+          Still waiting?
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setStalled(false)
+              onRetry()
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      ) : null}
+      <div className="flex w-full gap-2">
+        <Button variant="secondary" className="flex-1" onClick={onCancel}>
+          Cancel
+        </Button>
+        {signInUrl ? (
+          <Button variant="secondary" className="flex-1" onClick={copy}>
+            {copied ? "Copied" : "Copy sign-in link"}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 export function LoginScreen({
   state = "default",
   sentEmail,
@@ -55,6 +150,9 @@ export function LoginScreen({
   onGithub,
   onGoogle,
   onSendMagicLink,
+  onCancel,
+  onRetry,
+  signInUrl,
   onReset,
   embedded = false
 }: LoginScreenProps) {
@@ -62,13 +160,26 @@ export function LoginScreen({
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const loading = state === "loading"
+  const [resent, setResent] = useState(false)
   const signup = mode === "signup"
 
-  /** Clear local inputs and any in-flight machine state, then flip modes. */
-  const toggleMode = () => {
+  // Resend is locked for the cooldown, then offered again.
+  useEffect(() => {
+    if (!resent) return
+    const timer = setTimeout(() => setResent(false), RESEND_COOLDOWN_MS)
+    return () => clearTimeout(timer)
+  }, [resent])
+
+  /** Clear local inputs, the resend cooldown and any in-flight machine state. */
+  const clearAndReset = () => {
     setEmail("")
     setName("")
+    setResent(false)
     onReset()
+  }
+
+  const toggleMode = () => {
+    clearAndReset()
     setMode(signup ? "signin" : "signup")
   }
 
@@ -78,7 +189,7 @@ export function LoginScreen({
       <button
         type="button"
         onClick={toggleMode}
-        className="text-brand hover:underline"
+        className="text-text-bright hover:underline"
       >
         {signup ? "Sign in" : "Create an account"}
       </button>
@@ -96,47 +207,53 @@ export function LoginScreen({
         }
       >
         <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
-          {state === "error" ? (
-            <Callout tone="red" glyph={<AlertCircle className="size-3.5" />} className="w-full">
-              {errorMessage ?? "We couldn't sign you in. Please try again."}
-            </Callout>
-          ) : null}
+          {state === "waiting" ? (
+            <WaitingPanel signInUrl={signInUrl} onCancel={onCancel} onRetry={onRetry} />
+          ) : (
+            <>
+              {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
+              <div
+                className="flex w-full flex-col gap-2"
+                style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
+              >
+                <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
+                <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
+              </div>
 
-          {/* OAuth stays visible across states; only the form area swaps to `sent`. */}
-          <div
-            className="flex w-full flex-col gap-2"
-            style={{ opacity: loading ? 0.5 : 1, pointerEvents: loading ? "none" : "auto" }}
-          >
-            <OAuthButton provider="github" mode={mode} onClick={onGithub} disabled={loading} />
-            <OAuthButton provider="google" mode={mode} onClick={onGoogle} disabled={loading} />
-          </div>
+              <AuthDivider />
 
-          <AuthDivider />
+              <MagicLinkForm
+                state={state}
+                mode={mode}
+                email={email}
+                name={name}
+                sentEmail={sentEmail}
+                onEmailChange={setEmail}
+                onNameChange={setName}
+                onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
+                onReset={clearAndReset}
+                onResend={() => {
+                  setResent(true)
+                  onSendMagicLink(sentEmail || email, signup ? name : undefined)
+                }}
+                resent={resent}
+              />
 
-          <MagicLinkForm
-            state={state}
-            mode={mode}
-            email={email}
-            name={name}
-            sentEmail={sentEmail}
-            onEmailChange={setEmail}
-            onNameChange={setName}
-            onSubmit={() => onSendMagicLink(email, signup ? name : undefined)}
-            onReset={() => {
-              setEmail("")
-              setName("")
-              onReset()
-            }}
-          />
+              {/* Under the input, so the email path stays usable while the cause is shown. */}
+              {state === "error" ? (
+                <ErrorPanel message={errorMessage} onRetry={onRetry} onReset={clearAndReset} />
+              ) : null}
+            </>
+          )}
 
           {signup ? (
             <p className="mt-2 text-center text-[11px] leading-normal text-dim">
               By continuing you agree to our{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-text-bright hover:underline">
                 Terms
               </a>{" "}
               &amp;{" "}
-              <a href="#" onClick={(event) => event.preventDefault()} className="text-brand hover:underline">
+              <a href="#" onClick={(event) => event.preventDefault()} className="text-text-bright hover:underline">
                 Privacy Policy
               </a>
               .

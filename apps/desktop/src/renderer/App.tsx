@@ -2185,12 +2185,9 @@ function renderPullRequestInbox(
 /** Map the auth machine's signed-out substate to the LoginScreen's visual state. */
 function loginStateOf(
   matches: (value: object) => boolean,
-): "default" | "loading" | "sent" | "error" {
-  if (
-    matches({ signedOut: "sending" }) ||
-    matches({ signedOut: "oauthPending" })
-  )
-    return "loading";
+): "default" | "loading" | "waiting" | "sent" | "error" {
+  if (matches({ signedOut: "sending" })) return "loading";
+  if (matches({ signedOut: "oauthPending" })) return "waiting";
   if (matches({ signedOut: "magicLinkSent" })) return "sent";
   if (matches({ signedOut: "error" })) return "error";
   return "default";
@@ -2307,6 +2304,9 @@ function AppContent({
         onSendMagicLink={(email, name) =>
           authSend({ type: "MAGIC_LINK", email, name })
         }
+        onCancel={() => authSend({ type: "CANCEL" })}
+        onRetry={() => authSend({ type: "RETRY" })}
+        signInUrl={authState.context.signInUrl ?? undefined}
         onReset={() => authSend({ type: "RESET" })}
       />
     </>
