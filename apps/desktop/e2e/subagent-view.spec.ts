@@ -119,3 +119,41 @@ test("Follow in the subagent view opens a file the viewed child edited", async (
     timeout: 15_000
   })
 })
+
+test("the subagent view shows the meta strip, Details, the quoted task and a read-only bar with Stop", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[held-subagents]] survey the app")
+  await composer.press("Enter")
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  await window.getByRole("button", { name: "View", exact: true }).first().click()
+
+  // Strip fields from the fleet node; null fields (phase, cost, artifacts) are omitted.
+  const strip = window.getByTestId("subagent-meta-strip")
+  await expect(strip.getByTestId("subagent-meta-identity")).toContainText("e2e/pi-fixture:high")
+  await expect(strip.getByTestId("subagent-meta-identity")).toContainText("running")
+  await expect(strip.getByTestId("subagent-meta-usage")).toContainText("workspace_read_file")
+  await expect(strip).not.toContainText("—")
+
+  // Details expands to the key/value grid with run id and started time.
+  await expect(window.getByTestId("subagent-meta-details")).toHaveCount(0)
+  await strip.getByTestId("subagent-meta-details-toggle").click()
+  await expect(window.getByTestId("subagent-meta-details")).toContainText("Run")
+  await expect(window.getByTestId("subagent-meta-details")).toContainText("Started")
+
+  // The task leads the transcript as a quote; the composer is replaced by the read-only bar.
+  await expect(window.getByTestId("subagent-task")).toContainText("Survey the tab bar")
+  const bar = window.getByTestId("subagent-readonly-bar")
+  await expect(bar).toContainText("read-only")
+  await expect(window.getByPlaceholder("Message the agent…")).toHaveCount(0)
+
+  // Stop goes pending. The held-subagents fixture has no stop responder, so the stopped line
+  // is covered by subagent-readonly-bar.test.tsx rather than here.
+  await bar.getByRole("button", { name: "Stop" }).click()
+  await expect(bar).toContainText("Stopping Explore…")
+  await expect(bar.getByRole("button", { name: "Stop" })).toBeDisabled()
+})
