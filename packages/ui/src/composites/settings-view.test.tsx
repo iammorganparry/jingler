@@ -413,3 +413,86 @@ describe("SettingsView", () => {
     expect(screen.queryByText("Appearance")).toBeNull()
   })
 })
+
+describe("Context settings · SettingsCard rows", () => {
+  const context = { auto: true, budgetTokens: 300_000 };
+
+  it("renders the thresholds as SettingsRows and persists through onSaveContext", () => {
+    const onSaveContext = vi.fn();
+    render(
+      <SettingsView
+        initialSection="context"
+        githubConnection={githubDisconnected}
+        context={context}
+        onSaveContext={onSaveContext}
+      />,
+    );
+    expect(screen.getAllByTestId("settings-row")).toHaveLength(2);
+    expect(screen.getByText("300k tokens")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Compact sessions automatically" }));
+    expect(onSaveContext).toHaveBeenLastCalledWith({ ...context, auto: false });
+
+    fireEvent.change(screen.getByRole("slider", { name: "Working-set budget" }), {
+      target: { value: "500000" },
+    });
+    expect(onSaveContext).toHaveBeenLastCalledWith({ ...context, auto: false, budgetTokens: 500_000 });
+  });
+
+  it("lists live sessions as rows", () => {
+    render(
+      <SettingsView
+        initialSection="context"
+        githubConnection={githubDisconnected}
+        context={context}
+        contextSessions={[{
+          id: "s1",
+          title: "Long running session",
+          snapshot: {
+            sessionId: "s1", tokens: 0, window: null, budget: 300_000, triggerAt: null,
+            phase: "unknown", preparing: false, digestReady: false, stalled: false,
+          } as never,
+        }]}
+      />,
+    );
+    expect(screen.getByText("Your sessions right now")).toBeTruthy();
+    expect(screen.getByText("Long running session")).toBeTruthy();
+    expect(screen.getByText("not measurable")).toBeTruthy();
+    expect(screen.getAllByTestId("settings-row")).toHaveLength(3);
+  });
+});
+
+describe("Plan settings · SettingsCard rows", () => {
+  it("persists plan auto-run through onSavePlanAutoRun", () => {
+    const onSavePlanAutoRun = vi.fn();
+    render(
+      <SettingsView
+        initialSection="plan"
+        githubConnection={githubDisconnected}
+        onSavePlanAutoRun={onSavePlanAutoRun}
+      />,
+    );
+    const toggle = screen.getByRole("switch", { name: "Plan auto-run" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onSavePlanAutoRun).toHaveBeenCalledWith(false);
+  });
+
+  it("saves the edited plan template through onSavePlanTemplate", async () => {
+    const onSavePlanTemplate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SettingsView
+        initialSection="plan"
+        githubConnection={githubDisconnected}
+        planTemplate={{ source: "" }}
+        onSavePlanTemplate={onSavePlanTemplate}
+      />,
+    );
+    expect(screen.getAllByTestId("settings-row")).toHaveLength(2);
+    fireEvent.change(screen.getByRole("textbox", { name: "Plan template" }), {
+      target: { value: "{}" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save template" }));
+    await waitFor(() => expect(onSavePlanTemplate).toHaveBeenCalledWith({ source: "{}" }));
+  });
+});

@@ -203,4 +203,20 @@ test("exposes the token levers in Settings", async ({ launchApp }) => {
   await expect(sessionsPanel).toBeVisible()
   await expect(sessionsPanel.getByText("Long running session")).toBeVisible()
   await expect(sessionsPanel.getByText(/\d+(?:\.\d+)?k context/)).toBeVisible()
+
+  // The levers sit on cataloged SettingsRows and persist via Config.setContext.
+  await expect(window.getByTestId("settings-row")).toHaveCount(3)
+  const auto = window.getByRole("switch", { name: "Compact sessions automatically" })
+  await expect(auto).toBeChecked()
+  await auto.click()
+  await expect(auto).not.toBeChecked()
+  await expect(window.getByRole("slider", { name: "Working-set budget" })).toBeDisabled()
+
+  await window.getByRole("button", { name: "Close settings" }).click()
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: /Context/ }).click()
+  await expect(
+    window.getByRole("switch", { name: "Compact sessions automatically" })
+  ).not.toBeChecked()
 })
