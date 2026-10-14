@@ -187,6 +187,66 @@ describe("GitHub settings", () => {
   });
 });
 
+describe("GitHub settings · SettingsCard rows", () => {
+  const githubConnected = {
+    ...githubDisconnected,
+    mode: "connected" as const,
+    connected: true,
+    user: { id: "1", login: "octocat", name: "Octo Cat", avatarUrl: null },
+    installations: [{
+      id: "101",
+      account: { id: "2", login: "acme", type: "Organization" as const, avatarUrl: null },
+      repositorySelection: "all" as const,
+      permissions: {},
+      status: "active" as const,
+      suspendedAt: null,
+    }],
+  };
+
+  it("renders connection, installations, toggles and git preference as SettingsRows", () => {
+    render(
+      <SettingsView
+        initialSection="github"
+        githubConnection={githubConnected}
+        github={{ enabled: true, autoCreatePr: false, autoDetectPr: true }}
+      />,
+    );
+    expect(screen.getByText("Connected as @octocat")).toBeTruthy();
+    expect(screen.getByText("@acme")).toBeTruthy();
+    expect(screen.getByText("All repositories")).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Enable pull-request features" })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Open PRs whose branch is checked out elsewhere" })).toBeTruthy();
+    // connection + installation + 3 PR + 2 review + 1 git
+    expect(screen.getAllByTestId("settings-row")).toHaveLength(8);
+  });
+
+  it("asks for confirmation before disconnecting", () => {
+    const onGithubDisconnect = vi.fn();
+    render(
+      <SettingsView
+        initialSection="github"
+        githubConnection={githubConnected}
+        onGithubDisconnect={onGithubDisconnect}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    expect(onGithubDisconnect).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onGithubDisconnect).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+    fireEvent.click(
+      Array.from(screen.getByRole("dialog").querySelectorAll("button")).find(
+        (button) => button.textContent === "Disconnect",
+      ) as HTMLElement,
+    );
+    expect(onGithubDisconnect).toHaveBeenCalledOnce();
+    expect(dialog).toBeTruthy();
+  });
+});
+
 describe("Devices settings", () => {
   it("renders account-owned device connection and compatibility states", () => {
     render(
