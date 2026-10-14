@@ -162,6 +162,18 @@ describe("routeReviewToAgent", () => {
     expect(sent).toHaveLength(1)
   })
 
+  // A forced re-run on an unchanged head is a NEW review. An earlier run that
+  // routed nothing (an empty or nit-only review) must not block it.
+  it("routes a fresh review on the same head after an earlier run sent nothing", async () => {
+    await routeReviewToAgent(session, review({ headSha: "h-rerun", findings: [] }), qc)
+    await routeReviewToAgent(
+      session,
+      review({ headSha: "h-rerun", createdAt: "2026-07-17T11:00:00.000Z" }),
+      qc
+    )
+    expect(sent).toHaveLength(1)
+  })
+
   // A new head is a new review — it must route again.
   it("routes again once the PR head advances", async () => {
     await routeReviewToAgent(session, review({ headSha: "h-five" }), qc)
