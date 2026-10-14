@@ -264,3 +264,48 @@ describe("PullRequestView load states", () => {
     expect(screen.getByText("CI results will appear here once a run starts.")).toBeTruthy()
   })
 })
+
+describe("PullRequestView header", () => {
+  const renderPr = (value: PullRequest) =>
+    render(<WidthTierValue width={600}><PullRequestView pr={value} connected /></WidthTierValue>)
+
+  it("renders title, grey number, and every meta field on one line", () => {
+    renderPr(pr)
+    expect(screen.getByRole("heading", { name: /Surface the actual API error/ }).textContent).toContain("#1838")
+    const meta = screen.getByTestId("pr-meta-line")
+    expect(meta.textContent).toContain("Open")
+    expect(meta.textContent).toContain("morgan")
+    expect(meta.textContent).toContain("fix/error → main")
+    expect(meta.textContent).toContain("1 commit")
+    expect(meta.textContent).toContain("3 files")
+    expect(meta.textContent).toContain("+10")
+    expect(meta.className).toContain("whitespace-nowrap")
+    expect(meta.className).not.toContain("flex-wrap")
+  })
+
+  it("labels draft and merged states", () => {
+    renderPr({ ...pr, state: "draft" })
+    expect(screen.getByTestId("pr-meta-line").textContent).toContain("Draft")
+    cleanup()
+    renderPr({ ...pr, state: "merged" })
+    expect(screen.getByTestId("pr-meta-line").textContent).toContain("Merged")
+  })
+
+  it("omits missing fields instead of showing a dash", () => {
+    renderPr({ ...pr, commits: 0, changedFiles: 0, additions: 0, deletions: 0, headRefName: "", createdAt: "not a date" })
+    const text = screen.getByTestId("pr-meta-line").textContent ?? ""
+    expect(text).not.toContain("—")
+    expect(text).not.toContain("commit")
+    expect(text).not.toContain("file")
+    expect(text).not.toContain("→")
+    expect(screen.queryByRole("button", { name: "Copy branch name" })).toBeNull()
+  })
+
+  it("copies the head branch", () => {
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    renderPr(pr)
+    fireEvent.click(screen.getByRole("button", { name: "Copy branch name" }))
+    expect(writeText).toHaveBeenCalledWith("fix/error")
+  })
+})
