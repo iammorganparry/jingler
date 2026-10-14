@@ -143,3 +143,54 @@ test("a long branch name truncates while the status word and diff stat stay on o
   const statBox = await diffStat.boundingBox()
   expect(statBox?.height ?? 99).toBeLessThan(20)
 })
+
+test("the filter/sort menu and a row context menu are fully keyboard operable", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  // Open the filter menu from the keyboard: End jumps to the last axis row, Sort by.
+  await window.getByTestId("session-filter-menu").focus()
+  await window.keyboard.press("Enter")
+  await expect(window.getByRole("menuitem", { name: /^Status/ })).toBeVisible()
+  await window.keyboard.press("End")
+  await expect(window.getByRole("menuitem", { name: /^Sort by/ })).toBeFocused()
+  await window.keyboard.press("ArrowRight")
+  await expect(window.getByRole("menuitem", { name: /^Recency/ })).toBeFocused()
+  await window.keyboard.press("ArrowDown")
+  await expect(window.getByRole("menuitem", { name: /^Name/ })).toBeFocused()
+  await window.keyboard.press("Enter")
+  await expect(window.getByRole("menu")).toHaveCount(0)
+
+  // The choice shows on the closed row and persists under this project's key.
+  await window.getByTestId("session-filter-menu").focus()
+  await window.keyboard.press("Enter")
+  await expect(window.getByRole("menuitem", { name: /^Sort by\s*Name/ })).toBeVisible()
+  await window.keyboard.press("Escape")
+  const stored = await window.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("sb.sidebar.filters.v2."))
+      .map((key) => JSON.parse(localStorage.getItem(key) ?? "{}").sortBy)
+  )
+  expect(stored).toContain("name")
+
+  // A row's context menu opens with the keyboard and Rename is first.
+  const row = window.getByTestId("session-row-s_running")
+  await row.focus()
+  await window.keyboard.press("Shift+F10")
+  await expect(window.getByRole("menuitem", { name: "Rename" })).toBeFocused()
+  await expect(window.getByRole("menuitem", { name: "Copy branch" })).toBeVisible()
+  await expect(window.getByRole("menuitem", { name: "Archive" })).toBeVisible()
+  await window.keyboard.press("Enter")
+  await window.keyboard.type("Renamed from the keyboard")
+  await window.keyboard.press("Enter")
+  await expect(window.getByTestId("session-row-s_running")).toContainText(
+    "Renamed from the keyboard"
+  )
+})
