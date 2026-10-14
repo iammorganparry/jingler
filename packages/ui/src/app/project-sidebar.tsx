@@ -1,6 +1,8 @@
 import { displayStatusOf, type Project, type Session, type SessionActivity } from "@jingler/core"
 import { useState } from "react"
-import { FolderCog, Import, Plus, Trash2 } from "lucide-react"
+import { FolderCog, FolderSearch, FolderX, Import, Plus, Trash2 } from "lucide-react"
+import { BannerShell } from "../components/banner-shell.js"
+import { Button } from "../components/button.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
@@ -12,6 +14,43 @@ import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation
 
 type ProjectItem = Pick<Project, "id" | "name" | "availability"> & { readonly path?: string }
 
+/** Tile menu rows; a missing folder adds a status row plus Locate ahead of Settings / Remove. */
+function tileMenuItems(
+  project: ProjectItem,
+  actions: { onOpenSettings?: () => void; onLocate?: () => void; onRemove?: () => void }
+): ContextMenuItem[] {
+  const { onOpenSettings, onLocate, onRemove } = actions
+  return [
+    ...(onLocate ? [
+      { label: "Folder not found", icon: FolderX, disabled: true, onSelect: () => {} },
+      { label: "Locate folder…", icon: FolderSearch, onSelect: onLocate }
+    ] : []),
+    ...(onOpenSettings ? [{ label: "Settings", icon: FolderCog, onSelect: onOpenSettings }] : []),
+    ...(onRemove ? [{ label: "Remove project", icon: Trash2, tone: "danger" as const, separated: true, onSelect: onRemove }] : [])
+  ]
+}
+
+/** Sidebar notice for the selected project whose folder is gone (neutral, spec §6.3). */
+export function MissingFolderBanner({
+  project,
+  onLocate
+}: {
+  project: Pick<Project, "id" | "name">
+  onLocate?: (projectId: string) => void | Promise<void>
+}) {
+  return (
+    <BannerShell
+      placement="lane"
+      icon={<FolderX size={14} />}
+      actions={onLocate ? [
+        <Button key="locate" size="sm" variant="secondary" onClick={() => void onLocate(project.id)}>Locate folder…</Button>
+      ] : undefined}
+    >
+      {project.name}: folder not found
+    </BannerShell>
+  )
+}
+
 function ProjectAvatar({
   project,
   owner,
@@ -20,6 +59,7 @@ function ProjectAvatar({
   activeSessionCount,
   onSelect,
   onOpenSettings,
+  onLocate,
   onRemove
 }: {
   project: ProjectItem
@@ -29,23 +69,11 @@ function ProjectAvatar({
   activeSessionCount: number
   onSelect: () => void
   onOpenSettings?: () => void
+  onLocate?: () => void
   onRemove?: () => void | Promise<void>
 }) {
   const [confirmingRemove, setConfirmingRemove] = useState(false)
-  const items: ContextMenuItem[] = [
-    ...(onOpenSettings ? [{ label: "Settings", icon: FolderCog, onSelect: onOpenSettings }] : []),
-    ...(onRemove
-      ? [
-          {
-            label: "Remove project",
-            icon: Trash2,
-            tone: "danger" as const,
-            separated: true,
-            onSelect: () => setConfirmingRemove(true)
-          }
-        ]
-      : [])
-  ]
+  const items = tileMenuItems(project, { onOpenSettings, onLocate, onRemove: onRemove && (() => setConfirmingRemove(true)) })
   const tile = (
     <HoverCard
       delayMs={120}
@@ -93,7 +121,7 @@ function ProjectAvatar({
           </span>
         ) : null}
         {project.availability !== "available" ? (
-          <span className="absolute -bottom-[3px] -left-[3px] size-2 rounded-full bg-state-needs ring-2 ring-canvas" />
+          <span aria-hidden className="absolute -bottom-[3px] -left-[3px] size-2 rounded-full bg-muted-foreground ring-2 ring-canvas" />
         ) : null}
       </button>
     </HoverCard>
@@ -140,6 +168,7 @@ export function ProjectSidebar({
   onAddProject,
   onImportSessions,
   onOpenSettings,
+  onLocate,
   onRemove
 }: {
   projects: ReadonlyArray<Project>
@@ -153,6 +182,8 @@ export function ProjectSidebar({
   onImportSessions?: () => void
   /** Rail tile context menu: open that project's settings. */
   onOpenSettings?: (projectId: string) => void
+  /** Rail tile context menu (missing folders only): pick the folder again. */
+  onLocate?: (projectId: string) => void | Promise<void>
   /** Rail tile context menu: unregister the project (confirmed first). */
   onRemove?: (projectId: string) => void | Promise<void>
 }) {
@@ -203,6 +234,11 @@ export function ProjectSidebar({
                 onOpenSettings={
                   onOpenSettings && project.id !== UNASSIGNED_PROJECT_ID
                     ? () => onOpenSettings(project.id)
+                    : undefined
+                }
+                onLocate={
+                  onLocate && project.availability === "missing" && project.id !== UNASSIGNED_PROJECT_ID
+                    ? () => void onLocate(project.id)
                     : undefined
                 }
                 onRemove={

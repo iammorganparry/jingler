@@ -166,6 +166,8 @@ export interface SessionSidebarProps {
   defaultFilters?: SessionFilters
   /** The project whose sessions this lists — filter and sort choices persist per project. */
   projectId?: string
+  /** A notice pinned under the header, e.g. the selected project's missing-folder banner. */
+  notice?: React.ReactNode
   /** Open a session's worktree in a terminal (row context menu). */
   onOpenInTerminal?: (sessionId: string) => void
 }
@@ -371,6 +373,7 @@ function SidebarBody({
   whatsNew,
   defaultFilters,
   projectId,
+  notice,
   onOpenInTerminal,
   pullRequestsActive = false,
   onOpenPullRequests,
@@ -879,6 +882,8 @@ return (renderExpandedGroupHeading())
           />
         </div>
       ) : null}
+
+      {notice}
 
       {workspaceView === "explorer" ? (
         <div className="min-h-0 flex-1 border-t border-hairline">{explorer}</div>
