@@ -1,13 +1,13 @@
 /**
  * TerminalDockView — binds the app's per-session terminal state (`useTerminals`)
- * and live xterm cells (`XtermView`) to the presentational `TerminalDock` chrome
+ * and live xterm cells (`XtermView`) to the presentational `TerminalPanel` chrome
  * in @jingler/ui. Mounted ONCE (kept alive across session switches) so switching
- * away and back preserves each session's tab strip; dock visibility/side come in
- * as props from `useTerminalDock`.
+ * away and back preserves each session's tab strip; panel visibility comes in
+ * as a prop.
  */
 import { useEffect, useState } from "react"
 import type { Session } from "@jingler/core"
-import { TerminalDock, type DockSide, type TerminalTab } from "@jingler/ui"
+import { TerminalPanel, type TerminalTab } from "@jingler/ui"
 import { useTerminals } from "./use-terminals.js"
 import { XtermView } from "./xterm-view.js"
 
@@ -17,23 +17,15 @@ export interface TerminalDockViewProps {
   /** The active session (its worktree is the terminals' cwd). Null → no session. */
   session: Session | null
   visible?: boolean
-  onToggle?: () => void
-  side?: DockSide
-  onSideChange?: (side: DockSide) => void
-  embedded?: boolean
 }
 
 export function TerminalDockView({
   session,
-  visible = true,
-  onToggle = () => {},
-  side = "bottom",
-  onSideChange = () => {},
-  embedded = false
+  visible = true
 }: TerminalDockViewProps) {
   const cwd = session?.worktreePath ?? undefined
   const terminals = useTerminals(session?.id ?? null, cwd)
-  const { create, close, select, markExited, tabs: infos, activeId, hydrated } = terminals
+  const { create, close, restart, select, markExited, tabs: infos, activeId, hydrated } = terminals
 
   // Exit code of the most recently exited shell — surfaced in the dock footer.
   const [lastExit, setLastExit] = useState<number | null>(null)
@@ -51,23 +43,23 @@ export function TerminalDockView({
   const tabs: ReadonlyArray<TerminalTab> = infos.map((t) => ({
     id: t.id,
     title: t.title,
-    status: t.status
+    status: t.status,
+    exitCode: t.exitCode
   }))
 
   return (
-    <TerminalDock
-      dock={side}
-      onDockChange={onSideChange}
+    <TerminalPanel
+      key={session?.id ?? "none"}
+      sessionId={session?.id ?? "none"}
       visible={visible}
-      onToggle={onToggle}
       tabs={tabs}
       activeId={activeId}
       onSelect={select}
       onNew={() => void create()}
       onClose={(id) => void close(id)}
+      onRestart={(id) => void restart(id)}
       cwdLabel={cwd}
       lastExit={lastExit}
-      embedded={embedded}
       renderTerminal={(id) => (
         <XtermView
           key={id}
