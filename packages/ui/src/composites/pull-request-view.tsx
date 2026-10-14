@@ -32,6 +32,8 @@ import { PrReviewGroup } from "./pr-review-group.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
+import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
+import { PrSwitcher } from "./pr-switcher.js"
 import { PrViewHeader } from "./pr-view-header.js"
 
 type PrEvidence = "overview" | "commits" | "checks" | "files"
@@ -158,6 +160,8 @@ export interface PullRequestViewProps {
   baseBranch?: string
   /** The session PR stack (ordered, bottom layer first). */
   prs?: ReadonlyArray<SessionPr>
+  /** Present when the session holds a PR stack: enables the header switcher and the Checks rail. */
+  stack?: PrStackNav
   /** The owning session's title, for the "routed to <session>" copy. */
   sessionTitle?: string
   onCreatePr?: (base?: string) => Promise<void> | void
@@ -222,6 +226,7 @@ export function PullRequestView({
   branch,
   baseBranch,
   prs,
+  stack,
   onCreatePr,
   onRetryPublish,
   onConnectGithub,
@@ -312,6 +317,7 @@ export function PullRequestView({
               onMarkReady={readOnly && !onMerge ? undefined : onMarkReady}
               markingReady={markingReady}
               onRequestClose={onClosePr && !(readOnly && !onMerge) ? () => setCloseConfirmOpen(true) : undefined}
+              switcher={stack ? <PrSwitcher {...stack} /> : undefined}
             />
             {pr.labels.length > 0 && (
               <div className="flex flex-wrap gap-[7px]">
@@ -349,7 +355,7 @@ export function PullRequestView({
          function renderReviewEvidence(pr: NonNullable<PullRequestViewProps["pr"]>) {
            if (evidence === "commits") return (<CommitEvidence pr={pr} />)
 return (evidence === "checks" ? (
-            <CheckEvidence pr={pr} />
+            <CheckEvidence pr={pr} stack={stack} />
           ) : (
           <>
           {/*
@@ -665,13 +671,20 @@ function CommitEvidence({ pr }: { pr: PullRequest }) {
   )
 }
 
-function CheckEvidence({ pr }: { pr: PullRequest }) {
-  if (pr.checks.length === 0) {
-    return <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
-  }
+function CheckEvidence({ pr, stack }: { pr: PullRequest; stack?: PrStackNav }) {
+  const checks =
+    pr.checks.length === 0 ? (
+      <EmptyState title="No checks reported" description="CI results will appear here once a run starts." />
+    ) : (
+      <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
+        {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
+      </div>
+    )
+  if (!stack) return checks
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-line bg-panel p-4">
-      {pr.checks.map((check) => <PrCheckRow key={check.name.toLowerCase()} check={check} />)}
+    <div className="flex items-start gap-6">
+      <PrStackRail layers={stack.layers} selected={stack.selected} onSelect={stack.onSelect} />
+      <div className="min-w-0 flex-1">{checks}</div>
     </div>
   )
 }

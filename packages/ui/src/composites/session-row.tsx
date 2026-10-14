@@ -229,7 +229,10 @@ export function SessionRow({
               className="flex shrink-0 items-center gap-1 whitespace-nowrap"
               title={`Pull request #${session.prNumber}`}
             >
-              <PrStatusGlyph pr={prState} />
+              <PrStatusGlyph
+                pr={prState}
+                stack={session.prs?.map((layer) => ({ state: layer.state ?? "open", checks: layer.checks ?? null }))}
+              />
               <span>#{session.prNumber}</span>
             </span>
           )}

@@ -9,6 +9,7 @@ import { PullRequestView } from "@jingler/ui"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
+import { usePrStack } from "./use-pr-stack.js"
 
 export function PullRequestPane({
   session,
@@ -34,6 +35,9 @@ export function PullRequestPane({
   onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
   onOpenFiles: () => void
 }) {
+  const stack = usePrStack(session, connected)
+  // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
+  const viewingLowerLayer = stack.selected !== null && stack.selected !== session.prNumber
   const {
     pr,
     busy,
@@ -54,7 +58,7 @@ export function PullRequestPane({
     resolveThread,
     replyToThread,
     openOnGithub
-  } = usePullRequest(session, { connected, autoDetect, onPrLinked })
+  } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: stack.selected })
   const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
 
   const {
@@ -83,6 +87,8 @@ export function PullRequestPane({
       branch={session.branch}
       baseBranch={session.baseBranch ?? pr?.baseRefName}
       prs={session.prs}
+      stack={stack.nav}
+      readOnly={viewingLowerLayer}
       sessionTitle={session.title}
       onCreatePr={
         workspaceModeOf(session) === "worktree" ? publish.publish : undefined

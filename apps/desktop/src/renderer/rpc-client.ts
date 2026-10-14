@@ -943,8 +943,8 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  githubPr: (sessionId: string): Promise<PullRequest | null> =>
-    run((c) => c.Github.pr({ sessionId })),
+  githubPr: (sessionId: string, number?: number): Promise<PullRequest | null> =>
+    run((c) => c.Github.pr(number === undefined ? { sessionId } : { sessionId, number })),
   githubPrState: (sessionId: string, number?: number): Promise<SessionPrStatus | null> =>
     run((c) => c.Github.prState(number === undefined ? { sessionId } : { sessionId, number })),
   githubTeams: (): Promise<GitHubTeamDiscovery> => run((c) => c.Github.teams()),

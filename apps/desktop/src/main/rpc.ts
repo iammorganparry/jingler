@@ -1591,11 +1591,18 @@ export const githubIssueCommentBySlug = (input: {
         }),
       );
 
-export const githubPr = (sessionId: string) =>
+/** A layer must belong to the session's stack; anything else is not ours to read. */
+const ownsPr = (
+  session: { prNumber: number | null; prs?: ReadonlyArray<{ number: number }> },
+  number: number,
+): boolean => number === session.prNumber || (session.prs ?? []).some((pr) => pr.number === number);
+
+export const githubPr = (sessionId: string, number?: number) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath || session.prNumber === null) return null;
-    return yield* GitHubApi.prView(session.worktreePath, session.prNumber);
+    if (number !== undefined && !ownsPr(session, number)) return null;
+    return yield* GitHubApi.prView(session.worktreePath, number ?? session.prNumber);
   });
 
 /**
@@ -1608,8 +1615,7 @@ export const githubPrState = (sessionId: string, number?: number) =>
   Effect.gen(function* () {
     const session = yield* resolveSession(sessionId);
     if (!session?.worktreePath || session.prNumber === null) return null;
-    // A layer must belong to this session's stack; anything else is not ours to read.
-    if (number !== undefined && !(session.prs ?? []).some((pr) => pr.number === number) && number !== session.prNumber) return null;
+    if (number !== undefined && !ownsPr(session, number)) return null;
     return yield* GitHubApi.prState(session.worktreePath, number ?? session.prNumber);
   });
 
@@ -5874,7 +5880,7 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.issueBySlug": ({ repository, number }) => githubIssueBySlug(repository, number),
   "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
   "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
-  "Github.pr": ({ sessionId }) => githubPr(sessionId),
+  "Github.pr": ({ sessionId, number }) => githubPr(sessionId, number),
   "Github.prState": ({ sessionId, number }) => githubPrState(sessionId, number),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
     githubSlug

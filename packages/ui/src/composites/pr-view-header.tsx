@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import type { PrState, PullRequest } from "@jingler/core"
 import { Check, Copy, Download, Ellipsis, ExternalLink } from "lucide-react"
 import { relativeTime } from "../lib/relative-time.js"
@@ -72,7 +72,7 @@ function PrMetaLine({ pr }: { pr: PullRequest }) {
   )
 }
 
-const menuItemClass =
+export const menuItemClass =
   "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
 
 /** The `⋯` menu: Mark ready (drafts), Copy branch, Close PR (destructive, confirmed by the caller). */
@@ -131,6 +131,8 @@ export interface PrViewHeaderProps {
   markingReady?: boolean
   /** Ask to close the PR; the parent owns the ConfirmDialog. */
   onRequestClose?: () => void
+  /** The stack switcher, shown beside the title when the session has a PR stack. */
+  switcher?: ReactNode
 }
 
 /** PR title with a grey `#number`, the actions on the right, and the one-line meta row beneath. */
@@ -142,7 +144,8 @@ export function PrViewHeader({
   onOpenOnGithub,
   onMarkReady,
   markingReady,
-  onRequestClose
+  onRequestClose,
+  switcher
 }: PrViewHeaderProps) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
@@ -150,6 +153,7 @@ export function PrViewHeader({
         <h2 className="min-w-0 flex-1 text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
           {pr.title} <span className="font-normal text-dim">#{pr.number}</span>
         </h2>
+        {switcher}
         {onOpenOnGithub && (
           <Tooltip label="Open on GitHub" side="bottom">
             <Button variant="ghost" size="icon" aria-label="Open on GitHub" className="size-7" onClick={onOpenOnGithub}>
