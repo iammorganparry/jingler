@@ -54,6 +54,7 @@ import {
 } from "../components/dialog.js"
 import { SearchField } from "../components/search-input.js"
 import { Badge } from "../components/badge.js"
+import { EmptyState } from "../components/feedback.js"
 import { JinglerWordmark } from "../brand/jingler-mark.js"
 import { AsyncButton } from "../components/async-button.js"
 import { GithubMark } from "../components/github-mark.js"
@@ -723,12 +724,9 @@ return ((
 
 function StubSection({ label }: { label: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-editor text-center">
-      <span className="text-[14px] font-semibold text-text-body">{label}</span>
-      <span className="max-w-[280px] text-[12px] leading-relaxed text-muted-foreground">
-        This section isn&apos;t wired up yet — it&apos;s coming in a later pass.
-      </span>
-    </div>
+    <section aria-label={label} className="flex flex-1 items-center justify-center bg-editor">
+      <EmptyState title={label} description="Coming soon — this section isn't available yet." />
+    </section>
   )
 }
 

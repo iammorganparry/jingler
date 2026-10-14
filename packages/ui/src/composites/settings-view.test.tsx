@@ -363,6 +363,21 @@ describe("SettingsView", () => {
     expect(keybindings.textContent?.includes("Soon")).toBeTruthy()
   })
 
+  it.each(["Permissions", "Keybindings"])("opens the %s placeholder with keyboard selection", async (name) => {
+    const user = userEvent.setup()
+    render(<SettingsView initialSection="general" githubConnection={githubDisconnected} />)
+
+    expect(screen.queryByRole("region", { name })).toBeNull()
+    await user.tab()
+    for (let i = 0; i < 40 && document.activeElement !== screen.getByRole("button", { name }); i++) await user.tab()
+    expect(document.activeElement).toBe(screen.getByRole("button", { name }))
+    await user.keyboard("{Enter}")
+
+    const stub = screen.getByRole("region", { name })
+    expect(stub.textContent).toContain("Coming soon")
+    expect(screen.getByRole("button", { name }).getAttribute("aria-current")).toBe("true")
+  })
+
   it("filters nav items by search query", async () => {
     const user = userEvent.setup()
     render(<SettingsView initialSection="general" githubConnection={githubDisconnected} />)
