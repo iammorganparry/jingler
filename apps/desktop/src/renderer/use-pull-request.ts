@@ -65,13 +65,20 @@ export interface PullRequestState {
 
 export function usePullRequest(
   session: Session,
-  opts: { connected: boolean; autoDetect: boolean; onPrLinked?: (sessionId: string, prNumber: number) => void }
+  opts: {
+    connected: boolean
+    autoDetect: boolean
+    onPrLinked?: (sessionId: string, prNumber: number) => void
+    /** The stack layer to show; defaults to the session's own PR. */
+    prNumber?: number | null
+  }
 ): PullRequestState {
   const qc = useQueryClient()
   const { autoDetect, onPrLinked } = opts
+  const prNumber = opts.prNumber ?? session.prNumber
 
   const query = useQuery({
-    queryKey: prKey(session.id, session.prNumber),
+    queryKey: prKey(session.id, prNumber),
     // Checks and review state change outside Jingler. Keep the visible PR current
     // without polling hidden/background windows.
     refetchInterval: PR_REFRESH_MS,
@@ -82,7 +89,7 @@ export function usePullRequest(
         const n = await rpc.githubDetectPr(session.id).catch(() => null)
         if (n != null && n !== session.prNumber) onPrLinked?.(session.id, n)
       }
-      return rpc.githubPr(session.id)
+      return rpc.githubPr(session.id, prNumber ?? undefined)
     }
   })
 
@@ -100,7 +107,7 @@ export function usePullRequest(
   const reviewMutation = useMutation({
     mutationFn: (input: { body: string; kind: ReviewSubmitKind }) =>
       rpc.githubReview(session.id, input.kind, input.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
 
   // "Merge pull request" merges the linked PR through GitHub's API. On success the
@@ -108,13 +115,13 @@ export function usePullRequest(
   // sweep, which polls the PR state, retires the session).
   const mergeMutation = useMutation({
     mutationFn: (method: PrMergeMethod) => rpc.githubMerge(session.id, method),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   // "Ready for review" flips a draft PR through GraphQL. On success the PR
   // read is invalidated so the header + side panel leave the Draft state.
   const markReadyMutation = useMutation({
     mutationFn: () => rpc.githubMarkReady(session.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const markReady = useCallback(
     () => markReadyMutation.mutateAsync().then(() => undefined),
@@ -124,7 +131,7 @@ export function usePullRequest(
   // `BEHIND` merge state. The re-read is what drops the blocker from the box.
   const updateBranchMutation = useMutation({
     mutationFn: () => rpc.githubUpdateBranch(session.id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const updateBranch = useCallback(
     () => updateBranchMutation.mutateAsync().then(() => undefined),
@@ -150,7 +157,7 @@ export function usePullRequest(
   const resolveThreadMutation = useMutation({
     mutationFn: (input: { threadId: string; resolved: boolean }) =>
       rpc.githubResolveThread(session.id, input.threadId, input.resolved),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const resolveThread = useCallback(
     (threadId: string, resolved: boolean) =>
@@ -162,7 +169,7 @@ export function usePullRequest(
   const replyToThreadMutation = useMutation({
     mutationFn: (input: { commentId: number; body: string }) =>
       rpc.githubReplyToThread(session.id, input.commentId, input.body),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, session.prNumber) })
+    onSuccess: () => void qc.invalidateQueries({ queryKey: prKey(session.id, prNumber) })
   })
   const replyToThread = useCallback(
     (commentId: number, body: string) =>
@@ -171,7 +178,7 @@ export function usePullRequest(
   )
 
   const pr = query.data ?? null
-  const sentEntryIds = useRoutedEntries(session.id, session.prNumber)
+  const sentEntryIds = useRoutedEntries(session.id, prNumber)
   const sendEntryToAgent = useCallback(
     async (entryId: string) => {
       // An id is either a top-level timeline entry or a comment inside an inline
@@ -193,9 +200,9 @@ export function usePullRequest(
       if (!found) return
       const ref = reviewFeedbackReference(found.path, found.line)
       routeToAgent(`Review feedback from @${found.author}${ref}:\n\n${found.body}\n\nPlease address this.`)
-      if (session.prNumber !== null) markRouted(session.id, session.prNumber, entryId)
+      if (prNumber !== null) markRouted(session.id, prNumber, entryId)
     },
-    [pr, routeToAgent, session.id, session.prNumber]
+    [pr, routeToAgent, session.id, prNumber]
   )
 
   const openOnGithub = useCallback(() => {

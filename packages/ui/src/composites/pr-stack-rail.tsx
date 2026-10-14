@@ -12,7 +12,17 @@ export interface PrStackLayer {
   readonly checks?: PrCheckStatus | null
 }
 
-const STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
+export const PR_STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
+
+/** Stack navigation handed to the PR view: switcher in the header, rail on Checks. */
+export interface PrStackNav {
+  /** Ordered bottom layer first. */
+  readonly layers: ReadonlyArray<PrStackLayer>
+  readonly selected: number | null
+  readonly onSelect: (number: number) => void
+  /** -1 = down the stack, 1 = up. */
+  readonly onStep: (delta: -1 | 1) => void
+}
 
 /** Node on the rail: a tick for merged, a cross for failing checks, otherwise a hollow ring. Red is the only colour. */
 function LayerNode({ layer }: { layer: PrStackLayer }) {
@@ -69,7 +79,7 @@ export function PrStackRail({
             <LayerNode layer={layer} />
             <span className="font-mono text-[12px]">#{layer.number}</span>
             <span className="min-w-0 flex-1 truncate text-[12px]">{layer.title ?? layer.branch}</span>
-            {layer.state && <span className="text-[11px] text-dim">{STATE_LABEL[layer.state]}</span>}
+            {layer.state && <span className="text-[11px] text-dim">{PR_STATE_LABEL[layer.state]}</span>}
           </Button>
         )
       })}

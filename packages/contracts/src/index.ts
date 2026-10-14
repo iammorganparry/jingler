@@ -1741,7 +1741,8 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.pr", {
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    /** `number` picks one layer of a stack; omitted reads the session's top PR. */
+    payload: { sessionId: Schema.String, number: Schema.optional(Schema.Number) }
   }),
 
   /** Open PRs across every repository granted to the GitHub App. */
