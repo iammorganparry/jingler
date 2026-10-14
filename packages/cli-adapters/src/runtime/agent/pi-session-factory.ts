@@ -162,6 +162,29 @@ const loadCapabilityCeiling = (): Promise<CapabilityCeilingModule> => {
   return capabilityCeilingModule
 }
 
+/**
+ * pi-subagents looks a parent's ceiling up by `resolveCurrentSessionId`, which
+ * prefers the session FILE over the session id. Registering under the id alone
+ * misses that lookup, and the child then requires every tool its shared profile
+ * lists, failing with "child tools were unavailable". Register under both.
+ */
+export const registerParentCapabilityCeiling = (
+  module: CapabilityCeilingModule,
+  sessionIds: ReadonlyArray<string | undefined>,
+  options: Omit<RegisterSubagentCapabilityCeilingOptions, "sessionId">
+): SubagentCapabilityCeilingHandle => {
+  const handles = [...new Set(sessionIds.filter((id): id is string => Boolean(id)))]
+    .map((sessionId) => module.registerSubagentCapabilityCeiling({ ...options, sessionId }))
+  return {
+    update: (ceiling) => {
+      for (const handle of handles) handle.update(ceiling)
+    },
+    dispose: () => {
+      for (const handle of handles) handle.dispose()
+    }
+  }
+}
+
 export interface PiSessionFactoryOptions {
   readonly agentDir: string
   readonly sessionsDir: string
@@ -804,8 +827,10 @@ function* bindSubagentCapabilities(
           }))
         ))
       )
-      subagentCeiling = capabilityCeiling.registerSubagentCapabilityCeiling({
-        sessionId: parentRuntimeSessionId,
+      subagentCeiling = registerParentCapabilityCeiling(capabilityCeiling, [
+        parentRuntimeSessionId,
+        embedded.result.session.sessionFile
+      ], {
         source: "jingler-runtime",
         ceiling: {
           allowedTools: [
