@@ -255,6 +255,9 @@ const backgroundResponse = (
   )
 }
 
+/** Waits (~400ms each) before a [[held-settles]] fixture finishes its children. */
+const HELD_SETTLE_AFTER_WAITS = 10
+
 const heldSubagentsResponse = (
   context: PiContext
 ): ReturnType<typeof fauxAssistantMessage> | null => {
@@ -268,12 +271,20 @@ const heldSubagentsResponse = (
   const resultsAfterLatestPrompt = recentToolResultCount(context, E2E_HELD_SUBAGENTS_TOOL)
   const startPhase = direct ? "direct-start" : "start"
   if (!steered) {
+    // [[held-settles]] finishes the children on their own after a few waits, so a spec can
+    // watch a child settle while its view is open (the composer is gone there, no steer possible).
+    const settles = prompt.includes("[[held-settles]]")
+    if (settles && resultsAfterLatestPrompt > HELD_SETTLE_AFTER_WAITS) {
+      return fauxAssistantMessage("Both agents reported back.")
+    }
     const toolCall = fauxToolCall(
       E2E_HELD_SUBAGENTS_TOOL,
       {
         phase: resultsAfterLatestPrompt === 0
           ? startPhase
-          : "wait"
+          : settles && resultsAfterLatestPrompt === HELD_SETTLE_AFTER_WAITS
+            ? "settle"
+            : "wait"
       },
       { id: `${direct ? "direct-subagent" : "held-subagents"}-${resultsAfterLatestPrompt}` }
     )
