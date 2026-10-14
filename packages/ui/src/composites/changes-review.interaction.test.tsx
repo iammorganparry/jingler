@@ -114,6 +114,18 @@ describe("ReviewFileDiff selection", () => {
     expect(screen.queryByPlaceholderText(COMPOSER_PLACEHOLDER)).toBeNull()
   })
 
+  it("renders no Keep or Revert control on a local diff, in the header or the composer", async () => {
+    render(
+      <WidthTierValue width={1_240}>
+        <ReviewFileDiff {...diffProps} file={file(path)} diff={patch} source="local" />
+      </WidthTierValue>
+    )
+
+    await selectOldLineOne()
+    expect(screen.queryByRole("button", { name: /revert/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /keep/i })).toBeNull()
+  })
+
   it("sends a comment straight to the agent without collecting a draft", async () => {
     const onAddDraft = vi.fn()
     const onSendComment = vi.fn()

@@ -108,7 +108,6 @@ import {
   githubAckEvent,
   workspaceRevertFile,
   withoutAttachmentData,
-  workspaceRevertLines,
 } from "./rpc.js";
 
 describe("session creation defaults", () => {
@@ -1139,7 +1138,7 @@ describe("RPC handlers", () => {
     });
   });
 
-  describe("Workspace.revert*", () => {
+  describe("Workspace.revertFile", () => {
     // Revert on an unknown / worktree-less session must be a safe no-op.
     it("no-ops for an unknown session (no worktree to touch)", async () => {
       const ws = Layer.mergeAll(
@@ -1152,16 +1151,6 @@ describe("RPC handlers", () => {
           workspaceRevertFile({ sessionId: "nope", path: "a.ts" }).pipe(
             Effect.provide(ws),
           ),
-        ),
-      ).resolves.toBeUndefined();
-      await expect(
-        Effect.runPromise(
-          workspaceRevertLines({
-            sessionId: "nope",
-            path: "a.ts",
-            startLine: 1,
-            endLine: 2,
-          }).pipe(Effect.provide(ws)),
         ),
       ).resolves.toBeUndefined();
     });
@@ -1210,16 +1199,6 @@ describe("RPC handlers", () => {
           workspaceRevertFile({
             sessionId: "direct-session",
             path: "developer-edit.ts",
-          }).pipe(Effect.provide(ws)),
-        ),
-      ).rejects.toThrow(/disabled for direct sessions/i);
-      await expect(
-        Effect.runPromise(
-          workspaceRevertLines({
-            sessionId: "direct-session",
-            path: "developer-edit.ts",
-            startLine: 1,
-            endLine: 2,
           }).pipe(Effect.provide(ws)),
         ),
       ).rejects.toThrow(/disabled for direct sessions/i);

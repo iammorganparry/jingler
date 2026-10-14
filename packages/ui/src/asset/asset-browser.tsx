@@ -39,6 +39,7 @@ export interface AssetRepositoryTreeProps {
   readonly treeError?: string | null
   readonly onRetryTree?: () => void
   readonly onSelectPath: (path: string) => void
+  readonly onDiscardFile?: (path: string) => void
 }
 
 function RepositoryTree({
@@ -47,11 +48,12 @@ function RepositoryTree({
   treeLoading = false,
   treeError = null,
   onRetryTree,
-  onSelectPath
+  onSelectPath,
+  onDiscardFile
 }: AssetRepositoryTreeProps) {
   return (
     <div className="relative h-full min-h-0 overflow-hidden bg-panel">
-      <AssetFileTree entries={entries} selectedPath={selectedPath} onSelectPath={onSelectPath} className="h-full" />
+      <AssetFileTree entries={entries} selectedPath={selectedPath} onSelectPath={onSelectPath} onDiscardFile={onDiscardFile} className="h-full" />
       {treeLoading && entries.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 bg-panel/90 text-[11px] text-dim">
           <Spinner size={12} /> Loading files…

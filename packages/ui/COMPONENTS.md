@@ -117,6 +117,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | Composer | `composites/composer.tsx` | Prompt composer: input, chips, attachments, send/stop. | skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth | yes | — |
 | ContextDivider | `composites/context-divider.tsx` | Transcript divider marking context compaction. | — | yes | — |
 | ContextMeter | `composites/context-meter.tsx` | Context-window usage ring and popover. | tokens, breakdown, triggerAt, phase, preparing, digestReady | yes | — |
+| DiscardFileMenu | `composites/discard-file-menu.tsx` | Right-click a file row → "Discard file changes" → ConfirmDialog (danger). Wraps a Pierre tree. | paths, onDiscard | yes | #424 (6.2) |
 | EnvironmentDialog | `composites/environment-dialog.tsx` | Pick or create a workspace environment. | open, state, values, host, hosts, environment | no | — |
 | InlineCommentComposer | `composites/inline-comment-composer.tsx` | Inline comment box anchored under a diff range. | — | no | — |
 | IssueInbox | `composites/issue-inbox.tsx` | Global GitHub issue list with detail pane. | issues, viewerLogin, warnings, onActivate, onRefresh, refreshing | yes | — |

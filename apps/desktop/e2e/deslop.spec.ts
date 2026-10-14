@@ -44,7 +44,7 @@ test("Deslop button sends the file to the session's agent", async ({ launchApp }
   // No PR yet, so Changes lists the uncommitted work; open the file's diff.
   const diff = await openChangedFile(window, "README.md")
 
-  // The Deslop button sits in the file's sticky header, beside Revert file.
+  // The Deslop button sits in the file's sticky header, beside Viewed.
   const deslop = diff.getByRole("button", { name: "Deslop" }).first()
   await expect(deslop).toBeVisible({ timeout: 30_000 })
   await deslop.click()

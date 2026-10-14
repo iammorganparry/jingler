@@ -20,6 +20,7 @@ export function QuestionCard({
   request,
   onSubmit,
   onCancel,
+  onSwitchToAuto,
   submitting = false
 }: {
   request: QuestionRequest
@@ -27,6 +28,8 @@ export function QuestionCard({
   onSubmit: (answers: readonly QuestionAnswer[]) => void
   /** Skip / dismiss the whole question group. */
   onCancel?: () => void
+  /** Offered as a tertiary link; omit (e.g. already in Auto) to hide it. */
+  onSwitchToAuto?: () => void
   /** Show a spinner on the submit button while the answers are in flight. */
   submitting?: boolean
 }) {
@@ -251,6 +254,11 @@ default: selectNumberedOption(e)
         {onCancel && (
           <Button variant="ghost" size="sm" onClick={onCancel}>
             Skip
+          </Button>
+        )}
+        {onSwitchToAuto && (
+          <Button variant="ghost" size="sm" onClick={onSwitchToAuto}>
+            Switch session to Auto
           </Button>
         )}
         <div className="flex-1" />

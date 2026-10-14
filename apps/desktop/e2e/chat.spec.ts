@@ -671,7 +671,7 @@ test("a passing check still links to its run", async ({ launchApp }) => {
   await expect(window.getByText("48s")).toBeVisible()
 })
 
-test("Changes falls back to the Uncommitted source and reverts a whole file", async ({ launchApp }) => {
+test("Changes falls back to the Uncommitted source and discards a whole file via right-click", async ({ launchApp }) => {
   // A session whose worktree (the e2e repo) has an uncommitted change. GitHub is
   // disconnected, so the PR source is empty and the Explorer falls back to the
   // "Uncommitted" (local) diff — where Revert is enabled.
@@ -691,8 +691,11 @@ test("Changes falls back to the Uncommitted source and reverts a whole file", as
   const diff = window.getByTestId("review-file-diff")
   await expect(diff.getByText("an uncommitted edit")).toBeVisible({ timeout: 20_000 })
 
-  // Revert the whole file → the uncommitted change leaves the change set.
-  await diff.getByRole("button", { name: /Revert file/ }).click()
+  // No per-file Keep/Revert control renders; discarding is a right-click on the tree row.
+  await expect(diff.getByRole("button", { name: /Revert|Keep/ })).toHaveCount(0)
+  await explorer.locator('[data-item-path="README.md"]').click({ button: "right" })
+  await window.getByRole("menuitem", { name: "Discard file changes" }).click()
+  await window.getByRole("button", { name: "Discard", exact: true }).click()
   await expect(explorer.locator('[data-item-path="README.md"]')).toHaveCount(0, { timeout: 20_000 })
 })
 
