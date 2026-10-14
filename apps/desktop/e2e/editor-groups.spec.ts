@@ -89,6 +89,32 @@ const rejectedFileDrag = async (page: Page, sourceSelector: string, targetGroup:
     return result
   }, { sourceSelector, targetGroup })
 
+/** Starts a drag and hovers a point of the target; `dropHeldDrag` finishes it. */
+const hoverDrag = async (page: Page, sourceSelector: string, targetGroup: number, x: number, y = 0.5) =>
+  page.evaluate(({ sourceSelector, targetGroup, x, y }) => {
+    const source = document.querySelector(sourceSelector)
+    const target = document.querySelectorAll('[data-testid="editor-group"]')[targetGroup]
+    if (!(source && target)) throw new Error(`missing drag node: ${sourceSelector}`)
+    const box = target.getBoundingClientRect()
+    const init = {
+      dataTransfer: new DataTransfer(),
+      bubbles: true,
+      cancelable: true,
+      clientX: box.left + box.width * x,
+      clientY: box.top + box.height * y
+    }
+    source.dispatchEvent(new DragEvent("dragstart", init))
+    target.dispatchEvent(new DragEvent("dragover", init))
+    Object.assign(window, { heldDrag: { source, target, init } })
+  }, { sourceSelector, targetGroup, x, y })
+
+const dropHeldDrag = async (page: Page) =>
+  page.evaluate(() => {
+    const { source, target, init } = (window as unknown as { heldDrag: { source: Element; target: Element; init: DragEventInit } }).heldDrag
+    target.dispatchEvent(new DragEvent("drop", init))
+    source.dispatchEvent(new DragEvent("dragend", init))
+  })
+
 const sessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedSession> => {
   const base = {
     repo: "widget",
@@ -252,6 +278,43 @@ test("dragging file and view tabs creates horizontal and vertical splits", async
   await expect(window.getByTestId("editor-split-column")).toBeVisible()
   await expect(window.getByTestId("editor-tab-file-b.ts")).toBeVisible()
   await expect(window.getByTestId("editor-tab-view-terminal")).toBeVisible()
+})
+
+test("dragging a tab shows five labelled drop zones, highlights the hovered one and splits on an edge drop", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    sessions,
+    seed: ({ repoPath }) => {
+      writeFileSync(join(repoPath, "a.ts"), "export const a = 1\n")
+      writeFileSync(join(repoPath, "b.ts"), "export const b = 2\n")
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.locator("[data-testid^='session-row-']").filter({ hasText: "Alpha session" }).first().click()
+  for (const path of ["a.ts", "b.ts"]) {
+    await window.keyboard.press("Meta+p")
+    await window.getByPlaceholder("Open a file in Alpha session…").fill(path)
+    await window.getByTestId(`palette-item-file:${path}`).click()
+  }
+  await expect(groups(window)).toHaveCount(2)
+
+  await hoverDrag(window, '[data-testid="editor-tab-file-b.ts"]', 1, 0.95)
+  const overlay = groups(window).nth(1).getByTestId("editor-drop-overlay")
+  await expect(overlay.getByTestId("editor-drop-zone")).toHaveCount(5)
+  for (const label of ["Split left", "Split right", "Split up", "Split down", "Move here"]) {
+    await expect(overlay.getByText(label)).toBeVisible()
+  }
+  await expect(overlay.locator('[data-active="true"]')).toHaveCount(1)
+  await expect(overlay.locator('[data-zone="right"]')).toHaveAttribute("data-active", "true")
+  await expect(overlay.locator('[data-zone="right"] polygon')).toHaveClass(/fill-brand\/20/)
+  await expect(overlay.locator('[data-zone="left"]')).toHaveAttribute("data-active", "false")
+
+  await dropHeldDrag(window)
+  await expect(window.getByTestId("editor-drop-overlay")).toHaveCount(0)
+  await expect(groups(window)).toHaveCount(3)
+  await expect(window.getByTestId("editor-split-row")).toBeVisible()
 })
 
 test("⌘T opens the focused group's tab-type chooser", async ({ launchApp }) => {
