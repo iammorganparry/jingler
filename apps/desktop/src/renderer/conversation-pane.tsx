@@ -78,7 +78,8 @@ import {
   recentSubagentNodes,
   registerMainViewReader,
   releaseSubagentTabController,
-  retainSubagentTabController
+  retainSubagentTabController,
+  selectSubagentTab
 } from "./subagent-tab-store.js"
 import { useSubagentView } from "./use-subagent-view.js"
 import { useBackgroundTasks } from "./use-background-tasks.js"
@@ -733,7 +734,14 @@ export function ConversationPane({
     chatId: activeChat.id,
     continuation: activeChat.continuation?.id ?? null,
     events: convo.subagentFleetEvents,
-    legacyAgents: legacyFleetAgents
+    legacyAgents: legacyFleetAgents,
+    onChildFinished: (node) =>
+      onPushToast?.({
+        key: `subagent-finished-${node.id}`,
+        variant: node.status === "failed" ? "error" : "success",
+        title: `${node.agent} ${node.status === "failed" ? "failed" : "finished"}`,
+        action: { label: "View", onAction: () => selectSubagentTab(session.id, activeChat.id, node.id) }
+      })
   })
   const [subagentControlOutcome, setSubagentControlOutcome] = useState<
     SubagentFleetControlOutcome | null

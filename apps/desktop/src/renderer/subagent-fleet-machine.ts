@@ -189,6 +189,25 @@ export const settleStoppedFleet = (
   ]
 }
 
+const FINISHED_STATUSES: ReadonlySet<SubagentFleetNode["status"]> = new Set(["completed", "failed"])
+
+/**
+ * Agents that went from active to completed/failed between two projections.
+ * The child the user has open is excluded: they are already watching it end.
+ * First sight of an already-finished node (history on mount) never counts.
+ */
+export const newlyFinishedNodes = (
+  previous: ReadonlyArray<SubagentFleetNode>,
+  next: ReadonlyArray<SubagentFleetNode>,
+  openId: string
+): ReadonlyArray<SubagentFleetNode> =>
+  next.filter((node) =>
+    node.nodeKind === "agent" &&
+    node.id !== openId &&
+    FINISHED_STATUSES.has(node.status) &&
+    previous.some((before) => before.id === node.id && ACTIVE_STATUSES.has(before.status))
+  )
+
 const hasNode = (nodes: ReadonlyArray<SubagentFleetNode>, id: string): boolean =>
   nodes.some((node) => node.id === id)
 
