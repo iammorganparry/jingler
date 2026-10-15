@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react"
 import { useEffect, useState, type ReactNode } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
+import { DiffStat } from "../components/diff-stat.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { cn } from "../lib/cn.js"
 import { fmtElapsed } from "../lib/relative-time.js"
@@ -86,6 +87,33 @@ function UsageRow({ node }: { node: SubagentFleetNode }) {
   )
 }
 
+/** Worktree branch (mono, truncates first), diff stat and a PR chip that opens the PR view. Shared-checkout children say so. */
+function WorkspaceRow({ node, onOpenPullRequest }: { node: SubagentFleetNode; onOpenPullRequest?: (prNumber: number) => void }) {
+  const { workspace, prNumber } = node
+  return (
+    <Row testId="subagent-meta-workspace">
+      {workspace ? (
+        <Grow className="font-mono text-text-body">{workspace.branch}</Grow>
+      ) : (
+        <Grow className="text-dim">Shared checkout</Grow>
+      )}
+      {workspace?.diff && <DiffStat added={workspace.diff.added} removed={workspace.diff.removed} className="flex-none" />}
+      {prNumber !== null && (
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="subagent-meta-pr"
+          aria-label={`Open pull request #${prNumber}`}
+          onClick={() => onOpenPullRequest?.(prNumber)}
+          className="h-5 flex-none px-1.5 font-mono text-[10px]"
+        >
+          PR #{prNumber}
+        </Button>
+      )}
+    </Row>
+  )
+}
+
 function ArtifactRow({ node, onOpenArtifact }: { node: SubagentFleetNode; onOpenArtifact?: (path: string) => void }) {
   if (node.artifacts.length === 0) return null
   return (
@@ -122,15 +150,18 @@ function DetailsGrid({ node }: { node: SubagentFleetNode }) {
   )
 }
 
-/** Meta strip under the subagent breadcrumb (board 20a): up to 3 rows, `Details` opens a key/value grid. Null fields are omitted. */
+/** Meta strip under the subagent breadcrumb (board 20a): up to 4 rows, `Details` opens a key/value grid. Null fields are omitted. */
 export function SubagentMetaStrip({
   node,
   providerId,
-  onOpenArtifact
+  onOpenArtifact,
+  onOpenPullRequest
 }: {
   node: SubagentFleetNode
   providerId?: ProviderId
   onOpenArtifact?: (path: string) => void
+  /** Opens the PR view (6.18) for the child's PR. */
+  onOpenPullRequest?: (prNumber: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const now = useNow(LIVE.has(node.status) && node.completedAt === null)
@@ -138,6 +169,7 @@ export function SubagentMetaStrip({
     <div data-testid="subagent-meta-strip" className="flex flex-col gap-1.5 border-b border-line px-[30px] py-2 text-[11px]">
       <IdentityRow node={node} providerId={providerId} now={now} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
       <UsageRow node={node} />
+      <WorkspaceRow node={node} onOpenPullRequest={onOpenPullRequest} />
       <ArtifactRow node={node} onOpenArtifact={onOpenArtifact} />
       {expanded && <DetailsGrid node={node} />}
     </div>

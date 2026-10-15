@@ -138,6 +138,9 @@ test("the subagent view shows the meta strip, Details, the quoted task and a rea
   await expect(strip.getByTestId("subagent-meta-identity")).toContainText("running")
   await expect(strip.getByTestId("subagent-meta-usage")).toContainText("workspace_read_file")
   await expect(strip).not.toContainText("—")
+  // Held fixture children share the parent checkout and have no PR.
+  await expect(strip.getByTestId("subagent-meta-workspace")).toHaveText("Shared checkout")
+  await expect(strip.getByTestId("subagent-meta-pr")).toHaveCount(0)
 
   // Details expands to the key/value grid with run id and started time.
   await expect(window.getByTestId("subagent-meta-details")).toHaveCount(0)
@@ -180,4 +183,17 @@ test("a child that finishes while its view is open stays open and shows its term
   await expect(view).toContainText("Survey the tab bar")
   await expect(window.getByTestId("subagent-breadcrumb")).toBeVisible()
   await expect(window.getByTestId("conversation-scroll")).toHaveCount(0)
+})
+
+test("subagent dropdown rows mark shared-checkout children", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[held-subagents]] survey the app")
+  await composer.press("Enter")
+  await expect(window.getByTestId("subagent-chip").first()).toBeVisible({ timeout: 15_000 })
+  await window.getByTestId("subagent-chip").first().click()
+  const row = window.getByTestId("subagent-chip-popover").getByRole("menuitem", { name: /Survey the tab bar/ })
+  await expect(row.getByTestId("subagent-chip-branch")).toHaveText("Shared checkout")
 })

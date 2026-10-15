@@ -314,6 +314,28 @@ describe("SubagentMetaStrip", () => {
   })
 })
 
+describe("SubagentMetaStrip workspace", () => {
+  const worktree = { path: "/wt/reviewer", branch: "feat/review-retry", baseRef: "main", diff: { added: 42, removed: 8 } }
+
+  it("shows the branch, diff stat and a PR chip that opens the PR view", () => {
+    const onOpenPullRequest = vi.fn()
+    render(<FleetAgentView node={fleetNode({ workspace: worktree, prNumber: 491 })} messages={[]} onOpenPullRequest={onOpenPullRequest} />)
+    const row = screen.getByTestId("subagent-meta-workspace")
+    expect(row.textContent).toContain("feat/review-retry")
+    expect(row.textContent).toContain("+42")
+    expect(row.textContent).toContain("−8")
+    expect(screen.getByText("feat/review-retry").className).toContain("truncate")
+    fireEvent.click(screen.getByRole("button", { name: "Open pull request #491" }))
+    expect(onOpenPullRequest).toHaveBeenCalledWith(491)
+  })
+
+  it("says Shared checkout and omits the PR chip for a child without a worktree or PR", () => {
+    render(<FleetAgentView node={fleetNode()} messages={[]} />)
+    expect(screen.getByTestId("subagent-meta-workspace").textContent).toBe("Shared checkout")
+    expect(screen.queryByTestId("subagent-meta-pr")).toBeNull()
+  })
+})
+
 describe("FleetAgentView task", () => {
   it("renders the task as the first, quoted item in the transcript", () => {
     const message: Message = {

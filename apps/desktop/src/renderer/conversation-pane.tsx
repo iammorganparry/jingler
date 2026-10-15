@@ -295,6 +295,7 @@ export function ConversationPane({
   providerCatalog,
   agentEndpointCatalog,
   onSelectChanges,
+  onOpenPullRequest,
   onSelectBrowser,
   onOpenProviderSettings,
   onAddMcp,
@@ -339,6 +340,8 @@ export function ConversationPane({
   onOpenFile?: (sessionId: string, path: string) => void
 /** Open the canonical Changes view from uncertain-mutation recovery. */
   onSelectChanges?: () => void
+  /** Open the session's PR view from a subagent's PR chip. */
+  onOpenPullRequest?: () => void
   /** Open the Browser view; the `Preview ready · Open browser` chip's path. */
   onSelectBrowser?: () => void
   /** Open provider settings for auth, target, migration, or certification recovery. */
@@ -1023,7 +1026,7 @@ export function ConversationPane({
         // mode, and environment pickers are omitted — those are main-turn
         // choices — and the composer's follow toggle points at this agent.
         <>
-          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile)}
+          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile, onOpenPullRequest)}
           {/* Same gutter + centered max-width as the transcript column above —
               a full-bleed composer read as a different surface entirely. */}
           <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
@@ -1141,7 +1144,7 @@ export function ConversationPane({
   )
 }
 
-function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined) {
+function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined, onOpenPullRequest: (() => void) | undefined) {
   return <FleetAgentView
     node={fleet.selectedNode!}
     messages={fleet.selectedLegacyAgent === null
@@ -1150,6 +1153,7 @@ function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: 
     providerId={session.providerId}
     controlOutcome={subagentControlOutcome}
     onOpenArtifact={(path) => onOpenFile?.(session.id, path)}
+    onOpenPullRequest={onOpenPullRequest}
     loading={fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading}
     onRetry={() => void childTranscriptQuery.refetch()}
     error={fleet.selectedLegacyAgent === null && childTranscriptQuery.error
