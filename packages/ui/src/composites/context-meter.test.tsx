@@ -1,8 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { ContextMeter } from "./context-meter.js"
 
 afterEach(cleanup)
+
+const ring = () => screen.getByRole("button", { name: /Context usage/ })
+const openPopover = async () => {
+  fireEvent.click(ring())
+  await waitFor(() => expect(screen.getAllByTestId("context-breakdown").length).toBeGreaterThan(0))
+}
 
 /**
  * The meter's job is to make the QUALITY BUDGET legible, not the hard window.
@@ -12,21 +18,18 @@ describe("ContextMeter", () => {
   it("measures against the compaction trigger, not the model's ceiling", () => {
     // A 1M-window model at 300k. Against the window this is 30% — against the
     // point where quality goes, it is full. Full is the honest reading.
-    const { container } = render(<ContextMeter tokens={300_000} triggerAt={300_000} />)
-    const bar = container.querySelector("span[style]") as HTMLElement
-    expect(bar.style.width).toBe("100%")
+    render(<ContextMeter tokens={300_000} triggerAt={300_000} />)
+    expect(ring().getAttribute("aria-label")).toBe("Context usage 100%")
   })
 
   it("fills proportionally below the trigger", () => {
-    const { container } = render(<ContextMeter tokens={85_000} triggerAt={170_000} />)
-    const bar = container.querySelector("span[style]") as HTMLElement
-    expect(bar.style.width).toBe("50%")
+    render(<ContextMeter tokens={85_000} triggerAt={170_000} />)
+    expect(ring().getAttribute("aria-label")).toBe("Context usage 50%")
   })
 
   it("never overflows past full when the session runs over", () => {
-    const { container } = render(<ContextMeter tokens={900_000} triggerAt={300_000} />)
-    const bar = container.querySelector("span[style]") as HTMLElement
-    expect(bar.style.width).toBe("100%")
+    render(<ContextMeter tokens={900_000} triggerAt={300_000} />)
+    expect(ring().getAttribute("aria-label")).toBe("Context usage 100%")
   })
 
   /**
@@ -36,7 +39,8 @@ describe("ContextMeter", () => {
   it("shows a reported total without inventing a target when the window is unknown", () => {
     const { container } = render(<ContextMeter tokens={100_000} triggerAt={null} />)
     expect(container.textContent).toContain("100k")
-    expect(container.querySelector("span[style]")).toBeNull()
+    expect(ring().getAttribute("aria-label")).toBe("Context usage 100k")
+    expect(screen.queryByTestId("context-ring-arc")).toBeNull()
   })
 
   it("renders nothing before the first reading", () => {
@@ -65,10 +69,8 @@ describe("ContextMeter", () => {
   })
 
   it("says so when auto-compaction is off for the session", () => {
-    const { container } = render(
-      <ContextMeter tokens={472_200} triggerAt={300_000} phase="unknown" />
-    )
-    expect((container.firstChild as HTMLElement).getAttribute("title")).toContain(
+    render(<ContextMeter tokens={472_200} triggerAt={300_000} phase="unknown" />)
+    expect(ring().getAttribute("title")).toContain(
       "automatic compaction is off"
     )
   })
@@ -86,10 +88,8 @@ describe("ContextMeter", () => {
   })
 
   it("offers a retry on a stalled session", () => {
-    const { container } = render(
-      <ContextMeter tokens={472_200} triggerAt={300_000} phase="prepare" stalled />
-    )
-    expect((container.firstChild as HTMLElement).getAttribute("title")).toContain("try again")
+    render(<ContextMeter tokens={472_200} triggerAt={300_000} phase="prepare" stalled />)
+    expect(ring().getAttribute("title")).toContain("try again")
   })
 
   // An in-flight summary is still the truth even on a session that had
@@ -116,7 +116,7 @@ describe("ContextMeter", () => {
     expect(screen.queryByText("compacts next turn")).toBeNull()
   })
 
-  it("names what is in flight on hover, so the hold is not a mystery", () => {
+  it("names what is in flight in the popover, so the hold is not a mystery", () => {
     render(
       <ContextMeter
         tokens={310_000}
@@ -163,16 +163,59 @@ describe("ContextMeter", () => {
     expect(done.innerHTML).not.toContain("animate-pulse")
   })
 
-  // A compaction already under way cannot be started again, so the meter stops
-  // being a button rather than offering one that does nothing.
-  it("is not clickable while compacting", () => {
+  // A compaction already under way cannot be started again, so the popover's
+  // action is disabled rather than offering one that does nothing.
+  it("disables Compact now while compacting and shows progress", async () => {
     render(<ContextMeter tokens={50_000} triggerAt={300_000} preparing onCompactNow={() => {}} />)
-    expect(screen.queryByRole("button")).toBeNull()
+    await openPopover()
+    expect((screen.getByRole("button", { name: "Compact now" }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId("context-status").textContent).toBe("compacting…")
   })
 
-  it("explains the in-flight state on hover", () => {
-    const { container } = render(<ContextMeter tokens={50_000} triggerAt={300_000} preparing />)
-    expect((container.firstChild as HTMLElement).getAttribute("title")).toContain(
+  it("calls onCompactNow from the popover", async () => {
+    const onCompactNow = vi.fn()
+    render(<ContextMeter tokens={50_000} triggerAt={300_000} onCompactNow={onCompactNow} />)
+    await openPopover()
+    fireEvent.click(screen.getByRole("button", { name: "Compact now" }))
+    expect(onCompactNow).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no Compact now without a handler", async () => {
+    render(<ContextMeter tokens={50_000} triggerAt={300_000} />)
+    await openPopover()
+    expect(screen.queryByRole("button", { name: "Compact now" })).toBeNull()
+  })
+
+  it("wraps the send button it rings", () => {
+    render(
+      <ContextMeter tokens={50_000} triggerAt={100_000}>
+        <button type="button">Send</button>
+      </ContextMeter>
+    )
+    expect(screen.getByRole("button", { name: "Send" })).toBeDefined()
+    expect(ring().getAttribute("aria-label")).toBe("Context usage 50%")
+  })
+
+  it("renders just the wrapped button before the first reading", () => {
+    render(
+      <ContextMeter tokens={0} triggerAt={100_000}>
+        <button type="button">Send</button>
+      </ContextMeter>
+    )
+    expect(screen.queryByRole("button", { name: /Context usage/ })).toBeNull()
+    expect(screen.getByRole("button", { name: "Send" })).toBeDefined()
+  })
+
+  it("turns the ring red only when compaction has stalled", () => {
+    const { rerender } = render(<ContextMeter tokens={900_000} triggerAt={300_000} />)
+    expect(screen.getByTestId("context-ring-arc").getAttribute("class")).not.toContain("state-failed")
+    rerender(<ContextMeter tokens={900_000} triggerAt={300_000} phase="prepare" stalled />)
+    expect(screen.getByTestId("context-ring-arc").getAttribute("class")).toContain("stroke-state-failed")
+  })
+
+  it("explains the in-flight state in the popover", () => {
+    render(<ContextMeter tokens={50_000} triggerAt={300_000} preparing />)
+    expect(ring().getAttribute("title")).toContain(
       "summarising in the background"
     )
   })
@@ -185,9 +228,9 @@ describe("ContextMeter", () => {
     expect(container.innerHTML).not.toContain("red")
   })
 
-  it("explains the numbers on hover", () => {
-    const { container } = render(<ContextMeter tokens={150_000} triggerAt={170_000} />)
-    const title = (container.firstChild as HTMLElement).getAttribute("title")
+  it("explains the numbers in the popover", () => {
+    render(<ContextMeter tokens={150_000} triggerAt={170_000} />)
+    const title = ring().getAttribute("title")
     expect(title).toContain("150,000")
     expect(title).toContain("170,000")
     expect(title).toContain("compacts")
@@ -195,15 +238,14 @@ describe("ContextMeter", () => {
 
   it.each([170_000, null])("shows context figures without Pi category data (target %s)", async (target) => {
     render(<ContextMeter tokens={105_700} triggerAt={target} onCompactNow={() => {}} />)
-    fireEvent.focus(screen.getByRole("button", { name: "Compact now" }))
-    await waitFor(() => expect(screen.getAllByTestId("context-breakdown").length).toBeGreaterThan(0))
+    await openPopover()
     expect(screen.getAllByText("105,700").length).toBeGreaterThan(0)
     expect(screen.getAllByText(target === null ? "Unknown" : "170,000").length).toBeGreaterThan(0)
     expect(screen.getAllByText("This harness reports a total, but no category breakdown.").length).toBeGreaterThan(0)
     expect(screen.queryByText("System prompt")).toBeNull()
   })
 
-  it("shows an estimated category breakdown on hover", async () => {
+  it("shows an estimated category breakdown in the popover", async () => {
     render(
       <ContextMeter
         tokens={10_000}
@@ -212,8 +254,7 @@ describe("ContextMeter", () => {
         onCompactNow={() => {}}
       />
     )
-    fireEvent.focus(screen.getByRole("button", { name: "Compact now" }))
-    await waitFor(() => expect(screen.getAllByTestId("context-breakdown").length).toBeGreaterThan(0))
+    await openPopover()
     expect(screen.getAllByText("System prompt").length).toBeGreaterThan(0)
     expect(screen.getAllByText("MCPs").length).toBeGreaterThan(0)
   })

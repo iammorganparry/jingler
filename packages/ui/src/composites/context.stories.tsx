@@ -39,7 +39,7 @@ export const Meter: Story = {
       ].map((row) => (
         <div key={row.label} className="flex items-center justify-between gap-4">
           <span className="text-[11px] text-muted-foreground">{row.label}</span>
-          <ContextMeter tokens={row.tokens} triggerAt={row.triggerAt} digestReady={row.ready} />
+          <ContextMeter tokens={row.tokens} triggerAt={row.triggerAt} digestReady={row.ready} onCompactNow={() => {}} />
         </div>
       ))}
       <div className="flex items-center justify-between gap-4">
@@ -48,6 +48,24 @@ export const Meter: Story = {
         </span>
         <ContextMeter tokens={120_000} triggerAt={null} />
       </div>
+    </div>
+  )
+}
+
+/** The one state drawn red: automatic compaction gave up, so there is something to do. */
+export const MeterStalled: Story = {
+  render: () => (
+    <div className="p-6">
+      <ContextMeter tokens={472_200} triggerAt={300_000} phase="prepare" stalled onCompactNow={() => {}} />
+    </div>
+  )
+}
+
+/** A summary is in flight: the ring pulses and the popover shows progress. */
+export const MeterCompacting: Story = {
+  render: () => (
+    <div className="p-6">
+      <ContextMeter tokens={158_000} triggerAt={150_000} phase="prepare" preparing onCompactNow={() => {}} />
     </div>
   )
 }

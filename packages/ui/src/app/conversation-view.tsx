@@ -47,7 +47,6 @@ import { sendPlanStageAction } from "../composites/plan-progress-dock.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import type { PreviewRailItem } from "../components/beui/overlays.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
-import { ContextMeter } from "../composites/context-meter.js"
 import { RunStats } from "../composites/run-stats.js"
 
 /**
@@ -358,18 +357,6 @@ export function ConversationView(props:  ConversationViewProps) {
 function renderSessionAnalytics() {
              return (!archived && (busy || runStartedAt !== null || tokens > 0) && (
             <div className="mb-1.5 flex min-w-0 flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
-              <ContextMeter
-                tokens={tokens}
-                breakdown={contextBreakdown}
-                triggerAt={contextTriggerAt}
-                phase={contextPhase}
-                preparing={contextPreparing}
-                digestReady={contextDigestReady}
-                stalled={contextStalled}
-                held={contextHeld}
-                heldReason={contextHeldReason}
-                onCompactNow={onCompactNow}
-              />
               <RunStats startedAt={runStartedAt} busy={busy} />
             </div>
           ))
@@ -520,6 +507,18 @@ function renderSessionAnalytics() {
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
                 allowPlan
+                contextMeter={{
+                  tokens,
+                  breakdown: contextBreakdown,
+                  triggerAt: contextTriggerAt,
+                  phase: contextPhase,
+                  preparing: contextPreparing,
+                  digestReady: contextDigestReady,
+                  stalled: contextStalled,
+                  held: contextHeld,
+                  heldReason: contextHeldReason,
+                  ...(onCompactNow ? { onCompactNow } : {})
+                }}
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}
