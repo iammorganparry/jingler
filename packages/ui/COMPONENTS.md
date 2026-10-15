@@ -106,7 +106,8 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 |---|---|---|---|---|---|
 | AddProjectDialog | `composites/add-project-dialog.tsx` | Add a project (repo) dialog. | open | yes | — |
 | AgentCard | `composites/agent-card.tsx` | Agent card: file target, tokens, status line; done/stopped are neutral icon rows, failed is a red icon + reason + Resume / View transcript. | file, state, tokens, status, reason, onResume, onViewTranscript | yes | #466 (8.7) |
-| AgentsSettings | `composites/agents-settings.tsx` | Settings › Agents & skills. | resources, models, modelAssignments, delegationEnabled, detection, selectedCandidateIds | no | — |
+| AgentsResourceList | `composites/agents-resource-list.tsx` | Searchable, windowed list of imported agents & skills: search, All/Agents/Skills + source chips with counts, per-row enable toggle, reveal and remove. | resources, query, kind, source, onQueryChange, onKindChange, onSourceChange | no | #494 (10.15) |
+| AgentsSettings | `composites/agents-settings.tsx` | Settings › Agents & skills. | resources, models, modelAssignments, delegationEnabled, detection, selectedCandidateIds | no | #494 (10.15) |
 | ApprovalGate | `composites/approval-gate.tsx` | Human-in-the-loop approval gate for tool calls. | — | yes | — |
 | ArchivedBanner | `composites/archived-banner.tsx` | Read-only banner for archived sessions (Restore / Delete). | reason, prNumber, base, onRestore, onDelete | no | #376 (2.11) |
 | AuthCard | `composites/auth-card.tsx` | Sign-in card chrome: brand mark, heading, tinted background. | title, subtitle, children, className | yes | — |
