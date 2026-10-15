@@ -220,3 +220,31 @@ test("configures canonical model, mode, and reasoning before creating a session"
     reasoning: { enabled: true, effort: "high" }
   })
 })
+
+test("the @ menu shows a Files header, keyboard footer and a No matches state", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions: sessions("s_mention_menu"),
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "menu-target.ts"), "export {}\n")
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.click()
+
+  await composer.pressSequentially("@menu-t")
+  const list = window.getByRole("listbox", { name: "Files" })
+  await expect(list.getByRole("option", { selected: true })).toContainText("menu-target.ts")
+  await expect(list.getByText("Files", { exact: true }).first()).toBeVisible()
+  await expect(window.getByText("navigate").first()).toBeVisible()
+
+  await composer.pressSequentially("zzz")
+  await expect(window.getByRole("status").filter({ hasText: "No matches for “menu-tzzz”" })).toBeVisible()
+
+  await composer.press("Escape")
+  await expect(window.getByRole("status").filter({ hasText: "No matches" })).toHaveCount(0)
+})

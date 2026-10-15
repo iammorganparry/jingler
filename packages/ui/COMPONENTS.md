@@ -115,7 +115,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | BranchDriftBanner | `composites/branch-drift-banner.tsx` | Banner when the shared checkout drifted off the pinned branch. | — | no | #376 (2.11) |
 | ImportSessionsList | `composites/import-sessions-list.tsx` | Import step: sessions found in other apps, grouped by source, searchable, multi-select with Import / Skip. | candidates, status, error, query, selected, onToggle, onImport, onSkip, onRetry | yes | #613 (16.5) |
 | OmittedFilesNotice, ExplorerPanel, ChangedFilesExplorer, ReviewFileDiff, ReviewSidebar | `composites/changes-review.tsx` | Changes review: explorer, file diff, sidebar, omitted-files notice. | branch, worktreePath, filter, onFilterChange, localAvailable, prAvailable | yes | — |
-| CommandMenu | `composites/command-menu.tsx` | `/` command palette for skills and built-in commands. | — | no | — |
+| CommandMenu | `composites/command-menu.tsx` | `/` command palette: Commands / Skills groups, match highlight, keyboard footer. | skills, activeIndex, query, onSelect, onHover | yes | #407 (5.1) |
 | Composer | `composites/composer.tsx` | Prompt composer: input, chips, attachments, send/stop. | skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth | yes | — |
 | ContextDivider | `composites/context-divider.tsx` | Transcript divider marking context compaction. | — | yes | — |
 | ContextMeter | `composites/context-meter.tsx` | Context-window usage ring and popover. | tokens, breakdown, triggerAt, phase, preparing, digestReady | yes | — |
@@ -128,7 +128,9 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | LinkedIssueSelector | `composites/linked-issue-selector.tsx` | Pick the issue linked to a workspace. | items, value, onValueChange, icon, variant, disabled | yes | — |
 | MagicLinkForm | `composites/magic-link-form.tsx` | Email magic-link input and submit. | state, mode, email, name, sentEmail, onEmailChange | yes | — |
 | McpServerForm, McpServerDialog, McpAuthSetupDialog, McpApiKeyDialog, McpBrand, McpSettings | `composites/mcp-settings.tsx` | Settings › MCP servers with forms and auth dialogs. | servers, parseError, loading, statuses, probing, probe | no | — |
-| MentionMenu | `composites/mention-menu.tsx` | `@` file/session mention palette on VirtualList. | — | no | #377 (2.12) |
+| MentionMenu | `composites/mention-menu.tsx` | `@` file mention palette on VirtualList: Files header, match highlight, middle-truncated paths, keyboard footer, "No matches for “query”". | files, activeIndex, query, onSelect, onHover | yes | #377 (2.12), #407 (5.1) |
+| AutocompleteMenu | `composites/autocomplete-menu.tsx` | Graphite popover shell shared by the `@` and `/` menus: trigger/query header, keyboard footer, No-matches state. | trigger, query, empty | yes | #407 (5.1) |
+| HighlightMatch | `components/highlight-match.tsx` | Emphasises the first case-insensitive match of a query inside text. | text, query | yes | #407 (5.1) |
 | PlanProgressContext, ToolStopContext, SubagentEntryContext, MessageTurn | `composites/message-turn.tsx` | One transcript turn: text, tool calls, thinking. | — | yes | — |
 | ModeSwitch | `composites/mode-switch.tsx` | Plan/Build and permission-mode switch. | — | yes | — |
 | NativeEndpointLogin | `composites/native-endpoint-login.tsx` | Sign-in against a native endpoint. | — | no | — |

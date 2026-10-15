@@ -515,12 +515,13 @@ const selectedComposerModel = ({ agentEndpointCatalog, providerCatalog, endpoint
 
 export function Composer(props: ComposerProps) {
          function renderAutocomplete() {
-           return (menu && count > 0 && (
+           return (menu && (count > 0 || menu.query !== "") && (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2">
           {menu.kind === "slash" ? (
             <CommandMenu
               skills={skillMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(skill) => replaceToken(skillInsertion(skill))}
               onHover={setActiveIndex}
             />
@@ -528,6 +529,7 @@ export function Composer(props: ComposerProps) {
             <MentionMenu
               files={fileMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(p) => replaceToken(`@${p}`)}
               onHover={setActiveIndex}
             />
@@ -1063,9 +1065,10 @@ export function Composer(props: ComposerProps) {
   const skillMatches = useMemo(
     () =>
       menu?.kind === "slash"
-        ? skills.filter((s) =>
-            s.name.toLowerCase().includes(menu.query.toLowerCase()),
-  )
+        ? skills
+            .filter((s) => s.name.toLowerCase().includes(menu.query.toLowerCase()))
+            // Commands list before skills, matching the menu's group order.
+            .sort((a, b) => Number(a.source === "skill") - Number(b.source === "skill"))
         : [],
     [menu, skills],
   );
@@ -1172,43 +1175,36 @@ export function Composer(props: ComposerProps) {
     return true
   }
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (handleActionsKeyDown(e)) return
-    if (menu && count > 0) {
-      switch (e.key) {
-case "ArrowDown": {
-
-        e.preventDefault();
-        setActiveIndex((i) => (i + 1) % count);
-        return;
-
-}
-case "ArrowUp": {
-
-        e.preventDefault();
-        setActiveIndex((i) => (i - 1 + count) % count);
-        return;
-
-}
-case "Enter":
-case "Tab": {
-
-        e.preventDefault();
-        if (menu.kind === "slash") {
-          replaceToken(skillInsertion(skillMatches[activeIndex]!));
-        } else replaceToken(`@${fileMatches[activeIndex]!}`);
-        return;
-
-}
-case "Escape": {
-
-        e.preventDefault();
-        setMenu(null);
-        return;
-
-}
-}
+  /** Drives the open `@` / `/` menu; returns true when the key was consumed. */
+  const handleMenuKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!menu) return false
+    if (e.key === "Escape") {
+      e.preventDefault()
+      setMenu(null)
+      return true
     }
+    if (count === 0) return false
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault()
+        setActiveIndex((i) => (i + 1) % count)
+        return true
+      case "ArrowUp":
+        e.preventDefault()
+        setActiveIndex((i) => (i - 1 + count) % count)
+        return true
+      case "Enter":
+      case "Tab":
+        e.preventDefault()
+        replaceToken(menu.kind === "slash" ? skillInsertion(skillMatches[activeIndex]!) : `@${fileMatches[activeIndex]!}`)
+        return true
+      default:
+        return false
+    }
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (handleActionsKeyDown(e) || handleMenuKeyDown(e)) return
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
