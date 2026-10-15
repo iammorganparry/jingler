@@ -185,7 +185,10 @@ export function ProviderModelBrowser({
         // instead of pushing the trigger past it (it overflowed a 112px composer slot).
         className={cn("h-8 w-auto min-w-0 max-w-full rounded-xl border-0 bg-transparent px-2 py-0 text-xs hover:bg-surface focus-visible:ring-2", inlineContent && "w-full")}
       >
-        <span className="min-w-0 truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
+        <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+          {selected !== undefined && <ProviderIcon providerId={selected.providerId} size={14} />}
+          <span className="min-w-0 truncate text-muted-foreground">{selected?.label ?? modelId ?? "Choose model"}</span>
+        </span>
       </SelectTrigger>
       <SelectContent
         inline={inlineContent}
@@ -196,8 +199,9 @@ export function ProviderModelBrowser({
       >
         {groups.map((group) => (
           <div key={group.groupId} role="group" aria-label={group.label} className="py-0.5">
-            <div className="px-2.5 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-              {group.label}
+            <div className="flex items-center gap-2 whitespace-nowrap px-2.5 py-1.5 text-[0.68rem] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              <ProviderIcon providerId={group.providerId} size={14} />
+              <span className="min-w-0 truncate">{group.label}</span>
             </div>
             {group.options.map((option) => (
               <SelectItem
@@ -208,7 +212,7 @@ export function ProviderModelBrowser({
               >
                 <span className="flex min-w-0 flex-1 items-center gap-2">
                   <span data-provider-logo className="grid size-5 shrink-0 place-items-center">
-                    <ProviderIcon providerId={option.providerId} size={16} />
+                    <ProviderIcon providerId={option.providerId} size={14} />
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm text-text-bright">{option.label}</span>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground"><span>{providerLabel(option.providerId)}</span> · <span>{option.contextSize}</span></span>
