@@ -41,21 +41,18 @@ const latestConcrete = (alias: string): string | undefined =>
     .at(-1)
 
 /**
- * Only the Claude CLI route registers the aliases in a child. On any other
- * Anthropic route the child fuzzy-resolves `sonnet` to a concrete id and
- * pi-subagents fails the run with `model_verification_failed`, so the parent
- * writes the concrete id into the profile instead.
+ * Profiles always carry the concrete Claude id, whatever the route. A child
+ * (CLI or not) reports the concrete model it ran, and pi-subagents compares
+ * that as text against the launch candidate, so an alias such as
+ * `anthropic/sonnet` fails with `model_verification_failed`.
  */
 export const concreteClaudeModels = (
-  models: SubagentModelAssignments,
-  cliRoute: boolean
+  models: SubagentModelAssignments
 ): SubagentModelAssignments =>
-  cliRoute
-    ? models
-    : Object.fromEntries(Object.entries(models).map(([agent, model]) => {
-        const alias = String(model).replace(/^anthropic\//u, "")
-        const concrete = String(model).startsWith("anthropic/") && alias in ALIAS_PREFIX
-          ? latestConcrete(alias)
-          : undefined
-        return [agent, concrete === undefined ? model : ProviderModelId.make(`anthropic/${concrete}`)]
-      }))
+  Object.fromEntries(Object.entries(models).map(([agent, model]) => {
+    const alias = String(model).replace(/^anthropic\//u, "")
+    const concrete = String(model).startsWith("anthropic/") && alias in ALIAS_PREFIX
+      ? latestConcrete(alias)
+      : undefined
+    return [agent, concrete === undefined ? model : ProviderModelId.make(`anthropic/${concrete}`)]
+  }))
