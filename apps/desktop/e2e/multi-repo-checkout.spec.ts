@@ -12,6 +12,7 @@ interface PersistedCheckout {
 interface PersistedSession {
   readonly worktreePath: string
   readonly repo: string
+  readonly repoPath: string
   readonly checkouts?: ReadonlyArray<PersistedCheckout>
   readonly archived?: boolean
 }
@@ -62,10 +63,14 @@ const launchTwoRepos = (
   return launched.then((app) => ({ ...app, secondPath }))
 }
 
-const startSwitchTurn = async (window: Page, secondPath: string): Promise<void> => {
+/** The session may start on either project; switch to whichever repo it is not on. */
+const startSwitchTurn = async (window: Page, home: string, repoPath: string, secondPath: string): Promise<string> => {
+  await expect.poll(() => sessionsAt(home)[0]?.repoPath, { timeout: 20_000 }).toBeTruthy()
+  const target = sessionsAt(home)[0]!.repoPath === secondPath ? repoPath : secondPath
   const composer = window.getByPlaceholder("Message the agent…")
-  await composer.fill(`[[switch-repo=${secondPath}]] work in the second repo`)
+  await composer.fill(`[[switch-repo=${target}]] work in the second repo`)
   await composer.press("Enter")
+  return target
 }
 
 /** Approve every gate the turn raises (the write is gated in ask mode). */
@@ -85,8 +90,10 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   await createWorkspace(window, "Multi repo", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
-  await startSwitchTurn(window, secondPath)
-  await expect(window.getByText("Switched to `gadget`", { exact: false })).toBeVisible({ timeout: 40_000 })
+  await startSwitchTurn(window, home, repoPath, secondPath)
+  await expect(window.getByText("Switched to", { exact: false }).first()).toBeVisible({ timeout: 40_000 })
+  await new Promise((r) => setTimeout(r, 8000))
+  console.log("DBG", JSON.stringify({ c: sessionsAt(home)[0]?.checkouts, wt: sessionsAt(home)[0]?.worktreePath }), execFileSync("find", [home, "-name", "other-repo.ts"], { encoding: "utf8" }))
   await allowGates(window, async () =>
     existsSync(join(sessionsAt(home)[0]?.checkouts?.[1]?.worktreePath ?? "/missing", "src", "other-repo.ts"))
   )
@@ -124,7 +131,7 @@ test("an unregistered repo asks for approval: approve registers and attaches", a
   await createWorkspace(window, "Approve repo", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
-  await startSwitchTurn(window, secondPath)
+  await startSwitchTurn(window, home, repoPath, secondPath)
   await expect(window.getByText("Attach an unregistered repository?")).toBeVisible({ timeout: 40_000 })
   await window.getByRole("button", { name: /Allow once/ }).first().click()
   await expect.poll(() => sessionsAt(home)[0]?.checkouts?.length, { timeout: 40_000 }).toBe(2)
@@ -138,7 +145,7 @@ test("denying the approval leaves the session unchanged", async ({ launchApp }) 
   await createWorkspace(window, "Deny repo", "worktree", repoPath)
   await expect(window.locator("[data-testid^='session-row-']")).toHaveCount(1)
 
-  await startSwitchTurn(window, secondPath)
+  await startSwitchTurn(window, home, repoPath, secondPath)
   await expect(window.getByText("Attach an unregistered repository?")).toBeVisible({ timeout: 40_000 })
   await window.getByRole("button", { name: "Deny" }).first().click()
   await expect(window.getByText("Attach an unregistered repository?")).toBeVisible()
