@@ -1,6 +1,7 @@
 import type { McpConfigEntry, McpImportOrigin, McpImportSourceId } from "@jingler/core"
 import { McpConfigEntry as McpConfigEntrySchema, mcpNameError } from "@jingler/core"
 import { execFile } from "node:child_process"
+import { readFile } from "node:fs/promises"
 import { Either, Option, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
 
@@ -138,9 +139,10 @@ const claudeServers = (
 /**
  * Parse Claude-shaped JSON: `~/.claude.json` (top-level `mcpServers` plus
  * per-project `projects[path].mcpServers`), repo `.mcp.json`, and Claude
- * Desktop's `claude_desktop_config.json` all share the `mcpServers` record.
+ * Desktop's `claude_desktop_config.json` all share the `mcpServers` record, as
+ * do `~/.claude/settings.json` and `managed-mcp.json` (pass `origin` to label them).
  */
-export const parseClaudeMcp = (raw: string): ReadonlyArray<McpImportCandidate> => {
+export const parseClaudeMcp = (raw: string, origin?: McpImportOrigin): ReadonlyArray<McpImportCandidate> => {
   const parsed = Schema.decodeUnknownOption(ClaudeFile)(JSON.parse(raw))
   if (Option.isNone(parsed)) return []
   const out = new Map<string, McpImportCandidate>()
@@ -152,6 +154,42 @@ export const parseClaudeMcp = (raw: string): ReadonlyArray<McpImportCandidate> =
       if (Option.isSome(decoded)) claudeServers(decoded.value.mcpServers, out)
     }
   }
+  return origin === undefined ? [...out.values()] : [...out.values()].map((found) => ({ ...found, origin }))
+}
+
+/**
+ * Where Claude Code reads enterprise `managed-mcp.json`
+ * (https://code.claude.com/docs/en/managed-mcp#deploy-managed-mcp-json).
+ * Windows lists the current Program Files path plus the legacy ProgramData one.
+ */
+export const managedMcpPaths = (platform: NodeJS.Platform): ReadonlyArray<string> =>
+  platform === "darwin"
+    ? ["/Library/Application Support/ClaudeCode/managed-mcp.json"]
+    : platform === "win32"
+      ? ["C:\\Program Files\\ClaudeCode\\managed-mcp.json", "C:\\ProgramData\\ClaudeCode\\managed-mcp.json"]
+      : ["/etc/claude-code/managed-mcp.json"]
+
+/** Read Claude-shaped files in order; absent or malformed ones are skipped silently. */
+export const readClaudeFileServers = async (
+  files: ReadonlyArray<{ readonly path: string; readonly origin: McpImportOrigin }>
+): Promise<ReadonlyArray<McpImportCandidate>> => {
+  const found: Array<ReadonlyArray<McpImportCandidate>> = []
+  for (const { path, origin } of files) {
+    try {
+      found.push(parseClaudeMcp(await readFile(path, "utf8"), origin))
+    } catch {
+      // Not an import error: most machines have no managed file.
+    }
+  }
+  return dedupeCandidates(...found)
+}
+
+/** Merge candidate groups; the first group to name a server wins. */
+export const dedupeCandidates = (
+  ...groups: ReadonlyArray<ReadonlyArray<McpImportCandidate>>
+): ReadonlyArray<McpImportCandidate> => {
+  const out = new Map<string, McpImportCandidate>()
+  for (const found of groups.flat()) if (!out.has(found.name)) out.set(found.name, found)
   return [...out.values()]
 }
 

@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  dedupeCandidates,
   discoverClaudeConnectors,
+  managedMcpPaths,
+  readClaudeFileServers,
   parseClaudeMcp,
   parseClaudeMcpList,
   parseCodexMcp,
@@ -86,6 +89,62 @@ describe("parseClaudeMcp", () => {
       expect.objectContaining({ name: "browser", entry: null, problem: expect.stringContaining("reserved") }),
       expect.objectContaining({ name: "weird", entry: null, problem: "Unrecognised server shape" })
     ])
+  })
+})
+
+describe("Claude settings.json and managed-mcp.json", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-files-"))
+  const settings = join(dir, "settings.json")
+  const managed = join(dir, "managed-mcp.json")
+  writeFileSync(settings, JSON.stringify({
+    permissions: {},
+    mcpServers: {
+      "clive-memory": { command: "node", args: ["memory.js"] },
+      shared: { type: "http", url: "https://settings.example/mcp" }
+    }
+  }))
+  writeFileSync(managed, JSON.stringify({
+    mcpServers: {
+      shared: { type: "http", url: "https://managed.example/mcp" },
+      corp: { type: "http", url: "https://corp.example/mcp" }
+    }
+  }))
+
+  it("labels candidates with the origin and keeps stdio servers", () => {
+    const [stdio] = parseClaudeMcp(readFileSync(settings, "utf8"), "user-settings")
+    expect(stdio).toMatchObject({
+      name: "clive-memory",
+      origin: "user-settings",
+      entry: { type: "local", command: ["node", "memory.js"] }
+    })
+  })
+
+  it("lists each server once across files, first file winning, and skips missing files", async () => {
+    const found = await readClaudeFileServers([
+      { path: settings, origin: "user-settings" },
+      { path: join(dir, "absent.json"), origin: "managed" },
+      { path: managed, origin: "managed" }
+    ])
+    expect(found.map((c) => [c.name, c.origin])).toEqual([
+      ["clive-memory", "user-settings"],
+      ["shared", "user-settings"],
+      ["corp", "managed"]
+    ])
+  })
+
+  it("skips malformed files and lets ~/.claude.json entries win over extras", async () => {
+    const broken = join(dir, "broken.json")
+    writeFileSync(broken, "{nope")
+    expect(await readClaudeFileServers([{ path: broken, origin: "managed" }])).toEqual([])
+    const main = parseClaudeMcp(JSON.stringify({ mcpServers: { shared: { command: "main" } } }))
+    const merged = dedupeCandidates(main, await readClaudeFileServers([{ path: settings, origin: "user-settings" }]))
+    expect(merged.find((c) => c.name === "shared")?.origin).toBeUndefined()
+  })
+
+  it("knows the managed-mcp.json path per OS", () => {
+    expect(managedMcpPaths("darwin")).toEqual(["/Library/Application Support/ClaudeCode/managed-mcp.json"])
+    expect(managedMcpPaths("linux")).toEqual(["/etc/claude-code/managed-mcp.json"])
+    expect(managedMcpPaths("win32")[0]).toBe("C:\\Program Files\\ClaudeCode\\managed-mcp.json")
   })
 })
 
