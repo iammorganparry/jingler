@@ -42,6 +42,16 @@ export const activeCheckoutCwd = (host: CheckoutHost): string => {
   return cwd
 }
 
+/** A host that always delegates to whichever host `current()` returns right now. */
+export const liveCheckoutHost = (current: () => CheckoutHost): CheckoutHost => ({
+  session: () => current().session(),
+  save: (next) => current().save(next),
+  projects: () => current().projects(),
+  approveRepo: (repoPath) => current().approveRepo(repoPath),
+  registerProject: (repoPath) => current().registerProject(repoPath),
+  createWorktree: (input) => current().createWorktree(input)
+})
+
 /** The cwd every workspace tool resolves per call: the active checkout when the session has a host, else the fixed run cwd. */
 export const toolCwd = (fallback: WorkspaceCwd, host: CheckoutHost | undefined): WorkspaceCwd =>
   host === undefined ? fallback : () => activeCheckoutCwd(host)

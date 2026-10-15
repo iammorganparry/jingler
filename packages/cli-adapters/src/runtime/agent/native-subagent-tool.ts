@@ -82,7 +82,8 @@ const toolBudgetFor = (
 const requestFor = (
   input: ForegroundNativeSubagentInput,
   spec: AgentRunSpec,
-  requestId: string
+  requestId: string,
+  cwd: string
 ): SubagentDelegationRequest => ({
   requestId,
   ownerRunId: spec.runId,
@@ -90,7 +91,7 @@ const requestFor = (
   agent: input.agent,
   task: input.task,
   context: input.context ?? "fresh",
-  cwd: spec.cwd,
+  cwd,
   ...(input.thinking === undefined ? {} : { thinking: input.thinking }),
   ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
   ...(input.toolBudget === undefined ? {} : { toolBudget: toolBudgetFor(input.toolBudget) }),
@@ -108,10 +109,11 @@ const executeDelegation = async (
   delegate: NativeSubagentDelegate,
   spec: AgentRunSpec,
   input: ForegroundNativeSubagentInput,
-  context: ToolExecutionContext
+  context: ToolExecutionContext,
+  cwd: string
 ) => {
   const response = await delegate(
-    requestFor(input, spec, randomUUID()),
+    requestFor(input, spec, randomUUID(), cwd),
     context.signal,
     (update) => context.progress({
       message: update.currentTool ?? update.recentOutput ?? "Subagent working",
@@ -187,18 +189,19 @@ const chainWorkflow = (
 const asyncRequest = (
   spec: AgentRunSpec,
   input: typeof AsyncSingleInput.Type | typeof AsyncWorkflowInput.Type,
+  cwd: string,
   names?: Readonly<Record<string, string>>
 ): PiSubagentAsyncSpawnRequest => {
   if ("workflow" in input) {
     return {
-      cwd: spec.cwd,
+      cwd,
       workflowScript: input.workflow.mode === "parallel"
         ? parallelWorkflow(input.workflow.tasks, names)
         : chainWorkflow(input.workflow.tasks, names)
     }
   }
   return {
-    cwd: spec.cwd,
+    cwd,
     agent: asyncAgent(input.agent, names),
     task: input.task,
     context: input.context ?? "fresh",
@@ -212,12 +215,13 @@ const executeAsync = async (
   spec: AgentRunSpec,
   input: typeof AsyncSingleInput.Type | typeof AsyncWorkflowInput.Type,
   context: ToolExecutionContext,
+  cwd: string,
   names?: Readonly<Record<string, string>>
 ) => {
   if (delegate === undefined) {
     throw new ToolError("execution-failed", "Background subagents are unavailable for this session")
   }
-  const result = await delegate(asyncRequest(spec, input, names), context.signal)
+  const result = await delegate(asyncRequest(spec, input, cwd, names), context.signal)
   return {
     status: "running",
     runId: result.runId,
@@ -231,7 +235,9 @@ export const registerNativeSubagentTool = (
   spec: AgentRunSpec,
   delegate: NativeSubagentDelegate,
   asyncDelegate?: PiSubagentAsyncDelegate,
-  asyncAgentNames?: Readonly<Record<string, string>>
+  asyncAgentNames?: Readonly<Record<string, string>>,
+  /** The parent's active checkout directory, read once per spawn so a child never inherits later switches. */
+  activeCwd?: () => string
 ): void => {
   if (!registry.canRegister("subagent")) return
   registry.register({
@@ -252,7 +258,7 @@ export const registerNativeSubagentTool = (
     idempotency: "unsafe",
     execute: (input: NativeSubagentInput, context) =>
       input.async === true
-        ? executeAsync(asyncDelegate, spec, input, context, asyncAgentNames)
-        : executeDelegation(delegate, spec, input, context)
+        ? executeAsync(asyncDelegate, spec, input, context, activeCwd?.() ?? spec.cwd, asyncAgentNames)
+        : executeDelegation(delegate, spec, input, context, activeCwd?.() ?? spec.cwd)
   })
 }
