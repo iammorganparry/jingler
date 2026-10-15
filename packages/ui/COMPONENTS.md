@@ -96,7 +96,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | — | `components/beui/feedback.tsx` | BeUI feedback helpers. | — | no | — |
 | FileDiff | `components/beui/file-diff.tsx` | Inline file diff. | file, fileIcon, lines, status, open, defaultOpen | no | — |
 | Loader | `components/beui/loader.tsx` | BeUI loader. | variant, size, speed, label, className | no | — |
-| SharedLayoutIndicator, PreviewRail, Dock | `components/beui/overlays.tsx` | SharedLayoutIndicator, PreviewRail (timeline rail), Dock. | items, label, activeId, defaultActiveId, onActiveChange, onItemSelect | no | — |
+| SharedLayoutIndicator, PreviewRail, Dock | `components/beui/overlays.tsx` | SharedLayoutIndicator, PreviewRail (timeline rail: item `kind` ticks amber needs-you / red failed / blue checkpoint, `meta` caption, `renderActions` interactive hover card), Dock. | items, label, activeId, defaultActiveId, onActiveChange, onItemSelect | no | — |
 | MorphPopover, MorphPopoverTrigger, MorphPopoverContent | `components/beui/popover-morph.tsx` | Popover whose panel morphs from the trigger corner. | children, open, defaultOpen, onOpenChange, anchorRef, interactionRef | no | — |
 | Select, SelectTrigger, SelectValue, SelectSearch, SelectContent, SelectItem | `components/beui/select.tsx` | BeUI Select with search. | value, defaultValue, onValueChange, open, defaultOpen, onOpenChange | yes | — |
 | ToolResultOutput, ToolResult | `components/beui/tool-result.tsx` | Tool result output block. | tool, title, children, status, kind, meta | no | — |

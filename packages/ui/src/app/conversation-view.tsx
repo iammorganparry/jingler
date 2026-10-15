@@ -182,14 +182,14 @@ const useRailActions = ({ items, checkpointCount, hasMoreHistory, onSelect, onRe
 /** ⌥↑ / ⌥↓ step between turns. Scoped like Shift+Tab: only fires while focus is inside this pane. */
 const useTurnHotkeys = (items: ReadonlyArray<PreviewRailItem>, activeId: string | undefined, onSelect: (item: PreviewRailItem) => void) =>
   useHotkeys<HTMLDivElement>(
-    ["alt+up", "alt+down"],
+    ["alt+arrowup", "alt+arrowdown"],
     event => {
       const step = event.key === "ArrowUp" ? -1 : 1
       const current = items.findIndex(item => item.id === activeId)
       const target = items[Math.min(Math.max(current + step, 0), items.length - 1)]
       if (target) onSelect(target)
     },
-    { preventDefault: true },
+    { preventDefault: true, enableOnFormTags: true },
     [activeId, items, onSelect]
   )
 
