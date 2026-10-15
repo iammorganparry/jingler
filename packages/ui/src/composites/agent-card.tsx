@@ -9,6 +9,53 @@ export type AgentState = "working" | "flagged" | "done" | "failed" | "stopped"
 const END_ICON = { done: Check, stopped: Square, failed: CircleAlert } as const
 const END_WORD = { done: "done", stopped: "stopped", failed: "failed" } as const
 
+const statusTone = (state: AgentState, ended: boolean): string =>
+  state === "flagged" ? "text-red" : state === "working" ? "text-yellow" : ended ? "text-dim" : "text-green"
+
+function AgentCardHeader({ file, state, tokens }: { file: string; state: AgentState; tokens?: string }) {
+  const working = state === "working"
+  const failed = state === "failed"
+  const EndIcon = state === "done" || state === "stopped" || failed ? END_ICON[state] : null
+  return (
+    <div className="flex items-center gap-[7px]">
+      {EndIcon ? (
+        <EndIcon
+          aria-hidden
+          data-testid={`agent-card-icon-${state}`}
+          className={cn("size-3 flex-none", failed ? "text-state-failed" : "text-muted-foreground")}
+        />
+      ) : (
+        <StatusDot tone={working ? "bg-yellow" : "bg-green"} size={working ? 8 : 7} pulse={working} />
+      )}
+      <span className="flex-1 truncate font-mono text-[11.5px] font-semibold text-text-bright">
+        {file}
+      </span>
+      {EndIcon && !failed && (
+        <span className="font-mono text-[9.5px] text-dim">{END_WORD[state as keyof typeof END_WORD]}</span>
+      )}
+      {tokens && <span className="font-mono text-[9.5px] text-muted-foreground">{tokens}</span>}
+    </div>
+  )
+}
+
+function AgentCardFailureActions({ onResume, onViewTranscript }: { onResume?: () => void; onViewTranscript?: () => void }) {
+  if (!onResume && !onViewTranscript) return null
+  return (
+    <div className="flex gap-1.5">
+      {onResume && (
+        <Button variant="secondary" size="sm" onClick={onResume}>
+          Resume
+        </Button>
+      )}
+      {onViewTranscript && (
+        <Button variant="ghost" size="sm" onClick={onViewTranscript}>
+          View transcript
+        </Button>
+      )}
+    </div>
+  )
+}
+
 /** A running-agent card (workflow view): file target, token count, status line; end states for done, stopped and failed. */
 export function AgentCard({
   file,
@@ -33,63 +80,22 @@ export function AgentCard({
   onViewTranscript?: () => void
   className?: string
 }) {
-  const working = state === "working"
-  const flagged = state === "flagged"
   const failed = state === "failed"
-  const EndIcon = state === "done" || state === "stopped" || failed ? END_ICON[state] : null
+  const ended = state === "done" || state === "stopped" || failed
   return (
     <div
       className={cn(
         "flex flex-col gap-1.5 rounded-lg px-2.5 py-2",
-        working && "border border-blue bg-surface shadow-[0_0_0_3px] shadow-blue/[0.12]",
-        (flagged || failed) && "border border-red/30 bg-panel",
+        state === "working" && "border border-blue bg-surface shadow-[0_0_0_3px] shadow-blue/[0.12]",
+        (state === "flagged" || failed) && "border border-red/30 bg-panel",
         (state === "done" || state === "stopped") && "border border-line bg-panel",
         className
       )}
     >
-      <div className="flex items-center gap-[7px]">
-        {EndIcon ? (
-          <EndIcon
-            aria-hidden
-            data-testid={`agent-card-icon-${state}`}
-            className={cn("size-3 flex-none", failed ? "text-state-failed" : "text-muted-foreground")}
-          />
-        ) : (
-          <StatusDot tone={working ? "bg-yellow" : "bg-green"} size={working ? 8 : 7} pulse={working} />
-        )}
-        <span className="flex-1 truncate font-mono text-[11.5px] font-semibold text-text-bright">
-          {file}
-        </span>
-        {EndIcon && !failed && (
-          <span className="font-mono text-[9.5px] text-dim">{END_WORD[state as keyof typeof END_WORD]}</span>
-        )}
-        {tokens && <span className="font-mono text-[9.5px] text-muted-foreground">{tokens}</span>}
-      </div>
+      <AgentCardHeader file={file} state={state} tokens={tokens} />
       {failed && reason && <div className="font-mono text-[10px] text-state-failed">{reason}</div>}
-      {status && (
-        <div
-          className={cn(
-            "font-mono text-[10px]",
-            flagged ? "text-red" : working ? "text-yellow" : EndIcon ? "text-dim" : "text-green"
-          )}
-        >
-          {status}
-        </div>
-      )}
-      {failed && (onResume || onViewTranscript) && (
-        <div className="flex gap-1.5">
-          {onResume && (
-            <Button variant="secondary" size="sm" onClick={onResume}>
-              Resume
-            </Button>
-          )}
-          {onViewTranscript && (
-            <Button variant="ghost" size="sm" onClick={onViewTranscript}>
-              View transcript
-            </Button>
-          )}
-        </div>
-      )}
+      {status && <div className={cn("font-mono text-[10px]", statusTone(state, ended))}>{status}</div>}
+      {failed && <AgentCardFailureActions onResume={onResume} onViewTranscript={onViewTranscript} />}
     </div>
   )
 }
