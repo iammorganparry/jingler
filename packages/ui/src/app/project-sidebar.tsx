@@ -56,6 +56,34 @@ export function MissingFolderBanner({
   )
 }
 
+/** Top corners of a tile: open-session count, with the amber needs-you badge taking top-right. */
+function TileCounts({ project, sessionCount, needsYouCount }: { project: ProjectItem; sessionCount: number; needsYouCount: number }) {
+  return (
+    <>
+        <span
+          aria-hidden
+          className={cn(
+            "absolute -top-[5px] flex h-4 min-w-4 items-center justify-center rounded-full whitespace-nowrap bg-line-strong px-1 text-[11px] font-semibold leading-[14px] text-text-bright ring-2 ring-canvas",
+            // The amber needs-you badge owns the top-right corner; the session count yields to the left.
+            needsYouCount > 0 ? "-left-[5px]" : "-right-[5px]"
+          )}
+        >
+          {sessionCount}
+        </span>
+        {needsYouCount > 0 ? (
+          <span
+            role="status"
+            data-testid={`project-needs-you-${project.id}`}
+            aria-label={`${project.name}: ${needsYouCount} need${needsYouCount === 1 ? "s" : ""} you`}
+            className="absolute -right-[5px] -top-[5px] flex rounded-full ring-2 ring-canvas"
+          >
+            <Badge tone="yellow" size="xs" className="h-4 min-w-4 justify-center rounded-full px-1">{needsYouCount}</Badge>
+          </span>
+        ) : null}
+    </>
+  )
+}
+
 function ProjectAvatar({
   project,
   owner,
@@ -118,26 +146,7 @@ function ProjectAvatar({
           size={28}
           className="rounded-[6px]"
         />
-        <span
-          aria-hidden
-          className={cn(
-            "absolute -top-[5px] flex h-4 min-w-4 items-center justify-center rounded-full whitespace-nowrap bg-line-strong px-1 text-[11px] font-semibold leading-[14px] text-text-bright ring-2 ring-canvas",
-            // The amber needs-you badge owns the top-right corner; the session count yields to the left.
-            needsYouCount > 0 ? "-left-[5px]" : "-right-[5px]"
-          )}
-        >
-          {sessionCount}
-        </span>
-        {needsYouCount > 0 ? (
-          <span
-            role="status"
-            data-testid={`project-needs-you-${project.id}`}
-            aria-label={`${project.name}: ${needsYouCount} need${needsYouCount === 1 ? "s" : ""} you`}
-            className="absolute -right-[5px] -top-[5px] flex rounded-full ring-2 ring-canvas"
-          >
-            <Badge tone="yellow" size="xs" className="h-4 min-w-4 justify-center rounded-full px-1">{needsYouCount}</Badge>
-          </span>
-        ) : null}
+        <TileCounts project={project} sessionCount={sessionCount} needsYouCount={needsYouCount} />
         {activeSessionCount > 0 ? (
           <span role="status" aria-label={`${project.name}: sessions in progress`} className="absolute -bottom-[3px] -right-[3px] flex rounded-full ring-2 ring-canvas">
             <StatusDot tone="bg-state-working" pulse size={8} />
