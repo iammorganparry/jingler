@@ -9,6 +9,10 @@ const api = {
   capture: rpc.workspaceCheckpointsCapture, preview: rpc.workspaceCheckpointsPreview,
   restore: rpc.workspaceCheckpointsRestore
 }
+// A direct revert shows only the confirm dialog; the list appears only as its error surface.
+const listVisible = (state: { matches(value: string): boolean }, direct: boolean): boolean =>
+  !state.matches("closed") && (!direct || state.matches("failed"))
+
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: UI maps mutually exclusive machine states to consent, preview and retry controls.
 export function WorkspaceCheckpointsView({ session, onSession, onClosed, returnFocus, revertTo }: { session: Session; onSession(session: Session): void; onClosed(): void; returnFocus: HTMLButtonElement | null; /** Skip the checkpoint list and open the revert confirm for this checkpoint. */ revertTo?: string }) {
   const [state, send] = useMachine(workspaceCheckpointsMachine, { input: { session, api, onSession } })
@@ -21,7 +25,7 @@ export function WorkspaceCheckpointsView({ session, onSession, onClosed, returnF
   const { items, preview, selected, error } = state.context
   const reverting = state.matches("confirming") || state.matches("restoreFailed") || (state.matches("working") && state.context.action === "restore")
   const turn = items.length - items.findIndex((item) => item.id === selected)
-  return <><Dialog open={!state.matches("closed") && (!direct || state.matches("failed"))} onOpenChange={(open) => { if (!open) cancel() }}>
+  return <><Dialog open={listVisible(state, direct)} onOpenChange={(open) => { if (!open) cancel() }}>
     <DialogContent hideClose aria-describedby={undefined} onCloseAutoFocus={(event) => { event.preventDefault(); if (returnFocus?.isConnected) returnFocus.focus() }}>
       <DialogTitle className="px-4 pt-4">Workspace checkpoints</DialogTitle>
       <DialogBody data-testid="workspace-checkpoints" className="space-y-2 text-xs">

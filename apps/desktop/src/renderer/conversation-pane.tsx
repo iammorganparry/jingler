@@ -261,6 +261,26 @@ function InterruptedRunCard({ session, chatId, busy }: { session: Session; chatI
   )
 }
 
+/** Rail "Revert to here": maps a turn number to its checkpoint and owns the direct-revert dialog. */
+function useTurnRevert(session: Session, busy: boolean) {
+  const ids = useTurnCheckpointIds(session, busy)
+  const [checkpointId, setCheckpointId] = useState<string | null>(null)
+  return {
+    checkpointCount: ids.length,
+    onRevertToTurn: (turn: number) => setCheckpointId(ids[turn - 1] ?? null),
+    dialog: checkpointId === null ? null : (
+      <WorkspaceCheckpointsView
+        key={checkpointId}
+        session={session}
+        revertTo={checkpointId}
+        returnFocus={null}
+        onSession={() => {}}
+        onClosed={() => setCheckpointId(null)}
+      />
+    )
+  }
+}
+
 export function ConversationPane({
   session,
   view = "conversation",
@@ -355,8 +375,7 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
-  const turnCheckpointIds = useTurnCheckpointIds(session, convo.busy)
-  const [revertCheckpointId, setRevertCheckpointId] = useState<string | null>(null)
+  const turnRevert = useTurnRevert(session, convo.busy)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
@@ -1059,22 +1078,13 @@ export function ConversationPane({
                 toggleFollowAgent,
                 onRestore,
                 onDelete,
-                checkpointCount: turnCheckpointIds.length,
-                onRevertToTurn: (turn) => setRevertCheckpointId(turnCheckpointIds[turn - 1] ?? null),
+                checkpointCount: turnRevert.checkpointCount,
+                onRevertToTurn: turnRevert.onRevertToTurn,
                 onFilterChanges: onSelectChanges
               })}
         </SubagentEntryContext.Provider>
       )}
-      {revertCheckpointId !== null && (
-        <WorkspaceCheckpointsView
-          key={revertCheckpointId}
-          session={session}
-          revertTo={revertCheckpointId}
-          returnFocus={null}
-          onSession={() => {}}
-          onClosed={() => setRevertCheckpointId(null)}
-        />
-      )}
+      {turnRevert.dialog}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
         the conversation (not in the sub-agent tab bar, which is per-run and

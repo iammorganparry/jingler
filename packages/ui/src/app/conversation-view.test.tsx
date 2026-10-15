@@ -194,6 +194,7 @@ describe("ConversationView timeline rail ticks", () => {
       const composer = screen.getByPlaceholderText(/Message/)
       await waitFor(() => expect(scrollTo).toHaveBeenCalled())
       scrollTo.mockClear()
+      composer.focus()
       fireEvent.keyDown(composer, { key: "ArrowUp", altKey: true, code: "ArrowUp" })
       await waitFor(() => expect(scrollTo).toHaveBeenCalled())
     } finally {
