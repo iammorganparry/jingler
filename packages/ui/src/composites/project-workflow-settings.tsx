@@ -146,41 +146,35 @@ function RunRow({ run, index, draft, edit }: { run: RunDraft; index: number; dra
     edit({ runs })
   }
   return (
-    <SettingsRow
-      label={
-        <Input
-          aria-label={`Run name ${index + 1}`}
-          className="h-8 w-full rounded-[6px] px-2.5 text-[13px]"
-          placeholder="Name"
-          value={run.label}
-          onChange={(event) => patchRun({ label: event.currentTarget.value })}
-        />
-      }
-      control={
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label={`Run command ${index + 1}`}
-            className="h-8 w-[260px] rounded-[6px] px-2.5 text-[13px]"
-            placeholder="Command"
-            value={run.command}
-            onChange={(event) => patchRun({ command: event.currentTarget.value })}
-          />
-          {index > 0 && (
-            <Button size="sm" variant="outline" aria-label={`Move run command ${index + 1} up`} onClick={moveUp}>
-              Move up
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label={`Remove run command ${index + 1}`}
-            onClick={() => edit({ runs: draft.runs.filter((item) => item.id !== run.id) })}
-          >
-            Remove
-          </Button>
-        </div>
-      }
-    />
+    <div data-testid="settings-row" className="flex flex-wrap items-center gap-2 px-4 py-3">
+      <Input
+        aria-label={`Run name ${index + 1}`}
+        className="h-8 min-w-32 flex-1 rounded-[6px] px-2.5 text-[13px]"
+        placeholder="Name"
+        value={run.label}
+        onChange={(event) => patchRun({ label: event.currentTarget.value })}
+      />
+      <Input
+        aria-label={`Run command ${index + 1}`}
+        className="h-8 min-w-48 flex-[2] rounded-[6px] px-2.5 text-[13px]"
+        placeholder="Command"
+        value={run.command}
+        onChange={(event) => patchRun({ command: event.currentTarget.value })}
+      />
+      {index > 0 && (
+        <Button size="sm" variant="outline" aria-label={`Move run command ${index + 1} up`} onClick={moveUp}>
+          Move up
+        </Button>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        aria-label={`Remove run command ${index + 1}`}
+        onClick={() => edit({ runs: draft.runs.filter((item) => item.id !== run.id) })}
+      >
+        Remove
+      </Button>
+    </div>
   )
 }
 
