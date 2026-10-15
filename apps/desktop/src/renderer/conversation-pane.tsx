@@ -49,6 +49,8 @@ import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, 
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
+import { useTurnCheckpointIds } from "./use-turn-checkpoints.js"
+import { WorkspaceCheckpointsView } from "./workspace-checkpoints-view.js"
 import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
@@ -353,6 +355,8 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
+  const turnCheckpointIds = useTurnCheckpointIds(session, convo.busy)
+  const [revertCheckpointId, setRevertCheckpointId] = useState<string | null>(null)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
@@ -1054,9 +1058,22 @@ export function ConversationPane({
                 fileBrowser,
                 toggleFollowAgent,
                 onRestore,
-                onDelete
+                onDelete,
+                checkpointCount: turnCheckpointIds.length,
+                onRevertToTurn: (turn) => setRevertCheckpointId(turnCheckpointIds[turn - 1] ?? null),
+                onFilterChanges: onSelectChanges
               })}
         </SubagentEntryContext.Provider>
+      )}
+      {revertCheckpointId !== null && (
+        <WorkspaceCheckpointsView
+          key={revertCheckpointId}
+          session={session}
+          revertTo={revertCheckpointId}
+          returnFocus={null}
+          onSession={() => {}}
+          onClosed={() => setRevertCheckpointId(null)}
+        />
       )}
       {/*
         Background tasks dock — runtime work that OUTLIVES this turn. Sits below
@@ -1222,7 +1239,10 @@ function renderMainConversation({
   fileBrowser,
   toggleFollowAgent,
   onRestore,
-  onDelete
+  onDelete,
+  checkpointCount,
+  onRevertToTurn,
+  onFilterChanges
 }: {
   convo: Conversation;
   addLocalMcp: ((name: string, entry: McpConfigEntry) => Promise<void>) | undefined;
@@ -1260,6 +1280,9 @@ function renderMainConversation({
   toggleFollowAgent: (enabled: boolean) => void;
   onRestore: ((sessionId: string) => void) | undefined;
   onDelete: ((sessionId: string) => void) | undefined;
+  checkpointCount: number;
+  onRevertToTurn: (turn: number) => void;
+  onFilterChanges: (() => void) | undefined;
 }) {
   return <ConversationView
     messages={convo.messages}
@@ -1367,6 +1390,9 @@ function renderMainConversation({
     focusKey={activeChat.id}
     followAgent={fileBrowser.followEnabled}
     onToggleFollowAgent={toggleFollowAgent}
+    checkpointCount={checkpointCount}
+    onRevertToTurn={onRevertToTurn}
+    onFilterChanges={onFilterChanges}
     archived={session.archived
       ? {
         reason: session.archiveReason ?? "merged",
