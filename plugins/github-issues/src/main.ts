@@ -32,6 +32,7 @@ export interface IssuePayload {
   readonly assignees: ReadonlyArray<GitHubUser>
   readonly comments: ReadonlyArray<IssueComment>
   readonly createdAt: string
+  readonly updatedAt?: string
 }
 
 type Request = (input: string | URL | globalThis.Request, init?: RequestInit) => Promise<Response>
@@ -135,6 +136,7 @@ const normalizeIssue = async (
         })
       : [],
     createdAt,
+    ...(string(issue.updatedAt) ? { updatedAt: string(issue.updatedAt) as string } : {}),
     ...(author ? { author } : {})
   }
 }
@@ -237,7 +239,8 @@ export const fetchIssue = async (
     ...issue,
     url: issue.html_url,
     author: issue.user,
-    createdAt: issue.created_at
+    createdAt: issue.created_at,
+    updatedAt: issue.updated_at
   }, () => comments(
     request,
     `${base}/issues/${input.issueNumber}/comments?per_page=100`,
@@ -248,7 +251,7 @@ export const fetchIssue = async (
 }
 
 const CLI_FIELDS = [
-  "number", "title", "body", "state", "url", "author", "labels", "assignees", "comments", "createdAt"
+  "number", "title", "body", "state", "url", "author", "labels", "assignees", "comments", "createdAt", "updatedAt"
 ].join(",")
 
 /** Prefer the operator's authenticated GitHub CLI without exposing its token. */
@@ -285,6 +288,26 @@ export const fetchIssueWithCli = async (
   return normalizeIssue(raw)
 }
 
+/** Close one issue through the authenticated GitHub CLI; the renderer cannot reach the network. */
+export const closeIssue = async (
+  input: FetchArgs,
+  exec: (
+    command: string,
+    args?: readonly string[],
+    options?: { readonly cwd?: string; readonly timeoutMs?: number }
+  ) => Promise<ExecResult>
+): Promise<void> => {
+  repositoryParts(input.repo)
+  if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+    throw new Error("The linked GitHub issue number is invalid.")
+  }
+  const result = await exec("gh", ["issue", "close", String(input.issueNumber), "--repo", input.repo], {
+    ...(input.worktreePath ? { cwd: input.worktreePath } : {}),
+    timeoutMs: 10_000
+  })
+  if (result.code !== 0) throw new Error(result.stderr.trim() || "GitHub could not close this issue.")
+}
+
 export const activate: Activate = (ctx) => {
   ctx.subscriptions.push(
     ctx.commands.register("github-issues.fetch", async (input) => {
@@ -298,6 +321,11 @@ export const activate: Activate = (ctx) => {
         `repository:${repo}`
       ])
       return fetchIssue(resolved, session)
+    }),
+    ctx.commands.register("github-issues.close", async (input) => {
+      const args = input as FetchArgs
+      const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      await closeIssue({ ...args, repo }, ctx.exec)
     })
   )
 

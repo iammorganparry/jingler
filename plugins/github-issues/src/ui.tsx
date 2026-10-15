@@ -23,7 +23,7 @@
  * having been opened in any of them.
  */
 import { useEffect, useState } from "react"
-import { CheckCircle2, CircleDot, ExternalLink, MessageSquare, Unlink } from "lucide-react"
+import { CircleDot, ExternalLink, MessageSquare, Unlink } from "lucide-react"
 import {
   definePlugin,
   useHost,
@@ -33,17 +33,19 @@ import {
 // The themed kit is its own entrypoint, so a plugin's Node-side build scripts
 // can import the root without dragging the component library in.
 import {
-  atLeast,
   Avatar,
-  cn,
+  Badge,
+  Button,
   githubAvatarUrl,
+  GithubMark,
   // The app's own chip, not a copy. A local port drifted by a font size within
   // one commit, which is the whole argument against porting it.
   IssueLabelChip,
   Markdown,
+  ReadingActionsMenu,
+  ReadingShell,
   relativeTime,
-  Spinner,
-  useWidthTier
+  Spinner
 } from "@jingler/plugin-sdk/ui"
 import { manifest } from "./manifest.js"
 
@@ -66,6 +68,7 @@ interface Issue {
   readonly assignees?: ReadonlyArray<IssueUser>
   readonly comments?: ReadonlyArray<IssueComment>
   readonly createdAt: string
+  readonly updatedAt?: string
 }
 
 /** One comment, including the issue body rendered as the opening one. */
@@ -110,11 +113,11 @@ function IssueTab({ session }: TabProps) {
   // with a session permanently attached to the wrong issue. It comes back
   // through the SDK, the same call any third-party plugin can make.
   const { unlinkIssue } = useSessionActions()
-  const tier = useWidthTier()
   const [issue, setIssue] = useState<Issue | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [unlinking, setUnlinking] = useState(false)
+  const [closing, setClosing] = useState(false)
 
   const linkedIssue = session.linkedIssue
   const issueNumber =
@@ -179,31 +182,26 @@ function IssueTab({ session }: TabProps) {
   }
 
 
+  const reference = { repo: session.repo, issueNumber, worktreePath: session.worktreePath }
+  const open = issue.state === "open"
+
   return (
-    <div
-      data-testid="github-issues-body"
-      className="flex min-h-0 flex-1 flex-col overflow-auto bg-editor"
-    >
-      <div
-        className={cn(
-          "mx-auto w-full max-w-[820px] py-7",
-          atLeast(tier, "mid") ? "px-8" : "px-4"
-        )}
-      >
-        <div className="mb-3 flex flex-wrap items-start gap-x-3 gap-y-2">
-          <h1 className="min-w-0 flex-1 text-[22px] font-semibold leading-tight text-text-bright">
-            {issue.title}{" "}
-            <span className="font-normal text-dim">#{issue.number}</span>
-          </h1>
-          <button
-            type="button"
+    <ReadingShell
+      title={issue.title}
+      identifier={`#${issue.number}`}
+      meta={<IssueMetaLine issue={issue} />}
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={() => void host.openExternal(issue.url)}
-            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
           >
-            <ExternalLink size={12} /> Open on GitHub
-          </button>
-          <button
-            type="button"
+            <ExternalLink size={14} aria-hidden /> Open on GitHub
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             data-testid="github-issues-unlink"
             disabled={unlinking}
             onClick={() => {
@@ -231,16 +229,39 @@ function IssueTab({ session }: TabProps) {
                   setUnlinking(false)
                 })
             }}
-            className="flex flex-none items-center gap-1.5 rounded border border-line px-2 py-1 text-[12px] text-text-body transition-colors hover:border-red hover:text-text-bright disabled:opacity-50"
           >
-            <Unlink size={12} /> {unlinking ? "Unlinking…" : "Unlink"}
-          </button>
-        </div>
-
-        <IssueMetadata issue={issue} />
-
+            <Unlink size={14} aria-hidden /> {unlinking ? "Unlinking…" : "Unlink"}
+          </Button>
+          <ReadingActionsMenu
+            items={[
+              { label: "Copy link", onSelect: () => void navigator.clipboard?.writeText(issue.url) },
+              ...(open
+                ? [
+                    {
+                      label: closing ? "Closing…" : "Close issue",
+                      destructive: true,
+                      disabled: closing,
+                      onSelect: () => {
+                        setClosing(true)
+                        void host
+                          .invoke("github-issues.close", reference)
+                          .then(() => setIssue({ ...issue, state: "closed" }))
+                          .catch((cause: unknown) => {
+                            setError(cause instanceof Error ? cause.message : String(cause))
+                          })
+                          .finally(() => setClosing(false))
+                      }
+                    }
+                  ]
+                : [])
+            ]}
+          />
+        </>
+      }
+    >
+      <div data-testid="github-issues-body" className="flex flex-col gap-[18px]">
         {(issue.labels?.length ?? 0) > 0 && (
-          <div className="mb-5 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {issue.labels?.map((label) => (
               <IssueLabelChip key={label.name} name={label.name} color={label.color} />
             ))}
@@ -248,12 +269,7 @@ function IssueTab({ session }: TabProps) {
         )}
 
         <div className="flex flex-col gap-3">
-          <Comment
-            author={issue.author}
-            body={issue.body}
-            createdAt={issue.createdAt}
-            opening
-          />
+          <Comment author={issue.author} body={issue.body} createdAt={issue.createdAt} opening />
           {issue.comments?.map((comment, i) => (
             <Comment
               key={`${comment.createdAt}-${i}`}
@@ -264,7 +280,7 @@ function IssueTab({ session }: TabProps) {
           ))}
         </div>
       </div>
-    </div>
+    </ReadingShell>
   )
 }
 
@@ -272,28 +288,32 @@ export default definePlugin(manifest, {
   views: { "github-issues.issue": IssueTab }
 })
 
-function IssueMetadata({ issue }: { readonly issue: Issue }) {
-  const open = issue.state.toLowerCase() === "open"
+/** Provider logo · state pill · author · relative `updatedAt` · comment count. */
+function IssueMetaLine({ issue }: { readonly issue: Issue }) {
+  const open = issue.state === "open"
+  const login = issue.author?.login
+  const commentCount = issue.comments?.length ?? 0
   return (
-        <div className="mb-5 flex flex-wrap items-center gap-2">
-          <span
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium",
-              open ? "bg-green/15 text-green" : "bg-purple/15 text-purple"
-            )}
-          >
-            {open ? <CircleDot size={12} /> : <CheckCircle2 size={12} />}
-            {open ? "Open" : "Closed"}
-          </span>
-          <span className="text-[12px] text-dim">
-            {issue.author?.login ?? "unknown"} opened this {relativeTime(issue.createdAt)}
-          </span>
-          {(issue.comments?.length ?? 0) > 0 && (
-            <span className="flex items-center gap-1 text-[12px] text-dim">
-              <MessageSquare size={12} /> {issue.comments?.length}
-            </span>
-          )}
-        </div>
-
+    <div
+      data-testid="issue-meta-line"
+      className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11.5px] text-muted-foreground"
+    >
+      <GithubMark size={14} />
+      <Badge tone={open ? "green" : "purple"} size="sm">
+        {open ? "Open" : "Closed"}
+      </Badge>
+      {login && (
+        <span className="flex shrink-0 items-center gap-1.5">
+          <Avatar initial={login.slice(0, 1).toUpperCase()} src={githubAvatarUrl(login)} size={16} />
+          {login}
+        </span>
+      )}
+      <span className="shrink-0">updated {relativeTime(issue.updatedAt ?? issue.createdAt)}</span>
+      {commentCount > 0 && (
+        <span className="flex shrink-0 items-center gap-1">
+          <MessageSquare size={12} aria-hidden /> {commentCount}
+        </span>
+      )}
+    </div>
   )
 }

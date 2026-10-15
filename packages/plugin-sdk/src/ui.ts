@@ -60,6 +60,11 @@ export { Avatar, githubAvatarUrl } from "@jingler/ui"
 // a plugin rendering issues should not have to reimplement the chip the app
 // already draws — the one copy that existed drifted by a font size immediately.
 export { IssueLabelChip } from "@jingler/ui"
+export { GithubMark } from "@jingler/ui"
+// The shared PR / issue reading surface: header, 720px column, 280px rail. A
+// plugin rendering an issue uses it instead of private header markup, so its
+// header cannot drift from the app's own pull request view.
+export { ReadingShell, ReadingActionsMenu } from "@jingler/ui"
 export { Callout } from "@jingler/ui"
 export { Card } from "@jingler/ui"
 export { Input } from "@jingler/ui"
