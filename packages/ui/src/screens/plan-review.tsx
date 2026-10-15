@@ -1,6 +1,7 @@
 import { planStageExecutionStatus, type PlanAnnotation, type PlanAnnotationAnchor, type PlanDocument, type PlanPrd } from "@jingler/core"
-import { Check, MessageSquarePlus } from "lucide-react"
+import { Check, MessageSquarePlus, RefreshCw } from "lucide-react"
 import { useEffect, useRef, useState, type RefObject } from "react"
+import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
 import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
@@ -10,6 +11,7 @@ import { loadPlanComments, savePlanComments } from "../composites/plan-comment-s
 import { buildAnchorFromRange } from "../composites/plan-doc/plan-anchor-dom.js"
 import { PlanStageCard } from "../composites/plan-stage-card.js"
 import { VisualBlocks } from "../composites/visual-blocks.js"
+import { usePlanVersion } from "./plan-review-version.js"
 
 export interface PlanReviewComment {
   readonly stageId?: string
@@ -141,7 +143,50 @@ function PlanContents({ items, scroller }: { readonly items: ReadonlyArray<Conte
   )
 }
 
-export function PlanReview({ document, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
+const APPROVE_REASON_ID = "plan-approve-reason"
+
+function PlanDecisionFooter({ error, general, onGeneralChange, busy, blockedReason, onDecide }: {
+  readonly error: string | null
+  readonly general: string
+  readonly onGeneralChange: (value: string) => void
+  readonly busy: boolean
+  readonly blockedReason: string | undefined
+  readonly onDecide: (approved: boolean) => void
+}) {
+  const blocked = busy || blockedReason !== undefined
+  return (
+    <footer className="flex flex-col gap-2 border-t border-hairline bg-editor px-4 py-3">
+      {error !== null && <p role="alert" className="text-[12px] text-state-failed">{error}</p>}
+      <div className="flex items-end gap-2">
+        <textarea
+          aria-label="General feedback"
+          placeholder="General feedback (optional)"
+          value={general}
+          onChange={(event) => onGeneralChange(event.target.value)}
+          rows={1}
+          className="h-8 min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-[5px] text-[13px] leading-5 outline-none"
+        />
+        {blockedReason !== undefined && (
+          <p id={APPROVE_REASON_ID} className="m-0 self-center text-[12px] text-muted-foreground">{blockedReason}</p>
+        )}
+        <Button variant="danger" size="sm" disabled={blocked} onClick={() => onDecide(false)}>
+          Request changes
+        </Button>
+        <Button
+          size="sm"
+          disabled={blocked}
+          aria-describedby={blockedReason === undefined ? undefined : APPROVE_REASON_ID}
+          onClick={() => onDecide(true)}
+        >
+          Approve
+        </Button>
+      </div>
+    </footer>
+  )
+}
+
+export function PlanReview({ document: latest, canApprove = true, onApprove, onRevise }: PlanReviewProps) {
+  const { document, stale, blockedReason, reload, markDecided } = usePlanVersion(latest)
   const container = useRef<HTMLDivElement | null>(null)
   const content = useRef<HTMLElement | null>(null)
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -159,10 +204,8 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const [busy, setBusy] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [showChanges, setShowChanges] = useState(false)
-  const canDecide =
-    canApprove &&
-    document.reviewId !== undefined &&
-    (document.status === "proposed" || document.status === "revising")
+  const canDecide = canApprove && document.reviewId !== undefined && document.status === "proposed"
+  const showFooter = canApprove && (canDecide || latest.status === "revising")
   const { plan } = document
   const draftCount = countUnsavedDrafts(draft === null ? "" : draftBody, replyDrafts)
   const draftKey = planDraftKey(document.sessionId, document.producingChatId)
@@ -193,6 +236,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
   const decide = async (approved: boolean) => {
     setBusy(true)
     setDecisionError(null)
+    markDecided()
     try {
       if (approved) await onApprove?.()
       else await onRevise?.(planFeedbackMarkdown(
@@ -275,6 +319,15 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
 
   return (
     <section aria-label="Plan review" data-testid="plan-review" className="flex min-h-0 min-w-0 flex-1 flex-col bg-editor">
+      {stale && (
+        <BannerShell
+          placement="top"
+          icon={<RefreshCw size={12} />}
+          actions={[<Button key="reload" variant="ghost" size="sm" onClick={reload}>Reload</Button>]}
+        >
+          Plan changed since you opened it
+        </BannerShell>
+      )}
       <div ref={container} className="@container relative min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex max-w-[1120px] gap-10 px-8 py-10">
           <PlanContents items={contents} scroller={container} />
@@ -358,24 +411,15 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         )}
       </div>
 
-      {canDecide && (
-        <footer className="flex flex-col gap-2 border-t border-hairline bg-editor px-4 py-3">
-          {decisionError !== null && <p role="alert" className="text-[12px] text-state-failed">{decisionError}</p>}
-          <div className="flex items-end gap-2">
-            <textarea
-              aria-label="General feedback"
-              placeholder="General feedback (optional)"
-              value={general}
-              onChange={(event) => setGeneral(event.target.value)}
-              rows={1}
-              className="h-8 min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-[5px] text-[13px] leading-5 outline-none"
-            />
-            <Button variant="danger" size="sm" disabled={busy} onClick={() => requestDecision(false)}>
-              Request changes
-            </Button>
-            <Button size="sm" disabled={busy} onClick={() => requestDecision(true)}>Approve</Button>
-          </div>
-        </footer>
+      {showFooter && (
+        <PlanDecisionFooter
+          error={decisionError}
+          general={general}
+          onGeneralChange={setGeneral}
+          busy={busy}
+          blockedReason={blockedReason}
+          onDecide={requestDecision}
+        />
       )}
       <DiscardCommentsDialog
         open={pendingDecision !== null}

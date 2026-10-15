@@ -155,7 +155,8 @@ const projectionStatus = (
   projection: PlannotatorProjection
 ): PlanDocumentStatus => {
   if (projection.review !== null) return "proposed"
-  if (projection.phase === "planning") return "draft"
+  // After a submission (a plan file exists) with no live review, the agent is revising it.
+  if (projection.phase === "planning") return projection.planFilePath === null ? "draft" : "revising"
   if (projection.phase === "executing") return "executing"
   return projection.checklist.length > 0 && projection.checklist.every(({ completed }) => completed)
     ? "done"
