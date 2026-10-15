@@ -2253,6 +2253,16 @@ export class JinglerReviewRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String, chatId: Schema.String }
   }),
 
+  /** Step back one history entry. No-op if closed or there is no history. */
+  Rpc.make("BrowserPreview.goBack", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
+  /** Step forward one history entry. No-op if closed or there is no forward history. */
+  Rpc.make("BrowserPreview.goForward", {
+    payload: { sessionId: Schema.String, chatId: Schema.String }
+  }),
+
   /**
    * Show/hide the native view without destroying it — the Preview dock switching
    * away from the Browser tab. `close` would also hide it, but it discards the

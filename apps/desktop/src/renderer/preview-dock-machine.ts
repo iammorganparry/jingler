@@ -19,9 +19,20 @@ export interface PreviewSessionState {
   readonly source: "operator" | "native"
 }
 
+/** Live page state pushed from the native view; never persisted. */
+export interface PreviewNavState {
+  readonly canGoBack: boolean
+  readonly canGoForward: boolean
+  readonly loading: boolean
+  readonly error: string | null
+}
+
+const IDLE_NAV: PreviewNavState = { canGoBack: false, canGoForward: false, loading: false, error: null }
+
 export interface PreviewDockContext {
   readonly focusedSessionId: string | null
   readonly sessions: Readonly<Record<string, PreviewSessionState>>
+  readonly nav: Readonly<Record<string, PreviewNavState>>
   readonly side: DockSide
   readonly legacyVisible: boolean
 }
@@ -32,6 +43,7 @@ export type PreviewDockEvent =
   | { readonly type: "SET_SIDE"; readonly side: DockSide }
   | { readonly type: "NAVIGATE"; readonly sessionId: string; readonly url: string }
   | { readonly type: "NATIVE_URL"; readonly sessionId: string; readonly url: string }
+  | ({ readonly type: "NAV_STATE"; readonly sessionId: string } & PreviewNavState)
   | { readonly type: "REVEAL_BROWSER"; readonly sessionId: string; readonly url: string }
   | { readonly type: "REMOVE_SESSION"; readonly sessionId: string }
   | { readonly type: "RECONCILE_SESSIONS"; readonly sessionIds: ReadonlyArray<string> }
@@ -163,6 +175,11 @@ export const previewDockMachine = setup({
         }))
       }
     }),
+    navState: assign(({ context, event }) => {
+      if (event.type !== "NAV_STATE") return {}
+      const { type: _type, sessionId, ...nav } = event
+      return { nav: { ...context.nav, [sessionId]: nav } }
+    }),
     revealBrowser: assign(({ context, event }) => {
       if (event.type !== "REVEAL_BROWSER") return {}
       return {
@@ -216,7 +233,7 @@ export const previewDockMachine = setup({
     const sessions = readSessions()
     const legacyVisible = readLegacyVisible()
     initializeStorage()
-    return { focusedSessionId: null, sessions, side: readSide(), legacyVisible }
+    return { focusedSessionId: null, sessions, nav: {}, side: readSide(), legacyVisible }
   },
   initial: "active",
   states: {
@@ -227,6 +244,7 @@ export const previewDockMachine = setup({
         SET_SIDE: { actions: "setSide" },
         NAVIGATE: { actions: "navigate" },
         NATIVE_URL: { actions: "nativeUrl" },
+        NAV_STATE: { actions: "navState" },
         REVEAL_BROWSER: { actions: "revealBrowser" },
         REMOVE_SESSION: { actions: "removeSession" },
         RECONCILE_SESSIONS: { actions: "reconcileSessions" }
@@ -240,3 +258,6 @@ export const previewSessionState = (
   sessionId: string | null
 ): PreviewSessionState =>
   sessionId === null ? defaultSessionState() : sessionFor(context, sessionId)
+
+export const previewNavFor = (context: PreviewDockContext, sessionId: string | null): PreviewNavState =>
+  (sessionId === null ? undefined : context.nav[sessionId]) ?? IDLE_NAV

@@ -610,3 +610,56 @@ test("Preview ready chip opens the Browser view without duplicating its tab", as
   await chip.click()
   await expect(window.getByTestId("editor-tab-view-browser")).toHaveCount(1)
 })
+
+test("browser toolbar: history buttons follow page history and a failed load offers Retry", async ({ launchApp }) => {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/html" })
+    response.end(`<!doctype html><title>page</title><h1>${request.url}</h1>`)
+  })
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject)
+    server.listen({ host: "127.0.0.1", port: 0 }, resolve)
+  })
+  const address = server.address()
+  if (address === null || typeof address === "string") {
+    await closeServer(server)
+    throw new Error("Toolbar server has no TCP address")
+  }
+  const origin = `http://127.0.0.1:${address.port}`
+
+  try {
+    const { window } = await launchApp({
+      configured: true,
+      isolateSystemHome: true,
+      withRepo: true,
+      sessions: seededSessions
+    })
+    await expect(appShell(window)).toBeVisible()
+    await window.getByTestId("header-view-browser").click()
+    const nav = window.getByRole("group", { name: "Browser navigation" }).filter({ visible: true })
+    const url = window.getByLabel("Preview URL").filter({ visible: true }).first()
+    await expect(nav).toBeVisible()
+    await expect(nav.getByRole("button", { name: "Back" })).toBeDisabled()
+    await expect(nav.getByRole("button", { name: "Forward" })).toBeDisabled()
+
+    await url.fill(`${origin}/one`)
+    await url.press("Enter")
+    await expect(url).toHaveValue(`${origin}/one`, { timeout: 10_000 })
+    await url.fill(`${origin}/two`)
+    await url.press("Enter")
+    await expect(url).toHaveValue(`${origin}/two`, { timeout: 10_000 })
+    await expect(nav.getByRole("button", { name: "Back" })).toBeEnabled({ timeout: 10_000 })
+
+    await nav.getByRole("button", { name: "Back" }).click()
+    await expect(url).toHaveValue(`${origin}/one`, { timeout: 10_000 })
+    await expect(nav.getByRole("button", { name: "Forward" })).toBeEnabled({ timeout: 10_000 })
+
+    await closeServer(server)
+    await nav.getByRole("button", { name: "Reload" }).click()
+    const alert = window.getByRole("alert").filter({ hasText: "ERR_" })
+    await expect(alert).toBeVisible({ timeout: 10_000 })
+    await expect(alert.getByRole("button", { name: "Retry" })).toBeVisible()
+  } finally {
+    await closeServer(server).catch(() => {})
+  }
+})

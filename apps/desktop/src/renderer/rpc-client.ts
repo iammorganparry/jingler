@@ -1240,6 +1240,12 @@ export const rpc = {
   /** Reload the current preview page. */
   browserPreviewReload: (sessionId: string, chatId: string): Promise<void> =>
     run((c) => c.BrowserPreview.reload({ sessionId, chatId })),
+  /** Step the preview back one history entry. */
+  browserPreviewGoBack: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.goBack({ sessionId, chatId })),
+  /** Step the preview forward one history entry. */
+  browserPreviewGoForward: (sessionId: string, chatId: string): Promise<void> =>
+    run((c) => c.BrowserPreview.goForward({ sessionId, chatId })),
   /** Hide the native view for a tab switch, keeping its page and history alive. */
   browserPreviewSetVisible: (
     sessionId: string,

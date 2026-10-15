@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createActor } from "xstate"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { previewDockMachine, previewOwnerId, previewSessionState } from "./preview-dock-machine.js"
+import { previewDockMachine, previewNavFor, previewOwnerId, previewSessionState } from "./preview-dock-machine.js"
 
 const store = new Map<string, string>()
 
@@ -179,5 +179,15 @@ describe("previewDockMachine", () => {
       actor.send({ type: "FOCUS_SESSION", sessionId: "alpha" })
       actor.send({ type: "TOGGLE" })
     }).not.toThrow()
+  })
+
+  it("tracks per-session nav state and defaults to no history", () => {
+    const actor = start()
+    expect(previewNavFor(actor.getSnapshot().context, "alpha")).toMatchObject({ canGoBack: false, canGoForward: false })
+    actor.send({ type: "NAV_STATE", sessionId: "alpha", canGoBack: true, canGoForward: false, loading: true, error: null })
+    actor.send({ type: "NAV_STATE", sessionId: "beta", canGoBack: false, canGoForward: false, loading: false, error: "ERR" })
+    const { context } = actor.getSnapshot()
+    expect(previewNavFor(context, "alpha")).toEqual({ canGoBack: true, canGoForward: false, loading: true, error: null })
+    expect(previewNavFor(context, "beta").error).toBe("ERR")
   })
 })
