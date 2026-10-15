@@ -649,7 +649,7 @@ export const startFakeGitHubServer = async (
       return false;
     };
     if (requestUrl.pathname === "/graphql" && method === "POST") {
-      return handleGraphql(req, res, requirePermissions, operations);
+      return handleGraphql(req, res, requirePermissions, operations, prs);
     }
 
     const repository = repositoryRequest(requestUrl, installation, res);
@@ -1027,7 +1027,7 @@ function pullHeadRepository(pr: FakeGitHubPr, login: string, cloneUrl: string | 
   };
 }
 
-async function handleGraphql(req: IncomingMessage, res: ServerResponse, requirePermissions: (...permissions: readonly string[]) => boolean, operations: string[]) {
+async function handleGraphql(req: IncomingMessage, res: ServerResponse, requirePermissions: (...permissions: readonly string[]) => boolean, operations: string[], prs: FakeGitHubPr[]) {
   const body = await requestBody(req);
   const query = String(body.query ?? "");
   const writesPullRequest =
@@ -1041,8 +1041,11 @@ async function handleGraphql(req: IncomingMessage, res: ServerResponse, requireP
   ) {
     return;
   }
-  if (query.includes("markPullRequestReadyForReview"))
+  if (query.includes("markPullRequestReadyForReview")) {
     operations.push("pr ready");
+    const index = prs.findIndex((pr) => `PR_${pr.number}` === (body.variables as { id?: string } | undefined)?.id);
+    if (index >= 0) prs[index] = { ...prs[index]!, isDraft: false };
+  }
   if (query.includes("resolveReviewThread"))
     operations.push("review thread resolve");
   if (query.includes("unresolveReviewThread"))

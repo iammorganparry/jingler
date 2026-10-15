@@ -285,7 +285,8 @@ describe("PullRequestView header", () => {
 
   it("labels draft and merged states", () => {
     renderPr({ ...pr, state: "draft" })
-    expect(screen.getByTestId("pr-meta-line").textContent).toContain("Draft")
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toContain("Draft")
+    expect(screen.getByTestId("pr-meta-line").textContent).not.toContain("Draft")
     cleanup()
     renderPr({ ...pr, state: "merged" })
     expect(screen.getByTestId("pr-meta-line").textContent).toContain("Merged")
@@ -393,5 +394,29 @@ describe("PullRequestView sub-tabs", () => {
     expect(screen.getByRole("tab", { name: "Commits 2" }).getAttribute("aria-selected")).toBe("true")
     fireEvent.keyDown(screen.getByRole("tab", { name: "Commits 2" }), { key: "ArrowLeft" })
     expect(screen.getByRole("tab", { name: "Conversation" }).getAttribute("aria-selected")).toBe("true")
+  })
+})
+
+describe("PullRequestView draft side panel", () => {
+  const draft: PullRequest = { ...pr, state: "draft", isDraft: true }
+  const view = (props: Partial<React.ComponentProps<typeof PullRequestView>> = {}) =>
+    render(<WidthTierValue width={1200}><PullRequestView pr={draft} connected {...props} /></WidthTierValue>)
+
+  it("calls onMarkReady from the secondary Mark ready for review button", async () => {
+    const onMarkReady = vi.fn()
+    view({ onMarkReady })
+    await userEvent.click(screen.getByRole("button", { name: "Mark ready for review" }))
+    expect(onMarkReady).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows the markReadyError inline", () => {
+    view({ onMarkReady: vi.fn(), markReadyError: "GitHub said no" })
+    expect(screen.getByText("GitHub said no")).toBeTruthy()
+  })
+
+  it("drops the Draft pill and button once the PR is ready", () => {
+    render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected onMarkReady={vi.fn()} /></WidthTierValue>)
+    expect(screen.getByRole("heading", { level: 2 }).textContent).not.toContain("Draft")
+    expect(screen.queryByRole("button", { name: "Mark ready for review" })).toBeNull()
   })
 })

@@ -421,7 +421,7 @@ export const PullRequestReviewRunning: Story = {
   )
 }
 
-/** Draft PR — the side panel offers "Ready for review" instead of merge. */
+/** Draft PR — the side panel offers "Mark ready for review" instead of merge. */
 export const PullRequestDraft: Story = {
   render: () => (
     <div className="flex h-screen bg-editor">

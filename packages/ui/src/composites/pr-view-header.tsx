@@ -47,9 +47,11 @@ function PrMetaLine({ pr }: { pr: PullRequest }) {
       data-testid="pr-meta-line"
       className="flex min-w-0 items-center gap-x-2.5 overflow-hidden whitespace-nowrap font-mono text-[11.5px] text-muted-foreground"
     >
-      <Badge tone="neutral" size="sm">
-        {STATE_LABEL[pr.state]}
-      </Badge>
+      {pr.state !== "draft" && (
+        <Badge tone="neutral" size="sm">
+          {STATE_LABEL[pr.state]}
+        </Badge>
+      )}
       {login && (
         <span className="flex shrink-0 items-center gap-1.5">
           <Avatar initial={login.charAt(0).toUpperCase()} src={githubAvatarUrl(login)} tone="orange" size={16} />
@@ -152,6 +154,11 @@ export function PrViewHeader({
       <div className="flex min-w-0 items-start gap-3">
         <h2 className="min-w-0 flex-1 text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
           {pr.title} <span className="font-normal text-dim">#{pr.number}</span>
+          {pr.state === "draft" && (
+            <Badge tone="neutral" size="sm" className="ml-2 align-middle" title="Draft pull request">
+              Draft
+            </Badge>
+          )}
         </h2>
         {switcher}
         {onOpenOnGithub && (
