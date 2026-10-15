@@ -2204,7 +2204,7 @@ function renderPullRequestInbox(
     merging={pullRequestInbox.merging}
     mergeError={pullRequestInbox.mergeError}
     sessionAction={selectedPullRequestTarget ? {
-      label: selectedPullRequestTarget.session ? "Open session" : "Create session",
+      label: selectedPullRequestTarget.session ? "Open session" : "Start session from this PR",
       onSelect: openSelectedPullRequestSession,
       ...(selectedPullRequestTarget.session || selectedPullRequestTarget.project
         ? {}

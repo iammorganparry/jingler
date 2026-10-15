@@ -4,13 +4,14 @@ import type { PrState, PullRequest } from "@jingler/core"
 import { Check, Copy, Download, Ellipsis, ExternalLink } from "lucide-react"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
-import { Badge } from "../components/badge.js"
+import { Badge, type BadgeTone } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { Tooltip } from "../components/tooltip.js"
 import { cn } from "../lib/cn.js"
 
 const STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
+const STATE_TONE: Record<PrState, BadgeTone> = { open: "neutral", draft: "neutral", merged: "purple", closed: "red" }
 const COPIED_MS = 1500
 
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
@@ -48,7 +49,7 @@ function PrMetaLine({ pr }: { pr: PullRequest }) {
       className="flex min-w-0 items-center gap-x-2.5 overflow-hidden whitespace-nowrap font-mono text-[11.5px] text-muted-foreground"
     >
       {pr.state !== "draft" && (
-        <Badge tone="neutral" size="sm">
+        <Badge tone={STATE_TONE[pr.state]} size="sm">
           {STATE_LABEL[pr.state]}
         </Badge>
       )}

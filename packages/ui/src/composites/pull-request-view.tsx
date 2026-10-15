@@ -122,8 +122,9 @@ function PublishStepper({ publish }: { publish: PublishCheckpoint }) {
 }
 
 /** Loading skeleton or retryable error while there is no PR yet; null once the Create-PR / PR views can render. */
-function renderLoadState(pr: PullRequest | null, busy: boolean, loadError: string | null | undefined, onRetryLoad?: () => void) {
-  if (pr !== null) return null
+function renderLoadState(pr: PullRequest | null, connected: boolean, busy: boolean, loadError: string | null | undefined, onRetryLoad?: () => void) {
+  // Not connected: fall through to the not-connected panel — a read would only fail.
+  if (pr !== null || !connected) return null
   // Avoid flashing the "Create PR" empty state before the PR resolves.
   if (busy) {
     return (
@@ -574,7 +575,7 @@ return (evidence === "checks" ? (
     return () => window.removeEventListener("keydown", close)
   }, [railOpen])
 
-  const loadView = renderLoadState(pr, busy, loadError, onRetryLoad)
+  const loadView = renderLoadState(pr, connected, busy, loadError, onRetryLoad)
   if (loadView) return loadView
   if (pr === null) {
     return (

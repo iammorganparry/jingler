@@ -193,6 +193,60 @@ export const ChecksLoadingAndError: Story = {
   )
 }
 
+/** Loading skeleton while the PR read is in flight. */
+export const PullRequestLoading: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected busy />
+    </div>
+  )
+}
+
+/** The read failed — error with Retry. */
+export const PullRequestLoadError: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected loadError="Couldn't reach GitHub." onRetryLoad={() => {}} />
+    </div>
+  )
+}
+
+/** Repository not connected — connection message + Connect GitHub. */
+export const PullRequestNotConnected: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={null} connected={false} connectionMessage="Install the GitHub App on this repository to create and review pull requests." onConnectGithub={() => {}} />
+    </div>
+  )
+}
+
+/** Read-only team PR from the inbox — no merge or review controls. */
+export const PullRequestReadOnly: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={pr} connected readOnly onOpenSession={() => {}} sessionActionLabel="Start session from this PR" onOpenOnGithub={() => {}} />
+    </div>
+  )
+}
+
+/** Merged header state. */
+export const PullRequestMerged: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={{ ...pr, state: "merged" }} connected />
+    </div>
+  )
+}
+
+/** Closed header state. */
+export const PullRequestClosed: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView pr={{ ...pr, state: "closed" }} connected />
+    </div>
+  )
+}
+
 /** The Pull Request tab — open PR with checks, reviewers, and a blocked merge. */
 export const PullRequestOpen: Story = {
   render: () => (

@@ -173,8 +173,8 @@ test("team queues use CLI only, refresh partial/access failures, and reuse local
     await expect(inbox.getByRole("button", { name: /Team PR 45/ })).toBeVisible()
     await expect(inbox.getByRole("button", { name: /Team PR 46/ })).toBeVisible()
     await inbox.getByRole("button", { name: /Team PR 46/ }).click()
-    await expect(inbox.getByRole("button", { name: "Create session" })).toBeDisabled()
-    await expect(inbox.getByRole("button", { name: "Create session" })).toHaveAttribute("title", "Add this repository as a local project to create a session.")
+    await expect(inbox.getByRole("button", { name: "Start session from this PR" })).toBeDisabled()
+    await expect(inbox.getByRole("button", { name: "Start session from this PR" })).toHaveAttribute("title", "Add this repository as a local project to create a session.")
 
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
@@ -236,7 +236,7 @@ test("team pickup creates a session using pinned HTTPS fetches and files reuse t
     await inbox.getByRole("button", { name: /Team PR 45/ }).click()
     await expect(inbox.getByRole("heading", { name: "Team PR 45" })).toBeVisible()
     const appWrites = githubServer.operations.length
-    await inbox.getByRole("button", { name: "Create session" }).click()
+    await inbox.getByRole("button", { name: "Start session from this PR" }).click()
     await expect(window.getByTestId("new-session-view")).toBeVisible()
     await window.getByRole("button", { name: "Create workspace" }).click()
     await expect(sessionRow(window, "Team PR 45")).toBeVisible({ timeout: 30_000 })

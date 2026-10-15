@@ -255,6 +255,44 @@ describe("PullRequestView load states", () => {
   })
 })
 
+describe("PullRequestView not-connected, merged/closed and read-only states", () => {
+  it("shows the connection message and Connect GitHub instead of a load error when disconnected", () => {
+    const onConnectGithub = vi.fn()
+    render(
+      <PullRequestView pr={null} connected={false} loadError="boom" connectionMessage="Install the GitHub App on acme/widget." onConnectGithub={onConnectGithub} />
+    )
+    expect(screen.getByText("Install the GitHub App on acme/widget.")).toBeTruthy()
+    expect(screen.queryByText("boom")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Connect GitHub" }))
+    expect(onConnectGithub).toHaveBeenCalledTimes(1)
+  })
+
+  it("tints the Merged and Closed header badges", () => {
+    render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, state: "merged" }} connected /></WidthTierValue>)
+    expect(screen.getByText("Merged").closest('[class*="text-purple"]')).toBeTruthy()
+    cleanup()
+    render(<WidthTierValue width={1200}><PullRequestView pr={{ ...pr, state: "closed" }} connected /></WidthTierValue>)
+    expect(screen.getByText("Closed").closest('[class*="text-red"]')).toBeTruthy()
+  })
+
+  it("exposes no write action in a read-only view and keeps Start session", async () => {
+    const onOpenSession = vi.fn()
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView pr={{ ...pr, state: "draft" }} connected readOnly onOpenSession={onOpenSession} sessionActionLabel="Start session from this PR" />
+      </WidthTierValue>
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Start session from this PR" }))
+    expect(onOpenSession).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Add a review")).toBeNull()
+    for (const name of ["Merge pull request", "Mark ready for review", "Close pull request", "Approve", "Request changes"])
+      expect(screen.queryByRole("button", { name })).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }))
+    expect(screen.queryByRole("menuitem", { name: "Mark ready" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Close PR" })).toBeNull()
+  })
+})
+
 describe("PullRequestView header", () => {
   const renderPr = (value: PullRequest) =>
     render(<WidthTierValue width={600}><PullRequestView pr={value} connected /></WidthTierValue>)
