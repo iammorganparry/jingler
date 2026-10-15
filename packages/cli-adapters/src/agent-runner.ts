@@ -70,7 +70,9 @@ import type {
 import { ContextManager } from "./context-manager.js"
 import { renderPrimer, tailAfter } from "./context-digest.js"
 import { healedWorktreePath } from "./runtime/persistence/worktree-path.js"
-import { branchAt, ensureWorktreeLinked } from "./git.js"
+import { branchAt, defaultBranchOf, ensureWorktreeLinked, GitService } from "./git.js"
+import { ProjectService } from "./projects.js"
+import { makeCheckoutHost } from "./checkout-host.js"
 import { BrowserControlMcpService,
   type BrowserControlMcpAttachment
 } from "./browser-control-mcp-service.js"
@@ -1020,7 +1022,52 @@ export class AgentRunner extends Effect.Service<AgentRunner>()("@jingler/AgentRu
                 console.error("Failed to persist execution usage", cause)
               }))
             )
+          // Multi-repo state for this turn. Optional services: a harness without a
+          // project registry or git (scripted tests) simply gets no `switch_checkout`.
+          const projectService = yield* Effect.serviceOption(ProjectService)
+          const gitService = yield* Effect.serviceOption(GitService)
+          const runWithEnv = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
+          const checkouts =
+            Option.isSome(projectService) && Option.isSome(gitService)
+              ? makeCheckoutHost({
+                  // A healed worktree path wins over the stale stored one for legacy sessions.
+                  session: { ...session, worktreePath },
+                  listProjects: () => runWithEnv(projectService.value.list().pipe(Effect.provide(env))),
+                  registerProject: (repoPath) =>
+                    runWithEnv(projectService.value.register({ path: repoPath }).pipe(Effect.provide(env))),
+                  persist: (next) =>
+                    runWithEnv(
+                      SessionStore.setCheckouts(sessionId, next).pipe(
+                        Effect.zipRight(SessionStore.get(sessionId)),
+                        Effect.provide(env)
+                      )
+                    ),
+                  createDetachedWorktree: (input) =>
+                    runWithEnv(gitService.value.createDetachedWorktree(input).pipe(Effect.provide(env))),
+                  defaultBranch: (repoPath) => runWithEnv(defaultBranchOf(repoPath).pipe(Effect.provide(env))),
+                  approveRepo: (repoPath) =>
+                    runWithEnv(
+                      Effect.gen(function* () {
+                        const gateId = `g_${sessionId}_${yield* nextId}`
+                        const gate = {
+                          id: gateId,
+                          kind: "command" as const,
+                          title: "Attach an unregistered repository?",
+                          detail: `The agent asked to work in ${repoPath}, which is not a registered project. Approving registers it as a project and attaches an isolated worktree.`,
+                          command: `switch_checkout ${repoPath}`,
+                          allowLabel: null,
+                          status: "pending" as const
+                        }
+                        const decision = yield* approvals.awaitGate(
+                          sessionId, chatId, gateId, gate, emit({ _tag: "GateRequested", gate })
+                        )
+                        return decision === "allow"
+                      })
+                    )
+                })
+              : undefined
           const adapterRun = adapter.run(chatId, spec, {
+            ...(checkouts === undefined ? {} : { checkouts }),
             emit,
             recordUsage,
             canUseTool,
