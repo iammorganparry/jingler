@@ -196,11 +196,14 @@ export function PlanCommentLayer({ container, content, comments, editable, reply
     if (active === null) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      // Capture + stop: otherwise the composer's Escape-to-stop hotkey also fires and aborts the
+      // agent waiting on this review, so "Request changes" would reach nobody.
+      event.stopPropagation()
       setHovered(null)
       setPinned(null)
     }
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
+    document.addEventListener("keydown", onKeyDown, true)
+    return () => document.removeEventListener("keydown", onKeyDown, true)
   }, [active])
 
   if (comments.length === 0) return null
