@@ -75,8 +75,8 @@ export function ContextDivider({
         aria-expanded={open}
         className="group flex w-full items-center gap-2 text-left"
       >
-        <span className="h-px flex-1 bg-border" />
-        <span className="flex items-center gap-1.5 rounded-full border border-border bg-bg px-2 py-0.5 font-mono text-[10px] text-muted-foreground transition-colors group-hover:text-fg">
+        <span className="h-px flex-1 bg-line" />
+        <span className="flex items-center gap-1.5 px-1 font-mono text-[10px] text-muted-foreground transition-colors group-hover:text-text-bright">
           <Layers className="size-3 text-dim" />
           Context compacted
           {quotable(tokensBefore) && (
@@ -86,11 +86,11 @@ export function ContextDivider({
             className={cn("size-3 text-dim transition-transform", open && "rotate-90")}
           />
         </span>
-        <span className="h-px flex-1 bg-border" />
+        <span className="h-px flex-1 bg-line" />
       </button>
 
       {open && (
-        <div className="mt-2 space-y-3 rounded-md border border-border bg-fg/[0.02] p-3">
+        <div className="mt-2 space-y-3 rounded-md border border-line bg-surface p-3">
           <p className="text-[11px] leading-relaxed text-dim">
             Your full history above is unchanged. This is what the agent carried
             forward into a fresh conversation — {kept} item{kept === 1 ? "" : "s"} kept.
