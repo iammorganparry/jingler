@@ -82,6 +82,31 @@ export const PREVIEW_REVEAL_CHANNEL = "jingler/preview/reveal"
  */
 export const PREVIEW_URL_CHANNEL = "jingler/preview/url"
 export const PREVIEW_CLOSE_TAB_CHANNEL = "jingler/preview/close-tab"
+/** Main→renderer push: history availability, loading and last main-frame load failure. */
+export const PREVIEW_NAV_CHANNEL = "jingler/preview/nav"
+
+/** Chromium's ERR_ABORTED: a superseded navigation, not a failure worth a Retry card. */
+const ERR_ABORTED = -3
+
+export interface PreviewNavState {
+  readonly canGoBack: boolean
+  readonly canGoForward: boolean
+  readonly loading: boolean
+  readonly error: string | null
+}
+
+export const previewNavState = (
+  wc: { readonly isLoading: () => boolean; readonly navigationHistory: { readonly canGoBack: () => boolean; readonly canGoForward: () => boolean } },
+  error: string | null
+): PreviewNavState => ({
+  canGoBack: wc.navigationHistory.canGoBack(),
+  canGoForward: wc.navigationHistory.canGoForward(),
+  loading: wc.isLoading(),
+  error
+})
+
+export const previewLoadFailure = (errorCode: number, description: string, isMainFrame: boolean): string | null =>
+  isMainFrame && errorCode !== ERR_ABORTED ? description || `Load failed (${errorCode})` : null
 
 export const isCloseTabInput = (input: Pick<Electron.Input, "type" | "key" | "control" | "meta" | "alt">): boolean =>
   input.type === "keyDown" && (input.meta || input.control) && !input.alt && input.key.toLowerCase() === "w"
@@ -111,6 +136,9 @@ export interface PreviewViewServiceShape {
   readonly navigate: (sessionId: string, chatId: string, url: string) => Effect.Effect<void, BrowserPreviewError>
   /** Reload the browser view. No-op when closed. */
   readonly reload: (sessionId: string, chatId: string) => Effect.Effect<void>
+  /** Step back / forward in the browser view's history. No-op when closed or at the end. */
+  readonly goBack: (sessionId: string, chatId: string) => Effect.Effect<void>
+  readonly goForward: (sessionId: string, chatId: string) => Effect.Effect<void>
   /**
    * Show or hide the BROWSER view without destroying it — the dock switching to
    * or from the Browser tab. Hiding never discards the page or its history.
@@ -326,7 +354,21 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
       view.webContents.on("will-redirect", (details) => {
         if (details.isMainFrame) pendingNavigations.get(key)?.redirects.add(details.url)
       })
-      view.webContents.on("did-fail-load", (_event, _code, _description, url, isMainFrame) => {
+      let failure: string | null = null
+      const publishNav = () =>
+        mainWindow()?.webContents.send(PREVIEW_NAV_CHANNEL, {
+          sessionId,
+          chatId,
+          ...previewNavState(view.webContents, failure)
+        })
+      view.webContents.on("did-start-loading", () => {
+        failure = null
+        publishNav()
+      })
+      view.webContents.on("did-stop-loading", publishNav)
+      view.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
+        failure = previewLoadFailure(code, description, isMainFrame) ?? failure
+        publishNav()
         if (!isMainFrame) return
         const pending = pendingNavigations.get(key)
         if (
@@ -334,9 +376,13 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
           (url === pending.requestedUrl || pending.redirects.has(url))
         ) pendingNavigations.delete(key)
       })
-      view.webContents.on("did-navigate", (_event, url) => publishUrl(url))
+      view.webContents.on("did-navigate", (_event, url) => {
+        publishUrl(url)
+        publishNav()
+      })
       view.webContents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
         if (isMainFrame) publishUrl(url)
+        publishNav()
       })
     }
     win.contentView.addChildView(view)
@@ -505,6 +551,12 @@ export const PreviewViewServiceLive = Layer.scoped(PreviewViewService, Effect.ge
 
     reload: (sessionId, chatId) =>
       Effect.sync(() => browserViews.get(browserOwnerKey(sessionId, chatId))?.webContents.reload()),
+
+    goBack: (sessionId, chatId) =>
+      Effect.sync(() => browserViews.get(browserOwnerKey(sessionId, chatId))?.webContents.navigationHistory.goBack()),
+
+    goForward: (sessionId, chatId) =>
+      Effect.sync(() => browserViews.get(browserOwnerKey(sessionId, chatId))?.webContents.navigationHistory.goForward()),
 
     setVisible: (sessionId, chatId, wanted) =>
       Effect.sync(() => {

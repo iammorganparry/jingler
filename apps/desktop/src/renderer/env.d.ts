@@ -58,6 +58,17 @@ interface JinglerBridge {
   readonly onPreviewUrlChanged: (
     cb: (payload: { readonly sessionId: string; readonly chatId: string; readonly url: string }) => void
   ) => () => void
+  /** Subscribe to the embedded browser's history, loading and load-failure state. */
+  readonly onPreviewNavState: (
+    cb: (payload: {
+      readonly sessionId: string
+      readonly chatId: string
+      readonly canGoBack: boolean
+      readonly canGoForward: boolean
+      readonly loading: boolean
+      readonly error: string | null
+    }) => void
+  ) => () => void
   /** Forward Cmd/Ctrl+W from the focused native Browser view. */
   readonly onPreviewCloseTab: (
     cb: (payload: { readonly sessionId: string; readonly chatId: string }) => void
