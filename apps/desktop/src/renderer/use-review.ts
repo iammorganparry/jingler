@@ -69,7 +69,8 @@ export interface ReviewState {
   readonly revertFile: (path: string) => void
 }
 
-const localKey = (sessionId: string) => ["local", "diff", sessionId] as const
+const localKey = (sessionId: string, checkoutId?: string) =>
+  (checkoutId === undefined ? ["local", "diff", sessionId] : ["local", "diff", sessionId, checkoutId]) as readonly string[]
 const threadsKey = (sessionId: string, prNumber: number | null) =>
   ["github", "review-threads", sessionId, prNumber] as const
 
@@ -111,7 +112,8 @@ const reviewThreadsFor = (
   threads: ReadonlyArray<PrReviewThread> | undefined
 ): ReadonlyArray<PrReviewThread> => source === "pr" ? (threads ?? []) : []
 
-export function useReview(session: Session): ReviewState {
+/** `checkoutId` reads one checkout of a multi-repo session; absent means the active one. */
+export function useReview(session: Session, checkoutId?: string): ReviewState {
   const qc = useQueryClient()
   // Filter, drafts and viewed markers are shared across the Explorer, the Files
   // view and the review tray, so they live in the session's review store.
@@ -133,7 +135,7 @@ export function useReview(session: Session): ReviewState {
   const reviewing = filter !== "all" || drafts.length > 0
 
   const prQuery = useQuery({
-    queryKey: ["github", "review", session.id, session.prNumber],
+    queryKey: ["github", "review", session.id, session.prNumber, ...(checkoutId === undefined ? [] : [checkoutId])],
     enabled: reviewing && session.prNumber != null,
     queryFn: async () => {
       // Settle independently: the file list and the diff are separate fetches
@@ -141,8 +143,8 @@ export function useReview(session: Session): ReviewState {
       // otherwise-complete review. (A single Promise.all rejection here showed
       // "No changes to review" even when 25 files had loaded.)
       const [filesResult, diffResult] = await Promise.allSettled([
-        rpc.githubFiles(session.id),
-        rpc.githubDiff(session.id)
+        rpc.githubFiles(session.id, checkoutId),
+        rpc.githubDiff(session.id, checkoutId)
       ])
       if (filesResult.status === "rejected") throw filesResult.reason
       return {
@@ -161,12 +163,12 @@ export function useReview(session: Session): ReviewState {
   // old PR after a new one was opened.
   const threadsQuery = useQuery({
     queryKey: threadsKey(session.id, session.prNumber),
-    queryFn: () => rpc.githubPr(session.id),
+    queryFn: () => rpc.githubPr(session.id, checkoutId),
     enabled: reviewing && filter === "pr" && session.prNumber != null
   })
   const localQuery = useQuery({
-    queryKey: localKey(session.id),
-    queryFn: () => rpc.sessionsDiff(session.id),
+    queryKey: localKey(session.id, checkoutId),
+    queryFn: () => rpc.sessionsDiff(session.id, checkoutId),
     enabled: reviewing
   })
 
