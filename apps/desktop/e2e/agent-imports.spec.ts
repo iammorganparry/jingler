@@ -147,7 +147,7 @@ test("searches and filters 500 imported agents and skills", async ({ launchApp }
   await window.getByRole("radio", { name: "Claude 50" }).click()
   await expect(window.getByRole("radio", { name: "Agents 50" })).toBeVisible()
   await window.getByRole("textbox", { name: "Search agents & skills…" }).fill("Resource 100")
-  await expect(window.getByText("1 results")).toBeVisible()
+  await expect(window.getByText("1 result")).toBeVisible()
 
   await window.getByRole("switch", { name: "Disable Resource 100" }).click()
   await expect(window.getByRole("switch", { name: "Enable Resource 100" })).toBeVisible()
