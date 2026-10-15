@@ -1632,6 +1632,7 @@ function AuthedApp({
           environments: environmentController.environments,
           loading: environmentController.loading,
           error: environmentController.error,
+          workspaces: sessions.filter((session) => !session.archived),
           onOpen: () => {
             environmentController.send({ type: "RESET" });
             setEnvironmentDialogOpen(true);
