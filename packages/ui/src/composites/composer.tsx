@@ -515,12 +515,13 @@ const selectedComposerModel = ({ agentEndpointCatalog, providerCatalog, endpoint
 
 export function Composer(props: ComposerProps) {
          function renderAutocomplete() {
-           return (menu && count > 0 && (
+           return (menu && (count > 0 || menu.query !== "") && (
         <div className="absolute inset-x-0 bottom-full z-10 mb-2">
           {menu.kind === "slash" ? (
             <CommandMenu
               skills={skillMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(skill) => replaceToken(skillInsertion(skill))}
               onHover={setActiveIndex}
             />
@@ -528,6 +529,7 @@ export function Composer(props: ComposerProps) {
             <MentionMenu
               files={fileMatches}
               activeIndex={activeIndex}
+              query={menu.query}
               onSelect={(p) => replaceToken(`@${p}`)}
               onHover={setActiveIndex}
             />
@@ -1063,9 +1065,10 @@ export function Composer(props: ComposerProps) {
   const skillMatches = useMemo(
     () =>
       menu?.kind === "slash"
-        ? skills.filter((s) =>
-            s.name.toLowerCase().includes(menu.query.toLowerCase()),
-  )
+        ? skills
+            .filter((s) => s.name.toLowerCase().includes(menu.query.toLowerCase()))
+            // Commands list before skills, matching the menu's group order.
+            .sort((a, b) => Number(a.source === "skill") - Number(b.source === "skill"))
         : [],
     [menu, skills],
   );

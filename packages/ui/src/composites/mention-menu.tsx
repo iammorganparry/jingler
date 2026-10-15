@@ -1,17 +1,26 @@
+import { useCallback } from "react"
 import { FileIcon } from "../components/file-icon.js"
+import { HighlightMatch } from "../components/highlight-match.js"
 import { VirtualList } from "../components/virtual-list.js"
-import { cn } from "../lib/cn.js"
+import { AutocompleteMenu } from "./autocomplete-menu.js"
 
 const pathKey = (path: string) => path
+const filesGroup = () => "Files"
 
-function MentionRow(path: string) {
+/**
+ * One file row. Rows never wrap: the directory shrinks with an ellipsis while
+ * the file name stays readable, so a long path truncates in the middle.
+ */
+function MentionRow({ path, query }: { path: string; query: string }) {
   const name = path.split("/").pop() ?? path
   const dir = path.slice(0, path.length - name.length)
   return (
-    <span className="flex min-w-0 items-center gap-2 px-3">
+    <span className="flex min-w-0 flex-1 items-center gap-2 px-3 whitespace-nowrap">
       <FileIcon path={path} />
-      <span className="font-mono text-[12px] text-text-bright">{name}</span>
-      {dir && <span className="truncate font-mono text-[10.5px] text-dim">{dir}</span>}
+      {dir && <span className="min-w-0 truncate font-mono text-[10.5px] text-dim">{dir}</span>}
+      <span className="max-w-[70%] flex-none truncate font-mono text-[12px] text-text-bright">
+        <HighlightMatch text={name} query={query} />
+      </span>
     </span>
   )
 }
@@ -25,29 +34,32 @@ function MentionRow(path: string) {
 export function MentionMenu({
   files,
   activeIndex,
+  query = "",
   onSelect,
   onHover,
   className
 }: {
   files: ReadonlyArray<string>
   activeIndex: number
+  query?: string
   onSelect: (path: string) => void
   onHover?: (index: number) => void
   className?: string
 }) {
-  if (files.length === 0) return null
+  const renderRow = useCallback((path: string) => <MentionRow path={path} query={query} />, [query])
   return (
-    <div className={cn("overflow-hidden rounded-xl border border-line bg-panel shadow-2xl", className)}>
+    <AutocompleteMenu trigger="@" query={query} empty={files.length === 0} className={className}>
       <VirtualList
         items={files}
         getKey={pathKey}
         getText={pathKey}
-        renderRow={MentionRow}
+        getGroup={filesGroup}
+        renderRow={renderRow}
         onSelect={onSelect}
         activeKey={files[activeIndex] ?? null}
         onActiveKeyChange={(path) => onHover?.(files.indexOf(path))}
         ariaLabel="Files"
       />
-    </div>
+    </AutocompleteMenu>
   )
 }
