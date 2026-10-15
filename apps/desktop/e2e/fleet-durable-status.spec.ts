@@ -271,7 +271,7 @@ test("durable native status appears as a live subagent tab", async ({
 
     rmSync(join(asyncRoot, ".active-runs", runId), { force: true })
     await window.evaluate(() => window.dispatchEvent(new Event("focus")))
-    // The chip keeps settled children under Finished; the scout row must stop running.
+    // The chip keeps settled children under Done; the scout row must stop running.
     await chip.click()
     await expect(
       popover.locator('[data-testid^="subagent-chip-row-"]').filter({ hasText: "main" })

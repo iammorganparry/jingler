@@ -50,6 +50,9 @@ export const Agents: Story = {
     <div className="flex w-80 flex-col gap-2">
       <AgentCard file="billing.ts" state="working" tokens="31k" status="reading middleware…" />
       <AgentCard file="api-keys.ts" state="flagged" status="⚠ 2 findings" />
+      <AgentCard file="routes.ts" state="done" status="3 files changed" tokens="48k" />
+      <AgentCard file="schema.ts" state="stopped" status="stopped by you" />
+      <AgentCard file="auth.ts" state="failed" reason="Tool timed out after 120s" onResume={() => undefined} onViewTranscript={() => undefined} />
     </div>
   )
 }

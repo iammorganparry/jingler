@@ -30,7 +30,7 @@ describe("SubagentChip", () => {
     expect(screen.getByTestId("subagent-chip").textContent).toContain("2 subagents")
   })
 
-  it("lists running rows then a Finished section with elapsed time", () => {
+  it("lists running rows then a Done group with elapsed time", () => {
     render(
       <SubagentChip
         subagents={[
@@ -46,7 +46,7 @@ describe("SubagentChip", () => {
     expect(running.textContent).toContain("reviewer")
     expect(running.textContent).toContain("Review the diff")
     expect(running.textContent).toContain("1m 5s")
-    expect(screen.getByText("Finished · 1")).toBeTruthy()
+    expect(screen.getByText("Done (1)")).toBeTruthy()
     const failed = screen.getByTestId("subagent-chip-row-b")
     expect(failed.textContent).toContain("failed")
     expect(failed.textContent).toContain("12s")
@@ -123,7 +123,7 @@ const peer = (chatId: string, title: string) => ({
 })
 
 describe("SubagentChip peers", () => {
-  it("renders for peers alone and lists them under Peers · N after Finished", () => {
+  it("renders for peers alone and lists them under Peers · N after Done", () => {
     render(<SubagentChip subagents={[]} onOpenSubagent={vi.fn()} peers={[peer("p1", "Agent B"), peer("p2", "Agent C")]} onMessagePeer={vi.fn()} />)
     expect(screen.getByTestId("subagent-chip").textContent).toContain("2 peers")
     openChip()

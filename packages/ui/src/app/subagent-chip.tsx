@@ -130,7 +130,7 @@ function Rows({ rows, now, onOpen }: { rows: ReadonlyArray<ChipRow>; now: number
 /**
  * Lane-header chip for the active chat's child agents: `N subagents ▾`, pulsing
  * while any child is spawning or running. Opens a popover of running children
- * then a `Finished · N` section, then `Peers · N`; a row opens that child's
+ * then a `Done (N)` group, then `Peers · N`; a row opens that child's
  * transcript and a peer's `Message` sends it a note. Rows indent by tree depth
  * (orchestrator → children, status word only); a failed row shows a red icon
  * and a `View error` action that opens that child.
@@ -187,7 +187,7 @@ export function SubagentChip({ subagents, onOpenSubagent, peers = [], onMessageP
           {finished.length > 0 && (
             <>
               <DropdownMenu.Label className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-dim">
-                Finished · {finished.length}
+                Done ({finished.length})
               </DropdownMenu.Label>
               <Rows rows={finished} now={now} onOpen={onOpenSubagent} />
             </>

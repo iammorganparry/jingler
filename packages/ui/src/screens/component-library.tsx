@@ -205,6 +205,9 @@ export function ComponentLibrary() {
         <Spec title="AgentCard">
           <AgentCard file="billing.ts" state="working" tokens="31k" status="reading middleware…" />
           <AgentCard file="api-keys.ts" state="flagged" status="⚠ 2 findings" />
+          <AgentCard file="routes.ts" state="done" status="3 files changed" />
+          <AgentCard file="schema.ts" state="stopped" status="stopped by you" />
+          <AgentCard file="auth.ts" state="failed" reason="Tool timed out after 120s" onResume={() => undefined} onViewTranscript={() => undefined} />
         </Spec>
         <Spec title="Callout">
           <Callout tone="yellow">Large workflow — 26 agents.</Callout>
