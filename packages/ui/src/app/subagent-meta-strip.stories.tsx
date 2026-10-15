@@ -50,3 +50,13 @@ export const SparseNode: Story = {
   }
 }
 export const Failed: Story = { args: { node: { ...node, status: "failed", currentTool: null, completedAt: Date.now() } } }
+export const Worktree: Story = {
+  args: {
+    node: { ...node, workspace: { path: "/wt/reviewer", branch: "feat/review-retry", baseRef: "main", diff: { added: 42, removed: 8 } }, prNumber: 491 }
+  }
+}
+export const LongBranch: Story = {
+  args: {
+    node: { ...node, workspace: { path: "/wt/r", branch: "feat/redesign-8.11-subagent-row-and-meta-strip-with-a-very-long-name", baseRef: null, diff: { added: 1204, removed: 388 } }, prNumber: 4912 }
+  }
+}

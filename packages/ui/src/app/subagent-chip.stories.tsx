@@ -42,3 +42,13 @@ export const WorkflowFleetTree: Story = {
     ]
   }
 }
+
+export const WorkspaceDetail: Story = {
+  args: {
+    subagents: [
+      { id: "a", agent: "reviewer", task: "Review the diff", status: "running", startedAt: now - 95_000, branch: "feat/review-retry", diff: { added: 42, removed: 8 }, prNumber: 491 },
+      { id: "b", agent: "worker", task: "Implement the chip popover", status: "running", startedAt: now - 60_000, branch: "feat/redesign-8.11-subagent-row-and-meta-strip-with-a-long-name", diff: { added: 1204, removed: 388 }, prNumber: 4912 },
+      { id: "c", agent: "scout", task: "Map the lane header", status: "completed", startedAt: now - 300_000, endedAt: now - 120_000, branch: null }
+    ]
+  }
+}

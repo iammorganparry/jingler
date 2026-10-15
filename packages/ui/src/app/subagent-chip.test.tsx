@@ -143,6 +143,39 @@ describe("SubagentChip peers", () => {
   })
 })
 
+describe("SubagentChip workspace", () => {
+  it("shows branch, diff stat and PR number on one line, branch truncating", () => {
+    render(
+      <SubagentChip
+        subagents={[item({ id: "a", branch: "feat/review-retry-with-a-very-long-branch-name", diff: { added: 42, removed: 8 }, prNumber: 491 })]}
+        onOpenSubagent={vi.fn()}
+      />
+    )
+    openChip()
+    const row = screen.getByTestId("subagent-chip-row-a")
+    const branch = screen.getByTestId("subagent-chip-branch")
+    expect(branch.textContent).toBe("feat/review-retry-with-a-very-long-branch-name")
+    expect(branch.className).toContain("truncate")
+    expect(branch.className).toContain("font-mono")
+    expect(row.textContent).toContain("+42")
+    expect(row.textContent).toContain("−8")
+    expect(row.textContent).toContain("#491")
+    expect(row.className).not.toContain("flex-wrap")
+  })
+
+  it("labels a child sharing the parent checkout", () => {
+    render(<SubagentChip subagents={[item({ id: "a", branch: null })]} onOpenSubagent={vi.fn()} />)
+    openChip()
+    expect(screen.getByTestId("subagent-chip-branch").textContent).toBe("Shared checkout")
+  })
+
+  it("renders no workspace detail when the runtime reports none", () => {
+    render(<SubagentChip subagents={[item({ id: "a" })]} onOpenSubagent={vi.fn()} />)
+    openChip()
+    expect(screen.queryByTestId("subagent-chip-branch")).toBeNull()
+  })
+})
+
 describe("formatElapsed", () => {
   it("formats seconds, minutes and hours", () => {
     expect(formatElapsed(900)).toBe("0s")

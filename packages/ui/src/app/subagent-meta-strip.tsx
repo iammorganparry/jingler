@@ -90,7 +90,6 @@ function UsageRow({ node }: { node: SubagentFleetNode }) {
 /** Worktree branch (mono, truncates first), diff stat and a PR chip that opens the PR view. Shared-checkout children say so. */
 function WorkspaceRow({ node, onOpenPullRequest }: { node: SubagentFleetNode; onOpenPullRequest?: (prNumber: number) => void }) {
   const { workspace, prNumber } = node
-  if (workspace === null && prNumber === null) return null
   return (
     <Row testId="subagent-meta-workspace">
       {workspace ? (
