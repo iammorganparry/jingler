@@ -10,14 +10,16 @@ import type {
   Repo,
   ResourceDetectionResult
 } from "@jingler/core"
-import { ArrowRight, FolderSearch, GitBranch } from "lucide-react"
+import { ArrowRight, GitBranch } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
+import { Stepper } from "../components/status-row.js"
 import { GithubMark } from "../components/github-mark.js"
 import { Spinner } from "../components/loading.js"
 import { StatusDot } from "../components/status-dot.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
+import { ProjectsFolderStep } from "./setup/projects-folder-step.js"
 import { ProviderSetupStep } from "./setup/provider-setup-step.js"
 import { ResourceSetupStep } from "./setup/resource-setup-step.js"
 
@@ -36,6 +38,11 @@ export interface SetupScreenProps {
   onChooseDir: () => void
   onContinue: () => void
   reposDir?: string | null
+  selectedRepoPaths?: ReadonlyArray<string>
+  onToggleRepo: (path: string) => void
+  onToggleAllRepos: () => void
+  onAddProjects: () => void
+  onCloneRepository: () => void
   onConnectGithub: () => void
   onSkipGithub: () => void
   onConnectClaude: (token: string) => void
@@ -52,6 +59,8 @@ export interface SetupScreenProps {
   onSkipImportSessions: () => void
   onContinueImportSessions: () => void
 }
+
+const ONBOARDING_STEPS = ["Projects folder", "GitHub", "Agent"] as const
 
 const githubLabel = (github: GitHubConnection): string => {
   switch (github.mode) {
@@ -86,6 +95,11 @@ export function SetupScreen({
   onChooseDir,
   onContinue,
   reposDir = null,
+  selectedRepoPaths = [],
+  onToggleRepo,
+  onToggleAllRepos,
+  onAddProjects,
+  onCloneRepository,
   onConnectGithub,
   onSkipGithub,
   onConnectClaude,
@@ -102,50 +116,9 @@ export function SetupScreen({
   onSkipImportSessions,
   onContinueImportSessions
 }: SetupScreenProps) {
-function renderWorkspaceSetup() {
-             return (<>
-            <div className="flex flex-col gap-2.5">
-              <Eyebrow>Welcome · 1 of 2</Eyebrow>
-              <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-bright">
-                Set up your workspace
-              </h1>
-              <p className="text-[13px] leading-[1.6] text-muted-foreground">
-                Choose the folder that holds your git repositories. Jingler scans it locally and
-                runs sessions in isolated worktrees.
-              </p>
-            </div>
-
-            {error && !busy && <Callout tone="red">{error}</Callout>}
-            {!chosen ? (
-              <Button variant="primary" onClick={onChooseDir} disabled={busy} className="self-start">
-                {busy ? <Spinner size={13} /> : <FolderSearch size={14} />}
-                {chooseLabel}
-              </Button>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 rounded-lg border border-line bg-sunken px-3 py-2.5">
-                  <FolderSearch size={14} className="flex-none text-blue" />
-                  <span className="truncate font-mono text-[12px] text-text-body">{reposDir}</span>
-                </div>
-                <RepositorySummary repos={shownRepos} total={repos.length} overflow={overflow} />
-                <div className="flex items-center gap-2.5 pt-1">
-                  <Button variant="primary" onClick={onContinue}>
-                    Continue
-                    <ArrowRight size={14} />
-                  </Button>
-                  <Button variant="ghost" onClick={onChooseDir} disabled={busy}>
-                    {busy ? "Scanning…" : "Choose a different folder"}
-                  </Button>
-                </div>
-              </>
-            )}
-          </>)
-           }
-
 function renderGithubSetup() {
              return (<>
             <div className="flex flex-col gap-2.5">
-              <Eyebrow>Welcome · 2 of 2</Eyebrow>
               <h1 className="text-[22px] font-semibold tracking-[-0.01em] text-text-bright">
                 Connect GitHub
               </h1>
@@ -232,7 +205,19 @@ function renderImportSessionsSetup() {
 
            switch (step) {
 case "workspace": {
-return (renderWorkspaceSetup())
+return (<ProjectsFolderStep
+            reposDir={reposDir}
+            repos={repos}
+            selectedRepoPaths={selectedRepoPaths}
+            error={error}
+            busy={busy}
+            onChooseDir={onChooseDir}
+            onContinue={onContinue}
+            onToggleRepo={onToggleRepo}
+            onToggleAllRepos={onToggleAllRepos}
+            onAddProjects={onAddProjects}
+            onCloneRepository={onCloneRepository}
+          />)
 }
 case "github": {
 return (renderGithubSetup())
@@ -270,8 +255,6 @@ return (renderImportSessionsSetup())
           />)
          }
 
-  const chosen = reposDir !== null
-  const chooseLabel = busy ? "Scanning…" : error ? "Choose another folder" : "Choose repos folder"
   const shownRepos = repos.slice(0, 6)
   const overflow = repos.length - shownRepos.length
   const githubBusy = busy || github.mode === "connecting"
@@ -284,6 +267,9 @@ return (renderImportSessionsSetup())
           <JinglerMark className="h-6 w-auto text-white" />
         </div>
 
+        {(step === "workspace" || step === "github") && (
+          <Stepper steps={ONBOARDING_STEPS} current={step === "workspace" ? 0 : 1} />
+        )}
         {getStep()}
       </div>
     </div>

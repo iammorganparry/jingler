@@ -33,6 +33,8 @@ export interface AppContext {
   readonly providerPendingAuthKind: AuthKind | null;
   readonly resourceDetection: ResourceDetectionResult | null;
   readonly selectedResourceCandidates: ReadonlyArray<DetectedResourceCandidate>;
+  /** Paths of the scanned repositories ticked on onboarding step 1. */
+  readonly selectedRepoPaths: ReadonlyArray<string>;
   readonly error: string | null;
 }
 
@@ -68,6 +70,9 @@ const hasSelectableDefault = (
     ) === true
   );
 };
+
+const messageOf = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
 
 export interface ChosenRepositoryDirectory {
   readonly reposDir: string;
@@ -115,13 +120,37 @@ const initialLoad = fromPromise<InitialData>(async () => {
   };
 });
 
-/** Open the native picker, persist, and scan; null when the user cancels. */
+const scanFailure = (dir: string, reason: string) =>
+  new Error(`Couldn't read ${dir} — ${reason}`);
+
+/**
+ * Open the native picker, persist, and scan; null when the user cancels. The
+ * workspace scan swallows unreadable folders as "no repos", so readability is
+ * checked first to surface a real error on step 1.
+ */
 const chooseDir = fromPromise<ChosenRepositoryDirectory | null>(async () => {
   const config = await rpc.chooseReposDir();
   if (!config?.reposDir) return null;
-  const repos = await rpc.workspaceRepos();
-  return { reposDir: config.reposDir, repos };
+  const { reposDir } = config;
+  await rpc.projectsListDirectories(reposDir).catch(() => {
+    throw scanFailure(reposDir, "permission denied");
+  });
+  const repos = await rpc.workspaceRepos().catch((error: unknown) => {
+    throw scanFailure(reposDir, messageOf(error));
+  });
+  return { reposDir, repos };
 });
+
+/** Register exactly the repositories the user ticked on step 1. */
+const registerProjects = fromPromise<void, ReadonlyArray<string>>(
+  async ({ input }) => {
+    for (const path of input) {
+      // Sequential: registration persists to a single projects file.
+      // eslint-disable-next-line no-await-in-loop
+      await rpc.projectsRegister({ path });
+    }
+  },
+);
 
 /** Load the persisted session list before entering the app. */
 const loadSessions = fromPromise<ReadonlyArray<Session>>(async () =>
@@ -204,15 +233,15 @@ const importResources = fromPromise<
   }),
 );
 
-const messageOf = (error: unknown) =>
-  error instanceof Error ? error.message : String(error);
-
 export const appMachine = setup({
   types: {
     context: {} as AppContext,
     events: {} as
       | { type: "CHOOSE" }
       | { type: "CONTINUE" }
+      | { type: "TOGGLE_REPO"; path: string }
+      | { type: "TOGGLE_ALL_REPOS" }
+      | { type: "ADD_PROJECTS" }
       | { type: "SKIP_GITHUB" }
       | { type: "GITHUB_CONNECTED" }
       | ({ type: "CONNECT_CLAUDE" } & Extract<
@@ -257,6 +286,7 @@ export const appMachine = setup({
   actors: {
     initialLoad,
     chooseDir,
+    registerProjects,
     loadSessions,
     loadProviderCatalog,
     completeProviderSetup,
@@ -278,6 +308,7 @@ export const appMachine = setup({
     providerPendingAuthKind: null,
     resourceDetection: null,
     selectedResourceCandidates: [],
+    selectedRepoPaths: [],
     error: null,
   },
   states: {
@@ -334,6 +365,46 @@ export const appMachine = setup({
                 CONTINUE: {
                   target: "#app.setup.github",
                   guard: ({ context }) => context.reposDir !== null,
+                  actions: assign({ error: null }),
+                },
+                TOGGLE_REPO: {
+                  actions: assign({
+                    selectedRepoPaths: ({ context, event }) =>
+                      context.selectedRepoPaths.includes(event.path)
+                        ? context.selectedRepoPaths.filter(
+                            (path) => path !== event.path,
+                          )
+                        : [...context.selectedRepoPaths, event.path],
+                  }),
+                },
+                TOGGLE_ALL_REPOS: {
+                  actions: assign({
+                    selectedRepoPaths: ({ context }) =>
+                      context.selectedRepoPaths.length === context.repos.length
+                        ? []
+                        : context.repos.map((repo) => repo.path),
+                  }),
+                },
+                ADD_PROJECTS: {
+                  target: "registering",
+                  guard: ({ context }) =>
+                    context.reposDir !== null &&
+                    context.selectedRepoPaths.length > 0,
+                  actions: assign({ error: null }),
+                },
+              },
+            },
+            registering: {
+              invoke: {
+                src: "registerProjects",
+                input: ({ context }) => context.selectedRepoPaths,
+                onDone: "#app.setup.github",
+                // A failed registration keeps the user on step 1 to retry.
+                onError: {
+                  target: "idle",
+                  actions: assign(({ event }) => ({
+                    error: `Couldn't add projects — ${messageOf(event.error)}`,
+                  })),
                 },
               },
             },
@@ -347,6 +418,7 @@ export const appMachine = setup({
                       ? {
                           reposDir: event.output.reposDir,
                           repos: event.output.repos,
+                          selectedRepoPaths: [],
                         }
                       : {},
                   ),
