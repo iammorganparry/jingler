@@ -1275,7 +1275,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Mcp.importCandidates", {
     success: Schema.Array(McpImportCandidateView),
     error: ConfigError,
-    payload: { source: McpImportSourceId }
+    payload: {
+      source: McpImportSourceId,
+      /** Also run `claude mcp list` for claude.ai connectors and plugin servers (slow). */
+      connectors: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /**
@@ -1286,7 +1290,11 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Mcp.applyImport", {
     success: Schema.Array(Schema.String),
     error: ConfigError,
-    payload: { source: McpImportSourceId, names: Schema.Array(Schema.String) }
+    payload: {
+      source: McpImportSourceId,
+      names: Schema.Array(Schema.String),
+      connectors: Schema.optional(Schema.Boolean)
+    }
   }),
 
   /** Reveal mcp.json in the file manager, creating an empty file if absent. */
