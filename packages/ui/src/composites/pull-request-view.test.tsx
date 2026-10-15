@@ -69,16 +69,6 @@ describe("PullRequestView evidence navigation", () => {
     expect(screen.getByRole("button", { name: "Pull request details" })).toBeTruthy()
   })
 
-  it("moves merge-method radios with arrow keys", () => {
-    render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected onMerge={() => {}} /></WidthTierValue>)
-    const merge = screen.getByRole("radio", { name: "Merge" })
-    const squash = screen.getByRole("radio", { name: "Squash" })
-    merge.focus()
-    fireEvent.keyDown(merge, { key: "ArrowRight" })
-    expect(squash.getAttribute("aria-checked")).toBe("true")
-    expect(document.activeElement).toBe(squash)
-  })
-
   it("hides write controls in read-only views", () => {
     render(<WidthTierValue width={1200}><PullRequestView pr={pr} connected readOnly /></WidthTierValue>)
     expect(screen.queryByText("Add a review")).toBeNull()

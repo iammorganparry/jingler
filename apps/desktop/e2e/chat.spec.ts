@@ -601,7 +601,8 @@ test("the merge box offers a strategy, and merges with the one chosen", async ({
   await expect(mergeButton).toBeVisible({ timeout: 20_000 })
 
   // Choosing squash re-labels the action, so the button says what will happen.
-  await window.getByRole("radio", { name: "Squash" }).click()
+  await window.getByRole("button", { name: "Merge method" }).click()
+  await window.getByRole("option", { name: "Squash and merge" }).click()
   await expect(window.getByRole("button", { name: "Squash and merge" })).toBeVisible()
 
   await window.getByRole("button", { name: "Squash and merge" }).click()

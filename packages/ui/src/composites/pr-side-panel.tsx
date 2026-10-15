@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react"
+import type { ReactNode } from "react"
 import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
@@ -8,6 +8,7 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Eyebrow } from "../components/eyebrow.js"
 import { Spinner } from "../components/loading.js"
+import { MergeSplitButton } from "./merge-split-button.js"
 import { PrCheckRow } from "./pr-check-row.js"
 import { ReviewFindings, type ReviewFindingsProps } from "./review-findings.js"
 
@@ -19,39 +20,18 @@ const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: str
   pending: { tone: "count", label: "pending" }
 }
 
-/**
- * The three merge strategies, with the button label each one arms.
- *
- * The label changes with the choice rather than staying "Merge pull request":
- * these are not interchangeable — squash rewrites the branch into one commit and
- * rebase discards the merge commit — so the button has to say which is about to
- * happen. GitHub does the same, for the same reason.
- */
-const MERGE_METHODS: ReadonlyArray<{
-  method: PrMergeMethod
-  label: string
-  action: string
-  hint: string
-}> = [
-  {
-    method: "merge",
-    label: "Merge",
-    action: "Merge pull request",
-    hint: "Keep all commits and add a merge commit"
-  },
-  {
-    method: "squash",
-    label: "Squash",
-    action: "Squash and merge",
-    hint: "Combine every commit into one on the base branch"
-  },
-  {
-    method: "rebase",
-    label: "Rebase",
-    action: "Rebase and merge",
-    hint: "Replay each commit onto the base, with no merge commit"
-  }
-]
+/** The one blocker the operator can clear from the rail (see `collectMergeBlockers`). */
+const BEHIND_BLOCKER = "Branch is out of date with the base"
+
+function BlockerRow({ blocker, action }: { blocker: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 text-[12px] text-text">
+      <span className="text-red">✗</span>
+      <span className="min-w-0 flex-1">{blocker}</span>
+      {action}
+    </div>
+  )
+}
 
 function ReviewerRow({ reviewer }: { reviewer: PrReviewer }) {
   const meta = reviewerBadge[reviewer.state]
@@ -172,51 +152,58 @@ function renderDraftActions() {
            }
 
 function renderConflictActions() {
-             return (<div className="overflow-hidden rounded-lg border border-red/30">
-            <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
-              <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
-                !
-              </span>
-              <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
-            </div>
-            <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
-              {pr.mergeBlockers.map((blocker) => (
-                <span key={blocker} className="flex items-center gap-2 text-[12px] text-text">
-                  <span className="text-red">✗</span>
-                  {blocker}
+             return (<div className="flex flex-col gap-3">
+            <div className="overflow-hidden rounded-lg border border-red/30">
+              <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
+                <span className="flex size-5 flex-none items-center justify-center rounded-full bg-red/20 text-[12px] text-red">
+                  !
                 </span>
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 px-[13px] pb-[13px]">
-              {/*
-                "Out of date" is the ONE blocker the operator can clear from here
-                — conflicts need the code, branch protection needs a reviewer,
-                failing checks need a fix. `mergeStateStatus` was fetched all
-                along and only ever collapsed into a blocker STRING, so the box
-                stated the problem and offered nothing. This updates the remote
-                head only; the worktree is left alone, since the agent may be
-                mid-turn with uncommitted work.
-              */}
-              {behind && onUpdateBranch && (
-                <Button
-                  variant="secondary"
-                  className="w-full justify-center gap-2"
-                  disabled={!connected || updatingBranch}
-                  onClick={onUpdateBranch}
-                >
-                  {updatingBranch && <Spinner size={13} />}
-                  {updatingBranch ? "Updating…" : "Update branch"}
-                </Button>
-              )}
+                <span className="text-[13px] font-semibold text-text-bright">Merging blocked</span>
+              </div>
+              <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
+                {/*
+                  "Out of date" is the ONE blocker the operator can clear from here
+                  — conflicts need the code, branch protection needs a reviewer,
+                  failing checks need a fix. This updates the remote head only; the
+                  worktree is left alone, since the agent may be mid-turn with
+                  uncommitted work.
+                */}
+                {pr.mergeBlockers.map((blocker) => (
+                  <BlockerRow
+                    key={blocker}
+                    blocker={blocker}
+                    action={
+                      behind && blocker === BEHIND_BLOCKER && onUpdateBranch ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="gap-2"
+                          disabled={!connected || updatingBranch}
+                          onClick={onUpdateBranch}
+                        >
+                          {updatingBranch && <Spinner size={13} />}
+                          {updatingBranch ? "Updating…" : "Update branch"}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </div>
               {updateBranchError && (
-                <Callout tone="red" className="items-start">
-                  {updateBranchError}
-                </Callout>
+                <div className="px-[13px] pb-[13px]">
+                  <Callout tone="red" className="items-start">
+                    {updateBranchError}
+                  </Callout>
+                </div>
               )}
-              <Button variant="secondary" className="w-full justify-center" disabled>
-                Merge pull request
-              </Button>
             </div>
+            <MergeSplitButton
+              connected={connected}
+              onMerge={onMerge}
+              merging={merging}
+              blockedReason={pr.mergeBlockers[0]}
+              mergeError={mergeError}
+            />
           </div>)
            }
 
@@ -231,71 +218,15 @@ function renderConflictActions() {
            if (blocked) return (renderConflictActions())
            return (<div className="flex flex-col gap-3">
             <Callout tone="blue">This branch has no conflicts and can be merged.</Callout>
-            {/*
-              The strategy picker. `PrMergeMethod` and the GitHub API value
-              supported all three from the start; only the UI didn't, so every
-              merge from here was a merge commit. Squash is most teams' default,
-              which made this the likeliest reason to give up and open the
-              browser. Segmented rather than a dropdown: three options, and which
-              one is armed must be readable without opening anything.
-            */}
-            <div
-              role="radiogroup"
-              aria-label="Merge method"
-              className="flex overflow-hidden rounded-md border border-line"
-            >
-              {MERGE_METHODS.map((m, index) => (
-                <button
-                  key={m.method}
-                  type="button"
-                  role="radio"
-                  aria-checked={method === m.method}
-                  tabIndex={method === m.method ? 0 : -1}
-                  data-merge-method={m.method}
-                  title={m.hint}
-                  disabled={merging}
-                  onClick={() => setMethod(m.method)}
-                  onKeyDown={(event) => moveMethod(event, index)}
-                  className={cn(
-                    "flex-1 px-2 py-[5px] text-[11.5px] transition-colors disabled:pointer-events-none",
-                    method === m.method
-                      ? "bg-surface text-text-bright"
-                      : "text-dim hover:bg-surface/50 hover:text-text"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <Button
-              className="w-full justify-center gap-2"
-              disabled={!connected || merging || !onMerge}
-              onClick={() => void Promise.resolve(onMerge?.(method)).catch(() => {})}
-            >
-              {merging && <Spinner size={13} />}
-              {merging ? "Merging…" : MERGE_METHODS.find((m) => m.method === method)!.action}
-            </Button>
-            {mergeError && (
-              <Callout tone="red" className="items-start">
-                {mergeError}
-              </Callout>
-            )}
+            <MergeSplitButton
+              connected={connected}
+              onMerge={onMerge}
+              merging={merging}
+              mergeError={mergeError}
+            />
           </div>)
          }
 
-  // Merge-commit default, matching GitHub and the previous hardcoded
-  // behaviour — a picker that silently changed what the button did would be a
-  // worse regression than not having one.
-  const [method, setMethod] = useState<PrMergeMethod>("merge")
-  const moveMethod = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return
-    event.preventDefault()
-    const delta = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1
-    const next = (index + delta + MERGE_METHODS.length) % MERGE_METHODS.length
-    const value = MERGE_METHODS[next]!.method
-    setMethod(value)
-    document.querySelector<HTMLButtonElement>(`[data-merge-method="${value}"]`)?.focus()
-  }
   const failing = pr.checks.filter((c) => c.status === "fail").length
   const blocked = pr.mergeBlockers.length > 0
   const behind = pr.mergeStateStatus === "BEHIND"
