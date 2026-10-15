@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, sessionRow, showSessions, test } from "./fixtures.js"
+import { appShell, confirmArchive, expect, sessionRow, showSessions, test } from "./fixtures.js"
 import { explorerTree } from "./explorer.js"
 import { showPullRequestDetails } from "./pull-request.js"
 import type { Page } from "@playwright/test"
@@ -865,6 +865,7 @@ test("sidebar quick-actions: hover a row to archive an active session", async ({
   const row = window.getByTestId("session-row-s_act")
   await row.hover()
   await window.getByRole("button", { name: "Archive Second session" }).click()
+  await confirmArchive(window)
 
   // Archiving now removes it from the default (active) list — and it is still
   // there, one filter away, rather than deleted.

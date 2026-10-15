@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { appShell, expect, sessionRow, test } from "./fixtures.js"
+import { appShell, confirmArchive, expect, sessionRow, test } from "./fixtures.js"
 import type { SeedSession } from "./fixtures.js"
 
 /**
@@ -315,6 +315,7 @@ test("archives the active session from the palette", async ({ launchApp }) => {
 
   await window.keyboard.press("Meta+k")
   await window.getByTestId("palette-item-action:archive-session").click()
+  await confirmArchive(window)
 
   // Archived is a FILTER, and the default hides it — so the row leaving the
   // sidebar IS the outcome.

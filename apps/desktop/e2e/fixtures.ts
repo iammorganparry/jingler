@@ -76,6 +76,14 @@ export const showSessions = async (
   await expect(window.getByTestId("session-filter-menu")).toBeVisible();
 };
 
+/** Confirm the "Archive this workspace?" dialog every archive now opens. */
+export const confirmArchive = async (window: Page): Promise<void> => {
+  await window
+    .getByRole("dialog", { name: "Archive this workspace?" })
+    .getByRole("button", { name: "Archive", exact: true })
+    .click();
+};
+
 /**
  * "The app shell is on screen" — the sentinel ~19 specs assert before doing
  * anything else.

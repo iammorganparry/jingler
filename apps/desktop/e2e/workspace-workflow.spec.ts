@@ -1,6 +1,6 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { addProject, appShell, expect, showSessions, test } from "./fixtures.js"
+import { addProject, appShell, confirmArchive, expect, showSessions, test } from "./fixtures.js"
 
 test("approves setup, copied files, named Run/Stop, and archive cleanup", async ({ launchApp }) => {
   const launched = await launchApp({ configured: true, withRepo: true })
@@ -76,6 +76,7 @@ test("approves setup, copied files, named Run/Stop, and archive cleanup", async 
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.hover()
   await row.getByRole("button", { name: /^Archive / }).click()
+  await confirmArchive(window)
   await expect.poll(() => existsSync(join(session.worktreePath, "cleanup-proof.txt"))).toBe(true)
   await expect.poll(() => JSON.parse(readFileSync(sessionsPath, "utf8")).find((item: { id: string }) => item.id === session.id)?.archived).toBe(true)
 })
@@ -126,6 +127,7 @@ for (const recovery of ["retry", "skip"] as const) {
     await expect(window.getByText("Workflow turn admitted.", { exact: true })).toBeVisible()
     const row = window.getByTestId(`session-row-${session.id}`)
     await row.hover(); await row.getByRole("button", { name: /^Archive / }).click()
+    await confirmArchive(window)
     await expect(window.getByRole("dialog", { name: "Archive failed" })).toContainText("Cleanup exited with code 7.")
     expect(current().workspaceLifecycle.status).toBe("cleanup-failed")
     expect(current().archived).not.toBe(true)
