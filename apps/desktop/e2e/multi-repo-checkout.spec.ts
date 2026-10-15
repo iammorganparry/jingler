@@ -92,8 +92,8 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
 
   await startSwitchTurn(window, home, repoPath, secondPath)
   await expect(window.getByText("Switched to", { exact: false }).first()).toBeVisible({ timeout: 40_000 })
-  await new Promise((r) => setTimeout(r, 8000))
-  console.log("DBG", JSON.stringify({ c: sessionsAt(home)[0]?.checkouts, wt: sessionsAt(home)[0]?.worktreePath }), execFileSync("find", [home, "-name", "other-repo.ts"], { encoding: "utf8" }))
+  await expect(window.getByText("Edited the second repository.")).toBeVisible({ timeout: 40_000 })
+  console.log("DBG", execFileSync("sh", ["-c", `find ${home} ${join(home, "..")}/jingler-e2e-repos-* -name other-repo.ts 2>&1; cat ${home}/jingler/sessions.json | head -c 3000`], { encoding: "utf8" }))
   await allowGates(window, async () =>
     existsSync(join(sessionsAt(home)[0]?.checkouts?.[1]?.worktreePath ?? "/missing", "src", "other-repo.ts"))
   )
