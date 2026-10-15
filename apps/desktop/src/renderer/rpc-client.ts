@@ -405,14 +405,16 @@ export const rpc = {
   mcpStartAuthorization: (name: string) =>
     run((c) => c.Mcp.startAuthorization({ name })),
   mcpImportCandidates: (
-    source: McpImportSourceId
+    source: McpImportSourceId,
+    connectors?: boolean
   ): Promise<ReadonlyArray<McpImportCandidateView>> =>
-    run((c) => c.Mcp.importCandidates({ source })),
+    run((c) => c.Mcp.importCandidates({ source, connectors })),
   mcpApplyImport: (
     source: McpImportSourceId,
-    names: ReadonlyArray<string>
+    names: ReadonlyArray<string>,
+    connectors?: boolean
   ): Promise<ReadonlyArray<string>> =>
-    run((c) => c.Mcp.applyImport({ source, names })),
+    run((c) => c.Mcp.applyImport({ source, names, connectors })),
   mcpReveal: (): Promise<void> => run((c) => c.Mcp.reveal()),
   agentResourcesRemove: (selector: ManagedResourceSelector): Promise<void> =>
     run((c) => c.AgentResources.remove(selector)),

@@ -11,13 +11,13 @@ afterEach(() => {
 describe("McpImportPrompt", () => {
   it("discovers all sources, dedupes names, and imports by source once", async () => {
     const load = vi.fn(async (source: "claude" | "codex" | "opencode") => source === "claude"
-      ? [{ name: "linear", source, target: "npx linear", problem: null }]
+      ? [{ name: "linear", source, origin: "user" as const, target: "npx linear", problem: null }]
       : source === "codex"
         ? [
-            { name: "linear", source, target: "duplicate", problem: null },
-            { name: "docs", source, target: "https://docs.example/mcp", problem: null }
+            { name: "linear", source, origin: "user" as const, target: "duplicate", problem: null },
+            { name: "docs", source, origin: "user" as const, target: "https://docs.example/mcp", problem: null }
           ]
-        : [{ name: "broken", source, target: "", problem: "invalid" }]
+        : [{ name: "broken", source, origin: "user" as const, target: "", problem: "invalid" }]
     )
     const apply = vi.fn(async () => [])
 
@@ -54,6 +54,7 @@ describe("McpImportPrompt", () => {
       load={async (source) => [{
         name: "linear",
         source,
+        origin: "user" as const,
         target: "https://linear.example/mcp",
         problem: null
       }]}
