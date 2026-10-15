@@ -25,6 +25,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Button | `components/button.tsx` | Base button: primary, secondary, ghost, destructive. | children, pressScale, ripple | yes | #360 (1.2) |
 | ButtonGroup | `components/button-group.tsx` | Joined group of buttons. | — | no | — |
 | BannerShell | `components/banner-shell.tsx` | Neutral notice: icon (red only when failed), truncating message, up to two one-line actions, dismiss; top/lane/card placements. | icon, failed, actions, onDismiss, placement | yes | #376 (2.11) |
+| ReadingShell, ReadingActionsMenu | `components/reading-shell.tsx` | Shared PR/issue reading surface: header (title + grey identifier, meta line, actions), 720px column, 280px rail (stacks below the wide tier); `⋯` menu with destructive items. | title, identifier, meta, actions, rail, items | yes | #445 (6.23) |
 | Callout | `components/callout.tsx` | Inline notice with a leading glyph; tones share BannerShell neutral styling, only red colours the glyph. | children, glyph, className | no | #376 (2.11) |
 | Card, CardHeader | `components/card.tsx` | Bordered panel surface (Card, CardHeader). | — | no | — |
 | Checkbox | `components/checkbox.tsx` | Checkbox. | checked, onCheckedChange, indeterminate, label, tone | yes | — |

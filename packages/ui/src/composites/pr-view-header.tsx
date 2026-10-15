@@ -7,6 +7,7 @@ import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge, type BadgeTone } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
+import { menuItemClass } from "../components/reading-shell.js"
 import { Tooltip } from "../components/tooltip.js"
 import { cn } from "../lib/cn.js"
 
@@ -74,9 +75,6 @@ function PrMetaLine({ pr }: { pr: PullRequest }) {
     </div>
   )
 }
-
-export const menuItemClass =
-  "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[12.5px] text-text-body outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[highlighted]:bg-surface data-[highlighted]:text-text-bright"
 
 /** The `⋯` menu: Mark ready (drafts), Copy branch, Close PR (destructive, confirmed by the caller). */
 function PrActionsMenu({
