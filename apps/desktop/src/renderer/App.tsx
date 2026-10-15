@@ -65,6 +65,7 @@ import {
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
+  AgentEditsMarkerContext,
   closeSurfaceEverywhere,
   forgetEditorLayout,
   openTab,
@@ -80,6 +81,7 @@ import {
 } from "./use-explanation-document.js";
 import { setFirstMessage } from "./first-message-store.js";
 import { SessionSubagentTabs, SubagentLaneViewProvider } from "./session-chat-tabs.js";
+import { useAgentEditsMarkerRenderer } from "./file-agent-edits.js";
 import { selectSubagentTab, useAllSessionSubagentTabs } from "./subagent-tab-store.js";
 import { queueSessionChatMutation } from "./session-chat-mutations.js";
 import { PullRequestPane } from "./pull-request-pane.js";
@@ -405,6 +407,7 @@ function AuthedApp({
   const chatActivities = useAllChatActivities();
   const planSessions = usePlanSessions();
   const explanationSessions = useExplanationSessions(sessions);
+  const renderAgentEditsMarker = useAgentEditsMarkerRenderer(sessions);
   const browserDock = usePreviewDock();
   const sessionsLoaded = state.matches("ready");
   useEffect(() => {
@@ -1515,6 +1518,7 @@ function AuthedApp({
       )}
       {checkpointOwner && <WorkspaceCheckpointsView key={checkpointOwner.session.id} session={checkpointOwner.session} returnFocus={checkpointOwner.trigger} onSession={publishSessionUpdate} onClosed={() => setCheckpointOwner(null)} />}
       <SubagentLaneViewProvider>
+      <AgentEditsMarkerContext.Provider value={renderAgentEditsMarker}>
       <JinglerApp
         onOpenCheckpoints={(id, trigger) => { const session = sessions.find((item) => item.id === id); if (session) setCheckpointOwner({ session, trigger }); }}
         tabContributions={pluginTabs}
@@ -1976,6 +1980,7 @@ function AuthedApp({
         )}
         version={window.jingler.appVersion}
       />
+      </AgentEditsMarkerContext.Provider>
       </SubagentLaneViewProvider>
       {sessionMutationError !== null && (
         <div

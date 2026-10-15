@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest"
 import {
+  agentEditAnnotations,
   agentFollowDiffSelection,
   captureDiffCodeReference,
   resolveAgentFollowPath
@@ -82,5 +83,19 @@ describe("file diff context", () => {
       endLine: 3,
       source: "export const mode = 'legacy'\n"
     })
+  })
+})
+
+describe("agentEditAnnotations", () => {
+  it("anchors each edit under its changed lines and skips edits without a preview", () => {
+    const edits = [
+      { id: "t1:0", turnId: "a1", label: "Agent edit · Turn 1", preview: "-export const mode = 'legacy'\n+export const mode = 'modern'" },
+      { id: "t3:0", turnId: "a3", label: "Agent edit · Turn 3", preview: "+export const retries = 3" },
+      { id: "t4:0", turnId: "a4", label: "Agent edit · Turn 4", preview: null }
+    ]
+    expect(agentEditAnnotations(patch, "src/config.ts", edits)).toEqual([
+      { kind: "agent-edit", id: "agent-edit:t1:0", path: "src/config.ts", side: "new", lineNumber: 3, label: "Agent edit · Turn 1", turnId: "a1" },
+      { kind: "agent-edit", id: "agent-edit:t3:0", path: "src/config.ts", side: "new", lineNumber: 42, label: "Agent edit · Turn 3", turnId: "a3" }
+    ])
   })
 })

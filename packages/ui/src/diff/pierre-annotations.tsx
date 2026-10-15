@@ -59,7 +59,20 @@ export interface PierreSelectedRangeActionsAnnotation extends AnnotationIdentity
   readonly actions: readonly PierreSelectedRangeAction[]
 }
 
+/** Label under an agent-edited line range; read-only (no per-hunk Keep/Revert). */
+export interface PierreAgentEditAnnotation extends AnnotationIdentity {
+  readonly kind: "agent-edit"
+  readonly path: string
+  readonly side: JinglerDiffSide
+  readonly lineNumber: number
+  /** e.g. `Agent edit · Turn 3` */
+  readonly label: string
+  /** The assistant message the edit came from, for jumping the timeline. */
+  readonly turnId: string
+}
+
 export type PierreAnnotationPayload =
+  | PierreAgentEditAnnotation
   | PierreInlineComposerAnnotation
   | PierreSavedDraftAnnotation
   | PierreReviewThreadAnnotation
@@ -119,6 +132,13 @@ export const pierreAnnotationLocation = (
     }
     case "finding":
       return findingAnnotationLocation(payload.finding)
+    case "agent-edit":
+      if (payload.lineNumber < 1) return null
+      return {
+        path: canonicalPierrePath(payload.path),
+        lineNumber: payload.lineNumber,
+        side: payload.side
+      }
   }
 }
 

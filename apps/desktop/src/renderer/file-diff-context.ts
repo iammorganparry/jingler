@@ -1,4 +1,4 @@
-import type { JinglerLineSelection } from "@jingler/ui"
+import type { AgentEdit, JinglerLineSelection, PierreAgentEditAnnotation } from "@jingler/ui"
 import { parsePierreFileDiffForPath, parseUnifiedDiffForPath } from "@jingler/ui"
 import { normalizeCodeReference, type CodeReference } from "./code-reference.js"
 
@@ -119,3 +119,29 @@ export const captureDiffCodeReference = (
     source: lines.join("")
   })
 }
+
+/**
+ * Anchor each agent edit under its last changed line in the file's patch. An edit with
+ * no preview cannot be located, so it is counted in the breadcrumb but not decorated.
+ */
+export const agentEditAnnotations = (
+  patch: string,
+  path: string,
+  edits: readonly AgentEdit[]
+): readonly PierreAgentEditAnnotation[] =>
+  edits.flatMap((edit) => {
+    if (edit.preview === null) return []
+    const range = agentFollowDiffSelection(patch, path, edit.preview)
+    if (range === null) return []
+    return [
+      {
+        kind: "agent-edit" as const,
+        id: `agent-edit:${edit.id}`,
+        path,
+        side: range.side,
+        lineNumber: range.endLine,
+        label: edit.label,
+        turnId: edit.turnId
+      }
+    ]
+  })

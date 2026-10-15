@@ -19,14 +19,17 @@ import {
   useOptionalThemeTokens,
   useThemeSyntax
 } from "../theme-provider.js"
+import { AgentEditLabel } from "./agent-edit-label.js"
 import {
   createPierreDiffAnnotation,
   PierreAnnotationRegion,
+  type PierreAgentEditAnnotation,
   type PierreAnnotationMetadata,
   type PierreAnnotationPayload,
   type PierreSelectedRangeActionsAnnotation
 } from "./pierre-annotations.js"
 import {
+  canonicalPierrePath,
   createPierreCodeViewItem,
   pierreItemVersion
 } from "./pierre-model.js"
@@ -79,6 +82,10 @@ export interface DiffViewProps {
   scrollRequest?: PierreCodeViewProps["scrollRequest"]
   onTokenEnter?: PierreFileDiffViewProps["onTokenEnter"]
   onTokenLeave?: PierreFileDiffViewProps["onTokenLeave"]
+  /** Read-only `Agent edit · Turn N` labels anchored under the edited lines. */
+  agentEdits?: readonly PierreAgentEditAnnotation[]
+  /** A label was clicked; receives the edit's turn id. */
+  onAgentEditSelect?: (turnId: string) => void
 }
 
 const inputFileDiffs = ({
@@ -156,7 +163,9 @@ export function DiffView({
   onSelectionChange,
   scrollRequest,
   onTokenEnter,
-  onTokenLeave
+  onTokenLeave,
+  agentEdits,
+  onAgentEditSelect
 }: DiffViewProps) {
   const theme = useThemeSyntax()
   const tokens = useOptionalThemeTokens()
@@ -192,6 +201,8 @@ export function DiffView({
         scrollRequest={scrollRequest}
         onTokenEnter={onTokenEnter}
         onTokenLeave={onTokenLeave}
+        agentEdits={agentEdits}
+        onAgentEditSelect={onAgentEditSelect}
       />
     </PierreProvider>
   )
@@ -211,10 +222,31 @@ function useDiffSelectionState() {
   return { selection, body, setBody, clear, onSelectionChange }
 }
 
+const annotationsForFile = (
+  candidate: FileDiffMetadata,
+  selectionPayload: PierreAnnotationPayload | null,
+  selectionPath: string | undefined,
+  agentEdits: readonly PierreAgentEditAnnotation[]
+): { readonly annotations: DiffLineAnnotation<PierreAnnotationMetadata>[]; readonly ids: string } => {
+  const name = canonicalPierrePath(candidate.name)
+  const payloads: PierreAnnotationPayload[] = [
+    ...(selectionPayload !== null && selectionPath === candidate.name ? [selectionPayload] : []),
+    ...agentEdits.filter((edit) => canonicalPierrePath(edit.path) === name)
+  ]
+  return {
+    annotations: payloads.flatMap((payload) => {
+      const annotation = createPierreDiffAnnotation(payload)
+      return annotation === null ? [] : [annotation]
+    }),
+    ids: payloads.map((payload) => payload.id).join(",")
+  }
+}
+
 function usePierreDiffModel(
   fileDiffs: readonly FileDiffMetadata[],
   selection: JinglerLineSelection | null,
-  actions: DiffActions | undefined
+  actions: DiffActions | undefined,
+  agentEdits: readonly PierreAgentEditAnnotation[] | undefined
 ) {
   const activeSelection = useMemo(
     () =>
@@ -230,40 +262,49 @@ function usePierreDiffModel(
         : selectedActionsPayload(activeSelection, actions),
     [actions, activeSelection]
   )
-  const annotation = useMemo(
-    () => payload === null ? null : createPierreDiffAnnotation(payload),
-    [payload]
+  const perFile = useMemo(
+    () =>
+      fileDiffs.map((candidate) =>
+        annotationsForFile(candidate, payload, activeSelection?.path, agentEdits ?? [])
+      ),
+    [activeSelection?.path, agentEdits, fileDiffs, payload]
   )
   const items = useMemo(
     () =>
-      fileDiffs.map((candidate) =>
+      fileDiffs.map((candidate, index) =>
         createPierreCodeViewItem<PierreAnnotationMetadata>({
           type: "diff",
           fileDiff: candidate,
-          annotations:
-            annotation !== null && activeSelection?.path === candidate.name
-              ? [annotation]
-              : undefined,
+          annotations: perFile[index]!.annotations.length > 0 ? perFile[index]!.annotations : undefined,
           version: pierreItemVersion(
             fileDiffContentIdentity(candidate),
             candidate.name,
-            payload?.id
+            perFile[index]!.ids
           )
         })
       ),
-    [activeSelection?.path, annotation, fileDiffs, payload?.id]
+    [fileDiffs, perFile]
   )
-  return { activeSelection, annotation, items }
+  return {
+    activeSelection,
+    annotations: perFile[0]?.annotations ?? [],
+    hasAnnotations: perFile.some((entry) => entry.annotations.length > 0),
+    items
+  }
 }
 
 function useSelectedRangeRenderer(
   actions: DiffActions | undefined,
   body: string,
   setBody: (body: string) => void,
-  clear: () => void
+  clear: () => void,
+  onAgentEditSelect: ((turnId: string) => void) | undefined
 ) {
   return useCallback(
     (candidate: PierreAnnotationPayload) => {
+      if (candidate.kind === "agent-edit") {
+        return <AgentEditLabel payload={candidate} onSelect={onAgentEditSelect} />
+      }
       if (actions === undefined || candidate.kind !== "selected-range-actions") return null
       const comment = () => {
         const trimmed = body.trim()
@@ -285,7 +326,7 @@ function useSelectedRangeRenderer(
         />
       )
     },
-    [actions, body, clear, setBody]
+    [actions, body, clear, onAgentEditSelect, setBody]
   )
 }
 
@@ -301,7 +342,9 @@ function DiffViewContent({
   onSelectionChange,
   scrollRequest,
   onTokenEnter,
-  onTokenLeave
+  onTokenLeave,
+  agentEdits,
+  onAgentEditSelect
 }: {
   readonly revision: number
   readonly fileDiffs: readonly FileDiffMetadata[]
@@ -315,6 +358,8 @@ function DiffViewContent({
   readonly scrollRequest: PierreCodeViewProps["scrollRequest"]
   readonly onTokenEnter: PierreFileDiffViewProps["onTokenEnter"]
   readonly onTokenLeave: PierreFileDiffViewProps["onTokenLeave"]
+  readonly agentEdits: readonly PierreAgentEditAnnotation[] | undefined
+  readonly onAgentEditSelect: ((turnId: string) => void) | undefined
 }) {
   const state = useDiffSelectionState()
   useEffect(() => state.clear(), [revision, state.clear])
@@ -330,8 +375,14 @@ function DiffViewContent({
   const activeSelection =
     actions === undefined ? (selection ?? null) : (state.selection ?? selection ?? null)
   const handleSelectionChange = actions === undefined ? onSelectionChange : state.onSelectionChange
-  const model = usePierreDiffModel(fileDiffs, activeSelection, actions)
-  const renderAnnotation = useSelectedRangeRenderer(actions, state.body, state.setBody, state.clear)
+  const model = usePierreDiffModel(fileDiffs, activeSelection, actions, agentEdits)
+  const renderAnnotation = useSelectedRangeRenderer(
+    actions,
+    state.body,
+    state.setBody,
+    state.clear,
+    onAgentEditSelect
+  )
   return (
     <div
       className={cn(
@@ -345,10 +396,10 @@ function DiffViewContent({
         fill={fill}
         fileDiffs={fileDiffs}
         items={model.items}
-        annotation={model.annotation}
+        annotations={model.annotations}
         selection={handleSelectionChange === undefined ? undefined : model.activeSelection}
         onSelectionChange={handleSelectionChange}
-        renderAnnotation={model.annotation === null ? undefined : renderAnnotation}
+        renderAnnotation={model.hasAnnotations ? renderAnnotation : undefined}
         options={options}
         scrollRequest={scrollRequest}
         onTokenEnter={onTokenEnter}
@@ -363,7 +414,7 @@ function PierreDiffRenderer({
   fill,
   fileDiffs,
   items,
-  annotation,
+  annotations,
   selection,
   onSelectionChange,
   renderAnnotation,
@@ -376,7 +427,7 @@ function PierreDiffRenderer({
   readonly fill: boolean
   readonly fileDiffs: readonly FileDiffMetadata[]
   readonly items: readonly CodeViewItem<PierreAnnotationMetadata>[]
-  readonly annotation: DiffLineAnnotation<PierreAnnotationMetadata> | null
+  readonly annotations: readonly DiffLineAnnotation<PierreAnnotationMetadata>[]
   readonly selection: JinglerLineSelection | null | undefined
   readonly onSelectionChange: ((selection: JinglerLineSelection | null) => void) | undefined
   readonly renderAnnotation: ((payload: PierreAnnotationPayload) => ReactNode) | undefined
@@ -410,7 +461,7 @@ function PierreDiffRenderer({
         className={className}
         scrollable={fill}
         fileDiff={fileDiffs[0]!}
-        annotations={annotation === null ? undefined : [annotation]}
+        annotations={annotations.length === 0 ? undefined : [...annotations]}
         selection={selection}
         onSelectionChange={onSelectionChange}
         renderAnnotation={renderAnnotation}

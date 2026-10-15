@@ -16,6 +16,7 @@
  */
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import {
+  createContext,
   memo,
   useCallback,
   useContext,
@@ -28,7 +29,8 @@ import {
   type ReactNode
 } from "react"
 import { createPortal } from "react-dom"
-import { ChevronRight, Ellipsis, Plus, X, type LucideIcon } from "lucide-react"
+import { Ellipsis, Plus, X, type LucideIcon } from "lucide-react"
+import { Breadcrumb } from "../components/breadcrumb.js"
 import { cn } from "../lib/cn.js"
 import { FileIcon } from "../components/file-icon.js"
 import { WidthTierProvider } from "../hooks/width-tier.js"
@@ -52,6 +54,9 @@ import { DropZoneOverlay, resolveDropEdge } from "./drop-zone-overlay.js"
 import { CommandPalette } from "./command-palette.js"
 import type { PaletteItem } from "./command-palette-model.js"
 import { ChatLaneHeader, SubagentLaneViewContext, type ChatLaneHeaderChat } from "./chat-lane-header.js"
+
+/** Host-provided marker (`● N agent edits`) shown at the right of a file tab's breadcrumb. */
+export const AgentEditsMarkerContext = createContext<(sessionId: string, path: string) => ReactNode>(() => null)
 
 export interface EditorTabMeta {
   readonly label: string
@@ -407,6 +412,7 @@ const EditorGroup = memo(function EditorGroup({
   const [width, setWidth] = useState(0)
   const sectionRef = useRef<HTMLElement>(null)
   const resolveSubagentView = useContext(SubagentLaneViewContext)
+  const renderAgentEdits = useContext(AgentEditsMarkerContext)
   
   useEffect(() => {
     const section = sectionRef.current
@@ -528,14 +534,9 @@ const EditorGroup = memo(function EditorGroup({
       </div>
       )}
       {!collapsed && crumbs.length > 0 && (
-        <nav aria-label="Breadcrumb" className="flex h-6 flex-none items-center gap-1 px-3 text-[11px] text-dim">
-          {crumbs.map((crumb, index) => (
-            <span key={`${index}-${crumb}`} className="flex min-w-0 items-center gap-1">
-              {index > 0 && <ChevronRight className="size-3 flex-none" />}
-              <span className={cn("truncate", index === crumbs.length - 1 && "text-muted-foreground")}>{crumb}</span>
-            </span>
-          ))}
-        </nav>
+        <Breadcrumb crumbs={crumbs}>
+          {active.kind === "file" ? renderAgentEdits(api.sessionId, active.id) : null}
+        </Breadcrumb>
       )}
       {!collapsed && (
         <div className="relative flex min-h-0 min-w-0 flex-1">
