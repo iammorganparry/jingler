@@ -59,6 +59,8 @@ export interface McpSettingsProps {
 
 const ORIGIN_LABELS: Record<McpImportCandidateView["origin"], string> = {
   user: "User",
+  "user-settings": "User settings",
+  managed: "Managed",
   "claude.ai": "claude.ai",
   plugin: "Plugin"
 }

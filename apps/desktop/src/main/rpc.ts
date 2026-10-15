@@ -102,6 +102,9 @@ import {
   probeAll,
   discoverClaudeConnectors,
   parseClaudeMcp,
+  managedMcpPaths,
+  dedupeCandidates,
+  readClaudeFileServers,
   parseCodexMcp,
   parseOpencodeMcp,
   type McpImportCandidate,
@@ -421,6 +424,21 @@ const mcpImportFile = (source: "claude" | "codex" | "opencode") =>
   );
 
 /**
+ * Servers Claude Code also loads from `~/.claude/settings.json` and enterprise
+ * `managed-mcp.json`. Missing or unreadable files are skipped silently. E2E
+ * homes get a home-rooted managed file so a real machine's never leaks in.
+ */
+const mcpClaudeExtraFiles = (): ReadonlyArray<{ path: string; origin: "user-settings" | "managed" }> => [
+  { path: resolve(mcpImportHome(), ".claude", "settings.json"), origin: "user-settings" },
+  ...(process.env.JINGLER_E2E === "1"
+    ? [resolve(mcpImportHome(), "managed-mcp.json")]
+    : managedMcpPaths(process.platform)
+  ).map((path) => ({ path, origin: "managed" as const })),
+];
+
+const mcpClaudeExtras = Effect.promise(() => readClaudeFileServers(mcpClaudeExtraFiles()));
+
+/**
  * Last `claude mcp list` discovery. The listing health-checks every server
  * (30-60s), so Apply reuses what the operator just saw instead of re-running it.
  */
@@ -432,12 +450,18 @@ const mcpImportParse = (
   reuseConnectors = false,
 ) =>
   Effect.gen(function* () {
-    const fromFile = yield* mcpImportFile(source).pipe(
-      // With connectors on, a missing ~/.claude.json is not an error.
-      Effect.catchAll((cause) =>
-        source === "claude" && connectors ? Effect.succeed([]) : Effect.fail(cause),
-      ),
-    );
+    const fromFile =
+      source === "claude"
+        ? yield* Effect.gen(function* () {
+            const main = yield* Effect.either(mcpImportFile("claude"));
+            const extras = yield* mcpClaudeExtras;
+            // A missing ~/.claude.json is fine once another Claude file or connectors supply servers.
+            if (main._tag === "Left" && extras.length === 0 && !connectors) {
+              return yield* Effect.fail(main.left);
+            }
+            return dedupeCandidates(main._tag === "Right" ? main.right : [], extras);
+          })
+        : yield* mcpImportFile(source);
     if (source !== "claude" || !connectors) return fromFile;
     if (!reuseConnectors) {
       const taken = new Set([
