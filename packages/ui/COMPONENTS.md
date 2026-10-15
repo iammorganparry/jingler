@@ -188,8 +188,9 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | ThemesSettings | `composites/themes-settings.tsx` | Settings › Themes. | themes, skipped, activeId, onSelect, onDuplicate, onDelete | no | — |
 | ThoughtBlock | `composites/thought-block.tsx` | Agent reasoning line in the transcript. | — | yes | — |
 | ToolCall | `composites/tool-call.tsx` | Tool-call row with collapsible output. | status, name, target, meta, filePath, children | yes | — |
+| UsageLimits | `composites/usage-limits.tsx` | Limits-only usage summary in the account menu: neutral row per provider limit window (`Limited until 16:40`, no status fills) plus a labelled-placeholder relay quota row. | usage, loading | yes | #501 (11.1) |
 | UsageModal | `composites/usage-modal.tsx` | Usage & limits modal. | — | no | — |
-| UserMenu | `composites/user-menu.tsx` | Account menu. | user, onOpenSettings, onOpenUsage, onSignOut, onSignIn, ghConnected, whatsNew | yes | — |
+| UserMenu | `composites/user-menu.tsx` | Account menu; embeds UsageLimits (refreshes usage on open) above Settings / Usage & limits. | user, usage, onLoadUsage, onOpenSettings, onOpenUsage, onSignOut, onSignIn, ghConnected, whatsNew | yes | — |
 | VisualBlocks | `composites/visual-blocks.tsx` | Structured visual blocks for plans and explanations. | blocks, className | no | — |
 | VisualCallPathDiff | `composites/visual-call-path.tsx` | Call-path diff visual. | — | no | — |
 | WebSearchSettings | `composites/web-search-settings.tsx` | Settings › Web search. | status, loading, busy, error, onSave, onClear | yes | — |

@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect"
+import { isE2eEnv } from "../e2e-environment.js"
 
 /**
  * The Claude CLI's own report of the subscription's rate-limit windows.
@@ -55,8 +56,16 @@ export const recordClaudeCliRateLimits = (record: unknown, now: () => Date = () 
   return true
 }
 
-/** The most recent report, or null before any Claude CLI turn this run. */
-export const latestClaudeCliRateLimits = (): ClaudeCliRateLimits | null => latest
+/**
+ * The most recent report, or null before any Claude CLI turn this run. In the
+ * e2e build, `JINGLER_E2E_CLAUDE_RATE_LIMITS` (a `rate_limit_event` record as
+ * JSON) stands in for a first turn so usage UI can be exercised hermetically.
+ */
+export const latestClaudeCliRateLimits = (): ClaudeCliRateLimits | null => {
+  const seeded = process.env.JINGLER_E2E_CLAUDE_RATE_LIMITS
+  if (latest === null && isE2eEnv() && seeded) recordClaudeCliRateLimits(JSON.parse(seeded))
+  return latest
+}
 
 /** Test seam: forget what was observed. */
 export const resetClaudeCliRateLimits = (): void => {
