@@ -102,20 +102,19 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   const [first, second] = session.checkouts!
   // The write landed in repo B's worktree, never repo A's.
   expect(existsSync(join(first!.worktreePath!, "src", "other-repo.ts"))).toBe(false)
-  git(second!.worktreePath!, ["add", "-A"])
-  git(second!.worktreePath!, ["commit", "-m", "second repo work", "--no-gpg-sign"])
 
   // Header switcher and the sidebar repo count.
   await expect(window.getByTestId("checkout-switcher")).toBeVisible()
   await expect(window.getByTestId(`session-repos-${(session as unknown as { id: string }).id}`)).toContainText("2 repos")
 
   // Changes: both repos grouped by checkout.
-  await window.getByTestId("view-tab-files").click()
-  await window.getByRole("button", { name: "Changes" }).first().click().catch(() => undefined)
+  await window.getByRole("button", { name: "Changes", exact: true }).last().click()
   await expect(window.getByTestId(`changes-checkout-${first!.id}`)).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByTestId(`changes-checkout-${second!.id}`)).toBeVisible()
+  await expect(window.getByTestId(`changes-checkout-${second!.id}`)).toContainText("other-repo.ts", { timeout: 20_000 })
+  await expect(window.getByTestId(`changes-checkout-${first!.id}`)).not.toContainText("other-repo.ts")
 
   // Archive removes every worktree the session owns.
+  await window.getByRole("tab", { name: "Sessions" }).click()
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.hover()
   await row.getByRole("button", { name: /^Archive / }).click()
