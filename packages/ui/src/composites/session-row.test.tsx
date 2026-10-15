@@ -9,7 +9,7 @@ describe("SessionRow interrupted status", () => {
   it("labels an interrupted session and yields to live activity", () => {
     const session = testSession({ id: "interrupted" })
     const { rerender } = render(<SessionRow session={session} interrupted />)
-    expect(screen.getByText("Interrupted")).toBeDefined()
+    expect(screen.getByText(/^Interrupted/)).toBeDefined()
     rerender(
       <SessionRow
         session={session}
@@ -17,7 +17,7 @@ describe("SessionRow interrupted status", () => {
         activity={{ kind: "running", verb: "Running", target: "pnpm test" }}
       />
     )
-    expect(screen.queryByText("Interrupted")).toBeNull()
+    expect(screen.queryByText(/^Interrupted/)).toBeNull()
   })
 })
 
