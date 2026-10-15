@@ -90,6 +90,26 @@ describe("native PI-backed subagent tool", () => {
     )
   })
 
+  it("spawns the child in the parent's active checkout at spawn time, not the run cwd", async () => {
+    let active = "/wt/api"
+    const delegateSubagent = vi.fn<NativeSubagentDelegate>(async () => ({
+      status: "completed",
+      runId: "c1",
+      agent: "researcher",
+      result: { kind: "text", text: "ok" },
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 1, toolCalls: 0, durationMs: 1 }
+    }) as never)
+    const registry = new ToolRegistry()
+    registerNativeSubagentTool(registry, spec, delegateSubagent, undefined, undefined, () => active)
+    const run = () => Effect.runPromise(registry.execute({
+      id: "subagent", arguments: { agent: "researcher", task: "t" }, role: "conversation", mode: "auto"
+    }))
+    await run()
+    active = "/wt/web"
+    await run()
+    expect(delegateSubagent.mock.calls.map(([request]) => request.cwd)).toEqual(["/wt/api", "/wt/web"])
+  })
+
   const asyncTool = (
     spawnSubagent: PiSubagentAsyncDelegate,
     asyncAgentNames?: Readonly<Record<string, string>>
