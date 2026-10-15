@@ -692,12 +692,13 @@ function getActiveTabContext(active: Session) {
          }
 
   function renderSettings() {
+    const menu = getProjectMenuProps()
     return (settingsOpen && providerConnections ? (
             <SettingsView
               key={settingsSection}
               initialSection={settingsSection}
               routines={routines}
-              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow, onReadConfig: props.onReadProjectConfig } : undefined}
+              projectWorkflows={onSaveProjectWorkflow ? { projects, loading: props.projectsLoading, onSave: onSaveProjectWorkflow, onReadConfig: props.onReadProjectConfig, onLocateProject: menu.onLocateProject, onRemoveProject: menu.onRemoveProject } : undefined}
               providerConnections={providerConnections}
               agents={agents}
               runtimeInspector={runtimeInspector}
