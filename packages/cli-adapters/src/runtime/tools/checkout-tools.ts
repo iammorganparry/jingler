@@ -58,6 +58,58 @@ export const toolCwd = (fallback: WorkspaceCwd, host: CheckoutHost | undefined):
 
 const sameRepoPath = (a: string | undefined, b: string): boolean => a !== undefined && resolve(a) === resolve(b)
 
+type FoundProject = Pick<Project, "id" | "name" | "path">
+
+/** Look the project up by name or path; an unregistered path needs operator approval and is then registered. */
+const resolveProject = async (
+  host: CheckoutHost,
+  project: string | undefined,
+  repoPath: string | undefined
+): Promise<FoundProject | { readonly status: "denied"; readonly repoPath: string }> => {
+  const found = (await host.projects()).find((p) =>
+    project !== undefined ? p.name.toLowerCase() === project.toLowerCase() : sameRepoPath(p.path, repoPath!)
+  )
+  if (found !== undefined) return found
+  if (project !== undefined) throw new ToolError("invalid-input", `No registered project named "${project}"`)
+  const resolved = resolve(repoPath!)
+  if (!(await host.approveRepo(resolved))) return { status: "denied", repoPath: resolved }
+  return host.registerProject(resolved)
+}
+
+const switchExisting = (
+  session: CheckoutSessionState,
+  existing: SessionCheckout,
+  name: string,
+  branch: string | undefined
+): CheckoutSessionState => {
+  if (branch !== undefined && branch !== existing.branch) {
+    throw new ToolError("invalid-input", `${name} is already attached on branch ${existing.branch}`)
+  }
+  return reduceCheckouts(session, { type: "switch", checkoutId: existing.id })
+}
+
+const attachNew = async (
+  host: CheckoutHost,
+  session: CheckoutSessionState,
+  found: FoundProject,
+  branch: string | undefined
+): Promise<CheckoutSessionState> => {
+  const slug = `${found.name.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}-${randomBytes(3).toString("hex")}`
+  const worktree = await host.createWorktree({ repoPath: found.path, repoName: found.name, slug, baseBranch: branch })
+  const checkout: SessionCheckout = {
+    id: `co_${slug}`,
+    projectId: found.id,
+    repo: found.name,
+    repoPath: found.path,
+    worktreePath: worktree.path,
+    workspaceMode: "worktree",
+    branch: worktree.branch,
+    baseBranch: worktree.baseBranch,
+    prNumber: null
+  }
+  return reduceCheckouts(session, { type: "attach", checkout })
+}
+
 export const registerCheckoutTool = (
   registry: ToolRegistry,
   host: CheckoutHost,
@@ -85,38 +137,10 @@ export const registerCheckoutTool = (
         throw new ToolError("invalid-input", "Provide a project name or a repoPath")
       }
       const session = host.session()
-      let found = (await host.projects()).find((p) =>
-        project !== undefined ? p.name.toLowerCase() === project.toLowerCase() : sameRepoPath(p.path, repoPath!)
-      )
-      if (found === undefined) {
-        if (project !== undefined) throw new ToolError("invalid-input", `No registered project named "${project}"`)
-        if (!(await host.approveRepo(resolve(repoPath!)))) return { status: "denied", repoPath: resolve(repoPath!) }
-        found = await host.registerProject(resolve(repoPath!))
-      }
-
+      const found = await resolveProject(host, project, repoPath)
+      if ("status" in found) return found
       const existing = checkoutsOf(session).find((c) => sameRepoPath(c.repoPath, found.path))
-      let next: CheckoutSessionState
-      if (existing !== undefined) {
-        if (branch !== undefined && branch !== existing.branch) {
-          throw new ToolError("invalid-input", `${found.name} is already attached on branch ${existing.branch}`)
-        }
-        next = reduceCheckouts(session, { type: "switch", checkoutId: existing.id })
-      } else {
-        const slug = `${found.name.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}-${randomBytes(3).toString("hex")}`
-        const worktree = await host.createWorktree({ repoPath: found.path, repoName: found.name, slug, baseBranch: branch })
-        const checkout: SessionCheckout = {
-          id: `co_${slug}`,
-          projectId: found.id,
-          repo: found.name,
-          repoPath: found.path,
-          worktreePath: worktree.path,
-          workspaceMode: "worktree",
-          branch: worktree.branch,
-          baseBranch: worktree.baseBranch,
-          prNumber: null
-        }
-        next = reduceCheckouts(session, { type: "attach", checkout })
-      }
+      const next = existing === undefined ? await attachNew(host, session, found, branch) : switchExisting(session, existing, found.name, branch)
       await host.save(next)
       const active = activeCheckoutOf(next)
       await Effect.runPromise(publishEvent({
