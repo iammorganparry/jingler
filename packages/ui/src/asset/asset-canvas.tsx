@@ -23,6 +23,8 @@ export interface AssetCanvasProps {
   readonly loading?: boolean
   readonly error?: AssetCanvasError | null
   readonly onReveal?: () => void
+  /** Re-issues the failed read; shown on the error state. */
+  readonly onRetry?: () => void
   /** Renderer-owned native PDF host; its measured element stays inside this canvas. */
   readonly renderPdf?: (placeholder: ReactNode) => ReactNode
 }
@@ -35,6 +37,7 @@ export function AssetCanvas({
   loading = false,
   error = null,
   onReveal,
+  onRetry,
   renderPdf
 }: AssetCanvasProps) {
   if (selectedPath === null) {
@@ -60,7 +63,7 @@ export function AssetCanvas({
     return <AssetUnsupported path={error.path} onReveal={onReveal} />
   }
   if (error?.type === "error") {
-    return <AssetError message={error.message} onReveal={onReveal} />
+    return <AssetError message={error.message} onReveal={onReveal} onRetry={onRetry} />
   }
   if (payload === undefined) return <AssetLoading />
 

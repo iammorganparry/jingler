@@ -8,7 +8,7 @@ import { jinglerDark, jinglerLight, toTokens } from "@jingler/themes"
 import { createPierreFileDiff } from "../diff/pierre-model.js"
 import { PierreProvider } from "../diff/pierre-provider.js"
 import { AssetCanvas } from "./asset-canvas.js"
-import { AssetError, AssetLoading, AssetTooLarge, AssetUnsupported, AssetView } from "./asset-view.js"
+import { AssetBinary, AssetError, AssetLoading, AssetTooLarge, AssetUnsupported, AssetView } from "./asset-view.js"
 
 const meta: Meta<typeof AssetView> = {
   title: "Asset/AssetView",
@@ -229,10 +229,22 @@ export const Unsupported: Story = {
   )
 }
 
+export const Binary: Story = {
+  render: () => (
+    <Frame>
+      <AssetBinary onReveal={() => {}} />
+    </Frame>
+  )
+}
+
 export const ReadError: Story = {
   render: () => (
     <Frame>
-      <AssetError message="ENOENT: the file was moved or deleted." onReveal={() => {}} />
+      <AssetError
+        message="ENOENT: the file was moved or deleted."
+        onReveal={() => {}}
+        onRetry={() => {}}
+      />
     </Frame>
   )
 }

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import type { AssetPayload } from "@jingler/core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -103,6 +103,7 @@ describe("AssetCanvas", () => {
     ).toBe(true)
     cleanup()
 
+    const onRetry = vi.fn()
     mount(<AssetCanvas selectedPath="missing.txt" loading />)
     expect(screen.getByText("Loading…")).toBeTruthy()
     cleanup()
@@ -110,8 +111,11 @@ describe("AssetCanvas", () => {
       <AssetCanvas
         selectedPath="missing.txt"
         error={{ type: "error", message: "Couldn't open missing.txt." }}
+        onRetry={onRetry}
       />
     )
     expect(screen.getByText("Couldn't open missing.txt.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,7 +1,9 @@
 import { useMemo } from "react"
-import { FileWarning, FolderOpen, TriangleAlert } from "lucide-react"
+import { ExternalLink, FileWarning, TriangleAlert } from "lucide-react"
 import type { AssetPayload } from "@jingler/core"
 import { cn } from "../lib/cn.js"
+import { Button } from "../components/button.js"
+import { EmptyState } from "../components/feedback.js"
 import { Spinner } from "../components/loading.js"
 import { Markdown } from "../components/markdown.js"
 import { createPierreFileContents } from "../diff/pierre-model.js"
@@ -138,35 +140,51 @@ export const formatBytes = (bytes: number): string => {
   return `${value.toFixed(1)} ${units[unit]}`
 }
 
-/** A framed, centred message with an optional "Reveal in Finder" escape hatch. */
+/**
+ * The one frame every file-viewer state (loading, too large, unsupported, binary,
+ * error) is drawn in: a centred cataloged EmptyState, with Retry and "Open
+ * externally" (the existing reveal-in-Finder RPC) as its actions.
+ */
 function AssetNotice({
   icon,
   title,
   detail,
-  onReveal
+  onReveal,
+  onRetry,
+  busy,
+  alert
 }: {
   icon: React.ReactNode
   title: string
   detail?: string
   onReveal?: () => void
+  onRetry?: () => void
+  busy?: boolean
+  alert?: boolean
 }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
-      {icon}
-      <div className="space-y-1">
-        <p className="text-[13px] font-medium text-text-bright">{title}</p>
-        {detail && <p className="text-[12px] text-dim">{detail}</p>}
+  const actions =
+    onRetry || onReveal ? (
+      <div className="flex items-center gap-2">
+        {onRetry && (
+          <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
+            Retry
+          </Button>
+        )}
+        {onReveal && (
+          <Button type="button" variant="secondary" size="sm" onClick={onReveal}>
+            <ExternalLink className="size-3.5" aria-hidden />
+            Open externally
+          </Button>
+        )}
       </div>
-      {onReveal && (
-        <button
-          type="button"
-          onClick={onReveal}
-          className="mt-1 inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-3 py-1.5 text-[12px] text-text-body hover:bg-hover"
-        >
-          <FolderOpen className="size-3.5" aria-hidden />
-          Reveal in Finder
-        </button>
-      )}
+    ) : undefined
+  return (
+    <div
+      role={alert ? "alert" : undefined}
+      aria-busy={busy || undefined}
+      className="flex h-full items-center justify-center bg-canvas"
+    >
+      <EmptyState icon={icon} title={title} description={detail} action={actions} />
     </div>
   )
 }
@@ -174,16 +192,15 @@ function AssetNotice({
 /** Shown while an asset's bytes are being read off disk. */
 export function AssetLoading({ className }: { className?: string }) {
   return (
-    <div className={cn("flex h-full items-center justify-center gap-2 bg-canvas text-dim", className)}>
-      <Spinner size={13} />
-      <span className="text-[12px]">Loading…</span>
+    <div className={cn("h-full", className)}>
+      <AssetNotice icon={<Spinner size={13} />} title="Loading…" busy />
     </div>
   )
 }
 
 /**
  * The escape hatch when a file exceeds its kind's size cap — we refuse to pull
- * the bytes across IPC (see `ASSET_SIZE_CAP`) and offer Finder instead.
+ * the bytes across IPC (see `ASSET_SIZE_CAP`) and offer an external open instead.
  */
 export function AssetTooLarge({
   path,
@@ -198,7 +215,7 @@ export function AssetTooLarge({
 }) {
   return (
     <AssetNotice
-      icon={<FileWarning className="size-6 text-muted-foreground" aria-hidden />}
+      icon={<FileWarning className="size-6" aria-hidden />}
       title="File too large to preview"
       detail={`${path} is ${formatBytes(size)} — over the ${formatBytes(cap)} preview limit.`}
       onReveal={onReveal}
@@ -210,7 +227,7 @@ export function AssetTooLarge({
 export function AssetUnsupported({ path, onReveal }: { path: string; onReveal?: () => void }) {
   return (
     <AssetNotice
-      icon={<FileWarning className="size-6 text-dim" aria-hidden />}
+      icon={<FileWarning className="size-6" aria-hidden />}
       title="No preview available"
       detail={`${path} can't be previewed here.`}
       onReveal={onReveal}
@@ -218,14 +235,36 @@ export function AssetUnsupported({ path, onReveal }: { path: string; onReveal?: 
   )
 }
 
-/** The read failed — a deleted file, a permission error, a decode error. */
-export function AssetError({ message, onReveal }: { message: string; onReveal?: () => void }) {
+/** Bytes that are not valid UTF-8 text, so the editor refuses them. */
+export function AssetBinary({ onReveal }: { onReveal?: () => void }) {
   return (
     <AssetNotice
-      icon={<TriangleAlert className="size-6 text-red" aria-hidden />}
+      icon={<FileWarning className="size-6" aria-hidden />}
+      title="Binary file"
+      detail="This file is not valid UTF-8 text, so Jingler will not edit it."
+      onReveal={onReveal}
+    />
+  )
+}
+
+/** The read failed — a deleted file, a permission error, a decode error. Retry re-issues the read. */
+export function AssetError({
+  message,
+  onReveal,
+  onRetry
+}: {
+  message: string
+  onReveal?: () => void
+  onRetry?: () => void
+}) {
+  return (
+    <AssetNotice
+      alert
+      icon={<TriangleAlert className="size-6 text-state-failed" aria-hidden />}
       title="Couldn't open this file"
       detail={message}
       onReveal={onReveal}
+      onRetry={onRetry}
     />
   )
 }
