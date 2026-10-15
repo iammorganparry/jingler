@@ -1,6 +1,6 @@
 import { RoutinesSettings } from "./routines-settings.js"
 import { sessionArchiveMachine } from "./session-archive-machine.js"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMachine } from "@xstate/react";
 import {
   useMutation,
@@ -263,13 +263,13 @@ function AuthedApp({
   user,
   onSignOut,
   onSignIn,
-  onRetryAuth,
+  banner,
 }: {
   user?: User;
   onSignOut?: () => void;
   onSignIn?: () => void;
-  /** Set while the auth server is unreachable: shows the offline banner. */
-  onRetryAuth?: () => void;
+  /** Notice under the title bar, e.g. while the auth server is unreachable. */
+  banner?: ReactNode;
 }) {
   const windowControls = useWindowControls()
 
@@ -1546,7 +1546,7 @@ function AuthedApp({
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
-        banner={onRetryAuth && <UnreachableBanner onRetry={onRetryAuth} />}
+        banner={banner}
         repos={repos}
         projects={projectController.projects}
         projectsLoading={projectController.loading}
@@ -2335,7 +2335,7 @@ function AppContent({
         user={signedIn ? authState.context.session?.user : undefined}
         onSignOut={signedIn ? () => authSend({ type: "SIGN_OUT" }) : undefined}
         onSignIn={signedOut ? () => setSignInOpen(true) : undefined}
-        onRetryAuth={authState.matches("unreachable") ? () => authSend({ type: "RETRY" }) : undefined}
+        banner={authState.matches("unreachable") ? <UnreachableBanner onRetry={() => authSend({ type: "RETRY" })} /> : undefined}
       />
       <SignInDialog
         open={signInOpen && signedOut}
