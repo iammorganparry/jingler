@@ -5,11 +5,13 @@ import type { DockSide } from "@jingler/ui"
 import {
   previewDockMachine,
   previewOwnerId,
+  previewNavFor,
   previewSessionState,
+  type PreviewNavState,
   type PreviewSessionState
 } from "./preview-dock-machine.js"
 
-export interface PreviewDockSessionPrefs extends PreviewSessionState {
+export interface PreviewDockSessionPrefs extends PreviewSessionState, PreviewNavState {
   readonly toggle: () => void
   readonly navigate: (url: string) => void
 }
@@ -55,6 +57,7 @@ export function usePreviewDock(): PreviewDockPrefs {
       const session = previewSessionState(state.context, ownerId)
       return {
         ...session,
+        ...previewNavFor(state.context, ownerId),
         toggle: () => {
           if (ownerId !== null) send({ type: "TOGGLE", sessionId: ownerId })
         },
@@ -73,9 +76,13 @@ export function usePreviewDock(): PreviewDockPrefs {
     const stopUrl = window.jingler.onPreviewUrlChanged(({ sessionId, chatId, url }) => {
       send({ type: "NATIVE_URL", sessionId: previewOwnerId(sessionId, chatId), url })
     })
+    const stopNav = window.jingler.onPreviewNavState(({ sessionId, chatId, ...nav }) => {
+      send({ type: "NAV_STATE", sessionId: previewOwnerId(sessionId, chatId), ...nav })
+    })
     return () => {
       stopReveal()
       stopUrl()
+      stopNav()
     }
   }, [send])
 

@@ -6,6 +6,8 @@ import {
   isBrowserPopupUrl,
   isCloseTabInput,
   isHttpUrl,
+  previewLoadFailure,
+  previewNavState,
   toRect
 } from "./preview-view.js"
 
@@ -141,5 +143,18 @@ describe("fileUrlFor", () => {
     // The two guards must not overlap: whatever this produces has to be
     // something the browser view would reject outright.
     expect(isHttpUrl(fileUrlFor("/tmp/wt/report.pdf"))).toBe(false)
+  })
+})
+
+describe("preview nav state", () => {
+  it("reports history and loading from the web contents", () => {
+    const wc = { isLoading: () => true, navigationHistory: { canGoBack: () => true, canGoForward: () => false } }
+    expect(previewNavState(wc, null)).toEqual({ canGoBack: true, canGoForward: false, loading: true, error: null })
+  })
+
+  it("surfaces main-frame failures but not aborts or subframes", () => {
+    expect(previewLoadFailure(-102, "ERR_CONNECTION_REFUSED", true)).toBe("ERR_CONNECTION_REFUSED")
+    expect(previewLoadFailure(-3, "ERR_ABORTED", true)).toBeNull()
+    expect(previewLoadFailure(-102, "x", false)).toBeNull()
   })
 })

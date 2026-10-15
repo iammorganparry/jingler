@@ -212,7 +212,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | DiffPanel | `app/diff-panel.tsx` | Right-hand worktree diff rail. | — | no | — |
 | EditorGroups | `app/editor-groups.tsx` | Split tree of editor groups. | onOpenCheckpoints, sessionId, layout, revision, describe, renderBody | no | — |
 | JinglerApp | `app/jingler-app.tsx` | Top-level app composition. | onOpenCheckpoints, sessions, user, update, releaseNotes, onSignOut | yes | — |
-| PreviewDock, PreviewToggleButton | `app/preview-dock.tsx` | Browser preview dock and toggle. | embedded, dock, onDockChange, visible, onToggle, url | yes | — |
+| PreviewDock, PreviewToggleButton | `app/preview-dock.tsx` | Browser preview dock and toggle: IconButtonGroup nav (back · forward · reload · open external; back/forward disabled without history), URL field, device-width group, loading spin, load-error InlineError with Retry. ⌘⇧B toggles. | embedded, dock, onDockChange, visible, onToggle, url, canGoBack, canGoForward, onBack, onForward, onOpenExternal, loading, error | yes | #468 (8.9) |
 | ProjectSidebar | `app/project-sidebar.tsx` | 56px project rail. | — | no | — |
 | SessionSidebar | `app/session-sidebar.tsx` | Sessions and Explorer sidebar. | search, workspaceView, forceCollapsed, expandRequest, onWorkspaceViewChange, explorer | yes | — |
 | SessionSplit | `app/session-split.tsx` | Chat + content split layout. | onOpenCheckpoints, group, sessions, emptyState, renderConversation, session | no | — |

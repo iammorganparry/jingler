@@ -69,7 +69,7 @@ const ITEMS: ReadonlyArray<PaletteItem> = [
     kind: "action",
     label: "Toggle Browser",
     group: "Actions",
-    hint: "⌃⇧B",
+    hint: "⌘⇧B",
     icon: MonitorPlay,
     run: noop
   },

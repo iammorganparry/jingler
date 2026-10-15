@@ -30,7 +30,7 @@ export const matchChecksChord = (event: Chord): boolean =>
   (event.key.toLowerCase() === "p" || event.code === "KeyP")
 /** The shortcut shown beside a built-in tab in the palette. Changes also covers the retired Code Review tab. */
 export const tabShortcutHint = (tabId: TabKey): string | undefined => {
-  if (tabId === BUILTIN_TAB.browser) return "⌃⇧B"
+  if (tabId === BUILTIN_TAB.browser) return "⌘⇧B"
   if (tabId === BUILTIN_TAB.terminal) return "⌃`"
   if (tabId === BUILTIN_TAB.changes) return "⌘⇧D"
   if (tabId === BUILTIN_TAB.checks) return "⌘⇧P"

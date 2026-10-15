@@ -928,7 +928,7 @@ function SessionPaneBody(props: SessionPaneProps) {
     id: tab.id,
     label: tab.label,
     icon: tab.icon,
-    ...(tab.id === BUILTIN_TAB.checks ? { shortcut: "mod+shift+p" } : tab.id === BUILTIN_TAB.changes ? { shortcut: "mod+shift+d" } : {}),
+    ...(tab.id === BUILTIN_TAB.checks ? { shortcut: "mod+shift+p" } : tab.id === BUILTIN_TAB.changes ? { shortcut: "mod+shift+d" } : tab.id === BUILTIN_TAB.browser ? { shortcut: "mod+shift+b" } : {}),
     ...(tab.badge?.kind === "count" ? { count: tab.badge.text } : {}),
     ...(tab.badge?.kind === "diff" ? { count: `+${tab.badge.added} −${tab.badge.removed}` } : {}),
     ...(props.tabContributions?.some((contribution) => contribution.id === tab.id) ? { plugin: true } : {})
