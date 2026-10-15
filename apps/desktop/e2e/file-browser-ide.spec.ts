@@ -594,6 +594,40 @@ test("reveals the followed mutation diff and sends selected feedback with contex
   })
 })
 
+test("decorates agent edits with a turn label and counts them in the file breadcrumb", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    isolateSystemHome: true,
+    withRepo: true,
+    seed: seedRepository,
+    sessions: ({ repoPath }) => [session(repoPath), otherSession(repoPath)]
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await splitChatBesideFiles(window)
+  await window
+    .getByTestId("composer")
+    .getByRole("button", { name: "Follow agent", exact: true })
+    .click()
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[follow-diff-preview]] Update the configuration mode.")
+  await composer.press("Enter")
+
+  const followed = window.locator('[data-follow-agent-change="follow-diff-1"]').filter({ visible: true })
+  await expect(followed).toBeVisible({ timeout: 20_000 })
+  const label = followed.getByRole("button", { name: "Agent edit · Turn 1" })
+  await expect(label).toBeVisible()
+  await expect(followed.getByRole("button", { name: /Keep|Revert/ })).toHaveCount(0)
+  await expect(
+    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" }).getByText("1 agent edit", { exact: true })
+  ).toBeVisible()
+
+  await label.click()
+  await expect(window.getByText("Updated the configuration mode.", { exact: true }).first()).toBeInViewport()
+})
+
 async function selectVisibleTreeItem(target: import("@playwright/test").Locator) {
   // A virtualized row can be re-rendered under the pointer right after a
   // scroll, swallowing the click; retry until the tree reports the selection.
