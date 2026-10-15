@@ -95,6 +95,15 @@ describe("Plannotator native projection", () => {
     ])
   })
 
+  it("projects a planning phase with a submitted plan and no live review as revising", () => {
+    const project = (planFilePath: string | null) => plannotatorProjectionToPlanDocument(
+      Schema.decodeUnknownSync(PlannotatorProjection)({ phase: "planning", planFilePath, review: null, checklist: [] }),
+      "s", "c", "2026-09-27T00:00:00.000Z"
+    )
+    expect(project("PLAN.md").status).toBe("revising")
+    expect(project(null).status).toBe("draft")
+  })
+
   it("keeps previous source on resubmission", () => {
     const base = {
       phase: "planning",

@@ -224,6 +224,37 @@ describe("PlanReview", () => {
     })
   })
 
+  describe("stale and revising plans", () => {
+    it("disables Approve with a reason while the agent is revising", () => {
+      renderReview({ document: { ...document, status: "revising", reviewId: undefined } })
+      const approve = screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement
+      expect(approve.disabled).toBe(true)
+      expect(approve.getAttribute("aria-describedby")).toBe(screen.getByText("Agent is revising this plan").id)
+      expect(screen.queryByText("Plan changed since you opened it")).toBeNull()
+    })
+
+    it("shows the banner when a new submission replaces the open plan, and Reload adopts it", () => {
+      const view = renderReview()
+      const next = { ...document, reviewId: "review-2", revision: 2, plan: { ...document.plan, title: "Auth replacement v2" } }
+      const rerenderWith = (doc: PlanDocument) => view.rerender(
+        <ThemeProvider tokens={toTokens(jinglerDark)}>
+          <OpenAssetProvider open={vi.fn()} knownFiles={new Set(["src/auth.ts"])}>
+            <PlanReview document={doc} />
+          </OpenAssetProvider>
+        </ThemeProvider>
+      )
+      rerenderWith(next)
+      expect(screen.getByText("Plan changed since you opened it")).toBeTruthy()
+      expect(screen.getByRole("heading", { name: "Auth replacement" })).toBeTruthy()
+      expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(true)
+
+      fireEvent.click(screen.getByRole("button", { name: "Reload" }))
+      expect(screen.queryByText("Plan changed since you opened it")).toBeNull()
+      expect(screen.getByRole("heading", { name: "Auth replacement v2" })).toBeTruthy()
+      expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(false)
+    })
+  })
+
   it("persists replies and resolution across remounts", async () => {
     const first = renderReview()
     addComment("Returning users can authenticate with the replacement token format.", "Keep this behavior.")

@@ -916,7 +916,6 @@ export function ConversationPane({
   // review actions while pending, then stays read-only as the checklist advances.
   const planSurface = renderPlanSurface(
     plannotatorDocument,
-    pendingReviewId,
     decideReview,
     <PlanReviewerDisconnectedCard
       sessionId={session.id}
@@ -1648,7 +1647,6 @@ function configuredFontScale(config: Awaited<ReturnType<typeof rpc.configGet>> |
 
 function renderPlanSurface(
   plannotatorDocument: import("@jingler/core").PlanDocument | null,
-  pendingReviewId: string | null,
   decideReview: (approved: boolean, feedback?: string) => Promise<void>,
   disconnectedCard: ReactNode
 ) {
@@ -1657,9 +1655,8 @@ function renderPlanSurface(
       {disconnectedCard}
       {plannotatorDocument !== null && (
         <PlanReview
-          key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}:${pendingReviewId ?? "plan"}`}
+          key={`${plannotatorDocument.sessionId}:${plannotatorDocument.producingChatId}:${plannotatorDocument.id}`}
           document={plannotatorDocument}
-          canApprove={pendingReviewId !== null}
           onApprove={() => decideReview(true)}
           onRevise={(feedback) => decideReview(false, feedback)}
         />

@@ -148,6 +148,9 @@ type Story = StoryObj<typeof meta>
 
 export const Proposed: Story = {}
 
+/** The agent is rewriting after feedback: Approve is disabled with its reason. */
+export const Revising: Story = { args: { document: { ...document, status: "revising", reviewId: undefined } } }
+
 export const Approved: Story = { args: { document: { ...document, status: "approved" } } }
 
 /** Stage 1 finished (every task done, every criterion passed); stage 2 underway. */
