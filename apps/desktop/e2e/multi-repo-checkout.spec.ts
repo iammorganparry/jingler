@@ -110,8 +110,8 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   // Changes: both repos grouped by checkout.
   await window.getByRole("button", { name: "Changes", exact: true }).last().click()
   await expect(window.getByTestId(`changes-checkout-${first!.id}`)).toBeVisible({ timeout: 20_000 })
-  await expect(window.getByTestId(`changes-checkout-${second!.id}`)).toContainText("other-repo.ts", { timeout: 20_000 })
-  await expect(window.getByTestId(`changes-checkout-${first!.id}`)).not.toContainText("other-repo.ts")
+  await expect(window.getByTestId(`changes-checkout-${second!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByTestId(`changes-checkout-${first!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toHaveCount(0)
 
   // Archive removes every worktree the session owns.
   await window.getByRole("tab", { name: "Sessions" }).click()
