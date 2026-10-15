@@ -4,6 +4,7 @@ import { FolderCog, FolderSearch, FolderX, Import, Plus, Trash2 } from "lucide-r
 import { BannerShell } from "../components/banner-shell.js"
 import { Button } from "../components/button.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
+import { Badge } from "../components/badge.js"
 import { ConfirmDialog } from "../components/confirm-dialog.js"
 import { ContextMenu, type ContextMenuItem } from "../components/context-menu.js"
 import { HoverCard } from "../components/hover-card.js"
@@ -11,6 +12,9 @@ import { StatusDot } from "../components/status-dot.js"
 import { cn } from "../lib/cn.js"
 import { JinglerMark } from "../brand/jingler-mark.js"
 import { projectIdForSession, UNASSIGNED_PROJECT_ID } from "./project-navigation.js"
+
+/** Live activity kinds that mean the run is blocked on the operator. */
+const NEEDS_YOU_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 
 type ProjectItem = Pick<Project, "id" | "name" | "availability"> & { readonly path?: string }
 
@@ -58,6 +62,7 @@ function ProjectAvatar({
   active,
   sessionCount,
   activeSessionCount,
+  needsYouCount,
   onSelect,
   onOpenSettings,
   onLocate,
@@ -68,6 +73,8 @@ function ProjectAvatar({
   active: boolean
   sessionCount: number
   activeSessionCount: number
+  /** Sessions blocked on the operator (question or approval); drives the amber top-right badge. */
+  needsYouCount: number
   onSelect: () => void
   onOpenSettings?: () => void
   onLocate?: () => void
@@ -87,6 +94,7 @@ function ProjectAvatar({
           <div className="mt-2 flex gap-3 text-[11px] text-muted-foreground">
             <span>{sessionCount} open session{sessionCount === 1 ? "" : "s"}</span>
             {activeSessionCount > 0 ? <span className="text-text-bright">{activeSessionCount} active</span> : null}
+            {needsYouCount > 0 ? <span className="text-yellow">{needsYouCount} need you</span> : null}
           </div>
         </div>
       }
@@ -112,10 +120,24 @@ function ProjectAvatar({
         />
         <span
           aria-hidden
-          className="absolute -right-[5px] -top-[5px] flex h-4 min-w-4 items-center justify-center rounded-full whitespace-nowrap bg-line-strong px-1 text-[11px] font-semibold leading-[14px] text-text-bright ring-2 ring-canvas"
+          className={cn(
+            "absolute -top-[5px] flex h-4 min-w-4 items-center justify-center rounded-full whitespace-nowrap bg-line-strong px-1 text-[11px] font-semibold leading-[14px] text-text-bright ring-2 ring-canvas",
+            // The amber needs-you badge owns the top-right corner; the session count yields to the left.
+            needsYouCount > 0 ? "-left-[5px]" : "-right-[5px]"
+          )}
         >
           {sessionCount}
         </span>
+        {needsYouCount > 0 ? (
+          <span
+            role="status"
+            data-testid={`project-needs-you-${project.id}`}
+            aria-label={`${project.name}: ${needsYouCount} need${needsYouCount === 1 ? "s" : ""} you`}
+            className="absolute -right-[5px] -top-[5px] flex rounded-full ring-2 ring-canvas"
+          >
+            <Badge tone="yellow" size="xs" className="h-4 min-w-4 justify-center rounded-full px-1">{needsYouCount}</Badge>
+          </span>
+        ) : null}
         {activeSessionCount > 0 ? (
           <span role="status" aria-label={`${project.name}: sessions in progress`} className="absolute -bottom-[3px] -right-[3px] flex rounded-full ring-2 ring-canvas">
             <StatusDot tone="bg-state-working" pulse size={8} />
@@ -230,6 +252,9 @@ export function ProjectSidebar({
                 sessionCount={projectSessions.length}
                 activeSessionCount={projectSessions.filter((session) =>
                   ["running", "thinking"].includes(displayStatusOf(liveActivity?.[session.id], session.status))
+                ).length}
+                needsYouCount={projectSessions.filter((session) =>
+                  NEEDS_YOU_KINDS.has(liveActivity?.[session.id]?.kind ?? "")
                 ).length}
                 onSelect={() => onSelect(project.id)}
                 onOpenSettings={

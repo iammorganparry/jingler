@@ -78,6 +78,36 @@ describe("ProjectSidebar", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("shows an amber needs-you count on a tile, clearing when the question is answered", () => {
+    const props = {
+      projects,
+      sessions: [
+        testSession({ id: "blocked", projectId: "beta" }),
+        testSession({ id: "approval", projectId: "beta" }),
+        testSession({ id: "busy", projectId: "beta" }),
+        testSession({ id: "other", projectId: "gamma" })
+      ],
+      activeProjectId: "alpha",
+      onSelect: vi.fn()
+    }
+    const { rerender } = render(<ProjectSidebar {...props} liveActivity={{
+      blocked: { kind: "needs-input", verb: "Asking", target: null, startedAt: 0 },
+      approval: { kind: "needs-approval", verb: "Approving", target: null, startedAt: 0 },
+      busy: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 }
+    }} />)
+    const badge = screen.getByTestId("project-needs-you-beta")
+    expect(badge.textContent).toBe("2")
+    expect(badge.getAttribute("aria-label")).toBe("Beta: 2 need you")
+    expect(badge.innerHTML).toContain("text-yellow")
+    expect(badge.innerHTML).toContain("whitespace-nowrap")
+    expect(screen.queryByTestId("project-needs-you-gamma")).toBeNull()
+    expect(within(screen.getByRole("button", { name: "Beta" })).getByText("3")).toBeTruthy()
+    rerender(<ProjectSidebar {...props} liveActivity={{
+      busy: { kind: "thinking", verb: "Thinking", target: null, startedAt: 0 }
+    }} />)
+    expect(screen.queryByTestId("project-needs-you-beta")).toBeNull()
+  })
+
   it("shows project details when its avatar receives focus", async () => {
     render(
       <ProjectSidebar
