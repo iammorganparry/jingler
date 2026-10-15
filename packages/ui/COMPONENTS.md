@@ -209,6 +209,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionSidebar | `app/session-sidebar.tsx` | Sessions and Explorer sidebar. | search, workspaceView, forceCollapsed, expandRequest, onWorkspaceViewChange, explorer | yes | — |
 | SessionSplit | `app/session-split.tsx` | Chat + content split layout. | onOpenCheckpoints, group, sessions, emptyState, renderConversation, session | no | — |
 | SessionTree | `app/session-tree.tsx` | Session chats, views and open files tree. | — | no | — |
+| PluginPaneState | `app/plugin-pane-state.tsx` | Plugin dock pane states: loading skeleton, empty, and crashed (message + Retry) on EmptyState/ListSkeleton. | variant, pluginId, message, onRetry | yes | #521 (13.11) |
 | SubagentTabBar | `app/subagent-tab-bar.tsx` | Subagent chip strip. | — | no | — |
 | SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
 | SubagentMetaStrip | `app/subagent-meta-strip.tsx` | Up to 3-row strip under the subagent breadcrumb: provider, model, status · phase, elapsed, `Details ▾` key/value grid (run id, started), current tool, usage, Background pill, artifact chips. Null fields omitted; pills never truncate. | node, providerId, onOpenArtifact | yes | #462 (8.3) |

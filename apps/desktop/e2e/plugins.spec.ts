@@ -1431,6 +1431,63 @@ export default definePlugin(
   await expect(window.getByTestId(`session-row-${SESSION.id}`)).toBeVisible()
 })
 
+test("a crashed dock pane shows the error state, and Retry recovers it", async ({
+  launchApp
+}) => {
+  // The pane throws until the page sets a flag, so Retry has something to recover
+  // to. Asserts the shared EmptyState-based card and that Retry re-mounts the pane.
+  const { window, home } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [SESSION]
+  })
+
+  await seedPlugin(home, {
+    id: "pane-plugin",
+    manifest: {
+      id: "pane-plugin",
+      name: "Pane Plugin",
+      version: "1.0.0",
+      ui: "dist/ui.js",
+      contributes: {
+        panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }]
+      }
+    },
+    ui: `
+import { jsx } from "react/jsx-runtime"
+import { definePlugin } from "@jingler/plugin-sdk"
+function Side() {
+  if (!globalThis.__paneRecovered) throw new Error("pane exploded")
+  return jsx("span", { "data-testid": "pane-recovered", children: "recovered" })
+}
+export default definePlugin(
+  {
+    id: "pane-plugin", name: "Pane Plugin", version: "1.0.0", ui: "dist/ui.js",
+    contributes: { panes: [{ id: "pane-plugin.side", label: "Side", slot: "right" }] }
+  },
+  { panes: { "pane-plugin.side": Side } }
+)
+`
+  })
+
+  await openSession(window)
+
+  const card = window.getByTestId("plugin-pane-error-pane-plugin")
+  await expect(card).toBeVisible({ timeout: 15_000 })
+  await expect(card).toContainText("pane exploded")
+
+  // Retry on a still-broken pane shows the card again rather than blanking.
+  await window.getByTestId("plugin-pane-error-retry-pane-plugin").click()
+  await expect(card).toBeVisible()
+
+  await window.evaluate(() => {
+    ;(globalThis as { __paneRecovered?: boolean }).__paneRecovered = true
+  })
+  await window.getByRole("button", { name: "Retry" }).click()
+  await expect(window.getByTestId("pane-recovered")).toHaveText("recovered")
+  await expect(card).toHaveCount(0)
+})
+
 test("SDK hooks work inside a dock pane, as the SDK documents", async ({ launchApp }) => {
   // Panes were never wrapped in a `PluginViewProvider`, so every hook threw
   // "called outside a Jingler plugin view" — in one of the two places the SDK

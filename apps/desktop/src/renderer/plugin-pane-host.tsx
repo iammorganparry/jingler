@@ -23,9 +23,17 @@
  * failure copy differs too: a broken tab tells the operator other tabs are fine,
  * which is the wrong thing to say about a dock.
  */
-import { Component, type ErrorInfo, type ReactNode } from "react"
-import { TriangleAlert } from "lucide-react"
+import {
+  Component,
+  Suspense,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode
+} from "react"
 import type { Session } from "@jingler/core"
+import { PluginPaneState } from "@jingler/ui"
 import { PluginViewProvider } from "@jingler/plugin-sdk"
 import { pluginBridge } from "./plugin-bridge.js"
 import { toSessionSnapshot } from "./plugin-loader.js"
@@ -41,6 +49,37 @@ interface Props {
 
 interface State {
   readonly message: string | null
+}
+
+/**
+ * The pane's own output plus its loading and empty states.
+ *
+ * A pane that suspends gets the skeleton. A pane that renders nothing gets the
+ * empty state — detected from the DOM because the host cannot know what a
+ * plugin component returns. `display: contents` keeps the wrapper out of layout.
+ */
+function PaneBody({ pluginId, children }: { pluginId: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [empty, setEmpty] = useState(false)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const check = () => setEmpty(el.childElementCount === 0 && !el.textContent?.trim())
+    check()
+    const observer = new MutationObserver(check)
+    observer.observe(el, { childList: true, characterData: true, subtree: true })
+    return () => observer.disconnect()
+  }, [])
+  return (
+    <>
+      <div ref={ref} className="contents">
+        <Suspense fallback={<PluginPaneState variant="loading" pluginId={pluginId} />}>
+          {children}
+        </Suspense>
+      </div>
+      {empty && <PluginPaneState variant="empty" pluginId={pluginId} />}
+    </>
+  )
 }
 
 export class PluginPaneHost extends Component<Props, State> {
@@ -85,37 +124,19 @@ export class PluginPaneHost extends Component<Props, State> {
             bridge: pluginBridge(this.props.pluginId)
           }}
         >
-          {this.props.children}
+          <PaneBody pluginId={this.props.pluginId}>{this.props.children}</PaneBody>
         </PluginViewProvider>
       )
     }
 
     return (
-      <div
-        data-testid={`plugin-pane-error-${this.props.pluginId}`}
-        className="flex min-h-0 min-w-0 flex-col items-center justify-center gap-2 bg-panel px-4 py-6 text-dim"
-      >
-        <TriangleAlert size={22} className="text-yellow" strokeWidth={1.5} />
-        <div className="text-center text-[12.5px] font-semibold text-text">
-          “{this.props.pluginId}” pane stopped working
-        </div>
-        <div className="max-w-[240px] text-center font-mono text-[10.5px] leading-[1.5] text-dim">
-          {this.state.message}
-        </div>
-        {/* Same explicit retry as the tab host — see the note there. */}
-        <button
-          type="button"
-          data-testid={`plugin-pane-error-retry-${this.props.pluginId}`}
-          onClick={() => this.setState({ message: null })}
-          className="rounded border border-line px-2 py-0.5 text-[11.5px] text-text-body transition-colors hover:border-blue hover:text-text-bright"
-        >
-          Try again
-        </button>
-        <div className="max-w-[240px] text-center text-[11.5px] leading-[1.5]">
-          The rest of the app is unaffected. Disable this plugin in Settings ›
-          Plugins.
-        </div>
-      </div>
+      <PluginPaneState
+        variant="error"
+        pluginId={this.props.pluginId}
+        message={this.state.message}
+        // Same explicit retry as the tab host — see the note there.
+        onRetry={() => this.setState({ message: null })}
+      />
     )
   }
 }
