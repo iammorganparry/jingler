@@ -9,6 +9,7 @@ import type {
 import { Schema } from "effect"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
+import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import {
   Dialog,
@@ -324,14 +325,9 @@ export function McpServerDialog({
 
 function ConnectorsButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      disabled={loading}
-      onClick={onClick}
-      className="rounded-md border border-line bg-panel px-2 py-1 text-[11px] text-text hover:bg-surface disabled:opacity-50"
-    >
+    <Button variant="secondary" size="sm" disabled={loading} onClick={onClick}>
       {loading ? "Checking claude.ai…" : "Include claude.ai connectors & plugins"}
-    </button>
+    </Button>
   )
 }
 
