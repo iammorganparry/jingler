@@ -3,6 +3,8 @@ import { Check, MessageSquarePlus } from "lucide-react"
 import { useEffect, useRef, useState, type RefObject } from "react"
 import { Button } from "../components/button.js"
 import { PlanRevisionDiff } from "../composites/plan-change-block.js"
+import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
+import { countUnsavedDrafts, planDraftKey, setPlanDraftCount } from "../composites/plan-comment-drafts.js"
 import { PlanCommentLayer } from "../composites/plan-comment-layer.js"
 import { loadPlanComments, savePlanComments } from "../composites/plan-comment-store.js"
 import { buildAnchorFromRange } from "../composites/plan-doc/plan-anchor-dom.js"
@@ -151,6 +153,8 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     const saved = loadPlanComments(commentIdentity)
     return saved.length > 0 ? saved : document.plan.annotations
   })
+  const [replyDrafts, setReplyDrafts] = useState<Readonly<Record<string, string>>>({})
+  const [pendingDecision, setPendingDecision] = useState<boolean | null>(null)
   const [general, setGeneral] = useState("")
   const [busy, setBusy] = useState(false)
   const [decisionError, setDecisionError] = useState<string | null>(null)
@@ -160,6 +164,13 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     document.reviewId !== undefined &&
     (document.status === "proposed" || document.status === "revising")
   const { plan } = document
+  const draftCount = countUnsavedDrafts(draft === null ? "" : draftBody, replyDrafts)
+  const draftKey = planDraftKey(document.sessionId, document.producingChatId)
+
+  useEffect(() => {
+    setPlanDraftCount(draftKey, draftCount)
+    return () => setPlanDraftCount(draftKey, 0)
+  }, [draftKey, draftCount])
 
   useEffect(() => {
     if (commentIdentityRef.current !== commentIdentity) {
@@ -198,6 +209,18 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
     } finally {
       setBusy(false)
     }
+  }
+
+  const requestDecision = (approved: boolean) => {
+    if (draftCount > 0) setPendingDecision(approved)
+    else void decide(approved)
+  }
+
+  const discardDraftsAndDecide = (approved: boolean) => {
+    setDraft(null)
+    setDraftBody("")
+    setReplyDrafts({})
+    return decide(approved)
   }
 
   const saveDraft = () => {
@@ -299,7 +322,7 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
         </article>
         </div>
 
-        <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} onReply={reply} onResolve={resolve} />
+        <PlanCommentLayer key={document.revision} container={container} content={content} comments={comments} editable={canDecide} replyDrafts={replyDrafts} onReplyDraftChange={(id, text) => setReplyDrafts((current) => ({ ...current, [id]: text }))} onReply={reply} onResolve={resolve} />
 
         {selection !== null && draft === null && (
           <button
@@ -347,13 +370,19 @@ export function PlanReview({ document, canApprove = true, onApprove, onRevise }:
               rows={1}
               className="h-8 min-w-0 flex-1 resize-none rounded-[8px] border border-line bg-panel px-2 py-[5px] text-[13px] leading-5 outline-none"
             />
-            <Button variant="danger" size="sm" disabled={busy} onClick={() => void decide(false)}>
+            <Button variant="danger" size="sm" disabled={busy} onClick={() => requestDecision(false)}>
               Request changes
             </Button>
-            <Button size="sm" disabled={busy} onClick={() => void decide(true)}>Approve</Button>
+            <Button size="sm" disabled={busy} onClick={() => requestDecision(true)}>Approve</Button>
           </div>
         </footer>
       )}
+      <DiscardCommentsDialog
+        open={pendingDecision !== null}
+        count={draftCount}
+        onOpenChange={(open) => { if (!open) setPendingDecision(null) }}
+        onDiscard={() => discardDraftsAndDecide(pendingDecision === true)}
+      />
     </section>
   )
 }
