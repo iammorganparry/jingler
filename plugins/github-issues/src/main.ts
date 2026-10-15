@@ -308,6 +308,31 @@ export const closeIssue = async (
   if (result.code !== 0) throw new Error(result.stderr.trim() || "GitHub could not close this issue.")
 }
 
+/** Post one comment (optionally closing the issue with it) through the authenticated GitHub CLI. */
+export const commentIssue = async (
+  input: FetchArgs & { readonly body: string; readonly close?: boolean },
+  exec: (
+    command: string,
+    args?: readonly string[],
+    options?: { readonly cwd?: string; readonly timeoutMs?: number }
+  ) => Promise<ExecResult>
+): Promise<void> => {
+  repositoryParts(input.repo)
+  if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
+    throw new Error("The linked GitHub issue number is invalid.")
+  }
+  if (input.body.trim().length === 0) throw new Error("A comment cannot be empty.")
+  const target = [String(input.issueNumber), "--repo", input.repo]
+  const args = input.close
+    ? ["issue", "close", ...target, "--comment", input.body]
+    : ["issue", "comment", ...target, "--body", input.body]
+  const result = await exec("gh", args, {
+    ...(input.worktreePath ? { cwd: input.worktreePath } : {}),
+    timeoutMs: 10_000
+  })
+  if (result.code !== 0) throw new Error(result.stderr.trim() || "GitHub could not post this comment.")
+}
+
 export const activate: Activate = (ctx) => {
   ctx.subscriptions.push(
     ctx.commands.register("github-issues.fetch", async (input) => {
@@ -326,6 +351,11 @@ export const activate: Activate = (ctx) => {
       const args = input as FetchArgs
       const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
       await closeIssue({ ...args, repo }, ctx.exec)
+    }),
+    ctx.commands.register("github-issues.comment", async (input) => {
+      const args = input as FetchArgs & { body: string; close?: boolean }
+      const repo = await resolveRepository(args.repo, args.worktreePath, ctx.exec)
+      await commentIssue({ ...args, repo }, ctx.exec)
     })
   )
 

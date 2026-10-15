@@ -36,6 +36,7 @@ import {
   Avatar,
   Badge,
   Button,
+  CommentComposer,
   githubAvatarUrl,
   GithubMark,
   // The app's own chip, not a copy. A local port drifted by a font size within
@@ -279,6 +280,23 @@ function IssueTab({ session }: TabProps) {
             />
           ))}
         </div>
+
+        <CommentComposer
+          // Remounted per issue so a draft never crosses to another one.
+          key={issue.number}
+          canClose={open}
+          post={async (body, close) => {
+            await host.invoke("github-issues.comment", { ...reference, body, close })
+            // The post already succeeded; if the refresh fails, show the comment locally
+            // rather than reject and invite a duplicate post.
+            const next = await host.invoke<Issue>("github-issues.fetch", reference).catch(() => ({
+              ...issue,
+              state: close ? "closed" : issue.state,
+              comments: [...(issue.comments ?? []), { body, createdAt: new Date().toISOString() }]
+            }))
+            setIssue(next)
+          }}
+        />
       </div>
     </ReadingShell>
   )

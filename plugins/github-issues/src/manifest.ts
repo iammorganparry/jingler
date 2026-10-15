@@ -55,6 +55,11 @@ export const manifest = defineManifest({
         id: "github-issues.close",
         title: "Close linked issue",
         category: "GitHub"
+      },
+      {
+        id: "github-issues.comment",
+        title: "Comment on linked issue",
+        category: "GitHub"
       }
     ]
   }
