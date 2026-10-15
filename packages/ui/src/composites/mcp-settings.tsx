@@ -57,7 +57,7 @@ export interface McpSettingsProps {
   ) => Promise<ReadonlyArray<string>>
 }
 
-const ORIGIN_LABELS: Record<McpImportCandidateView["origin"], string> = {
+export const MCP_ORIGIN_LABELS: Record<McpImportCandidateView["origin"], string> = {
   user: "User",
   "user-settings": "User settings",
   managed: "Managed",
@@ -416,7 +416,7 @@ function ImportFlow({
                 />
                 <span className="text-text-body">{candidate.name}</span>
                 <span className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
-                  {ORIGIN_LABELS[candidate.origin]}
+                  {MCP_ORIGIN_LABELS[candidate.origin]}
                 </span>
                 <span className="min-w-0 truncate font-mono text-[10px] text-dim">
                   {candidate.problem ?? candidate.target}
