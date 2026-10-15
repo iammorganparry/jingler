@@ -1,5 +1,12 @@
 # @jingler/server
 
+## 0.11.0
+
+### Patch Changes
+
+- Updated dependencies [0148386]
+  - @jingler/core@0.11.0
+
 ## 0.10.1
 
 ### Patch Changes
