@@ -61,3 +61,16 @@ export const VeryLong: Story = {
     activeId: "turn-100"
   }
 }
+
+export const TickKindsAndActions: Story = {
+  args: {
+    items: makeItems(6).map((item, i) => ({
+      ...item,
+      meta: `Turn ${i + 1} · 4 files · +84 −12`,
+      kind: (["checkpoint", undefined, "failed", undefined, "needs-you", undefined] as const)[i]
+    })),
+    highlightActive: true,
+    activeId: "turn-4",
+    renderActions: () => <button type="button">Jump</button>
+  }
+}

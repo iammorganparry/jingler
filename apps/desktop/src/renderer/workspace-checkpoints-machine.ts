@@ -13,7 +13,7 @@ export const workspaceCheckpointsMachine = setup({
   types: {
     context: {} as Input & { items: ReadonlyArray<WorkspaceCheckpoint>; preview: WorkspaceCheckpointPreview | null; selected: string; action: "list" | "capture" | "enable" | "disable" | "preview" | "restore"; error: string | null },
     input: {} as Input,
-    events: {} as { type: "OPEN" | "CANCEL" | "ENABLE" | "DISABLE" | "CAPTURE" | "CONFIRM" | "RETRY" } | { type: "PREVIEW"; id: string }
+    events: {} as { type: "OPEN"; id?: string } | { type: "CANCEL" | "ENABLE" | "DISABLE" | "CAPTURE" | "CONFIRM" | "RETRY" } | { type: "PREVIEW"; id: string }
   },
   actors: {
     operation: fromPromise(async ({ input }: { input: Input & { action: string; selected: string; preview: WorkspaceCheckpointPreview | null } }) => {
@@ -35,7 +35,8 @@ export const workspaceCheckpointsMachine = setup({
   initial: "closed",
   context: ({ input }) => ({ ...input, items: [], preview: null, selected: "", action: "list", error: null }),
   states: {
-    closed: { on: { OPEN: { target: "working", actions: assign({ action: "list" }) } } },
+    // OPEN with an id goes straight to that checkpoint's revert preview (the timeline rail's "Revert to here").
+    closed: { on: { OPEN: { target: "working", actions: assign({ action: ({ event }) => event.id ? "preview" : "list", selected: ({ event }) => event.id ?? "" }) } } },
     ready: { on: {
       ENABLE: "consent",
       DISABLE: { target: "working", actions: assign({ action: "disable" }) },

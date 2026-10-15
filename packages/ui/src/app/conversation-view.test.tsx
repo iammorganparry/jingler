@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { plannotatorProjectionToPlanDocument, type Message } from "@jingler/core"
 import {
   ConversationView,
@@ -8,6 +8,8 @@ import {
   latestAssistantMessageIndex,
   planTranscriptAnchorIndex
 } from "./conversation-view.js"
+
+afterEach(cleanup)
 
 const textMessage = (id: string, role: Message["role"], text: string): Message => ({
   id,
@@ -144,5 +146,59 @@ describe("ConversationView preview chip", () => {
     view.rerender(<ConversationView mode="auto" messages={[]} previewReady={{ onOpen }} />)
     fireEvent.click(screen.getByRole("button", { name: /Preview ready · Open browser/ }))
     expect(onOpen).toHaveBeenCalledOnce()
+  })
+})
+
+describe("ConversationView timeline rail ticks", () => {
+  const blockedTurns = (): Message[] => [
+    textMessage("1", "user", "First request"),
+    textMessage("2", "assistant", "Done"),
+    textMessage("3", "user", "Second request"),
+    {
+      ...textMessage("4", "assistant", ""),
+      parts: [{ _tag: "Question", request: { id: "q", questions: [] }, answers: null }]
+    }
+  ]
+
+  it("marks a blocked question amber and shows turn stats, Jump, Filter Changes and Revert to here on hover", () => {
+    const onRevertToTurn = vi.fn()
+    const onFilterChanges = vi.fn()
+    render(
+      <ConversationView mode="auto" messages={blockedTurns()} checkpointCount={2} onRevertToTurn={onRevertToTurn} onFilterChanges={onFilterChanges} />
+    )
+    const ticks = screen.getAllByRole("button", { name: /^Go to user message/ })
+    expect(ticks[1]!.querySelector("[data-slot=preview-rail-tick]")!.getAttribute("data-kind")).toBe("needs-you")
+    expect(ticks[0]!.querySelector("[data-slot=preview-rail-tick]")!.getAttribute("data-kind")).toBe("checkpoint")
+
+    fireEvent.pointerEnter(ticks[0]!)
+    expect(document.querySelector("[data-slot=preview-rail-meta]")!.textContent).toBe("Turn 1")
+    fireEvent.click(screen.getByRole("button", { name: "Filter Changes" }))
+    expect(onFilterChanges).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole("button", { name: "Revert to here" }))
+    expect(onRevertToTurn).toHaveBeenCalledWith(1)
+    expect(screen.getByRole("button", { name: "Jump" })).toBeTruthy()
+  })
+
+  it("offers no Revert to here for turns without a checkpoint", () => {
+    render(<ConversationView mode="auto" messages={blockedTurns()} checkpointCount={0} onRevertToTurn={vi.fn()} />)
+    fireEvent.pointerEnter(screen.getAllByRole("button", { name: /^Go to user message/ })[0]!)
+    expect(screen.queryByRole("button", { name: "Revert to here" })).toBeNull()
+  })
+
+  it("moves between turns with alt+up / alt+down", async () => {
+    const scrollTo = vi.fn()
+    const original = HTMLElement.prototype.scrollTo
+    HTMLElement.prototype.scrollTo = scrollTo
+    try {
+      render(<ConversationView mode="auto" messages={blockedTurns()} />)
+      const composer = screen.getByPlaceholderText(/Message/)
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled())
+      scrollTo.mockClear()
+      composer.focus()
+      fireEvent.keyDown(composer, { key: "ArrowUp", altKey: true, code: "ArrowUp" })
+      await waitFor(() => expect(scrollTo).toHaveBeenCalled())
+    } finally {
+      HTMLElement.prototype.scrollTo = original
+    }
   })
 })

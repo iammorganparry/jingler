@@ -1133,3 +1133,26 @@ test("long session rail shows gap marker and expands on click", async ({ launchA
   await expect(gap).toHaveCount(0)
   await expect(ticks).toHaveCount(turns)
 })
+
+test("a blocked question shows an amber rail tick whose hover card jumps to it", async ({ launchApp }) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+  const composer = window.getByPlaceholder("Message the agent…")
+  // The rail needs two turns to render, so finish one turn before asking.
+  await composer.fill("Say hello")
+  await composer.press("Enter")
+  await expect(composer).toBeEnabled({ timeout: 30_000 })
+  await expect(window.getByText("Agent breathing…")).toHaveCount(0, { timeout: 30_000 })
+  await composer.fill("[[ask]] migrate the store")
+  await composer.press("Enter")
+  await expect(window.getByText("Agent needs your input")).toBeVisible({ timeout: 15_000 })
+
+  const rail = window.getByRole("navigation", { name: "Message navigation" })
+  const tick = rail.locator('[data-slot="preview-rail-item"]').last()
+  await expect(tick.locator('[data-slot="preview-rail-tick"]')).toHaveAttribute("data-kind", "needs-you")
+  await tick.hover()
+  await expect(window.locator('[data-slot="preview-rail-meta"]')).toContainText("Turn 2")
+  await expect(window.getByRole("button", { name: "Filter Changes" })).toBeVisible()
+  await window.getByRole("button", { name: "Jump", exact: true }).click()
+  await expect(window.getByText("[[ask]] migrate the store").first()).toBeVisible()
+})
