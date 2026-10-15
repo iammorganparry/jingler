@@ -2503,14 +2503,29 @@ function shouldAutoDetectPr(connected: boolean, config: GithubConfig | null): bo
   return connected && (config?.autoDetectPr ?? true);
 }
 
-function ArchiveConfirmation({ state, send }: { state: import("xstate").SnapshotFrom<typeof sessionArchiveMachine>; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+type ArchiveSnapshot = import("xstate").SnapshotFrom<typeof sessionArchiveMachine>;
+
+const METADATA_ONLY_WARNING =
+  "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked.";
+
+/** The dialog copy for the current archive step: terminal-history consent, first ask, or failure. */
+function archiveDialogCopy(state: ArchiveSnapshot) {
+  const metadataOnly = Boolean(state.context.session?.checkpointPtyHistory);
+  const failed = state.matches("failed") || state.matches("recovering") || (state.matches("loading") && state.context.retrying);
+  if (metadataOnly) {
+    return { destructive: false, title: failed ? "Archive failed" : "Archive without cleanup?", description: state.context.error ?? METADATA_ONLY_WARNING, confirmLabel: failed ? "Retry" : "Archive without cleanup" };
+  }
+  return { destructive: true, title: failed ? "Archive failed" : "Archive this workspace?", description: state.context.error ?? "Terminal history is saved", confirmLabel: failed ? "Retry" : "Archive" };
+}
+
+function ArchiveConfirmation({ state, send }: { state: ArchiveSnapshot; send: import("xstate").ActorRefFrom<typeof sessionArchiveMachine>["send"] }) {
+  // Closed only while idle or the first load; a failure keeps it open with the error until Cancel or a successful Retry.
+  const open = !state.matches("idle") && !(state.matches("loading") && !state.context.retrying);
   return <ConfirmDialog
     closeOnConfirm={false}
-    open={state.matches("confirming") || (Boolean(state.context.session?.checkpointPtyHistory) && state.matches("archiving")) || state.matches("failed")}
+    open={open}
     onOpenChange={open => { if (!open) send({ type: "CANCEL" }); }}
-    title={state.matches("failed") ? "Archive failed" : "Archive without cleanup?"}
-    description={state.context.error ?? "Interactive terminal jobs cannot be proven stopped. This only hides the workspace in the archive: files and running jobs are preserved, and cleanup will not run. Destructive deletion remains blocked."}
-    confirmLabel={state.matches("failed") ? "Retry" : "Archive without cleanup"}
+    {...archiveDialogCopy(state)}
     onConfirm={() => { send({ type: "CONFIRM" }); }}
   />
 }
