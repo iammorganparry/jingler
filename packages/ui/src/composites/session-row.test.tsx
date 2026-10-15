@@ -58,3 +58,22 @@ describe("SessionRow linked issue badge", () => {
     expect(badge.getAttribute("title")).toBe("ENG-123: Provider-neutral badges")
   })
 })
+
+describe("SessionRow multi-repo count", () => {
+  const checkout = (id: string, repo: string) => ({ id, repo, branch: "b", prNumber: null })
+
+  it("shows `· N repos` only when the session has more than one checkout", () => {
+    const multi = testSession({
+      id: "multi",
+      checkouts: [checkout("primary", "org/api"), checkout("c2", "org/web")],
+      activeCheckoutId: "primary"
+    })
+    render(<SessionRow session={multi} />)
+    expect(screen.getByTestId("session-repos-multi").textContent).toBe(" · 2 repos")
+  })
+
+  it("renders a legacy session exactly as before", () => {
+    render(<SessionRow session={testSession({ id: "legacy" })} />)
+    expect(screen.queryByTestId("session-repos-legacy")).toBeNull()
+  })
+})
