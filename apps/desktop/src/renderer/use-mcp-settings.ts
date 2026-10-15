@@ -64,9 +64,14 @@ export function useMcpSettings(): McpSettingsProps {
       await invalidate()
     },
     reveal: () => rpc.mcpReveal(),
-    importCandidates: (source: McpImportSourceId) => rpc.mcpImportCandidates(source),
-    applyImport: async (source: McpImportSourceId, names: ReadonlyArray<string>) => {
-      const imported = await rpc.mcpApplyImport(source, names)
+    importCandidates: (source: McpImportSourceId, connectors?: boolean) =>
+      rpc.mcpImportCandidates(source, connectors),
+    applyImport: async (
+      source: McpImportSourceId,
+      names: ReadonlyArray<string>,
+      connectors?: boolean
+    ) => {
+      const imported = await rpc.mcpApplyImport(source, names, connectors)
       await invalidate()
       return imported
     }

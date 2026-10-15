@@ -26,18 +26,24 @@ describe("Claude CLI child model aliases", () => {
 })
 
 describe("concreteClaudeModels", () => {
-  // A child whose Anthropic credential is not the Claude CLI route never registers the
-  // `sonnet` alias, so the parent must write the id that child would resolve to.
-  it("writes the id an alias-less child resolves when the route is not the Claude CLI", async () => {
+  // The child reports the concrete id it ran; pi-subagents compares it as text with the
+  // profile model, so every route (Claude CLI included) must write the concrete id.
+  it("writes the id a child resolves for an alias", async () => {
     const resolved = await resolve(false)
-    expect(concreteClaudeModels({ worker: ProviderModelId.make("anthropic/sonnet") }, false))
+    expect(resolved).toMatch(/^claude-sonnet/u)
+    expect(concreteClaudeModels({ worker: ProviderModelId.make("anthropic/sonnet") }))
       .toEqual({ worker: `anthropic/${resolved}` })
   })
 
-  it("keeps aliases on the Claude CLI route and leaves other ids alone", () => {
-    const assignments = { worker: ProviderModelId.make("anthropic/sonnet") }
-    expect(concreteClaudeModels(assignments, true)).toEqual(assignments)
+  it("rewrites every alias and leaves other ids alone", () => {
+    const concrete = (assignments: Record<string, ProviderModelId>) =>
+      Object.values(concreteClaudeModels(assignments))
+    expect(concrete({
+      scout: ProviderModelId.make("anthropic/sonnet"),
+      oracle: ProviderModelId.make("anthropic/haiku"),
+      worker: ProviderModelId.make("anthropic/opus")
+    }).every((model) => !/\/(opus|sonnet|haiku)$/u.test(model))).toBe(true)
     const other = { worker: ProviderModelId.make("openai-codex/gpt-5.6-sol"), scout: ProviderModelId.make("anthropic/claude-opus-5") }
-    expect(concreteClaudeModels(other, false)).toEqual(other)
+    expect(concreteClaudeModels(other)).toEqual(other)
   })
 })

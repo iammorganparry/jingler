@@ -9,6 +9,7 @@ import type {
 import { Schema } from "effect"
 import * as React from "react"
 import { AsyncButton } from "../components/async-button.js"
+import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import {
   Dialog,
@@ -46,12 +47,22 @@ export interface McpSettingsProps {
   readonly reveal: () => Promise<void>
   /** Import flow: load candidates from one source, then apply a selection. */
   readonly importCandidates: (
-    source: McpImportSourceId
+    source: McpImportSourceId,
+    connectors?: boolean
   ) => Promise<ReadonlyArray<McpImportCandidateView>>
   readonly applyImport: (
     source: McpImportSourceId,
-    names: ReadonlyArray<string>
+    names: ReadonlyArray<string>,
+    connectors?: boolean
   ) => Promise<ReadonlyArray<string>>
+}
+
+export const MCP_ORIGIN_LABELS: Record<McpImportCandidateView["origin"], string> = {
+  user: "User",
+  "user-settings": "User settings",
+  managed: "Managed",
+  "claude.ai": "claude.ai",
+  plugin: "Plugin"
 }
 
 const IMPORT_SOURCES: ReadonlyArray<{ id: McpImportSourceId; label: string }> = [
@@ -314,6 +325,14 @@ export function McpServerDialog({
   )
 }
 
+function ConnectorsButton({ loading, onClick }: { loading: boolean; onClick: () => void }) {
+  return (
+    <Button variant="secondary" size="sm" disabled={loading} onClick={onClick}>
+      {loading ? "Checking claude.ai…" : "Include claude.ai connectors & plugins"}
+    </Button>
+  )
+}
+
 function ImportFlow({
   importCandidates,
   applyImport
@@ -323,17 +342,23 @@ function ImportFlow({
   const [selected, setSelected] = React.useState<ReadonlySet<string>>(new Set())
   const [message, setMessage] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [connectors, setConnectors] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
 
-  const load = async (next: McpImportSourceId) => {
+  const load = async (next: McpImportSourceId, withConnectors = false) => {
     setError(null)
     setMessage(null)
+    setLoading(true)
     try {
-      const found = await importCandidates(next)
+      const found = await importCandidates(next, withConnectors)
+      setConnectors(withConnectors)
       setSource(next)
       setCandidates(found)
       setSelected(new Set(found.filter((c) => c.problem === null).map((c) => c.name)))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Could not read the ${next} config`)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -341,7 +366,7 @@ function ImportFlow({
     if (source === null) return
     setError(null)
     try {
-      const imported = await applyImport(source, [...selected])
+      const imported = await applyImport(source, [...selected], connectors)
       setCandidates(null)
       setSource(null)
       setMessage(
@@ -390,12 +415,18 @@ function ImportFlow({
                   }}
                 />
                 <span className="text-text-body">{candidate.name}</span>
+                <span className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
+                  {MCP_ORIGIN_LABELS[candidate.origin]}
+                </span>
                 <span className="min-w-0 truncate font-mono text-[10px] text-dim">
                   {candidate.problem ?? candidate.target}
                 </span>
               </label>
             ))}
             <div className="mt-2 flex items-center gap-2">
+              {source === "claude" && !connectors ? (
+                <ConnectorsButton loading={loading} onClick={() => void load("claude", true)} />
+              ) : null}
               <AsyncButton pendingLabel="Importing…" onClick={apply} disabled={selected.size === 0}>
                 Import {selected.size} server{selected.size === 1 ? "" : "s"}
               </AsyncButton>

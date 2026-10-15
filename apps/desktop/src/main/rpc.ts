@@ -100,7 +100,11 @@ import {
   AgentResourceService,
   McpConfigService,
   probeAll,
+  discoverClaudeConnectors,
   parseClaudeMcp,
+  managedMcpPaths,
+  dedupeCandidates,
+  readClaudeFileServers,
   parseCodexMcp,
   parseOpencodeMcp,
   type McpImportCandidate,
@@ -407,7 +411,7 @@ const mcpImportSources: Record<
 };
 
 /** Parse one source file into full (secret-bearing) candidates. Main-only. */
-const mcpImportParse = (source: "claude" | "codex" | "opencode") =>
+const mcpImportFile = (source: "claude" | "codex" | "opencode") =>
   Effect.tryPromise({
     try: () => readFile(mcpImportSources[source].path(), "utf8"),
     catch: () =>
@@ -420,6 +424,58 @@ const mcpImportParse = (source: "claude" | "codex" | "opencode") =>
       }),
     ),
   );
+
+/**
+ * Servers Claude Code also loads from `~/.claude/settings.json` and enterprise
+ * `managed-mcp.json`. Missing or unreadable files are skipped silently. E2E
+ * homes get a home-rooted managed file so a real machine's never leaks in.
+ */
+const mcpClaudeExtraFiles = (): ReadonlyArray<{ path: string; origin: "user-settings" | "managed" }> => [
+  { path: resolve(mcpImportHome(), ".claude", "settings.json"), origin: "user-settings" },
+  ...(process.env.JINGLER_E2E === "1"
+    ? [resolve(mcpImportHome(), "managed-mcp.json")]
+    : managedMcpPaths(process.platform)
+  ).map((path) => ({ path, origin: "managed" as const })),
+];
+
+const mcpClaudeExtras = Effect.promise(() => readClaudeFileServers(mcpClaudeExtraFiles()));
+
+/**
+ * Last `claude mcp list` discovery. The listing health-checks every server
+ * (30-60s), so Apply reuses what the operator just saw instead of re-running it.
+ */
+let lastClaudeConnectors: ReadonlyArray<McpImportCandidate> = [];
+
+const mcpImportParse = (
+  source: "claude" | "codex" | "opencode",
+  connectors: boolean,
+  reuseConnectors = false,
+) =>
+  Effect.gen(function* () {
+    const fromFile =
+      source === "claude"
+        ? yield* Effect.gen(function* () {
+            const main = yield* Effect.either(mcpImportFile("claude"));
+            const extras = yield* mcpClaudeExtras;
+            // A missing ~/.claude.json is fine once another Claude file or connectors supply servers.
+            if (main._tag === "Left" && extras.length === 0 && !connectors) {
+              return yield* Effect.fail(main.left);
+            }
+            return dedupeCandidates(main._tag === "Right" ? main.right : [], extras);
+          })
+        : yield* mcpImportFile(source);
+    if (source !== "claude" || !connectors) return fromFile;
+    if (!reuseConnectors) {
+      const taken = new Set([
+        ...(yield* mcpList()).servers.map((server) => server.name),
+        ...fromFile.map((candidate) => candidate.name),
+      ]);
+      lastClaudeConnectors = yield* Effect.promise(() =>
+        discoverClaudeConnectors({ cwd: mcpImportHome(), taken }),
+      );
+    }
+    return [...fromFile, ...lastClaudeConnectors];
+  });
 
 const mcpCandidateTarget = (candidate: McpImportCandidate): string =>
   candidate.entry === null
@@ -489,10 +545,11 @@ const mcpStartAuthorization = (name: string) =>
 const mcpApplyImport = (
   source: "claude" | "codex" | "opencode",
   names: ReadonlyArray<string>,
+  connectors: boolean,
 ) =>
   Effect.gen(function* () {
     const requested = new Set(names);
-    const candidates = yield* mcpImportParse(source);
+    const candidates = yield* mcpImportParse(source, connectors, true);
     const existing = new Set(
       (yield* mcpList()).servers.map((server) => server.name),
     );
@@ -5467,18 +5524,20 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
     ),
   "Mcp.setApiKey": ({ name, apiKey }) => mcpSetApiKey(name, apiKey),
   "Mcp.startAuthorization": ({ name }) => mcpStartAuthorization(name),
-  "Mcp.importCandidates": ({ source }) =>
-    mcpImportParse(source).pipe(
+  "Mcp.importCandidates": ({ source, connectors }) =>
+    mcpImportParse(source, connectors === true).pipe(
       Effect.map((candidates) =>
         candidates.map((candidate) => ({
           name: candidate.name,
           source: candidate.source,
+          origin: candidate.origin ?? "user",
           target: mcpCandidateTarget(candidate),
           problem: candidate.problem,
         })),
       ),
     ),
-  "Mcp.applyImport": ({ source, names }) => mcpApplyImport(source, names),
+  "Mcp.applyImport": ({ source, names, connectors }) =>
+    mcpApplyImport(source, names, connectors === true),
   "Mcp.reveal": () => mcpReveal(),
   // Discovery supplies the CLI's resolved binary path — a GUI-launched Electron
   // app has a threadbare PATH, so Codex's own model list is only reachable via

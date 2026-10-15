@@ -87,12 +87,20 @@ describe("managed pi-subagent profiles", () => {
     expect(scout.contract.inheritSkills).toBe(false)
     expect(scout.contract.tools.fanoutAuthorized).toBe(false)
     expect(scout.contract.tools.disableAmbientExtensions).toBe(true)
+    // `extensions` and `subagentOnlyExtensions` both list the child extensions.
+    const childExtensions = [childTools, claudeProvider, PONYTAIL_EXTENSION_PATH]
     expect(scout.contract.tools.configuredExtensions).toEqual([
-      childTools,
-      claudeProvider,
-      PONYTAIL_EXTENSION_PATH
+      ...childExtensions,
+      ...childExtensions
     ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
+    // Foreground children load only the child-only list, so every profile must carry it.
+    for (const agent of [...JINGLER_SUBAGENT_NAMES]) {
+      const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
+      expect(profile).toContain(
+        `subagentOnlyExtensions: ${childTools}, ${claudeProvider}, ${PONYTAIL_EXTENSION_PATH}`
+      )
+    }
     for (const agent of ["worker", "oracle"]) {
       const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
       expect(profile).toMatch(/^defaultContext: fresh$/m)
@@ -102,6 +110,26 @@ describe("managed pi-subagent profiles", () => {
       "subagent",
       "contact_supervisor"
     ])
+  })
+
+  // Integration level: the e2e fixtures replace the child process, so they cannot see which
+  // extensions a foreground `delegate` actually launches with. This reads the launch plan.
+  it("launches a foreground delegate with the child-tools extension and command_execute", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-subagent-profiles-"))
+    roots.push(root)
+    const childTools = join(root, "jingler-child-tools.mjs")
+    await writeFile(childTools, "export default () => undefined\n")
+    await materializePiSubagentProfiles(root, childTools, "claude.mjs", {}, {
+      delegate: ["command_execute", "workspace_read_file"]
+    })
+    process.env.PI_CODING_AGENT_DIR = root
+    const delegate = await resolveAgent(root, "delegate")
+    expect(delegate.ok).toBe(true)
+    if (!delegate.ok) return
+    expect(delegate.contract.tools.extensionArgs).toContain(childTools)
+    expect(delegate.contract.tools.requestedBuiltin).toContain("command_execute")
+    expect(await readFile(join(root, "agents", "delegate.md"), "utf8"))
+      .toContain(`subagentOnlyExtensions: ${childTools},`)
   })
 
   it("drops command_inspect only where command_execute is offered", async () => {

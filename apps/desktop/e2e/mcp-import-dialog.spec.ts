@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import { writeFileSync } from "node:fs"
+import { mkdirSync, writeFileSync } from "node:fs"
 import { expect, test } from "./fixtures.js"
 
 test("presents discovered MCP servers with a readable stacked header", async ({ launchApp }) => {
@@ -27,4 +27,27 @@ test("presents discovered MCP servers with a readable stacked header", async ({ 
   expect(descriptionBox).not.toBeNull()
   expect(descriptionBox!.y).toBeGreaterThan(titleBox!.y + titleBox!.height)
   await expect(dialog.getByRole("button", { name: "Import 2 servers" })).toBeVisible()
+})
+
+test("offers servers only in ~/.claude/settings.json and managed-mcp.json, labelled by origin", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    seed: ({ home }) => {
+      mkdirSync(join(home, ".claude"), { recursive: true })
+      writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({
+        mcpServers: { "clive-memory": { command: "node", args: ["memory.js"] } }
+      }))
+      writeFileSync(join(home, "managed-mcp.json"), JSON.stringify({
+        mcpServers: { corp: { type: "http", url: "https://corp.example/mcp" } }
+      }))
+    }
+  })
+
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByText(/Found 2 servers/)).toBeVisible()
+  await expect(dialog.getByText("clive-memory", { exact: true })).toBeVisible()
+  await expect(dialog.getByText("User settings")).toBeVisible()
+  await expect(dialog.getByText("Managed")).toBeVisible()
+  await dialog.getByRole("button", { name: "Import 2 servers" }).click()
+  await expect(dialog).toBeHidden()
 })
