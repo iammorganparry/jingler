@@ -18,7 +18,8 @@ import {
   INTERACTIVE_TOOL_TIMEOUT_MS,
   ToolRegistry,
   type ToolDefinition,
-  type ToolRegistryOptions
+  type ToolRegistryOptions,
+  type WorkspaceCwd
 } from "../tools/tool-registry.js"
 import {
   registerWorkspaceInspectionTools,
@@ -199,7 +200,7 @@ export const registerWebSearchTool = (
 
 export interface JinglerToolRegistryInput {
   readonly context: AgentRuntimeContext
-  readonly cwd: string
+  readonly cwd: WorkspaceCwd
   readonly workspace?: WorkspaceInspectionPort
   readonly webSearch?: WebSearchServiceShape
   readonly mcp?: JinglerMcpAttachments

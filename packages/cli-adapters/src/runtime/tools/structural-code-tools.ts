@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { codeReadModes, codeReadRoles, codeWriteModes, codeWriteRoles } from "./tool-registry.js"
-import type { ToolRegistry } from "./tool-registry.js"
+import { cwdOf, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 import { applyIdentifierEdits, structuralPreview } from "./typescript-analysis.js"
 
 const PREVIEW_TOKEN = /^[a-f0-9]{64}$/u
@@ -9,7 +9,7 @@ const MatchInput = {
   kind: Schema.Literal("identifier", "call")
 }
 
-export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string): void => {
+export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: WorkspaceCwd): void => {
   registry.register({
     id: "structural_search",
     version: "1",
@@ -22,7 +22,7 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     outputBudget: 32_000,
     cancellable: false,
     idempotency: "safe",
-    execute: ({ symbol, kind }, context) => structuralPreview(cwd, symbol, kind, context.signal)
+    execute: ({ symbol, kind }, context) => structuralPreview(cwdOf(cwd), symbol, kind, context.signal)
   })
   registry.register({
     id: "structural_edit",
@@ -41,9 +41,9 @@ export const registerStructuralCodeTools = (registry: ToolRegistry, cwd: string)
     cancellable: false,
     idempotency: "keyed",
     execute: async ({ symbol, kind, newName, previewToken }, context) => {
-      const preview = await structuralPreview(cwd, symbol, kind, context.signal)
+      const preview = await structuralPreview(cwdOf(cwd), symbol, kind, context.signal)
       if (preview.value.previewToken !== previewToken) throw new Error("Structural preview is stale; run structural_search again")
-      return applyIdentifierEdits(cwd, preview.value.matches, symbol, newName, {
+      return applyIdentifierEdits(cwdOf(cwd), preview.value.matches, symbol, newName, {
         preview: { kind, token: previewToken }
       })
     }
