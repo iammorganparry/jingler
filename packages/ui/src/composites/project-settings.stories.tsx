@@ -90,3 +90,33 @@ function UnifiedProjects() {
   )
 }
 export const Unified: Story = { render: () => <UnifiedProjects /> }
+
+const missingProjects = settingsProjects.map((project) => (project.id === "widget" ? { ...project, availability: "missing" as const } : project))
+/** Project whose folder is gone: neutral "Folder not found" row with Locate… / Remove (same copy as the sidebar). */
+export const MissingFolder: Story = {
+  args: { projects: missingProjects, onLocateProject: async () => {}, onRemoveProject: async () => {} },
+}
+/** Routines list restyled on SettingsCard/SettingsRow, with a saved routine and run history. */
+export const RoutinesList: Story = {
+  render: () => (
+    <div className="mx-auto max-w-4xl bg-panel p-4 sm:p-8">
+      <RoutinesSettingsView
+        projects={settingsProjects}
+        projectId="widget"
+        document={settingsDocument}
+        models={settingsModels}
+        busy={false}
+        loading={false}
+        error={null}
+        onEdit={() => {}}
+        onSave={() => {}}
+        onEnable={() => {}}
+        onDelete={() => {}}
+        onRun={() => {}}
+        onCancel={() => {}}
+        onOpen={() => {}}
+        onRefresh={() => {}}
+      />
+    </div>
+  ),
+}

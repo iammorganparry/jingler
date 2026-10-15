@@ -177,3 +177,15 @@ describe("RoutinesSettingsView", () => {
     expect(input.onRefresh).toHaveBeenCalledOnce()
   })
 })
+
+describe("RoutinesSettingsView rows", () => {
+  it("renders saved routines as settings rows and wires Run now and Delete", () => {
+    const input = props()
+    render(<RoutinesSettingsView {...input} />)
+    expect(screen.getAllByTestId("settings-row").length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole("button", { name: "Delete Inspect Widget" }))
+    expect(input.onDelete).toHaveBeenCalledWith("routine-widget")
+    fireEvent.click(screen.getByRole("button", { name: "Run now Inspect Widget" }))
+    expect(input.onRun).toHaveBeenCalledWith("routine-widget")
+  })
+})
