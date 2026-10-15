@@ -362,6 +362,21 @@ function renderSessionAnalytics() {
           ))
            }
 
+         function getContextMeter() {
+           return {
+             tokens,
+             breakdown: contextBreakdown,
+             triggerAt: contextTriggerAt,
+             phase: contextPhase,
+             preparing: contextPreparing,
+             digestReady: contextDigestReady,
+             stalled: contextStalled,
+             held: contextHeld,
+             heldReason: contextHeldReason,
+             ...(onCompactNow ? { onCompactNow } : {})
+           }
+         }
+
          function renderComposerArea() {
 
   function queuedMessageActions(item: NonNullable<ConversationViewProps["queued"]>[number]) {
@@ -507,18 +522,7 @@ function renderSessionAnalytics() {
                 thinkingEnabled={thinkingEnabled}
                 onSetReasoning={onSetReasoning}
                 allowPlan
-                contextMeter={{
-                  tokens,
-                  breakdown: contextBreakdown,
-                  triggerAt: contextTriggerAt,
-                  phase: contextPhase,
-                  preparing: contextPreparing,
-                  digestReady: contextDigestReady,
-                  stalled: contextStalled,
-                  held: contextHeld,
-                  heldReason: contextHeldReason,
-                  ...(onCompactNow ? { onCompactNow } : {})
-                }}
+                contextMeter={getContextMeter()}
                 onSend={onSend}
                 onStop={onStop}
                 initialValue={initialDraft}
