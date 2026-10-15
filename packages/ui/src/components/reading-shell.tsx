@@ -92,7 +92,8 @@ export interface ReadingShellProps extends ReadingHeaderProps {
  * column stays on the true centre axis.
  */
 export function ReadingShell({ rail, children, ...header }: ReadingShellProps) {
-  const side = Boolean(rail) && atLeast(useWidthTier(), "wide")
+  const wide = atLeast(useWidthTier(), "wide")
+  const side = Boolean(rail) && wide
   return (
     <div
       data-testid="reading-shell"
