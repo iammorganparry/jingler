@@ -1,7 +1,7 @@
 import { Spin } from "../components/spin.js"
 import { SegmentedControl } from "../components/segmented-control.js"
 import * as React from "react"
-import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, User } from "@jingler/core"
+import type { DiffStat, Environment, PrState, SessionPrStatus, Session, SessionActivity, SessionDisplayStatus, Usage, User } from "@jingler/core"
 import { displayStatusOf, UNTITLED_SESSION } from "@jingler/core"
 import {
   ChevronRight,
@@ -130,6 +130,10 @@ export interface SessionSidebarProps {
   user?: User
   /** Open the Usage & limits modal (from the account menu). */
   onOpenUsage?: () => void
+  /** Usage snapshot summarised in the account menu's limits popover. */
+  usage?: Usage | null
+  /** Refresh usage each time the account menu opens. */
+  onLoadUsage?: () => Promise<void> | void
   /** Open the Settings view (from the account menu). */
   onOpenSettings?: () => void
   /** Sign out (from the account menu). */
@@ -396,6 +400,8 @@ function SidebarBody({
   onNewSession,
   user,
   onOpenUsage,
+  usage,
+  onLoadUsage,
   onOpenSettings,
   onSignOut,
   onSignIn,
@@ -952,6 +958,8 @@ return (renderExpandedGroupHeading())
           user={user}
           onOpenSettings={onOpenSettings}
           onOpenUsage={onOpenUsage}
+          usage={usage}
+          onLoadUsage={onLoadUsage}
           onSignOut={onSignOut}
           onSignIn={onSignIn}
           ghConnected={ghConnected}

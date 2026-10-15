@@ -9,6 +9,7 @@ import type {
   SessionPrStatus,
   Session,
   SessionActivity,
+  Usage,
   User
 } from "@jingler/core"
 import type { PendingEnvironmentSession } from "../app/environment-session-startup-machine.js"
@@ -163,6 +164,9 @@ export interface SessionConversationProps {
   user?: User
   /** Open the Usage & limits modal (from the sidebar account menu). */
   onOpenUsage?: () => void
+  /** Usage snapshot and refresh for the account menu's limits summary. */
+  usage?: Usage | null
+  onLoadUsage?: () => Promise<void> | void
   /** Open the Settings view (from the sidebar account menu). */
   onOpenSettings?: () => void
   /** Open Settings directly on provider connections from runtime recovery. */
@@ -453,6 +457,8 @@ export function SessionConversation(props: SessionConversationProps) {
         onNewSession={openNewSession}
         user={props.user}
         onOpenUsage={props.onOpenUsage}
+        usage={props.usage}
+        onLoadUsage={props.onLoadUsage}
         onOpenSettings={props.onOpenSettings}
         onSignOut={props.onSignOut}
         onSignIn={props.onSignIn}

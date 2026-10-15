@@ -28,6 +28,20 @@ export const Default: Story = {
     ghConnected: true,
     onOpenSettings: noop,
     onOpenUsage: noop,
+    onLoadUsage: noop,
+    usage: {
+      fetchedAt: null,
+      providers: [
+        {
+          name: "Anthropic",
+          plan: "Max",
+          available: true,
+          windows: [
+            { label: "Current session", resetsAt: new Date(Date.now() + 3_600_000).toISOString(), utilization: 100, status: "limited" }
+          ]
+        }
+      ]
+    },
     onSignOut: noop
   },
   render: (args) => (
