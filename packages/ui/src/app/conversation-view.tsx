@@ -47,6 +47,7 @@ import { PlanApprovalCard } from "../composites/plan-card.js"
 import { sendPlanStageAction } from "../composites/plan-progress-dock.js"
 import { createMessageRailPreview, MessageScroller } from "../composites/beui/messages.js"
 import type { PreviewRailItem } from "../components/beui/overlays.js"
+import { summarizeTurn, turnRailMeta } from "./conversation-turns.js"
 import { ArchivedBanner } from "../composites/archived-banner.js"
 import { RunStats } from "../composites/run-stats.js"
 
@@ -132,6 +133,65 @@ const activeRailIdFor = (
   const userIndex = userMessageIndexes.findLast(i => i <= index) ?? userMessageIndexes[0]
   return userIndex === undefined ? undefined : itemKeys[userIndex]
 }
+
+/** The rail tick for one user turn: its preview text plus attention/checkpoint colour and file stats. */
+const buildRailItem = (
+  messages: ReadonlyArray<Message>,
+  messageIndex: number,
+  nextUserIndex: number,
+  userIndex: number,
+  turnCount: number,
+  id: string,
+  checkpointed: boolean
+): PreviewRailItem => {
+  const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
+  const summary = summarizeTurn(messages.slice(messageIndex + 1, nextUserIndex))
+  return {
+    id,
+    ...createMessageRailPreview(railText(messages[messageIndex]!), responseTurn ? railText(responseTurn) : ""),
+    ariaLabel: `Go to user message ${userIndex + 1} of ${turnCount}`,
+    kind: summary.attention ?? (checkpointed ? "checkpoint" : undefined),
+    meta: turnRailMeta(userIndex + 1, summary)
+  }
+}
+
+const sameRailItem = (a: PreviewRailItem, b: PreviewRailItem): boolean =>
+  a.id === b.id && a.label === b.label && a.description === b.description && a.ariaLabel === b.ariaLabel && a.kind === b.kind && a.meta === b.meta
+
+/** Hover-card controls for a rail tick: Jump, Filter Changes, and Revert to here where a checkpoint exists. */
+const useRailActions = ({ items, checkpointCount, hasMoreHistory, onSelect, onRevertToTurn, onFilterChanges }: {
+  items: ReadonlyArray<PreviewRailItem>
+  checkpointCount: number
+  hasMoreHistory: boolean
+  onSelect: (item: PreviewRailItem) => void
+  onRevertToTurn?: (turn: number) => void
+  onFilterChanges?: () => void
+}) => useCallback((item: PreviewRailItem) => {
+  const turn = items.findIndex(candidate => candidate.id === item.id) + 1
+  return (
+    <>
+      <Button size="sm" variant="secondary" onClick={() => onSelect(item)}>Jump</Button>
+      {onFilterChanges && <Button size="sm" variant="secondary" onClick={onFilterChanges}>Filter Changes</Button>}
+      {onRevertToTurn && !hasMoreHistory && turn <= checkpointCount && (
+        <Button size="sm" variant="danger" onClick={() => onRevertToTurn(turn)}>Revert to here</Button>
+      )}
+    </>
+  )
+}, [checkpointCount, hasMoreHistory, items, onFilterChanges, onRevertToTurn, onSelect])
+
+/** ⌥↑ / ⌥↓ step between turns. Scoped like Shift+Tab: only fires while focus is inside this pane. */
+const useTurnHotkeys = (items: ReadonlyArray<PreviewRailItem>, activeId: string | undefined, onSelect: (item: PreviewRailItem) => void) =>
+  useHotkeys<HTMLDivElement>(
+    ["alt+up", "alt+down"],
+    event => {
+      const step = event.key === "ArrowUp" ? -1 : 1
+      const current = items.findIndex(item => item.id === activeId)
+      const target = items[Math.min(Math.max(current + step, 0), items.length - 1)]
+      if (target) onSelect(target)
+    },
+    { preventDefault: true },
+    [activeId, items, onSelect]
+  )
 
 /** Shift+Tab cycles Jingler's provider-neutral permission modes. */
 const MODE_CYCLE: ReadonlyArray<PermissionMode> = ["ask", "accept-edits", "auto"]
@@ -258,6 +318,15 @@ export interface ConversationViewProps {
    * run the same prompt twice.
    */
   steeringId?: string | null
+  /**
+   * How many of the oldest turns have a restorable workspace checkpoint (their rail ticks turn blue
+   * and the hover card offers "Revert to here"). Turn N maps to the N-th oldest checkpoint.
+   */
+  checkpointCount?: number
+  /** Revert the workspace to the checkpoint taken at the start of this 1-based turn. */
+  onRevertToTurn?: (turn: number) => void
+  /** Show the session's Changes — the hover card's "Filter Changes". */
+  onFilterChanges?: () => void
   onDecideGate?: (gateId: string, decision: GateDecision) => void
   onSetMode?: (mode: PermissionMode) => void
   onSwitchToAuto?: () => void
@@ -327,8 +396,9 @@ const autoSwitchLink = (mode: ConversationViewProps["mode"], onSwitchToAuto: Con
  * it streams.
  */
 export function ConversationView(props:  ConversationViewProps) {
-  const { messages, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
+  const { messages, checkpointCount, hasMoreHistory, loadingHistory, onLoadEarlier, mode, skills, files, paused, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, onSend, onRetryPrompt, onStop, busy, tokens, contextBreakdown, contextTriggerAt, contextPhase, contextPreparing, contextDigestReady, contextStalled, contextHeld, contextHeldReason, onCompactNow, runStartedAt, queued, onUnqueue, onSendNow, onHandoffQueued, onHandoffAllQueued, onEditQueued, handoffHint, steeringId, onDecideGate, onSetMode, onSwitchToAuto, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, reasoningEffort, thinkingEnabled, onSetReasoning, question, onAnswerQuestion, onOpenPlanReview, onForkOntoBranch, onAdoptBranch, planDocument, draft, onDraftChange, draftAttachments, onDraftAttachmentsChange, draftCodeReferences, onDraftCodeReferenceRemove, onDraftCodeReferencesClear, autoFocusComposer, focusKey, composerDisabledReason, followAgent, onToggleFollowAgent, archived, initialDraft } = defaultProps(props, {
     hasMoreHistory: false,
+    checkpointCount: 0,
     loadingHistory: false,
     skills: [],
     files: [],
@@ -625,28 +695,25 @@ function renderSessionAnalytics() {
     const previous = previousRailItems.current
     let reusedAll = previous.length === userMessageIndexes.length
     const next = userMessageIndexes.map((messageIndex, userIndex) => {
-      const message = messages[messageIndex]!
-      const responseTurn = messages.slice(messageIndex + 1).find(candidate => candidate.role === "assistant")
-      const item = {
-        id: itemKeys[messageIndex]!,
-        ...createMessageRailPreview(railText(message), responseTurn ? railText(responseTurn) : ""),
-        ariaLabel: `Go to user message ${userIndex + 1} of ${userMessageIndexes.length}`
-      }
+      const item = buildRailItem(
+        messages,
+        messageIndex,
+        userMessageIndexes[userIndex + 1] ?? messages.length,
+        userIndex,
+        userMessageIndexes.length,
+        itemKeys[messageIndex]!,
+        // Turn numbers only line up with checkpoints once the whole history is loaded.
+        !hasMoreHistory && userIndex < checkpointCount
+      )
       const old = previous[userIndex]
-      if (
-        old !== undefined &&
-        old.id === item.id &&
-        old.label === item.label &&
-        old.description === item.description &&
-        old.ariaLabel === item.ariaLabel
-      ) return old
+      if (old !== undefined && sameRailItem(old, item)) return old
       reusedAll = false
       return item
     })
     const result = reusedAll ? previous : next
     previousRailItems.current = result
     return result
-  }, [itemKeys, messages, userMessageIndexes])
+  }, [checkpointCount, hasMoreHistory, itemKeys, messages, userMessageIndexes])
 
   // Virtualize the transcript so large sessions stay fast. Heights are dynamic
   // (markdown, tool cards, diffs) so we measure each turn as it renders/grows.
@@ -693,6 +760,8 @@ function renderSessionAnalytics() {
     virtualizer.scrollToIndex(index, { align: "center" })
   }, [messages.length, virtualizer])
   useJumpToTurn(focusKey, messages, jumpToIndex)
+  const renderRailActions = useRailActions({ items: messageRailItems, checkpointCount, hasMoreHistory, onSelect: handleRailSelect, onRevertToTurn: props.onRevertToTurn, onFilterChanges: props.onFilterChanges })
+  const turnHotkeyRef = useTurnHotkeys(messageRailItems, activeRailId, handleRailSelect)
 
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll
   // metrics at click, then after the older page lands add back exactly the height
@@ -720,7 +789,7 @@ function renderSessionAnalytics() {
 
   return (
     <div ref={modeHotkeyRef} className="flex min-h-0 min-w-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div ref={turnHotkeyRef} className="flex min-h-0 min-w-0 flex-1 flex-col">
         {archived && (
           <ArchivedBanner
             reason={archived.reason}
@@ -735,6 +804,7 @@ function renderSessionAnalytics() {
           navigationItems={messageRailItems}
           navigationActiveId={activeRailId}
           onNavigationSelect={handleRailSelect}
+          renderNavigationActions={renderRailActions}
           followOutput={following && messages.length > 0}
           onFollowChange={setFollowing}
           busy={busy}
