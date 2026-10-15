@@ -28,7 +28,7 @@ test("imports claude.ai connectors and plugin MCPs, signs in, and exposes them t
       configured: true,
       withRepo: true,
       sessions,
-      piFixture: { scenarioId: "claudeai-mcp", authRoute: "claude-setup-token" },
+      piFixture: { scenarioId: "named-mcp", authRoute: "claude-setup-token" },
       e2eEnv: {
         JINGLER_CLAUDE_BINARY: claudeBinary,
         FAKE_CLAUDE_MCP_URL: mcp.url,

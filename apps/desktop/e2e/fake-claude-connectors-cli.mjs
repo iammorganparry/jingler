@@ -23,18 +23,26 @@ if (args[0] === "mcp" && args[1] === "list") {
 }
 
 writeFileSync(process.env.FAKE_CLAUDE_ARGS_FILE, JSON.stringify(args))
-for await (const _ of process.stdin) { /* drain the stream-json prompt */ }
+let input = ""
+for await (const chunk of process.stdin) input += chunk
+const transcript = JSON.parse(input).message.content.filter(({ type }) => type === "text").map(({ text }) => text).join("\n")
+const say = (text) => {
+  console.log(JSON.stringify({ type: "stream_event", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } }))
+  console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done" }))
+  process.exit(0)
+}
+// Jingler interrupts Claude after a relay tool call and re-runs it with the result in the transcript.
+if (transcript.includes('name="mcp_search"')) {
+  say(transcript.includes("claude-ai-linear") && transcript.includes("lookup")
+    ? "Claude saw the imported Linear connector."
+    : `Claude missed the connector: ${transcript}`)
+}
 const { url, headers } = JSON.parse(readFileSync(args[args.indexOf("--mcp-config") + 1], "utf8")).mcpServers.jingler
 headers.Authorization = headers.Authorization.replace(/\$\{([^}]+)\}/g, (_, key) => process.env[key])
-const response = await fetch(url, {
+process.on("SIGINT", () => process.exit(0))
+await fetch(url, {
   method: "POST",
   headers: { ...headers, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
   body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "mcp_search", arguments: { query: "", server: "claude-ai-linear" } } })
 })
-const text = (await response.json()).result?.content?.[0]?.text ?? ""
-const seen = text.includes("claude-ai-linear") && text.includes("lookup")
-console.log(JSON.stringify({
-  type: "stream_event",
-  event: { type: "content_block_delta", delta: { type: "text_delta", text: seen ? "Claude saw the imported Linear connector." : `Claude missed the connector: ${text}` } }
-}))
-console.log(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done" }))
+await new Promise(() => {})
