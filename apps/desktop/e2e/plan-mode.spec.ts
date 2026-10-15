@@ -195,8 +195,16 @@ test("selection comments reach the agent and the revision diff shows what change
   await review(launched).getByRole("button", { name: "Add comment" }).click()
   await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Save comment" }).click()
-  await expect(review(launched).getByRole("complementary", { name: "Plan comments" }))
-    .toContainText("Keep the existing token format.")
+  // The thread is a floating avatar: hover shows the card, Esc closes it, click pins it.
+  const avatar = review(launched).getByRole("button", { name: "Comment by You" })
+  await avatar.hover()
+  const thread = review(launched).getByRole("complementary", { name: "Plan comments" })
+  await expect(thread).toContainText("Keep the existing token format.")
+  await expect(thread.locator("[data-comment-thread]")).toHaveCSS("width", "320px")
+  await launched.window.keyboard.press("Escape")
+  await expect(thread).not.toContainText("Keep the existing token format.")
+  await avatar.click()
+  await expect(thread).toContainText("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Request changes" }).click()
 
   // The fixture agent echoes every quoted anchor it received into the rewrite.
@@ -213,7 +221,7 @@ test("selection comments reach the agent and the revision diff shows what change
   await expect(changes).toHaveCount(0)
 
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("button", { name: /\[\[plan\]\] replace auth$/ }).first().click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
