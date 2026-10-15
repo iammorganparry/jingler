@@ -15,11 +15,15 @@ const setup = () => {
     workspaceMode: "worktree", branch: "feat/x", prNumber: null
   } as CheckoutSessionState
   const created: string[] = []
+  const registered: string[] = []
+  let approve = false
   const events: StreamEvent[] = []
   const host: CheckoutHost = {
     session: () => session,
     save: async (next) => { session = next },
     projects: async () => projects,
+    approveRepo: async () => approve,
+    registerProject: async (repoPath) => { registered.push(repoPath); return { id: "p3", name: "elsewhere", path: repoPath } },
     createWorktree: async ({ repoPath, baseBranch }) => {
       created.push(repoPath)
       return { path: `/wt/new-${created.length}`, branch: baseBranch ?? "main", baseBranch: baseBranch ?? "main", repoPath }
@@ -29,7 +33,7 @@ const setup = () => {
   registerCheckoutTool(registry, host, (e) => Effect.sync(() => { events.push(e) }))
   const run = (args: unknown) =>
     Effect.runPromise(registry.execute({ id: "switch_checkout", arguments: args, role: "conversation", mode: "auto" }))
-  return { host, created, events, run }
+  return { host, created, events, run, registered, approveWith: (v: boolean) => { approve = v } }
 }
 
 describe("switch_checkout", () => {
@@ -61,13 +65,21 @@ describe("switch_checkout", () => {
     expect(activeCheckoutCwd(host)).toBe("/wt/new-1")
   })
 
-  it("asks for approval on an unregistered path and attaches nothing", async () => {
-    const { host, created, events, run } = setup()
+  it("denied approval on an unregistered path leaves the session unchanged", async () => {
+    const { host, created, registered, run } = setup()
     const result = await run({ repoPath: "/elsewhere/repo" })
-    expect(result.status).toBe("success")
+    expect(result).toMatchObject({ status: "success", value: { status: "denied" } })
     expect(created).toEqual([])
+    expect(registered).toEqual([])
     expect(host.session().checkouts).toBeUndefined()
-    expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ _tag: "GateRequested", gate: { status: "pending" } })
+  })
+
+  it("approved unregistered path is registered as a project and attached", async () => {
+    const { host, created, registered, run, approveWith } = setup()
+    approveWith(true)
+    await run({ repoPath: "/elsewhere/repo" })
+    expect(registered).toEqual(["/elsewhere/repo"])
+    expect(created).toEqual(["/elsewhere/repo"])
+    expect(host.session().repo).toBe("elsewhere")
   })
 })

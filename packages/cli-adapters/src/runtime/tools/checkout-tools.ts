@@ -43,7 +43,7 @@ export const activeCheckoutCwd = (host: CheckoutHost): string => {
 }
 
 /** The cwd every workspace tool resolves per call: the active checkout when the session has a host, else the fixed run cwd. */
-export const toolCwd = (fallback: string, host: CheckoutHost | undefined): WorkspaceCwd =>
+export const toolCwd = (fallback: WorkspaceCwd, host: CheckoutHost | undefined): WorkspaceCwd =>
   host === undefined ? fallback : () => activeCheckoutCwd(host)
 
 const sameRepoPath = (a: string | undefined, b: string): boolean => a !== undefined && resolve(a) === resolve(b)
