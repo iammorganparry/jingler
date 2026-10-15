@@ -22,11 +22,13 @@ const props = (over: Partial<PreviewDockProps> = {}): PreviewDockProps => ({
   ...over
 })
 
+const pressed = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed")
+
 describe("PreviewDock toolbar", () => {
   it("disables Back and Forward when there is no history", () => {
     render(<PreviewDock {...props()} />)
-    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Back" })).toHaveProperty("disabled", true)
+    expect(screen.getByRole("button", { name: "Forward" })).toHaveProperty("disabled", true)
   })
 
   it("enables history buttons and routes every toolbar action", () => {
@@ -43,16 +45,16 @@ describe("PreviewDock toolbar", () => {
 
   it("marks the chosen device width pressed", () => {
     render(<PreviewDock {...props()} />)
-    expect(screen.getByRole("button", { name: "Desktop" })).toHaveAttribute("aria-pressed", "true")
+    expect(pressed("Desktop")).toBe("true")
     fireEvent.click(screen.getByRole("button", { name: "Phone" }))
-    expect(screen.getByRole("button", { name: "Phone" })).toHaveAttribute("aria-pressed", "true")
-    expect(screen.getByRole("button", { name: "Desktop" })).toHaveAttribute("aria-pressed", "false")
+    expect(pressed("Phone")).toBe("true")
+    expect(pressed("Desktop")).toBe("false")
   })
 
   it("shows a Retry that reloads on a load error and flags loading", () => {
     const p = props({ error: "ERR_CONNECTION_REFUSED", loading: true })
     render(<PreviewDock {...p} />)
-    expect(screen.getByRole("alert")).toHaveTextContent("ERR_CONNECTION_REFUSED")
+    expect(screen.getByRole("alert").textContent).toContain("ERR_CONNECTION_REFUSED")
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(p.onReload).toHaveBeenCalledOnce()
     expect(document.querySelector("[aria-busy=true]")).not.toBeNull()
