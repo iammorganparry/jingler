@@ -50,6 +50,8 @@ Primitives in `components/`. Prefer these over raw elements.
 | HtmlPreview | `components/html-preview.tsx` | Opt-in preview for an html fenced block in agent output. | — | yes | — |
 | IconButtonGroup | `components/icon-button-group.tsx` | One bordered unit of icon buttons with tooltips, pressed state and arrow-key focus (browser toolbar). | items, label, className | yes | #366 (2.1) |
 | Input | `components/input.tsx` | Plain text field (BeUI Input geometry). | — | no | — |
+| CommentComposer | `components/comment-composer.tsx` (+ `comment-composer-machine.ts`) | Issue comment box under a thread: Textarea, `Comment` primary, `Close with comment` secondary; failed post keeps the draft and shows an inline error. | post, canClose | yes | #446 (6.24) |
+| Textarea | `components/textarea.tsx` | Multi-line field sharing Input's border, focus ring and disabled states. | — | yes | #446 (6.24) |
 | Kbd, KbdChip | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). KbdChip formats `mod+k` as ⌘K on macOS, Ctrl+K elsewhere. | shortcut, mac, onFill | yes | #361 (1.3), #374 (2.9) |
 | Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). | — | yes | #361 (1.3), #374 (2.9) |
 | KpiTile, StackedMiniBar | `components/kpi-tile.tsx` | Usage metric tile with one-line partial marker and a labelled "No data" placeholder for a missing value; inline-SVG stacked bar from a number array (empty/zero renders an empty track). | label, value, delta, partial, values | yes | #379 (2.14) |
