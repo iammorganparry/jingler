@@ -154,7 +154,7 @@ export function AgentsResourceList(props: AgentsResourceListProps) {
         value={query}
         onChange={props.onQueryChange}
         placeholder="Search agents & skills…"
-        count={`${visible.length} results`}
+        count={`${visible.length} ${visible.length === 1 ? "result" : "results"}`}
       />
       <FilterChips options={options.kinds} value={kind} onChange={props.onKindChange} ariaLabel="Filter by kind" />
       <FilterChips options={options.sources} value={source} onChange={props.onSourceChange} ariaLabel="Filter by source" />
