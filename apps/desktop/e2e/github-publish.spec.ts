@@ -306,3 +306,51 @@ test("a draft PR shows the Draft pill and Mark ready for review removes it", asy
   await expect(pill).toHaveCount(0, { timeout: 15_000 })
   await expect(window.getByRole("button", { name: "Mark ready for review" })).toHaveCount(0)
 })
+
+test("a behind PR lists its blocker with Update branch and disables Merge with the reason", async ({ launchApp }) => {
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{
+      id: "s_behind",
+      repo: "widget",
+      branch: "chore/behind",
+      title: "Behind work",
+      status: "idle",
+      diff: { added: 1, removed: 0 },
+      prNumber: 484,
+      githubInstallationId: "101",
+      githubRepositoryId: "301",
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T00:00:00.000Z",
+      worktreePath: repoPath,
+      mode: "accept-edits"
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 484,
+        title: "Behind work",
+        headRefName: "chore/behind",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        mergeStateStatus: "BEHIND"
+      }]
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-checks").click()
+  await showPullRequestDetails(window)
+
+  const blocker = window.getByText("Branch is out of date with the base")
+  await expect(blocker).toBeVisible({ timeout: 20_000 })
+  await expect(window.getByRole("button", { name: "Merge pull request" })).toBeDisabled()
+  await expect(window.getByTestId("merge-split-button")).toHaveAttribute(
+    "title",
+    "Branch is out of date with the base"
+  )
+  await window.getByRole("button", { name: "Update branch" }).click()
+  await expect.poll(() => githubServer.operations.join("\n"), { timeout: 15_000 }).toContain("update-branch")
+})

@@ -475,3 +475,17 @@ export const Settings: Story = {
     </div>
   )
 }
+
+/** Merge box with a behind-the-base blocker: row with `Update branch`, disabled split button. */
+export const PullRequestMergeBlocked: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView
+        pr={{ ...pr, mergeStateStatus: "BEHIND", mergeBlockers: ["Branch is out of date with the base"] }}
+        connected
+        onUpdateBranch={() => {}}
+        onMerge={() => {}}
+      />
+    </div>
+  )
+}
