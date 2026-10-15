@@ -45,17 +45,23 @@ export interface AgentEdit {
 /** Every change the agent's tools made to `path`, oldest first. */
 export const agentEditsOf = (messages: readonly Message[], path: string): readonly AgentEdit[] => {
   let number = 0
+  // A turn can report the same change twice (e.g. a write and its follow-up diff); count it once.
+  const seen = new Set<string>()
   return messages.flatMap((message) => {
     if (message.role !== "assistant") return []
     number += 1
     return message.parts.flatMap((part) =>
       part._tag !== "Tool"
         ? []
-        : (part.tool.fileChanges?.changes ?? []).flatMap((change, index) =>
-            change.path === path
-              ? [{ id: `${part.tool.id}:${index}`, turnId: message.id, label: `Agent edit · Turn ${number}`, preview: change.preview }]
-              : []
-          )
+        : (part.tool.fileChanges?.changes ?? []).flatMap((change, index) => {
+            if (change.path !== path) return []
+            if (change.preview != null) {
+              const key = `${message.id}\0${change.preview}`
+              if (seen.has(key)) return []
+              seen.add(key)
+            }
+            return [{ id: `${part.tool.id}:${index}`, turnId: message.id, label: `Agent edit · Turn ${number}`, preview: change.preview }]
+          })
     )
   })
 }

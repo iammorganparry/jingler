@@ -621,7 +621,7 @@ test("decorates agent edits with a turn label and counts them in the file breadc
   await expect(label).toBeVisible()
   await expect(followed.getByRole("button", { name: /Keep|Revert/ })).toHaveCount(0)
   await expect(
-    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" }).getByText("1 agent edit", { exact: true })
+    window.getByRole("navigation", { name: "Breadcrumb" }).filter({ hasText: "src/config.ts" }).getByText(/\b1 agent edit$/)
   ).toBeVisible()
 
   await label.click()

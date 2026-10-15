@@ -39,4 +39,17 @@ describe("review turns", () => {
     ])
     expect(agentEditsOf(messages, "missing.ts")).toEqual([])
   })
+
+  it("counts a turn's repeated report of the same change once", () => {
+    const change = { path: "src/b.ts", preview: "+x" }
+    const twice = [{
+      id: "a1",
+      role: "assistant",
+      parts: [
+        { _tag: "Tool", tool: { id: "t1", fileChanges: { changes: [change] } } },
+        { _tag: "Tool", tool: { id: "t2", fileChanges: { changes: [change] } } }
+      ]
+    }] as never
+    expect(agentEditsOf(twice, "src/b.ts").map((edit) => edit.id)).toEqual(["t1:0"])
+  })
 })
