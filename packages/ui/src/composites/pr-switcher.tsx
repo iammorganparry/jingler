@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { Button } from "../components/button.js"
 import { cn } from "../lib/cn.js"
 import { PR_STATE_LABEL, type PrStackNav } from "./pr-stack-rail.js"
-import { menuItemClass } from "./pr-view-header.js"
+import { menuItemClass } from "../components/reading-shell.js"
 
 /** ⌥[ steps down the stack, ⌥] steps up. Matched on `code`: macOS rewrites `key` under Option. */
 export const matchStackStepChord = (

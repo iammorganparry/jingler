@@ -284,7 +284,7 @@ export function PullRequestView({
   function renderPullRequestBody(pr: NonNullable<PullRequestViewProps["pr"]>) {
     return (<div className="flex min-w-0 flex-1 flex-col">
         {/*
-          Same reading column as the Conversation view — 760px, centred, on a
+          Same reading column as the shared ReadingShell — 720px, centred, on a
           30px gutter, with the scrollbar gutter reserved on BOTH edges so the
           column sits on the window's true centre axis rather than shifting when
           a scrollbar appears. Switching tabs shouldn't move the text you were
@@ -292,7 +292,7 @@ export function PullRequestView({
           to line lengths nothing else in the app does.
         */}
         <div className="flex flex-1 flex-col overflow-auto px-[30px] py-[26px] [scrollbar-gutter:stable_both-edges]">
-          <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col gap-[18px]">
+          <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-[18px]">
             {publish?.step === "failed" && (
               <div
                 aria-live="polite"
