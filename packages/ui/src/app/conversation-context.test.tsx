@@ -19,8 +19,7 @@ describe("ConversationView — live context", () => {
       />
     )
 
-    expect(screen.getByText("120k")).toBeDefined()
-    expect(screen.getByText("context")).toBeDefined()
+    expect(screen.getByRole("button", { name: "Context usage 62%" })).toBeDefined()
     expect(screen.getByRole("button", { name: "Stop" })).toBeDefined()
   })
 })

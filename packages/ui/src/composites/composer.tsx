@@ -46,6 +46,7 @@ import { downscaleImage } from "../lib/image-downscale.js";
 import { atLeast, useWidthTier } from "../hooks/width-tier.js";
 import { AttachmentThumb } from "../components/attachment-thumb.js";
 import { Button } from "../components/button.js";
+import { ContextMeter, type ContextMeterProps } from "./context-meter.js";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../components/beui/select.js";
 import { CodeChip } from "../components/code-chip.js";
 import { MorphPopover, MorphPopoverContent, MorphPopoverTrigger } from "../components/beui/popover-morph.js";
@@ -295,6 +296,8 @@ type ComposerProps =  {
   onPlanStageAction?: PlanStageActionHandler;
   /** New-session-only controls rendered instead of static repository metadata. */
   contextControls?: ReactNode;
+  /** Context-usage ring drawn around the send/stop button; omit for no ring. */
+  contextMeter?: Omit<ContextMeterProps, "children" | "className">;
   /** Canonical certified model surface. */
   providerCatalog?: ProviderCatalog | null;
   agentEndpointCatalog?: AgentEndpointCatalog | null;
@@ -713,7 +716,7 @@ export function Composer(props: ComposerProps) {
             </MorphPopover>)
   }
 
-  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, className } = defaultProps(props, {
+  const { submitting, preserveDraftOnSend, skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth, onAuthorizeMcp, onSend, onStop, branch, branchPending, repo, diff, environments, environmentId, environmentPending, onSetEnvironment, providerCatalog, agentEndpointCatalog, endpointId, connectionId, providerId, modelId, onSetModel, mode, onSetMode, followAgent, onToggleFollowAgent, reasoningEffort, thinkingEnabled, onSetReasoning, allowPlan, paused, disabledReason, busy, placeholder, autoFocus, focusKey, initialValue, value: controlledValue, onValueChange, attachments: controlledAttachments, onAttachmentsChange, codeReferences, onCodeReferenceRemove, onCodeReferencesClear, planDocument, onOpenPlanStage, onPlanStageAction, contextControls, contextMeter, className } = defaultProps(props, {
     skills: [],
     files: [],
     mcpServers: [],
@@ -830,6 +833,10 @@ export function Composer(props: ComposerProps) {
             </Button>)
   }
 
+  function withContextRing(button: ReactNode) {
+    return contextMeter ? <ContextMeter {...contextMeter}>{button}</ContextMeter> : button
+  }
+
   function getDisabledReason() {
            if (disabledReason !== undefined) return (<Pill tone="yellow" dot>
                 {roomy ? disabledReason : "unavailable"}
@@ -837,8 +844,8 @@ export function Composer(props: ComposerProps) {
            if (paused) return (<Pill tone="yellow" dot>
               {roomy ? "paused for approval" : "paused"}
             </Pill>)
-           if (submitting) return renderSendButton()
-           if (busy && onStop) return (<Button
+           if (submitting) return withContextRing(renderSendButton())
+           if (busy && onStop) return withContextRing(<Button
               variant="primary"
               size="icon"
               className="size-7 rounded-full"
@@ -848,7 +855,7 @@ export function Composer(props: ComposerProps) {
             >
               <Square size={12} fill="currentColor" />
             </Button>)
-           return renderSendButton()
+           return withContextRing(renderSendButton())
          }
 
   const modelCatalog = agentEndpointCatalog ?? providerCatalog

@@ -24,6 +24,12 @@ const { id: connectionId } = catalog.connections[0]!.connection
 const { id: modelId } = catalog.connections[0]!.models[0]!
 
 describe("Composer send row", () => {
+  it("rings the send button with the context meter", () => {
+    render(<Composer contextMeter={{ tokens: 50_000, triggerAt: 100_000 }} />)
+    expect(screen.getByRole("button", { name: "Context usage 50%" })).toBeDefined()
+    expect(screen.getByRole("button", { name: /Send/ })).toBeDefined()
+  })
+
   it("replaces the pending branch label as soon as the session branch settles", () => {
     const { rerender } = render(
       <Composer branch="main" branchPending repo="widget" />
