@@ -2,6 +2,7 @@ import { createActor } from "xstate"
 import { describe, expect, it } from "vitest"
 import type { Subagent, SubagentFleetNode } from "@jingler/core"
 import {
+  newlyFinishedNodes,
   projectLegacySubagents,
   settleStoppedFleet,
   subagentFleetMachine
@@ -235,4 +236,25 @@ describe("subagentFleetMachine", () => {
   })
 
 
+
+  describe("newlyFinishedNodes", () => {
+    const done = { ...node, status: "completed" as const }
+    const failed = { ...node, status: "failed" as const }
+
+    it("reports an active child that completed or failed", () => {
+      expect(newlyFinishedNodes([node], [done], "main")).toEqual([done])
+      expect(newlyFinishedNodes([node], [failed], "main")).toEqual([failed])
+    })
+
+    it("skips the child the user has open", () => {
+      expect(newlyFinishedNodes([node], [done], node.id)).toEqual([])
+    })
+
+    it("skips history seen already finished, stops, and still-active children", () => {
+      expect(newlyFinishedNodes([], [done], "main")).toEqual([])
+      expect(newlyFinishedNodes([done], [done], "main")).toEqual([])
+      expect(newlyFinishedNodes([node], [{ ...node, status: "stopped" }], "main")).toEqual([])
+      expect(newlyFinishedNodes([node], [node], "main")).toEqual([])
+    })
+  })
 })

@@ -17,7 +17,7 @@ const seededSessions = ({ repoPath }: { repoPath: string }): ReadonlyArray<SeedS
 }]
 
 const openPreviousChats = async (window: Parameters<typeof appShell>[0]) => {
-  // #460: finished children live in the lane-header chip's popover ("Finished · N").
+  // #460: finished children live in the lane-header chip's popover ("Done (N)").
   await window.getByTestId("subagent-chip").first().click()
 }
 

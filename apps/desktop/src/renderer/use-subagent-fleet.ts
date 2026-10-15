@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useActorRef, useSelector } from "@xstate/react"
 import type {
   Subagent,
@@ -13,6 +13,7 @@ import { completedSubagentNodes } from "./subagent-tab-store.js"
 import {
   MAIN_FLEET_AGENT,
   legacySubagentNodeId,
+  newlyFinishedNodes,
   parentRuntimeSessionIdFromFleetEvents,
   projectLegacySubagents,
   subagentFleetMachine
@@ -42,6 +43,8 @@ export function useSubagentFleet(input: {
   readonly continuation: string | null
   readonly events: ReadonlyArray<SubagentFleetEvent>
   readonly legacyAgents?: ReadonlyArray<Subagent>
+  /** Fired once when an agent other than the open one completes or fails. */
+  readonly onChildFinished?: (node: SubagentFleetNode) => void
 }): SubagentFleetController {
   const parentRuntimeSessionId = parentRuntimeSessionIdFromFleetEvents(
     input.events,
@@ -63,6 +66,14 @@ export function useSubagentFleet(input: {
     actor.send({ type: "SYNC", events })
   }, [actor, events])
   const context = useSelector(actor, (snapshot) => snapshot.context)
+  const previousNodes = useRef<ReadonlyArray<SubagentFleetNode>>(context.tree.nodes)
+  const onChildFinished = useRef(input.onChildFinished)
+  onChildFinished.current = input.onChildFinished
+  useEffect(() => {
+    const finished = newlyFinishedNodes(previousNodes.current, context.tree.nodes, context.selectedId)
+    previousNodes.current = context.tree.nodes
+    for (const node of finished) onChildFinished.current?.(node)
+  }, [context.tree.nodes, context.selectedId])
   const completedNodes = useMemo(
     () => completedSubagentNodes(events),
     [events]

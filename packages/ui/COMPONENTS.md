@@ -105,7 +105,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | Component | File | Purpose | Key props | Story | Redesign |
 |---|---|---|---|---|---|
 | AddProjectDialog | `composites/add-project-dialog.tsx` | Add a project (repo) dialog. | open | yes | — |
-| AgentCard | `composites/agent-card.tsx` | Running-agent card: file target, tokens, status line. | — | yes | — |
+| AgentCard | `composites/agent-card.tsx` | Agent card: file target, tokens, status line; done/stopped are neutral icon rows, failed is a red icon + reason + Resume / View transcript. | file, state, tokens, status, reason, onResume, onViewTranscript | yes | #466 (8.7) |
 | AgentsSettings | `composites/agents-settings.tsx` | Settings › Agents & skills. | resources, models, modelAssignments, delegationEnabled, detection, selectedCandidateIds | no | — |
 | ApprovalGate | `composites/approval-gate.tsx` | Human-in-the-loop approval gate for tool calls. | — | yes | — |
 | ArchivedBanner | `composites/archived-banner.tsx` | Read-only banner for archived sessions (Restore / Delete). | reason, prNumber, base, onRestore, onDelete | no | #376 (2.11) |
@@ -211,7 +211,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionTree | `app/session-tree.tsx` | Session chats, views and open files tree. | — | no | — |
 | PluginPaneState | `app/plugin-pane-state.tsx` | Plugin dock pane states: loading skeleton, empty, and crashed (message + Retry) on EmptyState/ListSkeleton. | variant, pluginId, message, onRetry | yes | #521 (13.11) |
 | SubagentTabBar | `app/subagent-tab-bar.tsx` | Subagent chip strip. | — | no | — |
-| SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then `Finished · N`, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
+| SubagentChip | `app/subagent-chip.tsx` | Lane-header `N subagents ▾` chip; popover lists running children then a `Done (N)` group, then `Peers · N` with a Message button per peer; row opens that child. | subagents, onOpenSubagent, peers, onMessagePeer | no | #460 (8.1) |
 | SubagentMetaStrip | `app/subagent-meta-strip.tsx` | Up to 3-row strip under the subagent breadcrumb: provider, model, status · phase, elapsed, `Details ▾` key/value grid (run id, started), current tool, usage, Background pill, artifact chips. Null fields omitted; pills never truncate. | node, providerId, onOpenArtifact | yes | #462 (8.3) |
 | SubagentReadOnlyBar | `app/subagent-readonly-bar.tsx` | Replaces the composer in a subagent view: `Subagent of <main> · read-only` + Stop (pending then stopped line); attention message + Reply; terminal summary + Retry. | node, mainTitle, onStop, onReply, onRetry | yes | #462 (8.3) |
 | AgentView, FleetAgentView | `app/subagent-view.tsx` | Read-only child agent transcript. | node, messages, providerId, loading, error, controlOutcome | no | — |
