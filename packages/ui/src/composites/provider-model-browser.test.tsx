@@ -82,6 +82,7 @@ describe("ProviderModelBrowser", () => {
     fireEvent.keyDown(search, { key: "ArrowDown" })
     expect(document.activeElement).toBe(screen.getByRole("option", { name: /Claude Sonnet/i }))
     expect(screen.getByRole("option", { name: /Claude Sonnet/i }).querySelector("[data-provider-logo]")).toBeTruthy()
+    expect(screen.getByRole("option", { name: /Claude Sonnet/i }).querySelector("[data-provider-logo] svg")?.getAttribute("width")).toBe("14")
     expect(screen.getByText("200k")).toBeTruthy()
     expect(screen.queryByText("anthropic/claude-sonnet · local")).toBeNull()
     expect(screen.queryByText("Claude Opus stale")).toBeNull()
