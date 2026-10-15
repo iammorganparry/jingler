@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { appShell, createWorkspace, expect, sessionRow, test } from "./fixtures.js"
+import { showPullRequestDetails } from "./pull-request.js"
 
 const git = (cwd: string, args: ReadonlyArray<string>, home?: string): string =>
   execFileSync("git", [...args], {
@@ -259,4 +260,49 @@ test("publishes a migration-era established jingler branch without renaming it",
     base: "main",
     title: "Publish historical session"
   })
+})
+
+test("a draft PR shows the Draft pill and Mark ready for review removes it", async ({ launchApp }) => {
+  const { window, githubServer } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [{
+      id: "s_draft",
+      repo: "widget",
+      branch: "chore/draft",
+      title: "Draft work",
+      status: "idle",
+      diff: { added: 1, removed: 0 },
+      prNumber: 483,
+      githubInstallationId: "101",
+      githubRepositoryId: "301",
+      costUsd: 0,
+      tokens: 0,
+      updatedAt: "2026-07-11T00:00:00.000Z",
+      worktreePath: repoPath,
+      mode: "accept-edits"
+    }],
+    githubApp: {
+      connected: true,
+      userLogin: "e2e-user",
+      prs: [{
+        number: 483,
+        title: "Draft work",
+        headRefName: "chore/draft",
+        baseRefName: "main",
+        author: { login: "e2e-user" },
+        isDraft: true
+      }]
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await window.getByTestId("header-view-checks").click()
+  await showPullRequestDetails(window)
+
+  const pill = window.getByRole("heading", { level: 2 }).getByText("Draft", { exact: true })
+  await expect(pill).toBeVisible({ timeout: 20_000 })
+  await window.getByRole("button", { name: "Mark ready for review" }).click()
+  await expect.poll(() => githubServer.operations, { timeout: 15_000 }).toContain("pr ready")
+  await expect(pill).toHaveCount(0, { timeout: 15_000 })
+  await expect(window.getByRole("button", { name: "Mark ready for review" })).toHaveCount(0)
 })

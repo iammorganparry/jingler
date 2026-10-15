@@ -154,12 +154,13 @@ function renderDraftActions() {
             <Callout tone="blue">This pull request is a draft.</Callout>
             {onMarkReady && (
               <Button
+                variant="secondary"
                 className="w-full justify-center gap-2"
                 disabled={!connected || markingReady}
                 onClick={onMarkReady}
               >
                 {markingReady && <Spinner size={13} />}
-                {markingReady ? "Marking ready…" : "Ready for review"}
+                {markingReady ? "Marking ready…" : "Mark ready for review"}
               </Button>
             )}
             {markReadyError && (
