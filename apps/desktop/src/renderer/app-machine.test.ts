@@ -517,6 +517,102 @@ describe("appMachine first-run coordination", () => {
   });
 });
 
+describe("appMachine onboarding step 1 project selection", () => {
+  const repo = (name: string) => ({
+    name,
+    path: `/repos/${name}`,
+    defaultBranch: "main",
+    currentBranch: "main",
+    remoteUrl: null,
+    githubSlug: null,
+  });
+
+  it("registers exactly the ticked repositories, then advances to GitHub", async () => {
+    const registered: string[] = [];
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a"), repo("b"), repo("c")],
+        })),
+        registerProjects: fromPromise<void, ReadonlyArray<string>>(
+          async ({ input }) => {
+            registered.push(...input);
+          },
+        ),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/a" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/b" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/c" });
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/c" });
+    actor.send({ type: "ADD_PROJECTS" });
+    await waitFor(actor, (snapshot) => snapshot.matches({ setup: "github" }));
+    expect(registered).toEqual(["/repos/a", "/repos/b"]);
+    actor.stop();
+  });
+
+  it("toggles all repositories and ignores ADD_PROJECTS with nothing ticked", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a"), repo("b")],
+        })),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "ADD_PROJECTS" });
+    expect(actor.getSnapshot().matches({ setup: { workspace: "idle" } })).toBe(true);
+    actor.send({ type: "TOGGLE_ALL_REPOS" });
+    expect(actor.getSnapshot().context.selectedRepoPaths).toEqual(["/repos/a", "/repos/b"]);
+    actor.send({ type: "TOGGLE_ALL_REPOS" });
+    expect(actor.getSnapshot().context.selectedRepoPaths).toEqual([]);
+    actor.stop();
+  });
+
+  it("stays on step 1 with an error when registration fails", async () => {
+    const machine = unconfigured().provide({
+      actors: {
+        chooseDir: fromPromise<ChosenRepositoryDirectory | null>(async () => ({
+          reposDir: "/repos",
+          repos: [repo("a")],
+        })),
+        registerProjects: fromPromise<void, ReadonlyArray<string>>(async () => {
+          throw new Error("disk full");
+        }),
+      },
+    });
+    const actor = createActor(machine).start();
+    await waitFor(actor, (snapshot) =>
+      snapshot.matches({ setup: { workspace: "idle" } }),
+    );
+    actor.send({ type: "CHOOSE" });
+    await waitFor(actor, (snapshot) => snapshot.context.reposDir === "/repos");
+    actor.send({ type: "TOGGLE_REPO", path: "/repos/a" });
+    actor.send({ type: "ADD_PROJECTS" });
+    await waitFor(
+      actor,
+      (snapshot) =>
+        snapshot.matches({ setup: { workspace: "idle" } }) &&
+        snapshot.context.error !== null,
+    );
+    expect(actor.getSnapshot().context.error).toContain("disk full");
+    actor.stop();
+  });
+});
+
 describe("appMachine boot failure retry", () => {
   it("retries from failure back to loading", async () => {
     const machine = appMachine.provide({

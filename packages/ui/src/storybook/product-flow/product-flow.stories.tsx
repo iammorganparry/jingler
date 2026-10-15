@@ -285,6 +285,10 @@ function ProductFlow({ startAt }: { readonly startAt: ProductFlowCheckpoint }) {
       resourceDetection={FLOW_RESOURCE_DETECTION}
       onChooseDir={() => send({ type: "CHOOSE_WORKSPACE" })}
       onContinue={() => send({ type: "CONTINUE" })}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={() => send({ type: "CONTINUE" })}
+      onCloneRepository={noop}
       onConnectGithub={() => send({ type: "CONNECT_GITHUB" })}
       onSkipGithub={() => send({ type: "SKIP_GITHUB" })}
       onConnectClaude={() => send({
@@ -348,9 +352,80 @@ export const WorkspaceScanFailed: Story = {
     <SetupScreen
       step="workspace"
       github={disconnectedGithub}
-      error="EACCES: permission denied, scandir '/Users/morgan/Code'"
+      error="Couldn't read ~/code — permission denied"
+      reposDir="~/code"
       onChooseDir={noop}
       onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onImportResources={noop}
+      onSkipResources={noop}
+      onCancelResourceImport={noop}
+      onRetryResources={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
+    />
+  )
+}
+
+/** A scanned folder with no git repositories offers cloning one. */
+export const WorkspaceEmpty: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      reposDir="~/code"
+      onChooseDir={noop}
+      onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
+      onConnectGithub={noop}
+      onSkipGithub={noop}
+      onConnectClaude={noop}
+      onStartCodex={noop}
+      onConnectApi={noop}
+      onContinueProvider={noop}
+      onSkipProvider={noop}
+      onCancelAuth={noop}
+      onRetryProvider={noop}
+      onImportResources={noop}
+      onSkipResources={noop}
+      onCancelResourceImport={noop}
+      onRetryResources={noop}
+      onSkipImportSessions={noop}
+      onContinueImportSessions={noop}
+    />
+  )
+}
+
+/** A scanned folder lists its repositories with checkboxes and an "Add N projects" action. */
+export const WorkspaceRepoList: Story = {
+  render: () => frame(
+    <SetupScreen
+      step="workspace"
+      github={disconnectedGithub}
+      reposDir="/Users/morgan/Code"
+      repos={FLOW_REPOS}
+      selectedRepoPaths={[FLOW_REPOS[0]!.path]}
+      onChooseDir={noop}
+      onContinue={noop}
+      onToggleRepo={noop}
+      onToggleAllRepos={noop}
+      onAddProjects={noop}
+      onCloneRepository={noop}
       onConnectGithub={noop}
       onSkipGithub={noop}
       onConnectClaude={noop}
