@@ -815,6 +815,8 @@ test("an archived session shows in the Archived group, read-only, and restores",
   // It auto-selects → the archived banner + locked composer render (read-only).
   await expect(window.getByText(/was merged/)).toBeVisible()
   await expect(window.getByText(/Composer disabled/)).toBeVisible()
+  await expect(window.getByText(/This session is archived and now read-only/)).toBeVisible()
+  await expect(window.getByRole("button", { name: "Delete", exact: true })).toBeVisible()
 
   // Restore it → archived state clears (banner + lock gone, real composer back).
   await window.getByRole("button", { name: "Restore session" }).click()
