@@ -18,11 +18,12 @@ describe("MergeSplitButton", () => {
     expect(screen.getByRole("button", { name: "Squash and merge" })).toBeTruthy()
   })
 
-  it("is disabled with the first blocker as its tooltip", () => {
+  it("is disabled with the first blocker as its tooltip", async () => {
     const onMerge = vi.fn()
     render(<MergeSplitButton connected onMerge={onMerge} blockedReason="Merge conflicts" />)
     expect((screen.getByRole("button", { name: "Merge pull request" }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByTestId("merge-split-button").getAttribute("title")).toBe("Merge conflicts")
+    fireEvent.focusIn(screen.getByTestId("merge-split-button"))
+    expect(await screen.findByText("Merge conflicts")).toBeTruthy()
   })
 
   it("shows a failed merge under the button", () => {

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactElement } from "react"
 import type { PrMergeMethod } from "@jingler/core"
 import { ChevronDown } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -6,6 +6,7 @@ import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { ChipMenu } from "../components/chip-menu.js"
 import { Spinner } from "../components/loading.js"
+import { Tooltip } from "../components/tooltip.js"
 
 /**
  * The three merge strategies, with the button label each one arms.
@@ -68,7 +69,8 @@ export function MergeSplitButton({
   return (
     <div className="flex flex-col gap-2">
       {/* A disabled button gets no pointer events, so the reason rides on the wrapper. */}
-      <div data-testid="merge-split-button" title={blockedReason ?? undefined} className="flex w-full">
+      <BlockedTooltip reason={blockedReason}>
+      <div data-testid="merge-split-button" className="flex w-full">
         <Button
           className="flex-1 justify-center gap-2 rounded-r-none"
           disabled={!connected || locked || !onMerge}
@@ -106,6 +108,7 @@ export function MergeSplitButton({
           )}
         />
       </div>
+      </BlockedTooltip>
       {mergeError && (
         <Callout tone="red" className="items-start">
           {mergeError}
@@ -113,4 +116,8 @@ export function MergeSplitButton({
       )}
     </div>
   )
+}
+
+function BlockedTooltip({ reason, children }: { reason: string | null; children: ReactElement }) {
+  return reason === null ? children : <Tooltip label={reason}>{children}</Tooltip>
 }
