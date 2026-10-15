@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react"
-import type { User } from "@jingler/core"
+import type { Usage, User } from "@jingler/core"
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { ChevronsUpDown, Gauge, LogIn, LogOut, Settings, Sparkles } from "lucide-react"
 import { cn } from "../lib/cn.js"
 import { Avatar } from "../components/avatar.js"
 import { StatusDot } from "../components/status-dot.js"
+import { UsageLimits } from "./usage-limits.js"
 import { WhatsNewDialog, type WhatsNewEntry } from "./whats-new-dialog.js"
 
 export interface UserMenuProps {
@@ -17,6 +18,10 @@ export interface UserMenuProps {
   onOpenSettings?: () => void
   /** Open the Usage & limits modal. */
   onOpenUsage?: () => void
+  /** Latest usage snapshot; its limit windows are summarised in the menu. */
+  usage?: Usage | null
+  /** Refresh usage; called each time the menu opens. Absent hides the limits summary. */
+  onLoadUsage?: () => Promise<void> | void
   /** Sign out of the app. */
   onSignOut?: () => void
   /** Open the optional sign-in dialog. Offered only while signed out. */
@@ -92,6 +97,8 @@ export function UserMenu({
   user,
   onOpenSettings,
   onOpenUsage,
+  usage,
+  onLoadUsage,
   onSignOut,
   onSignIn,
   ghConnected = false,
@@ -103,7 +110,7 @@ export function UserMenu({
 
   return (
     <>
-    <DropdownMenu.Root>
+    <DropdownMenu.Root onOpenChange={(open) => open && void onLoadUsage?.()}>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
@@ -134,6 +141,13 @@ export function UserMenu({
               </span>
             </span>
           </div>
+
+          {onLoadUsage && (
+            <>
+              <DropdownMenu.Separator className="my-1 h-px bg-hairline" />
+              <UsageLimits usage={usage} loading={usage == null} />
+            </>
+          )}
 
           {(onOpenSettings || onOpenUsage) && (
             <DropdownMenu.Separator className="my-1 h-px bg-hairline" />

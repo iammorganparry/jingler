@@ -504,6 +504,8 @@ export function JinglerApp(props:  JinglerAppProps) {
     return {
 onNewSession: onCreateSession ? openNewSession : undefined,
 onOpenUsage: onLoadUsage ? openUsage : undefined,
+usage,
+onLoadUsage,
 onOpenSettings: providerConnections
             ? () => openSettings("providers")
             : undefined,
