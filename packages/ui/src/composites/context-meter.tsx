@@ -156,7 +156,7 @@ export function ContextMeter({
 
   return (
     <MorphPopover className={cn("items-center", className)}>
-      <span className="relative grid size-9 flex-none place-items-center">
+      <span className="relative grid size-10 flex-none place-items-center">
         <MorphPopoverTrigger>
           <Button
             variant="ghost"

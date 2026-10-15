@@ -64,7 +64,8 @@ test("compacts a session and keeps its history intact", async ({ launchApp }) =>
   // resolved a trigger point — the ring renders nothing without a reading.
   const ring = window.getByRole("button", { name: /^Context usage \d+%$/ })
   await expect(ring).toBeVisible({ timeout: 20_000 })
-  await ring.click()
+  // The send button fills the ring's centre; the click lands on the 6px band around it.
+  await ring.click({ position: { x: 3, y: 20 } })
   const breakdown = window.getByTestId("context-breakdown").first()
   await expect(breakdown).toBeVisible()
   await expect(breakdown.getByText("System prompt")).toBeVisible()
@@ -147,7 +148,8 @@ test("reassembles a digest that arrives as streamed deltas", async ({ launchApp 
 
   const ring = window.getByRole("button", { name: /^Context usage/ })
   await expect(ring).toBeVisible({ timeout: 20_000 })
-  await ring.click()
+  // The send button fills the ring's centre; the click lands on the 6px band around it.
+  await ring.click({ position: { x: 3, y: 20 } })
   await window.getByRole("button", { name: "Compact now" }).click()
 
   // The digest PARSED. With the "\n" join this never happens: the reply is

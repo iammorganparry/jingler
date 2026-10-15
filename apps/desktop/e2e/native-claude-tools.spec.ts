@@ -39,7 +39,8 @@ test("native Claude consumes two real Jingler tool results before its final answ
   await expect.poll(() => chat().continuation?.runtimeId).toBe("claude")
   const ring = window.getByRole("button", { name: /^Context usage/ })
   await expect(ring).toHaveAttribute("title", /105,900/)
-  await ring.click()
+  // The send button fills the ring's centre; the click lands on the 6px band around it.
+  await ring.click({ position: { x: 3, y: 20 } })
   const breakdown = window.getByTestId("context-breakdown").first()
   await expect(breakdown).toBeVisible()
   await expect(breakdown.getByText("105,900", { exact: true })).toBeVisible()
