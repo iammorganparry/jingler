@@ -84,7 +84,7 @@ const allowGates = async (window: Page, until: () => Promise<boolean>): Promise<
     .toBe(true)
 }
 
-test("agent switches to a second registered repo mid-turn; Changes groups both; archive removes both worktrees", async ({ launchApp }) => {
+test("agent switches to a second registered repo mid-turn; Changes groups both; delete removes both worktrees", async ({ launchApp }) => {
   const { window, home, repoPath, secondPath } = await launchTwoRepos(launchApp, true)
   await expect(appShell(window)).toBeVisible()
   await createWorkspace(window, "Multi repo", "worktree", repoPath)
@@ -113,12 +113,13 @@ test("agent switches to a second registered repo mid-turn; Changes groups both; 
   await expect(window.getByTestId(`changes-checkout-${second!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toBeVisible({ timeout: 20_000 })
   await expect(window.getByTestId(`changes-checkout-${first!.id}`).locator('[data-item-path="src/other-repo.ts"]')).toHaveCount(0)
 
-  // Archive removes every worktree the session owns.
+  // Deleting the session removes every worktree it owns.
   await window.getByRole("tab", { name: "Sessions" }).click()
   const row = window.locator("[data-testid^='session-row-']").first()
   await row.hover()
-  await row.getByRole("button", { name: /^Archive / }).click()
-  await expect.poll(() => sessionsAt(home)[0]?.archived, { timeout: 30_000 }).toBe(true)
+  await row.getByRole("button", { name: /^Delete / }).click()
+  await window.getByRole("dialog").getByRole("button", { name: "Delete" }).click()
+  await expect.poll(() => sessionsAt(home).length, { timeout: 30_000 }).toBe(0)
   await expect.poll(() => existsSync(first!.worktreePath!), { timeout: 30_000 }).toBe(false)
   await expect.poll(() => existsSync(second!.worktreePath!), { timeout: 30_000 }).toBe(false)
 })
