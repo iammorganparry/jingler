@@ -665,14 +665,9 @@ const createSessionHandle = (
       const ids = subagentProfileToolIds(registry, agent)
       return ids.some((id) => id !== "supervisor_state") ? [[agent, ids]] : []
     })) as PiSubagentProfileTools
-    const childAnthropic = childProviderConnections(connection, subagentConfig.connections)
-      .find(({ providerId }) => providerId === "anthropic")
     yield* preparePiSubagentsRuntime(
       options.agentDir,
-      concreteClaudeModels(
-        subagentConfig.models,
-        childAnthropic === undefined || usesClaudeCli(childAnthropic)
-      ),
+      concreteClaudeModels(subagentConfig.models),
       profileTools
     ).pipe(
       Effect.mapError(

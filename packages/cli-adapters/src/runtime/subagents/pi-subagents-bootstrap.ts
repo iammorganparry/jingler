@@ -117,6 +117,11 @@ const writeConfig = async (path: string): Promise<void> => {
   }
 }
 
+// `extensions` disables ambient extensions; `subagentOnlyExtensions` is the
+// child-only list pi-subagents documents for foreground children, so both carry it.
+const CHILD_EXTENSIONS = (childToolsPath: string, claudeProviderPath: string): string =>
+  `${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}`
+
 const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
@@ -130,7 +135,7 @@ const rewriteAgentProfile = (
   .replace(/^defaultContext:.*$/m, "defaultContext: fresh")
   .replace(
     /^---\n/u,
-    `---\nextensions: ${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
+    `---\nextensions: ${CHILD_EXTENSIONS(childToolsPath, claudeProviderPath)}\nsubagentOnlyExtensions: ${CHILD_EXTENSIONS(childToolsPath, claudeProviderPath)}\n${model ? `model: ${JSON.stringify(model)}\n` : ""}`
   )
 
 /**

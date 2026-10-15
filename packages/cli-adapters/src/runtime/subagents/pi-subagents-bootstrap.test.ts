@@ -87,12 +87,20 @@ describe("managed pi-subagent profiles", () => {
     expect(scout.contract.inheritSkills).toBe(false)
     expect(scout.contract.tools.fanoutAuthorized).toBe(false)
     expect(scout.contract.tools.disableAmbientExtensions).toBe(true)
+    // `extensions` and `subagentOnlyExtensions` both list the child extensions.
+    const childExtensions = [childTools, claudeProvider, PONYTAIL_EXTENSION_PATH]
     expect(scout.contract.tools.configuredExtensions).toEqual([
-      childTools,
-      claudeProvider,
-      PONYTAIL_EXTENSION_PATH
+      ...childExtensions,
+      ...childExtensions
     ])
     expect(scout.contract.tools.requestedBuiltin).toEqual(["contact_supervisor"])
+    // Foreground children load only the child-only list, so every profile must carry it.
+    for (const agent of [...JINGLER_SUBAGENT_NAMES]) {
+      const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
+      expect(profile).toContain(
+        `subagentOnlyExtensions: ${childTools}, ${claudeProvider}, ${PONYTAIL_EXTENSION_PATH}`
+      )
+    }
     for (const agent of ["worker", "oracle"]) {
       const profile = await readFile(join(root, "agents", `${agent}.md`), "utf8")
       expect(profile).toMatch(/^defaultContext: fresh$/m)
