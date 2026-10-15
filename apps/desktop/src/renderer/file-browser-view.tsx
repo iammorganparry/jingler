@@ -7,6 +7,7 @@ import {
   AssetRepositoryTree,
   type AssetAgentActivity,
   AssetCanvas,
+  AssetBinary,
   AssetError,
   AssetTooLarge,
   AssetUnsupported,
@@ -25,7 +26,7 @@ import {
 } from "@jingler/ui"
 import type { PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
-import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, FileWarning, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
+import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
 import { openSessionFileDiff, useFileBrowser } from "./use-file-browser.js"
 import { setReviewFilter, useSessionReviewState } from "./review-store.js"
@@ -1152,33 +1153,6 @@ function DebugSection({ title, children }: { readonly title: string; readonly ch
   return <section className="border-b border-line p-2"><h3 className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-dim">{title}</h3>{children}</section>
 }
 
-function FileNotice({
-  icon,
-  title,
-  detail,
-  onReveal
-}: {
-  readonly icon: ReactNode
-  readonly title: string
-  readonly detail: string
-  readonly onReveal?: () => void
-}) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
-      {icon}
-      <div className="space-y-1">
-        <p className="text-[13px] font-medium text-text-bright">{title}</p>
-        <p className="text-[12px] text-dim">{detail}</p>
-      </div>
-      {onReveal !== undefined ? (
-        <Button type="button" variant="secondary" size="sm" onClick={onReveal}>
-          Reveal in Finder
-        </Button>
-      ) : null}
-    </div>
-  )
-}
-
 function FilePdfBody({
   sessionId,
   path,
@@ -1222,12 +1196,7 @@ function fileStatusNotice(browser: FileBrowserController, sessionId: string): Re
   }
   if (browser.status === "binary") {
     return (
-      <FileNotice
-        icon={<FileWarning className="size-6 text-dim" aria-hidden />}
-        title="Binary file"
-        detail="This file is not valid UTF-8 text, so Jingler will not edit it."
-        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
-      />
+      <AssetBinary onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")} />
     )
   }
   if (browser.status === "too-large" && browser.failure?.type === "too-large") {
@@ -1256,6 +1225,8 @@ function fileStatusNotice(browser: FileBrowserController, sessionId: string): Re
             ? browser.failure.message
             : `Couldn't open ${browser.selectedPath}.`
         }
+        onReveal={() => void rpc.assetReveal(sessionId, browser.selectedPath ?? "")}
+        onRetry={browser.reload}
       />
     )
   }
