@@ -1,5 +1,11 @@
 # @jingler/themes
 
+## 0.10.1
+
+### Patch Changes
+
+- @jingler/core@0.10.1
+
 ## 0.10.0
 
 ### Patch Changes

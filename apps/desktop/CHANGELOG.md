@@ -1,5 +1,14 @@
 # @jingler/desktop
 
+## 0.10.1
+
+### Patch Changes
+
+- ba1c46e: MCP import now includes servers from Claude's `~/.claude/settings.json` and managed `managed-mcp.json`, labelled "User settings" and "Managed".
+- 1df8441: Fixed a crash where a diff with a malformed hunk showed a global "parsePatchContent: Invalid hunk" error. Jingler now renders whatever part of the diff it can instead.
+- 62d67c4: Subagents on the Claude CLI route no longer fail at startup with `model_verification_failed`: agent profiles now always carry the concrete Claude model id.
+  - @jingler/plannotator-ext@0.10.1
+
 ## 0.10.0
 
 ### Minor Changes
