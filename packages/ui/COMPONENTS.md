@@ -148,6 +148,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PrReviewComposer | `composites/pr-review-composer.tsx` | Sticky PR review composer. | — | no | — |
 | PrReviewGroup | `composites/pr-review-group.tsx` | Group of review threads from one review. | — | no | — |
 | PrReviewThreadView | `composites/pr-review-thread.tsx` | Inline review thread with reply/resolve. | — | no | — |
+| MergeSplitButton | `composites/merge-split-button.tsx` | `Squash and merge ▾` split button: merge, squash or rebase; choice remembered; disabled with the first blocker as tooltip; `mergeError` shown under it. | connected, onMerge, merging, blockedReason, mergeError | yes | #435 (6.13) |
 | PrSidePanel | `composites/pr-side-panel.tsx` | PR right rail: reviewers, checks, merge box. | pr, connected, onMerge, merging, mergeError, onClosePr | no | — |
 | PrTimelineEntry | `composites/pr-timeline-entry.tsx` | PR timeline entry. | — | no | — |
 | ProjectWorkflowSettings | `composites/project-workflow-settings.tsx` | Per-project workflow settings. | projects, loading, routines | yes | — |
