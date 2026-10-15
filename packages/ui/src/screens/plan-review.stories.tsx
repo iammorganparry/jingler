@@ -172,3 +172,30 @@ export const Executing: Story = {
     }
   }
 }
+
+const message = (id: string, body: string, authorKind: "user" | "agent") => ({
+  id, body, authorKind, authorId: authorKind === "agent" ? "jingler" : "operator",
+  createdAt: "2026-10-08T00:00:00.000Z", mentionedParticipantIds: [], deliveryState: "sent" as const
+})
+
+/** Compare with Paper boards 17a/17b: 20px avatars in the gutter; agent = mono Jingler mark; reply badge; hover opens the 320px card. */
+export const CommentAvatars: Story = {
+  args: {
+    document: {
+      ...document,
+      plan: {
+        ...document.plan,
+        annotations: [
+          {
+            id: "c-user", stageId: "token-store", body: "Keep the v1 reader.", author: "user", createdAt: "2026-10-08T00:00:00.000Z", status: "open",
+            messages: [message("m1", "Keep the v1 reader.", "user"), message("m2", "Agreed, kept.", "agent")]
+          },
+          {
+            id: "c-agent", stageId: "token-store", body: "Migration is idempotent.", author: "agent", createdAt: "2026-10-08T00:00:00.000Z", status: "open",
+            messages: [message("m3", "Migration is idempotent.", "agent")]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -195,8 +195,16 @@ test("selection comments reach the agent and the revision diff shows what change
   await review(launched).getByRole("button", { name: "Add comment" }).click()
   await review(launched).getByRole("textbox", { name: "Comment" }).fill("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Save comment" }).click()
-  await expect(review(launched).getByRole("complementary", { name: "Plan comments" }))
-    .toContainText("Keep the existing token format.")
+  // The thread is a floating avatar: hover shows the card, Esc closes it, click pins it.
+  const avatar = review(launched).getByRole("button", { name: "Comment by You" })
+  await avatar.hover()
+  const thread = review(launched).getByRole("complementary", { name: "Plan comments" })
+  await expect(thread).toContainText("Keep the existing token format.")
+  await expect(thread.locator("[data-comment-thread]")).toHaveCSS("width", "320px")
+  await launched.window.keyboard.press("Escape")
+  await expect(thread).not.toContainText("Keep the existing token format.")
+  await avatar.click()
+  await expect(thread).toContainText("Keep the existing token format.")
   await review(launched).getByRole("button", { name: "Request changes" }).click()
 
   // The fixture agent echoes every quoted anchor it received into the rewrite.

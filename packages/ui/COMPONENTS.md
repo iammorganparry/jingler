@@ -142,7 +142,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PhaseNode | `composites/phase-node.tsx` | Workflow phase node. | — | yes | — |
 | PlanApprovalCard, PlanCard | `composites/plan-card.tsx` | Plan card and approval card in the transcript. | — | yes | — |
 | PlanChangeBlock, PlanRevisionDiff | `composites/plan-change-block.tsx` | Proposed per-file diff in a plan. | path, patch | no | — |
-| PlanCommentLayer | `composites/plan-comment-layer.tsx` | Margin comment threads over plan text. | container, content, comments, editable, onReply, onResolve | no | — |
+| PlanCommentLayer | `composites/plan-comment-layer.tsx` | Floating 20px Avatar per plan comment thread at its anchored line (agent = Jingler mark, reply-count badge, −6px stacking); hover/focus opens the 320px thread card, click pins, Esc closes; hovered range tinted stronger. | container, content, comments, editable, onReply, onResolve | no | #453 (7.4) |
 | PlanTaskList, PlanProgressDock, PlanProgressRow | `composites/plan-progress-dock.tsx` | Plan task list / progress dock; neutral icon rows, failed row red with `Step N failed` + `Retry step` / `Ask agent`, interrupted `Stopped by you` + `Resume`, blocked line. | document, onOpenStage, onStageAction | yes | #454 (7.5) |
 | PlanStageCard | `composites/plan-stage-card.tsx` | Plan stage card with SCM-style change letters. | stage, number, stages, onComment | no | — |
 | STEP, PlanStepList | `composites/plan-step-list.tsx` | Legacy plan step list. | — | no | — |
