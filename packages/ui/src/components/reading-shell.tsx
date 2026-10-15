@@ -51,7 +51,7 @@ export function ReadingActionsMenu({ items }: { items: ReadonlyArray<ReadingMenu
   )
 }
 
-export interface ReadingShellProps {
+export interface ReadingHeaderProps {
   title: ReactNode
   /** Grey suffix after the title: `#482`. */
   identifier?: string
@@ -61,20 +61,38 @@ export interface ReadingShellProps {
   meta?: ReactNode
   /** Right-aligned header actions: buttons, then `ReadingActionsMenu`. */
   actions?: ReactNode
+}
+
+/** Title + grey identifier, actions on the right, meta row beneath. Shared by every reading view. */
+export function ReadingHeader({ title, identifier, titleAdornment, meta, actions }: ReadingHeaderProps) {
+  return (
+    <header data-testid="reading-header" className="flex min-w-0 flex-col gap-2">
+      <div className="flex min-w-0 items-start gap-3">
+        <h2 className="min-w-0 flex-1 text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
+          {title}
+          {identifier && <> <span className="font-normal text-dim">{identifier}</span></>}
+          {titleAdornment}
+        </h2>
+        {actions}
+      </div>
+      {meta}
+    </header>
+  )
+}
+
+export interface ReadingShellProps extends ReadingHeaderProps {
   /** The 280px right rail; stacks under the column below the `wide` tier. */
   rail?: ReactNode
   children?: ReactNode
 }
 
 /**
- * The shared PR / issue reading surface: header (title + grey identifier, meta
- * line, actions), a 720px centred column and an optional 280px rail. The
- * scrollbar gutter is reserved on both edges so the column stays on the true
- * centre axis.
+ * The shared PR / issue reading surface: header, a 720px centred column and an
+ * optional 280px rail. The scrollbar gutter is reserved on both edges so the
+ * column stays on the true centre axis.
  */
-export function ReadingShell({ title, identifier, titleAdornment, meta, actions, rail, children }: ReadingShellProps) {
-  const docked = atLeast(useWidthTier(), "wide")
-  const side = Boolean(rail) && docked
+export function ReadingShell({ rail, children, ...header }: ReadingShellProps) {
+  const side = Boolean(rail) && atLeast(useWidthTier(), "wide")
   return (
     <div
       data-testid="reading-shell"
@@ -82,17 +100,7 @@ export function ReadingShell({ title, identifier, titleAdornment, meta, actions,
     >
       <div className={cn("mx-auto flex w-full flex-1 gap-8", side ? "max-w-[1032px]" : "max-w-[720px] flex-col")}>
         <div data-testid="reading-column" className="flex min-w-0 max-w-[720px] flex-1 flex-col gap-[18px]">
-          <header data-testid="reading-header" className="flex min-w-0 flex-col gap-2">
-            <div className="flex min-w-0 items-start gap-3">
-              <h2 className="min-w-0 flex-1 text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
-                {title}
-                {identifier && <> <span className="font-normal text-dim">{identifier}</span></>}
-                {titleAdornment}
-              </h2>
-              {actions}
-            </div>
-            {meta}
-          </header>
+          <ReadingHeader {...header} />
           {children}
         </div>
         {rail && (

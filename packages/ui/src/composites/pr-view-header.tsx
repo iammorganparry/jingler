@@ -1,15 +1,13 @@
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { useState, type ReactNode } from "react"
 import type { PrState, PullRequest } from "@jingler/core"
-import { Check, Copy, Download, Ellipsis, ExternalLink } from "lucide-react"
+import { Check, Copy, Download, ExternalLink } from "lucide-react"
 import { relativeTime } from "../lib/relative-time.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { Badge, type BadgeTone } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { DiffStat } from "../components/diff-stat.js"
-import { menuItemClass } from "../components/reading-shell.js"
+import { ReadingActionsMenu, ReadingHeader, type ReadingMenuItem } from "../components/reading-shell.js"
 import { Tooltip } from "../components/tooltip.js"
-import { cn } from "../lib/cn.js"
 
 const STATE_LABEL: Record<PrState, string> = { open: "Open", draft: "Draft", merged: "Merged", closed: "Closed" }
 const STATE_TONE: Record<PrState, BadgeTone> = { open: "neutral", draft: "neutral", merged: "purple", closed: "red" }
@@ -83,43 +81,17 @@ function PrActionsMenu({
   markingReady,
   onRequestClose
 }: Pick<PrViewHeaderProps, "pr" | "onMarkReady" | "markingReady" | "onRequestClose">) {
-  const canMarkReady = Boolean(onMarkReady) && pr.state === "draft"
-  const canClose = Boolean(onRequestClose) && (pr.state === "open" || pr.state === "draft")
-  if (!canMarkReady && !canClose && !pr.headRefName) return null
-  return (
-    <DropdownMenu.Root>
-      <Tooltip label="More actions" side="bottom">
-        <DropdownMenu.Trigger asChild>
-          <Button variant="ghost" size="icon" aria-label="More actions" className="size-7">
-            <Ellipsis size={16} aria-hidden />
-          </Button>
-        </DropdownMenu.Trigger>
-      </Tooltip>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={6}
-          className="z-50 flex min-w-[180px] flex-col gap-0.5 rounded-lg border border-line bg-sunken p-1.5 shadow-2xl"
-        >
-          {canMarkReady && (
-            <DropdownMenu.Item disabled={markingReady} onSelect={() => onMarkReady?.()} className={menuItemClass}>
-              {markingReady ? "Marking ready…" : "Mark ready"}
-            </DropdownMenu.Item>
-          )}
-          {pr.headRefName && (
-            <DropdownMenu.Item onSelect={() => void navigator.clipboard?.writeText(pr.headRefName)} className={menuItemClass}>
-              Copy branch
-            </DropdownMenu.Item>
-          )}
-          {canClose && (
-            <DropdownMenu.Item onSelect={() => onRequestClose?.()} className={cn(menuItemClass, "text-state-failed")}>
-              Close PR
-            </DropdownMenu.Item>
-          )}
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  )
+  const items: ReadingMenuItem[] = []
+  if (onMarkReady && pr.state === "draft") {
+    items.push({ label: markingReady ? "Marking ready…" : "Mark ready", disabled: markingReady, onSelect: onMarkReady })
+  }
+  if (pr.headRefName) {
+    items.push({ label: "Copy branch", onSelect: () => void navigator.clipboard?.writeText(pr.headRefName) })
+  }
+  if (onRequestClose && (pr.state === "open" || pr.state === "draft")) {
+    items.push({ label: "Close PR", destructive: true, onSelect: onRequestClose })
+  }
+  return <ReadingActionsMenu items={items} />
 }
 
 export interface PrViewHeaderProps {
@@ -149,39 +121,42 @@ export function PrViewHeader({
   switcher
 }: PrViewHeaderProps) {
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex min-w-0 items-start gap-3">
-        <h2 className="min-w-0 flex-1 text-pretty text-[20px] font-bold tracking-[-0.2px] text-text-bright">
-          {pr.title} <span className="font-normal text-dim">#{pr.number}</span>
-          {pr.state === "draft" && (
-            <Badge tone="neutral" size="sm" className="ml-2 align-middle" title="Draft pull request">
-              Draft
-            </Badge>
+    <ReadingHeader
+      title={pr.title}
+      identifier={`#${pr.number}`}
+      titleAdornment={
+        pr.state === "draft" && (
+          <Badge tone="neutral" size="sm" className="ml-2 align-middle" title="Draft pull request">
+            Draft
+          </Badge>
+        )
+      }
+      meta={<PrMetaLine pr={pr} />}
+      actions={
+        <>
+          {switcher}
+          {onOpenOnGithub && (
+            <Tooltip label="Open on GitHub" side="bottom">
+              <Button variant="ghost" size="icon" aria-label="Open on GitHub" className="size-7" onClick={onOpenOnGithub}>
+                <ExternalLink size={15} aria-hidden />
+              </Button>
+            </Tooltip>
           )}
-        </h2>
-        {switcher}
-        {onOpenOnGithub && (
-          <Tooltip label="Open on GitHub" side="bottom">
-            <Button variant="ghost" size="icon" aria-label="Open on GitHub" className="size-7" onClick={onOpenOnGithub}>
-              <ExternalLink size={15} aria-hidden />
+          {onOpenSession && (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={Boolean(sessionActionDisabledReason)}
+              title={sessionActionDisabledReason}
+              onClick={onOpenSession}
+            >
+              <Download size={14} aria-hidden />
+              {sessionActionLabel}
             </Button>
-          </Tooltip>
-        )}
-        {onOpenSession && (
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={Boolean(sessionActionDisabledReason)}
-            title={sessionActionDisabledReason}
-            onClick={onOpenSession}
-          >
-            <Download size={14} aria-hidden />
-            {sessionActionLabel}
-          </Button>
-        )}
-        <PrActionsMenu pr={pr} onMarkReady={onMarkReady} markingReady={markingReady} onRequestClose={onRequestClose} />
-      </div>
-      <PrMetaLine pr={pr} />
-    </div>
+          )}
+          <PrActionsMenu pr={pr} onMarkReady={onMarkReady} markingReady={markingReady} onRequestClose={onRequestClose} />
+        </>
+      }
+    />
   )
 }
