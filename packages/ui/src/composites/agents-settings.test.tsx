@@ -1,10 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { JINGLER_SUBAGENT_NAMES, ManagedResourceId, ProviderId, ProviderModelId } from "@jingler/core"
 import { Schema } from "effect"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentsSettings } from "./agents-settings.js"
 
 afterEach(cleanup)
+// VirtualList windows by measured size, which jsdom reports as 0.
+beforeEach(() => {
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(448)
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(600)
+})
 
 const resourceId = Schema.decodeUnknownSync(ManagedResourceId)("review")
 const candidateId = Schema.decodeUnknownSync(ManagedResourceId)("deploy")
@@ -50,6 +55,12 @@ describe("AgentsSettings", () => {
       selectedCandidateIds={new Set([candidateId])}
       loading={false}
       reviewing
+      query=""
+      kind="all"
+      source="all"
+      onQueryChange={vi.fn()}
+      onKindChange={vi.fn()}
+      onSourceChange={vi.fn()}
       onDetect={vi.fn()}
       onSetDelegationEnabled={vi.fn()}
       onSetModel={onSetModel}
