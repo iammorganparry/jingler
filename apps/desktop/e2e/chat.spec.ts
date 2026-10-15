@@ -357,6 +357,10 @@ test("a storm of consecutive tool calls collapses to the latest with a +N more t
   await expect(window.getByText("src/file-1.ts")).toHaveCount(0)
   await expect(window.getByText("src/file-4.ts").first()).toBeVisible()
 
+  // Graphite tool rows: completed calls carry neutral status; red is reserved for failures.
+  await expect(window.locator('[data-slot="tool-result"][data-tool-status="success"]').first()).toBeVisible()
+  await expect(window.locator('[data-slot="tool-result"][data-tool-status="error"]')).toHaveCount(0)
+
   // Expanding reveals the earlier calls; collapsing hides them again.
   await window.getByRole("button", { name: /\+ 3 more tool calls/ }).click()
   await expect(window.getByText("src/file-1.ts")).toBeVisible()

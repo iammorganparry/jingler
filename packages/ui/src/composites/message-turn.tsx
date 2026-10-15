@@ -92,12 +92,12 @@ const pathOf = (tool: ToolCallModel, displayName: string): string | null => {
 const HUNK_PREVIEW_LINES = 12
 
 const TASK_PROGRESS_META = {
-  "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-blue border-blue/30 bg-blue/10" },
+  "in-progress": { label: "In progress", Icon: LoaderCircle, tone: "text-text-bright border-line bg-surface" },
   completed: { label: "Completed", Icon: CheckCircle2, tone: "text-muted-foreground border-line bg-surface" },
   blocked: { label: "Blocked", Icon: AlertCircle, tone: "text-muted-foreground border-line bg-surface" },
   skipped: { label: "Skipped", Icon: Circle, tone: "text-dim border-line bg-sunken" },
-  failed: { label: "Failed", Icon: XCircle, tone: "text-red border-red/30 bg-red/10" },
-  interrupted: { label: "Interrupted", Icon: PauseCircle, tone: "text-orange border-orange/30 bg-orange/10" }
+  failed: { label: "Failed", Icon: XCircle, tone: "text-state-failed border-state-failed/30 bg-state-failed/10" },
+  interrupted: { label: "Interrupted", Icon: PauseCircle, tone: "text-muted-foreground border-line bg-surface" }
 } as const
 
 function PlanTaskProgressChip({ progress }: { progress: Omit<PlanTaskProgressPart, "_tag"> }) {

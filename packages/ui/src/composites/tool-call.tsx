@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
-import { ChevronDown, ChevronRight, CircleStop } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, X } from "lucide-react"
 import { cn } from "../lib/cn.js"
-import { StatusDot } from "../components/status-dot.js"
+import { Spin } from "../components/spin.js"
 import { FileIcon } from "../components/file-icon.js"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { ToolResultSurface } from "./beui/work.js"
@@ -95,7 +95,7 @@ function PathTarget({ path }: { path: string }) {
           }}
           className={cn(
             nameClass,
-            "cursor-pointer rounded-[3px] underline-offset-2 outline-none hover:text-blue hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            "cursor-pointer rounded-[3px] underline-offset-2 outline-none hover:text-text-bright hover:underline focus-visible:ring-2 focus-visible:ring-ring"
           )}
         >
           {base}
@@ -123,9 +123,13 @@ export function ToolCall({
 }: ToolCallProps) {
          function renderToolHeading() {
            return (<>
-      {status === "success" && <span className="text-green">✓</span>}
-      {status === "error" && <span className="text-red">✗</span>}
-      {status === "running" && <StatusDot tone="bg-yellow" size={8} pulse />}
+      {status === "success" && <Check className="size-3 flex-none text-dim" />}
+      {status === "error" && <X className="size-3 flex-none text-state-failed" />}
+      {status === "running" && (
+        <Spin active className="flex-none">
+          <LoaderCircle className="size-3 text-muted-foreground" />
+        </Spin>
+      )}
       <span className="text-muted-foreground">{name}</span>
       {icon}
       {filePath && <FileIcon path={filePath} />}
@@ -135,7 +139,7 @@ export function ToolCall({
         <span className="flex-1 truncate text-left text-text-bright">{target}</span>
       )}
       {meta && (
-        <span className={cn("shrink-0", status === "error" ? "text-red" : "text-dim")}>{meta}</span>
+        <span className="shrink-0 text-dim">{meta}</span>
       )}
       {onToggle &&
         (expanded ? (
@@ -151,19 +155,15 @@ export function ToolCall({
   )
   const headerClass = cn(
     "flex w-full items-center gap-[9px] px-2.5 py-1.5 font-mono text-[11.5px]",
-    status === "running" && "bg-yellow/[0.08]",
-    status === "success" && "bg-surface",
-    onToggle && "cursor-pointer text-left transition-colors hover:bg-line/20"
+    onToggle && "cursor-pointer text-left transition-colors hover:bg-hover"
   )
   return (
     <ToolResultSurface
       className={cn(
-        "rounded-md",
-        status === "running" && "border-yellow/30",
-        status === "error" && "border-red/35 bg-red/[0.05]",
-        status === "success" && "border-line",
+        "rounded-md border-line bg-transparent",
         className
       )}
+      data-tool-status={status}
     >
       <div className="flex items-stretch">
         {onToggle ? (
@@ -184,7 +184,7 @@ export function ToolCall({
             onClick={onStop}
             aria-label="Stop tool"
             title="Stop"
-            className="flex-none px-2.5 text-red outline-none transition-colors hover:bg-red/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="flex-none px-2.5 text-state-failed outline-none transition-colors hover:bg-state-failed/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <CircleStop className="size-3.5" />
           </button>

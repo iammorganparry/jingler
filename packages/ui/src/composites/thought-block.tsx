@@ -69,8 +69,8 @@ export function ThoughtBlock({
 
       <AnimatePresence initial={false}>
         {collapsible && open && (
-          // Deliberately frameless: the reasoning reads as marginalia — small,
-          // dim, italic — not as a card competing with the answer.
+          // Deliberately frameless: the reasoning reads as marginalia behind a
+          // hairline rule — not as a card competing with the answer.
           <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -78,7 +78,7 @@ export function ThoughtBlock({
             transition={SPRING}
             className="overflow-hidden"
           >
-            <div className="mt-1.5 pl-5 italic text-[calc(11px*var(--sb-font-scale,1))] leading-[1.6] text-dim">
+            <div className="mt-1.5 ml-[7px] border-l border-line pl-3 text-[calc(11.5px*var(--sb-font-scale,1))] leading-[1.6] text-muted-foreground">
               {children}
             </div>
           </m.div>
