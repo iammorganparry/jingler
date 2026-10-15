@@ -14,16 +14,15 @@ export interface SignInDialogProps extends Omit<LoginScreenProps, "embedded"> {
 export function SignInDialog({ open, onOpenChange, ...login }: SignInDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* No dialog chrome: the glowing auth card IS the surface, centred on the
-          blurred app. Escape and a click on the backdrop dismiss it. */}
+      {/* The dialog's own panel is the surface; the auth card sits flat inside it. */}
       <DialogContent
         hideClose
-        className="w-auto rounded-none border-0 bg-transparent p-16 shadow-none"
+        className="w-[360px] items-center p-4"
         aria-describedby={undefined}
       >
         {/* The card's own heading is the visible title; Radix still needs one it owns. */}
         <DialogTitle className="sr-only">Account</DialogTitle>
-        <LoginScreen {...login} embedded />
+        <LoginScreen {...login} embedded cardClassName="w-full border-0 bg-transparent shadow-none" />
       </DialogContent>
     </Dialog>
   )

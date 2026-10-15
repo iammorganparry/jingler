@@ -43,6 +43,8 @@ export interface LoginScreenProps {
    * the screen.
    */
   embedded?: boolean
+  /** Extra classes for the auth card (the dialog flattens it into its own panel). */
+  cardClassName?: string
 }
 
 const COPY: Record<AuthMode, { title: string; subtitle: string }> = {
@@ -154,7 +156,8 @@ export function LoginScreen({
   onRetry,
   signInUrl,
   onReset,
-  embedded = false
+  embedded = false,
+  cardClassName
 }: LoginScreenProps) {
   const [mode, setMode] = useState<AuthMode>("signin")
   const [email, setEmail] = useState("")
@@ -206,7 +209,7 @@ export function LoginScreen({
             : "relative flex flex-1 items-center justify-center overflow-hidden"
         }
       >
-        <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle}>
+        <AuthCard title={COPY[mode].title} subtitle={COPY[mode].subtitle} className={cardClassName}>
           {state === "waiting" ? (
             <WaitingPanel signInUrl={signInUrl} onCancel={onCancel} onRetry={onRetry} />
           ) : (

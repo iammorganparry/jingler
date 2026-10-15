@@ -27,10 +27,9 @@ export function AuthCard({ title, subtitle, children, className }: AuthCardProps
   return (
     <div
       className={cn(
-        "relative z-10 flex w-[328px] flex-col items-center rounded-xl border border-line bg-panel px-7 pb-6 pt-7",
+        "relative z-10 flex w-[328px] flex-col items-center rounded-xl border border-line bg-panel px-7 pb-6 pt-7 shadow-[0_10px_30px_-12px_var(--sb-shadow-strong)]",
         className
       )}
-      style={{ boxShadow: "0 10px 30px -12px var(--sb-shadow-strong)" }}
     >
       {/*
         No tile behind the mark. The card is already a rounded rectangle on a
