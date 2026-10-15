@@ -132,6 +132,7 @@ import {
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
+  reduceCheckouts,
   sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
@@ -4819,6 +4820,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
   "Sessions.delete": ({ sessionId, skipCleanup }) => deleteSession(sessionId, skipCleanup),
   "Sessions.createChat": ({ sessionId }) =>
     SessionStore.createChat(sessionId).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause })),
+      ),
+    ),
+  "Sessions.switchCheckout": ({ sessionId, checkoutId }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      yield* SessionStore.setCheckouts(
+        sessionId,
+        reduceCheckouts(session, { type: "switch", checkoutId }),
+      );
+      return yield* SessionStore.get(sessionId);
+    }).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),

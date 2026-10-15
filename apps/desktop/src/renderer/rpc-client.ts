@@ -637,6 +637,8 @@ export const rpc = {
     run((c) => c.Sessions.delete({ sessionId, skipCleanup })),
   sessionsCreateChat: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.createChat({ sessionId })),
+  sessionsSwitchCheckout: (sessionId: string, checkoutId: string): Promise<Session> =>
+    run((c) => c.Sessions.switchCheckout({ sessionId, checkoutId })),
   sessionsSelectChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.selectChat({ sessionId, chatId })),
   sessionsRenameChat: (

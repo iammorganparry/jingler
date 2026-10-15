@@ -908,6 +908,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /** Make another attached checkout the session's active one (cwd and scalar mirrors follow it). */
+  Rpc.make("Sessions.switchCheckout", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, checkoutId: Schema.String }
+  }),
+
   /** Persist which chat is active for the session. */
   Rpc.make("Sessions.selectChat", {
     success: Session,
