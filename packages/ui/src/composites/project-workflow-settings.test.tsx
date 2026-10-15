@@ -2,6 +2,7 @@ import { useState } from "react"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Project } from "@jingler/core"
+import { within } from "@testing-library/react"
 import { ProjectWorkflowSettings } from "./project-workflow-settings.js"
 const project: Project = {
   id: "p-1",
@@ -215,4 +216,24 @@ it("isolates a late config read and its routine templates after the selected pro
   await waitFor(() => expect(screen.getByLabelText("Setup command")).toHaveProperty("value", "second setup"))
   expect(screen.queryByText(/Old template/)).toBeNull()
   expect(onSave).not.toHaveBeenCalled()
+})
+
+describe("ProjectWorkflowSettings missing folder", () => {
+  const missing = { ...project, availability: "missing" as const }
+  it("shows Locate… and a confirmed Remove for a missing folder", async () => {
+    const onLocateProject = vi.fn()
+    const onRemoveProject = vi.fn()
+    render(<ProjectWorkflowSettings projects={[missing]} onSave={vi.fn()} onLocateProject={onLocateProject} onRemoveProject={onRemoveProject} />)
+    expect(screen.getByText("Folder not found")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Locate…" }))
+    expect(onLocateProject).toHaveBeenCalledWith("p-1")
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }))
+    expect(onRemoveProject).not.toHaveBeenCalled()
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Remove project" }))
+    await waitFor(() => expect(onRemoveProject).toHaveBeenCalledWith("p-1"))
+  })
+  it("hides the missing-folder row for an available project", () => {
+    render(<ProjectWorkflowSettings projects={[project]} onSave={vi.fn()} onLocateProject={vi.fn()} onRemoveProject={vi.fn()} />)
+    expect(screen.queryByText("Folder not found")).toBeNull()
+  })
 })
