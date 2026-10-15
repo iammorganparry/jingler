@@ -38,7 +38,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema } from "@jingler/core"
+import { Session as SessionSchema, migrateSessionCheckouts } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -2299,7 +2299,7 @@ function* readPersistedSessions(fs: FileSystem.FileSystem) {
     const decoded = Schema.decodeUnknownEither(SessionSchema)(
       migrateLegacyRuntimeIdentity(migrateRepoName(migrateSessionChats(value)))
     )
-    if (Either.isRight(decoded)) { updateWorkspaceReadiness(decoded.right); sessions.push(decoded.right) }
+    if (Either.isRight(decoded)) { const migrated = migrateSessionCheckouts(decoded.right); updateWorkspaceReadiness(migrated); sessions.push(migrated) }
   }
   return sessions
 }
