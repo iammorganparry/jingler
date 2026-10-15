@@ -145,8 +145,8 @@ export const mcpNameError = (name: string): string | null => {
 export const McpImportSourceId = Schema.Literal("claude", "codex", "opencode")
 export type McpImportSourceId = Schema.Schema.Type<typeof McpImportSourceId>
 
-/** Where a candidate was found: a config file, a claude.ai connector, or a Claude plugin. */
-export const McpImportOrigin = Schema.Literal("user", "claude.ai", "plugin")
+/** Where a candidate was found: a config file, Claude's settings.json or managed-mcp.json, a claude.ai connector, or a Claude plugin. */
+export const McpImportOrigin = Schema.Literal("user", "user-settings", "managed", "claude.ai", "plugin")
 export type McpImportOrigin = Schema.Schema.Type<typeof McpImportOrigin>
 
 /**

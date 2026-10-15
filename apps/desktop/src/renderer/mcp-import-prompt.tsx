@@ -1,3 +1,4 @@
+import { MCP_ORIGIN_LABELS } from "@jingler/ui"
 import type {
   McpImportCandidateView,
   McpImportSourceId,
@@ -116,7 +117,7 @@ export function McpImportPrompt({
                 <div className="flex items-center justify-between gap-3">
                   <div className="truncate text-xs font-medium text-text-bright">{candidate.name}</div>
                   <div className="flex-none rounded-md border border-hairline bg-panel px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wide text-dim">
-                    {candidate.source}
+                    {MCP_ORIGIN_LABELS[candidate.origin ?? "user"]}
                   </div>
                 </div>
                 <div className="mt-0.5 truncate font-mono text-[10px] text-dim">{candidate.target}</div>
