@@ -248,13 +248,17 @@ describe("GitHub settings · SettingsCard rows", () => {
 });
 
 describe("Devices settings", () => {
-  it("renders account-owned device connection and compatibility states", () => {
-    render(
+  it("renders all five connection states as neutral one-line text", () => {
+    const states = ["online", "offline", "reconnecting", "incompatible", "revoked"] as const;
+    const { container } = render(
       <DevicesSection
-        environments={[
-          base,
-          { ...base, id: "device-2", name: "old-mini", state: "incompatible" },
-        ]}
+        environments={states.map((state) => ({
+          ...base,
+          id: `device-${state}`,
+          name: `box-${state}`,
+          state,
+          agentVersion: "0.8",
+        }))}
         loading={false}
         dialog={dialog}
         onOpen={vi.fn()}
@@ -263,17 +267,64 @@ describe("Devices settings", () => {
         onRevoke={vi.fn()}
       />,
     );
-    expect(screen.getByText("online")).toBeTruthy();
-    expect(screen.getByText("incompatible")).toBeTruthy();
+    for (const label of ["Online", "Offline", "Reconnecting…", "Incompatible", "Revoked"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.getByText(/Device agent v0\.8 is older than this app needs/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "How to update" })).toBeTruthy();
+    expect(container.innerHTML).not.toMatch(/bg-(green|yellow|amber|red)/);
     expect(
       screen.getByText(/account-owned machines appear here automatically/i),
     ).toBeTruthy();
   });
-  it("confirms before revoking an environment", () => {
+
+  it("shows the update command from the device-agent README", () => {
+    render(
+      <DevicesSection
+        environments={[{ ...base, state: "incompatible" }]}
+        loading={false}
+        dialog={dialog}
+        onOpen={vi.fn()}
+        onRefresh={vi.fn()}
+        onRename={vi.fn()}
+        onRevoke={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "How to update" }));
+    expect(screen.getByText("pnpm --filter @jingler/device-agent build")).toBeTruthy();
+  });
+
+  it("lists running workspaces before a confirmed revoke", async () => {
     const revoke = vi.fn();
-    vi.spyOn(window, "confirm")
-      .mockReturnValueOnce(false)
-      .mockReturnValueOnce(true);
+    render(
+      <DevicesSection
+        environments={[base]}
+        workspaces={[
+          { id: "s1", title: "Fix login", environmentId: "device-1" },
+          { id: "s2", title: "Add search", environmentId: "device-1" },
+          { id: "s3", title: "Local only" },
+        ]}
+        loading={false}
+        dialog={dialog}
+        onOpen={vi.fn()}
+        onRefresh={vi.fn()}
+        onRename={vi.fn()}
+        onRevoke={revoke}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    expect(revoke).not.toHaveBeenCalled();
+    expect(screen.getByText("Revoke buildbox?")).toBeTruthy();
+    expect(screen.getByText(/2 workspaces run on it and will stop/)).toBeTruthy();
+    expect(screen.getByText("Fix login")).toBeTruthy();
+    expect(screen.getByText("Add search")).toBeTruthy();
+    expect(screen.queryByText("Local only")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke device" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("device-1"));
+  });
+
+  it("cancelling the revoke confirm leaves the device paired", () => {
+    const revoke = vi.fn();
     render(
       <DevicesSection
         environments={[base]}
@@ -286,9 +337,8 @@ describe("Devices settings", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(revoke).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Revoke" }));
-    expect(revoke).toHaveBeenCalledWith("device-1");
   });
 
   it("renames an environment through the supported dialog", async () => {

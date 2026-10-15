@@ -72,6 +72,35 @@ describe("environment machine", () => {
     actor.stop()
   })
 
+  it("retains every connection state in the inventory", async () => {
+    const services = api()
+    const all = (
+      ["online", "offline", "reconnecting", "incompatible", "revoked"] as const
+    ).map((state) => ({ ...environment, id: `device_${state}`, state }))
+    services.list.mockResolvedValueOnce(all)
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => !snapshot.context.loading)
+    expect(actor.getSnapshot().context.environments.map((e) => e.state)).toEqual(
+      ["online", "offline", "reconnecting", "incompatible", "revoked"]
+    )
+    actor.stop()
+  })
+
+  it("removes a revoked device and keeps the others", async () => {
+    const services = api()
+    services.list.mockResolvedValueOnce([environment, secondEnvironment])
+    const actor = createActor(createEnvironmentMachine(services)).start()
+    await waitFor(actor, (snapshot) => !snapshot.context.loading)
+    actor.send({ type: "REVOKE", id: environment.id })
+    await waitFor(
+      actor,
+      (snapshot) => snapshot.context.environments.length === 1
+    )
+    expect(services.revoke).toHaveBeenCalledWith(environment.id)
+    expect(actor.getSnapshot().context.environments).toEqual([secondEnvironment])
+    actor.stop()
+  })
+
   it("reconciles an account-scoped device presence invalidation", async () => {
     const services = api()
     services.list.mockResolvedValueOnce([

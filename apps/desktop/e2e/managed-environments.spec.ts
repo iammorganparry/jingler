@@ -61,6 +61,8 @@ test("selects the fixed authenticated Cloud execution target", async ({
   await expect(
     app.window.getByRole("button", { name: "Add cloud environment" }),
   ).toHaveCount(0);
+  await expect(environment.locator("..").locator("..")).toContainText("Online");
+  await expect(app.window.getByRole("button", { name: "Revoke" })).toHaveCount(0);
   await expect(app.window.getByRole("button", { name: "Delete" })).toHaveCount(
     0,
   );

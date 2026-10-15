@@ -10,6 +10,7 @@ import type {
   ContextSnapshot,
   Environment,
   ExecutionMode,
+  Session,
   PlanTemplateConfig
 } from "@jingler/core"
 import {
@@ -37,6 +38,7 @@ import {
   Gauge,
   SlidersHorizontal,
   Sparkles,
+  TriangleAlert,
   X
 } from "lucide-react"
 import { cn } from "../lib/cn.js"
@@ -185,6 +187,8 @@ export interface SettingsViewProps {
     loading: boolean
     error?: string | null
     dialog: EnvironmentDialogProps
+    /** Live workspaces; those on a device are listed before it can be revoked. */
+    workspaces?: ReadonlyArray<Pick<Session, "id" | "title" | "environmentId">>
     onOpen: () => void
     onRefresh: () => void | Promise<void>
     onRename: (id: string, name: string) => void | Promise<void>
@@ -513,11 +517,67 @@ return (<GithubSection
   )
 }
 
+/** From apps/device-agent/README.md "Build and bootstrap". */
+const DEVICE_AGENT_UPDATE_COMMAND = "pnpm --filter @jingler/device-agent build"
+
+const DEVICE_STATUS_LABEL: Record<Environment["state"], string> = {
+  online: "Online",
+  offline: "Offline",
+  reconnecting: "Reconnecting…",
+  incompatible: "Incompatible",
+  revoked: "Revoked",
+  provisioning: "Provisioning…",
+  sleeping: "Sleeping",
+  restoring: "Restoring…",
+  paused: "Paused",
+  failed: "Failed"
+}
+
+const agentTooOldText = (agentVersion: string | null): string =>
+  agentVersion
+    ? `Device agent v${agentVersion.replace(/^v/, "")} is older than this app needs`
+    : "Device agent is older than this app needs"
+
+/** One neutral line of text; only Incompatible carries a (red) icon, never a fill. */
+function DeviceStatus({ state }: { state: Environment["state"] }) {
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+      {state === "incompatible" && (
+        <TriangleAlert size={12} className="text-state-failed" aria-hidden />
+      )}
+      {DEVICE_STATUS_LABEL[state]}
+    </span>
+  )
+}
+
+function RevokeImpact({
+  workspaces
+}: {
+  workspaces: ReadonlyArray<{ id: string; title: string }>
+}) {
+  const count = workspaces.length
+  if (count === 0) return <p>No workspaces run on it.</p>
+  return (
+    <>
+      <p>
+        {count} {count === 1 ? "workspace runs" : "workspaces run"} on it and
+        will stop.
+      </p>
+      <ul className="mt-2 list-disc pl-5">
+        {workspaces.map((workspace) => (
+          <li key={workspace.id}>{workspace.title}</li>
+        ))}
+      </ul>
+    </>
+  )
+}
+
 export function DevicesSection({
   environments,
   loading,
   error,
   dialog,
+  workspaces = [],
   onOpen,
   onRefresh,
   onRename,
@@ -528,6 +588,13 @@ export function DevicesSection({
   )
   const [renameValue, setRenameValue] = React.useState("")
   const [renamePending, setRenamePending] = React.useState(false)
+  const [revokeTarget, setRevokeTarget] = React.useState<Environment | null>(
+    null
+  )
+  const [updateOpen, setUpdateOpen] = React.useState(false)
+  const revokeWorkspaces = workspaces.filter(
+    (workspace) => revokeTarget && workspace.environmentId === revokeTarget.id
+  )
 
   const openRename = (environment: Environment): void => {
     setRenameTarget(environment)
@@ -592,22 +659,7 @@ export function DevicesSection({
               {loading ? "Loading devices…" : "No owned machines yet."}
             </div>
           ) : (
-            environments.map((environment) => {
-                               function getClassName() {
-                                 switch (environment.state) {
-case "online": {
-return ("bg-surface text-muted-foreground")
-}
-case "incompatible": {
-return ("bg-surface text-muted-foreground")
-}
-case "revoked": {
-return ("bg-red/10 text-red")
-}
-}
-                                 return ("bg-surface text-muted-foreground")
-                               }
-return ((
+            environments.map((environment) => (
               <div
                 key={environment.id}
                 className="flex items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
@@ -631,15 +683,20 @@ return ((
                         ? `agent ${environment.agentVersion}`
                         : "agent version unknown"}
                   </span>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-1 text-[10px] font-medium",
-                    getClassName()
+                  {environment.state === "incompatible" && (
+                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                      {agentTooOldText(environment.agentVersion)}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setUpdateOpen(true)}
+                      >
+                        How to update
+                      </Button>
+                    </div>
                   )}
-                >
-                  {environment.state}
-                </span>
+                </div>
+                <DeviceStatus state={environment.state} />
                 {environment.kind === "owned" && (
                   <Button
                     variant="ghost"
@@ -653,24 +710,49 @@ return ((
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Revoke ${environment.name}? Active remote sessions will disconnect.`
-                        )
-                      )
-                        void onRevoke(environment.id)
-                    }}
+                    onClick={() => setRevokeTarget(environment)}
                   >
                     Revoke
                   </Button>
                 )}
               </div>
-            )); })
+            ))
           )}
         </div>
       </div>
       <EnvironmentDialog {...dialog} />
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeTarget(null)
+        }}
+        title={`Revoke ${revokeTarget?.name ?? ""}?`}
+        description={<RevokeImpact workspaces={revokeWorkspaces} />}
+        confirmLabel="Revoke device"
+        destructive
+        onConfirm={() => (revokeTarget ? onRevoke(revokeTarget.id) : undefined)}
+      />
+      <Dialog open={updateOpen} onOpenChange={setUpdateOpen}>
+        <DialogContent className="w-[460px]">
+          <DialogHeader>
+            <DialogTitle>Update the device agent</DialogTitle>
+          </DialogHeader>
+          <DialogBody>
+            <p className="mb-2 text-[12px] text-muted-foreground">
+              Build the current agent, then use Add owned machine to upload it
+              over SSH.
+            </p>
+            <code className="block rounded-md bg-sunken px-3 py-2 font-mono text-[11px] text-text-bright">
+              {DEVICE_AGENT_UPDATE_COMMAND}
+            </code>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={() => setUpdateOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={renameTarget !== null}
         onOpenChange={(open) => {
