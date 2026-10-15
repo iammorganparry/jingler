@@ -24,7 +24,7 @@ import {
   narrowToTurn,
   ReviewFileDiff
 } from "@jingler/ui"
-import type { PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
+import type { AgentEdit, PierreAnnotationMetadata, ReviewTurn } from "@jingler/ui"
 import type { JinglerLineSelection } from "@jingler/ui"
 import { Bug, ChevronDown, ChevronRight, CirclePause, CirclePlay, MessageSquarePlus, MousePointer2, Square, StepForward } from "lucide-react"
 import type { FileBrowserController } from "./use-file-browser.js"
@@ -42,9 +42,11 @@ import {
 } from "./agent-file-activity.js"
 import { useDebugSessionModel, type DebugSessionModel } from "./debug-session.js"
 import {
+  agentEditAnnotations,
   agentFollowDiffSelection,
   captureDiffCodeReference
 } from "./file-diff-context.js"
+import { useAgentEdits, useJumpToAgentEditTurn } from "./file-agent-edits.js"
 
 const DEBUG_HOVER_IDENTIFIER = /^[\p{ID_Start}_$][\p{ID_Continue}_$\u200C\u200D]*$/u
 type BrowserToken = TokenEventBase & { readonly side?: "additions" | "deletions" }
@@ -340,6 +342,8 @@ export function FileBrowserView({
   const debug = useDebugSessionModel(session.id, debugSnapshot)
   const changes = useChangesReview(session, connected)
   const { turn } = useReviewTurns(session)
+  const agentEdits = useAgentEdits(session, browser.selectedPath)
+  const jumpToAgentEditTurn = useJumpToAgentEditTurn(session)
   const debugFrame = debug.snapshot.session?.status === "stopped"
     ? (debug.snapshot.session.frame ?? null)
     : null
@@ -477,6 +481,8 @@ export function FileBrowserView({
                 sessionTitle={session.title}
                 changes={changes}
                 turn={turn}
+                agentEdits={agentEdits}
+                onAgentEditSelect={jumpToAgentEditTurn}
                 connected={connected}
                 browser={browser}
                 nativeAvailable={nativeAvailable}
@@ -549,6 +555,8 @@ function FileCanvas({
   sessionTitle,
   changes,
   turn,
+  agentEdits,
+  onAgentEditSelect,
   connected,
   browser,
   nativeAvailable,
@@ -566,6 +574,8 @@ function FileCanvas({
   readonly sessionTitle: string
   readonly changes: ChangesReview
   readonly turn: ReviewTurn | null
+  readonly agentEdits: readonly AgentEdit[]
+  readonly onAgentEditSelect: (turnId: string) => void
   readonly connected: boolean
   readonly browser: FileBrowserController
   readonly nativeAvailable: boolean
@@ -674,6 +684,8 @@ function FileCanvas({
       <FileDiffCanvas
         sessionId={sessionId}
         fileDiff={shownFileDiff}
+        agentEdits={agentEdits}
+        onAgentEditSelect={onAgentEditSelect}
         browser={browser}
         selection={selection}
         onSelectionChange={onSelectionChange}
@@ -764,6 +776,8 @@ function FileCanvas({
 function FileDiffCanvas({
   sessionId,
   fileDiff,
+  agentEdits,
+  onAgentEditSelect,
   browser,
   selection,
   onSelectionChange,
@@ -775,6 +789,8 @@ function FileDiffCanvas({
 }: {
   sessionId: string;
   fileDiff: ReturnType<typeof parsePierreFileDiffs>[number];
+  agentEdits: readonly AgentEdit[];
+  onAgentEditSelect: (turnId: string) => void;
   browser: FileBrowserController;
   selection: JinglerLineSelection | null;
   onSelectionChange: (selection: JinglerLineSelection | null) => void;
@@ -791,10 +807,16 @@ function FileDiffCanvas({
     return semanticTokenHover(sessionId, path, symbol, token, undefined, signal)
   }, [path, sessionId])
   const tokenHover = useDelayedTokenHover(query)
+  const agentEditLabels = useMemo(
+    () => (browser.patch === null ? [] : agentEditAnnotations(browser.patch, path, agentEdits)),
+    [agentEdits, browser.patch, path]
+  )
   return (
     <div className="relative h-full min-h-0">
       <DiffView
         fileDiff={fileDiff}
+        agentEdits={agentEditLabels}
+        onAgentEditSelect={onAgentEditSelect}
     label={`${browser.selectedPath} changes`}
     className="h-full min-h-0"
     selection={selection}

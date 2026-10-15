@@ -192,6 +192,9 @@ export const createReviewCodeItems = ({
       case "selected-range-actions":
         payloadPath = payload.selection.path
         break
+      case "agent-edit":
+        payloadPath = payload.path
+        break
       case "saved-draft":
         payloadPath = payload.draft.path
         break
@@ -469,6 +472,7 @@ export function ReviewCodeView({
           )
         case "finding":
         case "selected-range-actions":
+        case "agent-edit":
           return null
       }
     },

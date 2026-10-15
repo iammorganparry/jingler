@@ -1,6 +1,6 @@
 import type { Message } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { narrowToTurn, reviewTurnsOf } from "./review-turns.js"
+import { agentEditsOf, narrowToTurn, reviewTurnsOf } from "./review-turns.js"
 
 const tool = (path: string) =>
   ({ _tag: "Tool", tool: { fileChanges: { changes: [{ path }] } } }) as never
@@ -28,5 +28,15 @@ describe("review turns", () => {
     const files = [{ path: "src/a.ts" }, { path: "src/b.ts" }, { path: "docs/c.md" }]
     expect(narrowToTurn(files, first!).map((f) => f.path)).toEqual(["src/a.ts", "src/b.ts"])
     expect(narrowToTurn(files, null)).toBe(files)
+  })
+
+  it("lists the edits to one path, labelled with the turn number", () => {
+    const edits = agentEditsOf(messages, "src/b.ts")
+    expect(edits.map((edit) => [edit.turnId, edit.label])).toEqual([
+      ["a1", "Agent edit · Turn 1"],
+      ["a3", "Agent edit · Turn 3"],
+      ["a3", "Agent edit · Turn 3"]
+    ])
+    expect(agentEditsOf(messages, "missing.ts")).toEqual([])
   })
 })

@@ -1,4 +1,5 @@
 import { updateTranscriptRowKeys } from "./transcript-row-keys.js"
+import { useJumpToTurn } from "./jump-to-turn.js"
 import { defaultProps } from "../lib/default-props.js"
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { planDocumentToPlan } from "@jingler/core"
@@ -683,6 +684,12 @@ function renderSessionAnalytics() {
     setFollowing(last)
     virtualizer.scrollToIndex(index, { align: last ? "end" : "center" })
   }, [itemKeys, messages.length, virtualizer])
+
+  const jumpToIndex = useCallback((index: number) => {
+    setFollowing(index === messages.length - 1)
+    virtualizer.scrollToIndex(index, { align: "center" })
+  }, [messages.length, virtualizer])
+  useJumpToTurn(focusKey, messages, jumpToIndex)
 
   // Preserve the viewport across a "Load earlier" prepend: capture the scroll
   // metrics at click, then after the older page lands add back exactly the height

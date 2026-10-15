@@ -31,3 +31,31 @@ export const narrowToTurn = <T extends { readonly path: string }>(
   const paths = new Set(turn.paths)
   return items.filter((item) => paths.has(item.path))
 }
+
+/** One file change an agent tool made to a single path, labelled with the turn it came from. */
+export interface AgentEdit {
+  readonly id: string
+  /** The assistant message the edit belongs to. */
+  readonly turnId: string
+  /** `Agent edit · Turn 3` — numbered like `reviewTurnsOf`. */
+  readonly label: string
+  readonly preview: string | null
+}
+
+/** Every change the agent's tools made to `path`, oldest first. */
+export const agentEditsOf = (messages: readonly Message[], path: string): readonly AgentEdit[] => {
+  let number = 0
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return []
+    number += 1
+    return message.parts.flatMap((part) =>
+      part._tag !== "Tool"
+        ? []
+        : (part.tool.fileChanges?.changes ?? []).flatMap((change, index) =>
+            change.path === path
+              ? [{ id: `${part.tool.id}:${index}`, turnId: message.id, label: `Agent edit · Turn ${number}`, preview: change.preview }]
+              : []
+          )
+    )
+  })
+}
