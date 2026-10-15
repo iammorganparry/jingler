@@ -38,6 +38,7 @@ import { ProviderIcon } from "../components/provider-icon.js"
 import { SessionRow } from "../composites/session-row.js"
 import { SessionHoverCard } from "../composites/session-hover-card.js"
 import { AISidebarSurface } from "../composites/beui/shell.js"
+import { ArchivedEntry } from "./archived-list.js"
 import { SessionTree, type SessionChatActions } from "./session-tree.js"
 import type { SessionSurface } from "./session-surface-layout.js"
 import { displayStatusLabel, displayStatusTone } from "../tokens.js"
@@ -924,6 +925,7 @@ return (renderExpandedGroupHeading())
         <>
       {renderPullRequestsLink()}
       {renderIssuesLink()}
+      <ArchivedEntry sessions={sessions} onRestore={onRestore} onDelete={onDelete} />
 
       {renderPendingEnvironment()}
 
