@@ -19,6 +19,7 @@ import {
 } from "./subagent-capability-broker.js"
 import type { SubagentCapability } from "@jingler/core"
 import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
+import { registerProgressiveMcpTools, type McpToolClientFactory } from "../tools/mcp-tools.js"
 
 const spec = {
   role: "conversation",
@@ -377,4 +378,38 @@ describe("SubagentCapabilityBroker", () => {
     expect(events).toEqual(["start:child-call", "end:child-call", "start:marker", "end:marker"])
   })
 
+  it("gives Claude and Pi subagents the imported claude.ai connector through mcp_search and mcp_call", async () => {
+    const connector = { name: "claude-ai-linear", url: "https://mcp.linear.app/mcp", headers: {} }
+    const calls: string[] = []
+    const factory: McpToolClientFactory = (requested) => requested === connector
+      ? Effect.succeed({
+          listTools: () => Effect.succeed({ tools: [{ name: "lookup", description: "Look something up", inputSchema: { type: "object", properties: {} } }] }),
+          callTool: (name) => Effect.sync(() => { calls.push(name); return { content: [{ type: "text", text: "found" }] } }),
+          close: Effect.void
+        })
+      : Effect.die("unexpected server")
+    const registry = new ToolRegistry()
+    registerProgressiveMcpTools(registry, [{ server: connector, risk: "network" }], factory)
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    const capabilities = await register(broker, registry)
+
+    // Both the worker (Claude/Pi child) and the read-only reviewer see the connector's relay tools.
+    for (const agent of ["worker", "reviewer"]) {
+      expect(capabilityFor(capabilities, agent).tools.map(({ id }) => id)).toEqual(["mcp_search", "mcp_call", "supervisor_state"])
+    }
+    const listed = await fetch(capabilityFor(capabilities, "worker").endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version: 1, token: capabilityFor(capabilities, "worker").token, parentRuntimeSessionId: "parent", callId: "search", toolId: "mcp_search", arguments: { query: "", server: "claude-ai-linear" } })
+    })
+    await expect(listed.json()).resolves.toMatchObject({ status: "success", value: { matches: [{ server: "claude-ai-linear", tool: "lookup" }] } })
+    const invoked = await fetch(capabilityFor(capabilities, "worker").endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ version: 1, token: capabilityFor(capabilities, "worker").token, parentRuntimeSessionId: "parent", callId: "call", toolId: "mcp_call", arguments: { server: "claude-ai-linear", tool: "lookup", arguments: {} } })
+    })
+    expect((await invoked.json() as { status: string }).status).toBe("success")
+    expect(calls).toEqual(["lookup"])
+  })
 })
