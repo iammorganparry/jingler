@@ -1,6 +1,6 @@
 import { RoutinesSettings } from "./routines-settings.js"
 import { sessionArchiveMachine } from "./session-archive-machine.js"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMachine } from "@xstate/react";
 import {
   useMutation,
@@ -56,6 +56,7 @@ import {
   LoadingScreen,
   SignInDialog,
   SetupScreen,
+  AddProjectDialog,
   ToastRegion,
   toastMachine,
     JinglerApp,
@@ -2409,6 +2410,8 @@ function renderAppSetup(
     state.matches({ setup: { resources: "detecting" } }) ||
     state.matches({ setup: { resources: "importing" } });
   return (
+    <SetupWithCloneDialog onCloned={() => send({ type: "CONTINUE" })}>
+      {(openClone) => (
     <SetupScreen
       step={setupStep}
       github={github.connection}
@@ -2432,11 +2435,17 @@ function renderAppSetup(
       busy={
         state.matches({ setup: { workspace: "choosing" } }) ||
         github.busy ||
+        state.matches({ setup: { workspace: "registering" } }) ||
         providerBusy ||
         resourcesBusy
       }
+      selectedRepoPaths={state.context.selectedRepoPaths}
       onChooseDir={() => send({ type: "CHOOSE" })}
       onContinue={() => send({ type: "CONTINUE" })}
+      onToggleRepo={(path) => send({ type: "TOGGLE_REPO", path })}
+      onToggleAllRepos={() => send({ type: "TOGGLE_ALL_REPOS" })}
+      onAddProjects={() => send({ type: "ADD_PROJECTS" })}
+      onCloneRepository={openClone}
       onConnectGithub={
         github.connection.connected ? github.manage : github.connect
       }
@@ -2491,6 +2500,41 @@ function renderAppSetup(
       onSkipImportSessions={() => send({ type: "SKIP_IMPORT_SESSIONS" })}
       onContinueImportSessions={() => send({ type: "CONTINUE_IMPORT_SESSIONS" })}
     />
+      )}
+    </SetupWithCloneDialog>
+  );
+}
+
+/** Step 1's "Clone a repository" reuses the Add project dialog; a clone registers the project and moves on. */
+function SetupWithCloneDialog({
+  onCloned,
+  children,
+}: {
+  onCloned: () => void;
+  children: (openClone: () => void) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const projects = useProjects();
+  return (
+    <>
+      {children(() => setOpen(true))}
+      <AddProjectDialog
+        open={open}
+        onClose={() => setOpen(false)}
+        browse={projects.browse}
+        browseCloneDestination={projects.browseCloneDestination}
+        listDirectories={projects.listDirectories}
+        listGitHubRepositories={projects.listGitHubRepositories}
+        register={projects.register}
+        createDirectory={projects.createDirectory}
+        clone={projects.clone}
+        cloneFromGitHub={projects.cloneFromGitHub}
+        onAdded={() => {
+          setOpen(false);
+          onCloned();
+        }}
+      />
+    </>
   );
 }
 

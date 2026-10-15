@@ -154,6 +154,10 @@ const props = (
   github,
   onChooseDir: vi.fn(),
   onContinue: vi.fn(),
+  onToggleRepo: vi.fn(),
+  onToggleAllRepos: vi.fn(),
+  onAddProjects: vi.fn(),
+  onCloneRepository: vi.fn(),
   onConnectGithub: vi.fn(),
   onSkipGithub: vi.fn(),
   onConnectClaude: vi.fn(),
@@ -179,6 +183,44 @@ describe("SetupScreen", () => {
     expect(screen.getByText(/permission denied/u)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Choose another folder" }));
     expect(onChooseDir).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the 3-step stepper on step 1 and 2", () => {
+    const { rerender } = render(<SetupScreen {...props()} />);
+    const current = () => screen.getByRole("list", { name: "Progress" }).querySelector("[aria-current=step]")?.textContent;
+    expect(current()).toContain("Projects folder");
+    expect(screen.getByText("Agent")).toBeTruthy();
+    rerender(<SetupScreen {...props({ step: "github" })} />);
+    expect(current()).toContain("GitHub");
+  });
+
+  it("lists repositories with checkboxes and adds exactly the ticked ones", () => {
+    const onToggleRepo = vi.fn();
+    const onAddProjects = vi.fn();
+    const repo = (name: string) => ({ name, path: `/code/${name}`, defaultBranch: "main", currentBranch: "main", remoteUrl: null, githubSlug: null });
+    render(
+      <SetupScreen
+        {...props({
+          reposDir: "/code",
+          repos: [repo("a"), repo("b")],
+          selectedRepoPaths: ["/code/a", "/code/b"],
+          onToggleRepo,
+          onAddProjects,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "a" }));
+    expect(onToggleRepo).toHaveBeenCalledWith("/code/a");
+    fireEvent.click(screen.getByRole("button", { name: /Add 2 projects/u }));
+    expect(onAddProjects).toHaveBeenCalledOnce();
+  });
+
+  it("shows the empty state with Clone a repository", () => {
+    const onCloneRepository = vi.fn();
+    render(<SetupScreen {...props({ reposDir: "~/code", repos: [], onCloneRepository })} />);
+    expect(screen.getByText("No git repositories in ~/code")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clone a repository" }));
+    expect(onCloneRepository).toHaveBeenCalledOnce();
   });
 
   it("does not present a provider harness picker", () => {
