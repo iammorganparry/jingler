@@ -103,6 +103,34 @@ describe("ClaudeAgentRuntime", () => {
       .toEqual(["--effort", "max"])
   })
 
+  // Verified against Claude Code 2.1.286: without --strict-mcp-config the init
+  // event lists the account's claude.ai connectors; with it the list is empty.
+  // Imported connectors therefore reach Claude only through Jingler's relay
+  // (mcp_search / mcp_call), and exactly one --mcp-config is passed so a
+  // connector can never appear twice.
+  it("hides claude.ai connectors and passes only the Jingler relay config", () => {
+    const args = claudeAgentArguments(spec(), "new-session", "/tmp/relay/mcp.json")
+    expect(args).toContain("--strict-mcp-config")
+    expect(args.filter((arg) => arg === "--mcp-config")).toEqual(["--mcp-config"])
+    expect(args[args.indexOf("--mcp-config") + 1]).toBe("/tmp/relay/mcp.json")
+  })
+
+  it("lists only the jingler relay server to the child, not imported servers", async () => {
+    const binary = await executable(`
+import { readFileSync } from "node:fs";
+process.stdin.resume();
+const args = process.argv.slice(2);
+const names = Object.keys(JSON.parse(readFileSync(args[args.indexOf("--mcp-config") + 1], "utf8")).mcpServers);
+console.log(JSON.stringify({type:"stream_event", event:{type:"content_block_delta", delta:{type:"text_delta", text: names.join(",")}}}));
+console.log(JSON.stringify({type:"result",is_error:false,usage:{}}));
+`)
+    const events = [...await Effect.runPromise(
+      makeClaudeAgentRuntime({ binary, createToolRegistry: () => Effect.succeed(new ToolRegistry()) })
+        .run(spec(), context).pipe(Stream.runCollect)
+    )]
+    expect(events).toContainEqual({ _tag: "Assistant", text: "jingler" })
+  })
+
   it("passes Jingler rules and the actual active tool catalog on every turn", async () => {
     const binary = await executable(`
 process.stdin.resume();

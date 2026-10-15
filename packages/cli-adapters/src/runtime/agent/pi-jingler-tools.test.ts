@@ -163,6 +163,21 @@ describe("Jingler target-owned tools", () => {
     expect(listed).toEqual(["jingler-browser"])
   })
 
+  it("offers an imported claude.ai connector once, behind mcp_search", async () => {
+    const connector = { name: "claude-ai-linear", url: "https://mcp.linear.app/mcp", headers: {} }
+    const registry = await Effect.runPromise(createJinglerTools({
+      context: runtimeContext(),
+      cwd: "/workspace",
+      mcp: { configured: [connector] },
+      mcpClientFactory: () => Effect.die("must not dial before mcp_search")
+    }))
+    const capabilities = registry.capabilitiesFor("conversation", "auto")
+    expect(capabilities.filter(({ id }) => id === "mcp_search")).toHaveLength(1)
+    expect(capabilities.find(({ id }) => id === "mcp_search")?.description)
+      .toContain("claude-ai-linear")
+    expect(capabilities.some(({ id }) => id.startsWith("mcp__claude-ai-linear"))).toBe(false)
+  })
+
   it("treats a null browser lease as detached", async () => {
     const askQuestion = vi.fn(() => Effect.succeed([]))
     const registry = await Effect.runPromise(createJinglerTools({
