@@ -18,11 +18,11 @@ describe("asset viewer states", () => {
   })
 
   it.each([
-    ["too large", <AssetTooLarge path="huge.log" size={44_123_456} cap={5 * 1024 * 1024} onReveal={() => {}} />, "File too large to preview"],
-    ["unsupported", <AssetUnsupported path="archive.zip" onReveal={() => {}} />, "No preview available"],
-    ["binary", <AssetBinary onReveal={() => {}} />, "Binary file"]
+    ["too large", () => <AssetTooLarge path="huge.log" size={44_123_456} cap={5 * 1024 * 1024} onReveal={() => {}} />, "File too large to preview"],
+    ["unsupported", () => <AssetUnsupported path="archive.zip" onReveal={() => {}} />, "No preview available"],
+    ["binary", () => <AssetBinary onReveal={() => {}} />, "Binary file"]
   ])("offers Open externally on the %s state", (_name, node, title) => {
-    render(node)
+    render(node())
     expect(screen.getByText(title)).toBeTruthy()
     expect(screen.getByRole("button", { name: "Open externally" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()

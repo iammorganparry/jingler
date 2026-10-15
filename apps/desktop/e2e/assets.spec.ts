@@ -498,4 +498,6 @@ test("edits UTF-8 files with unknown extensions and refuses binary data", async 
   const binaryBody = fileBody(window, "archive.bin")
   await expect(binaryBody.getByText("Binary file", { exact: true })).toBeVisible({ timeout: 15_000 })
   await expect(binaryBody.getByRole("button", { name: "Save", exact: true })).toHaveCount(0)
+  await expect(binaryBody.getByRole("button", { name: "Open externally", exact: true })).toBeVisible()
+  await expect(binaryBody.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0)
 })
