@@ -1700,6 +1700,15 @@ function AuthedApp({
             agentsSettings.snapshot.matches("importing") ||
             agentsSettings.snapshot.matches("mutating"),
           reviewing: agentsSettings.snapshot.matches("reviewing"),
+          query: agentsSettings.snapshot.context.query,
+          kind: agentsSettings.snapshot.context.kind,
+          source: agentsSettings.snapshot.context.source,
+          onQueryChange: (query) =>
+            agentsSettings.send({ type: "SET_QUERY", query }),
+          onKindChange: (kind) =>
+            agentsSettings.send({ type: "SET_KIND", kind }),
+          onSourceChange: (source) =>
+            agentsSettings.send({ type: "SET_SOURCE", source }),
           error: agentsSettings.snapshot.context.error,
           onDetect: () => agentsSettings.send({ type: "DETECT" }),
           onSetDelegationEnabled: saveSubagentDelegationEnabled,

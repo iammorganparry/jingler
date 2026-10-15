@@ -9,6 +9,7 @@ import { useMachine } from "@xstate/react"
 import { useState, type ReactNode } from "react"
 import { JinglerApp } from "../../app/jingler-app.js"
 import { ConversationView } from "../../app/conversation-view.js"
+import type { ResourceKindFilter, ResourceSourceFilter } from "../../composites/agents-resource-list.js"
 import { RuntimeRecoveryCard } from "../../composites/runtime-recovery-card.js"
 import {
   SettingsView,
@@ -100,6 +101,9 @@ const useAgentSettings = (
   reviewing = false
 ): NonNullable<SettingsViewProps["agents"]> => {
   const [resources, setResources] = useState<ReadonlyArray<ManagedResource>>(FLOW_RESOURCES)
+  const [query, onQueryChange] = useState("")
+  const [kind, onKindChange] = useState<ResourceKindFilter>("all")
+  const [source, onSourceChange] = useState<ResourceSourceFilter>("all")
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<ReadonlySet<string>>(
     () => new Set(FLOW_RESOURCE_DETECTION.candidates.map(({ id }) => id))
   )
@@ -113,6 +117,12 @@ const useAgentSettings = (
     selectedCandidateIds,
     loading: false,
     reviewing,
+    query,
+    kind,
+    source,
+    onQueryChange,
+    onKindChange,
+    onSourceChange,
     onDetect: noop,
     onSetDelegationEnabled: noop,
     onSetModel: noop,

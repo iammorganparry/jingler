@@ -67,4 +67,23 @@ describe("agents settings machine", () => {
     await waitFor(actor, (snapshot) => snapshot.matches("ready"))
     expect(api.setEnabled).toHaveBeenCalledWith({ id: resource.id }, false)
   })
+
+  it("keeps search, kind, and source filters in context", async () => {
+    const api = {
+      list: vi.fn(async () => [resource]),
+      detect: vi.fn(),
+      importFiles: vi.fn(),
+      setEnabled: vi.fn(),
+      remove: vi.fn(),
+      reveal: vi.fn(),
+      watch: vi.fn(() => () => undefined)
+    }
+    const actor = createActor(createAgentsSettingsMachine(api as never)).start()
+    await waitFor(actor, (snapshot) => snapshot.matches("ready"))
+    expect(actor.getSnapshot().context).toMatchObject({ query: "", kind: "all", source: "all" })
+    actor.send({ type: "SET_QUERY", query: "rev" })
+    actor.send({ type: "SET_KIND", kind: "skill" })
+    actor.send({ type: "SET_SOURCE", source: "claude" })
+    expect(actor.getSnapshot().context).toMatchObject({ query: "rev", kind: "skill", source: "claude" })
+  })
 })

@@ -10,10 +10,15 @@ import {
   type JinglerSubagentName,
   type SubagentProviderModelAssignments
 } from "@jingler/core"
-import { Boxes, Check, FolderOpen, RefreshCw, Trash2 } from "lucide-react"
+import { Boxes, Check, RefreshCw } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Callout } from "../components/callout.js"
 import { Toggle } from "../components/toggle.js"
+import {
+  AgentsResourceList,
+  type ResourceKindFilter,
+  type ResourceSourceFilter
+} from "./agents-resource-list.js"
 
 export interface AgentsSettingsProps {
   readonly resources: ReadonlyArray<ManagedResource>
@@ -24,6 +29,9 @@ export interface AgentsSettingsProps {
   readonly selectedCandidateIds: ReadonlySet<string>
   readonly loading: boolean
   readonly reviewing: boolean
+  readonly query: string
+  readonly kind: ResourceKindFilter
+  readonly source: ResourceSourceFilter
   readonly error?: string | null
   readonly onDetect: () => void
   readonly onSetDelegationEnabled: (enabled: boolean) => void
@@ -39,14 +47,10 @@ export interface AgentsSettingsProps {
   readonly onReveal: (selector: ManagedResourceSelector) => void
   readonly onRemove: (selector: ManagedResourceSelector) => void
   readonly onRetry: () => void
+  readonly onQueryChange: (query: string) => void
+  readonly onKindChange: (kind: ResourceKindFilter) => void
+  readonly onSourceChange: (source: ResourceSourceFilter) => void
 }
-
-const scopeLabel = (resource: ManagedResource): string =>
-  resource.scope.kind === "device-local"
-    ? `Device · ${resource.scope.targetId}`
-    : resource.scope.allowedTargets.length === 0
-      ? "Portable · all targets"
-      : `Portable · ${resource.scope.allowedTargets.join(", ")}`
 
 const agentLabel = (agent: JinglerSubagentName): string =>
   agent[0]!.toUpperCase() + agent.slice(1)
@@ -200,42 +204,7 @@ export function AgentsSettings(props: AgentsSettingsProps) {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-lg border border-line bg-panel">
-          {props.loading && props.resources.length === 0 ? (
-            <p className="px-4 py-10 text-center text-[12px] text-muted-foreground">Loading managed resources…</p>
-          ) : props.resources.length === 0 ? (
-            <p className="px-4 py-10 text-center text-[12px] text-muted-foreground">No managed resources imported.</p>
-          ) : props.resources.map((resource) => (
-            <div
-              key={`${resource.kind}:${resource.id}`}
-              className="grid grid-cols-[36px_minmax(0,1fr)_44px_88px_88px] items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0"
-            >
-              <span className="flex size-9 items-center justify-center rounded-md bg-sunken text-blue"><Boxes size={17} /></span>
-              <div className="min-w-0 flex-1">
-                <strong className="block truncate text-[12px] text-text-bright">{resource.name}</strong>
-                <span className="text-[10px] text-muted-foreground">{resource.kind} · {scopeLabel(resource)} · {resource.trust}</span>
-              </div>
-              <span className="flex justify-center">
-                <Toggle
-                  checked={resource.enabled}
-                  onCheckedChange={(enabled) => props.onSetEnabled({ id: resource.id }, enabled)}
-                  aria-label={`${resource.enabled ? "Disable" : "Enable"} ${resource.name}`}
-                  disabled={props.loading}
-                />
-              </span>
-              <span className="flex justify-end">
-                <Button aria-label={`Reveal ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onReveal({ id: resource.id })} disabled={props.loading}>
-                  <FolderOpen size={13} /> Reveal
-                </Button>
-              </span>
-              <span className="flex justify-end">
-                <Button aria-label={`Remove ${resource.name}`} variant="ghost" size="sm" onClick={() => props.onRemove({ id: resource.id })} disabled={props.loading}>
-                  <Trash2 size={13} /> Remove
-                </Button>
-              </span>
-            </div>
-          ))}
-        </div>
+        <AgentsResourceList {...props} />
       </div>
     </section>
   )
