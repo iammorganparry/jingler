@@ -182,7 +182,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | SessionRow | `composites/session-row.tsx` | Sidebar session row. | — | no | #381 (2.16) |
 | SettingsDialog | `composites/settings-dialog.tsx` | Settings dialog shell. | — | no | — |
 | SettingsView, DevicesSection | `composites/settings-view.tsx` | Full settings page; DevicesSection. | key, label, icon, ready | yes | — |
-| SignInDialog | `composites/sign-in-dialog.tsx` | Optional sign-in dialog from the sidebar footer. | open, onOpenChange | no | — |
+| SignInDialog | `composites/sign-in-dialog.tsx` | Optional sign-in dialog from the sidebar footer: a standard dialog panel hosting the flattened auth card, every LoginState. | open, onOpenChange | yes | #517 (13.7) |
 | SlashCommandRow | `composites/slash-command-row.tsx` | Row in the slash-command palette. | — | yes | — |
 | StreamingText | `composites/streaming-text.tsx` | Markdown-preserving streaming text. | — | yes | — |
 | ThemesSettings | `composites/themes-settings.tsx` | Settings › Themes. | themes, skipped, activeId, onSelect, onDuplicate, onDelete | no | — |

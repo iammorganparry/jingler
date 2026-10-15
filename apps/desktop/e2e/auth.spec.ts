@@ -195,3 +195,14 @@ test("Resend sends the magic link again and locks for the cooldown", async ({ la
   await expect(window.getByRole("button", { name: "Sent again ✓" })).toBeDisabled()
   await expect.poll(() => authServer.sentEmails).toEqual(["founder@example.com", "founder@example.com"])
 })
+
+test("the sign-in dialog is a standard dialog panel that closes on success", async ({ launchApp }) => {
+  const { window, completeDeepLinkSignIn } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  const dialog = window.getByRole("dialog")
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole("heading", { name: "Sign in to Jingler" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /continue with github/i })).toBeVisible()
+  await completeDeepLinkSignIn()
+  await expect(dialog).toHaveCount(0)
+})
