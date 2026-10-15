@@ -221,7 +221,7 @@ test("selection comments reach the agent and the revision diff shows what change
   await expect(changes).toHaveCount(0)
 
   await approveReview(launched)
-  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
+  await launched.window.getByRole("button", { name: /\[\[plan\]\] replace auth$/ }).first().click()
   await expect(launched.window.getByText("Implemented and verified the approved plan.").first())
     .toBeVisible({ timeout: 30_000 })
 })
