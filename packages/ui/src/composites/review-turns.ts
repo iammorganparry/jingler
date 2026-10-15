@@ -42,6 +42,15 @@ export interface AgentEdit {
   readonly preview: string | null
 }
 
+/** True when this turn already reported the same previewed change; records it otherwise. */
+const repeated = (seen: Set<string>, turnId: string, preview: string | null | undefined): boolean => {
+  if (preview == null) return false
+  const key = `${turnId}\0${preview}`
+  if (seen.has(key)) return true
+  seen.add(key)
+  return false
+}
+
 /** Every change the agent's tools made to `path`, oldest first. */
 export const agentEditsOf = (messages: readonly Message[], path: string): readonly AgentEdit[] => {
   let number = 0
@@ -55,11 +64,7 @@ export const agentEditsOf = (messages: readonly Message[], path: string): readon
         ? []
         : (part.tool.fileChanges?.changes ?? []).flatMap((change, index) => {
             if (change.path !== path) return []
-            if (change.preview != null) {
-              const key = `${message.id}\0${change.preview}`
-              if (seen.has(key)) return []
-              seen.add(key)
-            }
+            if (repeated(seen, message.id, change.preview)) return []
             return [{ id: `${part.tool.id}:${index}`, turnId: message.id, label: `Agent edit · Turn ${number}`, preview: change.preview }]
           })
     )
