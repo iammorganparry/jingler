@@ -76,6 +76,8 @@ import { AskPill } from "../components/ask-pill.js"
 import { ChatDrawer } from "../app/chat-drawer.js"
 import type { TabLauncherItem } from "../app/chat-tab-bar.js"
 import { File, MessageSquarePlus, MessagesSquare } from "lucide-react"
+import { DiscardCommentsDialog } from "../composites/discard-comments-dialog.js"
+import { planDraftCount, planDraftKey } from "../composites/plan-comment-drafts.js"
 import { LinkedIssueSelector, type LinkedIssueSelectorItem } from "../composites/linked-issue-selector.js"
 
 const issueMenuValue = (issue: IssueReference): string =>
@@ -827,6 +829,18 @@ function SessionPaneBody(props: SessionPaneProps) {
     [active.activeChatId, active.id, layout, props.isBrowserActive, props.onCloseUntouchedChat, props.onRequestCloseFile, props.onToggleBrowser, sessionId, syncChat, update]
   )
 
+  const [pendingPlanClose, setPendingPlanClose] = useState<{ groupId: string; surface: SessionSurface; count: number } | null>(null)
+  const requestCloseTab = useCallback(
+    (groupId: string, surface: SessionSurface) => {
+      const count = surface.kind === "view" && surface.id === BUILTIN_TAB.plan
+        ? planDraftCount(planDraftKey(active.id, surface.chatId ?? active.activeChatId))
+        : 0
+      if (count > 0) setPendingPlanClose({ groupId, surface, count })
+      else closeTabIn(groupId, surface)
+    },
+    [active.activeChatId, active.id, closeTabIn]
+  )
+
   const launcherTabs = tabs.some((contribution) => contribution.id === BUILTIN_TAB.plan)
     ? tabs
     : [...tabs, contributions.find((contribution) => contribution.id === BUILTIN_TAB.plan)!]
@@ -899,11 +913,11 @@ function SessionPaneBody(props: SessionPaneProps) {
       sessionId,
       update,
       syncChat,
-      closeTabIn
+      requestCloseTab
     )
     window.addEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
     return () => window.removeEventListener(SESSION_SURFACE_COMMAND_EVENT, onCommand)
-  }, [closeTabIn, paneFocused, sessionId, syncChat, update])
+  }, [requestCloseTab, paneFocused, sessionId, syncChat, update])
 
   const surfaceInGroup = (groupId: string): SessionSurface | undefined => {
     const group = groupsOf((editorLayoutOf(sessionId) ?? layout).root).find((g) => g.id === groupId)
@@ -1001,7 +1015,7 @@ function SessionPaneBody(props: SessionPaneProps) {
             if (surface.kind === "chat") props.onFocusChat?.(sessionId, surface.id)
             else syncChat(surface)
           }}
-          onClose={closeTabIn}
+          onClose={requestCloseTab}
           onDrop={(drag, groupId, edge, copy) => {
             update((current) => dropTab(current, drag, groupId, edge, copy, mainChatId))
             syncChat(drag.surface)
@@ -1047,6 +1061,12 @@ function SessionPaneBody(props: SessionPaneProps) {
         )}
         {props.renderReviewTray?.(active, { onConnectGithub: connectGithub })}
       </div>
+      <DiscardCommentsDialog
+        open={pendingPlanClose !== null}
+        count={pendingPlanClose?.count ?? 0}
+        onOpenChange={(open) => { if (!open) setPendingPlanClose(null) }}
+        onDiscard={() => { if (pendingPlanClose) closeTabIn(pendingPlanClose.groupId, pendingPlanClose.surface) }}
+      />
     </>
   )
 }

@@ -218,6 +218,26 @@ test("selection comments reach the agent and the revision diff shows what change
     .toBeVisible({ timeout: 30_000 })
 })
 
+test("approving with an unsaved comment asks before discarding it", async ({ launchApp }) => {
+  const launched = await launchPlanMode(launchApp)
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+
+  const intent = review(launched)
+    .getByRole("region", { name: "Implement auth", exact: true })
+    .getByText("Auth tokens use the new format through the existing entry point.", { exact: true })
+  await intent.click({ clickCount: 3 })
+  await review(launched).getByRole("button", { name: "Add comment" }).click()
+  await review(launched).getByRole("textbox", { name: "Comment" }).fill("Unsaved thought.")
+  await review(launched).getByRole("button", { name: "Approve", exact: true }).click()
+
+  const dialog = launched.window.getByRole("dialog", { name: "Discard 1 unsaved comment?" })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole("button", { name: "Keep editing" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(review(launched).getByRole("textbox", { name: "Comment" })).toHaveValue("Unsaved thought.")
+})
+
 test("plan review reads as a document: real heading scale, inline detail, file rows open Files", async ({ launchApp }) => {
   const launched = await launchPlanMode(launchApp)
   await startPlanReview(launched)

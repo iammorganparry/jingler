@@ -18,6 +18,8 @@ export interface PlanCommentLayerProps {
   readonly content: RefObject<HTMLElement | null>
   readonly comments: ReadonlyArray<PlanAnnotation>
   readonly editable: boolean
+  readonly replyDrafts: Readonly<Record<string, string>>
+  readonly onReplyDraftChange: (id: string, text: string) => void
   readonly onReply: (id: string, body: string) => void
   readonly onResolve: (id: string, resolved: boolean) => void
 }
@@ -43,9 +45,8 @@ const highlightFor = (comment: PlanAnnotation, body: HTMLElement, root: HTMLElem
   }]
 }
 
-export function PlanCommentLayer({ container, content, comments, editable, onReply, onResolve }: PlanCommentLayerProps) {
+export function PlanCommentLayer({ container, content, comments, editable, replyDrafts, onReplyDraftChange, onReply, onResolve }: PlanCommentLayerProps) {
   const [highlights, setHighlights] = useState<ReadonlyArray<Highlight>>([])
-  const [replies, setReplies] = useState<Readonly<Record<string, string>>>({})
 
   useEffect(() => {
     const root = container.current
@@ -104,14 +105,14 @@ export function PlanCommentLayer({ container, content, comments, editable, onRep
               <div className="mt-2 flex gap-2">
                 <input
                   aria-label={`Reply to ${comment.id}`}
-                  value={replies[comment.id] ?? ""}
+                  value={replyDrafts[comment.id] ?? ""}
                   placeholder="Reply…"
-                  onChange={(event) => setReplies((current) => ({ ...current, [comment.id]: event.target.value }))}
+                  onChange={(event) => onReplyDraftChange(comment.id, event.target.value)}
                   className="min-w-0 flex-1 rounded border border-line bg-editor px-2 py-1 outline-none"
                 />
-                <Button size="sm" disabled={(replies[comment.id] ?? "").trim().length === 0} onClick={() => {
-                  onReply(comment.id, replies[comment.id] ?? "")
-                  setReplies((current) => ({ ...current, [comment.id]: "" }))
+                <Button size="sm" disabled={(replyDrafts[comment.id] ?? "").trim().length === 0} onClick={() => {
+                  onReply(comment.id, replyDrafts[comment.id] ?? "")
+                  onReplyDraftChange(comment.id, "")
                 }}>Reply</Button>
               </div>
             )}
