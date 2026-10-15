@@ -489,6 +489,34 @@ test("main-chat feedback revises a pending Plannotator review", async ({ launchA
   ).toContain("keeping the existing token format")
 })
 
+test("a plan revised while open shows the stale banner and Reload fetches the new version", async ({ launchApp }) => {
+  const launched = await launchApp({
+    configured: true,
+    withRepo: true,
+    piFixture: PI_FIXTURE,
+    sessions
+  })
+  await expect(appShell(launched.window)).toBeVisible()
+  await startPlanReview(launched)
+  await openPlanTab(launched)
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeEnabled()
+
+  // Feedback from the main chat replaces the review the reviewer has open.
+  await launched.window.getByRole("tab", { name: "[[plan]] replace auth", exact: true }).click()
+  const composer = launched.window.getByPlaceholder("Queue a message while the agent works…")
+  await composer.fill("Keep the existing token format")
+  await composer.press("Enter")
+  await expect.poll(() => planFile(launched), { timeout: 30_000 }).toContain("keeping the existing token format")
+
+  await openPlanTab(launched)
+  await expect(review(launched).getByText("Plan changed since you opened it")).toBeVisible({ timeout: 30_000 })
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeDisabled()
+  await review(launched).getByRole("button", { name: "Reload" }).click()
+  await expect(review(launched).getByText("Plan changed since you opened it")).toHaveCount(0)
+  await expect(review(launched).getByText("keeping the existing token format").first()).toBeVisible()
+  await expect(review(launched).getByRole("button", { name: "Approve", exact: true })).toBeEnabled()
+})
+
 test("a pending Plannotator review reopens natively after an Electron restart", async ({
   launchApp
 }) => {
