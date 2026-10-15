@@ -7,6 +7,8 @@ import { PhaseNode } from "./phase-node.js"
 import { AgentCard } from "./agent-card.js"
 import { ApprovalGate } from "./approval-gate.js"
 import { SlashCommandRow } from "./slash-command-row.js"
+import { CommandMenu } from "./command-menu.js"
+import { MentionMenu } from "./mention-menu.js"
 import { Composer } from "./composer.js"
 import { Callout } from "../components/callout.js"
 import { TerminalDock, type DockSide, type TerminalTab } from "../app/terminal-panel.js"
@@ -85,6 +87,27 @@ export const Rows: Story = {
   render: () => (
     <div className="flex w-80 flex-col gap-2">
       <SlashCommandRow name="review" description="Review the current diff" badge="built-in" active />
+    </div>
+  )
+}
+
+const MENU_SKILLS = [
+  { name: "/review", description: "Review the current diff", source: "command" as const },
+  { name: "/deploy", description: "Ship the current branch to production", source: "skill" as const }
+]
+const MENU_FILES = [
+  "src/components/composer/autocomplete/a-very-long-directory-name/another-nested-directory/mention-menu.tsx",
+  "src/index.ts",
+  "README.md"
+]
+
+/** Compare with Paper board 22a (mention menu). */
+export const AutocompleteMenus: Story = {
+  render: () => (
+    <div className="flex w-[456px] flex-col gap-4">
+      <CommandMenu skills={MENU_SKILLS} activeIndex={0} query="e" onSelect={() => {}} />
+      <MentionMenu files={MENU_FILES} activeIndex={0} query="m" onSelect={() => {}} />
+      <MentionMenu files={[]} activeIndex={0} query="zzz" onSelect={() => {}} />
     </div>
   )
 }
