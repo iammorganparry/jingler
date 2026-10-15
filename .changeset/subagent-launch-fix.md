@@ -2,4 +2,4 @@
 "@jingler/desktop": patch
 ---
 
-Subagents on the Claude CLI route no longer fail at startup with `model_verification_failed`: agent profiles now always carry the concrete Claude model id.
+Fix subagents failing to start: children on the Claude CLI route no longer fail with `model_verification_failed`, and foreground `delegate` children now get their tools (`command_execute`, file tools, and so on).
