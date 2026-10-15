@@ -95,7 +95,7 @@ describe("agentEditAnnotations", () => {
     ]
     expect(agentEditAnnotations(patch, "src/config.ts", edits)).toEqual([
       { kind: "agent-edit", id: "agent-edit:t1:0", path: "src/config.ts", side: "new", lineNumber: 3, label: "Agent edit · Turn 1", turnId: "a1" },
-      { kind: "agent-edit", id: "agent-edit:t3:0", path: "src/config.ts", side: "new", lineNumber: 41, label: "Agent edit · Turn 3", turnId: "a3" }
+      { kind: "agent-edit", id: "agent-edit:t3:0", path: "src/config.ts", side: "new", lineNumber: 42, label: "Agent edit · Turn 3", turnId: "a3" }
     ])
   })
 })
