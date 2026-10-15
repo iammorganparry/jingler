@@ -29,7 +29,10 @@ const chipItem = (node: SubagentFleetNode): SubagentChipItem => ({
   status: chipStatus(node.status),
   parentId: node.parentId,
   startedAt: node.startedAt,
-  ...(node.completedAt === null ? {} : { endedAt: node.completedAt })
+  ...(node.completedAt === null ? {} : { endedAt: node.completedAt }),
+  branch: node.workspace?.branch ?? null,
+  ...(node.workspace?.diff ? { diff: node.workspace.diff } : {}),
+  prNumber: node.prNumber
 })
 
 /** The active chat's children as chip items, plus the open callback shared by every entry point. */

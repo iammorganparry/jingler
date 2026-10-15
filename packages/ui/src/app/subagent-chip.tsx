@@ -4,6 +4,7 @@ import { ChevronDown, CircleAlert } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
+import { DiffStat } from "../components/diff-stat.js"
 import { PeerAgentRow } from "./agent-roster.js"
 import { StatusDot } from "../components/status-dot.js"
 import { buildSubagentTree, type SubagentTreeRow } from "./subagent-tree.js"
@@ -28,6 +29,12 @@ export interface SubagentChipItem {
   readonly startedAt: number
   /** Epoch ms the child finished; elapsed freezes here. */
   readonly endedAt?: number
+  /** Child worktree branch; null = shares the parent checkout; omitted = not reported. */
+  readonly branch?: string | null
+  /** Lines the child changed in its worktree. */
+  readonly diff?: { readonly added: number; readonly removed: number }
+  /** PR the child opened or linked. */
+  readonly prNumber?: number | null
 }
 
 export interface SubagentChipProps {
@@ -70,6 +77,22 @@ type ChipRow = SubagentTreeRow<SubagentChipItem>
 /** Pixels of indent per tree level. */
 const INDENT_PX = 14
 
+/** Branch (mono, truncates first), `+N −N` and PR number; the stats and PR never shrink. */
+function RowWorkspace({ item }: { item: SubagentChipItem }) {
+  if (item.branch === undefined) return null
+  return (
+    <>
+      {item.branch === null ? (
+        <span data-testid="subagent-chip-branch" className="min-w-0 max-w-[110px] shrink truncate text-[11px] text-dim">Shared checkout</span>
+      ) : (
+        <span data-testid="subagent-chip-branch" title={item.branch} className="min-w-0 max-w-[110px] shrink truncate font-mono text-[11px] text-dim">{item.branch}</span>
+      )}
+      {item.diff && <DiffStat added={item.diff.added} removed={item.diff.removed} className="flex-none" />}
+      {item.prNumber != null && <Badge tone="neutral" size="xs" className="flex-none">#{item.prNumber}</Badge>}
+    </>
+  )
+}
+
 function Row({ row, now, onOpen }: { row: ChipRow; now: number; onOpen: (id: string) => void }) {
   const { item, depth } = row
   const failed = item.status === "failed"
@@ -93,6 +116,7 @@ function Row({ row, now, onOpen }: { row: ChipRow; now: number; onOpen: (id: str
         <span className={failed ? "flex-none text-state-failed" : "flex-none text-dim"}>{STATUS_WORD[item.status]}</span>
         <span className="flex-none font-medium text-text-bright">{item.agent}</span>
         <span className="min-w-0 flex-1 truncate text-text-body">{item.task}</span>
+        <RowWorkspace item={item} />
         <span className="flex-none tabular-nums text-dim">{formatElapsed((item.endedAt ?? now) - item.startedAt)}</span>
       </DropdownMenu.Item>
       {failed && (

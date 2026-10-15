@@ -106,6 +106,7 @@ export interface FleetAgentViewProps {
   readonly error?: string | null
   readonly controlOutcome?: SubagentFleetControlOutcome | null
   readonly onOpenArtifact?: (path: string) => void
+  readonly onOpenPullRequest?: (prNumber: number) => void
   readonly onRetry?: () => void
 }
 
@@ -118,6 +119,7 @@ export function FleetAgentView({
   error = null,
   controlOutcome = null,
   onOpenArtifact,
+  onOpenPullRequest,
   onRetry
 }: FleetAgentViewProps) {
          function renderAgentHeader() {
@@ -178,7 +180,7 @@ export function FleetAgentView({
   return (
     <div data-testid="fleet-agent-transcript" className="flex min-h-0 flex-1 flex-col bg-editor">
       {renderAgentHeader()}
-      {node && <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} />}
+      {node && <SubagentMetaStrip node={node} providerId={providerId} onOpenArtifact={onOpenArtifact} onOpenPullRequest={onOpenPullRequest} />}
       {controlOutcome && (
         <div
           data-testid="subagent-control-outcome"

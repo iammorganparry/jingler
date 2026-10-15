@@ -83,7 +83,9 @@ export const SubagentFleetWorkspace = Schema.Struct({
   path: Schema.String,
   branch: Schema.String,
   /** Branch the worktree was created from, when the runtime knows it. */
-  baseRef: Schema.NullOr(Schema.String)
+  baseRef: Schema.NullOr(Schema.String),
+  /** Lines the child changed in its worktree, when the runtime reports them. */
+  diff: Schema.optional(Schema.Struct({ added: Schema.Number, removed: Schema.Number }))
 })
 export type SubagentFleetWorkspace = Schema.Schema.Type<typeof SubagentFleetWorkspace>
 

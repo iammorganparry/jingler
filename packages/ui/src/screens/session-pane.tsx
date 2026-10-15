@@ -100,6 +100,8 @@ export interface ConversationPaneCtx {
   onSelectBrowser?: () => void
   /** Present canonical worktree changes for mutation recovery inspection. */
   onSelectChanges: () => void
+  /** Open the session's pull request view (a subagent's PR chip). */
+  onOpenPullRequest: () => void
   /** Open provider settings for authentication or certification recovery. */
   onOpenProviderSettings: () => void
   /** Present the first renderable streamed draft using this pane's width. */
@@ -733,6 +735,7 @@ function SessionPaneBody(props: SessionPaneProps) {
 
           onSelectBrowser: () => ctx.onSelectTab(BUILTIN_TAB.browser),
           onSelectChanges: () => ctx.onSelectTab(BUILTIN_TAB.changes),
+          onOpenPullRequest: () => ctx.onSelectTab(BUILTIN_TAB.checks),
           onOpenProviderSettings: props.onOpenProviderSettings ?? connectGithub,
           onPlanDraftAvailable: () => presentPlanDraftFor(session.activeChatId),
           onPlanDraftUnavailable: () => dismissPlanDraftFor(session.activeChatId),
