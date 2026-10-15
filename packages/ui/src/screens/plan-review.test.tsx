@@ -111,6 +111,9 @@ const addComment = (quote: string, body: string) => {
   fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
 }
 
+/** Pins the first comment thread open by clicking its floating avatar. */
+const openThread = async () => fireEvent.click(await screen.findByRole("button", { name: /^Comment by/ }))
+
 describe("PlanReview", () => {
   it("renders each stage as a document section with technical detail inline", async () => {
     const open = vi.fn()
@@ -138,11 +141,12 @@ describe("PlanReview", () => {
     expect(open).toHaveBeenCalledWith("src/auth.ts")
   })
 
-  it("adds a comment to a whole stage", () => {
+  it("adds a comment to a whole stage", async () => {
     renderReview()
     fireEvent.click(screen.getByRole("button", { name: "Comment on Implement auth" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep this stage small." } })
     fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+    await openThread()
     expect(screen.getByText("Keep this stage small.")).toBeTruthy()
     expect(screen.getByRole("complementary", { name: "Plan comments" }).textContent).toContain("implement-auth")
   })
@@ -173,6 +177,7 @@ describe("PlanReview", () => {
     renderReview({ onApprove, onRevise })
 
     addComment("Replace the auth flow.", "Resolved note.")
+    await openThread()
     fireEvent.click(screen.getByRole("button", { name: "Resolve" }))
     fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
     await waitFor(() => expect(onRevise).toHaveBeenCalledWith(undefined))
@@ -203,6 +208,7 @@ describe("PlanReview", () => {
       const onRevise = vi.fn()
       renderReview({ onRevise })
       addComment("Replace the auth flow.", "Saved note.")
+      await openThread()
       fireEvent.change(screen.getByRole("textbox", { name: REPLY_TEXTBOX }), { target: { value: "Unsent reply" } })
       startDraft("Half-written note.")
       fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
@@ -217,6 +223,7 @@ describe("PlanReview", () => {
       const onApprove = vi.fn()
       renderReview({ onApprove })
       addComment("Replace the auth flow.", "Saved note.")
+      await openThread()
       fireEvent.click(screen.getByRole("button", { name: "Approve" }))
 
       await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
@@ -258,6 +265,7 @@ describe("PlanReview", () => {
   it("persists replies and resolution across remounts", async () => {
     const first = renderReview()
     addComment("Returning users can authenticate with the replacement token format.", "Keep this behavior.")
+    await openThread()
     const reply = screen.getByRole("textbox", { name: REPLY_TEXTBOX })
     fireEvent.change(reply, { target: { value: "Agreed." } })
     fireEvent.click(screen.getByRole("button", { name: "Reply" }))
@@ -266,6 +274,7 @@ describe("PlanReview", () => {
     first.unmount()
 
     renderReview()
+    await openThread()
     expect(screen.getByText("Keep this behavior.")).toBeTruthy()
     expect(screen.getByText("Agreed.")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Reopen" })).toBeTruthy()
@@ -302,7 +311,26 @@ describe("PlanReview", () => {
       messages: [{ id: "m", body: "Old note", authorKind: "user", authorId: "operator", createdAt: "2026-09-29T00:00:00.000Z", mentionedParticipantIds: [], deliveryState: "sent" }]
     }
     renderReview({ document: { ...document, id: "plannotator:revised", revision: 2, plan: { ...document.plan, annotations: [detached] } } })
-    await waitFor(() => expect(screen.getByText("Detached from changed text")).toBeTruthy())
+    await openThread()
+    expect(screen.getByText("Detached from changed text")).toBeTruthy()
+  })
+
+  it("opens a thread on avatar focus, pins it on activate and closes on Escape", async () => {
+    renderReview()
+    addComment("Replace the auth flow.", "Keyboard note.")
+    const avatar = await screen.findByRole("button", { name: "Comment by You" })
+    expect(screen.queryByText("Keyboard note.")).toBeNull()
+
+    fireEvent.focus(avatar)
+    expect(screen.getByText("Keyboard note.")).toBeTruthy()
+    expect(screen.getByText("Keyboard note.").closest("[class*='w-[320px]']")).toBeTruthy()
+
+    fireEvent.click(avatar)
+    fireEvent.blur(avatar)
+    expect(screen.getByText("Keyboard note.")).toBeTruthy()
+
+    fireEvent.keyDown(globalThis.document, { key: "Escape" })
+    expect(screen.queryByText("Keyboard note.")).toBeNull()
   })
 
   it("shows a failed decision and keeps comments for a retry", async () => {
