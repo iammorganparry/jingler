@@ -1177,6 +1177,11 @@ export function Composer(props: ComposerProps) {
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (handleActionsKeyDown(e)) return
+    if (menu && count === 0 && e.key === "Escape") {
+      e.preventDefault()
+      setMenu(null)
+      return
+    }
     if (menu && count > 0) {
       switch (e.key) {
 case "ArrowDown": {

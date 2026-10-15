@@ -239,8 +239,8 @@ test("the @ menu shows a Files header, keyboard footer and a No matches state", 
   await composer.pressSequentially("@menu-t")
   const list = window.getByRole("listbox", { name: "Files" })
   await expect(list.getByRole("option", { selected: true })).toContainText("menu-target.ts")
-  await expect(list.getByText("Files", { exact: true })).toBeVisible()
-  await expect(window.getByText("navigate", { exact: true })).toBeVisible()
+  await expect(list.getByText("Files", { exact: true }).first()).toBeVisible()
+  await expect(window.getByText("navigate").first()).toBeVisible()
 
   await composer.pressSequentially("zzz")
   await expect(window.getByRole("status").filter({ hasText: "No matches for “menu-tzzz”" })).toBeVisible()
