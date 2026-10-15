@@ -15,6 +15,7 @@ import {
 import { testSession as session } from "../test-support.js"
 import { SESSION_SURFACE_COMMAND_EVENT } from "../app/session-surface-layout.js"
 import { editorTabMime } from "../app/editor-groups.js"
+import { planDraftKey, setPlanDraftCount } from "../composites/plan-comment-drafts.js"
 import { resetEditorLayouts } from "../app/editor-layout-machine.js"
 
 beforeEach(() => {
@@ -598,6 +599,48 @@ describe("mount groups", () => {
 
     const focusedGroup = screen.getAllByTestId("editor-group").find((group) => group.dataset.focused)!
     expect(within(focusedGroup).getByRole("tab", { selected: true }).textContent).toContain("Plan")
+  })
+
+  describe("closing a Plan tab with unsaved comments", () => {
+    const renderPlanTab = () => {
+      localStorage.setItem(
+        "sb.session-surfaces.v1:a",
+        JSON.stringify({
+          panes: [
+            { surface: { kind: "chat", id: "c_a_1" }, ratio: 0.5 },
+            { surface: { kind: "view", id: "plan", chatId: "c_a_1" }, ratio: 0.5 }
+          ],
+          focused: 1,
+          openViews: [{ kind: "view", id: "plan", chatId: "c_a_1" }]
+        })
+      )
+      render(<SessionPane session={session({ id: "a" })} planSessions={new Set(["c_a_1"])} />)
+    }
+
+    it("asks first, and Keep editing leaves the tab open", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 2)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      expect(screen.getByText("Discard 2 unsaved comments?")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+      expect(screen.getByRole("button", { name: "Close Plan" })).toBeTruthy()
+    })
+
+    it("Discard closes the tab, and zero drafts close it without asking", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 1)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+      expect(screen.queryByRole("button", { name: "Close Plan" })).toBeNull()
+    })
+
+    it("closes immediately with no drafts", () => {
+      setPlanDraftCount(planDraftKey("a", "c_a_1"), 0)
+      renderPlanTab()
+      fireEvent.click(screen.getByRole("button", { name: "Close Plan" }))
+      expect(screen.queryByText(/unsaved comment/)).toBeNull()
+      expect(screen.queryByRole("button", { name: "Close Plan" })).toBeNull()
+    })
   })
 
   it("hides Plan Review when no embedded review is active", () => {

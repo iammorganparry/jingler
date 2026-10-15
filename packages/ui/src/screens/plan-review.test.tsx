@@ -181,6 +181,49 @@ describe("PlanReview", () => {
     await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
   })
 
+  describe("unsaved comment guard", () => {
+    const startDraft = (body: string) => {
+      fireEvent.click(screen.getByRole("button", { name: "Comment on Implement auth" }))
+      fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: body } })
+    }
+
+    it("asks before deciding while a draft exists, and Keep editing changes nothing", () => {
+      const onApprove = vi.fn()
+      renderReview({ onApprove })
+      startDraft("Half-written note.")
+      fireEvent.click(screen.getByRole("button", { name: "Approve" }))
+
+      expect(screen.getByText("Discard 1 unsaved comment?")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Keep editing" }))
+      expect(onApprove).not.toHaveBeenCalled()
+      expect((screen.getByRole("textbox", { name: "Comment" }) as HTMLTextAreaElement).value).toBe("Half-written note.")
+    })
+
+    it("Discard proceeds with the original action and counts reply drafts", async () => {
+      const onRevise = vi.fn()
+      renderReview({ onRevise })
+      addComment("Replace the auth flow.", "Saved note.")
+      fireEvent.change(screen.getByRole("textbox", { name: REPLY_TEXTBOX }), { target: { value: "Unsent reply" } })
+      startDraft("Half-written note.")
+      fireEvent.click(screen.getByRole("button", { name: "Request changes" }))
+
+      expect(screen.getByText("Discard 2 unsaved comments?")).toBeTruthy()
+      fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+      await waitFor(() => expect(onRevise).toHaveBeenCalledTimes(1))
+      expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
+    })
+
+    it("decides immediately with no drafts", async () => {
+      const onApprove = vi.fn()
+      renderReview({ onApprove })
+      addComment("Replace the auth flow.", "Saved note.")
+      fireEvent.click(screen.getByRole("button", { name: "Approve" }))
+
+      await waitFor(() => expect(onApprove).toHaveBeenCalledTimes(1))
+      expect(screen.queryByText(/unsaved comment/)).toBeNull()
+    })
+  })
+
   it("persists replies and resolution across remounts", async () => {
     const first = renderReview()
     addComment("Returning users can authenticate with the replacement token format.", "Keep this behavior.")
