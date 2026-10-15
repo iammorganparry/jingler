@@ -59,6 +59,7 @@ const READ_TOOL = "workspace_read_file"
 const WRITE_TOOL = "workspace_write"
 const RENAME_TOOL = "workspace_rename"
 const COMMAND_TOOL = "command_execute"
+const SWITCH_CHECKOUT_TOOL = "switch_checkout"
 const SUBAGENT_TOOL = "subagent"
 const SUPERVISOR_REVIEW_TASK = "Review the checkout flow against its acceptance criteria."
 const E2E_CONTEXT_WINDOW = 1_000_000
@@ -994,7 +995,22 @@ function offloadFixtureResponse(context: PiContext) {
   )
 }
 
+// `[[switch-repo=/abs/path]]`: switch to that repo mid-turn, then edit a file there.
+const switchRepoResponse = (context: PiContext): ReturnType<typeof fauxAssistantMessage> | null => {
+  const target = /\[\[switch-repo=([^\]]+)\]\]/u.exec(latestOperatorText(context))?.[1]
+  if (target === undefined) return null
+  if (recentToolResultCount(context, SWITCH_CHECKOUT_TOOL) === 0) {
+    return callTool(SWITCH_CHECKOUT_TOOL, { repoPath: target }, "switch-repo-1")
+  }
+  if (recentToolResultCount(context, WRITE_TOOL) === 0) {
+    return callTool(WRITE_TOOL, { path: "src/other-repo.ts", content: "export const otherRepo = true\n" }, "switch-repo-write-1")
+  }
+  return fauxAssistantMessage("Edited the second repository.")
+}
+
 function scenarioFixtureResponse(context: PiContext) {
+  const switchRepo = switchRepoResponse(context)
+  if (switchRepo !== null) return switchRepo
   const fileBrowser = fileBrowserResponse(context)
   if (fileBrowser !== null) return fileBrowser
   const supervisorSubagent = supervisorSubagentResponse(context)

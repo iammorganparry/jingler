@@ -908,6 +908,13 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     payload: { sessionId: Schema.String }
   }),
 
+  /** Make another attached checkout the session's active one (cwd and scalar mirrors follow it). */
+  Rpc.make("Sessions.switchCheckout", {
+    success: Session,
+    error: GitError,
+    payload: { sessionId: Schema.String, checkoutId: Schema.String }
+  }),
+
   /** Persist which chat is active for the session. */
   Rpc.make("Sessions.selectChat", {
     success: Session,
@@ -990,7 +997,7 @@ export class JinglerCoreRpcs extends RpcGroup.make(
   Rpc.make("Sessions.diff", {
     success: SessionReviewDiff,
     error: GitError,
-    payload: { id: Schema.String }
+    payload: { id: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Lightweight totals for badges and the Changes tab. */
@@ -1723,7 +1730,7 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.pr", {
     success: Schema.NullOr(PullRequest),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** Open PRs across every repository granted to the GitHub App. */
@@ -1852,21 +1859,21 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   Rpc.make("Github.prState", {
     success: Schema.NullOr(SessionPrStatus),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** The changed files of a session's PR, for the Code Review file list. */
   Rpc.make("Github.files", {
     success: Schema.Array(PrFileChange),
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /** The unified diff of a session's PR vs its base branch. */
   Rpc.make("Github.diff", {
     success: Schema.String,
     error: GitHubApiError,
-    payload: { sessionId: Schema.String }
+    payload: { sessionId: Schema.String, checkoutId: Schema.optional(Schema.String) }
   }),
 
   /**

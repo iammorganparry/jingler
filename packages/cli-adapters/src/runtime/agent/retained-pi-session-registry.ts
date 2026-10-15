@@ -101,6 +101,8 @@ const publishDetachedEvent = (
   }
 }
 
+import { liveCheckoutHost } from "../tools/checkout-tools.js"
+
 const detachedPiSessionContext = (context: AgentRuntimeContext): AgentRuntimeContext => ({
   mcp: context.mcp === undefined
     ? undefined
@@ -110,7 +112,8 @@ const detachedPiSessionContext = (context: AgentRuntimeContext): AgentRuntimeCon
   registerBackgroundStop: context.registerBackgroundStop,
   canUseTool: context.canUseTool,
   askQuestion: () => Effect.succeed([]),
-  publishExplanation: () => Effect.void
+  publishExplanation: () => Effect.void,
+  ...(context.checkouts === undefined ? {} : { checkouts: context.checkouts })
 })
 
 export const rebindablePiSessionContext = (
@@ -118,6 +121,10 @@ export const rebindablePiSessionContext = (
 ): AgentRuntimeContext => ({
   get planning() { return holder.current.planning },
   get mcp() { return holder.current.mcp },
+  // A retained session registers its tools once; a stable facade keeps them on the CURRENT turn's host.
+  get checkouts() {
+    return holder.current.checkouts === undefined ? undefined : liveCheckoutHost(() => holder.current.checkouts!)
+  },
   isPlanReviewPending: () => holder.current.isPlanReviewPending?.() ?? false,
   publishEvent: (event) => holder.current.publishEvent(event),
   recordUsage: (fact) => holder.current.recordUsage?.(fact) ?? Effect.void,

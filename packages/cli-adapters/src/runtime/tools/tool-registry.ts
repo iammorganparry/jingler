@@ -11,6 +11,10 @@ import { Effect, Either, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
+/** A workspace root fixed at registration, or read per call because it moves when the agent switches checkout. */
+export type WorkspaceCwd = string | (() => string)
+export const cwdOf = (cwd: WorkspaceCwd): string => (typeof cwd === "function" ? cwd() : cwd)
+
 export type ToolRisk = "read" | "network" | "mutate" | "execute"
 export type ToolIdempotency = "safe" | "keyed" | "unsafe"
 

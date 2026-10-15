@@ -36,7 +36,8 @@ const runtimeContext = (spec: AgentTurnSpec, context: AgentContext) => ({
   publishExplanation: (explanation: Parameters<NonNullable<AgentContext["publishExplanation"]>>[0]) =>
     context.publishExplanation?.(explanation) ?? Effect.void,
   listPeerAgents: context.listPeerAgents,
-  messagePeerAgent: context.messagePeerAgent
+  messagePeerAgent: context.messagePeerAgent,
+  ...(context.checkouts === undefined ? {} : { checkouts: context.checkouts })
 })
 
 const piSpec = (runId: string, spec: AgentTurnSpec) => {

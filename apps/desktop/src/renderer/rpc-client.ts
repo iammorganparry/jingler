@@ -639,6 +639,8 @@ export const rpc = {
     run((c) => c.Sessions.delete({ sessionId, skipCleanup })),
   sessionsCreateChat: (sessionId: string): Promise<Session> =>
     run((c) => c.Sessions.createChat({ sessionId })),
+  sessionsSwitchCheckout: (sessionId: string, checkoutId: string): Promise<Session> =>
+    run((c) => c.Sessions.switchCheckout({ sessionId, checkoutId })),
   sessionsSelectChat: (sessionId: string, chatId: string): Promise<Session> =>
     run((c) => c.Sessions.selectChat({ sessionId, chatId })),
   sessionsRenameChat: (
@@ -674,8 +676,8 @@ export const rpc = {
     attachmentId: string
   ): Promise<string | null> =>
     run((c) => c.Sessions.attachment({ chatId, attachmentId })),
-  sessionsDiff: (id: string): Promise<SessionReviewDiff> =>
-    run((c) => c.Sessions.diff({ id })),
+  sessionsDiff: (id: string, checkoutId?: string): Promise<SessionReviewDiff> =>
+    run((c) => c.Sessions.diff({ id, checkoutId })),
   sessionsDiffStat: (id: string): Promise<SessionDiffStat> =>
     run((c) => c.Sessions.diffStat({ id })),
   sessionsFileDiff: (id: string, path: string): Promise<SessionFileDiff> =>
@@ -945,10 +947,10 @@ export const rpc = {
     template: PlanTemplateConfig
   ): Promise<WorkspaceConfig> =>
     run((c) => c.Config.setPlanTemplate({ template })),
-  githubPr: (sessionId: string): Promise<PullRequest | null> =>
-    run((c) => c.Github.pr({ sessionId })),
-  githubPrState: (sessionId: string): Promise<SessionPrStatus | null> =>
-    run((c) => c.Github.prState({ sessionId })),
+  githubPr: (sessionId: string, checkoutId?: string): Promise<PullRequest | null> =>
+    run((c) => c.Github.pr({ sessionId, checkoutId })),
+  githubPrState: (sessionId: string, checkoutId?: string): Promise<SessionPrStatus | null> =>
+    run((c) => c.Github.prState({ sessionId, checkoutId })),
   githubTeams: (): Promise<GitHubTeamDiscovery> => run((c) => c.Github.teams()),
   githubTeamPrs: (input: { accountId: string; organization: string; teamSlug: string; queue: GitHubTeamQueue; refresh: boolean }): Promise<GitHubTeamPrResult> =>
     run((c) => c.Github.teamPrs(input)),
@@ -990,10 +992,10 @@ export const rpc = {
     run((c) => c.Github.closeIssue({ sessionId })),
   githubIssue: (sessionId: string): Promise<Issue | null> =>
     run((c) => c.Github.issue({ sessionId })),
-  githubFiles: (sessionId: string): Promise<ReadonlyArray<PrFileChange>> =>
-    run((c) => c.Github.files({ sessionId })),
-  githubDiff: (sessionId: string): Promise<string> =>
-    run((c) => c.Github.diff({ sessionId })),
+  githubFiles: (sessionId: string, checkoutId?: string): Promise<ReadonlyArray<PrFileChange>> =>
+    run((c) => c.Github.files({ sessionId, checkoutId })),
+  githubDiff: (sessionId: string, checkoutId?: string): Promise<string> =>
+    run((c) => c.Github.diff({ sessionId, checkoutId })),
   githubDetectPr: (sessionId: string): Promise<number | null> =>
     run((c) => c.Github.detectPr({ sessionId })),
   githubEvents: (

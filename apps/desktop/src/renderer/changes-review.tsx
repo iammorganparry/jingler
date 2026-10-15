@@ -6,8 +6,8 @@
  */
 import { useCallback, useMemo } from "react"
 import type { Session } from "@jingler/core"
-import { workspaceModeOf } from "@jingler/core"
-import { ChangedFilesExplorer, ReviewSidebar } from "@jingler/ui"
+import { checkoutsOf, workspaceModeOf } from "@jingler/core"
+import { ChangedFilesExplorer, ReviewSidebar, checkoutLabel } from "@jingler/ui"
 import { getConversationActor } from "./conversation-registry.js"
 import { setReviewFilter, setReviewFocused, useReviewFocused } from "./review-store.js"
 import { reviewCommentsContext } from "./review-references.js"
@@ -21,8 +21,8 @@ const deslopPrompt = (path: string): string =>
   `names, and simplify control flow — WITHOUT changing behaviour. If the file ` +
   `is already clean, say so rather than churning it.`
 
-export function useChangesReview(session: Session, connected: boolean) {
-  const review = useReview(session)
+export function useChangesReview(session: Session, connected: boolean, checkoutId?: string) {
+  const review = useReview(session, checkoutId)
   // Read-only: the adversarial review is *run* from the Pull Request tab; its
   // findings anchor to the PR diff wherever that diff renders.
   const adversarial = useAdversarialReview(session, { connected })
@@ -74,6 +74,37 @@ export function useChangesReview(session: Session, connected: boolean) {
 export const revealSessionChanges = (session: Session): void =>
   setReviewFilter(session.id, session.prNumber, session.prNumber != null ? "pr" : "local")
 
+function CheckoutChangesList({
+  session,
+  connected,
+  checkoutId,
+  activePath,
+  onOpenPath
+}: {
+  readonly session: Session
+  readonly connected: boolean
+  readonly checkoutId?: string
+  readonly activePath: string | null
+  readonly onOpenPath: (path: string) => void
+}) {
+  const { review, adversarial } = useChangesReview(session, connected, checkoutId)
+  return (
+    <ChangedFilesExplorer
+      files={review.files}
+      fileDiffs={review.fileDiffs}
+      omittedFiles={review.omittedFiles}
+      diffLineLimit={review.diffLineLimit}
+      drafts={review.drafts}
+      reviewThreads={review.reviewThreads}
+      // Adversarial findings belong to the active checkout's PR only.
+      review={review.source === "pr" && checkoutId === undefined ? adversarial.review : null}
+      activePath={activePath}
+      onSelectFile={onOpenPath}
+    />
+  )
+}
+
+/** Changes for the session; a multi-repo session lists one group per checkout. */
 export function ChangesExplorerPanel({
   session,
   connected,
@@ -85,19 +116,38 @@ export function ChangesExplorerPanel({
   readonly activePath: string | null
   readonly onOpenPath: (path: string) => void
 }) {
-  const { review, adversarial } = useChangesReview(session, connected)
+  const checkouts = checkoutsOf(session)
+  if (checkouts.length < 2) {
+    return (
+      <CheckoutChangesList
+        session={session}
+        connected={connected}
+        activePath={activePath}
+        onOpenPath={onOpenPath}
+      />
+    )
+  }
   return (
-    <ChangedFilesExplorer
-      files={review.files}
-      fileDiffs={review.fileDiffs}
-      omittedFiles={review.omittedFiles}
-      diffLineLimit={review.diffLineLimit}
-      drafts={review.drafts}
-      reviewThreads={review.reviewThreads}
-      review={review.source === "pr" ? adversarial.review : null}
-      activePath={activePath}
-      onSelectFile={onOpenPath}
-    />
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+      {checkouts.map((checkout) => (
+        <section
+          key={checkout.id}
+          data-testid={`changes-checkout-${checkout.id}`}
+          className="flex min-h-[10rem] flex-1 flex-col border-b border-line"
+        >
+          <h3 className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-wide text-dim">
+            {checkoutLabel(checkout)}
+          </h3>
+          <CheckoutChangesList
+            session={session}
+            connected={connected}
+            checkoutId={checkout.id}
+            activePath={activePath}
+            onOpenPath={onOpenPath}
+          />
+        </section>
+      ))}
+    </div>
   )
 }
 

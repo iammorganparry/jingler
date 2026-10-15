@@ -17,6 +17,8 @@ import { AssetService } from "../../asset.js"
 import type { OffloadCommandRouterPort } from "../../offload-command-router.js"
 import {
   ToolError,
+  cwdOf,
+  type WorkspaceCwd,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolRegistry
@@ -247,7 +249,7 @@ export interface WorkspaceCommandRouting {
 
 export const registerWorkspaceMutationTools = (
   registry: ToolRegistry,
-  cwd: string,
+  cwd: WorkspaceCwd,
   workspace: WorkspaceMutationPort,
   routing?: WorkspaceCommandRouting
 ): void => {
@@ -256,7 +258,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_write",
       description: "Create or replace a UTF-8 text file inside the workspace.",
       input: Schema.Struct({ path: PathInput, content: Schema.String }),
-      execute: ({ path, content }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.write(cwd, path, content) : Effect.runPromise(workspace.write(cwd, path, content))
+      execute: ({ path, content }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.write(cwdOf(cwd), path, content) : Effect.runPromise(workspace.write(cwdOf(cwd), path, content))
     })
   )
   registry.register(
@@ -270,7 +272,7 @@ export const registerWorkspaceMutationTools = (
         replaceAll: Schema.optionalWith(Schema.Boolean, { default: () => false })
       }),
       execute: ({ path, oldText, newText, replaceAll }) =>
-        routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.edit(cwd, path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(cwd, path, oldText, newText, replaceAll))
+        routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.edit(cwdOf(cwd), path, oldText, newText, replaceAll) : Effect.runPromise(workspace.edit(cwdOf(cwd), path, oldText, newText, replaceAll))
     })
   )
   registry.register(
@@ -278,7 +280,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_delete",
       description: "Delete one existing file inside the workspace.",
       input: Schema.Struct({ path: PathInput }),
-      execute: ({ path }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.remove(cwd, path) : Effect.runPromise(workspace.remove(cwd, path))
+      execute: ({ path }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.remove(cwdOf(cwd), path) : Effect.runPromise(workspace.remove(cwdOf(cwd), path))
     })
   )
   registry.register(
@@ -286,7 +288,7 @@ export const registerWorkspaceMutationTools = (
       id: "workspace_rename",
       description: "Rename one workspace file without overwriting the destination.",
       input: Schema.Struct({ from: PathInput, to: PathInput }),
-      execute: ({ from, to }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.rename(cwd, from, to) : Effect.runPromise(workspace.rename(cwd, from, to))
+      execute: ({ from, to }) => routing?.sessionId && workspaceCheckpointMode(routing.sessionId) ? checkpointFiles.rename(cwdOf(cwd), from, to) : Effect.runPromise(workspace.rename(cwdOf(cwd), from, to))
     })
   )
   registry.register({
@@ -309,18 +311,18 @@ export const registerWorkspaceMutationTools = (
       Effect.runPromise(
         (routing && !workspaceCheckpointMode(routing.sessionId)
           ? routing.offload.executeIfEligible(
-              cwd,
+              cwdOf(cwd),
               routing.sessionId,
               command,
               context
             ).pipe(
               Effect.flatMap((remote) =>
                 remote === null
-                  ? workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)
+                  ? workspace.execute(cwdOf(cwd), command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)
                   : Effect.succeed(remote)
               )
             )
-          : workspace.execute(cwd, command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)),
+          : workspace.execute(cwdOf(cwd), command, { ...context, workspaceEnvironment: routing?.workspaceEnvironment }, routing?.sessionId)),
         { signal: context.signal }
       )
   })

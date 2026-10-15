@@ -136,6 +136,8 @@ import {
   PluginError,
   SessionNotFoundError,
   workspaceModeOf,
+  reduceCheckouts,
+  sessionForCheckout,
   createWorkspaceProvisioningPlan,
   defaultModeFor,
   WorkspaceTransferCheckpoint as WorkspaceTransferCheckpointSchema,
@@ -590,11 +592,9 @@ const mcpReveal = () =>
  * a broken worktree for a clean one.
  * Exported for tests.
  */
-export const sessionDiff = (id: string) =>
+export const sessionDiff = (id: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* SessionStore.get(id).pipe(
-      Effect.orElseSucceed(() => null),
-    );
+    const session = yield* resolveCheckoutSession(id, checkoutId);
     if (!session?.worktreePath) return EMPTY_REVIEW_DIFF;
     return yield* WorkspaceService.diff(session.worktreePath);
   });
@@ -620,6 +620,14 @@ export const sessionFileDiff = (id: string, path: string) =>
 /** Resolve a session (best-effort; unknown → null) for the GitHub handlers. */
 const resolveSession = (sessionId: string) =>
   SessionStore.get(sessionId).pipe(Effect.orElseSucceed(() => null));
+
+/** The session seen through one checkout (the active one when `checkoutId` is absent). */
+const resolveCheckoutSession = (sessionId: string, checkoutId?: string) =>
+  resolveSession(sessionId).pipe(
+    Effect.map((session) =>
+      session && checkoutId !== undefined ? sessionForCheckout(session, checkoutId) : session,
+    ),
+  );
 
 type SessionWithPr = Session & { readonly prNumber: number };
 
@@ -1698,9 +1706,9 @@ export const githubIssueCommentBySlug = (input: {
         }),
       );
 
-export const githubPr = (sessionId: string) =>
+export const githubPr = (sessionId: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
     return yield* GitHubApi.prView(session.worktreePath, session.prNumber);
   });
@@ -1710,9 +1718,9 @@ export const githubPr = (sessionId: string) =>
  * null when there's no worktree / linked PR). Drives the archive sweep. Exported
  * for tests.
  */
-export const githubPrState = (sessionId: string) =>
+export const githubPrState = (sessionId: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return null;
     return yield* GitHubApi.prState(session.worktreePath, session.prNumber);
   });
@@ -2005,17 +2013,17 @@ export const setSessionPersistent = (sessionId: string, persistent: boolean) =>
   );
 
 /** `Github.files` handler — the PR's changed files (empty without a linked PR). */
-export const githubFiles = (sessionId: string) =>
+export const githubFiles = (sessionId: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return [];
     return yield* GitHubApi.prFiles(session.worktreePath, session.prNumber);
   });
 
 /** `Github.diff` handler — the PR's unified diff (empty without a linked PR). */
-export const githubDiff = (sessionId: string) =>
+export const githubDiff = (sessionId: string, checkoutId?: string) =>
   Effect.gen(function* () {
-    const session = yield* resolveSession(sessionId);
+    const session = yield* resolveCheckoutSession(sessionId, checkoutId);
     if (!session?.worktreePath || session.prNumber === null) return "";
     return yield* GitHubApi.prDiff(session.worktreePath, session.prNumber);
   });
@@ -4873,6 +4881,19 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         Effect.fail(new GitError({ message: "Session not found", cause })),
       ),
     ),
+  "Sessions.switchCheckout": ({ sessionId, checkoutId }) =>
+    Effect.gen(function* () {
+      const session = yield* SessionStore.get(sessionId);
+      yield* SessionStore.setCheckouts(
+        sessionId,
+        reduceCheckouts(session, { type: "switch", checkoutId }),
+      );
+      return yield* SessionStore.get(sessionId);
+    }).pipe(
+      Effect.catchTag("SessionNotFoundError", (cause) =>
+        Effect.fail(new GitError({ message: "Session not found", cause })),
+      ),
+    ),
   "Sessions.selectChat": ({ sessionId, chatId }) =>
     SessionStore.selectChat(sessionId, chatId).pipe(
       Effect.catchTag("SessionNotFoundError", (cause) =>
@@ -5009,7 +5030,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       }
       return null;
     }).pipe(Effect.orElseSucceed(() => null)),
-  "Sessions.diff": ({ id }) =>
+  "Sessions.diff": ({ id, checkoutId }) =>
     Effect.gen(function* () {
       const session = yield* SessionStore.get(id);
       const remote = yield* RemoteSessionService;
@@ -5017,7 +5038,7 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
         session,
         "Sessions.diff",
         {},
-        { execute: () => sessionDiff(id) },
+        { execute: () => sessionDiff(id, checkoutId) },
         {
           execute: () =>
             remote
@@ -5720,8 +5741,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
   "Github.issueBySlug": ({ repository, number }) => githubIssueBySlug(repository, number),
   "Github.issueCommentBySlug": (input) => githubIssueCommentBySlug(input),
   "Github.issueCloseBySlug": ({ repository, number }) => GitHubApi.issueCloseBySlug(repository, number),
-  "Github.pr": ({ sessionId }) => githubPr(sessionId),
-  "Github.prState": ({ sessionId }) => githubPrState(sessionId),
+  "Github.pr": ({ sessionId, checkoutId }) => githubPr(sessionId, checkoutId),
+  "Github.prState": ({ sessionId, checkoutId }) => githubPrState(sessionId, checkoutId),
   "Github.listPrs": ({ repoPath, githubSlug, mine, search }) =>
     githubSlug
       ? GitHubApi.listPrsBySlug(githubSlug, { mine, search })
@@ -5732,8 +5753,8 @@ const ReviewHandlersLayer = JinglerReviewRpcs.toLayer({
       : GitHubApi.listIssues(repoPath, { mine, search }),
   "Github.closeIssue": ({ sessionId }) => githubCloseIssue(sessionId),
   "Github.issue": ({ sessionId }) => githubIssue(sessionId),
-  "Github.files": ({ sessionId }) => githubFiles(sessionId),
-  "Github.diff": ({ sessionId }) => githubDiff(sessionId),
+  "Github.files": ({ sessionId, checkoutId }) => githubFiles(sessionId, checkoutId),
+  "Github.diff": ({ sessionId, checkoutId }) => githubDiff(sessionId, checkoutId),
   "Github.detectPr": ({ sessionId }) => githubDetectPr(sessionId),
   "Explanation.current": ({ sessionId }) =>
     SessionStore.get(sessionId).pipe(
