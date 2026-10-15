@@ -1899,7 +1899,14 @@ export const activityLabel = (activity: SessionActivity): string =>
  * yes (Needs Input), paused (Idle), or resolved (Settled). Anything finer is
  * detail they didn't ask for at the price of the thing they did.
  */
-export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "monitoring" | "idle" | "settled"
+export type SessionDisplayStatus =
+  | "thinking"
+  | "running"
+  | "needs-input"
+  | "monitoring"
+  | "idle"
+  | "settled"
+  | "interrupted"
 
 /**
  * What a session reports in the sidebar, from its live activity (when it has one)
@@ -1918,10 +1925,13 @@ export type SessionDisplayStatus = "thinking" | "running" | "needs-input" | "mon
  *    one thing for the human to do about it.
  *  - **Legacy "done" folds to idle.** Nothing writes it. Settled is reserved for
  *    an explicit, host-admitted declaration that all requested work is resolved.
+ *  - **Interrupted never outranks live work.** `interrupted` is a restart-time
+ *    fact about a stale transcript; any live activity means the run resumed.
  */
 export const displayStatusOf = (
   activity: SessionActivity | null | undefined,
-  status: SessionStatus
+  status: SessionStatus,
+  interrupted?: boolean
 ): SessionDisplayStatus => {
   if (activity) {
     switch (activity.kind) {
@@ -1937,6 +1947,7 @@ export const displayStatusOf = (
         return "running"
     }
   }
+  if (interrupted) return "interrupted"
   switch (status) {
     case "settled":
       return "settled"

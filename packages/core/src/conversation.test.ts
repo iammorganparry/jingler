@@ -1319,6 +1319,14 @@ describe("displayStatusOf", () => {
     }
   })
 
+  it("reports interrupted only when there is no live activity", () => {
+    expect(displayStatusOf(null, "idle", true)).toBe("interrupted")
+    expect(displayStatusOf(undefined, "running", true)).toBe("interrupted")
+    expect(displayStatusOf(act("editing"), "idle", true)).toBe("running")
+    expect(displayStatusOf(null, "idle", false)).toBe("idle")
+    expect(displayStatusOf(null, "idle")).toBe("idle")
+  })
+
   it("maps every session status onto one of the five", () => {
     for (const status of SessionStatus.literals) {
       expect(FIVE, `${status} must map into the five`).toContain(displayStatusOf(null, status))

@@ -49,6 +49,7 @@ import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, 
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
+import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
   publishFleetAgentFileActivity,
@@ -333,6 +334,7 @@ export function ConversationPane({
     onAuthorizeMcp
   )
   const convo = useConversation(session, activeChat.id)
+  const interrupted = useInterruptedChats().some((c) => c.sessionId === session.id && c.chatId === activeChat.id)
   const { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation } = useEnvironmentHandoff(session.id, convo.busy)
   const fileBrowser = useFileBrowser(session.id, session.worktreePath)
   const toggleFollowAgent = useCallback(
@@ -927,6 +929,18 @@ export function ConversationPane({
           message={providerRecovery.message}
           actionLabel="Open providers"
           onAction={() => onOpenProviderSettings?.()}
+        />
+      )}
+      {interrupted && !convo.busy && (
+        <RuntimeRecoveryCard
+          label="Interrupted run"
+          title="Interrupted"
+          message="This run stopped when Jingler closed."
+          actionLabel="Resume"
+          onAction={() => {
+            clearInterruptedChat(session.id, activeChat.id)
+            getConversationActor(session, activeChat.id).send({ type: "SEND", text: "Continue" })
+          }}
         />
       )}
       <McpRecoveryCards

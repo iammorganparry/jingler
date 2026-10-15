@@ -62,6 +62,7 @@ export function SessionRow({
   environment,
   repoOwner,
   activity,
+  interrupted,
   prState,
   subagentCount = 0,
   active = false,
@@ -84,6 +85,8 @@ export function SessionRow({
    * falls back to the persisted `session.status`.
    */
   activity?: SessionActivity
+  /** The last run was cut off by a restart; ignored while there is live activity. */
+  interrupted?: boolean
   /**
    * Live state of the session's linked PR. A merged/closed PR badges the row
    * rather than retiring the session: one session can outlive several PRs (open
@@ -357,7 +360,7 @@ export function SessionRow({
 
   // One rollup, three jobs: what the row says, what colour it says it in, and
   // whether it dims. The label is one of five words — never the tool or target.
-  const display = displayStatusOf(activity, session.status)
+  const display = displayStatusOf(activity, session.status, interrupted)
   const status = displayStatusTone[display]
   const label = displayStatusLabel[display]
   const linkedIssue = issueReferenceOf(session)

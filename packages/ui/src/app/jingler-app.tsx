@@ -218,6 +218,8 @@ export interface JinglerAppProps {
   onGithubDisconnect?: () => void
   /** What each session's agent is doing right now ("Running npm test"), keyed by id. */
   liveActivity?: Record<string, SessionActivity>
+  /** Sessions whose last run was cut off by a restart. */
+  interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
@@ -566,6 +568,7 @@ onOpenGithubSettings: providerConnections ? () => openSettings("github") : undef
         showEmpty={showEmpty}
         patch={patch}
         liveActivity={liveActivity}
+        interruptedSessions={props.interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
         subagentCounts={subagentCounts}

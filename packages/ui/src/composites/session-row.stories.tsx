@@ -6,6 +6,15 @@ const meta: Meta = { title: "Sidebar/Session Row", parameters: { layout: "center
 export default meta
 type Story = StoryObj
 
+/** A run cut off by a restart reads "Interrupted" until the session goes live again. */
+export const Interrupted: Story = {
+  render: () => (
+    <div className="w-[248px]">
+      <SessionRow session={testSession({ id: "interrupted", title: "Refactor auth middleware" })} interrupted />
+    </div>
+  )
+}
+
 /** 248px is the sidebar width: status, PR number and diff stat stay on one line; only the branch truncates. */
 export const LongBranchAtSidebarWidth: Story = {
   render: () => (

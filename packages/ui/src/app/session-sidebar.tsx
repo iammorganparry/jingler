@@ -115,6 +115,8 @@ export interface SessionSidebarProps {
   /** Live per-session agent status, overriding the persisted status. */
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Sessions whose last run was cut off by a restart (dropped once they go live again). */
+  interruptedSessions?: ReadonlySet<string>
   /** Live linked-PR state per session id, badged onto the row (never auto-archives). */
   prStates?: Record<string, SessionPrStatus>
   /** Running subagent count per session id, shown as `· N agents` on the row. */
@@ -386,6 +388,7 @@ function SidebarBody({
   chatActivities,
   fileDiffs,
   liveActivity,
+  interruptedSessions,
   prStates,
   subagentCounts,
   repoOwners,
@@ -689,10 +692,11 @@ return (renderExpandedGroupHeading())
   // reorder the list under the reader's cursor. The row still says which.
   const statusOf = React.useCallback(
     (s: Session): SessionDisplayStatus => {
-      const display = displayStatusOf(liveActivity?.[s.id], s.status)
-      return display === "thinking" ? "running" : display
+      const display = displayStatusOf(liveActivity?.[s.id], s.status, interruptedSessions?.has(s.id))
+      // Interrupted stays in the Idle group: a restart-time fact shouldn't add a group.
+      return display === "thinking" ? "running" : display === "interrupted" ? "idle" : display
     },
-    [liveActivity]
+    [liveActivity, interruptedSessions]
   )
 
   const filtered = React.useMemo(
@@ -755,6 +759,7 @@ return (renderExpandedGroupHeading())
         environment={environments.find((environment) => environment.id === s.environmentId)}
         repoOwner={repoOwners?.[s.id]}
         activity={liveActivity?.[s.id]}
+        interrupted={interruptedSessions?.has(s.id)}
         prState={prStates?.[s.id]}
         subagentCount={subagentCounts?.[s.id]}
         active={s.id === activeSessionId}
@@ -1012,6 +1017,7 @@ function SessionRail({
   sessions,
   activeSessionId,
   liveActivity,
+  interruptedSessions,
   prStates,
   onSelect,
   onNewSession,
@@ -1028,6 +1034,7 @@ function SessionRail({
   sessions: ReadonlyArray<Session>
   activeSessionId: string | null
   liveActivity?: Record<string, SessionActivity | undefined>
+  interruptedSessions?: ReadonlySet<string>
   prStates?: Record<string, SessionPrStatus>
   onSelect?: (id: string) => void
   onNewSession?: () => void
@@ -1046,7 +1053,7 @@ function SessionRail({
 
   const renderCell = (s: Session) => {
     const active = s.id === activeSessionId
-    const status = displayStatusOf(liveActivity?.[s.id], s.status)
+    const status = displayStatusOf(liveActivity?.[s.id], s.status, interruptedSessions?.has(s.id))
     return (
       <HoverCard
         key={s.id}
@@ -1055,6 +1062,7 @@ function SessionRail({
           <SessionHoverCard
             session={s}
             activity={liveActivity?.[s.id]}
+            interrupted={interruptedSessions?.has(s.id)}
             prState={prStates?.[s.id]}
           />
         }
@@ -1293,6 +1301,7 @@ export function SessionSidebar(props: SessionSidebarProps) {
       sessions={props.sessions}
       activeSessionId={props.activeSessionId}
       liveActivity={props.liveActivity}
+      interruptedSessions={props.interruptedSessions}
       prStates={props.prStates}
       onSelect={props.onSelect}
       onNewSession={props.onNewSession}

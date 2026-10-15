@@ -45,7 +45,8 @@ export const displayStatusLabel: Record<SessionDisplayStatus, string> = {
   "needs-input": "Needs Input",
   monitoring: "Monitoring",
   idle: "Idle",
-  settled: "Settled"
+  settled: "Settled",
+  interrupted: "Interrupted"
 }
 
 /**
@@ -63,7 +64,8 @@ export const displayStatusTone: Record<SessionDisplayStatus, SessionStatus> = {
   "needs-input": "needs-input",
   monitoring: "running",
   idle: "idle",
-  settled: "settled"
+  settled: "settled",
+  interrupted: "idle"
 }
 
 /** Whether a status should glow/pulse its dot. */
