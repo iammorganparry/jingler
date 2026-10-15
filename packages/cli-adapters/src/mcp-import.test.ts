@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { parseClaudeMcp, parseCodexMcp, parseOpencodeMcp } from "./mcp-import.js"
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  discoverClaudeConnectors,
+  parseClaudeMcp,
+  parseClaudeMcpList,
+  parseCodexMcp,
+  parseOpencodeMcp
+} from "./mcp-import.js"
 
 describe("parseClaudeMcp", () => {
   it("reads stdio and remote servers from mcpServers and per-project blocks", () => {
@@ -195,5 +204,104 @@ describe("parseOpencodeMcp", () => {
       { name: "invalid", entry: null, problem: "Invalid server configuration" },
       { name: "empty", entry: null, problem: "Invalid server configuration" }
     ])
+  })
+})
+
+const LISTING = [
+  "Checking MCP server health…",
+  "",
+  "obsidian: npx @mauricio.wolff/mcp-obsidian@latest /docs - ✓ Connected",
+  "claude.ai Linear: https://mcp.linear.app/mcp - ! Needs authentication",
+  "claude.ai Supabase - GTM Grid: https://mcp.supabase.com/mcp - ✓ Connected",
+  "plugin:engineering:notion: https://mcp.notion.com/mcp (HTTP) - ! Needs authentication",
+  "plugin:engineering:legacy: https://legacy.example/sse (SSE) - ✓ Connected",
+  "plugin:engineering:placeholder:  (HTTP) - - Not configured",
+  "plugin:engineering:local: node server.js - ✓ Connected",
+  "claude.ai Browser: https://mcp.browser.example/mcp - ✓ Connected"
+].join("\n")
+
+describe("parseClaudeMcpList", () => {
+  it("parses claude.ai and plugin servers into OAuth remote candidates with origins", () => {
+    const candidates = parseClaudeMcpList(LISTING)
+    expect(candidates.map(({ name, origin }) => [name, origin])).toEqual([
+      ["claude-ai-linear", "claude.ai"],
+      ["claude-ai-supabase-gtm-grid", "claude.ai"],
+      ["plugin-engineering-notion", "plugin"],
+      ["plugin-engineering-legacy", "plugin"],
+      ["plugin-engineering-placeholder", "plugin"],
+      ["plugin-engineering-local", "plugin"],
+      ["claude-ai-browser", "claude.ai"]
+    ])
+    expect(candidates[0]).toEqual({
+      name: "claude-ai-linear",
+      source: "claude",
+      origin: "claude.ai",
+      problem: null,
+      entry: {
+        type: "remote",
+        url: "https://mcp.linear.app/mcp",
+        headers: {},
+        auth: { type: "oauth" },
+        displayName: "claude.ai Linear",
+        enabled: true
+      }
+    })
+  })
+
+  it("carries a problem for not-configured, SSE and stdio entries", () => {
+    const byName = Object.fromEntries(parseClaudeMcpList(LISTING).map((c) => [c.name, c]))
+    expect(byName["plugin-engineering-placeholder"]).toMatchObject({ entry: null, problem: expect.stringContaining("Not configured") })
+    expect(byName["plugin-engineering-legacy"]).toMatchObject({ entry: null, problem: expect.stringContaining("SSE") })
+    expect(byName["plugin-engineering-local"]).toMatchObject({ entry: null, problem: expect.stringContaining("stdio") })
+  })
+
+  it("never overwrites existing names and flags in-listing collisions", () => {
+    const candidates = parseClaudeMcpList(
+      "claude.ai Linear: https://a.example/mcp - ✓ Connected\nclaude.ai  Linear: https://b.example/mcp - ✓ Connected",
+      new Set(["claude-ai-linear"])
+    )
+    expect(candidates).toHaveLength(2)
+    for (const candidate of candidates) {
+      expect(candidate).toMatchObject({ entry: null, problem: expect.stringContaining("already exists") })
+    }
+  })
+})
+
+describe("discoverClaudeConnectors", () => {
+  const fakeCli = (body: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), "fake-claude-"))
+    const file = join(dir, "claude")
+    writeFileSync(file, `#!/bin/sh\n${body}\n`)
+    chmodSync(file, 0o755)
+    return file
+  }
+  const options = { cwd: tmpdir(), taken: new Set<string>() }
+
+  it("returns an explanatory problem when the binary is missing", async () => {
+    const result = await discoverClaudeConnectors({ ...options, binary: "/nonexistent/claude" })
+    expect(result).toHaveLength(1)
+    expect(result[0]).toMatchObject({ entry: null, problem: expect.stringContaining("not found") })
+  })
+
+  it("explains a signed-out CLI instead of crashing", async () => {
+    const binary = fakeCli(
+      'if [ "$1" = auth ]; then echo \'{"loggedIn":false}\'; else echo "Checking MCP server health…"; fi'
+    )
+    const result = await discoverClaudeConnectors({ ...options, binary })
+    expect(result).toEqual([expect.objectContaining({ entry: null, problem: expect.stringContaining("signed out") })])
+  })
+
+  it("lists connectors from a logged-in CLI", async () => {
+    const binary = fakeCli(
+      'if [ "$1" = auth ]; then echo \'{"loggedIn":true,"authMethod":"claude.ai"}\'; else echo "claude.ai Linear: https://mcp.linear.app/mcp - ! Needs authentication"; fi'
+    )
+    const result = await discoverClaudeConnectors({ ...options, binary })
+    expect(result).toEqual([expect.objectContaining({ name: "claude-ai-linear", problem: null })])
+  })
+
+  it("reports a failing listing as a problem", async () => {
+    const binary = fakeCli("exit 1")
+    const result = await discoverClaudeConnectors({ ...options, binary })
+    expect(result).toEqual([expect.objectContaining({ entry: null, problem: expect.stringContaining("failed") })])
   })
 })

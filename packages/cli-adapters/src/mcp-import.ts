@@ -1,5 +1,6 @@
-import type { McpConfigEntry, McpImportSourceId } from "@jingler/core"
+import type { McpConfigEntry, McpImportOrigin, McpImportSourceId } from "@jingler/core"
 import { McpConfigEntry as McpConfigEntrySchema, mcpNameError } from "@jingler/core"
+import { execFile } from "node:child_process"
 import { Either, Option, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
 
@@ -16,6 +17,8 @@ import { parse as parseToml } from "smol-toml"
 export interface McpImportCandidate {
   readonly name: string
   readonly source: McpImportSourceId
+  /** Absent means a config file the user wrote. */
+  readonly origin?: McpImportOrigin
   readonly entry: McpConfigEntry | null
   /** Why this candidate cannot be imported; null when `entry` is usable. */
   readonly problem: string | null
@@ -225,3 +228,134 @@ export const parseOpencodeMcp = (raw: string): ReadonlyArray<McpImportCandidate>
       : candidate("opencode", name, { ...rest, auth })
   })
 }
+
+const LIST_LINE = /^(.+?): (.*?)(?: \((HTTP|SSE|stdio)\))? - ([✔✓✘✗!⏸⊘]|-)(?: (.*))?$/
+const slug = (name: string): string =>
+  name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+
+/**
+ * Parse `claude mcp list` text into claude.ai connector and plugin candidates
+ * (https://code.claude.com/docs/en/mcp). Lines look like
+ * `claude.ai Linear: https://mcp.linear.app/mcp - ! Needs authentication` and
+ * `plugin:eng:notion: https://mcp.notion.com/mcp (HTTP) - ! Needs authentication`.
+ * Config-file servers in the same output are skipped (the file parser has them).
+ *
+ * Imported entries are plain remote URLs with Jingler-managed OAuth; claude.ai
+ * tokens are never read. Names are slugged (`claude.ai Linear` → `claude-ai-linear`)
+ * with the original kept as `displayName`. `taken` holds names already in
+ * `mcp.json`, which a candidate may never overwrite.
+ */
+const listOrigin = (original: string): McpImportOrigin | null =>
+  original.startsWith("claude.ai ") ? "claude.ai" : original.startsWith("plugin:") ? "plugin" : null
+
+const listProblem = (
+  target: string,
+  kind: string | undefined,
+  status: string,
+  exists: boolean,
+  name: string
+): string | null => {
+  if (target === "" || /not configured/i.test(status)) return "Not configured — the server has no URL"
+  if (!/^https?:\/\//.test(target)) return "Local (stdio) servers can't be imported from the Claude listing"
+  if (kind === "SSE") return "SSE servers can't use Jingler's managed sign-in"
+  return exists ? `A server named "${name}" already exists` : null
+}
+
+export const parseClaudeMcpList = (
+  output: string,
+  taken: ReadonlySet<string> = new Set()
+): ReadonlyArray<McpImportCandidate> => {
+  const seen = new Set(taken)
+  const out: Array<McpImportCandidate> = []
+  for (const line of output.split("\n")) {
+    const match = LIST_LINE.exec(line.trim())
+    if (match === null) continue
+    const [, original = "", rawTarget = "", kind, , status = ""] = match
+    const origin = listOrigin(original)
+    if (origin === null) continue
+    const name = slug(original)
+    const target = rawTarget.trim()
+    const problem = listProblem(target, kind, status, seen.has(name), name)
+    seen.add(name)
+    out.push({
+      ...candidate(
+        "claude",
+        name,
+        problem === null
+          ? { type: "remote", url: target, auth: { type: "oauth" }, displayName: original, enabled: true }
+          : null,
+        problem
+      ),
+      origin
+    })
+  }
+  return out
+}
+
+const run = (
+  binary: string,
+  args: ReadonlyArray<string>,
+  options: { readonly cwd: string; readonly timeoutMs: number }
+): Promise<string> =>
+  new Promise((resolve, reject) => {
+    execFile(
+      binary,
+      [...args],
+      { cwd: options.cwd, timeout: options.timeoutMs, maxBuffer: 4_000_000, encoding: "utf8" },
+      (error, stdout) => (error === null ? resolve(stdout) : reject(error))
+    )
+  })
+
+const connectorNote = (problem: string): McpImportCandidate => ({
+  name: "claude.ai connectors",
+  source: "claude",
+  origin: "claude.ai",
+  entry: null,
+  problem
+})
+
+/**
+ * Discover claude.ai connectors and plugin MCP servers through the Claude CLI.
+ * `claude mcp list` health-checks every server and can take a minute, so call
+ * it only on an explicit user action. A missing binary, a logged-out CLI or a
+ * timeout yields a single unimportable note instead of an error.
+ */
+export const discoverClaudeConnectors = async (options: {
+  readonly cwd: string
+  readonly taken: ReadonlySet<string>
+  readonly binary?: string
+  readonly timeoutMs?: number
+}): Promise<ReadonlyArray<McpImportCandidate>> => {
+  const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const notes: Array<McpImportCandidate> = []
+  try {
+    const status: unknown = JSON.parse(await run(binary, ["auth", "status"], { cwd: options.cwd, timeoutMs: 15_000 }))
+    const decoded = decodeUnknownMap(status)
+    if (Option.isSome(decoded) && decoded.value.loggedIn !== true) {
+      notes.push(connectorNote("Claude CLI is signed out — run `claude auth login` to see claude.ai connectors"))
+    } else if (Option.isSome(decoded) && decoded.value.authMethod !== "claude.ai") {
+      notes.push(connectorNote("claude.ai connectors need a claude.ai login, not an API key"))
+    }
+  } catch (cause) {
+    if (isMissingBinary(cause)) {
+      return [connectorNote(`Claude CLI not found (${binary}) — install it to import claude.ai connectors`)]
+    }
+    // `auth status` is advisory; the listing below is the source of truth.
+  }
+  try {
+    const output = await run(binary, ["mcp", "list"], { cwd: options.cwd, timeoutMs: options.timeoutMs ?? 90_000 })
+    return [...notes, ...parseClaudeMcpList(output, options.taken)]
+  } catch (cause) {
+    return [
+      ...notes,
+      connectorNote(
+        isMissingBinary(cause)
+          ? `Claude CLI not found (${binary}) — install it to import claude.ai connectors`
+          : "`claude mcp list` failed or timed out — try again"
+      )
+    ]
+  }
+}
+
+const isMissingBinary = (cause: unknown): boolean =>
+  typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT"
