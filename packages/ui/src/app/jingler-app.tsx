@@ -168,6 +168,8 @@ export interface JinglerAppProps {
   onSignOut?: () => void
   /** Open the optional sign-in dialog. Offered only while signed out. */
   onSignIn?: () => void
+  /** Full-width notice under the title bar (e.g. the auth server is unreachable). */
+  banner?: ReactNode
   /** Repos discovered under the workspace, for the New Session picker. */
   repos?: ReadonlyArray<Repo>
   /** Durable registered repositories, independent of workspaces. */
@@ -1457,7 +1459,7 @@ function getActiveTabContext(active: Session) {
   return (
     // No layout picker in the title bar any more: the shape of the split is a
     // consequence of what you dragged where, not a mode you pick up front.
-    <AppShell title="Jingler" platform={props.platform} windowControls={props.windowControls}>
+    <AppShell title="Jingler" platform={props.platform} windowControls={props.windowControls} banner={props.banner}>
       {renderSessionWorkspace()}
       {renderAddProjectDialog()}
       {onLoadUsage && (

@@ -2188,9 +2188,10 @@ export class JinglerReviewRpcs extends RpcGroup.make(
   // lives in the OS keychain (main process); these procedures let the renderer
   // read the session, kick off sign-in, and sign out.
 
-  /** The current authenticated session, or null when signed out. */
+  /** The current authenticated session, or null when signed out; `AuthError` when the auth server is unreachable. */
   Rpc.make("Auth.getSession", {
-    success: Schema.NullOr(AuthSession)
+    success: Schema.NullOr(AuthSession),
+    error: AuthError
   }),
 
   /**
