@@ -38,7 +38,7 @@ import {
   UNTITLED_SESSION,
   workspaceModeOf
 } from "@jingler/core"
-import { Session as SessionSchema, migrateSessionCheckouts } from "@jingler/core"
+import { Session as SessionSchema, activeCheckoutOf, checkoutsOf, migrateSessionCheckouts, ownedWorktreePaths } from "@jingler/core"
 import { GitHubFeedbackOutboxEntry as GitHubFeedbackOutboxEntrySchema } from "@jingler/core"
 import { basename } from "node:path"
 import { FileSystem, type Path } from "@effect/platform"
@@ -1885,6 +1885,23 @@ export class SessionStore extends Effect.Service<SessionStore>()(
     const setWorktreePath = (id: string, worktreePath: string) =>
         update(id, (s) => ({ ...s, worktreePath }))
 
+      /** Persist a checkout reducer result: the checkout list plus the scalar mirrors of the active one. */
+      const setCheckouts = (id: string, next: Parameters<typeof activeCheckoutOf>[0]) =>
+        update(id, (session) => ({
+          ...session,
+          projectId: next.projectId,
+          repo: next.repo,
+          repoPath: next.repoPath,
+          worktreePath: next.worktreePath,
+          workspaceMode: next.workspaceMode,
+          branch: next.branch,
+          baseBranch: next.baseBranch,
+          prNumber: next.prNumber,
+          githubSlug: next.githubSlug,
+          checkouts: next.checkouts,
+          activeCheckoutId: next.activeCheckoutId
+        }))
+
       /** Attach a durable project identity without changing checkout/transcript state. */
       const setProject = (id: string, projectId: string) =>
         update(id, (session) => ({ ...session, projectId }))
@@ -1991,26 +2008,20 @@ export class SessionStore extends Effect.Service<SessionStore>()(
           const target = (yield* readAll()).find((s) => s.id === id)
           if (!target) return
           if (workspaceHasUnprovenProcesses(target)) return yield* Effect.fail(new GitError({ message: "Workspace terminal descendants cannot be proven stopped; deletion is refused. The workspace remains usable." }))
-          if (
-            target.worktreePath &&
-            workspaceModeOf(target) === "worktree"
-          ) {
+          // Every worktree the session owns (one per attached repo), never a direct checkout.
+          for (const worktreePath of ownedWorktreePaths(target)) {
             const fs = yield* FileSystem.FileSystem
             const worktreeExists = yield* fs
-              .exists(target.worktreePath)
+              .exists(worktreePath)
               .pipe(Effect.orElseSucceed(() => false))
             // A blank session starts detached until its first generated title.
             // If it committed before that retitle, deleting the worktree would
             // otherwise remove the only reference to those commits.
             if (worktreeExists) {
-              yield* GitService.preserveDetachedHead(
-                target.worktreePath,
-                basename(target.worktreePath)
-              )
+              yield* GitService.preserveDetachedHead(worktreePath, basename(worktreePath))
             }
-            yield* GitService.removeWorktreeAt(target.worktreePath, target.repoPath).pipe(
-              Effect.ignore
-            )
+            const repoPath = checkoutsOf(target).find((c) => c.worktreePath === worktreePath)?.repoPath
+            yield* GitService.removeWorktreeAt(worktreePath, repoPath).pipe(Effect.ignore)
           }
           // Re-read INSIDE the lock rather than filtering the list read above.
           // `removeWorktreeAt` shells out to git (`worktree remove --force`, then
@@ -2101,6 +2112,7 @@ export class SessionStore extends Effect.Service<SessionStore>()(
         markCheckpointTerminalExecutionUnprovable,
         reconcileInterruptedWorkspaceLifecycles,
         setWorktreePath,
+        setCheckouts,
         setProject,
         setIssue,
         addIssues,

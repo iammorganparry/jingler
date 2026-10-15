@@ -10,7 +10,7 @@ import {
   type StreamEvent,
   type Worktree
 } from "@jingler/core"
-import { INTERACTIVE_TOOL_TIMEOUT_MS, ToolError, type ToolRegistry } from "./tool-registry.js"
+import { INTERACTIVE_TOOL_TIMEOUT_MS, ToolError, type ToolRegistry, type WorkspaceCwd } from "./tool-registry.js"
 
 /** The session slice the checkout reducer reads and rewrites. */
 export type CheckoutSessionState = Parameters<typeof activeCheckoutOf>[0]
@@ -21,6 +21,10 @@ export interface CheckoutHost {
   /** Persist the reducer's result; `session()` must return it afterwards. */
   readonly save: (next: CheckoutSessionState) => Promise<void>
   readonly projects: () => Promise<ReadonlyArray<Pick<Project, "id" | "name" | "path">>>
+  /** Ask the operator whether an unregistered repo may be attached; resolves to their decision. */
+  readonly approveRepo: (repoPath: string) => Promise<boolean>
+  /** Register an operator-approved repo as a project. */
+  readonly registerProject: (repoPath: string) => Promise<Pick<Project, "id" | "name" | "path">>
   /** Fork an isolated worktree of `repoPath`; `baseBranch` undefined means the repo default. */
   readonly createWorktree: (input: {
     readonly repoPath: string
@@ -38,6 +42,10 @@ export const activeCheckoutCwd = (host: CheckoutHost): string => {
   return cwd
 }
 
+/** The cwd every workspace tool resolves per call: the active checkout when the session has a host, else the fixed run cwd. */
+export const toolCwd = (fallback: string, host: CheckoutHost | undefined): WorkspaceCwd =>
+  host === undefined ? fallback : () => activeCheckoutCwd(host)
+
 const sameRepoPath = (a: string | undefined, b: string): boolean => a !== undefined && resolve(a) === resolve(b)
 
 export const registerCheckoutTool = (
@@ -49,7 +57,7 @@ export const registerCheckoutTool = (
     id: "switch_checkout",
     version: "1",
     description:
-      "Work in another repository of this session. Give a registered project name or a repo path; Jingler attaches an isolated worktree (or re-activates the one already attached) and every later tool call runs there. An unregistered path asks the operator for approval and attaches nothing.",
+      "Work in another repository of this session. Give a registered project name or a repo path; Jingler attaches an isolated worktree (or re-activates the one already attached) and every later tool call runs there. An unregistered path asks the operator for approval; approving registers it as a project, denying attaches nothing.",
     input: Schema.Struct({
       project: Schema.optional(Schema.String),
       repoPath: Schema.optional(Schema.String),
@@ -67,24 +75,13 @@ export const registerCheckoutTool = (
         throw new ToolError("invalid-input", "Provide a project name or a repoPath")
       }
       const session = host.session()
-      const found = (await host.projects()).find((p) =>
+      let found = (await host.projects()).find((p) =>
         project !== undefined ? p.name.toLowerCase() === project.toLowerCase() : sameRepoPath(p.path, repoPath!)
       )
       if (found === undefined) {
         if (project !== undefined) throw new ToolError("invalid-input", `No registered project named "${project}"`)
-        await Effect.runPromise(publishEvent({
-          _tag: "GateRequested",
-          gate: {
-            id: `switch_checkout_${randomBytes(4).toString("hex")}`,
-            kind: "command",
-            title: "Attach an unregistered repository?",
-            detail: `The agent asked to work in ${resolve(repoPath!)}, which is not a registered project.`,
-            command: `switch_checkout ${resolve(repoPath!)}`,
-            allowLabel: null,
-            status: "pending"
-          }
-        }))
-        return { status: "approval-required", repoPath: resolve(repoPath!) }
+        if (!(await host.approveRepo(resolve(repoPath!)))) return { status: "denied", repoPath: resolve(repoPath!) }
+        found = await host.registerProject(resolve(repoPath!))
       }
 
       const existing = checkoutsOf(session).find((c) => sameRepoPath(c.repoPath, found.path))

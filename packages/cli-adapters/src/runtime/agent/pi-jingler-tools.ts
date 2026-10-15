@@ -28,7 +28,7 @@ import {
 import type { WebSearchServiceShape } from "../../web-search.js"
 import { registerCodeIntelligenceTools } from "../tools/code-intelligence-tools.js"
 import { registerStructuralCodeTools } from "../tools/structural-code-tools.js"
-import { activeCheckoutCwd, registerCheckoutTool } from "../tools/checkout-tools.js"
+import { registerCheckoutTool, toolCwd } from "../tools/checkout-tools.js"
 import type { AgentRuntimeContext } from "./agent-runtime.js"
 
 const roles = ["conversation", "plan", "plan-execution", "background"] as const
@@ -256,8 +256,7 @@ export const createJinglerTools = (
       input.context,
       new ToolRegistry(input.registryOptions)
     )
-    const checkouts = input.context.checkouts
-    const cwd: WorkspaceCwd = checkouts === undefined ? input.cwd : () => activeCheckoutCwd(checkouts)
+    const cwd = toolCwd(input.cwd, input.context.checkouts)
     if (input.workspace) {
       registerWorkspaceInspectionTools(registry, cwd, input.workspace)
     }
