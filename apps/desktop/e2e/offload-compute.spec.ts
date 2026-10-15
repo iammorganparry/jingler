@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process"
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import type { Locator } from "@playwright/test"
-import { appShell, expect, test, type SeedSession } from "./fixtures.js"
+import { appShell, confirmArchive, expect, test, type SeedSession } from "./fixtures.js"
 import { startFakeAuthServer } from "./fake-auth.js"
 
 const openToolResult = async (tool: Locator): Promise<void> => {
@@ -111,6 +111,7 @@ test("enables, primes, automatically routes, and restores Offload Compute status
     .getByTestId("session-row-session_offload_compute_e2e")
     .hover()
   await reopened.window.getByRole("button", { name: "Archive Offload compute" }).click()
+  await confirmArchive(reopened.window)
   await expect.poll(() => reopened.authServer.offloadRequests.map(({ kind }) => kind))
     .toContain("destroy")
   const primesBeforeRestore = reopened.authServer.offloadRequests
