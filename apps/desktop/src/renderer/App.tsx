@@ -95,6 +95,7 @@ import { TerminalDockView } from "./terminal-dock-view.js";
 import { PreviewDockView } from "./preview-dock-view.js";
 import { usePreviewDock } from "./use-preview-dock.js";
 import { useSessionActivities } from "./session-activity.js";
+import { clearInterruptedChat, useInterruptedChats, useInterruptedChatsLoader } from "./interrupted-chats.js";
 import { setSessionDiff, useSessionDiffs, useSessionFileDiffs } from "./diff-presence.js";
 import { clearPlanAutoPresentation, usePlanSessions } from "./plan-presence.js";
 import {
@@ -298,6 +299,16 @@ function AuthedApp({
   const plugins = usePlugins();
   const pluginCatalog = usePluginCatalog();
   const liveActivity = useSessionActivities();
+  useInterruptedChatsLoader();
+  const interruptedChats = useInterruptedChats();
+  const interruptedSessions = useMemo(
+    () => new Set(interruptedChats.map((c) => c.sessionId)),
+    [interruptedChats],
+  );
+  // A session that went live again is no longer interrupted.
+  useEffect(() => {
+    for (const id of Object.keys(liveActivity)) clearInterruptedChat(id);
+  }, [liveActivity]);
   const debugEnabled = hasEnabledDebugPlugin(pluginCatalog);
   const [visibleDebugSessionIds, setVisibleDebugSessionIds] = useState<ReadonlySet<string>>(new Set());
   const debugSessionIds = sessions.map((session) => session.id);
@@ -1561,6 +1572,7 @@ function AuthedApp({
         onGithubRefresh={github.refresh}
         onGithubDisconnect={github.disconnect}
         liveActivity={liveActivity}
+        interruptedSessions={interruptedSessions}
         chatActivities={chatActivities}
         prStates={prStates}
         subagentCounts={subagentCounts}

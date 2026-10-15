@@ -25,15 +25,17 @@ import { displayStatusLabel, displayStatusTone, statusTextClass } from "../token
 export function SessionHoverCard({
   session,
   activity,
+  interrupted,
   prState
 }: {
   session: Session
   /** What the agent is doing right now; absent falls back to the persisted status. */
   activity?: SessionActivity
+  interrupted?: boolean
   /** Live PR state; `null`/absent renders no PR line at all. */
   prState?: SessionPrStatus | null
 }) {
-  const display = displayStatusOf(activity, session.status)
+  const display = displayStatusOf(activity, session.status, interrupted)
   // The detail line ("Running pnpm test -- auth") when there IS live activity;
   // the five-word rollup otherwise. Never both — they'd say the same thing twice.
   const detail = activity ? activityLabel(activity) : displayStatusLabel[display]

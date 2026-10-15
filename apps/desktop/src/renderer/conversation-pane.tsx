@@ -49,6 +49,7 @@ import { clearMcpRecoveryDismissal, dismissMcpRecovery, isMcpRecoveryDismissed, 
 import { handoffEachQueued } from "./handoff-each-queued.js"
 import { PlanReviewerDisconnectedCard } from "./plan-reviewer-disconnected-card.js"
 import { rpc } from "./rpc-client.js"
+import { clearInterruptedChat, useInterruptedChats } from "./interrupted-chats.js"
 import { endpointCatalogForSession, runtimeTargetForSession } from "./session-endpoint-catalog.js"
 import {
   publishFleetAgentFileActivity,
@@ -237,6 +238,24 @@ const useEnvironmentHandoff = (sessionId: string, busy: boolean) => {
     continueEnvironmentMutation.mutate(environmentId)
   }, [busy, handoffAfterStop, continueEnvironmentMutation.mutate])
   return { continuationEnvironmentId, setContinuationEnvironmentId, handoffAfterStop, setHandoffAfterStop, continueEnvironmentMutation, environmentMutation }
+}
+
+/** Resume card for a chat whose last run was cut off by a restart (#520). */
+function InterruptedRunCard({ session, chatId, busy }: { session: Session; chatId: string; busy: boolean }) {
+  const interrupted = useInterruptedChats().some((c) => c.sessionId === session.id && c.chatId === chatId)
+  if (!interrupted || busy) return null
+  return (
+    <RuntimeRecoveryCard
+      label="Interrupted run"
+      title="Interrupted"
+      message="This run stopped when Jingler closed."
+      actionLabel="Resume"
+      onAction={() => {
+        clearInterruptedChat(session.id, chatId)
+        getConversationActor(session, chatId).send({ type: "SEND", text: "Continue" })
+      }}
+    />
+  )
 }
 
 export function ConversationPane({
@@ -929,6 +948,7 @@ export function ConversationPane({
           onAction={() => onOpenProviderSettings?.()}
         />
       )}
+      <InterruptedRunCard session={session} chatId={activeChat.id} busy={convo.busy} />
       <McpRecoveryCards
         servers={localMcpConfig.servers}
         setApiKey={localMcpConfig.setApiKey}

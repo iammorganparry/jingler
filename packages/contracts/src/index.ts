@@ -673,6 +673,16 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: Schema.Array(Session)
   }),
 
+  /**
+   * Chats whose last persisted turn was still streaming when the app died and
+   * that have no live turn now. Read-only: derived from each transcript's tail.
+   */
+  Rpc.make("Sessions.interruptedChats", {
+    success: Schema.Array(
+      Schema.Struct({ sessionId: Schema.String, chatId: Schema.String })
+    )
+  }),
+
   /** Fetch one session by id. */
   Rpc.make("Sessions.get", {
     success: Session,

@@ -142,6 +142,8 @@ export interface SessionConversationProps {
   patch?: string
   /** What each session's agent is doing right now, keyed by id (live). */
   liveActivity?: Record<string, SessionActivity>
+  /** Sessions whose last run was cut off by a restart. */
+  interruptedSessions?: ReadonlySet<string>
   /** Live activity by session, then chat, for the sidebar tree. */
   chatActivities?: Readonly<Record<string, Readonly<Record<string, SessionActivity>>>>
   /** Live linked-PR state per session id, badged onto sidebar rows. */
@@ -444,6 +446,7 @@ export function SessionConversation(props: SessionConversationProps) {
         onRestore={props.onRestoreSession}
         onDelete={props.onDeleteSession}
         liveActivity={props.liveActivity}
+        interruptedSessions={props.interruptedSessions}
         prStates={props.prStates}
         subagentCounts={props.subagentCounts}
         repoOwners={props.repoOwners}

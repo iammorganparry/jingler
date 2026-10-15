@@ -130,4 +130,19 @@ describe("RuntimeRecoveryCard", () => {
       expect(onAction).toHaveBeenCalledOnce()
     })
   })
+
+  it("offers Resume for an interrupted run", () => {
+    const onAction = vi.fn()
+    render(
+      <RuntimeRecoveryCard
+        label="Interrupted run"
+        title="Interrupted"
+        message="This run stopped when Jingler closed."
+        actionLabel="Resume"
+        onAction={onAction}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Resume/ }))
+    expect(onAction).toHaveBeenCalledTimes(1)
+  })
 })

@@ -52,6 +52,17 @@ export const ThreeVariants: Story = {
   )
 }
 
+/** Interrupted run: the transcript tail was mid-stream when Jingler closed. */
+export const Interrupted: Story = {
+  args: {
+    label: "Interrupted run",
+    title: "Interrupted",
+    message: "This run stopped when Jingler closed.",
+    actionLabel: "Resume",
+    onAction: () => {}
+  }
+}
+
 /** MCP server variant: neutral body, dismissable, icon only red on failure. */
 export const McpServer: Story = {
   args: {
