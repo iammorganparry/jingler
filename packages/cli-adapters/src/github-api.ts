@@ -30,6 +30,7 @@ import {
   mapCheck,
   mapIssue,
   mapIssueListItem,
+  mapLinkedPrs,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
@@ -812,7 +813,11 @@ export const makeGitHubApiClient = (options: GitHubApiClientOptions): GitHubApiC
             issue_number: issueNumber
           }, ["issues:read"])
         ])
-        return mapIssue({ ...issue.data, comments })
+        const timeline = await paginate(cwd, "/repos/{owner}/{repo}/issues/{issue_number}/timeline", {
+          issue_number: issueNumber
+        }, ["issues:read"])
+        const linkedPrs = mapLinkedPrs(timeline)
+        return { ...mapIssue({ ...issue.data, comments }), ...(linkedPrs.length ? { linkedPrs } : {}) }
       } catch (error) {
         if (error instanceof GitHubApiError && error.reason === "not-found") return null
         throw error
