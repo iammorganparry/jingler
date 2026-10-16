@@ -1074,6 +1074,7 @@ function SessionRail({
             activity={liveActivity?.[s.id]}
             interrupted={interruptedSessions?.has(s.id)}
             prState={prStates?.[s.id]}
+            stack={s.prs}
           />
         }
       >
