@@ -1,5 +1,12 @@
 # @jingler/desktop
 
+## 0.11.1
+
+### Patch Changes
+
+- d2337d9: Run up to 10 background subagents at once (was 4).
+  - @jingler/plannotator-ext@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes

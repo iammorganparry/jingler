@@ -1,5 +1,7 @@
 # @jingler/plugin-github-issues
 
+## 0.11.1
+
 ## 0.11.0
 
 ## 0.10.1
