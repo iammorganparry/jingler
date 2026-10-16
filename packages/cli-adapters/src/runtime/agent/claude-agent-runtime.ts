@@ -18,6 +18,7 @@ import {
 } from "./agent-runtime.js"
 
 import { trackChild } from "../../child-registry.js"
+import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import { recordClaudeCliRateLimits } from "../providers/claude-cli-rate-limits.js"
 import type { RegistryMcpRelay } from "../providers/registry-mcp-relay.js"
 import { claudeCliEnvironment } from "../providers/claude-cli-environment.js"
@@ -317,7 +318,7 @@ async function* runClaude(
   signal: AbortSignal
 ): AsyncGenerator<StreamEvent> {
   const sessionId = spec.continuation?.id ?? randomUUID()
-  const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const binary = await resolveClaudeBinary(options.binary)
   const environment = claudeCliEnvironment(options.environment ?? process.env)
   const scope = await Effect.runPromise(Scope.make())
   await reserveClaudeSession(reserved, sessionId, scope)

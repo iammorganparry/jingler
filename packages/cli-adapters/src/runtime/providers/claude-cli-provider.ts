@@ -17,6 +17,7 @@ import type {
 import { lazyStream } from "@earendil-works/pi-ai/api/lazy"
 import { Option, Schema } from "effect"
 import { execFileText, trackChild } from "../../child-registry.js"
+import { resolveClaudeBinary } from "../../claude-cli-resolver.js"
 import {
   startClaudeCliToolRelay,
   type ClaudeCliToolRelay,
@@ -136,12 +137,12 @@ export const checkClaudeSubscription = async (
   await readClaudeLogin(binary, environment, signal)
 }
 
-export const verifyLocalClaudeSubscription = (
+export const verifyLocalClaudeSubscription = async (
   options: Pick<ClaudeCliProviderOptions, "binary" | "environment"> & {
     readonly signal?: AbortSignal
   } = {}
 ): Promise<ClaudeLogin> => {
-  const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const binary = await resolveClaudeBinary(options.binary)
   return readClaudeLogin(
     binary,
     subscriptionEnvironment(options.environment ?? process.env),
@@ -516,7 +517,7 @@ async function* runClaudeCli(
 ): AsyncGenerator<AssistantMessageEvent> {
   const partial = partialMessage(model)
   yield { type: "start", partial: { ...partial } }
-  const binary = providerOptions.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const binary = await resolveClaudeBinary(providerOptions.binary)
   const environment = subscriptionEnvironment(providerOptions.environment ?? process.env)
   const output: ClaudeOutputState = { result: null, open: null, rescued: null }
   let relay: ClaudeCliToolRelay | null = null
