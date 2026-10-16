@@ -8,6 +8,71 @@ import { ToolResultSurface } from "./beui/work.js"
 
 export type ToolCallStatus = "success" | "running" | "error"
 
+export interface ToolCallLabelInput {
+  readonly toolName: string
+  readonly args?: Record<string, unknown> | null
+  readonly intent?: string | null
+  readonly cwd?: string | null
+}
+
+export interface ToolCallLabelResult {
+  readonly title: string
+  readonly detail: string | null
+}
+
+/** The session's own cwd prefix on a Bash command is noise, not information. */
+const stripCwdPrefix = (text: string, cwd?: string | null): string => {
+  if (!cwd) return text
+  const prefix = `cd ${cwd} && `
+  return text.startsWith(prefix) ? text.slice(prefix.length) : text
+}
+
+const baseName = (path: string): string => {
+  const cut = path.replace(/\/+$/, "").lastIndexOf("/")
+  return cut < 0 ? path : path.slice(cut + 1)
+}
+
+const toolCallDetail = (
+  toolName: string,
+  args: Record<string, unknown> | null | undefined,
+  cwd?: string | null
+): string | null => {
+  const raw = typeof args?.["command"] === "string"
+    ? args["command"]
+    : typeof args?.["path"] === "string"
+      ? args["path"]
+      : null
+  return raw === null ? null : stripCwdPrefix(raw, cwd)
+}
+
+/**
+ * A tool call's title and secondary line. `intent` (agent-written, present
+ * tense) always wins the title when present; otherwise derive a label from
+ * the tool name and its arguments so the row never shows a bare `cd … && …`.
+ */
+export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInput): ToolCallLabelResult {
+  const detail = toolCallDetail(toolName, args, cwd)
+  if (intent) return { title: intent, detail }
+  switch (toolName) {
+    case "command_execute": {
+      const command = typeof args?.["command"] === "string" ? stripCwdPrefix(args["command"], cwd) : ""
+      const firstWord = command.trim().split(/\s+/u)[0] ?? ""
+      return { title: firstWord ? `Ran \`${firstWord}\`` : "Ran command", detail }
+    }
+    case "workspace_read_file": {
+      const path = typeof args?.["path"] === "string" ? args["path"] : ""
+      return { title: path ? `Read \`${baseName(path)}\`` : "Read file", detail }
+    }
+    case "workspace_edit":
+    case "workspace_write": {
+      const path = typeof args?.["path"] === "string" ? args["path"] : ""
+      return { title: path ? `Edited \`${baseName(path)}\`` : "Edited file", detail }
+    }
+    default:
+      return { title: toolName, detail }
+  }
+}
+
 export interface ToolCallProps {
   status: ToolCallStatus
   /** Tool name, e.g. "Read", "Grep", "Bash". */
