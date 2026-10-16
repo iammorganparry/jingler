@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process"
 import { randomBytes } from "node:crypto"
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { promisify } from "node:util"
 import {
   SUBAGENT_CAPABILITY_VERSION,
   SubagentJsonValue,
@@ -48,6 +50,8 @@ export interface SubagentParentSpec {
   readonly role: AgentRole
   readonly mode: RuntimeMode
   readonly targetCapabilities: { readonly targetId: string }
+  /** Parent checkout; a child cwd is honoured only inside a worktree of the same repo. */
+  readonly cwd?: string
 }
 
 interface RegisteredChild {
@@ -58,6 +62,7 @@ interface RegisteredChild {
   readonly grantedToolIds: ReadonlySet<string>
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
+  readonly parentCwd: string | undefined
   readonly supervisorState: () => SubagentSupervisorSnapshot
 }
 
@@ -279,6 +284,7 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               grantedToolIds: new Set(tools.map(({ id }) => id)),
               registry: input.registry,
               context: input.context,
+              parentCwd: input.spec.cwd,
               supervisorState: input.supervisorState
             })
             tokens.add(token)
@@ -319,6 +325,24 @@ export const SubagentCapabilityBrokerLive = Layer.scoped(
   Effect.acquireRelease(makeSubagentCapabilityBroker(), (broker) => broker.close)
 )
 
+const gitCommonDir = (cwd: string): Promise<string | null> =>
+  promisify(execFile)("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd })
+    .then(({ stdout }) => stdout.trim(), () => null)
+
+/**
+ * The cwd a child's tool call runs in: its own worktree when that shares the
+ * parent's git repo, the parent's checkout when it sent none (or the parent has
+ * no cwd), and `null` (forbidden) for any other path.
+ */
+export const resolveChildCwd = async (
+  parentCwd: string | undefined,
+  childCwd: string | undefined
+): Promise<string | undefined | null> => {
+  if (parentCwd === undefined || childCwd === undefined || childCwd === parentCwd) return undefined
+  const [parent, child] = await Promise.all([gitCommonDir(parentCwd), gitCommonDir(childCwd)])
+  return parent !== null && parent === child ? childCwd : null
+}
+
 function* executeCapabilityRequest(
   request: IncomingMessage,
   ref: Ref.Ref<BrokerState>,
@@ -349,6 +373,8 @@ function* executeCapabilityRequest(
   }
   const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
   if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
+  const cwd = yield* Effect.promise(() => resolveChildCwd(child.parentCwd, decoded.cwd))
+  if (cwd === null) return yield* writeJson(response, 403, { error: "forbidden-cwd" })
   const result = yield* Effect.tryPromise(() => executeRegistryTool({
     registry: child.registry,
     spec: child,
@@ -358,7 +384,8 @@ function* executeCapabilityRequest(
     parameters: decoded.arguments,
     signal: undefined,
     allowed: true,
-    onUpdate: undefined
+    onUpdate: undefined,
+    ...(cwd === undefined ? {} : { cwd })
   }))
   yield* writeJson(response, 200, responseFrom(result.details))
 }
