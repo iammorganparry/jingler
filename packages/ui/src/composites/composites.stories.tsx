@@ -28,6 +28,16 @@ export const ToolCalls: Story = {
   )
 }
 
+/** With an agent-written `intent`: the intent is the title, the raw command drops to a dim mono line. */
+export const ToolCallsWithIntent: Story = {
+  render: () => (
+    <div className="flex w-80 flex-col gap-2">
+      <ToolCall status="success" name="Bash" target="Running tests" detail="pnpm test" meta="exit 0" />
+      <ToolCall status="running" name="Bash" target="Finding the retry logic" detail="grep -rn retry src" />
+    </div>
+  )
+}
+
 export const Thought: Story = {
   render: () => (
     <div className="w-80">

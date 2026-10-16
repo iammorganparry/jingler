@@ -27,20 +27,22 @@ const stripCwdPrefix = (text: string, cwd?: string | null): string => {
   return text.startsWith(prefix) ? text.slice(prefix.length) : text
 }
 
+const TRAILING_SLASHES = /\/+$/
+const WHITESPACE = /\s+/u
+
 const baseName = (path: string): string => {
-  const cut = path.replace(/\/+$/, "").lastIndexOf("/")
+  const cut = path.replace(TRAILING_SLASHES, "").lastIndexOf("/")
   return cut < 0 ? path : path.slice(cut + 1)
 }
 
 const toolCallDetail = (
-  toolName: string,
   args: Record<string, unknown> | null | undefined,
   cwd?: string | null
 ): string | null => {
-  const raw = typeof args?.["command"] === "string"
-    ? args["command"]
-    : typeof args?.["path"] === "string"
-      ? args["path"]
+  const raw = typeof args?.command === "string"
+    ? args.command
+    : typeof args?.path === "string"
+      ? args.path
       : null
   return raw === null ? null : stripCwdPrefix(raw, cwd)
 }
@@ -51,21 +53,21 @@ const toolCallDetail = (
  * the tool name and its arguments so the row never shows a bare `cd … && …`.
  */
 export function toolCallLabel({ toolName, args, intent, cwd }: ToolCallLabelInput): ToolCallLabelResult {
-  const detail = toolCallDetail(toolName, args, cwd)
+  const detail = toolCallDetail(args, cwd)
   if (intent) return { title: intent, detail }
   switch (toolName) {
     case "command_execute": {
-      const command = typeof args?.["command"] === "string" ? stripCwdPrefix(args["command"], cwd) : ""
-      const firstWord = command.trim().split(/\s+/u)[0] ?? ""
+      const command = typeof args?.command === "string" ? stripCwdPrefix(args.command, cwd) : ""
+      const firstWord = command.trim().split(WHITESPACE)[0] ?? ""
       return { title: firstWord ? `Ran \`${firstWord}\`` : "Ran command", detail }
     }
     case "workspace_read_file": {
-      const path = typeof args?.["path"] === "string" ? args["path"] : ""
+      const path = typeof args?.path === "string" ? args.path : ""
       return { title: path ? `Read \`${baseName(path)}\`` : "Read file", detail }
     }
     case "workspace_edit":
     case "workspace_write": {
-      const path = typeof args?.["path"] === "string" ? args["path"] : ""
+      const path = typeof args?.path === "string" ? args.path : ""
       return { title: path ? `Edited \`${baseName(path)}\`` : "Edited file", detail }
     }
     default:
@@ -97,6 +99,12 @@ export interface ToolCallProps {
    * as a stop button on the header only while `status` is "running".
    */
   onStop?: () => void
+  /**
+   * Second line under the header — the raw command/path once `target` is an
+   * agent-written intent. Mono, dim, truncated; the full text still lives in
+   * the expanded body below.
+   */
+  detail?: ReactNode
   className?: string
 }
 
@@ -184,6 +192,7 @@ export function ToolCall({
   expanded = false,
   onToggle,
   onStop,
+  detail,
   className
 }: ToolCallProps) {
          function renderToolHeading() {
@@ -216,11 +225,18 @@ export function ToolCall({
          }
 
   const header = (
-    renderToolHeading()
+    <>
+      <div className={cn("flex items-center gap-[9px]", detail ? "font-sans text-text-bright" : "font-mono")}>
+        {renderToolHeading()}
+      </div>
+      {detail && (
+        <div className="truncate pl-[21px] font-mono text-[11px] text-dim">{detail}</div>
+      )}
+    </>
   )
   const headerClass = cn(
-    "flex w-full items-center gap-[9px] px-2.5 py-1.5 font-mono text-[11.5px]",
-    onToggle && "cursor-pointer text-left transition-colors hover:bg-hover"
+    "flex w-full flex-col gap-0.5 px-2.5 py-1.5 text-left text-[11.5px]",
+    onToggle && "cursor-pointer transition-colors hover:bg-hover"
   )
   return (
     <ToolResultSurface

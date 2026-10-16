@@ -7,6 +7,12 @@ afterEach(cleanup)
 const redIcons = (c: HTMLElement) => c.querySelectorAll("svg.text-state-failed")
 
 describe("ToolCall", () => {
+  it("renders detail as a second mono line under the title", () => {
+    const { container } = render(<ToolCall status="success" name="Bash" target="Running tests" detail="pnpm test" />)
+    expect(container.textContent).toContain("Running tests")
+    expect(container.textContent).toContain("pnpm test")
+  })
+
   it("shows a red icon only for a failed call", () => {
     const failed = render(<ToolCall status="error" name="Bash" target="pnpm test" meta="exit 1" />)
     expect(redIcons(failed.container)).toHaveLength(1)
