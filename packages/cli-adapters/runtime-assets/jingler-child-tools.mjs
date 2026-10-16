@@ -33,7 +33,8 @@ export default function jinglerChildTools(pi) {
             parentRuntimeSessionId: capability.parentRuntimeSessionId,
             callId,
             toolId: tool.id,
-            arguments: parameters
+            arguments: parameters,
+            cwd: process.cwd()
           }),
           signal
         })

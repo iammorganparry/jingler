@@ -11,6 +11,7 @@ import { registerWorkspaceMutationTools, type WorkspaceMutationPort } from "../t
 import { JINGLER_SUBAGENT_NAMES } from "@jingler/core"
 import {
   makeSubagentCapabilityBroker,
+  resolveChildCwd,
   subagentProfileToolIds,
   SubagentCapabilityBrokerLive,
   SubagentCapabilityBrokerService,
@@ -411,5 +412,33 @@ describe("SubagentCapabilityBroker", () => {
     })
     expect((await invoked.json() as { status: string }).status).toBe("success")
     expect(calls).toEqual(["lookup"])
+  })
+})
+
+describe("resolveChildCwd", () => {
+  const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+  const { mkdtempSync, realpathSync } = require("node:fs") as typeof import("node:fs")
+  const { tmpdir } = require("node:os") as typeof import("node:os")
+  const { join } = require("node:path") as typeof import("node:path")
+  const repo = (): string => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "child-cwd-")))
+    execFileSync("git", ["init", "-q"], { cwd: dir })
+    execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir })
+    return dir
+  }
+
+  it("routes a worktree of the parent's repo to the child's own cwd", async () => {
+    const parent = repo()
+    const lane = join(realpathSync(mkdtempSync(join(tmpdir(), "lane-"))), "lane")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "lane", lane], { cwd: parent })
+    expect(await resolveChildCwd(parent, lane)).toBe(lane)
+  })
+
+  it("forbids a path outside the parent's repo", async () => {
+    expect(await resolveChildCwd(repo(), repo())).toBeNull()
+  })
+
+  it("falls back to the parent checkout when the child sends no cwd", async () => {
+    expect(await resolveChildCwd(repo(), undefined)).toBeUndefined()
   })
 })
