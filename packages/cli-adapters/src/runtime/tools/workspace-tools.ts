@@ -195,7 +195,7 @@ export const registerWorkspaceInspectionTools = (
         "List tracked and untracked non-ignored files in the current workspace.",
       input: EmptyInput,
       providerInputSchema: EMPTY_PROVIDER_INPUT,
-      execute: () => Effect.runPromise(workspace.listFiles(cwdOf(cwd)))
+      execute: (_input, context) => Effect.runPromise(workspace.listFiles(context.cwd ?? cwdOf(cwd)))
     })
   )
   registry.register(
@@ -204,8 +204,8 @@ export const registerWorkspaceInspectionTools = (
       description:
         "Read one bounded text file inside the current workspace. Paths outside the workspace and escaping symlinks are rejected.",
       input: Schema.Struct({ path: Schema.String.pipe(Schema.minLength(1)) }),
-      execute: ({ path }) =>
-        Effect.runPromise(workspace.readTextFile(cwdOf(cwd), path))
+      execute: ({ path }, context) =>
+        Effect.runPromise(workspace.readTextFile(context.cwd ?? cwdOf(cwd), path))
     })
   )
   registry.register(
@@ -218,7 +218,7 @@ export const registerWorkspaceInspectionTools = (
         args: Schema.Array(Schema.String).pipe(Schema.minItems(1))
       }),
       execute: ({ program, args }, context) =>
-        Effect.runPromise(workspace.executeReadOnly(cwdOf(cwd), program, args, context), {
+        Effect.runPromise(workspace.executeReadOnly(context.cwd ?? cwdOf(cwd), program, args, context), {
           signal: context.signal
         })
     })
