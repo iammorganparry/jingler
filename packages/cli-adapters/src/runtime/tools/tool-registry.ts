@@ -7,7 +7,7 @@ import type {
 } from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
-import { Effect, Either, Schema } from "effect"
+import { Effect, Either, JSONSchema, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -181,6 +181,46 @@ const errorEnvelope = (error: ToolError): ToolResultEnvelope => ({
 const abortError = (signal: AbortSignal): ToolError =>
   new ToolError(signal.reason === "timeout" ? "timed-out" : "cancelled", signal.reason === "timeout" ? "Tool timed out" : "Tool cancelled", true)
 
+export type JsonSchemaNode = { readonly type?: unknown; readonly anyOf?: ReadonlyArray<JsonSchemaNode>; readonly properties?: Record<string, JsonSchemaNode> }
+
+const structuredTypes = (schema: JsonSchemaNode | undefined): ReadonlyArray<string> => {
+  if (schema === undefined) return []
+  const own = Array.isArray(schema.type) ? schema.type : [schema.type]
+  return [...own, ...(schema.anyOf ?? []).flatMap(structuredTypes)].filter(
+    (type): type is string => type === "array" || type === "object"
+  )
+}
+
+const parseStructured = (value: unknown, wanted: ReadonlyArray<string>): unknown => {
+  if (typeof value !== "string" || wanted.length === 0) return value
+  try {
+    const parsed: unknown = JSON.parse(value)
+    const kind = Array.isArray(parsed) ? "array" : typeof parsed === "object" && parsed !== null ? "object" : null
+    return kind !== null && wanted.includes(kind) ? parsed : value
+  } catch {
+    // Not JSON: a genuine string the validator should judge.
+    return value
+  }
+}
+
+/**
+ * Every runtime's tool calls settle here before decoding. Some models (Opus
+ * reliably, others occasionally) send an array/object argument as its JSON
+ * text instead of structured data (`questions: "[{...}]"`), which fails
+ * schema validation with "must be array" and can push the model to abandon
+ * the tool call and print the payload as assistant text instead. Parse a
+ * top-level string into its JSON value only when the tool's schema wants
+ * array/object there; anything that doesn't parse to that shape is left for
+ * the decoder to reject as before.
+ */
+export const normalizeStringifiedArguments = (schema: JsonSchemaNode, args: unknown): unknown => {
+  const properties = schema.properties
+  if (typeof args !== "object" || args === null || Array.isArray(args) || properties === undefined) return args
+  const entries = Object.entries(args).map(([key, value]) => [key, value, parseStructured(value, structuredTypes(properties[key]))] as const)
+  if (entries.every(([, before, after]) => before === after)) return args
+  return Object.fromEntries(entries.map(([key, , after]) => [key, after]))
+}
+
 const validateExecution = (
   tool: AnyToolDefinition,
   input: ToolExecutionRequest
@@ -191,7 +231,9 @@ const validateExecution = (
   if (tool.idempotency === "keyed" && !input.idempotencyKey) {
     return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool requires an idempotency key")) }
   }
-  const decoded = Schema.decodeUnknownEither(tool.input)(input.arguments)
+  const schema = (tool.providerInputSchema ?? JSONSchema.make(tool.input)) as JsonSchemaNode
+  const normalized = normalizeStringifiedArguments(schema, input.arguments)
+  const decoded = Schema.decodeUnknownEither(tool.input)(normalized)
   return Either.isLeft(decoded)
     ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool input failed validation")) }
     : { ok: true, value: decoded.right }
