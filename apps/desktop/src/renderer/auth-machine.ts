@@ -12,6 +12,8 @@
  *     oauthPending  — browser opened, awaiting the `jingler://` callback;
  *                     CANCEL/RESET return to idle, and it times out into `error`
  *     error         — a send/OAuth attempt failed; RETRY re-runs it, RESET clears it
+ *   unreachable   — the auth check failed to reach the server (offline, 5xx): NOT signed out.
+ *                   The app still shows, with a banner; RETRY (or a deep-link CALLBACK) re-runs `checking`
  *   signedIn      — authenticated; `SIGN_OUT` revokes and returns to the wall
  *   signingOut    — sign-out request in flight
  *
@@ -98,8 +100,11 @@ export const authMachine = setup({
           },
           { target: "signedOut" }
         ],
-        onError: { target: "signedOut" }
+        onError: { target: "unreachable" }
       }
+    },
+    unreachable: {
+      on: { RETRY: "checking", CALLBACK: "checking" }
     },
     signedOut: {
       initial: "idle",

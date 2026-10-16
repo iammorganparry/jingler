@@ -249,7 +249,7 @@ import {
 } from "./github-relay.js";
 
 /** The single IPC channel both directions of the RPC transport ride on. */
-export const authenticatedSession = () => AuthService.getSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
+export const authenticatedSession = () => AuthService.checkSession().pipe(Effect.tap(session => RoutinesService.pipe(Effect.flatMap(service => session ? service.start : service.stop), Effect.catchAll(cause => Effect.logError(cause.message)))))
 
 export const RPC_CHANNEL = "jingler/rpc";
 

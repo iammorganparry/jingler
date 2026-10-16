@@ -64,12 +64,16 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
   effect: Effect.gen(function* () {
     const secrets = yield* SecretStore
 
-    /** Validate the stored token; null when signed out, invalid, or unreachable. */
-    const getSession = (): Effect.Effect<AuthSession | null> =>
+    /** Validate the stored token; null when signed out or invalid, `AuthError` when the server can't be reached. */
+    const checkSession = (): Effect.Effect<AuthSession | null, AuthError> =>
       Effect.gen(function* () {
         const token = yield* secrets.get
         return yield* validateStoredAuthToken(token, secrets)
       })
+
+    /** Like `checkSession`, but an unreachable server reads as signed out (routine fences want a boolean). */
+    const getSession = (): Effect.Effect<AuthSession | null> =>
+      checkSession().pipe(Effect.orElseSucceed(() => null))
 
     /** POST to the auth server, mapping transport failure to a user-facing `AuthError`. */
     const post = (path: string, payload: unknown): Effect.Effect<Response, AuthError> =>
@@ -144,26 +148,25 @@ export class AuthService extends Effect.Service<AuthService>()("@jingler/AuthSer
         yield* secrets.clear
       })
 
-    return { getSession, startSignIn, sendMagicLink, signOut } as const
+    return { checkSession, getSession, startSignIn, sendMagicLink, signOut } as const
   })
 }) {}
 
 function* validateStoredAuthToken(token: string | null, secrets: SecretStoreShape) {
   if (!token) return null
   const base = authBaseUrl()
-  const res = yield* Effect.tryPromise(() =>
-    fetch(`${base}/api/auth/get-session`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-  ).pipe(Effect.orElseSucceed(() => null))
-  // Network error → keep the token, stay signed out for now (transient).
-  if (!res) return null
+  const unreachable = () => new AuthError({ message: "Couldn't reach the sign-in service." })
+  // Network error → keep the token and report unreachable (transient, not signed out).
+  const res = yield* Effect.tryPromise({
+    try: () => fetch(`${base}/api/auth/get-session`, { headers: { Authorization: `Bearer ${token}` } }),
+    catch: unreachable
+  })
   // Unauthorized → the token is dead; clear it so we stop retrying.
   if (res.status === 401) {
     yield* secrets.clear
     return null
   }
-  if (!res.ok) return null
+  if (!res.ok) return yield* Effect.fail(unreachable())
   const body = yield* Effect.tryPromise(() => res.json() as Promise<SessionResponse>).pipe(
     Effect.orElseSucceed(() => null)
   )

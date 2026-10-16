@@ -206,3 +206,22 @@ test("the sign-in dialog is a standard dialog panel that closes on success", asy
   await completeDeepLinkSignIn()
   await expect(dialog).toHaveCount(0)
 })
+
+test("an offline boot shows the app with the unreachable banner, not the sign-in wall", async ({ launchApp }) => {
+  // A stored token, but the auth server refuses connections: unreachable, not signed out.
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [seeded],
+    authSessionServer: { url: "http://127.0.0.1:1", token: "e2e-token" }
+  })
+  await expect(appShell(window)).toBeVisible()
+  await expect(sessionRow(window, "Seeded session")).toBeVisible()
+  await expect(window.getByText("Can't reach Jingler — you can keep working locally")).toBeVisible()
+  await expect(signInHeading(window)).toHaveCount(0)
+
+  // Retry re-checks; the server is still down, so the banner stays and the app keeps working.
+  await window.getByRole("button", { name: "Retry" }).click()
+  await expect(window.getByText("Can't reach Jingler — you can keep working locally")).toBeVisible()
+  await expect(sessionRow(window, "Seeded session")).toBeVisible()
+})

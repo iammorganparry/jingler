@@ -10,6 +10,7 @@ import { authMachine, OAUTH_TIMEOUT_MS } from "./auth-machine.js"
  * OAuth → deep-link → signed-in path, and sign-out.
  */
 const h = vi.hoisted(() => ({
+  sessionError: null as Error | null,
   session: null as null | { user: { id: string; email: string; name: string; image: string | null }; expiresAt: string },
   magicLinkOk: true,
   sentEmails: [] as Array<string>,
@@ -21,7 +22,10 @@ const h = vi.hoisted(() => ({
 
 vi.mock("./rpc-client.js", () => ({
   rpc: {
-    authGetSession: async () => h.session,
+    authGetSession: async () => {
+      if (h.sessionError) throw h.sessionError
+      return h.session
+    },
     authSendMagicLink: async (email: string) => {
       h.sentEmails.push(email)
       if (!h.magicLinkOk) throw new Error("send failed")
@@ -43,6 +47,7 @@ const SESSION = {
 
 beforeEach(() => {
   h.session = null
+  h.sessionError = null
   h.magicLinkOk = true
   h.sentEmails = []
   h.openedUrls = []
@@ -64,6 +69,23 @@ describe("authMachine", () => {
     const actor = start()
     await waitFor(actor, (s) => s.matches("signedOut"))
     expect(actor.getSnapshot().matches({ signedOut: "idle" })).toBe(true)
+  })
+
+  it("reaches unreachable, not the wall, when the auth server can't be reached", async () => {
+    h.sessionError = new Error("Couldn't reach the sign-in service.")
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("unreachable"))
+    expect(actor.getSnapshot().matches("signedOut")).toBe(false)
+  })
+
+  it("RETRY from unreachable re-checks and signs in once the server is back", async () => {
+    h.sessionError = new Error("offline")
+    h.session = SESSION
+    const actor = start()
+    await waitFor(actor, (s) => s.matches("unreachable"))
+    h.sessionError = null
+    actor.send({ type: "RETRY" })
+    await waitFor(actor, (s) => s.matches("signedIn"))
   })
 
   it("goes straight to signedIn when a valid session exists", async () => {

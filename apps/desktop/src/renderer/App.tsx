@@ -63,6 +63,7 @@ import {
   PullRequestInbox,
   IssueInbox,
   BootFailureCard,
+  UnreachableBanner,
   ThemeProvider,
   useSplashHold,
   useThemeCatalog,
@@ -263,10 +264,13 @@ function AuthedApp({
   user,
   onSignOut,
   onSignIn,
+  banner,
 }: {
   user?: User;
   onSignOut?: () => void;
   onSignIn?: () => void;
+  /** Notice under the title bar, e.g. while the auth server is unreachable. */
+  banner?: ReactNode;
 }) {
   const windowControls = useWindowControls()
 
@@ -1543,6 +1547,7 @@ function AuthedApp({
         issuesView={renderIssueInbox(issueInbox, issueSessionAction(selectedIssueTarget, openSelectedIssueSession))}
         onSignOut={onSignOut}
         onSignIn={onSignIn}
+        banner={banner}
         repos={repos}
         projects={projectController.projects}
         projectsLoading={projectController.loading}
@@ -2331,6 +2336,7 @@ function AppContent({
         user={signedIn ? authState.context.session?.user : undefined}
         onSignOut={signedIn ? () => authSend({ type: "SIGN_OUT" }) : undefined}
         onSignIn={signedOut ? () => setSignInOpen(true) : undefined}
+        banner={authState.matches("unreachable") ? <UnreachableBanner onRetry={() => authSend({ type: "RETRY" })} /> : undefined}
       />
       <SignInDialog
         open={signInOpen && signedOut}

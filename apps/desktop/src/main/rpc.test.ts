@@ -2393,7 +2393,7 @@ describe("Auth.getSession routine sign-in fence", () => {
     const store = new RoutineStore(join(root, "routines.json"))
     const scheduler = new RoutineScheduler(store, { execute, sessionExists: async () => false }, { now: () => now, setTimer: callback => { due = callback; return callback }, clearTimer: () => { due = undefined } })
     let session: AuthSession | null = { user: { id: "operator", email: "operator@example.test", name: "Operator", image: null }, expiresAt: "2026-10-07T00:00:00.000Z" }
-    const layer = Layer.mergeAll(Layer.succeed(AuthService, { getSession: () => Effect.sync(() => session) } as AuthService), Layer.succeed(RoutinesService, RoutinesService.make({
+    const layer = Layer.mergeAll(Layer.succeed(AuthService, { checkSession: () => Effect.sync(() => session) } as unknown as AuthService), Layer.succeed(RoutinesService, RoutinesService.make({
       scheduler, start: Effect.promise(() => scheduler.start()), stop: Effect.promise(() => scheduler.stop()),
       resume: Effect.die("unused resume"), list: Effect.die("unused list"),
       save: () => Effect.die("unused save"), enable: () => Effect.die("unused enable"),
