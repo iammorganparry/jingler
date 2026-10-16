@@ -188,7 +188,7 @@ test("the rail's hover card lists every PR in a stacked session, bottom of the s
   await expect(window.getByTestId("session-rail")).toBeVisible()
 
   await window.locator('[data-session-id="s_stack"]').hover()
-  const card = window.getByTestId("hover-card")
+  const card = window.getByRole("tooltip")
   const stack = card.getByTestId("hover-card-pr-stack")
   await expect(stack).toBeVisible()
   await expect(card.getByTestId("hover-card-pr-stack-row-480")).toContainText("#480")
