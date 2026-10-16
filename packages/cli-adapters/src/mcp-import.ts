@@ -4,6 +4,7 @@ import { execFile } from "node:child_process"
 import { readFile } from "node:fs/promises"
 import { Either, Option, Schema } from "effect"
 import { parse as parseToml } from "smol-toml"
+import { resolveClaudeBinary } from "./claude-cli-resolver.js"
 
 /**
  * Pure parsers that read other tools' MCP configs into `McpConfigEntry`
@@ -364,7 +365,7 @@ export const discoverClaudeConnectors = async (options: {
   readonly binary?: string
   readonly timeoutMs?: number
 }): Promise<ReadonlyArray<McpImportCandidate>> => {
-  const binary = options.binary ?? process.env.JINGLER_CLAUDE_BINARY ?? "claude"
+  const binary = await resolveClaudeBinary(options.binary)
   const notes: Array<McpImportCandidate> = []
   try {
     const status: unknown = JSON.parse(await run(binary, ["auth", "status"], { cwd: options.cwd, timeoutMs: 15_000 }))
