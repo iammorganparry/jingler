@@ -158,11 +158,8 @@ describe("ToolRegistry", () => {
 
 it("normalizes a JSON-stringified array argument before validation (the shared decode path every runtime's tool calls pass through, e.g. Opus sending AskUserQuestion's list as text)", async () => {
   const registry = new ToolRegistry()
-  registry.register(definition({
-    id: "jingler_ask_question",
-    input: Schema.Struct({ id: Schema.String, questions: Schema.Array(Schema.Struct({ question: Schema.String })) }),
-    execute: async (input) => input
-  }))
+  const askInput = Schema.Struct({ id: Schema.String, questions: Schema.Array(Schema.Struct({ question: Schema.String })) })
+  registry.register({ ...definition(), id: "jingler_ask_question", input: askInput, execute: async (input: typeof askInput.Type) => input })
   const result = await Effect.runPromise(registry.execute({
     id: "jingler_ask_question",
     arguments: { id: "q1", questions: '[{"question":"Pick one?"}]' },
