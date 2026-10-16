@@ -81,6 +81,8 @@ export class ToolError extends Error {
 
 export interface ToolExecutionContext {
   readonly workspaceEnvironment?: Readonly<Record<string, string>>
+  /** Per-call cwd override (e.g. a validated subagent child cwd); absent means the tool's registered default. */
+  readonly cwd?: string
   readonly signal: AbortSignal
   readonly idempotencyKey: string | null
   readonly progress: (progress: ToolProgress) => void
@@ -142,6 +144,8 @@ export interface ToolExecutionRequest {
   readonly idempotencyKey?: string | null
   readonly callId?: string
   readonly progress?: (progress: ToolProgress) => void
+  /** Per-call cwd override threaded into ToolExecutionContext.cwd; see there. */
+  readonly cwd?: string
 }
 
 export interface ToolExecutionObserver {
@@ -277,7 +281,8 @@ const executeDefinition = async (
   const execution = tool.execute(value, {
     signal: controller.signal,
     idempotencyKey: input.idempotencyKey ?? null,
-    progress: input.progress ?? (() => undefined)
+    progress: input.progress ?? (() => undefined),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd })
   })
   try {
     const result = await Promise.race([
