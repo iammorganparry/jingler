@@ -7,7 +7,26 @@ import { StatusDot } from "../components/status-dot.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { DiffStat } from "../components/diff-stat.js"
 import { PrStatusGlyph } from "./pr-glyph.js"
+import { PR_STATE_LABEL, type PrStackLayer } from "./pr-stack-rail.js"
 import { displayStatusLabel, displayStatusTone, statusTextClass } from "../tokens.js"
+
+/** One row of the hover card's PR stack list: a layer's number and state word. */
+export interface PrStackRow {
+  readonly number: number
+  readonly stateWord: string
+}
+
+/**
+ * The hover card's stack rows, in the caller's order (bottom of the stack
+ * first, matching `Session.prs`/`PrStackLayer`). A layer whose state hasn't
+ * loaded yet (the live poll is still in flight) gets the word "—" rather than
+ * guessing a state it doesn't have.
+ */
+export const prStackRowsOf = (layers: ReadonlyArray<PrStackLayer> | undefined): ReadonlyArray<PrStackRow> =>
+  (layers ?? []).map((layer) => ({
+    number: layer.number,
+    stateWord: layer.state ? PR_STATE_LABEL[layer.state] : "—"
+  }))
 
 /**
  * What a session looks like when the sidebar is a 52px rail.
@@ -19,6 +38,10 @@ import { displayStatusLabel, displayStatusTone, statusTextClass } from "../token
  * that showed things the expanded sidebar doesn't would make the two states
  * disagree about what a session is.
  *
+ * The one addition is the PR STACK list: a stacked session's rail glyph only
+ * has room for the worst layer and a count, so the card is where "which PRs,
+ * in what order, in what state" actually lives.
+ *
  * Read-only by design. Archive and delete stay on the row, because a card you
  * must chase with the pointer to click is a card you will misclick.
  */
@@ -26,7 +49,8 @@ export function SessionHoverCard({
   session,
   activity,
   interrupted,
-  prState
+  prState,
+  stack
 }: {
   session: Session
   /** What the agent is doing right now; absent falls back to the persisted status. */
@@ -34,6 +58,8 @@ export function SessionHoverCard({
   interrupted?: boolean
   /** Live PR state; `null`/absent renders no PR line at all. */
   prState?: SessionPrStatus | null
+  /** This session's PR stack, bottom layer first. More than one layer renders a stack list instead of the single PR line. */
+  stack?: ReadonlyArray<PrStackLayer>
 }) {
   const display = displayStatusOf(activity, session.status, interrupted)
   // The detail line ("Running pnpm test -- auth") when there IS live activity;
@@ -41,6 +67,8 @@ export function SessionHoverCard({
   const detail = activity ? activityLabel(activity) : displayStatusLabel[display]
   const { added, removed } = session.diff
   const hasDiff = added > 0 || removed > 0
+  const stackRows = prStackRowsOf(stack)
+  const isStacked = stackRows.length > 1
 
   return (
     <div className="flex w-[240px] flex-col gap-1.5">
@@ -76,13 +104,36 @@ export function SessionHoverCard({
 
       {/* The footer only exists when it has something to say — an untouched
           session with no PR would otherwise get an empty grey strip. */}
-      {(hasDiff || session.prNumber !== null) && (
-        <div className="flex items-center gap-2.5 border-t border-hairline pt-1.5">
+      {(hasDiff || session.prNumber !== null || isStacked) && (
+        <div className="flex flex-col gap-1.5 border-t border-hairline pt-1.5">
           {hasDiff && <DiffStat added={added} removed={removed} />}
-          {session.prNumber !== null && (
-            <span className="flex items-center gap-1 font-mono text-[10px] text-dim">
-              <PrStatusGlyph pr={prState ?? null} size={12} />#{session.prNumber}
-            </span>
+          {isStacked ? (
+            <div className="flex flex-col gap-1" data-testid="hover-card-pr-stack">
+              {stackRows.map((row, index) => {
+                const layer = stack?.[index]
+                return (
+                  <span
+                    key={row.number}
+                    data-testid={`hover-card-pr-stack-row-${row.number}`}
+                    className="flex items-center gap-1.5 font-mono text-[10px] text-dim"
+                  >
+                    {layer?.state ? (
+                      <PrStatusGlyph pr={{ state: layer.state, checks: layer.checks ?? null }} size={11} />
+                    ) : (
+                      <span aria-hidden className="size-[11px] flex-none" />
+                    )}
+                    <span>#{row.number}</span>
+                    <span className="text-muted-foreground">{row.stateWord}</span>
+                  </span>
+                )
+              })}
+            </div>
+          ) : (
+            session.prNumber !== null && (
+              <span className="flex items-center gap-1 font-mono text-[10px] text-dim">
+                <PrStatusGlyph pr={prState ?? null} size={12} />#{session.prNumber}
+              </span>
+            )
           )}
         </div>
       )}
