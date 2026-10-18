@@ -319,3 +319,8 @@ export const SubagentAttentionReply = Schema.Struct({
   createdAt: Schema.Number
 })
 export type SubagentAttentionReply = Schema.Schema.Type<typeof SubagentAttentionReply>
+
+/** Count of fleet nodes with a pending attention request — the Fleet's "needs you" badge count. */
+export const countNodesAwaitingAttention = (
+  nodes: ReadonlyArray<SubagentFleetNode>
+): number => nodes.filter((node) => node.attention !== null).length
