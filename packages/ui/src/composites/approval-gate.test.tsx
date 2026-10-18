@@ -27,7 +27,7 @@ describe("ApprovalGate long command", () => {
     await userEvent.click(toggle)
     expect(screen.getByLabelText(/Show less/)).toBeTruthy()
     expect(container.querySelector(".h-24")).toBeFalsy()
-    expect(container.querySelector(".max-h-80")).toBeTruthy()
+    expect(container.querySelector(".overflow-y-auto")).toBeTruthy()
   })
 
   it("does not show toggle for short commands", () => {
@@ -116,5 +116,30 @@ describe("ApprovalGate Switch to Auto", () => {
     )
     await user.click(screen.getByText("Switch session to Auto"))
     expect(onSwitchToAuto).toHaveBeenCalledOnce()
+  })
+})
+
+describe("ApprovalGate 42-line command", () => {
+  const longCommand = Array.from({ length: 42 }, (_, i) => `step ${i + 1} && \\`).join("\n")
+
+  it("shows the toggle collapsed and keeps Approve rendered after expanding", async () => {
+    const user = userEvent.setup()
+    render(
+      <ApprovalGate
+        kind="command"
+        title="Run command"
+        detail="Test"
+        command={longCommand}
+        status="pending"
+      />
+    )
+
+    expect(screen.getByLabelText(/Show all · 42 lines/)).toBeTruthy()
+    expect(screen.getByText("Allow once")).toBeTruthy()
+
+    await user.click(screen.getByLabelText(/Show all · 42 lines/))
+
+    expect(screen.getByLabelText(/Show less/)).toBeTruthy()
+    expect(screen.getByText("Allow once")).toBeTruthy()
   })
 })

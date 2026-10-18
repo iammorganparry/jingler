@@ -81,3 +81,13 @@ export const PendingWithSwitchToAuto: Story = {
     onSwitchToAuto: () => undefined
   }
 }
+
+export const FortyTwoLineCommandPending: Story = {
+  args: {
+    kind: "command",
+    title: "Run deploy pipeline?",
+    detail: "Agent wants to run a shell command in your workspace",
+    command: Array.from({ length: 42 }, (_, i) => `step ${i + 1} && \\`).join("\n"),
+    status: "pending"
+  }
+}
