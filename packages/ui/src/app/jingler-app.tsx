@@ -85,6 +85,9 @@ import { TitleSearch } from "./title-search.js"
 import {
   matchPaletteChord,
   matchFileQuickOpenChord,
+  matchNeedsYouChord,
+  needsYouPaletteItems,
+  nextNeedsYouSession,
   PALETTE_GROUP,
   type PaletteItem,
   pluginGroupName,
@@ -93,6 +96,8 @@ import {
   viewPaletteItems
 } from "./command-palette-model.js"
 import { SEED_PATCH } from "../seed.js"
+/** Live activity kinds that mean a workspace is blocked on the operator — same set `project-sidebar.tsx` badges. */
+const NEEDS_YOU_ACTIVITY_KINDS: ReadonlySet<string> = new Set(["needs-input", "needs-approval"])
 import { environmentSessionStartupMachine } from "./environment-session-startup-machine.js"
 import {
   BUILTIN_TAB,
@@ -849,8 +854,20 @@ function getActiveTabContext(active: Session) {
         return true
   }
 
+  // "Go to next workspace that needs you" — the palette action's global
+  // binding. Provisional chord (#507): see `matchNeedsYouChord`'s doc.
+  function handleNeedsYouChord(e: KeyboardEvent) {
+      if (!matchNeedsYouChord(e)) return false
+      const next = nextNeedsYouSession(needsYouSessions, active?.id ?? null)
+      if (!next) return false
+      e.preventDefault()
+      selectSession(next)
+      return true
+  }
+
   const onKey = (e: KeyboardEvent) => {
       if (handleFileQuickOpen(e)) return
+      if (handleNeedsYouChord(e)) return
       // The palette goes FIRST, and in this listener rather than one of its own.
       // Three window-level keydown handlers racing for the same event is how a
       // chord ends up meaning two things depending on mount order.
@@ -1272,6 +1289,17 @@ function getActiveTabContext(active: Session) {
 
   }
 
+  // Open workspaces blocked on the operator (question or approval), in
+  // session-list order — the same order the "Needs you (N)" rows render in,
+  // and what `nextNeedsYouSession` cycles through.
+  const needsYouSessions = useMemo(
+    () =>
+      sessions.filter(
+        (s) => !s.archived && NEEDS_YOU_ACTIVITY_KINDS.has(liveActivity?.[s.id]?.kind ?? "")
+      ),
+    [sessions, liveActivity]
+  )
+
   const paletteItems = useMemo<ReadonlyArray<PaletteItem>>(() => {
     const items: PaletteItem[] = []
 
@@ -1284,6 +1312,16 @@ function getActiveTabContext(active: Session) {
       group: s.archived ? PALETTE_GROUP.archived : PALETTE_GROUP.sessions,
       run: () => selectSession(s.id)
     })
+
+    // Pinned first: `groupPaletteItems` keeps first-seen order, and this is
+    // the one group a person opens the palette FOR.
+    items.push(
+      ...needsYouPaletteItems(
+        needsYouSessions.map((s) => ({ id: s.id, title: s.title || UNTITLED_SESSION })),
+        active?.id ?? null,
+        selectSession
+      )
+    )
 
     items.push(...sessions.filter((session) => !session.archived).map(sessionItem))
 
@@ -1365,6 +1403,7 @@ function getActiveTabContext(active: Session) {
   }, [
     sessions,
     active,
+    needsYouSessions,
     selectSession,
     onCreateSession,
     renderTerminalDock,
