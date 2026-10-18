@@ -77,4 +77,23 @@ describe("IssueInbox load states", () => {
     expect(screen.queryByRole("button", { name: /Other/ })).toBeNull()
     expect(screen.getByRole("button", { name: /Crash on start/ })).toBeTruthy()
   })
+
+  it("renders linked PR rows and opens them on click, hiding the section when empty", () => {
+    const onOpenOnGithub = vi.fn()
+    const detail = {
+      ...item(), createdAt: "2026-08-01T10:00:00.000Z", comments: [],
+      linkedPrs: [{ number: 741, state: "open", url: "https://github.com/acme/widget/pull/741" }],
+    }
+    const { rerender } = mount(
+      <IssueInbox {...props} issues={[item()]} selected={{ repository: "acme/widget", number: 1 }} detail={detail} onOpenOnGithub={onOpenOnGithub} />
+    )
+    expect(screen.getByText("Linked pull requests")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /#741/ }))
+    expect(onOpenOnGithub).toHaveBeenCalledWith("https://github.com/acme/widget/pull/741")
+
+    rerender(<WidthTierValue width={1200}>
+      <IssueInbox {...props} issues={[item()]} selected={{ repository: "acme/widget", number: 1 }} detail={{ ...detail, linkedPrs: [] }} onOpenOnGithub={onOpenOnGithub} />
+    </WidthTierValue>)
+    expect(screen.queryByText("Linked pull requests")).toBeNull()
+  })
 })
