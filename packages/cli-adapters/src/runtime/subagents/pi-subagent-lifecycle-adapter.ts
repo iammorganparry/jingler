@@ -1206,8 +1206,24 @@ export class PiSubagentLifecycleAdapter {
     return Effect.runSync(this.#supervision.nextRevision)
   }
 
-  #belongsToParent(sessionId: string | undefined, runId: string): boolean {
+  #belongsToParent(
+    sessionId: string | undefined,
+    runId: string,
+    parentWorkflowRunId?: string
+  ): boolean {
     if (sessionId !== undefined) return this.#parentRuntimeSessionIds.has(sessionId)
+    // A workflowScript child is spawned inside its workflow's own detached
+    // process, never the parent's pi session, so its FIRST async-started
+    // event carries no `sessionId` at all — only `parentWorkflowRunId`. Its
+    // id is necessarily unknown yet (asyncStarts/tree checks below only ever
+    // match a SECOND event for the same run), so without this a brand-new
+    // workflow child was silently dropped and the Fleet never learned it
+    // existed. The workflow root already proved its own ownership when IT
+    // registered, so a child naming a known root inherits that ownership.
+    if (
+      parentWorkflowRunId !== undefined &&
+      this.#state().tree.nodes.some((node) => node.subagentId === parentWorkflowRunId)
+    ) return true
     return this.#state().asyncStarts.has(runId) || this.#state().tree.nodes.some(
       (node) => node.subagentId === runId || node.orchestrationRunId === runId
     )
@@ -1229,7 +1245,10 @@ export class PiSubagentLifecycleAdapter {
 
   #onAsyncStarted(payload: unknown): void {
     const started = Option.getOrUndefined(Schema.decodeUnknownOption(AsyncStarted)(payload))
-    if (!started || !this.#belongsToParent(started.sessionId, started.id)) return
+    if (
+      !started ||
+      !this.#belongsToParent(started.sessionId, started.id, started.parentWorkflowRunId)
+    ) return
     Effect.runSync(this.#supervision.putStart(started.id, {
       mode: started.mode,
       agent: started.agent,
