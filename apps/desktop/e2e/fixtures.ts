@@ -441,6 +441,12 @@ export interface LaunchedApp {
    * normally do this after the browser flow). Emits the main-process `open-url`.
    */
   readonly completeDeepLinkSignIn: () => Promise<void>;
+  /**
+   * Drive a denied/failed `jingler://` OAuth callback (no token, an `error`
+   * param) into the running app — the user declined the provider's consent
+   * screen, or the provider failed.
+   */
+  readonly completeDeniedOAuth: (kind?: "denied" | "failed") => Promise<void>;
   /** Complete GitHub installation and emit its dedicated desktop callback. */
   readonly completeGitHubConnection: () => Promise<void>;
   /** Semantic GitHub writes observed by the fake API server. */
@@ -569,6 +575,13 @@ export const test = base.extend<{
         }, `jingler://auth/callback?token=${authSessionServer.token}`);
       };
 
+      const completeDeniedOAuth = async (kind: "denied" | "failed" = "denied") => {
+        const error = kind === "denied" ? "access_denied" : "server_error";
+        await app.evaluate(({ app: electronApp }, url) => {
+          electronApp.emit("open-url", { preventDefault() {} }, url);
+        }, `jingler://auth/callback?error=${error}`);
+      };
+
       const completeGitHubConnection = async () => {
         githubServer.connect();
         await app.evaluate(({ app: electronApp }) => {
@@ -593,6 +606,7 @@ export const test = base.extend<{
         githubServer,
         githubRelay,
         completeDeepLinkSignIn,
+        completeDeniedOAuth,
         completeGitHubConnection,
         githubOperations,
       };

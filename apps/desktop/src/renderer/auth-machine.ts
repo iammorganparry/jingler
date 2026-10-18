@@ -54,10 +54,25 @@ export type AuthEvent =
   | { type: "OAUTH"; provider: AuthProvider }
   | { type: "MAGIC_LINK"; email: string; name?: string }
   | { type: "CALLBACK" }
+  | { type: "CALLBACK_ERROR"; kind: "denied" | "failed" }
   | { type: "RESET" }
   | { type: "CANCEL" }
   | { type: "RETRY" }
   | { type: "SIGN_OUT" }
+
+/** Display name for an OAuth provider (GitHub/Google), used in callback error copy. */
+const providerName = (provider: AuthProvider): string => (provider === "github" ? "GitHub" : "Google")
+
+/**
+ * Message for a `jingler://` callback that carried an `error` instead of a
+ * token: "denied" is the user declining the provider's consent screen,
+ * "failed" is everything else. Named after the last attempt so "GitHub"
+ * (not generic "Sign-in") shows when we know which provider was in flight.
+ */
+const callbackErrorMessage = (kind: "denied" | "failed", lastAttempt: AuthAttempt | null): string => {
+  const subject = lastAttempt?.kind === "oauth" ? `${providerName(lastAttempt.provider)} sign-in` : "Sign-in"
+  return kind === "denied" ? `${subject} was cancelled.` : `${subject} failed. Please try again.`
+}
 
 const checkAuth = fromPromise<AuthSession | null>(() => rpc.authGetSession())
 
@@ -128,7 +143,17 @@ export const authMachine = setup({
             lastAttempt: (): AuthAttempt => ({ kind: "magicLink" })
           })
         },
-        CALLBACK: "checking"
+        CALLBACK: "checking",
+        // The deep-link callback carried `error` instead of a token (the user
+        // declined the provider's consent screen, or the provider failed) —
+        // show it rather than stranding `oauthPending` with no response.
+        CALLBACK_ERROR: {
+          target: ".error",
+          actions: assign({
+            error: ({ context, event }) => callbackErrorMessage(event.kind, context.lastAttempt),
+            signInUrl: () => null
+          })
+        }
       },
       states: {
         idle: {},

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findDeepLinkInArgv, parseAuthCallback, parseGitHubCallback } from "./deep-link.js"
+import { classifyAuthCallbackError, findDeepLinkInArgv, parseAuthCallback, parseGitHubCallback } from "./deep-link.js"
 
 /**
  * The deep-link parsers are pure (no Electron), so they're unit-tested directly.
@@ -48,6 +48,21 @@ describe("parseGitHubCallback", () => {
 
   it("rejects ordinary BetterAuth callbacks", () => {
     expect(parseGitHubCallback("jingler://auth/callback?token=abc123")).toBeNull()
+  })
+})
+
+describe("classifyAuthCallbackError", () => {
+  it("is null when there's no error", () => {
+    expect(classifyAuthCallbackError(null)).toBeNull()
+  })
+
+  it("classifies access_denied as denied (user declined consent)", () => {
+    expect(classifyAuthCallbackError("access_denied")).toBe("denied")
+  })
+
+  it("classifies any other error as failed", () => {
+    expect(classifyAuthCallbackError("server_error")).toBe("failed")
+    expect(classifyAuthCallbackError("nosession")).toBe("failed")
   })
 })
 

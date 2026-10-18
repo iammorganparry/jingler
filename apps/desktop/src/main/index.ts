@@ -29,6 +29,7 @@ import type { AuthCallback, GitHubCallback } from "./deep-link.js"
 import {
   AUTH_COMPLETE_CHANNEL,
   GITHUB_COMPLETE_CHANNEL,
+  classifyAuthCallbackError,
   findDeepLinkInArgv,
   parseAuthCallback,
   parseGitHubCallback,
@@ -137,7 +138,7 @@ if (!gotPrimaryLock) {
     const notify = (ok: boolean, error: string | null = null) =>
       mainWindow?.webContents.send(AUTH_COMPLETE_CHANNEL, { ok, error })
     if (!cb.token) {
-      notify(false, cb.error)
+      notify(false, classifyAuthCallbackError(cb.error))
       return
     }
     const token = cb.token

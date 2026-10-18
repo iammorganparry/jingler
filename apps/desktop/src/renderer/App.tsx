@@ -2274,6 +2274,10 @@ export function App() {
   useEffect(() => {
     const unsubscribe = window.jingler.onAuthComplete((payload) => {
       if (payload.ok) authSend({ type: "CALLBACK" });
+      // A token-less callback: "denied" is the user declining the provider's
+      // consent screen, everything else (a storage failure, no params at all)
+      // reads as a generic failure.
+      else authSend({ type: "CALLBACK_ERROR", kind: payload.error === "denied" ? "denied" : "failed" });
     });
     return unsubscribe;
   }, [authSend]);
