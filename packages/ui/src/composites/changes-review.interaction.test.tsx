@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WidthTierValue } from "../hooks/width-tier.js"
 import type { PrFileChange } from "@jingler/core"
 import { ChangedFilesExplorer, ReviewFileDiff } from "./changes-review.js"
+import type { AgentTreeChanges } from "./review-agent-scope.js"
 
 const path = "src/session.ts"
 const patch = [
@@ -224,6 +225,57 @@ describe("ReviewFileDiff selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" }))
     expect(hide.getAttribute("aria-pressed")).toBe("false")
     expect(screen.queryByText("No files match these filters.")).toBeNull()
+  })
+
+  it("with a single agent tree, renders exactly the plain file rail (no agent chip or scope filter)", () => {
+    const trees: readonly AgentTreeChanges[] = [{ agentId: null, label: "Main", files: [file(path)] }]
+    render(
+      <WidthTierValue width={1_240}>
+        <ChangedFilesExplorer
+          files={[file(path)]}
+          fileDiffs={[{ path, diff: patch }]}
+          agentTrees={trees}
+          drafts={[]}
+          activePath={path}
+          onSelectFile={() => {}}
+        />
+      </WidthTierValue>
+    )
+    expect(screen.queryByRole("listbox", { name: "Changed files by agent" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Filter by agent" })).toBeNull()
+  })
+
+  it("with more than one agent tree, renders the agent chip and filters rows by scope", () => {
+    const otherPath = "src/store.ts"
+    const trees: readonly AgentTreeChanges[] = [
+      { agentId: null, label: "Main", files: [file(path)] },
+      { agentId: "agent-1", label: "worker", files: [file(otherPath)] }
+    ]
+    const onSelectFile = vi.fn()
+    render(
+      <WidthTierValue width={1_240}>
+        <ChangedFilesExplorer
+          files={[file(path), file(otherPath)]}
+          fileDiffs={[{ path, diff: patch }, { path: otherPath, diff: patch }]}
+          agentTrees={trees}
+          drafts={[]}
+          activePath={null}
+          onSelectFile={onSelectFile}
+        />
+      </WidthTierValue>
+    )
+    const list = screen.getByRole("listbox", { name: "Changed files by agent" })
+    expect(list).toBeTruthy()
+    expect(screen.getByTitle("worker")).toBeTruthy()
+    expect(screen.getAllByRole("option")).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter by agent" }))
+    fireEvent.click(screen.getByRole("option", { name: "worker" }))
+    expect(screen.getAllByRole("option", { name: new RegExp(otherPath) })).toHaveLength(1)
+    expect(screen.queryByRole("option", { name: new RegExp(`^${path}`) })).toBeNull()
+
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(otherPath) }))
+    expect(onSelectFile).toHaveBeenCalledWith(otherPath)
   })
 
   it("mounts saved drafts and GitHub threads as persistent Pierre annotations", async () => {
