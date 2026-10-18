@@ -16,7 +16,7 @@ import type {
 } from "@jingler/core"
 import { jinglerDark, toTokens } from "@jingler/themes"
 import { Maximize2, Minimize2 } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react"
 import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
@@ -212,6 +212,24 @@ export interface ChangedFilesExplorerProps {
  * The Explorer, filtered to one diff source's changed files: search, kind and
  * feedback filters, per-file status and counts, and viewed progress.
  */
+/** The turn filter strip; renders nothing without turns or a change handler. */
+function TurnFilterBar({
+  turns,
+  value,
+  onChange
+}: {
+  readonly turns: ComponentProps<typeof TurnFilter>["turns"]
+  readonly value: string | null
+  readonly onChange: ((id: string | null) => void) | undefined
+}) {
+  if (turns.length === 0 || !onChange) return null
+  return (
+    <div className="flex-none border-b border-hairline p-2">
+      <TurnFilter turns={turns} value={value} onChange={onChange} />
+    </div>
+  )
+}
+
 /** The changed-files list once two or more agent trees exist: scope filter plus per-agent rows. */
 function AgentScopedFileList({
   trees,
@@ -323,11 +341,7 @@ export function ChangedFilesExplorer({
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
-        {turns.length > 0 && onTurnChange ? (
-          <div className="flex-none border-b border-hairline p-2">
-            <TurnFilter turns={turns} value={turn?.id ?? null} onChange={onTurnChange} />
-          </div>
-        ) : null}
+        <TurnFilterBar turns={turns} value={turn?.id ?? null} onChange={onTurnChange} />
         {allFiles.length === 0 ? (
           <EmptyState title="No changes yet" description="Files the agent edits show up here." />
         ) : multiAgent ? (
