@@ -573,6 +573,12 @@ describe("GitHubApi installation permission scopes", () => {
       if (pathIs(request, "/repos/acme/widget/issues/10/comments")) {
         return json([{ body: "Issue context", user: { login: "maintainer" } }])
       }
+      if (pathIs(request, "/repos/acme/widget/issues/10/timeline")) {
+        return json([{
+          event: "cross-referenced",
+          source: { issue: { number: 42, html_url: "https://github.com/acme/widget/pull/42", state: "open", pull_request: {} } }
+        }])
+      }
       throw new Error(`unexpected ${request.method} ${request.url}`)
     })
 
@@ -593,7 +599,8 @@ describe("GitHubApi installation permission scopes", () => {
           author: expect.objectContaining({ name: "maintainer" }),
           body: "Issue context"
         })
-      ]
+      ],
+      linkedPrs: [{ number: 42, state: "open", url: "https://github.com/acme/widget/pull/42" }]
     })
     expect(seen.some((request) => request.url.pathname === "/user")).toBe(false)
     expect(credentialRequests).toEqual(

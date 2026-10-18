@@ -21,6 +21,7 @@ import {
   mapApiFiles,
   mapIssue,
   mapIssueListItem,
+  mapLinkedPrs,
   mapIssueSummary,
   mapPrState,
   mapPrSummary,
@@ -363,9 +364,18 @@ const issueView = (
   repository: string | null,
   number: number
 ): Effect.Effect<Issue, GitHubApiError, CommandExecutor.CommandExecutor> =>
-  json(cwd, ["issue", "view", String(number), ...repoArgs(repository), "--json", ISSUE_FIELDS]).pipe(
-    Effect.map(mapIssue)
-  )
+  Effect.gen(function* () {
+    const raw = yield* json(cwd, ["issue", "view", String(number), ...repoArgs(repository), "--json", ISSUE_FIELDS])
+    const issue = mapIssue(raw)
+    const [owner, repo] = repository
+      ? slugParts(repository.replace(/^github\.com\//, ""))
+      : yield* slugAt(cwd ?? "").pipe(Effect.map(slugParts))
+    const timeline = yield* json(cwd, [
+      "api", `repos/${owner}/${repo}/issues/${number}/timeline`, "--paginate", "--slurp"
+    ])
+    const linkedPrs = mapLinkedPrs(Array.isArray(timeline) ? timeline.flat() : [])
+    return linkedPrs.length ? { ...issue, linkedPrs } : issue
+  })
 
 const writeJson = (
   cwd: string | null,

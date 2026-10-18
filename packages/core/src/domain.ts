@@ -1916,10 +1916,18 @@ export const IssueComment = Schema.Struct({
 export type IssueComment = Schema.Schema.Type<typeof IssueComment>;
 
 /** The normalized rich issue payload returned by any issue provider. */
+export const IssueLinkedPr = Schema.Struct({
+  number: Schema.Number,
+  state: Schema.String,
+  url: Schema.String,
+});
+export type IssueLinkedPr = Schema.Schema.Type<typeof IssueLinkedPr>;
+
 export const IssueDetail = Schema.Struct({
   ...IssueSummaryFields,
   createdAt: Schema.String,
   comments: Schema.Array(IssueComment),
+  linkedPrs: Schema.optional(Schema.Array(IssueLinkedPr)),
 });
 export type IssueDetail = Schema.Schema.Type<typeof IssueDetail>;
 

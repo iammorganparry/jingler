@@ -587,6 +587,47 @@ describe("provider-neutral issue schemas", () => {
     expect(issue.identifier).toBe("ENG-123");
     expect("number" in issue).toBe(false);
   });
+
+  it("decodes IssueDetail without linkedPrs", () => {
+    const issue = Schema.decodeUnknownSync(IssueDetail)({
+      providerId: "github",
+      id: "1",
+      identifier: "owner/repo#1",
+      url: "https://github.com/owner/repo/issues/1",
+      title: "Bug",
+      labels: [],
+      state: "open",
+      body: "body",
+      author: null,
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-07T10:00:00.000Z",
+      comments: [],
+    });
+    expect(issue.linkedPrs).toBeUndefined();
+  });
+
+  it("decodes IssueDetail with linkedPrs", () => {
+    const issue = Schema.decodeUnknownSync(IssueDetail)({
+      providerId: "github",
+      id: "1",
+      identifier: "owner/repo#1",
+      url: "https://github.com/owner/repo/issues/1",
+      title: "Bug",
+      labels: [],
+      state: "open",
+      body: "body",
+      author: null,
+      assignees: [],
+      updatedAt: "2026-08-08T10:00:00.000Z",
+      createdAt: "2026-08-07T10:00:00.000Z",
+      comments: [],
+      linkedPrs: [{ number: 42, state: "open", url: "https://github.com/owner/repo/pull/42" }],
+    });
+    expect(issue.linkedPrs).toEqual([
+      { number: 42, state: "open", url: "https://github.com/owner/repo/pull/42" },
+    ]);
+  });
 });
 
 describe("Repo", () => {
