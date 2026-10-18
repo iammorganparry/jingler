@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import {
   adversarialReview,
+  agentTrees,
   localChanges,
   omittedFiles,
   prChanges,
@@ -140,6 +141,29 @@ function TurnFiltered() {
 
 /** "All turns ▾" narrows the file list to what one agent turn changed. */
 export const ExplorerTurnFilter: Story = { render: () => <TurnFiltered /> }
+
+function AgentScoped() {
+  const [active, setActive] = useState<string | null>(null)
+  return (
+    <Frame width={320}>
+      <ChangedFilesExplorer
+        files={agentTrees.flatMap((tree) => tree.files)}
+        fileDiffs={diffs(prChanges)}
+        agentTrees={agentTrees}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+      />
+    </Frame>
+  )
+}
+
+/**
+ * Three trees — main plus two subagent worktrees — switch Changes to the
+ * agent scope filter and per-agent rows; `config/auth.json` shows once per
+ * tree that touched it.
+ */
+export const ExplorerAgentScoped: Story = { render: () => <AgentScoped /> }
 
 /** The change list is loading: rows at real height, nothing shifts on load. */
 export const ExplorerLoading: Story = {
