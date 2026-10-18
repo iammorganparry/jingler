@@ -1,13 +1,13 @@
 import { useMemo, useState } from "react"
 import { useMachine } from "@xstate/react"
-import type { IssueDetail, IssueListItem } from "@jingler/core"
+import type { IssueDetail, IssueListItem, PrState } from "@jingler/core"
 import { ArrowLeft, CircleDot, MessageSquare } from "lucide-react"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
 import { AsyncButton } from "../components/async-button.js"
 import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
-import { Card } from "../components/card.js"
+import { Card, CardHeader } from "../components/card.js"
 import { Markdown } from "../components/markdown.js"
 import { Spinner } from "../components/loading.js"
 import { SearchField } from "../components/search-input.js"
@@ -18,6 +18,7 @@ import { useActivateOnFocus } from "../hooks/use-activate-on-focus.js"
 import { cn } from "../lib/cn.js"
 import { relativeTime } from "../lib/relative-time.js"
 import { IssueLabelChip } from "./issue-picker-list.js"
+import { PrStatusGlyph } from "./pr-glyph.js"
 import { PrReviewComposer } from "./pr-review-composer.js"
 import { InboxFilterSelect, InboxMessage, filterOptions } from "./pull-request-inbox.js"
 import {
@@ -277,6 +278,27 @@ function IssueDetailPane({ issue, repository, busy, error, closeError, sessionAc
         {closeError && <Callout tone="red">{closeError}</Callout>}
         {error && <p role="alert" className="text-xs text-red">{error}</p>}
       </div>
+      {issue.linkedPrs && issue.linkedPrs.length > 0 && (
+        <Card className="flex-none">
+          <CardHeader title="Linked pull requests" />
+          <div className="divide-y divide-hairline">
+            {issue.linkedPrs.map((pr) => (
+              <button
+                key={pr.url}
+                type="button"
+                onClick={() => onOpenOnGithub?.(pr.url)}
+                className="flex w-full items-center gap-2 px-[14px] py-[9px] text-left outline-none hover:bg-surface focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              >
+                <PrStatusGlyph pr={{ state: pr.state as PrState, checks: null }} />
+                <span className="font-mono text-[11.5px] text-muted-foreground">#{pr.number}</span>
+                <span className="text-[12.5px] text-text">{pr.state.charAt(0).toUpperCase() + pr.state.slice(1)}</span>
+                <div className="flex-1" />
+                <span className="font-mono text-[11px] text-dim">↗</span>
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
       {issue.body.trim() && (
         <Card className="flex-none">
           <div className="flex items-center gap-[9px] border-b border-hairline px-[14px] py-[11px]">
