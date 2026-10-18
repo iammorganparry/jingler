@@ -6,6 +6,8 @@ export interface SessionPrRow {
   readonly agent: string
   readonly branch: string | null
   readonly state?: string
+  /** The fleet node this row came from — absent for the main row, which has no node. */
+  readonly nodeId?: string
 }
 
 /**
@@ -32,7 +34,8 @@ export const sessionPrRows = (
       number: node.prNumber,
       agent: node.agent,
       branch: node.workspace?.branch ?? null,
-      state: node.status
+      state: node.status,
+      nodeId: node.id
     })
   }
   return rows
