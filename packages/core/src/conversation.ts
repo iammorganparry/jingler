@@ -37,6 +37,12 @@ export const ToolCall = Schema.Struct({
   name: Schema.String,
   /** Primary target — file path or query, or null. */
   target: Schema.NullOr(Schema.String),
+  /**
+   * Agent-written, present-tense summary of this call (≤60 chars), when the
+   * model filled the tool's `intent` argument. Optional for the same decode
+   * compatibility reason as `output`: older transcripts never carried it.
+   */
+  intent: Schema.optional(Schema.String),
   status: ToolStatus,
   /** Trailing meta, e.g. "142 lines" / "0 hits" / "6 commits". */
   meta: Schema.NullOr(Schema.String),
@@ -696,6 +702,8 @@ export const StreamEvent = Schema.Union(
     id: Schema.String,
     name: Schema.String,
     target: Schema.NullOr(Schema.String),
+    /** Agent-written present-tense call summary, when the model supplied one. */
+    intent: Schema.optional(Schema.String),
     agentId: AgentId
   }),
   /**
@@ -1071,6 +1079,7 @@ export const applyStreamEvent = (msg: Message, event: StreamEvent): Message => {
           id: e.id,
           name: e.name,
           target: e.target,
+          intent: e.intent,
           status: "running",
           meta: null,
           diff: null,

@@ -294,7 +294,8 @@ const ToolCardView = memo(function ToolCardView({ tool }: { tool: ToolCallModel 
                               return (<ToolCall
       status={tool.status}
       name={displayName}
-      target={tool.target ?? undefined}
+      target={tool.intent ?? tool.target ?? undefined}
+      detail={tool.intent ? (tool.target ?? undefined) : undefined}
       filePath={path}
       meta={toolMeta(tool)}
       expanded={expanded}

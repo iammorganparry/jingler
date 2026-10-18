@@ -31,6 +31,12 @@ const decodeText = Schema.decodeUnknownOption(TextResultPart)
 const decodeContent = Schema.decodeUnknownOption(ToolContent)
 const decodeDetails = Schema.decodeUnknownOption(ToolDetails)
 const decodeTarget = Schema.decodeUnknownOption(ToolTarget)
+
+/** The agent-written `intent` argument (see tool-registry's INTENT_PROPERTY), when supplied. */
+const IntentArg = Schema.Struct({ intent: Schema.optional(Schema.String) })
+const decodeIntentArg = Schema.decodeUnknownOption(IntentArg)
+export const toolIntent = (args: unknown): string | null =>
+  Option.getOrUndefined(decodeIntentArg(args))?.intent ?? null
 const SupervisorAttention = Schema.Struct({
   role: Schema.Literal("custom"),
   customType: Schema.Literal("subagent_supervisor_request"),
@@ -320,7 +326,8 @@ export const normalizePiEvent = (
         _tag: "ToolStart",
         id: event.toolCallId,
         name: event.toolName,
-        target: toolTarget(event.args)
+        target: toolTarget(event.args),
+        intent: toolIntent(event.args) ?? undefined
       }
     case "tool_execution_update":
       return {

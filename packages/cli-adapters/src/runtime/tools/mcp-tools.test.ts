@@ -209,7 +209,7 @@ it("discovers, namespaces, validates, invokes, and closes stateless MCP clients"
     ).toEqual(["mcp__jingler-browser__navigate"])
     expect(
       registry.providerInputSchemaFor("mcp__jingler-browser__navigate")
-    ).toEqual(tool.inputSchema)
+    ).toEqual({ ...tool.inputSchema, properties: { ...tool.inputSchema.properties, intent: expect.objectContaining({ type: "string" }) } })
 
     const invalid = await Effect.runPromise(
       registry.execute({
