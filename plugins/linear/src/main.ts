@@ -130,7 +130,7 @@ const GITHUB_PR_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:\/.*)
  * the attachment's rich metadata or the GitHub session if that's ever needed.
  */
 const linkedPrsFromAttachments = (issue: LinearIssueNode): readonly IssueLinkedPr[] =>
-  issue.attachments.nodes.flatMap(({ url }) => {
+  (issue.attachments?.nodes ?? []).flatMap(({ url }) => {
     const match = GITHUB_PR_URL.exec(url)
     return match ? [{ number: Number(match[1]), state: "open", url }] : []
   })
