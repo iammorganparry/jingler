@@ -98,7 +98,7 @@ describe("pi tool bridge", () => {
 
     expect(tool?.parameters).toEqual({
       type: "object",
-      properties: {},
+      properties: { intent: expect.objectContaining({ type: "string" }) },
       required: [],
       additionalProperties: false
     })

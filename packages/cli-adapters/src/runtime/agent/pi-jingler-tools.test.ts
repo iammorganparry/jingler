@@ -297,7 +297,7 @@ describe("Jingler session completion tool", () => {
     const registry = createJinglerControlTools(runtimeContext({}))
     expect(registry.providerInputSchemaFor("jingler_complete_session")).toEqual({
       type: "object",
-      properties: {},
+      properties: { intent: expect.objectContaining({ type: "string" }) },
       required: [],
       additionalProperties: false
     })
