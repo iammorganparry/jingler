@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { Button } from "../components/button.js"
 import { Badge } from "../components/badge.js"
 import { Callout } from "../components/callout.js"
+import { DiffStat } from "../components/diff-stat.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { FilterChips } from "../components/filter-chips.js"
 import { SegmentedControl } from "../components/segmented-control.js"
@@ -28,7 +29,15 @@ import type { JinglerLineSelection } from "../diff/pierre-selection.js"
 import { cn } from "../lib/cn.js"
 import { feedbackCounts } from "../lib/review-feedback.js"
 import { useOptionalThemeTokens, useThemeSyntax } from "../theme-provider.js"
+import { AgentFileRows } from "./agent-file-rows.js"
+import { AgentScopeFilter } from "./agent-scope-filter.js"
 import { filterReviewFiles } from "./review-file-filter.js"
+import {
+  CHANGES_SCOPE_ALL,
+  mergeAgentTrees,
+  sumAgentRows,
+  type AgentTreeChanges
+} from "./review-agent-scope.js"
 import { ReviewFileRail } from "./review-file-rail.js"
 import { ReviewFindingRow, rankFindings } from "./review-findings.js"
 import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
@@ -172,6 +181,12 @@ export function ExplorerPanel({
 export interface ChangedFilesExplorerProps {
   readonly files: readonly PrFileChange[]
   readonly fileDiffs: readonly { readonly path: string; readonly diff: string }[]
+  /**
+   * Per-checkout changed files (main + each subagent worktree with its own
+   * files). Fewer than two trees renders exactly the single-tree list below;
+   * two or more switches to the agent scope filter and per-agent rows.
+   */
+  readonly agentTrees?: readonly AgentTreeChanges[]
   readonly omittedFiles?: readonly ReviewOmittedFile[]
   readonly diffLineLimit?: number
   readonly drafts: readonly ReviewDraft[]
@@ -213,9 +228,20 @@ export function ChangedFilesExplorer({
   onTurnChange,
   loading = false,
   error = null,
-  onRetry
+  onRetry,
+  agentTrees = []
 }: ChangedFilesExplorerProps) {
   const controls = useCodeReviewView()
+  const [agentScope, setAgentScope] = useState(CHANGES_SCOPE_ALL)
+  // More than one tree (main + at least one subagent worktree) switches the
+  // list to the agent-scoped rows; a single tree renders exactly as before.
+  const multiAgent = agentTrees.length > 1
+  const agentRows = useMemo(() => mergeAgentTrees(agentTrees, agentScope), [agentTrees, agentScope])
+  const agentTotals = useMemo(() => sumAgentRows(agentRows), [agentRows])
+  const activeAgentKey = useMemo(
+    () => agentRows.find((row) => row.file.path === activePath)?.key ?? null,
+    [agentRows, activePath]
+  )
   const turn = turns.find((candidate) => candidate.id === turnId) ?? null
   const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
   const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
@@ -283,6 +309,21 @@ export function ChangedFilesExplorer({
         ) : null}
         {allFiles.length === 0 ? (
           <EmptyState title="No changes yet" description="Files the agent edits show up here." />
+        ) : multiAgent ? (
+          <>
+            <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
+              <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
+              <DiffStat added={agentTotals.added} removed={agentTotals.removed} className="text-[10.5px]" />
+            </div>
+            <div className="flex-none border-b border-hairline p-2">
+              <AgentScopeFilter trees={agentTrees} value={agentScope} onChange={setAgentScope} />
+            </div>
+            <AgentFileRows
+              rows={agentRows}
+              activeKey={activeAgentKey}
+              onSelectRow={(row) => onSelectFile(row.file.path)}
+            />
+          </>
         ) : (
           <ReviewFileRail
             files={files}
