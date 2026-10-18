@@ -45,6 +45,17 @@ export const parseAuthCallback = (raw: string): AuthCallback | null => {
   return { token: url.searchParams.get("token"), error: url.searchParams.get("error") }
 }
 
+/**
+ * Why a `jingler://` callback carries `error`: the user declining the OAuth
+ * consent screen is a normal outcome and reads very differently from an actual
+ * failure, so the wall needs to tell them apart.
+ */
+export type AuthCallbackError = "denied" | "failed"
+
+/** Classify a callback's `error` param. `null` when there's no error at all. */
+export const classifyAuthCallbackError = (error: string | null): AuthCallbackError | null =>
+  error === null ? null : error === "access_denied" ? "denied" : "failed"
+
 /** Parse the GitHub App result carried over the existing desktop bridge. */
 export const parseGitHubCallback = (raw: string): GitHubCallback | null => {
   let url: URL
