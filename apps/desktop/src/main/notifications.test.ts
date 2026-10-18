@@ -1,7 +1,7 @@
 import type { NotificationsConfig } from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { notificationPermission, shouldNotify } from "./notifications.js"
+import { notificationClickPayload, notificationPermission, shouldNotify } from "./notifications.js"
 
 /**
  * The suppression rules. These are the difference between a channel the operator
@@ -119,5 +119,21 @@ describe("notificationPermission", () => {
         throw new Error("no display")
       })
     ).toBe("unknown")
+  })
+})
+
+describe("notificationClickPayload", () => {
+  it("carries the turn a needs-input notification was about", () => {
+    expect(
+      notificationClickPayload({ sessionId: "s1", kind: "needs-input", turnId: "msg-1" })
+    ).toEqual({ sessionId: "s1", kind: "needs-input", turnId: "msg-1" })
+  })
+
+  it("is null for a kind with no single turn to point at", () => {
+    expect(notificationClickPayload({ sessionId: "s1", kind: "pr", turnId: null })).toEqual({
+      sessionId: "s1",
+      kind: "pr",
+      turnId: null
+    })
   })
 })
