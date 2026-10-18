@@ -24,7 +24,8 @@ const issue = {
   url: "https://github.com/acme/widget/issues/1", author: { login: "octocat" },
   assignees: [], labels: [{ name: "bug", color: "ff0000" }],
   createdAt: "2026-10-01T08:00:00.000Z", updatedAt: "2026-10-02T08:00:00.000Z",
-  comments: [{ author: { login: "lee" }, body: "Existing comment", createdAt: "2026-10-01T09:00:00.000Z" }]
+  comments: [{ author: { login: "lee" }, body: "Existing comment", createdAt: "2026-10-01T09:00:00.000Z" }],
+  linkedPrs: [{ number: 741, state: "open", url: "https://github.com/acme/widget/pull/741" }]
 }
 
 test("issue tab renders through the shared reading shell and closes via the ⋯ menu", async ({ launchApp }) => {
@@ -71,6 +72,8 @@ test("issue tab renders through the shared reading shell and closes via the ⋯ 
     await expect(window.getByTestId("issue-meta-line")).toContainText("Open")
     await expect(window.getByTestId("issue-meta-line")).toContainText("octocat")
     await expect(window.getByTestId("reading-column")).toContainText("Existing comment")
+    await expect(window.getByText("Linked pull requests")).toBeVisible()
+    await expect(window.getByRole("button", { name: /#741/ })).toBeVisible()
 
     // A failed post keeps the draft and shows an inline error; a retry then appears without a reload.
     const composer = window.getByTestId("comment-composer")
