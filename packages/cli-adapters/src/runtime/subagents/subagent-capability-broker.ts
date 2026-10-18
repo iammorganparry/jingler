@@ -28,6 +28,7 @@ import {
 } from "effect"
 import type { AgentRuntimeContext } from "../agent/agent-runtime.js"
 import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
+import { activeCheckoutCwd } from "../tools/checkout-tools.js"
 import type { ToolRegistry, ToolResultEnvelope, ToolRisk } from "../tools/tool-registry.js"
 
 const MAX_BODY_BYTES = 1024 * 1024
@@ -64,7 +65,7 @@ interface RegisteredChild {
   readonly grantedToolIds: ReadonlySet<string>
   readonly registry: ToolRegistry
   readonly context: AgentRuntimeContext
-  readonly parentCwd: string | undefined
+  readonly parentCwd: () => string | undefined
   readonly supervisorState: () => SubagentSupervisorSnapshot
 }
 
@@ -286,7 +287,8 @@ export const makeSubagentCapabilityBroker = (): Effect.Effect<
               grantedToolIds: new Set(tools.map(({ id }) => id)),
               registry: input.registry,
               context: input.context,
-              parentCwd: input.spec.cwd,
+              parentCwd: () =>
+                input.context.checkouts === undefined ? input.spec.cwd : activeCheckoutCwd(input.context.checkouts),
               supervisorState: input.supervisorState
             })
             tokens.add(token)
@@ -375,7 +377,7 @@ function* executeCapabilityRequest(
   }
   const risk: ToolRisk | null = child.registry.riskFor(decoded.toolId)
   if (risk === null) return yield* writeJson(response, 403, { error: "unknown-tool" })
-  const cwd = yield* Effect.promise(() => resolveChildCwd(child.parentCwd, decoded.cwd))
+  const cwd = yield* Effect.promise(() => resolveChildCwd(child.parentCwd(), decoded.cwd))
   if (cwd === null) return yield* writeJson(response, 403, { error: "forbidden-cwd" })
   const result = yield* Effect.tryPromise(() => executeRegistryTool({
     registry: child.registry,

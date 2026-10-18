@@ -21,6 +21,7 @@ import {
 import type { SubagentCapability } from "@jingler/core"
 import { executeRegistryTool } from "../agent/registry-tool-bridge.js"
 import { registerProgressiveMcpTools, type McpToolClientFactory } from "../tools/mcp-tools.js"
+import type { CheckoutHost, CheckoutSessionState } from "../tools/checkout-tools.js"
 
 const spec = {
   role: "conversation",
@@ -440,7 +441,78 @@ describe("SubagentCapabilityBroker", () => {
     expect((await invoked.json() as { status: string }).status).toBe("success")
     expect(calls).toEqual(["lookup"])
   })
+
+  it("routes a child's cwd by the repo the parent's active checkout points to NOW, not the repo it registered with", async () => {
+    const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
+    const { mkdtempSync, realpathSync } = require("node:fs") as typeof import("node:fs")
+    const { tmpdir } = require("node:os") as typeof import("node:os")
+    const { join } = require("node:path") as typeof import("node:path")
+    const repo = (): string => {
+      const dir = realpathSync(mkdtempSync(join(tmpdir(), "broker-cwd-")))
+      execFileSync("git", ["init", "-q"], { cwd: dir })
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: dir })
+      return dir
+    }
+    const repoA = repo()
+    const repoB = repo()
+    const lane = join(realpathSync(mkdtempSync(join(tmpdir(), "broker-lane-"))), "lane")
+    execFileSync("git", ["worktree", "add", "-q", "-b", "lane", lane], { cwd: repoB })
+
+    let session = { id: "s1", repo: "a", repoPath: repoA, branch: "main", prNumber: null } as CheckoutSessionState
+    const host: CheckoutHost = {
+      session: () => session,
+      save: async (next) => { session = next },
+      projects: async () => [],
+      approveRepo: async () => false,
+      registerProject: async (repoPath) => ({ id: "p", name: "repo", path: repoPath }),
+      createWorktree: async ({ repoPath, baseBranch }) =>
+        ({ path: repoPath, branch: baseBranch ?? "main", baseBranch: baseBranch ?? "main", repoPath })
+    }
+
+    const registry = new ToolRegistry()
+    registry.register({
+      id: "inspect",
+      version: "1",
+      description: "Inspect a value",
+      input: Schema.Struct({ value: Schema.String }),
+      risk: "read",
+      roles: ["conversation", "review"],
+      modes: ["auto", "read-only"],
+      timeoutMs: 1_000,
+      outputBudget: 1_000,
+      cancellable: true,
+      idempotency: "safe",
+      execute: ({ value }) => Promise.resolve({ inspected: value })
+    })
+
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    // Registered while the session's active checkout is repo A.
+    const capabilities = await register(broker, registry, { ...context(), checkouts: host })
+
+    // The parent calls switch_checkout to repo B after registering the child.
+    await host.save({ id: "s2", repo: "b", repoPath: repoB, branch: "main", prNumber: null } as CheckoutSessionState)
+
+    const worker = capabilityFor(capabilities, "worker")
+    const response = await fetch(worker.endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        version: 1,
+        token: worker.token,
+        parentRuntimeSessionId: worker.parentRuntimeSessionId,
+        callId: "child-call",
+        toolId: "inspect",
+        arguments: { value: "ok" },
+        cwd: lane
+      })
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toMatchObject({ status: "success", value: { inspected: "ok" } })
+  })
 })
+
 
 describe("resolveChildCwd", () => {
   const { execFileSync } = require("node:child_process") as typeof import("node:child_process")
