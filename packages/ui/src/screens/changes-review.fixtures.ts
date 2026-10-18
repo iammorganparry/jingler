@@ -11,6 +11,7 @@ import type {
 } from "@jingler/core"
 import type { ReviewOmittedFile } from "../composites/changes-review.js"
 import type { ReviewDraft } from "../composites/review-tray.js"
+import type { AgentTreeChanges } from "../composites/review-agent-scope.js"
 
 interface Hunk {
   readonly start: number
@@ -152,6 +153,18 @@ const styles = change({
 
 /** The worktree's uncommitted edits — what "Uncommitted" lists. */
 export const localChanges = [session, config, test]
+
+/**
+ * Multi-agent Changes: the main checkout plus two subagent worktrees, each
+ * with its own file list. `refresh` and `docs` are two agents touching
+ * different files; `styles` duplicates `config`'s path to exercise a file
+ * two trees both touched.
+ */
+export const agentTrees: readonly AgentTreeChanges[] = [
+  { agentId: null, label: "Main", files: [session.file, config.file] },
+  { agentId: "agent-refresh", label: "refresh-token-flow", files: [refresh.file, test.file] },
+  { agentId: "agent-docs", label: "update-docs", files: [docs.file, { ...config.file, additions: 1, deletions: 0 }] }
+]
 
 /** Everything the PR changes — a superset of the uncommitted work. */
 export const prChanges = [session, refresh, config, test, docs, styles]
