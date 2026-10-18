@@ -16,6 +16,7 @@
  */
 import { pendingQuestion } from "@jingler/core"
 import type { Message, NotificationKind, SessionActivity } from "@jingler/core"
+import { commandSummary } from "@jingler/ui"
 
 /** The slice of a session's state a notification decision depends on. */
 export interface NotifiableState {
@@ -86,9 +87,10 @@ const oneLine = (text: string): string => {
 }
 
 /**
- * What a blocked agent is asking, in one line: "Run `pnpm test`?" for a pending
- * command gate, the gate's title for an edit gate, else the first question.
- * Plans are not covered — `needs-approval` already has its own copy.
+ * What a blocked agent is asking, in one line: `commandSummary`'s "Run pnpm
+ * test" for a pending command gate, the gate's title for an edit gate, else
+ * the first question. Plans are not covered — `needs-approval` already has
+ * its own copy.
  */
 export const blockedPromptOf = (messages: ReadonlyArray<Message>): string | null => {
   const last = messages[messages.length - 1]
@@ -97,7 +99,7 @@ export const blockedPromptOf = (messages: ReadonlyArray<Message>): string | null
       ? last.parts.flatMap((part) => (part._tag === "Gate" && part.gate.status === "pending" ? [part.gate] : []))[0]
       : undefined
   if (gate) {
-    const text = gate.kind === "command" && gate.command ? `Run \`${oneLine(gate.command)}\`?` : oneLine(gate.title)
+    const text = gate.kind === "command" && gate.command ? commandSummary(gate.command) : oneLine(gate.title)
     return text === "" ? null : text
   }
   const question = pendingQuestion(messages)?.questions[0]?.question

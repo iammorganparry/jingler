@@ -140,7 +140,7 @@ describe("blocked-agent notification copy", () => {
 
   it("words a pending command gate as the command, not a plan approval", () => {
     const prompt = blockedPromptOf([assistant([{ _tag: "Gate", gate: gate() }])])
-    expect(prompt).toBe("Run `pnpm test --filter @jingler/desktop`?")
+    expect(prompt).toBe("Run pnpm test --filter @jingler/desktop")
     const plan = notificationFor(
       "add auth",
       state({ activity: thinking }),
@@ -154,7 +154,7 @@ describe("blocked-agent notification copy", () => {
     const toolGate = notificationFor(
       "add auth",
       state({ activity: thinking }),
-      state({ activity: blocked("needs-input"), prompt: "Run `pnpm test`?" })
+      state({ activity: blocked("needs-input"), prompt: "Run pnpm test" })
     )
     const planApproval = notificationFor(
       "add auth",
@@ -170,7 +170,7 @@ describe("blocked-agent notification copy", () => {
     const prompt = blockedPromptOf([assistant([{ _tag: "Gate", gate: gate({ command: long }) }])])!
     expect(prompt).not.toContain("\n")
     expect(prompt).toContain("…")
-    expect(prompt.startsWith("Run `pnpm exec vitest run")).toBe(true)
+    expect(prompt.startsWith("Run pnpm exec vitest run")).toBe(true)
   })
 
   it("uses the first line of a pending question", () => {
