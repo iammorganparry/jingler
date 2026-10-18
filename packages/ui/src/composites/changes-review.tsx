@@ -212,6 +212,34 @@ export interface ChangedFilesExplorerProps {
  * The Explorer, filtered to one diff source's changed files: search, kind and
  * feedback filters, per-file status and counts, and viewed progress.
  */
+/** The changed-files list once two or more agent trees exist: scope filter plus per-agent rows. */
+function AgentScopedFileList({
+  trees,
+  activePath,
+  onSelectFile
+}: {
+  readonly trees: readonly AgentTreeChanges[]
+  readonly activePath: string | null
+  readonly onSelectFile: (path: string) => void
+}) {
+  const [scope, setScope] = useState(CHANGES_SCOPE_ALL)
+  const rows = useMemo(() => mergeAgentTrees(trees, scope), [trees, scope])
+  const totals = useMemo(() => sumAgentRows(rows), [rows])
+  const activeKey = rows.find((row) => row.file.path === activePath)?.key ?? null
+  return (
+    <>
+      <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
+        <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
+        <DiffStat added={totals.added} removed={totals.removed} className="text-[10.5px]" />
+      </div>
+      <div className="flex-none border-b border-hairline p-2">
+        <AgentScopeFilter trees={trees} value={scope} onChange={setScope} />
+      </div>
+      <AgentFileRows rows={rows} activeKey={activeKey} onSelectRow={(row) => onSelectFile(row.file.path)} />
+    </>
+  )
+}
+
 export function ChangedFilesExplorer({
   files: sourceFiles,
   fileDiffs: sourceDiffs,
@@ -232,16 +260,9 @@ export function ChangedFilesExplorer({
   agentTrees = []
 }: ChangedFilesExplorerProps) {
   const controls = useCodeReviewView()
-  const [agentScope, setAgentScope] = useState(CHANGES_SCOPE_ALL)
   // More than one tree (main + at least one subagent worktree) switches the
   // list to the agent-scoped rows; a single tree renders exactly as before.
   const multiAgent = agentTrees.length > 1
-  const agentRows = useMemo(() => mergeAgentTrees(agentTrees, agentScope), [agentTrees, agentScope])
-  const agentTotals = useMemo(() => sumAgentRows(agentRows), [agentRows])
-  const activeAgentKey = useMemo(
-    () => agentRows.find((row) => row.file.path === activePath)?.key ?? null,
-    [agentRows, activePath]
-  )
   const turn = turns.find((candidate) => candidate.id === turnId) ?? null
   const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
   const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
@@ -310,20 +331,7 @@ export function ChangedFilesExplorer({
         {allFiles.length === 0 ? (
           <EmptyState title="No changes yet" description="Files the agent edits show up here." />
         ) : multiAgent ? (
-          <>
-            <div className="flex h-[42px] flex-none items-center gap-2 border-b border-hairline px-[14px]">
-              <span className="flex-1 text-[12px] font-semibold text-text-bright">Changed files</span>
-              <DiffStat added={agentTotals.added} removed={agentTotals.removed} className="text-[10.5px]" />
-            </div>
-            <div className="flex-none border-b border-hairline p-2">
-              <AgentScopeFilter trees={agentTrees} value={agentScope} onChange={setAgentScope} />
-            </div>
-            <AgentFileRows
-              rows={agentRows}
-              activeKey={activeAgentKey}
-              onSelectRow={(row) => onSelectFile(row.file.path)}
-            />
-          </>
+          <AgentScopedFileList trees={agentTrees} activePath={activePath} onSelectFile={onSelectFile} />
         ) : (
           <ReviewFileRail
             files={files}
