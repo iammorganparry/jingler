@@ -29,3 +29,9 @@ export const ErrorState: Story = {
   name: "Error",
   args: { state: "error", errorMessage: "We couldn't send the sign-in link. Please try again." }
 }
+// The `jingler://` callback carried `access_denied`: the user declined the
+// provider's consent screen. Same `error` substate/ErrorPanel, provider-specific copy.
+export const DeniedOAuth: Story = {
+  name: "Denied OAuth",
+  args: { state: "error", errorMessage: "GitHub sign-in was cancelled." }
+}
