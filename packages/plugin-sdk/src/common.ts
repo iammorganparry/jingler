@@ -88,10 +88,18 @@ export interface IssueComment {
   readonly url?: string
 }
 
+/** A pull request linked to an issue, surfaced by cross-reference or attachment. */
+export interface IssueLinkedPr {
+  readonly number: number
+  readonly state: string
+  readonly url: string
+}
+
 /** A normalized rich issue payload. */
 export interface IssueDetail extends IssueSummary {
   readonly createdAt: string
   readonly comments: readonly IssueComment[]
+  readonly linkedPrs?: readonly IssueLinkedPr[]
 }
 
 export interface SessionSnapshot {

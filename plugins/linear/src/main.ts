@@ -6,6 +6,7 @@ import type {
   IssueActor,
   IssueComment,
   IssueLabel,
+  IssueLinkedPr,
   IssueProvider,
   IssueReference,
   IssueSummary
@@ -117,8 +118,26 @@ const closedState = (issue: LinearIssueNode): boolean =>
   issue.state.type === "completed" ||
   issue.state.type === "canceled"
 
+// Matches https://github.com/{owner}/{repo}/pull/{number}, with or without a trailing path segment.
+const GITHUB_PR_URL = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/(\d+)(?:\/.*)?$/
+
+/**
+ * Fills IssueDetail.linkedPrs from issue attachments whose URL is a GitHub
+ * PR — see https://linear.app/developers/attachments. Linear's generic
+ * attachment query exposes only the URL, not live PR status, so state is
+ * reported as "open".
+ * ponytail: state always "open" (no live PR read); upgrade path is reading
+ * the attachment's rich metadata or the GitHub session if that's ever needed.
+ */
+const linkedPrsFromAttachments = (issue: LinearIssueNode): readonly IssueLinkedPr[] =>
+  issue.attachments.nodes.flatMap(({ url }) => {
+    const match = GITHUB_PR_URL.exec(url)
+    return match ? [{ number: Number(match[1]), state: "open", url }] : []
+  })
+
 const issueDetailFields = (issue: LinearIssueNode): Omit<LinearIssueDetail, "comments"> => {
   const assignee = optionalActor(issue.assignee)
+  const linkedPrs = linkedPrsFromAttachments(issue)
   return {
     providerId: "linear",
     id: issue.id,
@@ -139,7 +158,8 @@ const issueDetailFields = (issue: LinearIssueNode): Omit<LinearIssueDetail, "com
     },
     team: team(issue.team),
     project: optionalDisplayItem(issue.project),
-    cycle: optionalDisplayItem(issue.cycle)
+    cycle: optionalDisplayItem(issue.cycle),
+    ...(linkedPrs.length ? { linkedPrs } : {})
   }
 }
 

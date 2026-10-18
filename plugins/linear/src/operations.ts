@@ -47,6 +47,9 @@ export interface LinearIssueNode {
   readonly labels: {
     readonly nodes: readonly { readonly name: string; readonly color: string | null }[]
   }
+  readonly attachments: {
+    readonly nodes: readonly { readonly url: string }[]
+  }
 }
 
 export interface LinearConnection<Node> {
@@ -125,6 +128,7 @@ const ISSUE_FIELDS = `
   project { id name }
   cycle { id name }
   labels { nodes { name color } }
+  attachments { nodes { url } }
 `
 
 export const CONTEXT_QUERY = `query LinearContext {
