@@ -234,6 +234,33 @@ describe("SubagentCapabilityBroker", () => {
     await expect(parentOnly.json()).resolves.toEqual({ error: "forbidden-tool" })
   })
 
+  it("never lets a child call switch_checkout, which would move the parent's active checkout", async () => {
+    const registry = new ToolRegistry()
+    registry.register({
+      id: "switch_checkout",
+      version: "1",
+      description: "Work in another repository of this session.",
+      input: Schema.Struct({ repoPath: Schema.optional(Schema.String) }),
+      risk: "read",
+      roles: ["conversation", "plan-execution"],
+      modes: ["auto"],
+      timeoutMs: 1_000,
+      outputBudget: 1_000,
+      cancellable: true,
+      idempotency: "safe",
+      execute: () => Promise.resolve({ status: "switched" })
+    })
+    const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
+    brokers.push(broker)
+    const capabilities = await register(broker, registry)
+
+    expect(capabilityFor(capabilities, "worker").tools.map(({ id }) => id))
+      .not.toContain("switch_checkout")
+    const response = await call(capabilities, { toolId: "switch_checkout" })
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({ error: "forbidden-tool" })
+  })
+
   it("exposes only the scoped supervisor snapshot through the internal tool", async () => {
     const broker = await Effect.runPromise(makeSubagentCapabilityBroker())
     brokers.push(broker)

@@ -35,7 +35,9 @@ const PARENT_ONLY_TOOLS = new Set([
   "jingler_ask_question",
   "plannotator_submit_plan",
   "plannotator_update_plan",
-  "jingler_publish_explanation"
+  "jingler_publish_explanation",
+  // A child must never move the parent's active checkout out from under it.
+  "switch_checkout"
 ])
 const READ_ONLY_AGENTS = new Set(["advisor", "oracle", "reviewer"])
 const SAFE_AGENT_NAME = /^[a-z][a-z0-9-]*$/u
