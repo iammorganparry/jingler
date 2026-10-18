@@ -207,6 +207,17 @@ test("the sign-in dialog is a standard dialog panel that closes on success", asy
   await expect(dialog).toHaveCount(0)
 })
 
+test("a denied OAuth callback returns to the sign-in options with a cancelled message", async ({ launchApp }) => {
+  const { window, completeDeniedOAuth } = await launchApp(signedOutApp)
+  await openSignIn(window)
+  await window.getByRole("button", { name: /continue with github/i }).click()
+  await expect(window.getByText(/finish signing in in your browser/i)).toBeVisible()
+  await completeDeniedOAuth("denied")
+  await expect(window.getByText(/github sign-in was cancelled/i)).toBeVisible()
+  await expect(window.getByRole("button", { name: "Retry" })).toBeVisible()
+  await expect(signInHeading(window)).toBeVisible()
+})
+
 test("an offline boot shows the app with the unreachable banner, not the sign-in wall", async ({ launchApp }) => {
   // A stored token, but the auth server refuses connections: unreachable, not signed out.
   const { window } = await launchApp({
