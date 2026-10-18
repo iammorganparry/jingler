@@ -5,6 +5,7 @@ export * from "./lib/cn.js"
 export * from "./lib/native-overlay.js"
 export * from "./lib/review-feedback.js"
 export * from "./lib/relative-time.js"
+export * from "./lib/command-summary.js"
 export * from "./tokens.js"
 
 // Where a transcript thumbnail fetches bytes the transcript deliberately omits.
