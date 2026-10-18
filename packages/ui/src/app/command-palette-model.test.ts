@@ -5,7 +5,11 @@ import {
   itemKeywords,
   itemsInScope,
   matchFileQuickOpenChord,
+  matchNeedsYouChord,
   matchPaletteChord,
+  needsYouGroupName,
+  needsYouPaletteItems,
+  nextNeedsYouSession,
   nextScope,
   PALETTE_GROUP,
   type PaletteItem,
@@ -396,5 +400,89 @@ describe("palette scopes", () => {
   it("Tab cycles Workspace → Chat → Workspace", () => {
     expect(nextScope("workspace")).toBe("chat")
     expect(nextScope("chat")).toBe("workspace")
+  })
+})
+
+describe("nextNeedsYouSession", () => {
+  const blocked = [
+    { id: "a", title: "Alpha" },
+    { id: "b", title: "Beta" },
+    { id: "c", title: "Gamma" }
+  ]
+
+  it("cycles to the next blocked workspace in list order", () => {
+    expect(nextNeedsYouSession(blocked, "a")).toBe("b")
+    expect(nextNeedsYouSession(blocked, "b")).toBe("c")
+  })
+
+  it("wraps from the last back to the first", () => {
+    expect(nextNeedsYouSession(blocked, "c")).toBe("a")
+  })
+
+  it("starts from the first when the current session isn't blocked (or there is none)", () => {
+    expect(nextNeedsYouSession(blocked, "not-blocked")).toBe("a")
+    expect(nextNeedsYouSession(blocked, null)).toBe("a")
+  })
+
+  it("returns null when nothing is blocked", () => {
+    expect(nextNeedsYouSession([], "a")).toBeNull()
+  })
+})
+
+describe("needsYouPaletteItems", () => {
+  const blocked = [
+    { id: "a", title: "Alpha" },
+    { id: "b", title: "Beta" }
+  ]
+
+  it("produces no section at all when nothing is blocked — absent, not empty", () => {
+    expect(needsYouPaletteItems([], null, vi.fn())).toEqual([])
+  })
+
+  it("lists each blocked workspace, pinned under 'Needs you (N)', in order", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, null, open)
+    expect(items.map((i) => [i.id, i.label, i.group])).toEqual([
+      ["needs-you:a", "Alpha", needsYouGroupName(2)],
+      ["needs-you:b", "Beta", needsYouGroupName(2)],
+      ["action:next-needs-you", "Go to next workspace that needs you", needsYouGroupName(2)]
+    ])
+  })
+
+  it("each row opens its own workspace", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, null, open)
+    items[1]!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+
+  it("the cycling action opens the next blocked workspace after the current one", () => {
+    const open = vi.fn()
+    const items = needsYouPaletteItems(blocked, "a", open)
+    items.at(-1)!.run()
+    expect(open).toHaveBeenCalledExactlyOnceWith("b")
+  })
+})
+
+describe("matchNeedsYouChord", () => {
+  const MAC = true
+  const PC = false
+
+  it("matches ⌘⇧N on macOS and Ctrl+⇧N elsewhere", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true }), MAC)).toBe(true)
+    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", ctrlKey: true, shiftKey: true }), PC)).toBe(true)
+  })
+
+  it("does not fire without Shift — that chord is plain New Workspace", () => {
+    expect(matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true }), MAC)).toBe(false)
+  })
+
+  it("does not fire with Alt held, or on an already-handled event", () => {
+    expect(
+      matchNeedsYouChord(chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true, altKey: true }), MAC)
+    ).toBe(false)
+    const e = chord({ code: "KeyN", key: "n", metaKey: true, shiftKey: true, cancelable: true })
+    e.preventDefault()
+    expect(matchNeedsYouChord(e, MAC)).toBe(false)
   })
 })

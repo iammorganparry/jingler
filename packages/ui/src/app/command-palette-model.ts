@@ -258,6 +258,68 @@ export const viewPaletteItems = (
   }))
 
 /**
+ * A blocked workspace, as the palette needs to know it: enough to list and
+ * jump to it.
+ */
+export interface NeedsYouSession {
+  readonly id: string
+  readonly title: string
+}
+
+/** The "Needs you" heading, count baked in — the one group name that isn't fixed, because it's the first thing a person reads. */
+export const needsYouGroupName = (count: number): string => `Needs you (${count})`
+
+/**
+ * The blocked workspace to jump to after `currentId`, wrapping — visits every
+ * blocked session in list order before repeating. `currentId` absent from
+ * `blocked` (no active session, or the active one just stopped being
+ * blocked) starts the cycle from the first rather than erroring.
+ */
+export const nextNeedsYouSession = (
+  blocked: ReadonlyArray<NeedsYouSession>,
+  currentId: string | null
+): string | null => {
+  if (blocked.length === 0) return null
+  const index = blocked.findIndex((s) => s.id === currentId)
+  return blocked[(index + 1) % blocked.length]!.id
+}
+
+/**
+ * "Needs you (N)" rows: one per blocked workspace plus the cycling action.
+ * Pinned first in the palette by being pushed first — `groupPaletteItems`
+ * keeps first-seen order. Empty when nothing is blocked, same posture as every
+ * other capability here: no blocked workspaces is no section, not an empty one.
+ */
+export const needsYouPaletteItems = (
+  blocked: ReadonlyArray<NeedsYouSession>,
+  currentId: string | null,
+  open: (sessionId: string) => void
+): ReadonlyArray<PaletteItem> => {
+  if (blocked.length === 0) return []
+  const group = needsYouGroupName(blocked.length)
+  return [
+    ...blocked.map((session) => ({
+      id: `needs-you:${session.id}`,
+      kind: "session" as const,
+      label: session.title,
+      group,
+      run: () => open(session.id)
+    })),
+    {
+      id: "action:next-needs-you",
+      kind: "action" as const,
+      label: "Go to next workspace that needs you",
+      group,
+      hint: "⌘⇧N",
+      run: () => {
+        const next = nextNeedsYouSession(blocked, currentId)
+        if (next) open(next)
+      }
+    }
+  ]
+}
+
+/**
  * The palette's scope switch: **Workspace** is every row, **Chat** is the
  * subset about the active chat (its tabs, views and subagents). Chat narrows
  * Workspace, so the default scope never hides a row the palette had before.
@@ -418,4 +480,18 @@ export const matchFileQuickOpenChord = (
   if (e.defaultPrevented || e.altKey || e.shiftKey) return false
   if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
   return e.code === "KeyP" || e.key.toLowerCase() === "p"
+}
+
+/**
+ * Global binding for "Go to next workspace that needs you" — ⌘⇧N on macOS,
+ * Ctrl+⇧N elsewhere. Provisional: the redesign board draws this chord as a
+ * placeholder (#507, board 10+), not a confirmed pick — expect it to move.
+ */
+export const matchNeedsYouChord = (
+  e: PaletteChord,
+  isMac: boolean = isMacPlatform()
+): boolean => {
+  if (e.defaultPrevented || e.altKey || !e.shiftKey) return false
+  if (isMac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return false
+  return e.code === "KeyN" || e.key.toLowerCase() === "n"
 }
