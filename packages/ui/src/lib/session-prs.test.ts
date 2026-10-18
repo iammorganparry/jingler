@@ -46,7 +46,7 @@ describe("sessionPrRows", () => {
     ])
     expect(rows).toEqual([
       { number: 482, agent: "main", branch: null },
-      { number: 491, agent: "reviewer", branch: "fix/491", state: "running" }
+      { number: 491, agent: "reviewer", branch: "fix/491", state: "running", nodeId: "n1" }
     ])
   })
 
