@@ -58,13 +58,7 @@ function CommandBlock({ command }: { command: string }) {
           {command}
         </div>
         {shouldClamp && (
-          <div
-            className="absolute inset-x-0 bottom-0 h-10"
-            style={{
-              backgroundImage:
-                "linear-gradient(in oklab 180deg, oklab(18.8% 0.001 -0.004 / 0%) 0%, oklab(18.8% 0.001 -0.004) 100%)"
-            }}
-          />
+          <div aria-hidden className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-b from-transparent to-sunken" />
         )}
       </div>
       {lineCount > 6 && (
