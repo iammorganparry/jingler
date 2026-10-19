@@ -90,6 +90,19 @@ test("PR chip opens the PR view and a second click focuses it instead of duplica
   await expect(window.getByTestId("editor-tab-view-checks")).toHaveCount(1)
 })
 
+test("reordering a pinned view from the overflow menu changes the header order live", async ({ launchApp }) => {
+  const { window } = await launch(launchApp, ["changes", "checks", "terminal"])
+  await window.getByTestId("session-row-s_view_launcher").click()
+
+  const buttons = window.getByTestId("header-view-buttons")
+  await expect(buttons.locator('[data-testid^="header-view-"]')).toHaveText(["Changes", "Checks", "Terminal"])
+
+  await window.getByTestId("view-overflow-trigger").click()
+  await window.getByTestId("move-checks-up").click()
+
+  await expect(buttons.locator('[data-testid^="header-view-"]')).toHaveText(["Checks", "Changes", "Terminal"])
+})
+
 test("⌘K → Open view… opens the chosen view and leaves one tab on repeat", async ({ launchApp }) => {
   const { window } = await launch(launchApp)
   await window.getByTestId("session-row-s_view_launcher").click()
