@@ -1920,6 +1920,7 @@ function AuthedApp({
           return (
             <PullRequestPane
               session={session}
+              project={projectController.projects.find((project) => project.id === session.projectId)}
               connected={sessionConnected}
               autoDetect={autoDetect}
               viewerLogin={github.connection.user?.login}
@@ -1939,6 +1940,7 @@ function AuthedApp({
               onPrLinked={onPrLinked}
               onPublishCheckpoint={onPublishCheckpoint}
               onOpenFiles={ctx.onSelectReview}
+              onSession={publishSessionUpdate}
             />
           );
         }}

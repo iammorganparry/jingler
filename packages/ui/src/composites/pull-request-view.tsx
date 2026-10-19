@@ -206,6 +206,8 @@ export interface PullRequestViewProps {
   readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
+  /** The workspace setup/run lifecycle — collapsed Workflow section in the rail. */
+  workflow?: PrSidePanelProps["workflow"]
 }
 
 /**
@@ -255,7 +257,8 @@ export function PullRequestView({
   updatingBranch = false,
   updateBranchError,
   readOnly = false,
-  review
+  review,
+  workflow
 }: PullRequestViewProps) {
          function renderDetailsToggle() {
            return (!roomy && (
@@ -634,6 +637,7 @@ return (evidence === "checks" ? (
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        workflow={workflow}
         readOnly={readOnly && !onMerge}
       />
     </div>
