@@ -6,10 +6,11 @@ import type {
   Usage,
   UsageFact,
   UsageReport,
+  UsageReportGroup,
   UsageStatus,
   UsageWindow
 } from "@jingler/core"
-import { filterUsageFacts, sortModelPerformance, usageReportFromFacts } from "@jingler/core"
+import { filterUsageFacts, modelDetailFromFacts, sortModelPerformance, usageReportFromFacts } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Badge } from "../components/badge.js"
@@ -20,6 +21,7 @@ import { KpiTile, StackedMiniBar } from "../components/kpi-tile.js"
 import { ModelPerformanceTable } from "../components/model-performance-table.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
+import { ModelDetailDrawer } from "./model-detail-drawer.js"
 
 const fmtReset = (iso: string | null): string => {
   if (!iso) return "—"
@@ -169,6 +171,7 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
   const [runtimeFilter, setRuntimeFilter] = useState<"all" | AgentRuntimeId>("all")
   const [sortBy, setSortBy] = useState<ModelPerformanceSortKey>("runCount")
   const [direction, setDirection] = useState<"asc" | "desc">("desc")
+  const [selectedGroup, setSelectedGroup] = useState<UsageReportGroup | null>(null)
 
   const filteredFacts = useMemo<ReadonlyArray<UsageFact>>(
     () => filterUsageFacts(report.facts, runtimeFilter === "all" ? {} : { runtimeId: runtimeFilter }),
@@ -178,6 +181,10 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
   const sortedGroups = useMemo(
     () => sortModelPerformance(filteredGroups, sortBy, direction),
     [filteredGroups, sortBy, direction]
+  )
+  const selectedDetail = useMemo(
+    () => (selectedGroup ? modelDetailFromFacts(filteredFacts, selectedGroup) : null),
+    [filteredFacts, selectedGroup]
   )
 
   const onSort = (key: ModelPerformanceSortKey) => {
@@ -199,9 +206,20 @@ function ReportSection({ report, onExport }: { report: UsageReport; onExport?: (
       ) : (
         <>
           <KpiStrip groups={filteredGroups} />
-          <ModelPerformanceTable groups={sortedGroups} sortBy={sortBy} direction={direction} onSort={onSort} />
+          <ModelPerformanceTable
+            groups={sortedGroups}
+            sortBy={sortBy}
+            direction={direction}
+            onSort={onSort}
+            onRowClick={setSelectedGroup}
+          />
         </>
       )}
+      <ModelDetailDrawer
+        open={selectedGroup !== null}
+        detail={selectedDetail}
+        onOpenChange={(open) => !open && setSelectedGroup(null)}
+      />
     </div>
   )
 }

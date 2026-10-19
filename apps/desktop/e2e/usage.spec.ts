@@ -96,3 +96,33 @@ test("changing the runtime filter updates the execution report's KPIs and model 
   await expect(table.getByTestId("model-performance-row")).toContainText("sonnet")
   await expect(window.getByTestId("usage-kpis").getByText("1", { exact: true })).toBeVisible()
 })
+
+test("clicking a model row opens its detail drawer; Esc closes it", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: ({ home }) => {
+      const journals = join(home, "jingler", "runtime", "journals")
+      mkdirSync(journals, { recursive: true })
+      writeFileSync(
+        join(journals, "usage-facts.json"),
+        JSON.stringify([fact("a", "claude", "sonnet"), fact("b", "codex", "gpt-codex")])
+      )
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: /Usage & limits/ }).click()
+
+  const table = window.getByTestId("model-performance-table")
+  await table.getByTestId("model-performance-row").filter({ hasText: "sonnet" }).click()
+
+  const drawer = window.getByTestId("model-detail-drawer")
+  await expect(drawer).toBeVisible()
+  await expect(drawer).toContainText("sonnet")
+  await expect(drawer.getByTestId("model-detail-slowest-runs")).toBeVisible()
+
+  await window.keyboard.press("Escape")
+  await expect(drawer).toBeHidden()
+})
