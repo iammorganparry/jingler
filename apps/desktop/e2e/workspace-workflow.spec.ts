@@ -161,13 +161,14 @@ for (const recovery of ["retry", "skip"] as const) {
 
 for (const recovery of ["retry", "skip"] as const) {
   test(`${recovery}s failed setup from the collapsible Workflow section in Checks`, async ({ launchApp }) => {
-    const { window, repoPath } = await launchApp({ configured: true, withRepo: true })
+    const { window, repoPath, home } = await launchApp({ configured: true, withRepo: true })
     await expect(appShell(window)).toBeVisible()
     await window.getByTestId("new-session").click(); await addProject(window, repoPath); await window.keyboard.press("Escape")
     await window.getByRole("button", { name: "Account menu" }).click()
     await window.getByRole("menuitem", { name: "Settings" }).click()
     await window.getByRole("button", { name: "Projects", exact: true }).click()
-    await window.getByLabel("Setup command").fill("node -e \"process.exit(7)\"")
+    // Fails until `allow-setup` exists, so a retry only succeeds once explicitly approved.
+    await window.getByLabel("Setup command").fill("node -e \"if(!require('node:fs').existsSync('allow-setup'))process.exit(7)\"")
     await window.getByRole("checkbox", { name: /I approve these commands/ }).click()
     await window.getByRole("button", { name: "Save workflow" }).click()
     await expect(window.getByText("Saved and approved for this exact content.")).toBeVisible()
@@ -183,6 +184,10 @@ for (const recovery of ["retry", "skip"] as const) {
     await expect(section).toBeVisible()
     await expect(section.getByRole("button", { name: "Retry setup" })).toHaveCount(0)
     await section.locator("summary").click()
+    if (recovery === "retry") {
+      const worktreePath = JSON.parse(readFileSync(join(home, "jingler", "sessions.json"), "utf8"))[0].worktreePath as string
+      writeFileSync(join(worktreePath, "allow-setup"), "approved retry")
+    }
     await expect(section.getByRole("button", { name: recovery === "retry" ? "Retry setup" : "Skip setup", exact: true })).toBeVisible()
     await section.getByRole("button", { name: recovery === "retry" ? "Retry setup" : "Skip setup", exact: true }).click()
     await expect(window.getByTestId("workspace-workflow-bar").getByRole("alert")).toHaveCount(0, { timeout: 20000 })
