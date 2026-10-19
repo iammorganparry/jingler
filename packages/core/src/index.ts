@@ -50,3 +50,4 @@ export * from "./workspace-checkpoint.js"
 
 export * from "./routines.js"
 export * from "./project-config.js"
+export * from "./conflict-resolution.js"
