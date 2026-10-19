@@ -1,10 +1,23 @@
 import { Spin } from "../components/spin.js"
-import type { ProviderUsage, Usage, UsageReport, UsageStatus, UsageWindow } from "@jingler/core"
+import type {
+  AgentRuntimeId,
+  ModelPerformanceSortKey,
+  ProviderUsage,
+  Usage,
+  UsageFact,
+  UsageReport,
+  UsageStatus,
+  UsageWindow
+} from "@jingler/core"
+import { filterUsageFacts, sortModelPerformance, usageReportFromFacts } from "@jingler/core"
 import { Gauge, RefreshCw } from "lucide-react"
+import { useMemo, useState } from "react"
 import { Badge } from "../components/badge.js"
 import { Button } from "../components/button.js"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/dialog.js"
+import { FilterChips } from "../components/filter-chips.js"
 import { KpiTile, StackedMiniBar } from "../components/kpi-tile.js"
+import { ModelPerformanceTable } from "../components/model-performance-table.js"
 import { ProviderIcon } from "../components/provider-icon.js"
 import { providerAuthRouteLabel } from "../lib/provider-connection-labels.js"
 
@@ -69,11 +82,11 @@ function ProviderSection({ provider: p }: { provider: ProviderUsage }) {
         )}
       </div>
       {route && (
-        <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-          <span>{route}</span>
-          <span>Billing: {p.billingRoute ?? "unconfirmed"}</span>
-          <span>Target: {p.targetId}</span>
-          <span>Status: {p.authStatus}</span>
+        <div className="mb-3 flex items-center gap-2 overflow-x-auto">
+          <Badge tone="neutral" size="sm" className="max-w-[180px] truncate">{route}</Badge>
+          <Badge tone="neutral" size="sm" className="max-w-[160px] truncate">Billing: {p.billingRoute ?? "unconfirmed"}</Badge>
+          <Badge tone="neutral" size="sm" className="max-w-[160px] truncate">Target: {p.targetId}</Badge>
+          <Badge tone="neutral" size="sm" className="max-w-[140px] truncate">Status: {p.authStatus}</Badge>
         </div>
       )}
       {(p.quotaLabel || p.rateLimitLabel) && (
@@ -139,22 +152,56 @@ function KpiStrip({ groups }: { groups: Groups }) {
   )
 }
 
+const runtimeFilterOptions: ReadonlyArray<{ value: "all" | AgentRuntimeId; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+  { value: "opencode", label: "Opencode" },
+  { value: "pi", label: "Pi" }
+]
+
+/**
+ * The execution report's filter row, KPI strip and sortable per-model table. Filtering
+ * re-aggregates the underlying facts client-side; project filtering is skipped until
+ * `UsageFact` carries a project id (not yet recorded at the accounting boundary).
+ */
 function ReportSection({ report, onExport }: { report: UsageReport; onExport?: () => Promise<void> | void }) {
+  const [runtimeFilter, setRuntimeFilter] = useState<"all" | AgentRuntimeId>("all")
+  const [sortBy, setSortBy] = useState<ModelPerformanceSortKey>("runCount")
+  const [direction, setDirection] = useState<"asc" | "desc">("desc")
+
+  const filteredFacts = useMemo<ReadonlyArray<UsageFact>>(
+    () => filterUsageFacts(report.facts, runtimeFilter === "all" ? {} : { runtimeId: runtimeFilter }),
+    [report.facts, runtimeFilter]
+  )
+  const filteredGroups = useMemo(() => usageReportFromFacts(filteredFacts).groups, [filteredFacts])
+  const sortedGroups = useMemo(
+    () => sortModelPerformance(filteredGroups, sortBy, direction),
+    [filteredGroups, sortBy, direction]
+  )
+
+  const onSort = (key: ModelPerformanceSortKey) => {
+    if (key === sortBy) setDirection(direction === "asc" ? "desc" : "asc")
+    else (setSortBy(key), setDirection("desc"))
+  }
+
   return (
     <div className="border-t border-hairline py-[14px]">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="text-[12px] font-semibold text-text-bright">Execution report</div>
-        {onExport && <Button size="sm" variant="ghost" onClick={() => void onExport()}>Export JSON</Button>}
-      </div>
-      {report.groups.length === 0 ? (
-        <div className="text-[11px] text-muted-foreground">No completed parent or child runs recorded.</div>
-      ) : <KpiStrip groups={report.groups} />}
-      {report.groups.map((group) => (
-        <div key={`${group.runtimeId}:${group.providerId}:${group.modelId}:${group.kind}`} className="flex items-center justify-between py-1 text-[11px] text-muted-foreground">
-          <span>{group.runtimeId} · {group.modelId} · {group.kind}</span>
-          <span>{group.runCount} runs · {Math.round((group.successRate ?? 0) * 100)}% ok · {group.totalTokens} tokens · {group.toolCalls} tools · {group.costCoverage === 1 ? `$${group.knownCostUsd.toFixed(2)}` : "cost partial"}</span>
+        <div className="flex items-center gap-2">
+          <FilterChips options={runtimeFilterOptions} value={runtimeFilter} onChange={setRuntimeFilter} ariaLabel="Filter by runtime" />
+          {onExport && <Button size="sm" variant="ghost" onClick={() => void onExport()}>Export JSON</Button>}
         </div>
-      ))}
+      </div>
+      {filteredGroups.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">No completed parent or child runs recorded.</div>
+      ) : (
+        <>
+          <KpiStrip groups={filteredGroups} />
+          <ModelPerformanceTable groups={sortedGroups} sortBy={sortBy} direction={direction} onSort={onSort} />
+        </>
+      )}
     </div>
   )
 }
