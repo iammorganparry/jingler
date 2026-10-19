@@ -112,7 +112,7 @@ export function ReviewTray({
             onClick={submit}
             title="Submit review (⌘↵)"
           >
-            Submit · send {count} to agent →
+            Send {count} to agent →
           </Button>
           <Button
             variant="ghost"

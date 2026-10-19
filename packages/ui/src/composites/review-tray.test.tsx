@@ -10,10 +10,12 @@ const drafts: ReviewDraft[] = [
 ]
 
 describe("ReviewTray", () => {
-  it("submits with the neutral Submit button, not a primary action", () => {
+  it("submits with a neutral (secondary) Submit button, not a primary action", () => {
     const onFinishReview = vi.fn()
     render(<ReviewTray drafts={drafts} onRemoveDraft={() => {}} onFinishReview={onFinishReview} />)
-    const submit = screen.getByRole("button", { name: /Submit/ })
+    const submit = screen.getByRole("button", { name: /Send 2 to agent/ })
+    expect(submit.getAttribute("title")).toBe("Submit review (⌘↵)")
+    expect(submit.className).not.toContain("bg-primary-fill")
     fireEvent.click(submit)
     expect(onFinishReview).toHaveBeenCalledWith("send_to_agent")
   })
