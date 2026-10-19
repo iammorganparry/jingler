@@ -543,3 +543,18 @@ export const PullRequestMergeBlocked: Story = {
     </div>
   )
 }
+
+/** Merge box blocked by conflicts: "Ask agent to resolve conflicts" replaces the old dead end (#436). */
+export const PullRequestConflicted: Story = {
+  render: () => (
+    <div className="flex h-screen bg-editor">
+      <PullRequestView
+        pr={{ ...pr, mergeable: "CONFLICTING", mergeStateStatus: "DIRTY", mergeBlockers: ["Merge conflicts"] }}
+        connected
+        conflictedFiles={["src/auth/session.ts", "src/auth/token-store.ts"]}
+        onResolveConflicts={() => {}}
+        onMerge={() => {}}
+      />
+    </div>
+  )
+}

@@ -425,6 +425,52 @@ describe("PullRequestView sub-tabs", () => {
   })
 })
 
+describe("PullRequestView conflict side panel", () => {
+  const conflicted: PullRequest = {
+    ...pr,
+    mergeable: "CONFLICTING",
+    mergeStateStatus: "DIRTY",
+    mergeBlockers: ["Merge conflicts"]
+  }
+
+  it("sends the conflict-resolution prompt naming every conflicting file, then shows the resolving state", async () => {
+    const onResolveConflicts = vi.fn()
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView
+          pr={conflicted}
+          connected
+          conflictedFiles={["src/auth/session.ts", "src/auth/token-store.ts"]}
+          onResolveConflicts={onResolveConflicts}
+          onMerge={() => {}}
+        />
+      </WidthTierValue>
+    )
+    const button = screen.getByRole("button", { name: "Ask agent to resolve conflicts" })
+    await userEvent.click(button)
+    expect(onResolveConflicts).toHaveBeenCalledTimes(1)
+    const prompt = onResolveConflicts.mock.calls[0]![0] as string
+    expect(prompt).toContain("src/auth/session.ts")
+    expect(prompt).toContain("src/auth/token-store.ts")
+    expect(screen.getByText(/Agent is resolving…/)).toBeTruthy()
+  })
+
+  it("disables the button with no conflicting files reported yet", () => {
+    render(
+      <WidthTierValue width={1200}>
+        <PullRequestView
+          pr={conflicted}
+          connected
+          conflictedFiles={[]}
+          onResolveConflicts={vi.fn()}
+          onMerge={() => {}}
+        />
+      </WidthTierValue>
+    )
+    expect(screen.getByRole("button", { name: "Ask agent to resolve conflicts" })).toHaveProperty("disabled", true)
+  })
+})
+
 describe("PullRequestView draft side panel", () => {
   const draft: PullRequest = { ...pr, state: "draft", isDraft: true }
   const view = (props: Partial<React.ComponentProps<typeof PullRequestView>> = {}) =>
