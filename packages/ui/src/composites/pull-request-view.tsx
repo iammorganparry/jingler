@@ -31,6 +31,7 @@ import { PrReviewComposer } from "./pr-review-composer.js"
 import { PrReviewGroup } from "./pr-review-group.js"
 import { ReadinessChecklist } from "./readiness-checklist.js"
 import { PrSidePanel, type PrSidePanelProps } from "./pr-side-panel.js"
+import { WorkflowSection } from "./workflow-section.js"
 import { PrTimelineEntry } from "./pr-timeline-entry.js"
 import { PrStackRail, type PrStackNav } from "./pr-stack-rail.js"
 import { PrSwitcher } from "./pr-switcher.js"
@@ -206,6 +207,8 @@ export interface PullRequestViewProps {
   readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
+  /** The workspace setup/run lifecycle — collapsed Workflow section in the rail. */
+  workflow?: PrSidePanelProps["workflow"]
 }
 
 /**
@@ -255,7 +258,8 @@ export function PullRequestView({
   updatingBranch = false,
   updateBranchError,
   readOnly = false,
-  review
+  review,
+  workflow
 }: PullRequestViewProps) {
          function renderDetailsToggle() {
            return (!roomy && (
@@ -578,8 +582,18 @@ return (evidence === "checks" ? (
   const loadView = renderLoadState(pr, connected, busy, loadError, onRetryLoad)
   if (loadView) return loadView
   if (pr === null) {
+    // Workspace setup/run is independent of whether a PR exists yet — a
+    // worktree session reaches the Checks tab before publishing, and that's
+    // exactly when setup is most likely to still need a retry or skip.
     return (
-      renderCreatePullRequest()
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        {renderCreatePullRequest()}
+        {workflow && (
+          <div className="flex w-[280px] flex-none flex-col border-l border-hairline bg-panel">
+            <WorkflowSection {...workflow} />
+          </div>
+        )}
+      </div>
     )
   }
 
@@ -634,6 +648,7 @@ return (evidence === "checks" ? (
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        workflow={workflow}
         readOnly={readOnly && !onMerge}
       />
     </div>

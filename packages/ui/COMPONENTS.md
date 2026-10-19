@@ -160,6 +160,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PrReviewThreadView | `composites/pr-review-thread.tsx` | Inline review thread with reply/resolve. | — | no | — |
 | MergeSplitButton | `composites/merge-split-button.tsx` | `Squash and merge ▾` split button: merge, squash or rebase; choice remembered; disabled with the first blocker as tooltip; `mergeError` shown under it. | connected, onMerge, merging, blockedReason, mergeError | yes | #435 (6.13) |
 | PrSidePanel | `composites/pr-side-panel.tsx` | PR right rail: reviewers, checks, merge box. | pr, connected, onMerge, merging, mergeError, onClosePr | no | — |
+| WorkflowSection | `composites/workflow-section.tsx` | Collapsible Workflow section for the Checks rail: one-row summary, expands to setup retry/skip and run/stop, mirroring the conversation workflow bar. | lifecycle, commands, runs, error, onRetrySetup, onSkipSetup, onStartRun, onStopRun, onArchiveWithoutCleanup | yes | #437 (6.15) |
 | PrTimelineEntry | `composites/pr-timeline-entry.tsx` | PR timeline entry. | — | no | — |
 | ProjectWorkflowSettings | `composites/project-workflow-settings.tsx` | Per-project workflow settings. | projects, loading, routines | yes | — |
 | ProviderAuthForms | `composites/provider-auth-forms.tsx` | Credential entry for provider auth. | busy, mode, authKinds, apiProviderId, pendingAuthKind, onConnectClaude | no | — |

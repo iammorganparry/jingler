@@ -1,17 +1,6 @@
-import { useEffect, useState } from "react"
-import type { Project, Session, WorkspaceRunState } from "@jingler/core"
+import type { Project, Session } from "@jingler/core"
 import { Button } from "@jingler/ui"
-import { rpc } from "./rpc-client.js"
-
-const readyForRuns = (lifecycle: Session["workspaceLifecycle"]): boolean =>
-  lifecycle === undefined || lifecycle.status === "ready" || lifecycle.status === "setup-skipped"
-
-const hasWorkspaceContent = (session: Session, commandCount: number, runs: ReadonlyArray<WorkspaceRunState>, error: string | null): boolean => {
-  const lifecycle = session.workspaceLifecycle
-  const hasNotice = lifecycle?.status === "setup-running" || lifecycle?.status === "setup-failed" || lifecycle?.status === "cleanup-failed"
-  const hasControls = readyForRuns(lifecycle) && (commandCount > 0 || runs.some(run => run.status === "running"))
-  return Boolean(hasNotice || lifecycle?.output || hasControls || runs.some(run => run.status === "failed") || error)
-}
+import { useWorkspaceWorkflow, readyForWorkflowRuns } from "./use-workspace-workflow.js"
 
 export function WorkspaceWorkflowBar({
   session,
@@ -22,28 +11,10 @@ export function WorkspaceWorkflowBar({
   project?: Project
   onSession: (session: Session) => void
 }) {
-  const [runs, setRuns] = useState<ReadonlyArray<WorkspaceRunState>>([])
-  const [error, setError] = useState<string | null>(null)
-  const commands = project?.workflow?.runs ?? []
-  const lifecycle = session.workspaceLifecycle
-  const displayed = [...commands, ...runs.filter(run => !commands.some(command => command.id === run.id))]
+  const { runs, error, commands, lifecycle, displayed, hasContent, retrySetup, skipSetup, archiveWithoutCleanup, startRun, stopRun } =
+    useWorkspaceWorkflow(session, project, onSession)
 
-  useEffect(() => {
-    let cancelled = false
-    const refresh = () => void rpc.workspaceWorkflowListRuns(session.id).then((value) => {
-      if (!cancelled) setRuns(value)
-    }).catch(() => undefined)
-    refresh()
-    const timer = setInterval(refresh, 2_000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [session.id])
-
-  if (!hasWorkspaceContent(session, commands.length, runs, error)) return null
-
-  const mutateSession = async (action: () => Promise<Session>) => {
-    setError(null)
-    try { onSession(await action()) } catch (cause) { setError(cause instanceof Error ? cause.message : "Workspace action failed.") }
-  }
+  if (!hasContent) return null
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-line bg-panel px-3 py-2 text-xs" data-testid="workspace-workflow-bar">
@@ -51,30 +22,22 @@ export function WorkspaceWorkflowBar({
       {lifecycle?.status === "cleanup-failed" ? (
         <>
           <span role="alert" className="text-red">Cleanup failed: {lifecycle.error}</span>
-          <Button size="sm" variant="danger" onClick={() => void mutateSession(() => rpc.sessionsArchive(session.id, "closed", true))}>Archive without cleanup</Button>
+          <Button size="sm" variant="danger" onClick={archiveWithoutCleanup}>Archive without cleanup</Button>
         </>
       ) : null}
       {lifecycle?.status === "setup-failed" ? (
         <>
           <span role="alert" className="text-red">Setup failed: {lifecycle.error}</span>
-          <Button size="sm" onClick={() => void mutateSession(() => rpc.workspaceWorkflowRetrySetup(session.id))}>Retry setup</Button>
-          <Button size="sm" variant="outline" onClick={() => void mutateSession(() => rpc.workspaceWorkflowSkipSetup(session.id))}>Skip setup</Button>
+          <Button size="sm" onClick={retrySetup}>Retry setup</Button>
+          <Button size="sm" variant="outline" onClick={skipSetup}>Skip setup</Button>
         </>
       ) : null}
-      {readyForRuns(lifecycle) ? displayed.map((command) => {
+      {readyForWorkflowRuns(lifecycle) ? displayed.map((command) => {
         const state = runs.find((candidate) => candidate.id === command.id)
         return state?.status === "running" ? (
-          <Button key={command.id} size="sm" variant="outline" onClick={async () => {
-            setError(null)
-            try { await rpc.workspaceWorkflowStopRun(session.id, command.id); setRuns(await rpc.workspaceWorkflowListRuns(session.id)) }
-            catch (cause) { setError(cause instanceof Error ? cause.message : "Could not stop command.") }
-          }}>Stop {state.label}</Button>
+          <Button key={command.id} size="sm" variant="outline" onClick={() => void stopRun(command.id)}>Stop {state.label}</Button>
         ) : commands.some(configured => configured.id === command.id) ? (
-          <Button key={command.id} size="sm" onClick={async () => {
-            setError(null)
-            try { const next = await rpc.workspaceWorkflowStartRun(session.id, command.id); setRuns((current) => [...current.filter((item) => item.id !== next.id), next]) }
-            catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start command.") }
-          }}>Run {command.label}</Button>
+          <Button key={command.id} size="sm" onClick={() => void startRun(command.id)}>Run {command.label}</Button>
         ) : null
       }) : null}
       {runs.filter(run => run.status === "failed").map(run => <details key={`failure-${run.id}`} className="text-red">
