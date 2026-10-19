@@ -1,7 +1,12 @@
 import type { NotificationsConfig } from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
 import { describe, expect, it } from "vitest"
-import { notificationClickPayload, notificationPermission, shouldNotify } from "./notifications.js"
+import {
+  notificationClickPayload,
+  notificationPermission,
+  openNotificationSystemSettings,
+  shouldNotify
+} from "./notifications.js"
 
 /**
  * The suppression rules. These are the difference between a channel the operator
@@ -119,6 +124,26 @@ describe("notificationPermission", () => {
         throw new Error("no display")
       })
     ).toBe("unknown")
+  })
+})
+
+describe("openNotificationSystemSettings", () => {
+  it("opens System Settings → Notifications on macOS", async () => {
+    const calls: string[] = []
+    openNotificationSystemSettings((url) => {
+      calls.push(url)
+      return Promise.resolve()
+    }, "darwin")
+    expect(calls).toEqual(["x-apple.systempreferences:com.apple.preference.notifications"])
+  })
+
+  it("is a no-op on platforms other than macOS", () => {
+    const calls: string[] = []
+    openNotificationSystemSettings((url) => {
+      calls.push(url)
+      return Promise.resolve()
+    }, "win32")
+    expect(calls).toEqual([])
   })
 })
 
