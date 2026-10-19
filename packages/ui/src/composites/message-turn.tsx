@@ -28,6 +28,7 @@ import { QuestionSummary } from "./question-summary.js"
 import { ThoughtBlock } from "./thought-block.js"
 import { ToolCall } from "./tool-call.js"
 import { StreamingText } from "./streaming-text.js"
+import { InlineError } from "../components/feedback.js"
 import { toolDisplayName } from "../lib/tool-names.js"
 
 // Parts fill the transcript's centered content column (width is owned by

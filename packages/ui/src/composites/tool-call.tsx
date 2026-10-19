@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronRight, CircleStop, LoaderCircle, X } from "l
 import { cn } from "../lib/cn.js"
 import { Spin } from "../components/spin.js"
 import { FileIcon } from "../components/file-icon.js"
+import { Button } from "../components/button.js"
 import { useOpenPath } from "../asset/open-asset-context.js"
 import { ToolResultSurface } from "./beui/work.js"
 
