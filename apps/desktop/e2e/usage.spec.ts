@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { appShell, expect, test } from "./fixtures.js"
 
 /** The CLI's own rate-limit report: the five-hour window is exhausted, the weekly one is not. */
@@ -38,4 +40,59 @@ test("the account menu shows a limited provider's reset time without status colo
 
   // The Settings → Usage entry point stays in the same menu.
   await expect(window.getByRole("menuitem", { name: /Usage & limits/ })).toBeVisible()
+})
+
+/** A terminal accounting fact; `costUsd: null` means the provider reported no price. */
+const fact = (id: string, runtimeId: string, modelId: string) => ({
+  id,
+  runId: id,
+  sessionId: "s_usage",
+  chatId: "c_usage",
+  parentRunId: null,
+  runtimeId,
+  providerId: runtimeId === "claude" ? "anthropic" : "openai",
+  modelId,
+  kind: "parent",
+  startedAt: "2026-07-11T00:00:00.000Z",
+  endedAt: "2026-07-11T00:00:10.000Z",
+  durationMs: 10_000,
+  inputTokens: 1000,
+  outputTokens: 500,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  reasoningTokens: 0,
+  totalTokens: 1500,
+  costUsd: 1,
+  toolCalls: 1,
+  outcome: "success",
+  provenance: "e2e"
+})
+
+test("changing the runtime filter updates the execution report's KPIs and model table", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    seed: ({ home }) => {
+      const journals = join(home, "jingler", "runtime", "journals")
+      mkdirSync(journals, { recursive: true })
+      writeFileSync(
+        join(journals, "usage-facts.json"),
+        JSON.stringify([fact("a", "claude", "sonnet"), fact("b", "codex", "gpt-codex")])
+      )
+    }
+  })
+  await expect(appShell(window)).toBeVisible()
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: /Usage & limits/ }).click()
+
+  const table = window.getByTestId("model-performance-table")
+  await expect(table.getByTestId("model-performance-row")).toHaveCount(2)
+  await expect(window.getByTestId("usage-kpis").getByText("2", { exact: true })).toBeVisible()
+
+  await window.getByRole("radio", { name: "Claude" }).click()
+
+  await expect(table.getByTestId("model-performance-row")).toHaveCount(1)
+  await expect(table.getByTestId("model-performance-row")).toContainText("sonnet")
+  await expect(window.getByTestId("usage-kpis").getByText("1", { exact: true })).toBeVisible()
 })
