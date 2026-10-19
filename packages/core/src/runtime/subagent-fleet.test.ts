@@ -10,7 +10,8 @@ import {
   SubagentControlEnvelope,
   SubagentControlReceipt,
   SubagentAttentionRequest,
-  SubagentAttentionReply
+  SubagentAttentionReply,
+  countNodesAwaitingAttention
 } from "./subagent-fleet.js"
 
 const node = {
@@ -231,4 +232,25 @@ describe("subagent fleet contracts", () => {
     })).toThrow()
   })
 
+})
+
+describe("countNodesAwaitingAttention", () => {
+  it("counts only nodes with a pending attention request", () => {
+    const attention = {
+      requestId: "attention-1",
+      reason: "need_decision",
+      message: "Choose an API",
+      requestedAt: 2,
+      deadlineAt: null
+    } as const
+    expect(countNodesAwaitingAttention([
+      { ...node, workspace: null, prNumber: null, attention },
+      { ...node, workspace: null, prNumber: null, id: "parent/run-2", attention: null },
+      { ...node, workspace: null, prNumber: null, id: "parent/run-3", attention }
+    ])).toBe(2)
+  })
+
+  it("returns zero for an empty fleet", () => {
+    expect(countNodesAwaitingAttention([])).toBe(0)
+  })
 })

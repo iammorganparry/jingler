@@ -1026,7 +1026,7 @@ export function ConversationPane({
         // mode, and environment pickers are omitted — those are main-turn
         // choices — and the composer's follow toggle points at this agent.
         <>
-          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile, onOpenPullRequest)}
+          {renderFleetAgent(fleet, childTranscriptQuery, session, subagentControlOutcome, onOpenFile, onOpenPullRequest, controlSubagent)}
           {/* Same gutter + centered max-width as the transcript column above —
               a full-bleed composer read as a different surface entirely. */}
           <div className="flex-none px-[30px] pb-[18px] pt-[11px]">
@@ -1144,9 +1144,10 @@ export function ConversationPane({
   )
 }
 
-function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined, onOpenPullRequest: (() => void) | undefined) {
+function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: ReturnType<typeof useFleetChildTranscript>, session: Session, subagentControlOutcome: SubagentFleetControlOutcome | null, onOpenFile: ((sessionId: string, path: string) => void) | undefined, onOpenPullRequest: (() => void) | undefined, controlSubagent: (node: SubagentFleetNode, action: SubagentFleetControlAction, message?: string, replyTo?: string) => Promise<SubagentFleetControlOutcome>) {
+  const node = fleet.selectedNode!
   return <FleetAgentView
-    node={fleet.selectedNode!}
+    node={node}
     messages={fleet.selectedLegacyAgent === null
       ? (childTranscriptQuery.data ?? [])
       : [fleet.selectedLegacyAgent.message]}
@@ -1156,6 +1157,9 @@ function renderFleetAgent(fleet: SubagentFleetController, childTranscriptQuery: 
     onOpenPullRequest={onOpenPullRequest}
     loading={fleet.selectedLegacyAgent === null && childTranscriptQuery.isLoading}
     onRetry={() => void childTranscriptQuery.refetch()}
+    onReply={(text) => {
+      if (node.attention) void controlSubagent(node, "reply", text, node.attention.requestId)
+    }}
     error={fleet.selectedLegacyAgent === null && childTranscriptQuery.error
       ? rpcFailureMessage(childTranscriptQuery.error, "Could not load the child transcript.")
       : null} />
