@@ -73,7 +73,7 @@ describe("managed pi-subagent profiles", () => {
     expect(fanout.ok).toBe(true)
     if (!(scout.ok && worker.ok && fanout.ok)) return
     expect(scout.contract.model).toBe("anthropic/claude-test:low")
-    expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:high")
+    expect(worker.contract.model).toBe("openai-codex/gpt-5.6-sol:medium")
     expect(worker.contract.tools.requestedBuiltin).toEqual([
       "contact_supervisor",
       "workspace_read_file"
@@ -195,5 +195,14 @@ describe("managed pi-subagent profiles", () => {
       .toContain(`extensions: ${childTools}, `)
     expect(await readFile(join(root, "agents", "worker.md"), "utf8"))
       .toContain(PONYTAIL_EXTENSION_PATH)
+  })
+
+  it("runs workers at medium thinking instead of the vendor's high", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jingler-thinking-"))
+    roots.push(root)
+    await materializePiSubagentProfiles(root, "child.mjs", "claude.mjs")
+    const worker = await readFile(join(root, "agents", "worker.md"), "utf8")
+    expect(worker).toMatch(/^thinking: medium$/m)
+    expect(worker).not.toMatch(/^thinking: high$/m)
   })
 })

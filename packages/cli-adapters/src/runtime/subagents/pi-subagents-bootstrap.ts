@@ -122,6 +122,13 @@ const writeConfig = async (path: string): Promise<void> => {
 const CHILD_EXTENSIONS = (childToolsPath: string, claudeProviderPath: string): string =>
   `${childToolsPath}, ${claudeProviderPath}, ${PONYTAIL_EXTENSION_PATH}`
 
+/**
+ * Vendor `worker.md` ships `thinking: high`, and a worker makes 60-100 tool
+ * calls per task, each a full model call at that effort. Medium is plenty for
+ * scoped implementation work and keeps parallel workers inside plan limits.
+ */
+const THINKING_OVERRIDES: Readonly<Record<string, string>> = { worker: "medium" }
+
 const rewriteAgentProfile = (
   source: string,
   childToolsPath: string,
@@ -158,7 +165,10 @@ export const materializePiSubagentProfiles = async (
     readFile(join(target, `${agent}.md`), "utf8")
       .then((existing) => existing.match(/^tools: (.*)$/m)?.[1], () => undefined)
   await Promise.all(BUILTIN_AGENTS.map(async (agent) => {
-    const source = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
+    const vendor = await readFile(join(PI_SUBAGENTS_AGENT_DIR, `${agent}.md`), "utf8")
+    const source = agent in THINKING_OVERRIDES
+      ? vendor.replace(/^thinking:.*$/m, `thinking: ${THINKING_OVERRIDES[agent]}`)
+      : vendor
     await writeFile(
       join(target, `${agent}.md`),
       rewriteAgentProfile(
