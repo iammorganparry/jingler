@@ -200,6 +200,48 @@ export const ExplorerEmpty: Story = {
   )
 }
 
+const prLayers = [{ number: 480 }, { number: 481 }, { number: 482 }]
+
+function PrFiltered() {
+  const [prNumber, setPrNumber] = useState(481)
+  const [active, setActive] = useState<string | null>(null)
+  return (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={files(prChanges)}
+        fileDiffs={diffs(prChanges)}
+        drafts={[]}
+        activePath={active}
+        onSelectFile={setActive}
+        prLayers={prLayers}
+        prNumber={prNumber}
+        onPrNumberChange={setPrNumber}
+      />
+    </Frame>
+  )
+}
+
+/** "PR: #481 ▾" narrows the changed-file list to one layer of a PR stack. */
+export const ExplorerPrLayerFilter: Story = { render: () => <PrFiltered /> }
+
+/** A layer with no commits of its own: "No commits in this layer". */
+export const ExplorerPrLayerEmpty: Story = {
+  render: () => (
+    <Frame width={280}>
+      <ChangedFilesExplorer
+        files={[]}
+        fileDiffs={[]}
+        drafts={[]}
+        activePath={null}
+        onSelectFile={() => {}}
+        prLayers={prLayers}
+        prNumber={481}
+        onPrNumberChange={() => {}}
+      />
+    </Frame>
+  )
+}
+
 function Diff({
   index,
   source,

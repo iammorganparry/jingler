@@ -44,6 +44,7 @@ import { createReviewCodeFiles, ReviewCodeView } from "./review-code-view.js"
 import { narrowToTurn, type ReviewTurn } from "./review-turns.js"
 import { ReviewTray, type ReviewDraft } from "./review-tray.js"
 import { TurnFilter } from "./turn-filter.js"
+import { PrFilter, type PrFilterLayer } from "./pr-filter.js"
 import { useCodeReviewView } from "./use-code-review-view.js"
 
 /** Which diff a review shows — the PR, or the worktree's uncommitted changes. */
@@ -201,6 +202,10 @@ export interface ChangedFilesExplorerProps {
   readonly turns?: readonly ReviewTurn[]
   readonly turnId?: string | null
   readonly onTurnChange?: (turnId: string | null) => void
+  /** Stack layers the PR filter can select between; the filter shows with two or more. */
+  readonly prLayers?: readonly PrFilterLayer[]
+  readonly prNumber?: number | null
+  readonly onPrNumberChange?: (number: number) => void
   /** The change list is still loading: show placeholder rows at real height. */
   readonly loading?: boolean
   /** The change list failed to load; `onRetry` adds the Retry button. */
@@ -226,6 +231,24 @@ function TurnFilterBar({
   return (
     <div className="flex-none border-b border-hairline p-2">
       <TurnFilter turns={turns} value={value} onChange={onChange} />
+    </div>
+  )
+}
+
+/** The PR-layer filter strip; renders nothing without two or more stack layers. */
+function PrFilterBar({
+  layers,
+  value,
+  onChange
+}: {
+  readonly layers: readonly PrFilterLayer[]
+  readonly value: number | null
+  readonly onChange: ((number: number) => void) | undefined
+}) {
+  if (layers.length < 2 || !onChange || value === null) return null
+  return (
+    <div className="flex-none border-b border-hairline p-2">
+      <PrFilter layers={layers} value={value} onChange={onChange} />
     </div>
   )
 }
@@ -258,30 +281,25 @@ function AgentScopedFileList({
   )
 }
 
-export function ChangedFilesExplorer({
-  files: sourceFiles,
-  fileDiffs: sourceDiffs,
-  omittedFiles = [],
-  diffLineLimit = 0,
-  drafts,
-  reviewThreads = [],
-  review = null,
-  activePath,
-  onSelectFile,
-  onDiscardFile,
-  turns = [],
-  turnId = null,
-  onTurnChange,
-  loading = false,
-  error = null,
-  onRetry,
-  agentTrees = []
-}: ChangedFilesExplorerProps) {
-  const controls = useCodeReviewView()
-  // More than one tree (main + at least one subagent worktree) switches the
-  // list to the agent-scoped rows; a single tree renders exactly as before.
-  const multiAgent = agentTrees.length > 1
-  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+/** The empty state for a zero-file layer: a PR-stack-specific message once there's a layer to blame. */
+function ChangedFilesEmptyState({ hasPrLayers }: { readonly hasPrLayers: boolean }) {
+  return hasPrLayers ? (
+    <EmptyState title="No commits in this layer" description="Pick another PR layer to see its changes." />
+  ) : (
+    <EmptyState title="No changes yet" description="Files the agent edits show up here." />
+  )
+}
+
+/** The computed file list, feedback counts and derived stats `ChangedFilesExplorer` renders. */
+function useChangedFilesView(
+  sourceFiles: readonly PrFileChange[],
+  sourceDiffs: readonly { readonly path: string; readonly diff: string }[],
+  turn: ReviewTurn | null,
+  drafts: readonly ReviewDraft[],
+  reviewThreads: readonly PrReviewThread[],
+  review: AdversarialReview | null,
+  controls: ReturnType<typeof useCodeReviewView>
+) {
   const allFiles = useMemo(() => narrowToTurn(sourceFiles, turn), [sourceFiles, turn])
   const fileDiffs = useMemo(() => narrowToTurn(sourceDiffs, turn), [sourceDiffs, turn])
   const feedback = useMemo(
@@ -321,29 +339,52 @@ export function ChangedFilesExplorer({
   const added = files.reduce((sum, file) => sum + file.additions, 0)
   const removed = files.reduce((sum, file) => sum + file.deletions, 0)
   const viewed = files.filter((file) => file.viewed).length
+  return { allFiles, fileDiffs, feedback, files, statusByPath, added, removed, viewed }
+}
 
-  if (error !== null) {
-    return (
-      <div data-testid="changed-files-explorer" className="p-3">
-        <InlineError message={error} onRetry={onRetry} />
-      </div>
-    )
-  }
-  if (loading) {
-    return (
-      <div data-testid="changed-files-explorer" className="p-3">
-        <ListSkeleton rows={6} rowHeight={24} gap={6} />
-      </div>
-    )
-  }
-
+/** The loaded-and-non-empty body: file list, turn/PR filter bars, no-match banner. */
+function ChangedFilesBody({
+  omittedFiles,
+  diffLineLimit,
+  turns,
+  turnId,
+  onTurnChange,
+  prLayers,
+  prNumber,
+  onPrNumberChange,
+  multiAgent,
+  agentTrees,
+  activePath,
+  onSelectFile,
+  onDiscardFile,
+  view,
+  controls
+}: {
+  readonly omittedFiles: readonly ReviewOmittedFile[]
+  readonly diffLineLimit: number
+  readonly turns: readonly ReviewTurn[]
+  readonly turnId: string | null
+  readonly onTurnChange: ((id: string | null) => void) | undefined
+  readonly prLayers: readonly PrFilterLayer[]
+  readonly prNumber: number | null
+  readonly onPrNumberChange: ((number: number) => void) | undefined
+  readonly multiAgent: boolean
+  readonly agentTrees: readonly AgentTreeChanges[]
+  readonly activePath: string | null
+  readonly onSelectFile: (path: string) => void
+  readonly onDiscardFile: ((path: string) => void) | undefined
+  readonly view: ReturnType<typeof useChangedFilesView>
+  readonly controls: ReturnType<typeof useCodeReviewView>
+}) {
+  const { allFiles, fileDiffs: _fileDiffs, feedback, files, statusByPath, added, removed, viewed } = view
   return (
     <ReviewPierre>
       <div data-testid="changed-files-explorer" className="flex h-full min-h-0 flex-col">
         <OmittedFilesNotice files={omittedFiles} diffLineLimit={diffLineLimit} />
-        <TurnFilterBar turns={turns} value={turn?.id ?? null} onChange={onTurnChange} />
+        <TurnFilterBar turns={turns} value={turnId} onChange={onTurnChange} />
+        <PrFilterBar layers={prLayers} value={prNumber} onChange={onPrNumberChange} />
         {allFiles.length === 0 ? (
-          <EmptyState title="No changes yet" description="Files the agent edits show up here." />
+          <ChangedFilesEmptyState hasPrLayers={prLayers.length >= 2} />
         ) : multiAgent ? (
           <AgentScopedFileList trees={agentTrees} activePath={activePath} onSelectFile={onSelectFile} />
         ) : (
@@ -372,6 +413,71 @@ export function ChangedFilesExplorer({
         ) : null}
       </div>
     </ReviewPierre>
+  )
+}
+
+export function ChangedFilesExplorer({
+  files: sourceFiles,
+  fileDiffs: sourceDiffs,
+  omittedFiles = [],
+  diffLineLimit = 0,
+  drafts,
+  reviewThreads = [],
+  review = null,
+  activePath,
+  onSelectFile,
+  onDiscardFile,
+  turns = [],
+  turnId = null,
+  onTurnChange,
+  prLayers = [],
+  prNumber = null,
+  onPrNumberChange,
+  loading = false,
+  error = null,
+  onRetry,
+  agentTrees = []
+}: ChangedFilesExplorerProps) {
+  const controls = useCodeReviewView()
+  // More than one tree (main + at least one subagent worktree) switches the
+  // list to the agent-scoped rows; a single tree renders exactly as before.
+  const multiAgent = agentTrees.length > 1
+  const turn = turns.find((candidate) => candidate.id === turnId) ?? null
+  const view = useChangedFilesView(sourceFiles, sourceDiffs, turn, drafts, reviewThreads, review, controls)
+
+  if (error !== null) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <InlineError message={error} onRetry={onRetry} />
+      </div>
+    )
+  }
+  if (loading) {
+    return (
+      <div data-testid="changed-files-explorer" className="p-3">
+        <ListSkeleton rows={6} rowHeight={24} gap={6} />
+      </div>
+    )
+  }
+
+  return (
+    <ChangedFilesBody
+      omittedFiles={omittedFiles}
+      diffLineLimit={diffLineLimit}
+      turns={turns}
+      turnId={turn?.id ?? null}
+      onTurnChange={onTurnChange}
+      prLayers={prLayers}
+      prNumber={prNumber}
+      onPrNumberChange={onPrNumberChange}
+      multiAgent={multiAgent}
+      agentTrees={agentTrees}
+      activePath={activePath}
+      onSelectFile={onSelectFile}
+      onDiscardFile={onDiscardFile}
+      view={view}
+      controls={controls}
+    />
   )
 }
 

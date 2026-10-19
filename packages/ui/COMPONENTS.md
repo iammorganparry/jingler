@@ -120,6 +120,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | BranchDriftBanner | `composites/branch-drift-banner.tsx` | Banner when the shared checkout drifted off the pinned branch. | — | no | #376 (2.11) |
 | ImportSessionsList | `composites/import-sessions-list.tsx` | Import step: sessions found in other apps, grouped by source, searchable, multi-select with Import / Skip. | candidates, status, error, query, selected, onToggle, onImport, onSkip, onRetry | yes | #613 (16.5) |
 | OmittedFilesNotice, ExplorerPanel, ChangedFilesExplorer, ReviewFileDiff, ReviewSidebar | `composites/changes-review.tsx` | Changes review: explorer, file diff, sidebar, omitted-files notice. | branch, worktreePath, filter, onFilterChange, localAvailable, prAvailable | yes | — |
+| PrFilter | `composites/pr-filter.tsx` | "PR: #481 ▾" select narrowing the Changes explorer to one layer of a PR stack. | layers, value, onChange | yes | #427 (6.5) |
 | CommandMenu | `composites/command-menu.tsx` | `/` command palette: Commands / Skills groups, match highlight, keyboard footer. | skills, activeIndex, query, onSelect, onHover | yes | #407 (5.1) |
 | Composer | `composites/composer.tsx` | Prompt composer: input, chips, attachments, send/stop. | skills, files, onAddMcp, mcpServers, onSetMcpApiKey, onSetMcpAuth | yes | — |
 | ContextDivider | `composites/context-divider.tsx` | Transcript divider marking context compaction. | — | yes | — |

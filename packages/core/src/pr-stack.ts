@@ -33,3 +33,9 @@ export const prLayerRanges = (prs: ReadonlyArray<SessionPr>, trunk: string): Rea
       diffRange: ranged ? `${base}...${head}` : null
     }
   })
+
+/** The selected layer's range by PR number, or null when it isn't in the stack. */
+export const layerRangeByNumber = (
+  ranges: ReadonlyArray<PrLayerRange>,
+  number: number
+): PrLayerRange | null => ranges.find((range) => range.number === number) ?? null
