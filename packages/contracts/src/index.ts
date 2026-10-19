@@ -1608,6 +1608,15 @@ export class JinglerCoreRpcs extends RpcGroup.make(
     success: NotificationPermission
   }),
 
+  /**
+   * Open the OS notification settings pane so the operator can un-block
+   * Jingler. macOS only (`shell.openExternal` with an `x-apple.systempreferences:`
+   * URL); other platforms no-op, since there is nowhere equivalent to send them.
+   */
+  Rpc.make("Notify.openSystemSettings", {
+    success: Schema.Void
+  }),
+
   /** Persist the full set of starred repo paths (replaces the stored list). */
   Rpc.make("Config.setStarredRepos", {
     success: WorkspaceConfig,

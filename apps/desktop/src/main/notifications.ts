@@ -24,7 +24,7 @@ import type {
   NotificationsConfig
 } from "@jingler/core"
 import { NOTIFICATIONS_DEFAULT } from "@jingler/core"
-import { BrowserWindow, Notification } from "electron"
+import { BrowserWindow, Notification, shell } from "electron"
 
 /** IPC channel main uses to tell the renderer which session to open. */
 export const NOTIFICATION_ACTIVATED_CHANNEL = "jingler/notification-activated"
@@ -91,6 +91,24 @@ export const notificationPermission = (
   } catch {
     return "unknown"
   }
+}
+
+/**
+ * Open the OS pane where the operator can un-block notifications.
+ *
+ * macOS only: `x-apple.systempreferences:` is the one URL scheme that opens
+ * System Settings straight to the Notifications pane, and it is meaningless on
+ * Windows or Linux — there is no platform-neutral equivalent, so this is a
+ * no-op there rather than opening something misleading.
+ */
+export const openNotificationSystemSettings = (
+  openExternal: (url: string) => Promise<void> = (url) => shell.openExternal(url),
+  platform: string = process.platform
+): void => {
+  if (platform !== "darwin") return
+  void openExternal("x-apple.systempreferences:com.apple.preference.notifications").catch(() => {
+    // Best-effort: a failed hand-off to System Settings is not worth surfacing.
+  })
 }
 
 /** What a click on the notification sends the renderer, via `NOTIFICATION_ACTIVATED_CHANNEL`. */

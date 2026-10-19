@@ -226,6 +226,23 @@ function ExplanationPane({ sessionId }: { readonly sessionId: string }) {
 
 
 /** Set up window control state and event listeners for Windows/Linux. */
+/**
+ * Notification permission + the one action it makes available. Split out of
+ * `AuthedApp` (not because the logic is complex, but because one more inline
+ * `useQuery` there pushes that function over the cognitive-complexity lint
+ * budget — see #490).
+ */
+function useNotificationPermission() {
+  const query = useQuery({
+    queryKey: ["notification-permission"],
+    queryFn: () => rpc.notifyPermission(),
+  });
+  return {
+    permission: query.data,
+    onOpenSystemSettings: () => rpc.notifyOpenSystemSettings(),
+  };
+}
+
 function useWindowControls() {
   const [maximized, setMaximized] = useState(false)
 
@@ -506,6 +523,7 @@ function AuthedApp({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
   });
+  const notificationPermission = useNotificationPermission();
   const webSearchSet = useMutation({
     mutationFn: ({ provider, apiKey }: { provider: "exa" | "firecrawl"; apiKey: string }) =>
       rpc.webSearchSetCredential(provider, apiKey),
@@ -1618,6 +1636,8 @@ function AuthedApp({
         onSaveGitConfig={saveGitConfig}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
+        notificationPermission={notificationPermission.permission}
+        onOpenNotificationSystemSettings={notificationPermission.onOpenSystemSettings}
         offloadCompute={offloadCompute}
         onSaveOffloadCompute={saveOffloadCompute}
         offloadStatus={offloadSettingsStatus(offloadSettingsState, offloadCompute.enabled)}

@@ -211,6 +211,21 @@ export const Settings: Story = {
   )
 }
 
+export const SettingsNotificationsBlocked: Story = {
+  name: "Settings · Notifications · Blocked by macOS (10.11)",
+  render: () => (
+    <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
+      <SettingsView
+        initialSection="notifications"
+        githubConnection={DEMO_GITHUB}
+        notificationPermission="denied"
+        onOpenNotificationSystemSettings={() => {}}
+        onClose={() => {}}
+      />
+    </div>
+  )
+}
+
 const ComingSoon = ({ section }: { section: "permissions" | "keybindings" }) => (
   <div className="flex h-[760px] w-[1180px] overflow-hidden rounded-lg border border-line bg-editor">
     <SettingsView initialSection={section} githubConnection={DEMO_GITHUB} onClose={() => {}} />

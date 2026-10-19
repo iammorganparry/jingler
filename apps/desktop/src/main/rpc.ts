@@ -230,6 +230,7 @@ import type { WebContents } from "electron";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import {
   notificationPermission,
+  openNotificationSystemSettings,
   showNotification,
   shouldNotify,
 } from "./notifications.js";
@@ -5842,6 +5843,8 @@ const CoreHandlersLayer = JinglerCoreRpcs.toLayer({
       ),
     ),
   "Notify.permission": () => Effect.sync(() => notificationPermission()),
+  "Notify.openSystemSettings": () =>
+    Effect.sync(() => openNotificationSystemSettings()),
   "Config.setStarredRepos": ({ paths }) => ConfigService.setStarredRepos(paths),
   "Config.setHeaderViews": ({ views }) => ConfigService.setHeaderViews(views),
   "Config.setCollapsedRepos": ({ paths }) =>

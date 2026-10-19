@@ -4,6 +4,7 @@ import type {
   GitHubConnection,
   GitConfig,
   GithubConfig,
+  NotificationPermission,
   NotificationsConfig,
   OffloadComputeSettings,
   ContextConfig,
@@ -25,6 +26,7 @@ import {
   type ProviderConnectionsSettingsProps
 } from "./provider-connections-settings.js"
 import {
+  Bell,
   Boxes,
   Cloud,
   Cpu,
@@ -46,6 +48,7 @@ import { atLeast, useWidthTier } from "../hooks/width-tier.js"
 import { Button } from "../components/button.js"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/beui/select.js"
 import { Callout } from "../components/callout.js"
+import { BannerShell } from "../components/banner-shell.js"
 import {
   Dialog,
   DialogBody,
@@ -90,6 +93,7 @@ import { ProjectWorkflowSettings, type ProjectWorkflowSettingsProps } from "./pr
 
 type SectionKey =
   | "general"
+  | "notifications"
   | "projects"
   | "routines"
   | "providers"
@@ -125,6 +129,7 @@ const NAV_GROUPS: ReadonlyArray<NavGroup> = [
     label: "Workspace",
     items: [
       { key: "general", label: "General", icon: <SlidersHorizontal size={14} />, ready: true },
+      { key: "notifications", label: "Notifications", icon: <Bell size={14} />, ready: true },
       { key: "projects", label: "Projects", icon: <FolderCog size={14} />, ready: true },
       { key: "permissions", label: "Permissions", icon: <ShieldCheck size={14} />, ready: false }
     ]
@@ -224,6 +229,15 @@ export interface SettingsViewProps {
   /** Desktop-notification prefs; absent means the defaults, not "off". */
   notifications?: NotificationsConfig | null
   onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  /**
+   * Can the OS show Jingler's notifications? Only "denied" is actionable here —
+   * main never emits it today (see `notificationPermission` in
+   * apps/desktop/src/main/notifications.ts), so the warning row stays dark
+   * until a real macOS probe exists.
+   */
+  notificationPermission?: NotificationPermission | null
+  /** Opens System Settings → Notifications; macOS only. */
+  onOpenNotificationSystemSettings?: () => void | Promise<void>
   /** Automatic read-only cloud routing for eligible agent commands. */
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
@@ -292,6 +306,8 @@ export function SettingsView({
   onSaveGit,
   notifications,
   onSaveNotifications,
+  notificationPermission,
+  onOpenNotificationSystemSettings,
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
@@ -318,10 +334,16 @@ case "routines":
 case "projects": {
 return renderOptionalSection(projectWorkflows, (props) => <ProjectWorkflowSettings {...props} routines={routines} />, "Projects")
 }
-case "general": {
-return (<GeneralSection
+case "notifications": {
+return (<NotificationsSection
           notifications={notifications}
           onSaveNotifications={onSaveNotifications}
+          permission={notificationPermission}
+          onOpenSystemSettings={onOpenNotificationSystemSettings}
+        />)
+}
+case "general": {
+return (<GeneralSection
           offloadCompute={offloadCompute}
           onSaveOffloadCompute={onSaveOffloadCompute}
           offloadStatus={offloadStatus}
@@ -1156,8 +1178,6 @@ function OffloadStatusRow({
  * review: each switch is independently meaningful and instantly reversible.
  */
 function GeneralSection({
-  notifications,
-  onSaveNotifications,
   offloadCompute,
   onSaveOffloadCompute,
   offloadStatus,
@@ -1172,8 +1192,6 @@ function GeneralSection({
   onSaveFontScale,
   webSearch
 }: {
-  notifications?: NotificationsConfig | null
-  onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
   offloadCompute?: OffloadComputeSettings | null
   onSaveOffloadCompute?: (settings: OffloadComputeSettings) => void | Promise<void>
   offloadStatus?: "disabled" | "priming" | "ready" | "failed"
@@ -1223,21 +1241,6 @@ function GeneralSection({
     () => setFontScaleDraft(clampFontScale(fontScale)),
     [fontScale]
   )
-  // Absent config means the DEFAULTS, not silence — an operator who never opened
-  // this pane should still be told when an agent needs them.
-  const [draft, setDraft] = React.useState<NotificationsConfig>(
-    notifications ?? NOTIFICATIONS_DEFAULT
-  )
-  React.useEffect(() => {
-    if (notifications) setDraft(notifications)
-  }, [notifications])
-
-  const set = (patch: Partial<NotificationsConfig>) => {
-    const next = { ...draft, ...patch }
-    setDraft(next)
-    void onSaveNotifications?.(next)
-  }
-
   const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
     <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
   )
@@ -1350,7 +1353,75 @@ function GeneralSection({
         </SettingsCard>
 
         {webSearch ? <WebSearchSettings {...webSearch} /> : null}
+      </div>
+    </div>
+  )
+}
 
+/**
+ * Settings → Notifications. Per-kind toggles (see the module doc on the old
+ * General section, moved here unchanged) plus the one thing a toggle can't
+ * fix: macOS blocking Jingler at the OS level, which needs a way out, not a
+ * switch.
+ *
+ * The warning row only ever renders for `permission === "denied"`. Main never
+ * emits `denied` today (no platform probe exists — see `notificationPermission`
+ * in apps/desktop/src/main/notifications.ts), so this row is dark in practice
+ * until that detection lands. It must NOT fire for `unknown`: every macOS user
+ * who hasn't explicitly blocked notifications reports `unknown` (Electron has
+ * no permission query), so treating `unknown` as blocked would warn everyone.
+ */
+function NotificationsSection({
+  notifications,
+  onSaveNotifications,
+  permission,
+  onOpenSystemSettings
+}: {
+  notifications?: NotificationsConfig | null
+  onSaveNotifications?: (config: NotificationsConfig) => void | Promise<void>
+  permission?: NotificationPermission | null
+  onOpenSystemSettings?: () => void | Promise<void>
+}) {
+  // Absent config means the DEFAULTS, not silence — an operator who never opened
+  // this pane should still be told when an agent needs them.
+  const [draft, setDraft] = React.useState<NotificationsConfig>(
+    notifications ?? NOTIFICATIONS_DEFAULT
+  )
+  React.useEffect(() => {
+    if (notifications) setDraft(notifications)
+  }, [notifications])
+
+  const set = (patch: Partial<NotificationsConfig>) => {
+    const next = { ...draft, ...patch }
+    setDraft(next)
+    void onSaveNotifications?.(next)
+  }
+
+  const toggle = (label: string, description: string, checked: boolean, onChange: (v: boolean) => void, disabled?: boolean) => (
+    <GeneralToggleRow label={label} description={description} checked={checked} disabled={disabled} onChange={onChange} />
+  )
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col overflow-auto bg-editor p-6">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-6">
+        {permission === "denied" && (
+          <BannerShell
+            placement="card"
+            icon={<Bell size={14} />}
+            actions={[
+              <Button
+                key="open-system-settings"
+                variant="secondary"
+                size="sm"
+                onClick={() => void onOpenSystemSettings?.()}
+              >
+                Open System Settings
+              </Button>
+            ]}
+          >
+            Notifications are blocked by macOS
+          </BannerShell>
+        )}
         <SettingsCard title="Notifications">
           {toggle("Desktop notifications", "Tell me when a session needs me or stops, while Jingler is in the background.", draft.enabled, (enabled) => set({ enabled }))}
           {toggle("Needs input", "An agent is blocked waiting on your approval or an answer.", draft.needsInput, (needsInput) => set({ needsInput }), !draft.enabled)}
