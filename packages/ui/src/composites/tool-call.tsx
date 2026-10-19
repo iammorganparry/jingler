@@ -249,27 +249,27 @@ export function ToolCall({
     >
       <div className="flex items-stretch">
         {onToggle ? (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={onToggle}
             aria-expanded={expanded}
-            className={cn(headerClass, "min-w-0 flex-1 outline-none focus-visible:ring-2 focus-visible:ring-ring")}
+            className={cn(headerClass, "h-auto min-w-0 flex-1 rounded-none outline-none focus-visible:ring-2 focus-visible:ring-ring")}
           >
             {header}
-          </button>
+          </Button>
         ) : (
           <div className={cn(headerClass, "min-w-0 flex-1")}>{header}</div>
         )}
         {onStop && status === "running" && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             onClick={onStop}
             aria-label="Stop tool"
             title="Stop"
-            className="flex-none px-2.5 text-state-failed outline-none transition-colors hover:bg-state-failed/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            className="h-auto flex-none rounded-none px-2.5 text-state-failed outline-none hover:bg-state-failed/10 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <CircleStop className="size-3.5" />
-          </button>
+          </Button>
         )}
       </div>
       {/* While running with no peek yet, a shimmer bar signals live work. */}
