@@ -1,9 +1,10 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu"
 import { HEADER_VIEWS_MAX } from "@jingler/core"
-import { Check, Ellipsis } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, Ellipsis } from "lucide-react"
 import { Button } from "../components/button.js"
 import { Tooltip } from "../components/tooltip.js"
 import { cn } from "../lib/cn.js"
+import { moveHeaderView } from "../lib/header-views.js"
 import type { HeaderViewItem } from "./header-view-buttons.js"
 
 const itemClass =
@@ -51,12 +52,33 @@ function Row({ view, pinned, onOpen, onPinnedChange }: { view: HeaderViewItem } 
       Pin to header
     </DropdownMenu.CheckboxItem>
   )
+  const moveButton = (direction: "up" | "down") => (
+    <button
+      type="button"
+      aria-label={`Move ${view.label} ${direction}`}
+      data-testid={`move-${view.id}-${direction}`}
+      onClick={(event) => {
+        event.preventDefault()
+        onPinnedChange(moveHeaderView(pinned, view.id, direction))
+      }}
+      className="flex size-5 flex-none items-center justify-center rounded text-dim transition-colors hover:bg-hairline hover:text-text-bright disabled:pointer-events-none disabled:opacity-30"
+      disabled={direction === "up" ? pinned.indexOf(view.id) === 0 : pinned.indexOf(view.id) === pinned.length - 1}
+    >
+      {direction === "up" ? <ChevronUp size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+    </button>
+  )
   return (
     <div className="flex items-center gap-1">
       <DropdownMenu.Item data-testid={`open-${view.id}`} onSelect={() => onOpen(view.id)} className={cn(itemClass, "flex-1")}>
         <Icon size={14} className="flex-none text-muted-foreground" aria-hidden />
         <span className="flex-1 whitespace-nowrap">{view.label}</span>
       </DropdownMenu.Item>
+      {isPinned && (
+        <div className="flex flex-none items-center gap-0.5">
+          {moveButton("up")}
+          {moveButton("down")}
+        </div>
+      )}
       {refused ? <Tooltip label={FULL_LABEL} side="left">{pin}</Tooltip> : pin}
     </div>
   )

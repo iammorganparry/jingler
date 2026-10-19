@@ -46,6 +46,17 @@ describe("ViewOverflowMenu", () => {
     expect(onPinnedChange).toHaveBeenLastCalledWith(["checks"])
   })
 
+  it("reorders pinned views with the up/down buttons and hides them on unpinned rows", () => {
+    const onPinnedChange = vi.fn()
+    render(<ViewOverflowMenu views={views} pinned={["changes", "checks", "terminal"]} onOpen={vi.fn()} onPinnedChange={onPinnedChange} />)
+    openMenu()
+    expect(screen.queryByTestId("move-files-up")).toBeNull()
+    fireEvent.click(screen.getByTestId("move-checks-up"))
+    expect(onPinnedChange).toHaveBeenLastCalledWith(["checks", "changes", "terminal"])
+    expect((screen.getByTestId("move-changes-up") as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId("move-terminal-down") as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it("refuses a sixth pin and explains why in a tooltip", async () => {
     const onPinnedChange = vi.fn()
     const five = ["changes", "checks", "terminal", "browser", "files"]
