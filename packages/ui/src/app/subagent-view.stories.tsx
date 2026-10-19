@@ -46,3 +46,18 @@ type Story = StoryObj<typeof meta>
 export const Loading: Story = { args: { loading: true } }
 export const Orchestrator: Story = { args: { node: { ...node, nodeKind: "workflow", agent: "workflow" } } }
 export const LoadError: Story = { args: { error: "Could not load the child transcript." } }
+export const NeedsAttention: Story = {
+  args: {
+    node: {
+      ...node,
+      status: "needs-attention",
+      attention: {
+        requestId: "request-1",
+        reason: "need_decision",
+        message: "Should the retry use exponential backoff?",
+        requestedAt: 0,
+        deadlineAt: null
+      }
+    }
+  }
+}

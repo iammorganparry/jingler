@@ -2,11 +2,13 @@ import { useEffect, useRef } from "react"
 import type {
   Message,
   ProviderId,
+  QuestionRequest,
   SubagentFleetControlOutcome,
   SubagentFleetNode,
   SubagentFleetStatus
 } from "@jingler/core"
 import { MessageTurn } from "../composites/message-turn.js"
+import { QuestionCard } from "../composites/question-card.js"
 import { EmptyState, InlineError, ListSkeleton } from "../components/feedback.js"
 import { StatusDot } from "../components/status-dot.js"
 import { SubagentMetaStrip } from "./subagent-meta-strip.js"
@@ -108,7 +110,15 @@ export interface FleetAgentViewProps {
   readonly onOpenArtifact?: (path: string) => void
   readonly onOpenPullRequest?: (prNumber: number) => void
   readonly onRetry?: () => void
+  /** Answer the child's pending attention request (its `reply` control action). */
+  readonly onReply?: (text: string) => void
 }
+
+/** The child's pending attention message as a single free-text question. */
+const attentionQuestion = (attention: SubagentFleetNode["attention"]): QuestionRequest => ({
+  id: attention!.requestId,
+  questions: [{ question: attention!.message, header: "Reply", options: [], multiSelect: false }]
+})
 
 /** Full read-only child session selected from its chat-row tab. */
 export function FleetAgentView({
@@ -120,7 +130,8 @@ export function FleetAgentView({
   controlOutcome = null,
   onOpenArtifact,
   onOpenPullRequest,
-  onRetry
+  onRetry,
+  onReply
 }: FleetAgentViewProps) {
          function renderAgentHeader() {
            return (<div className="flex items-center gap-2 border-b border-line px-[30px] py-2 text-[11px] text-muted-foreground">
@@ -205,8 +216,11 @@ export function FleetAgentView({
           {loading && <ListSkeleton rows={3} rowHeight={48} />}
           {error && <InlineError message={error} onRetry={onRetry} />}
           {node?.attention && (
-            <div data-testid="subagent-attention" className="rounded border border-purple/30 bg-purple/[0.06] p-3 text-[12px] text-text-body">
-              {node.attention.message}
+            <div data-testid="subagent-attention">
+              <QuestionCard
+                request={attentionQuestion(node.attention)}
+                onSubmit={(answers) => onReply?.(answers[0]?.other ?? "")}
+              />
             </div>
           )}
           {renderEmptyTranscript()}

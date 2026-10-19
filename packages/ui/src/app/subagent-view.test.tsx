@@ -143,6 +143,33 @@ describe("FleetAgentView", () => {
     )
   })
 
+  it("answers a child's attention request through the question card's free-text row", () => {
+    const onReply = vi.fn()
+    render(
+      <FleetAgentView
+        node={fleetNode({
+          status: "needs-attention",
+          attention: {
+            requestId: "request-1",
+            reason: "need_decision",
+            message: "Should I include accessibility behavior?",
+            requestedAt: 30,
+            deadlineAt: null
+          }
+        })}
+        messages={[]}
+        onReply={onReply}
+      />
+    )
+
+    fireEvent.change(screen.getByPlaceholderText("Type a custom answer…"), {
+      target: { value: "Yes, include it." }
+    })
+    fireEvent.click(screen.getByRole("button", { name: /submit/i }))
+
+    expect(onReply).toHaveBeenCalledWith("Yes, include it.")
+  })
+
   it("shows final output after a partial transcript", () => {
     const message: Message = {
       id: "child-1",
