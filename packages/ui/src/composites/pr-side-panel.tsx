@@ -1,5 +1,6 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import type { PrMergeMethod, PrReviewer, PrReviewKind, PullRequest } from "@jingler/core"
+import { conflictResolutionPrompt } from "@jingler/core"
 import type { BadgeProps } from "../components/badge.js"
 import { cn } from "../lib/cn.js"
 import { Avatar, githubAvatarUrl } from "../components/avatar.js"
@@ -23,6 +24,8 @@ const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: str
 
 /** The one blocker the operator can clear from the rail (see `collectMergeBlockers`). */
 const BEHIND_BLOCKER = "Branch is out of date with the base"
+/** Matches `collectMergeBlockers`'s "Merge conflicts" string in `github-mappers.ts`. */
+const CONFLICTS_BLOCKER = "Merge conflicts"
 
 function BlockerRow({ blocker, action }: { blocker: string; action?: ReactNode }) {
   return (
@@ -73,6 +76,10 @@ export interface PrSidePanelProps {
   onUpdateBranch?: () => void
   updatingBranch?: boolean
   updateBranchError?: string | null
+  /** The files with merge conflicts — named in the "Ask agent to resolve conflicts" prompt. */
+  conflictedFiles?: ReadonlyArray<string>
+  /** Post a conflict-resolution prompt into the session's chat. */
+  onResolveConflicts?: (prompt: string) => void
   /**
    * The adversarial review panel's state + actions. Omitted in contexts that
    * don't offer a review (e.g. a story showing the bare PR rail). `canRun` is
@@ -108,12 +115,15 @@ export function PrSidePanel({
   onUpdateBranch,
   updatingBranch = false,
   updateBranchError,
+  conflictedFiles = [],
+  onResolveConflicts,
   review,
   workflow,
   width = 352,
   readOnly = false,
   className
 }: PrSidePanelProps) {
+  const [resolving, setResolving] = useState(false)
          function renderAdversarialReview() {
            return (review && (
         <div className="flex flex-none flex-col gap-3 border-b border-hairline p-4">
@@ -156,6 +166,7 @@ function renderDraftActions() {
            }
 
 function renderConflictActions() {
+  const hasConflicts = pr.mergeBlockers.includes(CONFLICTS_BLOCKER)
              return (<div className="flex flex-col gap-3">
             <div className="overflow-hidden rounded-lg border border-red/30">
               <div className="flex items-center gap-[9px] border-b border-hairline bg-red/[0.06] px-[13px] py-[10px]">
@@ -167,8 +178,9 @@ function renderConflictActions() {
               <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
                 {/*
                   "Out of date" is the ONE blocker the operator can clear from here
-                  — conflicts need the code, branch protection needs a reviewer,
-                  failing checks need a fix. This updates the remote head only; the
+                  with a direct GitHub mutation; branch protection needs a reviewer,
+                  failing checks need a fix. Conflicts route to the session's own
+                  agent instead, below. This updates the remote head only; the
                   worktree is left alone, since the agent may be mid-turn with
                   uncommitted work.
                 */}
@@ -193,6 +205,32 @@ function renderConflictActions() {
                   />
                 ))}
               </div>
+              {hasConflicts && onResolveConflicts && (
+                <div className="flex flex-col gap-1.5 border-t border-hairline px-[13px] py-[11px]">
+                  {resolving ? (
+                    <div className="flex items-center gap-2 text-[12px] text-text">
+                      <Spinner size={13} />
+                      <span>
+                        Agent is resolving…{" "}
+                        <span className="text-dim">{conflictedFiles.join(", ")}</span>
+                      </span>
+                    </div>
+                  ) : (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="w-full justify-center gap-2"
+                      disabled={!connected || conflictedFiles.length === 0}
+                      onClick={() => {
+                        onResolveConflicts(conflictResolutionPrompt(conflictedFiles))
+                        setResolving(true)
+                      }}
+                    >
+                      Ask agent to resolve conflicts
+                    </Button>
+                  )}
+                </div>
+              )}
               {updateBranchError && (
                 <div className="px-[13px] pb-[13px]">
                   <Callout tone="red" className="items-start">

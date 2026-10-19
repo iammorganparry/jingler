@@ -8,7 +8,7 @@
  * so its work + any approval gates/questions surface in the Conversation tab.
  * Keeps `@jingler/ui`'s `PullRequestView` presentational.
  */
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { PrMergeMethod, PullRequest, ReviewSubmitKind, Session } from "@jingler/core"
 import { rpc } from "./rpc-client.js"
@@ -61,6 +61,15 @@ export interface PullRequestState {
   /** Reply into an inline review thread (`commentId` = the REST databaseId). */
   readonly replyToThread: (commentId: number, body: string) => Promise<void>
   readonly openOnGithub: () => void
+  /**
+   * The PR's changed files, fetched only while merging is blocked by conflicts
+   * — the closest list GitHub's REST API gives us to "the conflicting files"
+   * without actually attempting the merge. Named in the side panel's
+   * conflict-resolution prompt.
+   */
+  readonly conflictedFiles: ReadonlyArray<string>
+  /** Post a conflict-resolution prompt into the session's chat, as a normal turn. */
+  readonly resolveConflicts: (prompt: string) => void
 }
 
 export function usePullRequest(
@@ -178,6 +187,19 @@ export function usePullRequest(
   )
 
   const pr = query.data ?? null
+  // Only the REST file list names conflicting paths; fetch it only once the PR
+  // read says merging is blocked by conflicts, never on every PR view.
+  const hasConflicts = pr?.mergeBlockers.includes("Merge conflicts") ?? false
+  const filesQuery = useQuery({
+    queryKey: ["github", "conflicted-files", session.id, prNumber],
+    queryFn: () => rpc.githubFiles(session.id, prNumber ?? undefined),
+    enabled: hasConflicts
+  })
+  const conflictedFiles = useMemo(
+    () => (hasConflicts ? (filesQuery.data ?? []).map((file) => file.path) : []),
+    [hasConflicts, filesQuery.data]
+  )
+  const resolveConflicts = useCallback((prompt: string) => routeToAgent(prompt), [routeToAgent])
   const sentEntryIds = useRoutedEntries(session.id, prNumber)
   const sendEntryToAgent = useCallback(
     async (entryId: string) => {
@@ -234,7 +256,9 @@ export function usePullRequest(
     sentEntryIds,
     resolveThread,
     replyToThread,
-    openOnGithub
+    openOnGithub,
+    conflictedFiles,
+    resolveConflicts
   }
 }
 

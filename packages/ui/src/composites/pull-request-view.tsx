@@ -207,6 +207,9 @@ export interface PullRequestViewProps {
   readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
+  /** The PR's conflicting files, named in the "Ask agent to resolve conflicts" prompt. */
+  conflictedFiles?: PrSidePanelProps["conflictedFiles"]
+  onResolveConflicts?: PrSidePanelProps["onResolveConflicts"]
   /** The workspace setup/run lifecycle — collapsed Workflow section in the rail. */
   workflow?: PrSidePanelProps["workflow"]
 }
@@ -259,6 +262,8 @@ export function PullRequestView({
   updateBranchError,
   readOnly = false,
   review,
+  conflictedFiles,
+  onResolveConflicts,
   workflow
 }: PullRequestViewProps) {
          function renderDetailsToggle() {
@@ -648,6 +653,8 @@ return (evidence === "checks" ? (
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        conflictedFiles={conflictedFiles}
+        onResolveConflicts={onResolveConflicts}
         workflow={workflow}
         readOnly={readOnly && !onMerge}
       />
