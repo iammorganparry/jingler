@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   filterUsageFacts,
   makeUsageFact,
+  modelDetailFromFacts,
   slowestRuns,
   sortModelPerformance,
   usageReportFromFacts,
@@ -117,5 +118,21 @@ describe("usage facts", () => {
     expect(byCostAsc.map((g) => g.modelId)).toEqual(["model-a", "model-b"])
     const byDurationDesc = sortModelPerformance(report.groups, "durationMs")
     expect(byDurationDesc.map((g) => g.modelId)).toEqual(["model-a", "model-b"])
+  })
+
+  it("builds a model detail from only the matching group's facts, sparkline in run order", () => {
+    const facts = [
+      fact({ id: "a", runId: "a", startedAt: "2026-01-01T00:00:02.000Z", durationMs: 100, totalTokens: 10 }),
+      fact({ id: "b", runId: "b", startedAt: "2026-01-01T00:00:01.000Z", durationMs: 3000, totalTokens: 20 }),
+      fact({ id: "c", runId: "c", modelId: "other-model", durationMs: 9000 })
+    ]
+    const detail = modelDetailFromFacts(facts, { runtimeId: "claude", providerId: "anthropic", modelId: "claude-sonnet", kind: "parent" })
+    expect(detail?.group.runCount).toBe(2)
+    expect(detail?.sparkline.map((p) => p.runId)).toEqual(["b", "a"])
+    expect(detail?.slowestRuns.map((r) => r.runId)).toEqual(["b", "a"])
+  })
+
+  it("returns null when no facts match the selector", () => {
+    expect(modelDetailFromFacts([fact()], { runtimeId: "codex", providerId: "openai", modelId: "gpt", kind: "parent" })).toBeNull()
   })
 })
