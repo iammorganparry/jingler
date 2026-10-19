@@ -962,6 +962,12 @@ function scenarioFixtureResponse(context: PiContext) {
   }
   const backgroundKind = backgroundKindFrom(context)
   if (backgroundKind !== null) return backgroundResponse(context, backgroundKind)
+  // Simulates a provider request that failed outright — the runner settles the
+  // turn with `pi prompt failed: …` (see `promptFailureMessage`), which the
+  // transcript renders as an InlineError row.
+  if (latestOperatorText(context).includes("[[fail]]")) {
+    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Simulated provider failure" })
+  }
   if (latestOperatorText(context).includes("[[ask]]")) return questionResponse(context)
   if (latestOperatorText(context).includes("[[storm]]")) return stormResponse(context)
   if (latestOperatorText(context).includes("GitHub feedback from")) {
