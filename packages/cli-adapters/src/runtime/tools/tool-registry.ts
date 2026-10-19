@@ -7,7 +7,7 @@ import type {
 } from "@jingler/core"
 import type { PromptToolCapability } from "../prompt/prompt-compiler.js"
 import type { WorktreeSnapshot } from "../file-changes/file-change-tracker.js"
-import { Effect, Either, Schema } from "effect"
+import { Effect, Either, JSONSchema, Schema } from "effect"
 
 export const INTERACTIVE_TOOL_TIMEOUT_MS = 24 * 60 * 60_000
 
@@ -177,6 +177,31 @@ const errorEnvelope = (error: ToolError): ToolResultEnvelope => ({
 const abortError = (signal: AbortSignal): ToolError =>
   new ToolError(signal.reason === "timeout" ? "timed-out" : "cancelled", signal.reason === "timeout" ? "Tool timed out" : "Tool cancelled", true)
 
+/** Agent-supplied present-tense summary of the call; stripped before decoding, never forwarded to the tool. */
+const IntentValue = Schema.String.pipe(Schema.maxLength(60))
+const isIntentValue = Schema.is(IntentValue)
+
+const stripIntent = (
+  args: unknown
+): { readonly ok: true; readonly value: unknown } | { readonly ok: false } => {
+  if (typeof args !== "object" || args === null || Array.isArray(args) || !("intent" in args)) {
+    return { ok: true, value: args }
+  }
+  const { intent, ...rest } = args as Record<string, unknown>
+  return isIntentValue(intent) ? { ok: true, value: rest } : { ok: false }
+}
+
+const INTENT_PROPERTY = {
+  type: "string",
+  maxLength: 60,
+  description: "Present-tense summary of what this call does and why, shown to the user while it runs."
+} as const
+
+const withIntentProperty = (schema: ToolProviderInputSchema): ToolProviderInputSchema => ({
+  ...schema,
+  properties: { ...schema.properties, intent: INTENT_PROPERTY }
+})
+
 const validateExecution = (
   tool: AnyToolDefinition,
   input: ToolExecutionRequest
@@ -187,7 +212,11 @@ const validateExecution = (
   if (tool.idempotency === "keyed" && !input.idempotencyKey) {
     return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool requires an idempotency key")) }
   }
-  const decoded = Schema.decodeUnknownEither(tool.input)(input.arguments)
+  const stripped = stripIntent(input.arguments)
+  if (!stripped.ok) {
+    return { ok: false, result: errorEnvelope(new ToolError("invalid-input", "intent must be a string of at most 60 characters")) }
+  }
+  const decoded = Schema.decodeUnknownEither(tool.input)(stripped.value)
   return Either.isLeft(decoded)
     ? { ok: false, result: errorEnvelope(new ToolError("invalid-input", "Tool input failed validation")) }
     : { ok: true, value: decoded.right }
@@ -376,7 +405,12 @@ export class ToolRegistry {
   }
 
   providerInputSchemaFor(id: string): ToolProviderInputSchema | null {
-    return this.#tools.get(id)?.providerInputSchema ?? null
+    const tool = this.#tools.get(id)
+    if (!tool) return null
+    const schema =
+      tool.providerInputSchema ??
+      ({ ...(JSONSchema.make(tool.input) as unknown as Record<string, unknown>), type: "object" } as unknown as ToolProviderInputSchema)
+    return withIntentProperty(schema)
   }
 
   hasMutatingTools(role: AgentRole, mode: RuntimeMode): boolean {

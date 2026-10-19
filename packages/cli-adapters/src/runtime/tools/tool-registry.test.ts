@@ -36,6 +36,42 @@ describe("ToolRegistry", () => {
     expect(execute).not.toHaveBeenCalled()
   })
 
+  it("strips a valid intent before decoding tool input", async () => {
+    const execute = vi.fn(async ({ path }: { readonly path: string }) => ({ path }))
+    const registry = new ToolRegistry()
+    registry.register(definition({ execute }))
+    const result = await Effect.runPromise(registry.execute({
+      id: "workspace_read",
+      arguments: { path: "README.md", intent: "Reading the readme" },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.status).toBe("success")
+    expect(execute).toHaveBeenCalledWith({ path: "README.md" }, expect.anything())
+  })
+
+  it("rejects an intent longer than 60 characters", async () => {
+    const execute = vi.fn(async () => "never")
+    const registry = new ToolRegistry()
+    registry.register(definition({ execute }))
+    const result = await Effect.runPromise(registry.execute({
+      id: "workspace_read",
+      arguments: { path: "README.md", intent: "x".repeat(61) },
+      role: "conversation",
+      mode: "ask"
+    }))
+    expect(result.error?.code).toBe("invalid-input")
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it("advertises intent on every tool's provider input schema", () => {
+    const registry = new ToolRegistry()
+    registry.register(definition())
+    registry.register(definition({ id: "workspace_edit_other", providerInputSchema: { type: "object", properties: { path: { type: "string" } } } }))
+    expect(registry.providerInputSchemaFor("workspace_read")?.properties?.intent).toMatchObject({ type: "string", maxLength: 60 })
+    expect(registry.providerInputSchemaFor("workspace_edit_other")?.properties?.intent).toMatchObject({ type: "string", maxLength: 60 })
+  })
+
   it("omits mutation and execution tools from plan and review roles", () => {
     const registry = new ToolRegistry()
     registry.register(definition({ id: "workspace_edit", risk: "mutate" }))
