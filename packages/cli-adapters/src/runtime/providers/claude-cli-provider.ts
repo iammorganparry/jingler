@@ -460,6 +460,36 @@ interface ClaudeOutputState {
 /** Only these whole-message records can carry a rejected tool call or the CLI's tool list. */
 const RESCUE_RECORD = /^\{"type":"(?:assistant|user|system)"/u
 
+/**
+ * Apply one stdout line to `state`. Returns "stop" when the stream is done (a
+ * result or a rescued tool call), the text/thinking delta to render, or null.
+ */
+const readClaudeLine = (
+  line: string,
+  state: ClaudeOutputState,
+  rescue: ReturnType<typeof makeClaudeCliToolRescue>
+): "stop" | typeof ClaudeStreamDelta.Type | null => {
+  if (RESCUE_RECORD.test(line)) {
+    let record: unknown
+    try {
+      record = JSON.parse(line)
+    } catch {
+      throw new Error("Claude CLI emitted malformed stream JSON")
+    }
+    const { call } = rescue(record)
+    if (call === null) return null
+    state.rescued = call
+    return "stop"
+  }
+  const decoded = decodeClaudeLine(line)
+  if (decoded.kind === "result") {
+    state.result = decoded.value
+    return "stop"
+  }
+  if (decoded.kind === "usage") state.usage = decoded.value
+  return decoded.kind === "delta" ? decoded.value : null
+}
+
 async function* streamClaudeOutput(
   child: ChildProcessWithoutNullStreams,
   partial: AssistantMessage,
@@ -468,31 +498,10 @@ async function* streamClaudeOutput(
 ): AsyncGenerator<AssistantMessageEvent> {
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })
   for await (const line of lines) {
-    if (RESCUE_RECORD.test(line)) {
-      let record: unknown
-      try {
-        record = JSON.parse(line)
-      } catch {
-        throw new Error("Claude CLI emitted malformed stream JSON")
-      }
-      const { call } = rescue(record)
-      if (call !== null) {
-        state.rescued = call
-        return
-      }
-      continue
-    }
-    const decoded = decodeClaudeLine(line)
-    if (decoded.kind === "result") {
-      state.result = decoded.value
-      return
-    }
-    if (decoded.kind === "usage") {
-      state.usage = decoded.value
-      continue
-    }
-    if (decoded.kind !== "delta") continue
-    const next = deltaEvents(partial, state.open, decoded.value)
+    const read = readClaudeLine(line, state, rescue)
+    if (read === "stop") return
+    if (read === null) continue
+    const next = deltaEvents(partial, state.open, read)
     state.open = next.open
     for (const event of next.events) yield event
   }
