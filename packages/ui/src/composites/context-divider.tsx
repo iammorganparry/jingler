@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ChevronRight, Layers } from "lucide-react"
 import type { ContextDigest } from "@jingler/core"
 import { cn } from "../lib/cn.js"
+import { Button } from "../components/button.js"
 
 const fmtTokens = (n: number): string =>
   n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n)
@@ -69,11 +70,11 @@ export function ContextDivider({
 
   return (
     <div className={cn("my-3", className)}>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="group flex w-full items-center gap-2 text-left"
+        className="group h-auto w-full gap-2 rounded-none px-0 py-0 text-left font-normal hover:bg-transparent"
       >
         <span className="h-px flex-1 bg-line" />
         <span className="flex items-center gap-1.5 px-1 font-mono text-[10px] text-muted-foreground transition-colors group-hover:text-text-bright">
@@ -87,7 +88,7 @@ export function ContextDivider({
           />
         </span>
         <span className="h-px flex-1 bg-line" />
-      </button>
+      </Button>
 
       {open && (
         <div className="mt-2 space-y-3 rounded-md border border-line bg-surface p-3">
