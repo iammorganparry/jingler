@@ -193,6 +193,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | ThoughtBlock | `composites/thought-block.tsx` | Agent reasoning line in the transcript. | — | yes | — |
 | ToolCall | `composites/tool-call.tsx` | Tool-call row with collapsible output. | status, name, target, meta, filePath, children | yes | — |
 | UsageLimits | `composites/usage-limits.tsx` | Limits-only usage summary in the account menu: neutral row per provider limit window (`Limited until 16:40`, no status fills) plus a labelled-placeholder relay quota row. | usage, loading | yes | #501 (11.1) |
+| ModelDetailDrawer | `composites/model-detail-drawer.tsx` | Per-model drill-down opened from a ModelPerformanceTable row: aggregate stats, duration sparkline, slowest runs (run ids only; not yet linked to turns). Built on Drawer. | open, detail, onOpenChange | yes | #503 (11.3) |
 | UsageModal | `composites/usage-modal.tsx` | Usage & limits modal. | — | no | — |
 | UserMenu | `composites/user-menu.tsx` | Account menu; embeds UsageLimits (refreshes usage on open) above Settings / Usage & limits. | user, usage, onLoadUsage, onOpenSettings, onOpenUsage, onSignOut, onSignIn, ghConnected, whatsNew | yes | — |
 | VisualBlocks | `composites/visual-blocks.tsx` | Structured visual blocks for plans and explanations. | blocks, className | no | — |

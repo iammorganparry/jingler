@@ -20,12 +20,15 @@ export function ModelPerformanceTable({
   sortBy,
   direction,
   onSort,
+  onRowClick,
   className
 }: {
   groups: ReadonlyArray<UsageReportGroup>
   sortBy: ModelPerformanceSortKey
   direction: "asc" | "desc"
   onSort: (key: ModelPerformanceSortKey) => void
+  /** Opens the model detail drawer for that row; rows render as plain data when omitted. */
+  onRowClick?: (group: UsageReportGroup) => void
   className?: string
 }) {
   return (
@@ -56,7 +59,23 @@ export function ModelPerformanceTable({
           <tr
             key={`${group.runtimeId}:${group.providerId}:${group.modelId}:${group.kind}`}
             data-testid="model-performance-row"
-            className="border-t border-hairline text-text-body"
+            tabIndex={onRowClick ? 0 : undefined}
+            role={onRowClick ? "button" : undefined}
+            onClick={onRowClick ? () => onRowClick(group) : undefined}
+            onKeyDown={
+              onRowClick
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      onRowClick(group)
+                    }
+                  }
+                : undefined
+            }
+            className={cn(
+              "border-t border-hairline text-text-body",
+              onRowClick && "cursor-pointer hover:bg-hover"
+            )}
           >
             {columns.map((col) => (
               <td key={col.key} className="py-1.5 tabular-nums">
