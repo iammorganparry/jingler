@@ -108,6 +108,14 @@ describe("MessageTurn streaming text", () => {
     expect(view.container.textContent).not.toContain("[blocked]")
   })
 
+  it("renders a failed prompt's text as the shared InlineError row", () => {
+    const view = render(<MessageTurn message={assistant({
+      streaming: false,
+      parts: [{ _tag: "Text", text: "pi prompt failed: network error" }]
+    })} />)
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain("pi prompt failed: network error")
+  })
+
   it("does not mark completed messages or a text part followed by another part", () => {
     const completed = render(<MessageTurn message={assistant({ streaming: false })} />)
     expect(completed.container.querySelector(".jingler-streaming-text")).toBeNull()

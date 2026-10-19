@@ -191,6 +191,15 @@ function renderProgressMarkers(
   return null
 }
 
+/**
+ * The runner's own text for a prompt that failed outright (no tool, no
+ * assistant reply — see `pi-agent-runtime.ts`). It is written as a plain Text
+ * part, so without this check it would render as ordinary prose; the reader
+ * needs the same "this broke" signal every other load failure gets.
+ */
+const PROMPT_FAILURE_PREFIX = "pi prompt failed"
+export const isPromptFailureText = (text: string): boolean => text.startsWith(PROMPT_FAILURE_PREFIX)
+
 function MessageText({
   text,
   markdown,
@@ -202,6 +211,9 @@ function MessageText({
 }) {
   const planDocument = useContext(PlanProgressContext)
   if (text.length === 0) return null
+  if (markdown && isPromptFailureText(text)) {
+    return <InlineError message={text} className={WIDTH} />
+  }
   if (markdown) {
     const progress = renderProgressMarkers(text, planDocument, streaming)
     if (progress !== null) return progress
