@@ -4,6 +4,7 @@
  * process's `RpcServer`. No business logic lives here — see `src/main/rpc.ts`.
  */
 import { contextBridge, ipcRenderer } from "electron"
+import type { NotificationKind } from "@jingler/core"
 import type { UpdateState } from "../shared/update.js"
 
 const RPC_CHANNEL = "jingler/rpc"
@@ -60,6 +61,13 @@ const initialThemeCss: string = (() => {
 interface AuthCompletePayload {
   readonly ok: boolean
   readonly error: string | null
+}
+
+/** What main sends on a notification click — see `main/notifications.ts`. */
+interface NotificationActivatedPayload {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  readonly turnId: string | null
 }
 
 interface PreviewEventPayload {
@@ -125,8 +133,8 @@ contextBridge.exposeInMainWorld("jingler", {
    * payload names the session the operator was told about, so the renderer can
    * select it. Returns an unsubscribe fn.
    */
-  onNotificationActivated: (cb: (payload: { readonly sessionId: string }) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, payload: { readonly sessionId: string }) =>
+  onNotificationActivated: (cb: (payload: NotificationActivatedPayload) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: NotificationActivatedPayload) =>
       cb(payload)
     ipcRenderer.on(NOTIFICATION_ACTIVATED_CHANNEL, listener)
     return () => ipcRenderer.removeListener(NOTIFICATION_ACTIVATED_CHANNEL, listener)

@@ -56,6 +56,7 @@ Primitives in `components/`. Prefer these over raw elements.
 | Kbd | `components/kbd.tsx` | Monospace keyboard chip; onFill variant for primary surfaces. One line (nowrap, shrink-0). | — | yes | #361 (1.3), #374 (2.9) |
 | KpiTile, StackedMiniBar | `components/kpi-tile.tsx` | Usage metric tile with one-line partial marker and a labelled "No data" placeholder for a missing value; inline-SVG stacked bar from a number array (empty/zero renders an empty track). | label, value, delta, partial, values | yes | #379 (2.14) |
 | LinearMark | `components/linear-mark.tsx` | Linear logo mark. | — | no | — |
+| ModelPerformanceTable | `components/model-performance-table.tsx` | Per-model usage rows sortable by any column (model, runs, success, duration, tokens, cost); cost shows "partial" below full coverage. | groups, sortBy, direction, onSort | yes | #502 (11.2) |
 | ThinkingOrb, Spinner, Skeleton | `components/loading.tsx` | ThinkingOrb, Spinner and Skeleton. | — | yes | #371 (2.6) |
 | ListSkeleton, EmptyState, InlineError | `components/feedback.tsx` | List loading rows at real height, empty state with next action, load error with Retry. | rows, rowHeight, title, action, message, onRetry | yes | #371 (2.6) |
 | Markdown | `components/markdown.tsx` | Markdown renderer with math (KaTeX) and code. | — | no | — |
@@ -159,6 +160,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | PrReviewThreadView | `composites/pr-review-thread.tsx` | Inline review thread with reply/resolve. | — | no | — |
 | MergeSplitButton | `composites/merge-split-button.tsx` | `Squash and merge ▾` split button: merge, squash or rebase; choice remembered; disabled with the first blocker as tooltip; `mergeError` shown under it. | connected, onMerge, merging, blockedReason, mergeError | yes | #435 (6.13) |
 | PrSidePanel | `composites/pr-side-panel.tsx` | PR right rail: reviewers, checks, merge box. | pr, connected, onMerge, merging, mergeError, onClosePr | no | — |
+| WorkflowSection | `composites/workflow-section.tsx` | Collapsible Workflow section for the Checks rail: one-row summary, expands to setup retry/skip and run/stop, mirroring the conversation workflow bar. | lifecycle, commands, runs, error, onRetrySetup, onSkipSetup, onStartRun, onStopRun, onArchiveWithoutCleanup | yes | #437 (6.15) |
 | PrTimelineEntry | `composites/pr-timeline-entry.tsx` | PR timeline entry. | — | no | — |
 | ProjectWorkflowSettings | `composites/project-workflow-settings.tsx` | Per-project workflow settings. | projects, loading, routines | yes | — |
 | ProviderAuthForms | `composites/provider-auth-forms.tsx` | Credential entry for provider auth. | busy, mode, authKinds, apiProviderId, pendingAuthKind, onConnectClaude | no | — |
@@ -191,6 +193,7 @@ Vendored BeUI primitives; the Jingler atoms above wrap them. Import the Jingler 
 | ThoughtBlock | `composites/thought-block.tsx` | Agent reasoning line in the transcript. | — | yes | — |
 | ToolCall | `composites/tool-call.tsx` | Tool-call row with collapsible output. | status, name, target, meta, filePath, children | yes | — |
 | UsageLimits | `composites/usage-limits.tsx` | Limits-only usage summary in the account menu: neutral row per provider limit window (`Limited until 16:40`, no status fills) plus a labelled-placeholder relay quota row. | usage, loading | yes | #501 (11.1) |
+| ModelDetailDrawer | `composites/model-detail-drawer.tsx` | Per-model drill-down opened from a ModelPerformanceTable row: aggregate stats, duration sparkline, slowest runs (run ids only; not yet linked to turns). Built on Drawer. | open, detail, onOpenChange | yes | #503 (11.3) |
 | UsageModal | `composites/usage-modal.tsx` | Usage & limits modal. | — | no | — |
 | UserMenu | `composites/user-menu.tsx` | Account menu; embeds UsageLimits (refreshes usage on open) above Settings / Usage & limits. | user, usage, onLoadUsage, onOpenSettings, onOpenUsage, onSignOut, onSignIn, ghConnected, whatsNew | yes | — |
 | VisualBlocks | `composites/visual-blocks.tsx` | Structured visual blocks for plans and explanations. | blocks, className | no | — |

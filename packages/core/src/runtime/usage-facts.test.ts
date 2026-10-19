@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest"
-import { makeUsageFact, slowestRuns, usageReportFromFacts, type UsageFact } from "./usage-facts.js"
+import {
+  filterUsageFacts,
+  makeUsageFact,
+  modelDetailFromFacts,
+  slowestRuns,
+  sortModelPerformance,
+  usageReportFromFacts,
+  type UsageFact
+} from "./usage-facts.js"
 
 const fact = (over: Partial<UsageFact> = {}): UsageFact => ({
   id: "run-1",
@@ -87,5 +95,44 @@ describe("usage facts", () => {
     const report = usageReportFromFacts(facts)
     const sum = report.groups.reduce((total, group) => total + group.durationMs, 0)
     expect(sum).toBe(facts.reduce((total, f) => total + f.durationMs, 0))
+  })
+
+  it("filters facts by runtime and started-at range", () => {
+    const facts = [
+      fact({ id: "a", startedAt: "2026-01-01T00:00:00.000Z" }),
+      fact({ id: "b", runId: "r2", runtimeId: "codex", startedAt: "2026-01-05T00:00:00.000Z" }),
+      fact({ id: "c", runId: "r3", startedAt: "2026-02-01T00:00:00.000Z" })
+    ]
+    expect(filterUsageFacts(facts, { runtimeId: "claude" }).map((f) => f.id)).toEqual(["a", "c"])
+    expect(filterUsageFacts(facts, { from: "2026-01-02T00:00:00.000Z", to: "2026-01-31T00:00:00.000Z" }).map((f) => f.id))
+      .toEqual(["b"])
+    expect(filterUsageFacts(facts, {})).toHaveLength(3)
+  })
+
+  it("sorts model performance rows by any column, nulls first ascending", () => {
+    const report = usageReportFromFacts([
+      fact({ id: "a", modelId: "model-a", durationMs: 100 }),
+      fact({ id: "b", runId: "r2", modelId: "model-b", durationMs: 50, costUsd: 1 })
+    ])
+    const byCostAsc = sortModelPerformance(report.groups, "knownCostUsd", "asc")
+    expect(byCostAsc.map((g) => g.modelId)).toEqual(["model-a", "model-b"])
+    const byDurationDesc = sortModelPerformance(report.groups, "durationMs")
+    expect(byDurationDesc.map((g) => g.modelId)).toEqual(["model-a", "model-b"])
+  })
+
+  it("builds a model detail from only the matching group's facts, sparkline in run order", () => {
+    const facts = [
+      fact({ id: "a", runId: "a", startedAt: "2026-01-01T00:00:02.000Z", durationMs: 100, totalTokens: 10 }),
+      fact({ id: "b", runId: "b", startedAt: "2026-01-01T00:00:01.000Z", durationMs: 3000, totalTokens: 20 }),
+      fact({ id: "c", runId: "c", modelId: "other-model", durationMs: 9000 })
+    ]
+    const detail = modelDetailFromFacts(facts, { runtimeId: "claude", providerId: "anthropic", modelId: "claude-sonnet", kind: "parent" })
+    expect(detail?.group.runCount).toBe(2)
+    expect(detail?.sparkline.map((p) => p.runId)).toEqual(["b", "a"])
+    expect(detail?.slowestRuns.map((r) => r.runId)).toEqual(["b", "a"])
+  })
+
+  it("returns null when no facts match the selector", () => {
+    expect(modelDetailFromFacts([fact()], { runtimeId: "codex", providerId: "openai", modelId: "gpt", kind: "parent" })).toBeNull()
   })
 })

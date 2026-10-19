@@ -3,16 +3,18 @@
  * (keyed by session id) when the PR tab is active; owns its data via
  * `usePullRequest`.
  */
-import type { Session } from "@jingler/core"
+import type { Project, Session } from "@jingler/core"
 import { workspaceModeOf } from "@jingler/core"
 import { PullRequestView } from "@jingler/ui"
 import { usePullRequest } from "./use-pull-request.js"
 import { useAdversarialReview } from "./use-adversarial-review.js"
 import { usePublish } from "./use-publish.js"
 import { usePrStack } from "./use-pr-stack.js"
+import { useWorkspaceWorkflow } from "./use-workspace-workflow.js"
 
 export function PullRequestPane({
   session,
+  project,
   connected,
   autoDetect,
   viewerLogin,
@@ -21,9 +23,11 @@ export function PullRequestPane({
   onConnectGithub,
   onPrLinked,
   onPublishCheckpoint,
-  onOpenFiles
+  onOpenFiles,
+  onSession
 }: {
   session: Session
+  project?: Project
   connected: boolean
   autoDetect: boolean
   /** The authenticated GitHub login (to disable approving your own PR). */
@@ -34,6 +38,8 @@ export function PullRequestPane({
   onPrLinked: (sessionId: string, prNumber: number) => void
   onPublishCheckpoint: (sessionId: string, checkpoint: NonNullable<Session["publish"]>) => void
   onOpenFiles: () => void
+  /** Publishes a workspace lifecycle update (retry/skip setup) back to the session list. */
+  onSession: (session: Session) => void
 }) {
   const stack = usePrStack(session, connected)
   // Session-level writes (merge, review, close…) act on the session's own PR, so a lower layer is read-only.
@@ -62,6 +68,7 @@ export function PullRequestPane({
     resolveConflicts
   } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: stack.selected })
   const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
+  const workflow = useWorkspaceWorkflow(session, project, onSession)
 
   const {
     review,
@@ -124,6 +131,17 @@ export function PullRequestPane({
         onRun: runReview,
         onSendFindingToAgent: sendFindingToAgent,
         sentFindingIds
+      }}
+      workflow={{
+        lifecycle: workflow.lifecycle,
+        commands: workflow.commands,
+        runs: workflow.runs,
+        error: workflow.error,
+        onRetrySetup: workflow.retrySetup,
+        onSkipSetup: workflow.skipSetup,
+        onStartRun: workflow.startRun,
+        onStopRun: workflow.stopRun,
+        onArchiveWithoutCleanup: workflow.archiveWithoutCleanup
       }}
     />
   )

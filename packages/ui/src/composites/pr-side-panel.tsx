@@ -12,6 +12,7 @@ import { Spinner } from "../components/loading.js"
 import { MergeSplitButton } from "./merge-split-button.js"
 import { PrCheckRow } from "./pr-check-row.js"
 import { ReviewFindings, type ReviewFindingsProps } from "./review-findings.js"
+import { WorkflowSection, type WorkflowSectionProps } from "./workflow-section.js"
 
 /** Reviewer state → Badge tone + label. */
 const reviewerBadge: Record<PrReviewKind, { tone: BadgeProps["tone"]; label: string }> = {
@@ -86,6 +87,8 @@ export interface PrSidePanelProps {
    * merged/closed PR by accident.
    */
   review?: Omit<ReviewFindingsProps, "canRun">
+  /** The workspace setup/run lifecycle — collapsed by default; omitted hides the section. */
+  workflow?: WorkflowSectionProps
   /**
    * The rail's width in px. Was a hard `w-[352px]` — which, in a 500px pane,
    * left the PR body about 88px of reading column after its own 60px gutters.
@@ -115,6 +118,7 @@ export function PrSidePanel({
   conflictedFiles = [],
   onResolveConflicts,
   review,
+  workflow,
   width = 352,
   readOnly = false,
   className
@@ -309,6 +313,9 @@ function renderConflictActions() {
           pr.checks.map((c) => <PrCheckRow key={c.name} check={c} />)
         )}
       </div>
+
+      {/* Workflow — collapsed by default; omitted entirely when there's nothing to show. */}
+      {workflow && <WorkflowSection {...workflow} />}
 
       {/* Adversarial review */}
       {renderAdversarialReview()}

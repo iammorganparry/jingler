@@ -93,6 +93,32 @@ export const notificationPermission = (
   }
 }
 
+/** What a click on the notification sends the renderer, via `NOTIFICATION_ACTIVATED_CHANNEL`. */
+export interface NotificationClickPayload {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  /**
+   * The turn the notification was about, so the renderer can scroll straight to
+   * its blocked card instead of just opening the session. Null for a kind with
+   * no single turn to point at (e.g. a PR update).
+   */
+  readonly turnId: string | null
+}
+
+/**
+ * Builds the click payload. Pure so the shape can be tested without wiring up
+ * an `Electron.Notification` — see the module doc for why that matters here.
+ */
+export const notificationClickPayload = (input: {
+  readonly sessionId: string
+  readonly kind: NotificationKind
+  readonly turnId: string | null
+}): NotificationClickPayload => ({
+  sessionId: input.sessionId,
+  kind: input.kind,
+  turnId: input.turnId
+})
+
 /**
  * Raise the notification and wire its click to focus the app on that session.
  *
@@ -106,6 +132,8 @@ export const showNotification = (
     readonly kind: NotificationKind
     readonly title: string
     readonly body: string
+    /** The turn this is about, for the click payload. Absent for kinds with none. */
+    readonly turnId?: string | null
   },
   config: NotificationsConfig | undefined,
   /** Injected in tests; defaults to the real focused-or-first window. */
@@ -131,7 +159,14 @@ export const showNotification = (
       if (win.isMinimized()) win.restore()
       win.show()
       win.focus()
-      win.webContents.send(NOTIFICATION_ACTIVATED_CHANNEL, { sessionId: input.sessionId })
+      win.webContents.send(
+        NOTIFICATION_ACTIVATED_CHANNEL,
+        notificationClickPayload({
+          sessionId: input.sessionId,
+          kind: input.kind,
+          turnId: input.turnId ?? null
+        })
+      )
     })
     notification.show()
   } catch {
