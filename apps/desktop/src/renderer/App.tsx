@@ -42,6 +42,7 @@ import {
   clampFontScale,
   DEFAULT_THEME_ID,
   normalizeHeaderViews,
+  pendingQuestion,
   workspaceModeOf,
 } from "@jingler/core";
 import {
@@ -70,6 +71,7 @@ import {
   AgentEditsMarkerContext,
   closeSurfaceEverywhere,
   forgetEditorLayout,
+  jumpToTurn,
   openTab,
   SESSION_SURFACE_COMMAND_EVENT,
   updateEditorLayout,
@@ -109,6 +111,7 @@ import {
   isChatUntouched,
   useAllChatActivities,
 } from "./conversation-registry.js";
+import { notificationTarget } from "./notification-target.js";
 import { addDraftCodeReference, clearDraft, getDraft } from "./draft-store.js";
 import { serializeCodeReferences } from "./code-reference.js";
 import { clearViewedPaths } from "./viewed-store.js";
@@ -365,14 +368,26 @@ function AuthedApp({
     tabId?: string;
     nonce: number;
   } | null>(null);
+  // A click can be about a still-pending question; if so, scroll the chat
+  // straight to it rather than just opening the session — see
+  // `notificationTarget`. `selectSessionRequest` already switches project (via
+  // `SessionConversation`'s activeSessionId effect), so nothing extra is
+  // needed for that half.
   useEffect(
     () =>
-      window.jingler.onNotificationActivated(({ sessionId }) =>
+      window.jingler.onNotificationActivated(({ sessionId, turnId }) => {
         setSelectRequest((prev) => ({
           sessionId,
           nonce: (prev?.nonce ?? 0) + 1,
-        })),
-      ),
+        }));
+        const session = sessionsRef.current.find((s) => s.id === sessionId);
+        if (!session) return;
+        const pending = pendingQuestion(
+          getConversationActor(session).getSnapshot().context.messages,
+        );
+        const target = notificationTarget({ sessionId, turnId }, pending?.id ?? null);
+        if (target.focusQuestion && turnId) jumpToTurn(session.activeChatId, turnId);
+      }),
     [],
   );
   // Keep the module-level cell the conversation registry reads in sync. It can't

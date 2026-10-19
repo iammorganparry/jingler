@@ -39,10 +39,16 @@ interface JinglerBridge {
   ) => () => void
   /**
    * Subscribe to notification clicks. Main has already focused the window; the
-   * payload names the session to select. Returns an unsubscribe fn.
+   * payload names the session to select, plus what it was about so the
+   * renderer can decide whether to focus a question — see
+   * `notification-target.ts`. Returns an unsubscribe fn.
    */
   readonly onNotificationActivated: (
-    cb: (payload: { readonly sessionId: string }) => void
+    cb: (payload: {
+      readonly sessionId: string
+      readonly kind: import("@jingler/core").NotificationKind
+      readonly turnId: string | null
+    }) => void
   ) => () => void
   /**
    * Subscribe to "an agent is driving the embedded browser — reveal the dock".
