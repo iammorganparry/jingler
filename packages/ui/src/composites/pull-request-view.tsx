@@ -206,6 +206,9 @@ export interface PullRequestViewProps {
   readOnly?: boolean
   /** The adversarial review panel's state + actions (right rail). */
   review?: PrSidePanelProps["review"]
+  /** The PR's conflicting files, named in the "Ask agent to resolve conflicts" prompt. */
+  conflictedFiles?: PrSidePanelProps["conflictedFiles"]
+  onResolveConflicts?: PrSidePanelProps["onResolveConflicts"]
 }
 
 /**
@@ -255,7 +258,9 @@ export function PullRequestView({
   updatingBranch = false,
   updateBranchError,
   readOnly = false,
-  review
+  review,
+  conflictedFiles,
+  onResolveConflicts
 }: PullRequestViewProps) {
          function renderDetailsToggle() {
            return (!roomy && (
@@ -634,6 +639,8 @@ return (evidence === "checks" ? (
         updatingBranch={updatingBranch}
         updateBranchError={updateBranchError}
         review={review}
+        conflictedFiles={conflictedFiles}
+        onResolveConflicts={onResolveConflicts}
         readOnly={readOnly && !onMerge}
       />
     </div>

@@ -57,7 +57,9 @@ export function PullRequestPane({
     sentEntryIds,
     resolveThread,
     replyToThread,
-    openOnGithub
+    openOnGithub,
+    conflictedFiles,
+    resolveConflicts
   } = usePullRequest(session, { connected, autoDetect, onPrLinked, prNumber: stack.selected })
   const publish = usePublish(session, onPrLinked, onPublishCheckpoint)
 
@@ -111,6 +113,8 @@ export function PullRequestPane({
       onReplyToThread={replyToThread}
       onOpenOnGithub={openOnGithub}
       onOpenFiles={onOpenFiles}
+      conflictedFiles={conflictedFiles}
+      onResolveConflicts={resolveConflicts}
       review={{
         review,
         running: reviewRunning,
