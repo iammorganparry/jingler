@@ -321,3 +321,64 @@ test("Explorer marks a file the scripted agent edits within 1s, and its parent f
   ).toBeVisible({ timeout: 15_000 })
   await expect(row("src/").locator('[title="Contains agent edits"], [title="Contains git status items"]')).toBeVisible({ timeout: 15_000 })
 })
+
+test("adds, removes and submits a review comment entirely from the keyboard", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: ({ repoPath }) => [seeded(repoPath)],
+    seed: ({ repoPath }) => {
+      mkdirSync(join(repoPath, "src", "auth"), { recursive: true })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 1\n")
+      execFileSync("git", ["add", "-A"], { cwd: repoPath })
+      execFileSync("git", ["commit", "-m", "seed keyboard review", "--no-gpg-sign"], {
+        cwd: repoPath
+      })
+      writeFileSync(join(repoPath, "src", "auth", "login.ts"), "export const login = 2\n")
+    }
+  })
+
+  await expect(appShell(window)).toBeVisible()
+  await window.setViewportSize({ width: 1800, height: 900 })
+  await sessionRow(window, "Pierre review session").click()
+  const closeTerminal = window.getByRole("button", { name: "Close zsh" })
+  if (await closeTerminal.isVisible()) {
+    await closeTerminal.click()
+    await expect(closeTerminal).toBeHidden()
+  }
+
+  const diff = await openChangedFile(window, "src/auth/login.ts")
+  const addedLine = diff
+    .locator('[data-line-type="change-addition"][data-column-number="1"]')
+    .first()
+  await expect(addedLine).toBeVisible()
+
+  const composer = window.getByPlaceholder("Suggest a change or ask the agent to fix this…")
+  const tray = window.getByTestId("review-tray")
+  const comment = tray.getByRole("group", { name: /login\.ts/ })
+
+  // Add a comment to the review tray without touching the mouse again:
+  // Tab from the composer's textarea to its (neutral) "Add to review" button and press it.
+  await addedLine.click({ position: { x: 6, y: 6 } })
+  await composer.fill("Keyboard review comment.")
+  await window.keyboard.press("Tab")
+  await window.keyboard.press("Enter")
+  await expect(tray).toBeVisible()
+  await expect(comment).toBeVisible()
+
+  // Remove it with Backspace while it's focused.
+  await comment.press("Backspace")
+  await expect(tray).toHaveCount(0)
+
+  // Add another, then submit the whole review with Cmd/Ctrl+Enter.
+  await addedLine.click({ position: { x: 6, y: 6 } })
+  await composer.fill("Keyboard review comment.")
+  await window.keyboard.press("Tab")
+  await window.keyboard.press("Enter")
+  await expect(tray).toBeVisible()
+  await expect(comment).toBeVisible()
+  await comment.press("ControlOrMeta+Enter")
+  await expect(tray).toHaveCount(0)
+})
