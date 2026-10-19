@@ -370,4 +370,26 @@ setInterval(() => {}, 1000)
     const done = events.at(-1)
     expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
   })
+
+  it("records the request's usage on a turn that ends in a tool call", async () => {
+    const binary = await executable(`process.stdin.resume(); console.log(${JSON.stringify(JSON.stringify(JSON.parse('{"type":"stream_event","event":{"type":"message_delta","usage":{"input_tokens":9,"output_tokens":236,"cache_read_input_tokens":26773,"cache_creation_input_tokens":2968}}}')))}); setInterval(() => {}, 1000)`)
+    const stream = createClaudeCliStreamSimple({
+      binary,
+      checkAuth: async () => {},
+      startToolRelay: async () => ({
+        mcpConfigPath: "/tmp/mcp.json",
+        toolCall: new Promise((resolve) => setTimeout(() => resolve({
+          id: "call-1",
+          name: "workspace_read_file",
+          arguments: { path: "package.json" }
+        }), 2000)),
+        close: async () => {}
+      })
+    })(model, context)
+    const done = (await collect(stream)).at(-1)
+    expect(done?.type === "done" ? done.reason : null).toBe("toolUse")
+    expect(done?.type === "done" ? done.message.usage : null).toMatchObject({
+      input: 9, output: 236, cacheRead: 26773, cacheWrite: 2968, totalTokens: 29986
+    })
+  })
 })
