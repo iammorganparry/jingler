@@ -157,6 +157,50 @@ export const usageReportFromFacts = (
   return { generatedAt, facts: [...facts], groups }
 }
 
+/** Usage view filters: an inclusive ISO `startedAt` range and/or a single runtime. `project` is reserved until facts carry a project id. */
+export type UsageFactFilter = {
+  readonly from?: string
+  readonly to?: string
+  readonly runtimeId?: AgentRuntimeId
+}
+
+export const filterUsageFacts = (
+  facts: ReadonlyArray<UsageFact>,
+  filter: UsageFactFilter
+): ReadonlyArray<UsageFact> =>
+  facts.filter((fact) =>
+    (!filter.runtimeId || fact.runtimeId === filter.runtimeId) &&
+    (!filter.from || fact.startedAt >= filter.from) &&
+    (!filter.to || fact.startedAt <= filter.to)
+  )
+
+export const ModelPerformanceSortKey = Schema.Literal(
+  "modelId",
+  "runCount",
+  "successRate",
+  "durationMs",
+  "totalTokens",
+  "knownCostUsd"
+)
+export type ModelPerformanceSortKey = Schema.Schema.Type<typeof ModelPerformanceSortKey>
+
+/** Per-model report rows sorted by any numeric/string column; `null` sorts before every known value. */
+export const sortModelPerformance = (
+  groups: ReadonlyArray<UsageReportGroup>,
+  sortBy: ModelPerformanceSortKey,
+  direction: "asc" | "desc" = "desc"
+): ReadonlyArray<UsageReportGroup> => {
+  const sorted = [...groups].sort((a, b) => {
+    const av = a[sortBy]
+    const bv = b[sortBy]
+    if (av === bv) return 0
+    if (av === null) return -1
+    if (bv === null) return 1
+    return av < bv ? -1 : 1
+  })
+  return direction === "asc" ? sorted : sorted.reverse()
+}
+
 /** The longest runs, each mapped to the parent turn it belongs to (a child maps to its parent run). */
 export const slowestRuns = (
   facts: ReadonlyArray<UsageFact>,
