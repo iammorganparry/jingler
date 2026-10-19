@@ -25,7 +25,7 @@ import {
 } from "./claude-cli-sampling-relay.js"
 import { recordClaudeCliRateLimits } from "./claude-cli-rate-limits.js"
 import { withClaudeCliPath } from "./claude-cli-environment.js"
-import { ClaudeTurnUsage } from "./claude-cli-usage.js"
+import { ClaudeRequestUsage, ClaudeTurnUsage } from "./claude-cli-usage.js"
 import { makeClaudeCliToolRescue } from "./claude-cli-tool-rescue.js"
 
 const ClaudeAuthStatus = Schema.Struct({
@@ -57,7 +57,21 @@ const ClaudeResult = Schema.Struct({
   usage: Schema.optional(ClaudeTurnUsage)
 })
 
+/**
+ * Per-request usage from the raw API stream. A turn that ends in a tool call
+ * is killed as soon as the relay captures the call, so it never reaches the
+ * `result` line; this is the only usage it gets.
+ */
+const ClaudeStreamUsage = Schema.Struct({
+  type: Schema.Literal("stream_event"),
+  event: Schema.Union(
+    Schema.Struct({ type: Schema.Literal("message_start"), message: Schema.Struct({ usage: ClaudeRequestUsage }) }),
+    Schema.Struct({ type: Schema.Literal("message_delta"), usage: ClaudeRequestUsage })
+  )
+})
+
 const decodeAuthStatus = Schema.decodeUnknownOption(ClaudeAuthStatus)
+const decodeStreamUsage = Schema.decodeUnknownOption(ClaudeStreamUsage)
 const decodeStreamDelta = Schema.decodeUnknownOption(ClaudeStreamDelta)
 const decodeResult = Schema.decodeUnknownOption(ClaudeResult)
 
@@ -166,8 +180,13 @@ const zeroUsage = (): Usage => ({
  * session a fraction that size. An older CLI without `iterations` falls back
  * to the sum.
  */
-const usageFrom = (result: typeof ClaudeResult.Type): Usage => {
-  const usage = result.usage?.iterations?.at(-1) ?? result.usage
+const usageFrom = (result: typeof ClaudeResult.Type): Usage => ({
+  ...requestUsage(result.usage?.iterations?.at(-1) ?? result.usage),
+  // The CLI reports the turn's spend as `total_cost_usd`; pi sums it into the session's cost.
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.total_cost_usd ?? 0 }
+})
+
+export const requestUsage = (usage: ClaudeRequestUsage | undefined): Usage => {
   const input = usage?.input_tokens ?? 0
   const output = usage?.output_tokens ?? 0
   const cacheRead = usage?.cache_read_input_tokens ?? 0
@@ -178,8 +197,7 @@ const usageFrom = (result: typeof ClaudeResult.Type): Usage => {
     cacheRead,
     cacheWrite,
     totalTokens: input + output + cacheRead + cacheWrite,
-    // The CLI reports the turn's spend as `total_cost_usd`; pi sums it into the session's cost.
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: result.total_cost_usd ?? 0 }
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
   }
 }
 
@@ -318,6 +336,7 @@ type OpenContent = { readonly type: "text" | "thinking"; readonly index: number 
 type DecodedClaudeLine =
   | { readonly kind: "delta"; readonly value: typeof ClaudeStreamDelta.Type }
   | { readonly kind: "result"; readonly value: typeof ClaudeResult.Type }
+  | { readonly kind: "usage"; readonly value: ClaudeRequestUsage }
   | { readonly kind: "ignored" }
 
 const recordOf = (value: unknown): Record<string, unknown> | null =>
@@ -347,6 +366,11 @@ const decodeClaudeLine = (line: string): DecodedClaudeLine => {
   if (delta !== null) return { kind: "delta", value: delta }
   const result = Option.getOrNull(decodeResult(value))
   if (result !== null) return { kind: "result", value: result }
+  const streamUsage = Option.getOrNull(decodeStreamUsage(value))
+  if (streamUsage !== null) {
+    const event = streamUsage.event
+    return { kind: "usage", value: event.type === "message_start" ? event.message.usage : event.usage }
+  }
   if (isCriticalClaudeRecord(value)) {
     throw new Error("Claude CLI emitted a malformed critical stream event")
   }
@@ -426,6 +450,8 @@ const toolEvents = (
 
 interface ClaudeOutputState {
   result: typeof ClaudeResult.Type | null
+  /** Latest per-request usage seen on the stream (message_delta supersedes message_start). */
+  usage: ClaudeRequestUsage | null
   open: OpenContent | null
   /** A call the CLI rejected although pi offered the tool; see claude-cli-tool-rescue. */
   rescued: RelayedToolCall | null
@@ -461,6 +487,10 @@ async function* streamClaudeOutput(
       state.result = decoded.value
       return
     }
+    if (decoded.kind === "usage") {
+      state.usage = decoded.value
+      continue
+    }
     if (decoded.kind !== "delta") continue
     const next = deltaEvents(partial, state.open, decoded.value)
     state.open = next.open
@@ -473,9 +503,11 @@ const terminalEvents = (
   call: RelayedToolCall | null,
   result: typeof ClaudeResult.Type | null,
   aborted: boolean,
-  stderr: string
+  stderr: string,
+  usage: ClaudeRequestUsage | null = null
 ): ReadonlyArray<AssistantMessageEvent> => {
   if (call !== null) {
+    if (usage !== null) partial.usage = requestUsage(usage)
     partial.stopReason = "toolUse"
     return [
       ...toolEvents(partial, call),
@@ -519,7 +551,7 @@ async function* runClaudeCli(
   yield { type: "start", partial: { ...partial } }
   const binary = await resolveClaudeBinary(providerOptions.binary)
   const environment = subscriptionEnvironment(providerOptions.environment ?? process.env)
-  const output: ClaudeOutputState = { result: null, open: null, rescued: null }
+  const output: ClaudeOutputState = { result: null, usage: null, open: null, rescued: null }
   let relay: ClaudeCliToolRelay | null = null
   let child: ChildProcessWithoutNullStreams | null = null
   let stderr = ""
@@ -572,7 +604,8 @@ async function* runClaudeCli(
       toolCall,
       output.result,
       options.signal?.aborted ?? false,
-      stderr
+      stderr,
+      output.usage
     )) yield event
   } catch (cause) {
     partial.stopReason = options.signal?.aborted ? "aborted" : "error"
