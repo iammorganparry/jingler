@@ -1,5 +1,19 @@
 # @jingler/cli-adapters
 
+## 0.11.2
+
+### Patch Changes
+
+- 01c0f7d: Fixed the subagent capability broker rejecting a child's cwd (403 `forbidden-cwd`) after the parent called `switch_checkout` to a different repo. The broker now resolves the parent's checkout per request instead of caching it once at registration.
+- 615f721: Find the Claude CLI when it's installed via Homebrew or hsclaude
+- 128d57e: Subagent tool calls (file reads, edits and shell commands) now run in the subagent's own worktree instead of the parent session's checkout.
+- 6794599: Subagent workers run at medium thinking instead of high, and Claude CLI turns that end in a tool call now record their token usage.
+- 062e750: Fix the SUBAGENTS panel staying empty while an async `workflowScript` run's children are running. A workflow child's first `subagent:async-started` event carries no `sessionId` (it is spawned inside the workflow's own detached process), only `parentWorkflowRunId` — this was rejected as not belonging to the parent session, so every workflow child was silently dropped from the Fleet projection.
+- Updated dependencies [128d57e]
+  - @jingler/core@0.11.2
+  - @jingler/themes@0.11.2
+  - @jingler/plannotator-ext@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes

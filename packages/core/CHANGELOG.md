@@ -1,5 +1,11 @@
 # @jingler/core
 
+## 0.11.2
+
+### Patch Changes
+
+- 128d57e: Subagent tool calls (file reads, edits and shell commands) now run in the subagent's own worktree instead of the parent session's checkout.
+
 ## 0.11.1
 
 ## 0.11.0

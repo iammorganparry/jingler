@@ -1,5 +1,11 @@
 # @jingler/desktop
 
+## 0.11.2
+
+### Patch Changes
+
+- @jingler/plannotator-ext@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes

@@ -1,5 +1,14 @@
 # @jingler/ui
 
+## 0.11.2
+
+### Patch Changes
+
+- Updated dependencies [128d57e]
+  - @jingler/core@0.11.2
+  - @jingler/contracts@0.11.2
+  - @jingler/themes@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes
