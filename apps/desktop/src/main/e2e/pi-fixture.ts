@@ -966,7 +966,12 @@ function scenarioFixtureResponse(context: PiContext) {
   // turn with `pi prompt failed: …` (see `promptFailureMessage`), which the
   // transcript renders as an InlineError row.
   if (latestOperatorText(context).includes("[[fail]]")) {
-    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "Simulated provider failure" })
+    // The runner settles a provider error as a `Failed` stream event carrying
+    // this message verbatim (see `piProviderFailure`/`EventSink.terminalEvent`
+    // in `pi-agent-runtime.ts`) — prefixed the same way a genuinely thrown
+    // prompt is (`promptFailureMessage`), so the transcript's InlineError
+    // detection (`isPromptFailureText`) recognizes it exactly like production.
+    return fauxAssistantMessage("", { stopReason: "error", errorMessage: "pi prompt failed: Simulated provider failure" })
   }
   if (latestOperatorText(context).includes("[[ask]]")) return questionResponse(context)
   if (latestOperatorText(context).includes("[[storm]]")) return stormResponse(context)
