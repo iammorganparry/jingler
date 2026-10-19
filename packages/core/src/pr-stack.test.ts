@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { prLayerRanges } from "./pr-stack.js"
+import { layerRangeByNumber, prLayerRanges } from "./pr-stack.js"
 
 const stack = [
   { number: 480, branch: "feat/a", base: "main" },
@@ -29,5 +29,16 @@ describe("prLayerRanges", () => {
     const [bottom, upper] = prLayerRanges([{ number: 1, branch: "x" }, { number: 2 }], "develop")
     expect(bottom!.commitRange).toBe("develop..x")
     expect(upper).toEqual({ number: 2, base: "x", head: null, commitRange: null, diffRange: null })
+  })
+})
+
+describe("layerRangeByNumber", () => {
+  it("finds the range for a given layer number", () => {
+    const ranges = prLayerRanges(stack, "main")
+    expect(layerRangeByNumber(ranges, 481)).toEqual(ranges[1])
+  })
+
+  it("returns null when the number isn't in the stack", () => {
+    expect(layerRangeByNumber(prLayerRanges(stack, "main"), 999)).toBeNull()
   })
 })
