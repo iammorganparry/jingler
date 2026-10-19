@@ -506,6 +506,10 @@ function AuthedApp({
     queryKey: ["web-search-settings"],
     queryFn: () => rpc.webSearchGet(),
   });
+  const notificationPermissionQuery = useQuery({
+    queryKey: ["notification-permission"],
+    queryFn: () => rpc.notifyPermission(),
+  });
   const webSearchSet = useMutation({
     mutationFn: ({ provider, apiKey }: { provider: "exa" | "firecrawl"; apiKey: string }) =>
       rpc.webSearchSetCredential(provider, apiKey),
@@ -1618,6 +1622,8 @@ function AuthedApp({
         onSaveGitConfig={saveGitConfig}
         notificationsConfig={notificationsConfig}
         onSaveNotificationsConfig={saveNotificationsConfig}
+        notificationPermission={notificationPermissionQuery.data ?? null}
+        onOpenNotificationSystemSettings={() => rpc.notifyOpenSystemSettings()}
         offloadCompute={offloadCompute}
         onSaveOffloadCompute={saveOffloadCompute}
         offloadStatus={offloadSettingsStatus(offloadSettingsState, offloadCompute.enabled)}

@@ -930,6 +930,8 @@ export const rpc = {
   }): Promise<void> => run((c) => c.Notify.show(input)),
   notifyPermission: (): Promise<NotificationPermission> =>
     run((c) => c.Notify.permission()),
+  notifyOpenSystemSettings: (): Promise<void> =>
+    run((c) => c.Notify.openSystemSettings()),
   configSetStarredRepos: (
     paths: ReadonlyArray<string>
   ): Promise<WorkspaceConfig> =>
