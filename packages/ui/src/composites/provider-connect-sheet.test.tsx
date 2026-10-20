@@ -63,4 +63,28 @@ describe("ProviderConnectSheet", () => {
     expect(onSaveApiKey).toHaveBeenCalledWith("sk-bad-key")
     expect((input as HTMLInputElement).value).toBe("sk-bad-key")
   })
+
+  it("starts a device-code login via onStartDeviceCode when offered", async () => {
+    const user = userEvent.setup()
+    const onStartDeviceCode = vi.fn().mockResolvedValue("login-device-1")
+
+    render(
+      <ProviderConnectSheet
+        open
+        onOpenChange={() => {}}
+        providerId={providerId}
+        providerLabel="Codex"
+        onStartOauth={async () => "login-1"}
+        onStartDeviceCode={onStartDeviceCode}
+        onCancelLogin={async () => {}}
+        onReopenBrowser={() => {}}
+        onSaveApiKey={async () => ({ ok: true })}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Use device code" }))
+
+    expect(onStartDeviceCode).toHaveBeenCalledTimes(1)
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeInTheDocument()
+  })
 })

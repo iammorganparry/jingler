@@ -25,8 +25,10 @@ export interface ProviderConnectSheetProps {
   /** Set once the OAuth login starts; the sheet stays in the waiting state until this clears. */
   oauthLoginId?: string | null
   deviceCode?: ConnectSheetDeviceCode | null
-  /** Starts an OAuth login (browser or device code) and resolves with the login id to track for Cancel. */
+  /** Starts an OAuth login (browser) and resolves with the login id to track for Cancel. */
   onStartOauth: () => Promise<string>
+  /** Starts an OAuth login via device code instead of a browser redirect; same Cancel/waiting flow as `onStartOauth`. */
+  onStartDeviceCode?: () => Promise<string>
   /** Calls the Provider.cancelLogin RPC for the in-flight login. */
   onCancelLogin: (loginId: string) => Promise<void>
   onReopenBrowser: () => void
@@ -42,6 +44,7 @@ export function ProviderConnectSheet({
   busy = false,
   deviceCode = null,
   onStartOauth,
+  onStartDeviceCode,
   onCancelLogin,
   onReopenBrowser,
   onSaveApiKey
@@ -56,6 +59,12 @@ export function ProviderConnectSheet({
 
   const startOauth = async () => {
     const loginId = await onStartOauth()
+    send({ type: "START_OAUTH", loginId })
+  }
+
+  const startDeviceCode = async () => {
+    if (!onStartDeviceCode) return
+    const loginId = await onStartDeviceCode()
     send({ type: "START_OAUTH", loginId })
   }
 
@@ -122,9 +131,16 @@ export function ProviderConnectSheet({
                 </Button>
               </div>
             ) : (
-              <Button variant="primary" disabled={busy} onClick={startOauth}>
-                {busy && <Spinner size={13} />} Open browser
-              </Button>
+              <div className="flex gap-2">
+                <Button variant="primary" disabled={busy} onClick={startOauth}>
+                  {busy && <Spinner size={13} />} Open browser
+                </Button>
+                {onStartDeviceCode && (
+                  <Button variant="secondary" disabled={busy} onClick={startDeviceCode}>
+                    Use device code
+                  </Button>
+                )}
+              </div>
             )
           ) : (
             <div className="flex flex-col gap-2">
