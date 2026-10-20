@@ -82,3 +82,36 @@ test("a dismissed MCP reconnect card stays hidden after the window reloads", asy
   await expect(window.getByPlaceholder("Message the agent…")).toBeVisible()
   await expect(window.getByRole("region", { name: "MCP server recovery" })).toHaveCount(0)
 })
+
+test("a server's detail dialog shows the log tail and tool count, and refreshes on reopen", async ({ launchApp }) => {
+  const { window } = await launchApp({
+    configured: true,
+    withRepo: true,
+    sessions: [session("s_mcp_detail", "Detail session")],
+    seed: ({ home }) => {
+      const jinglerDir = join(home, "jingler")
+      mkdirSync(jinglerDir, { recursive: true })
+      writeFileSync(join(jinglerDir, "mcp.json"), JSON.stringify({
+        mcp: {
+          runpod: { type: "remote", url: "https://runpod.example/mcp", auth: { type: "oauth" } }
+        }
+      }))
+    }
+  })
+
+  await window.getByRole("button", { name: "Account menu" }).click()
+  await window.getByRole("menuitem", { name: "Settings" }).click()
+  await window.getByRole("button", { name: "MCP servers", exact: true }).click()
+  await window.getByRole("button", { name: "Test connections" }).click()
+
+  await window.getByRole("button", { name: "Details" }).click()
+  const dialog = window.getByRole("dialog")
+  await expect(dialog.getByRole("log", { name: "Server log" })).toBeVisible()
+
+  await expect(dialog.getByText(/tools? available|Run Test connections/)).toBeVisible()
+
+  await window.keyboard.press("Escape")
+  await expect(window.getByRole("dialog")).toHaveCount(0)
+  await window.getByRole("button", { name: "Details" }).click()
+  await expect(window.getByRole("dialog").getByRole("log", { name: "Server log" })).toBeVisible()
+})

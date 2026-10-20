@@ -23,6 +23,7 @@ import { Input } from "../components/input.js"
 import { SettingsCard, SettingsRow } from "../components/settings-row.js"
 import { StatusRow } from "../components/status-row.js"
 import { Toggle } from "../components/toggle.js"
+import { McpServerDetailDialog } from "./mcp-server-detail-dialog.js"
 
 /**
  * Settings › MCP servers — the operator's `~/jingler/mcp.json`.
@@ -47,6 +48,8 @@ export interface McpSettingsProps {
   readonly setApiKey: (name: string, apiKey: string) => Promise<void>
   readonly startAuthorization: (name: string) => Promise<void>
   readonly reveal: () => Promise<void>
+  /** Last stderr lines for one server; refreshed each time its detail dialog opens. */
+  readonly logTail: (name: string) => Promise<{ readonly lines: ReadonlyArray<string> }>
   /** Import flow: load candidates from one source, then apply a selection. */
   readonly importCandidates: (
     source: McpImportSourceId
@@ -532,11 +535,26 @@ export function McpSettings({
   setApiKey,
   startAuthorization,
   reveal,
+  logTail,
   importCandidates,
   applyImport
 }: McpSettingsProps) {
   const [actionError, setActionError] = React.useState<string | null>(null)
   const [authSetupServer, setAuthSetupServer] = React.useState<McpServer | null>(null)
+  const [detailServer, setDetailServer] = React.useState<McpServer | null>(null)
+  const [logLines, setLogLines] = React.useState<ReadonlyArray<string>>([])
+  const [logLoading, setLogLoading] = React.useState(false)
+
+  const openDetail = (server: McpServer) => {
+    setDetailServer(server)
+    setLogLines([])
+    setLogLoading(true)
+    void logTail(server.name)
+      .then((result) => setLogLines(result.lines))
+      .finally(() => setLogLoading(false))
+  }
+
+
   const run = (action: () => Promise<void>) => {
     setActionError(null)
     void action().catch((cause) =>
@@ -606,6 +624,13 @@ export function McpSettings({
                 }
                 control={
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openDetail(server)}
+                      className="text-[11px] text-blue hover:underline"
+                    >
+                      Details
+                    </button>
                     <Toggle
                       checked={server.enabled}
                       onCheckedChange={(checked) => run(() => setEnabled(server.name, checked))}
@@ -653,6 +678,19 @@ export function McpSettings({
         setAuth={setAuth}
         setApiKey={setApiKey}
         startAuthorization={startAuthorization}
+      />
+      <McpServerDetailDialog
+        server={detailServer}
+        open={detailServer !== null}
+        onOpenChange={(open) => { if (!open) setDetailServer(null) }}
+        toolCount={detailServer === null ? null : (statusFor(statuses, detailServer.name)?.toolCount ?? null)}
+        logLines={logLines}
+        logLoading={logLoading}
+        oauthAccount={
+          detailServer !== null && detailServer.authKind === "oauth" && detailServer.authState === "ready"
+            ? detailServer.displayName
+            : null
+        }
       />
     </div>
   )
