@@ -342,6 +342,21 @@ test("AskUserQuestion replaces the composer with a question card and resumes on 
   await expect(window.getByText("HTTP middleware").last()).toBeVisible()
 })
 
+test("an errored turn renders the shared InlineError row", async ({
+  launchApp
+}) => {
+  const { window } = await launchApp({ configured: true, withRepo: true, sessions: seededSessions })
+  await expect(appShell(window)).toBeVisible()
+
+  const composer = window.getByPlaceholder("Message the agent…")
+  await composer.fill("[[fail]] break the provider request")
+  await composer.press("Enter")
+
+  const errorRow = window.locator('[role="alert"]')
+  await expect(errorRow).toBeVisible({ timeout: 15_000 })
+  await expect(errorRow).toContainText("pi prompt failed")
+})
+
 test("a storm of consecutive tool calls collapses to the latest with a +N more toggle", async ({
   launchApp
 }) => {
